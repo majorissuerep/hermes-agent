@@ -353,6 +353,12 @@ def build_profile_secret_scope(hermes_home: Path) -> Dict[str, str]:
     bridged = bridged_allow_all_users()
     if bridged is not None and _is_process_home(hermes_home):
         secrets.setdefault("GATEWAY_ALLOW_ALL_USERS", bridged)
+    # Match launch precedence: administrator-managed values override a profile's .env. Under
+    # multiplex semantics, get_secret() reads only this scope, so leaving the managed layer out
+    # would drop managed-only credentials and let a profile value win a collision.
+    from hermes_cli.managed_scope import load_managed_env
+
+    secrets.update((k, v) for k, v in load_managed_env().items() if not _is_global_env(k))
     return secrets
 
 
