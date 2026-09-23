@@ -770,8 +770,35 @@ class GatewayConfig:
 
         from gateway.profile_routing import parse_profile_routes
 
+        # Fork (external-surface lockdown): gateway.external_platforms: false
+        # hard-disables EVERY external messaging platform regardless of
+        # per-platform config — any connection to an outside messenger is
+        # treated as a vulnerability surface. LOCAL (CLI/TUI/desktop/
+        # dashboard) keeps working. Default ON for external platforms when
+        # the key is absent preserves per-platform opt-in; flipping the key
+        # to false is the one-switch kill.
+        external_platforms = _coerce_bool(data.get("external_platforms"), True)
+
+        def platforms_with_lockdown(key: str, parse, *, dicts_only: bool = False) -> dict:
+            out = by_platform(key, parse, dicts_only=dicts_only)
+            if not external_platforms:
+                locked = 0
+                for plat, cfg in list(out.items()):
+                    if plat is not Platform.LOCAL and getattr(cfg, "enabled", False):
+                        cfg.enabled = False
+                        locked += 1
+                if locked:
+                    import logging as _logging
+
+                    _logging.getLogger("hermes.gateway").warning(
+                        "gateway.external_platforms: false — force-disabled %d external "
+                        "platform adapter(s) (LOCAL surfaces unaffected)",
+                        locked,
+                    )
+            return out
+
         return cls(
-            platforms=by_platform("platforms", PlatformConfig.from_dict, dicts_only=True),
+            platforms=platforms_with_lockdown("platforms", PlatformConfig.from_dict, dicts_only=True),
             reset_triggers=data.get("reset_triggers", ["/new", "/reset"]),
             quick_commands=_coerce_dict(data.get("quick_commands", {})),
             sessions_dir=Path(data["sessions_dir"]) if "sessions_dir" in data else get_hermes_home() / "sessions",

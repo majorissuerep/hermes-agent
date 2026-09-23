@@ -2059,6 +2059,11 @@ DEFAULT_CONFIG = {
         "export": {"otlp": {"enabled": False, "endpoint": "", "headers_env": {}}},
     },
     "gateway": {  # Gateway settings (messaging platforms: Telegram, Discord, Slack, ...).
+        # Fork (external-surface lockdown): false hard-disables EVERY external
+        # messaging platform adapter regardless of per-platform enabled flags —
+        # any connection to an outside messenger is treated as a vulnerability
+        # surface. LOCAL surfaces (CLI/TUI/desktop/dashboard) are unaffected.
+        "external_platforms": True,
         # Seconds to let a SIGTERM-interrupted gateway agent unwind before adapter/database
         # teardown. Keep short so service-manager shutdowns don't exhaust their stop budget.
         "signal_interrupt_grace_timeout": 1,
