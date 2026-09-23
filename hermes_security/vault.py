@@ -37,6 +37,7 @@ _ROOT_KEY_BYTES = 32
 _SALT_BYTES = 32
 _META_FILENAME = ".hermes-vault"
 _VERIFIER_PLAINTEXT = b"hermes-vault-v1-verifier"
+_KEY_SLOT_AAD = b"hermes-vault-keyslot-v1"
 
 # scrypt parameters for new vaults.  Stored per-vault in metadata so future
 # releases can tighten them without invalidating existing vaults.
@@ -355,6 +356,161 @@ def _check_verifier(root_key: bytes, salt: bytes, verifier: bytes) -> bool:
     return plain == _VERIFIER_PLAINTEXT
 
 
+# ---------------------------------------------------------------------------
+# Key slots (v2 metadata): LUKS-style multiple credentials wrap ONE master
+# key. The system stores ONLY public material on disk (salt + verifier, or
+# an X25519 PUBLIC key + the master key sealed to it). The credential —
+# passphrase or private key — lives wherever the HUMAN wants it. Either
+# slot unlocks the same in-memory master key; no file is ever re-encrypted
+# when slots are added, removed, or rotated.
+# ---------------------------------------------------------------------------
+
+from cryptography.hazmat.primitives.asymmetric.x25519 import (
+    X25519PrivateKey,
+    X25519PublicKey,
+)
+from cryptography.hazmat.primitives.serialization import (
+    Encoding,
+    PrivateFormat,
+    PublicFormat,
+)
+from cryptography.hazmat.primitives.serialization import NoEncryption
+
+
+def generate_keypair() -> tuple[bytes, bytes]:
+    """Return (private_key_raw32, public_key_raw32). The private half is
+    shown to the human ONCE by the CLI and never stored by the system."""
+
+    private = X25519PrivateKey.generate()
+    pub = private.public_key()
+    return (
+        private.private_bytes(Encoding.Raw, PrivateFormat.Raw, NoEncryption()),
+        pub.public_bytes(Encoding.Raw, PublicFormat.Raw),
+    )
+
+
+def _seal_to_public_key(public_key_raw: bytes, master_key: bytes) -> dict:
+    """ECIES-style seal: ephemeral X25519 + HKDF + AES-GCM (age-style)."""
+
+    eph = X25519PrivateKey.generate()
+    shared = eph.exchange(X25519PublicKey.from_public_bytes(public_key_raw))
+    wrap_key = HKDF(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=None,
+        info=b"hermes/vault/v1/keyslot-x25519",
+    ).derive(shared)
+    nonce = secrets.token_bytes(_NONCE_BYTES)
+    sealed = AESGCM(wrap_key).encrypt(nonce, master_key, _KEY_SLOT_AAD)
+    eph_pub = eph.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
+    return {
+        "type": "x25519",
+        "eph": _b64e(eph_pub),
+        "nonce": _b64e(nonce),
+        "sealed": _b64e(sealed),
+    }
+
+
+def _unseal_with_private_key(slot: dict, private_key_raw: bytes) -> bytes:
+    eph_pub = X25519PublicKey.from_public_bytes(_b64d(slot["eph"]))
+    shared = X25519PrivateKey.from_private_bytes(private_key_raw).exchange(eph_pub)
+    wrap_key = HKDF(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=None,
+        info=b"hermes/vault/v1/keyslot-x25519",
+    ).derive(shared)
+    try:
+        return AESGCM(wrap_key).decrypt(
+            _b64d(slot["nonce"]), _b64d(slot["sealed"]), _KEY_SLOT_AAD
+        )
+    except InvalidTag as exc:
+        raise WrongMasterPasswordError(
+            "This private key does not open this vault"
+        ) from exc
+
+
+def add_key_slot(
+    home: Path | str,
+    *,
+    public_key_raw: bytes | None = None,
+    unlocked_vault: "Vault | None" = None,
+    password: str | bytes | None = None,
+) -> None:
+    """Add an X25519 public-key slot to an existing vault.
+
+    Requires EITHER an already-unlocked vault (same process) OR the current
+    passphrase (to unlock, add the slot, re-lock). The master key on disk is
+    only ever stored sealed to the new public key — the private half lives
+    with the human.
+    """
+
+    home_path = Path(home).expanduser().resolve()
+    meta = _load_meta(home_path)
+    if meta is None:
+        raise VaultNotInitializedError(f"No vault at {home_path}")
+
+    vault = unlocked_vault
+    if vault is None:
+        if password is None:
+            raise VaultLockedError("Unlock the vault (or pass the passphrase) to add a key slot")
+        vault = unlock(home_path, password)
+    if public_key_raw is None:
+        raise ValueError("public_key_raw is required")
+
+    slots = list(meta.get("key_slots") or [])
+    slots.append(_seal_to_public_key(public_key_raw, vault.master_key))
+    meta["key_slots"] = slots
+    _atomic_write(home_path / _META_FILENAME, json.dumps(meta).encode("utf-8"))
+
+
+def remove_key_slot(home: Path | str, *, index: int) -> None:
+    """Drop key slot *index* (rotation: add new, remove old)."""
+    home_path = Path(home).expanduser().resolve()
+    meta = _load_meta(home_path)
+    if meta is None:
+        raise VaultNotInitializedError(f"No vault at {home_path}")
+    slots = list(meta.get("key_slots") or [])
+    if not 0 <= index < len(slots):
+        raise VaultError(f"No key slot {index} (vault has {len(slots)})")
+    slots.pop(index)
+    meta["key_slots"] = slots
+    _atomic_write(home_path / _META_FILENAME, json.dumps(meta).encode("utf-8"))
+
+
+def unlock_with_private_key(home: Path | str, private_key_raw: bytes) -> Vault:
+    """Unlock via any X25519 key slot: try each sealed slot, cache on success."""
+
+    home_path = Path(home).expanduser().resolve()
+    meta = _load_meta(home_path)
+    if meta is None:
+        raise VaultNotInitializedError(f"No vault at {home_path}")
+    with _VAULT_LOCK:
+        cached = _VAULTS.get(home_path)
+        if cached is not None:
+            return cached
+    slots = meta.get("key_slots") or []
+    key_slots = [s for s in slots if isinstance(s, dict) and s.get("type") == "x25519"]
+    if not key_slots:
+        raise VaultLockedError(
+            f"The vault at {home_path} has no key slot; unlock with the master password"
+        )
+    last_error: Exception | None = None
+    for slot in key_slots:
+        try:
+            master_key = _unseal_with_private_key(slot, private_key_raw)
+        except WrongMasterPasswordError as exc:
+            last_error = exc
+            continue
+        vault = Vault(home=home_path, master_key=master_key)
+        with _VAULT_LOCK:
+            _VAULTS[home_path] = vault
+        return vault
+    raise last_error or WrongMasterPasswordError(
+        "This private key does not open any slot of this vault"
+    )
+
+
 def _zero(buf: bytearray | bytes) -> None:
     if isinstance(buf, bytearray):
         for i in range(len(buf)):
@@ -392,6 +548,27 @@ def unlock(home: Path | str, password: str | bytes) -> Vault:
     return vault
 
 
+def _read_key_file(path: str) -> bytes:
+    """Read a raw 32-byte X25519 key from *path* (base64 or hex text)."""
+
+    import base64 as _b64
+
+    raw = open(path, "r", encoding="utf-8").read().strip()
+    candidates: list[bytes] = []
+    try:
+        candidates.append(_b64.urlsafe_b64decode(raw + "=" * (-len(raw) % 4)))
+    except Exception:
+        pass
+    try:
+        candidates.append(bytes.fromhex(raw))
+    except ValueError:
+        pass
+    for cand in candidates:
+        if len(cand) == 32:
+            return cand
+    raise VaultIntegrityError(f"not a 32-byte key in base64 or hex ({path})")
+
+
 def get_vault(home: Path | str | None = None, *, allow_env_unlock: bool = True) -> Vault:
     """Return the unlocked vault for *home* (default: the active Hermes home).
 
@@ -416,6 +593,10 @@ def get_vault(home: Path | str | None = None, *, allow_env_unlock: bool = True) 
         if allow_env_unlock:
             from os import environ as _environ
 
+            key_path = _environ.get("HERMES_VAULT_PRIVATE_KEY")
+            if key_path:
+                private_key = _read_key_file(key_path)
+                return unlock_with_private_key(home_path, private_key)
             env_pw = _environ.get("HERMES_MASTER_PASSWORD")
             if env_pw:
                 return unlock(home_path, env_pw)

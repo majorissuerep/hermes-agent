@@ -39,6 +39,27 @@ def _tty_available() -> bool:
         return False
 
 
+def _load_key_file(path: str) -> bytes:
+    """Read a raw 32-byte X25519 key from *path* (base64 or hex text)."""
+
+    import base64 as _b64
+
+    raw = open(path, "r", encoding="utf-8").read().strip()
+    candidates: list[bytes] = []
+    try:
+        candidates.append(_b64.urlsafe_b64decode(raw + "=" * (-len(raw) % 4)))
+    except Exception:
+        pass
+    try:
+        candidates.append(bytes.fromhex(raw))
+    except ValueError:
+        pass
+    for cand in candidates:
+        if len(cand) == 32:
+            return cand
+    raise ValueError(f"not a 32-byte key in base64 or hex ({path})")
+
+
 def _prompt_new_password() -> str:
     # Non-interactive callers (scripts, takeover, CI): honor the env password
     # for CREATION too — it was already the unlock path for daemons.
@@ -186,6 +207,24 @@ def cmd_vault(args: Any) -> int:
         if not vault_mod.vault_exists(home):
             print(f"✗ No vault at {home}; run 'hermes secure-vault migrate' first")
             return 1
+        # Private-key unlock: --private-key / HERMES_VAULT_PRIVATE_KEY (path)
+        key_path = getattr(args, "private_key", None) or os.environ.get("HERMES_VAULT_PRIVATE_KEY")
+        if key_path:
+            try:
+                private_key = _load_key_file(key_path)
+            except (OSError, ValueError) as exc:
+                print(f"✗ Cannot read private key: {exc}")
+                return 1
+            try:
+                vault_mod.unlock_with_private_key(home, private_key)
+            except vault_errors.WrongMasterPasswordError:
+                print("✗ This private key does not open this vault")
+                return 1
+            except vault_errors.VaultLockedError as exc:
+                print(f"✗ {exc}")
+                return 1
+            print(f"✓ Vault unlocked via key slot for this process ({home})")
+            return 0
         password = _password_from_env_or_prompt()
         try:
             vault_mod.unlock(home, password)
@@ -193,6 +232,67 @@ def cmd_vault(args: Any) -> int:
             print("✗ Wrong master password")
             return 1
         print(f"✓ Vault unlocked for this process ({home})")
+        return 0
+
+    if command == "keygen":
+        private_key, public_key = vault_mod.generate_keypair()
+        print("X25519 keypair generated.")
+        print()
+        print(f"  PUBLIC  (base64): {vault_mod._b64e(public_key)}")
+        print()
+        print("  PRIVATE (base64): " + vault_mod._b64e(private_key))
+        print()
+        print("  ⚠ The private key is shown ONCE and never stored by Hermes.")
+        print("    Store it wherever YOU want (password manager, printed, USB,")
+        print("    another machine). The vault stores only the PUBLIC half.")
+        print("    LOSE IT = LOSE THE VAULT. There is no recovery.")
+        return 0
+
+    if command == "add-key":
+        if not vault_mod.vault_exists(home):
+            print(f"✗ No vault at {home}; run 'hermes secure-vault migrate' first")
+            return 1
+        pub_path = getattr(args, "public_key", None)
+        if not pub_path:
+            print("✗ --public-key <path> required (base64 or hex, 32 bytes)")
+            return 1
+        try:
+            public_key = _load_key_file(pub_path)
+        except (OSError, ValueError) as exc:
+            print(f"✗ Cannot read public key: {exc}")
+            return 1
+        password = _password_from_env_or_prompt()
+        try:
+            vault_mod.add_key_slot(home, public_key_raw=public_key, password=password)
+        except vault_errors.WrongMasterPasswordError:
+            print("✗ Wrong master password")
+            return 1
+        print("✓ Key slot added — vault is now also openable with the matching private key")
+        print("  (the system stored ONLY the public half)")
+        return 0
+
+    if command == "remove-key":
+        if not vault_mod.vault_exists(home):
+            print(f"✗ No vault at {home}")
+            return 1
+        slot = getattr(args, "slot", None)
+        if slot is None:
+            print("✗ --slot <index> required (see 'hermes secure-vault slots')")
+            return 1
+        vault_mod.remove_key_slot(home, index=slot)
+        print(f"✓ Key slot {slot} removed")
+        return 0
+
+    if command == "slots":
+        if not vault_mod.vault_exists(home):
+            print(f"○ No vault at {home}")
+            return 1
+        slots = vault_mod.vault_status(home)["meta"].get("key_slots") or []
+        if not slots:
+            print("○ No key slots (passphrase only)")
+            return 0
+        for i, slot in enumerate(slots):
+            print(f"  [{i}] {slot.get('type', '?')}")
         return 0
 
     if command == "lock":
