@@ -55,8 +55,8 @@ swap_source() {
         mv "$INSTALL_DIR" "$INSTALL_DIR.pre-fork-$STAMP"
     fi
     say "→ Cloning fork into $INSTALL_DIR..."
-    git clone --quiet "$FORK_SSH" "$INSTALL_DIR" 2>/dev/null \
-        || git clone --quiet "$FORK_HTTPS" "$INSTALL_DIR" \
+    git clone --quiet --branch vault "$FORK_SSH" "$INSTALL_DIR" 2>/dev/null \
+        || git clone --quiet --branch vault "$FORK_HTTPS" "$INSTALL_DIR" \
         || die "clone failed (tried SSH then HTTPS)"
 }
 
