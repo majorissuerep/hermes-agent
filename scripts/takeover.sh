@@ -17,6 +17,10 @@ set -euo pipefail
 
 FORK_SSH="git@github.com:majorissuerep/hermes-agent.git"
 FORK_HTTPS="https://github.com/majorissuerep/hermes-agent.git"
+# Offline/airgapped installs: FORK_SRC may point at a local mirror
+# (file:///path or /path) — origin is still pinned to the fork afterwards so
+# updates track majorissuerep/hermes-agent.
+FORK_SRC="${FORK_SRC:-$FORK_SSH}"
 HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
 INSTALL_DIR="$HERMES_HOME/hermes-agent"
 LAUNCHER="$HOME/.local/bin/hermes"
@@ -55,9 +59,11 @@ swap_source() {
         mv "$INSTALL_DIR" "$INSTALL_DIR.pre-fork-$STAMP"
     fi
     say "→ Cloning fork into $INSTALL_DIR..."
-    git clone --quiet --branch vault "$FORK_SSH" "$INSTALL_DIR" 2>/dev/null \
+    git clone --quiet --branch vault "$FORK_SRC" "$INSTALL_DIR" 2>/dev/null \
         || git clone --quiet --branch vault "$FORK_HTTPS" "$INSTALL_DIR" \
-        || die "clone failed (tried SSH then HTTPS)"
+        || die "clone failed (tried FORK_SRC then HTTPS)"
+    # Pin origin to the fork repo regardless of where the tree came from.
+    git -C "$INSTALL_DIR" remote set-url origin "$FORK_HTTPS" 2>/dev/null || true
 }
 
 # ── 4. Environment ──────────────────────────────────────────────────────────

@@ -29,10 +29,12 @@ phase1_native() {
         echo "luoman ALL=(root) NOPASSWD:ALL" > /etc/sudoers.d/luoman
         git --version && python3.13 --version
     '
-    # Native hermes: upstream clone at the documented install location
+    # Native hermes: upstream tree shipped in as a git bundle (host github
+    # HTTP git is 429-rate-limited from this egress).
+    docker cp ~/hermes-rehearsal-bundles/upstream.bundle "$CTF:$WORK/upstream.bundle"
     docker_run '
         set -e
-        git clone --quiet --depth 1 https://github.com/NousResearch/hermes-agent.git ~/.hermes/hermes-agent
+        git clone --quiet '"$WORK"'/upstream.bundle ~/.hermes/hermes-agent 2>/dev/null || git clone --quiet '"$WORK"'/upstream.bundle ~/.hermes/hermes-agent -b main
         cd ~/.hermes/hermes-agent
         python3.13 -m venv .venv
         .venv/bin/pip install --quiet --upgrade pip >/dev/null
@@ -72,11 +74,16 @@ PYEOF
 
 phase2_takeover() {
     echo "════ PHASE 2: fork takeover via scripts/takeover.sh ════"
+    # Host-side prep: GitHub's anonymous HTTP git is rate-limited from this
+    # egress (429), so ship the fork INTO the container as a git bundle.
+    # takeover.sh installs from the local mirror (FORK_SRC) and pins origin
+    # to the fork HTTPS remote afterwards.
+    docker cp ~/hermes-rehearsal-bundles/fork.bundle "$CTF:$WORK/fork.bundle"
     docker_run '
         set -e
-        mkdir -p '"$WORK"'
-        git clone --quiet --branch vault --depth 1 https://github.com/majorissuerep/hermes-agent.git '"$WORK"'/fork-src
-        bash '"$WORK"'/fork-src/scripts/takeover.sh
+        git clone --quiet '"$WORK"'/fork.bundle '"$WORK"'/fork-src -b vault 2>/dev/null || git clone --quiet '"$WORK"'/fork.bundle '"$WORK"'/fork-src
+        git -C '"$WORK"'/fork-src remote remove origin 2>/dev/null || true
+        FORK_SRC='"$WORK"'/fork-src bash '"$WORK"'/fork-src/scripts/takeover.sh
     '
     # takeover.sh migrate step runs interactively; drive it with the env password
     if ! docker_run 'test -f ~/.hermes/.hermes-vault' 2>/dev/null; then
