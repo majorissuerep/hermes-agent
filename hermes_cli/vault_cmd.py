@@ -26,6 +26,14 @@ def _home(args: Any):
 
 
 def _prompt_new_password() -> str:
+    # Non-interactive callers (scripts, takeover, CI): honor the env password
+    # for CREATION too — it was already the unlock path for daemons.
+    env_pw = os.environ.get("HERMES_MASTER_PASSWORD")
+    if env_pw and not sys.stdin.isatty():
+        if len(env_pw) < 8:
+            print("✗ HERMES_MASTER_PASSWORD must be at least 8 characters.")
+            raise SystemExit(2)
+        return env_pw
     while True:
         first = getpass.getpass("Create master password: ")
         if len(first) < 8:
@@ -127,7 +135,7 @@ def cmd_vault(args: Any) -> int:
 
     if command == "status":
         if not vault_mod.vault_exists(home):
-            print(f"○ No vault at {home} (state writes will be refused; run 'hermes vault init')")
+            print(f"○ No vault at {home} (state writes will be refused; run 'hermes secure-vault migrate')")
             return 1
         status = vault_mod.vault_status(home)
         meta = status["meta"]
@@ -141,20 +149,22 @@ def cmd_vault(args: Any) -> int:
             p = meta.get("kdf_p", "?")
             print(f"  KDF              : {kdf} (n={n}, r={r}, p={p})")
             print(f"  Version          : v{meta.get('version', '?')}")
-            # salt is public metadata; show length for verification
+            # salt is public metadata; show hex + length for verification
             salt_b64 = meta.get("salt", "")
             if salt_b64:
                 import base64 as _b64
-                print(f"  Salt             : {_b64.b64decode(salt_b64).hex()} ({len(salt_b64)} b64 chars)")
+
+                salt_hex = _b64.urlsafe_b64decode(salt_b64).hex()
+                print(f"  Salt             : {salt_hex} ({len(salt_b64)} b64 chars)")
         envelopes, dbs, frames = status["encrypted_files"]
         print(f"  Encrypted files  : {envelopes} envelope(s), {dbs} database(s), {frames} frame stream(s)")
         if not status["unlocked"]:
-            print(f"  (use 'hermes vault unlock' or set HERMES_MASTER_PASSWORD to unlock)")
+            print(f"  (use 'hermes secure-vault unlock' or set HERMES_MASTER_PASSWORD to unlock)")
         return 0
 
     if command == "unlock":
         if not vault_mod.vault_exists(home):
-            print(f"✗ No vault at {home}; run 'hermes vault init' first")
+            print(f"✗ No vault at {home}; run 'hermes secure-vault migrate' first")
             return 1
         password = _password_from_env_or_prompt()
         try:

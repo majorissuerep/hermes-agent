@@ -382,8 +382,14 @@ def unlock(home: Path | str, password: str | bytes) -> Vault:
     return vault
 
 
-def get_vault(home: Path | str | None = None) -> Vault:
-    """Return the unlocked vault for *home* (default: the active Hermes home)."""
+def get_vault(home: Path | str | None = None, *, allow_env_unlock: bool = True) -> Vault:
+    """Return the unlocked vault for *home* (default: the active Hermes home).
+
+    Fork: when the vault is locked but ``HERMES_MASTER_PASSWORD`` is set
+    (daemons, gateways, cron), auto-unlock instead of raising — background
+    writers like the log-frame handler must not crash-log on every record
+    merely because no TTY prompt is possible. Callers that want strict
+    failure pass ``allow_env_unlock=False``."""
 
     if home is None:
         from hermes_constants import get_hermes_home
@@ -395,8 +401,14 @@ def get_vault(home: Path | str | None = None) -> Vault:
     if vault is None:
         if not vault_exists(home_path):
             raise VaultNotInitializedError(
-                f"No vault at {home_path}; run 'hermes vault init' first"
+                f"No vault at {home_path}; run 'hermes secure-vault migrate' first"
             )
+        if allow_env_unlock:
+            from os import environ as _environ
+
+            env_pw = _environ.get("HERMES_MASTER_PASSWORD")
+            if env_pw:
+                return unlock(home_path, env_pw)
         raise VaultLockedError(
             f"The vault at {home_path} is locked; supply the master password to unlock"
         )
@@ -452,15 +464,18 @@ def _is_in_skip_dir(rel: Path | str) -> bool:
     return any(part in _SKIP_DIRS for part in parts)
 
 
+_FRAME_SUFFIXES = (".log", ".jsonl")
+
+
 def count_encrypted_files(home: Path | str) -> tuple[int, int, int]:
     """Count encrypted files, SQLCipher databases, and frame streams under *home*.
 
     Returns (envelope_count, db_count, frame_stream_count).  A file is counted
-    as an envelope if it starts with the ``HRMVAULT`` magic.  Databases are
-    identified by the SQLite header plus a ``.db``/``.sqlite``/``.sqlite3``
-    suffix (inside a vaulted home, these are always SQLCipher).  Frame streams
-    are ``*.log`` and ``*.jsonl`` files that carry the ``HRMVAULT`` magic
-    (encrypted append-only streams).
+    as an envelope if it starts with the ``HRMVAULT`` magic (config.yaml, .env,
+    auth.json, etc.).  Databases are identified by the SQLite header plus a
+    ``.db``/``.sqlite``/``.sqlite3`` suffix (inside a vaulted home, these are
+    always SQLCipher).  Frame streams are ``*.log`` and ``*.jsonl`` files in a
+    vaulted home (encrypted at the per-frame level, not file-level).
 
     No vault key is needed — this is a metadata-only scan.  Code/artifact trees
     (``hermes-agent``, ``.venv``, ``node_modules``, etc.) are skipped; they
@@ -488,11 +503,18 @@ def count_encrypted_files(home: Path | str) -> tuple[int, int, int]:
         except OSError:
             continue
         if head.startswith(_ENVELOPE_MAGIC):
+            # Envelopes: config, .env, auth.json, gateway_state.json, etc.
             envelopes += 1
-            if path.suffix in (".log", ".jsonl"):
-                frames += 1
-        elif path.suffix in _DB_SUFFIXES and head[:15] == _SQLITE_MAGIC:
+        elif path.suffix in _DB_SUFFIXES:
+            # In a vaulted home every .db/.sqlite file is SQLCipher — its
+            # first page is CIPHERTEXT, so there is no plaintext SQLite
+            # header to match (only a plaintext-mode db would show one, and
+            # those are precisely what this fork refuses to create).
             dbs += 1
+        elif path.suffix in _FRAME_SUFFIXES and not head.startswith(_ENVELOPE_MAGIC):
+            # Frame streams: encrypted per-frame, no file-level magic.
+            # In a vaulted home, .log/.jsonl files ARE frame streams.
+            frames += 1
     return envelopes, dbs, frames
 
 

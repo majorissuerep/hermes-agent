@@ -478,7 +478,12 @@ class _VaultFrameHandler(logging.Handler):
             self._frames.append(self.path, payload, purpose=self._purpose)
             self._written += len(payload) + 64
         except Exception:  # pragma: no cover - logging must never raise
-            self.handleError(record)
+            # A locked vault without HERMES_MASTER_PASSWORD (e.g. running
+            # 'secure-vault status' on a locked home) must not spam a
+            # traceback per record: drop the line silently; the stream
+            # resumes on unlock. HERMES_DEBUG=1 restores the traceback.
+            if os.environ.get("HERMES_DEBUG"):
+                self.handleError(record)
 
 
 class _ProfileRoutingFileHandler(logging.Handler):
