@@ -213,6 +213,13 @@ def _migrate_frames(home: Path, path: Path, rel: Path, report: MigrationReport) 
         payloads = [line.encode("utf-8") for line in plaintext.decode("utf-8", errors="replace").splitlines() if line.strip()]
     else:
         payloads = [line.encode("utf-8") for line in plaintext.decode("utf-8", errors="replace").splitlines()]
+    if not payloads:
+        # empty log: an empty frame stream is the correct sealed form
+        import os
+
+        os.chmod(path, 0o600)
+        report.frame_streams.append(rel.as_posix())
+        return
     tmp = path.with_name(path.name + ".frames-new")
     if tmp.exists():
         tmp.unlink()
@@ -258,6 +265,10 @@ def _purpose_for(rel: Path) -> str:
 
 
 def _classify(path: Path) -> str:
+    # DB sidecars are consumed by the parent DB's migration (checkpointed and
+    # removed); migrating one as its own file races the parent conversion.
+    if path.name.endswith(("-wal", "-shm", "-journal")):
+        return "skip"
     if path.suffix in _DB_SUFFIXES:
         return "db"
     if path.suffix in _FRAME_SUFFIXES:
@@ -290,6 +301,8 @@ def migrate_home(home: Path | str, password: str | bytes, *, dry_run: bool = Fal
     for path, rel in files:
         try:
             kind = _classify(path)
+            if kind == "skip":
+                continue
             if kind == "db":
                 if dry_run:
                     report.databases.append(rel.as_posix())
@@ -305,6 +318,10 @@ def migrate_home(home: Path | str, password: str | bytes, *, dry_run: bool = Fal
                     report.envelopes.append(rel.as_posix())
                 else:
                     _migrate_envelope(home, path, rel, report)
+        except FileNotFoundError:
+            # vanished mid-migration (e.g. a sidecar consumed by its parent
+            # DB conversion) — nothing to convert
+            report.skipped.append(rel.as_posix() + " (vanished)")
         except Exception as exc:  # noqa: BLE001 - one file must not kill the run
             report.failures.append(f"{rel.as_posix()}: {exc}")
 
