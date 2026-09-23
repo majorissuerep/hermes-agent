@@ -414,10 +414,11 @@ def _new_file_handler(
     Fork: inside a vaulted home every log line is an encrypted frame."""
     mkdir_under_hermes_home(path.parent)
     try:
-        from hermes_security import frames as _frames
-        from hermes_security.vault import find_vault_home
+        from hermes_security.io import _home_for
 
-        if find_vault_home(path) is not None:
+        if _home_for(path) is not None:  # real vault metadata in an ancestor
+            from hermes_security import frames as _frames
+
             handler = _VaultFrameHandler(
                 path, purpose="log", max_bytes=max_bytes, backup_count=backup_count
             )

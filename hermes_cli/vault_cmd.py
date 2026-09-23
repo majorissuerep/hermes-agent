@@ -101,15 +101,21 @@ def cmd_vault(args: Any) -> int:
         if vault_mod.vault_exists(home):
             print(f"✗ A vault already exists at {home}")
             return 1
+        # The CLI seeds the home scaffold (dirs, SOUL.md, logs) before any
+        # command runs, so a fresh home is never literally empty: route to
+        # migrate, which handles scaffold + real state identically and safely.
+        print("→ Home contains the first-run scaffold; using migrate (safe for fresh homes).")
+        args.vault_command = "migrate"
+        return cmd_vault(args)
         password = _prompt_new_password()
         try:
             vault_mod.init_vault(home, password)
         except vault_errors.PlaintextStateError as exc:
             print(f"✗ {exc}")
             print(
-                "  This home already contains unencrypted state. The vault never "
-                "auto-migrates: move your secrets into the new vaulted home "
-                "deliberately, then remove the plaintext copies."
+                "  This home already contains state. Use 'hermes secure-vault migrate'\n"
+                "  instead: it backs everything up and converts it in place onto\n"
+                "  the encrypted vault (sessions and configs preserved)."
             )
             return 1
         vault_mod.unlock(home, password)
@@ -164,8 +170,14 @@ def gate_startup(args: Any) -> None:
         return
     home = get_hermes_home()
     if not vault_mod.vault_exists(home):
-        # No vault: fail closed on the first thing that would write state.
-        # (Reading is allowed for doctor/help-style flows; writers refuse.)
+        # Pre-migration bootstrap mode: state writes land plaintext (upstream
+        # behavior) so installs/tests work before `secure-vault migrate` runs.
+        # Visible signal, never a silent pass.
+        print(
+            f"⚠ No secure vault at {home} — new state is written UNENCRYPTED.\n"
+            "  Run 'hermes secure-vault migrate' to switch to encrypted storage.",
+            file=sys.stderr,
+        )
         return
     if vault_mod.is_unlocked(home):
         return

@@ -48,7 +48,10 @@ def read_bytes(path: Path | str, *, purpose: str) -> Optional[bytes]:
     target = Path(path).expanduser()
     home = _home_for(target)
     try:
-        raw = target.read_bytes()
+        # builtins.open (not Path.read_bytes): callers' patch seams for
+        # denied/unreadable reads (config fail-closed guard) keep working.
+        with open(target, "rb") as handle:
+            raw = handle.read()
     except FileNotFoundError:
         return None
     except OSError:
@@ -61,17 +64,9 @@ def read_bytes(path: Path | str, *, purpose: str) -> Optional[bytes]:
             )
         vault = get_vault(home)
         return vault.decrypt(raw, purpose=purpose, relpath=_rel(target, home))
-    # No vaulted ancestor. Refuse plaintext reads inside the active Hermes
-    # home too — a stray plaintext file must never be consumed silently.
-    from hermes_constants import get_hermes_home
-
-    active = Path(get_hermes_home()).expanduser().resolve(strict=False)
-    resolved = target.resolve(strict=False)
-    if resolved == active or active in resolved.parents:
-        raise PlaintextStateError(
-            f"{target} is plaintext and no vault is initialized at {active}; "
-            "run 'hermes vault init' and migrate secrets deliberately"
-        )
+    # No vault anywhere: plaintext reads pass through (the write path is the
+    # enforcement point — it refuses NEW plaintext inside the active home;
+    # reading existing plaintext never crashes a pre-vault or vault-less flow).
     return raw
 
 

@@ -178,10 +178,10 @@ def _read_all_lines(path: Path) -> list:
     # streams (the vault frame handler wrote every byte of them; vault init
     # refuses pre-existing state, so there is no legacy plaintext log).
     try:
+        from hermes_security.io import _home_for
         from hermes_security import frames as _frames
-        from hermes_security.vault import find_vault_home
 
-        if find_vault_home(path) is not None and path.exists():
+        if _home_for(path) is not None and path.exists():
             text = b"".join(_frames.read_frames(path, purpose="log")).decode(
                 "utf-8", errors="replace"
             )

@@ -420,9 +420,9 @@ def divert_session_transcript_jsonl(session_id: str, messages) -> "Optional[Path
     sessions_dir = get_hermes_home() / "sessions"
     sessions_dir.mkdir(parents=True, exist_ok=True)
     path = sessions_dir / f"{sid}.jsonl"
-    from hermes_security.vault import find_vault_home
+    from hermes_security.io import _home_for
 
-    if find_vault_home(path) is not None:
+    if _home_for(path) is not None:
         from hermes_security import frames as _frames
 
         for msg in messages:
