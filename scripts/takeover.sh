@@ -84,13 +84,18 @@ build_venv() {
         done
         return 1
     }
-    PYBIN=$(pick_python) || die "no python between 3.11 and 3.13 found"
     if command -v uv >/dev/null; then
-        uv venv --python "$PYBIN" .venv >/dev/null 2>&1 || "$PYBIN" -m venv .venv
+        # uv provisions a managed 3.11 itself — no system interpreter needed
+        # (hosts whose only python3 is >=3.14 would otherwise die here).
+        uv venv --python 3.11 .venv >/dev/null 2>&1 || uv venv .venv >/dev/null 2>&1 || true
+        [ -x .venv/bin/python ] || {
+            PYBIN=$(pick_python) && "$PYBIN" -m venv .venv
+        }
         uv pip install --python .venv/bin/python -e . >/dev/null 2>&1 \
             || uv sync --all-extras >/dev/null 2>&1 \
             || die "dependency install failed"
     else
+        PYBIN=$(pick_python) || die "no python between 3.11 and 3.13 found"
         "$PYBIN" -m venv .venv || die "venv creation failed"
         .venv/bin/pip install --quiet --upgrade pip >/dev/null
         .venv/bin/pip install --quiet -e . >/dev/null 2>&1 || .venv/bin/pip install --quiet sqlcipher3-binary cryptography >/dev/null
