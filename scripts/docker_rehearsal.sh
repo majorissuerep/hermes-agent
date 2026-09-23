@@ -55,13 +55,15 @@ from hermes_state import SessionDB
 with SessionDB() as db:
     db.set_meta("rehearsal_marker", "native-before-takeover")
     s1 = "rehearsal-session-alpha"
+    db.ensure_session(s1, source="rehearsal", model="test/echo")
     db.append_message(s1, "user", "What is the debt total in Enishia?")
     db.append_message(s1, "assistant", "The total debt is 1,000,000 gold, payable to the church.",
                       tool_name="terminal", token_count=42)
     db.append_message(s1, "user", "Which party members can I recruit first?")
     db.append_message(s1, "assistant", "Nami the healer and Bray the merchant are the earliest.")
     s2 = "rehearsal-session-beta"
-    db.append_message(s2, "user", "Summarize the corruption stages in Ambrosias wettest dreams.")
+    db.ensure_session(s2, source="rehearsal", model="test/echo")
+    db.append_message(s2, "user", "Summarize the corruption stages in Ambrosia.")
     db.append_message(s2, "assistant", "Stage 1 purity through stage 5 ruin, gated by debt events.")
 print("sessions written")
 PYEOF
