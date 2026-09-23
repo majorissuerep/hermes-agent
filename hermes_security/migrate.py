@@ -30,6 +30,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
+import re
+
+# SQLite identifiers come from sqlite_master; validate before f-string use
+# so the fingerprint query builder can never interpolate a crafted name.
+_SAFE_IDENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
 from hermes_security import errors as vault_errors
 from hermes_security import frames as sec_frames
 from hermes_security import vault as vault_mod
@@ -109,11 +115,16 @@ def _conn_fingerprint(conn) -> str:
     """Schema + all rows, independent of driver (sqlcipher3 has no iterdump).
     Streams rows (a multi-GB state.db must not be materialized)."""
 
-    h = hashlib.md5()
+    # Change detection only, never a security primitive — but use a
+    # non-crypto-documented digest so scanners and auditors do not have to
+    # re-litigate MD5's role here on every pass.
+    h = hashlib.sha256()
     tables = [r[0] for r in conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
     ).fetchall()]
     for table in tables:
+        if not _SAFE_IDENT_RE.fullmatch(table):
+            raise ValueError(f"unsafe table name in fingerprint: {table!r}")
         cols = [r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()]
         h.update(f"{table}({','.join(sorted(cols))})".encode())
         rows = []

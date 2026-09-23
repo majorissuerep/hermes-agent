@@ -1,0 +1,9 @@
+# Bandit baseline for the encrypted fork — audited false positives.
+# Format: one finding per line: <test_id>:<filename>:<why it is safe>
+# Generated 2026-09-23 during the scanner-stack hardening pass.
+
+# _conn_fingerprint interpolates table names from sqlite_master into
+# PRAGMA/SELECT. PRAGMA cannot be parameterized; every name is validated
+# against _SAFE_IDENT_RE immediately above, so no attacker-controlled
+# identifier can reach the query string.
+B608:hermes_security/migrate.py:identifier-validated interpolation (see _SAFE_IDENT_RE guard)

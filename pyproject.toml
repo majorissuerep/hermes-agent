@@ -452,6 +452,14 @@ override-dependencies = [
   # requests with RSA and AES, and that API did not break in 49 or 50.
   # Remove this line when alibabacloud-tea-openapi lifts the cap.
   "cryptography>=50,<51",
+  # openwakeword depends on tflite-runtime (Linux marker), but Google stopped
+  # publishing it — last wheels are cp311, so Python 3.12+ installs fail.
+  # A never-true marker drops the dead transitive edge; ai-edge-litert is
+  # Google's successor package with current wheels (incl. cp314), added to
+  # the wake extra, and tools/wake_word.py already bridges the
+  # tflite_runtime.interpreter import to ai_edge_litert on every platform.
+  "tflite-runtime; sys_platform == 'never-matches-drop-edge'",
+  "ai-edge-litert==2.1.6; sys_platform == 'linux'",
 ]
 exclude-newer = "14 days"
 # h2: temporary exclude-newer exception for the CVE-2026-71554 (GHSA-6hr6-w5qg-qmwg,

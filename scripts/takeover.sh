@@ -25,7 +25,6 @@ HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
 INSTALL_DIR="$HERMES_HOME/hermes-agent"
 LAUNCHER="$HOME/.local/bin/hermes"
 STAMP="$(date +%Y%m%d-%H%M%S)"
-LOG_DIR="$HERMES_HOME/logs"
 QUIET=0
 [[ "${1:-}" == "-q" || "${1:-}" == "--quiet" ]] && QUIET=1
 
@@ -51,9 +50,12 @@ swap_source() {
             say "→ Fork already checked out at $INSTALL_DIR; updating..."
             # Fetch failure must NEVER block a takeover whose tree is local:
             # bounded wait, then warn and continue on the existing checkout.
-            timeout 60 git -C "$INSTALL_DIR" fetch origin --quiet 2>/dev/null \
-                && git -C "$INSTALL_DIR" reset --hard origin/$(git -C "$INSTALL_DIR" rev-parse --abbrev-ref HEAD) --quiet \
-                || say "  ○ origin unreachable — continuing on the existing checkout"
+            if timeout 60 git -C "$INSTALL_DIR" fetch origin --quiet 2>/dev/null; then
+                local_branch="$(git -C "$INSTALL_DIR" rev-parse --abbrev-ref HEAD)"
+                git -C "$INSTALL_DIR" reset --hard "origin/$local_branch" --quiet
+            else
+                say "  ○ origin unreachable — continuing on the existing checkout"
+            fi
             return
         fi
     fi

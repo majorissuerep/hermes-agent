@@ -221,7 +221,17 @@ def vault_meta_path(home: Path | str) -> Path:
 
 
 def vault_exists(home: Path | str) -> bool:
-    return vault_meta_path(home).exists()
+    """True when vault metadata exists. EACCES must NOT read as "no vault":
+    on 3.13+ Path.exists() swallows permission errors, which would let the
+    CLI treat an unreadable home as uninitialized and offer to MIGRATE it.
+    Fail closed by raising — the caller surfaces the real error."""
+
+    meta = vault_meta_path(home)
+    try:
+        meta.stat()
+        return True
+    except FileNotFoundError:
+        return False
 
 
 # Entries that are CODE, not user state: the git checkout of the app itself,

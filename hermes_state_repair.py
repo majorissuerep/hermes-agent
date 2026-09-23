@@ -872,7 +872,14 @@ def repair_state_db_schema(db_path: Path, *, backup: bool = True) -> Dict[str, A
     # misread as a parked deadlock. One lease (clamped to _MAX_LEASE_S=900) beats per-chunk renewal complexity.
     report_startup_progress(900.0, phase="state_db_repair")
     db_path = Path(db_path)
-    if not db_path.exists():
+    # Path.exists() on 3.13+ is os.path.exists() semantics: it swallows
+    # EACCES, so a permission-denied DB misreported as "does not exist" and
+    # skipped the live-writer preflight below. Path.stat() keeps the
+    # historical contract on every supported interpreter (OSError propagates
+    # unless the file is truly gone), so missing means missing.
+    try:
+        db_path.stat()
+    except FileNotFoundError:
         report["error"] = f"{db_path} does not exist"
         return report
     # Cross-restart cap: the in-memory claim bounds one process, but unhealable b-tree damage used to re-run
