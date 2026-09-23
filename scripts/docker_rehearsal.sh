@@ -27,6 +27,7 @@ phase1_native() {
         dnf -y install git python3.13 python3-pip sudo >/dev/null 2>&1
         useradd -m luoman 2>/dev/null || true
         echo "luoman ALL=(root) NOPASSWD:ALL" > /etc/sudoers.d/luoman
+        install -d -o luoman -g luoman /home/luoman/hermes-rehearsal
         git --version && python3.13 --version
     '
     # Native hermes: upstream tree shipped in as a git bundle (host github
