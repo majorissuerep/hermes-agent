@@ -86,9 +86,12 @@ phase2_takeover() {
         set -e
         git clone --quiet --depth 1 --no-local /bundles/fork '"$WORK"'/fork-src
         git -C '"$WORK"'/fork-src remote remove origin 2>/dev/null || true
-        FORK_SRC='"$WORK"'/fork-src bash '"$WORK"'/fork-src/scripts/takeover.sh
+        # Non-interactive: docker exec has no TTY, so the vault password must
+        # come from the environment for BOTH creation and unlock.
+        HERMES_MASTER_PASSWORD='"$PASS"' FORK_SRC='"$WORK"'/fork-src bash '"$WORK"'/fork-src/scripts/takeover.sh
     '
-    # takeover.sh migrate step runs interactively; drive it with the env password
+    # Safety net: if the vault still is not there (e.g. install-only run),
+    # drive migrate explicitly with the env password.
     if ! docker_run 'test -f ~/.hermes/.hermes-vault' 2>/dev/null; then
         echo "(vault not yet created — running migrate with env password)"
         docker_run 'HERMES_MASTER_PASSWORD='"$PASS"' bash '"$WORK"'/fork-src/scripts/takeover.sh' || true

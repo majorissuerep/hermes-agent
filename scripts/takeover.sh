@@ -49,8 +49,11 @@ swap_source() {
         origin_url="$(git -C "$INSTALL_DIR" remote get-url origin 2>/dev/null || true)"
         if [[ "$origin_url" == *majorissuerep/hermes-agent* ]]; then
             say "→ Fork already checked out at $INSTALL_DIR; updating..."
-            git -C "$INSTALL_DIR" fetch origin --quiet
-            git -C "$INSTALL_DIR" reset --hard origin/$(git -C "$INSTALL_DIR" rev-parse --abbrev-ref HEAD) --quiet
+            # Fetch failure must NEVER block a takeover whose tree is local:
+            # bounded wait, then warn and continue on the existing checkout.
+            timeout 60 git -C "$INSTALL_DIR" fetch origin --quiet 2>/dev/null \
+                && git -C "$INSTALL_DIR" reset --hard origin/$(git -C "$INSTALL_DIR" rev-parse --abbrev-ref HEAD) --quiet \
+                || say "  ○ origin unreachable — continuing on the existing checkout"
             return
         fi
     fi

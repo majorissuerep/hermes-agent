@@ -34,6 +34,12 @@ def _prompt_new_password() -> str:
             print("✗ HERMES_MASTER_PASSWORD must be at least 8 characters.")
             raise SystemExit(2)
         return env_pw
+    if not sys.stdin.isatty() and not env_pw:
+        print(
+            "✗ No terminal available to create a master password. "
+            "Set HERMES_MASTER_PASSWORD for non-interactive use."
+        )
+        raise SystemExit(2)
     while True:
         first = getpass.getpass("Create master password: ")
         if len(first) < 8:
