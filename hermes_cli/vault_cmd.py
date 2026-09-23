@@ -25,16 +25,30 @@ def _home(args: Any):
     return get_hermes_home()
 
 
+def _tty_available() -> bool:
+    """True when a real terminal can be reached for a password prompt.
+
+    NOT sys.stdin.isatty(): under `curl ... | bash` stdin is the pipe, but
+    /dev/tty is still the user's terminal and getpass reads /dev/tty
+    directly. Refusing on !isatty() wrongly locked out exactly that flow.
+    """
+
+    try:
+        return os.isatty(os.open("/dev/tty", os.O_RDWR))
+    except OSError:
+        return False
+
+
 def _prompt_new_password() -> str:
     # Non-interactive callers (scripts, takeover, CI): honor the env password
     # for CREATION too — it was already the unlock path for daemons.
     env_pw = os.environ.get("HERMES_MASTER_PASSWORD")
-    if env_pw and not sys.stdin.isatty():
+    if env_pw and not _tty_available():
         if len(env_pw) < 8:
             print("✗ HERMES_MASTER_PASSWORD must be at least 8 characters.")
             raise SystemExit(2)
         return env_pw
-    if not sys.stdin.isatty() and not env_pw:
+    if not _tty_available() and not env_pw:
         print(
             "✗ No terminal available to create a master password. "
             "Set HERMES_MASTER_PASSWORD for non-interactive use."
@@ -56,7 +70,7 @@ def _password_from_env_or_prompt(*, confirm: str = "Unlock master password: ") -
     env_pw = os.environ.get("HERMES_MASTER_PASSWORD")
     if env_pw:
         return env_pw
-    if not sys.stdin.isatty():
+    if not _tty_available():
         print(
             "✗ The vault is locked and no terminal is available. "
             "Set HERMES_MASTER_PASSWORD for non-interactive use."

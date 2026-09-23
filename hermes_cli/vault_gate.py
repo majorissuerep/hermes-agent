@@ -47,8 +47,21 @@ def _is_read_only(args: Any, command: Any) -> bool:
     return False
 
 
+def _tty_available() -> bool:
+    """True when a real terminal is reachable through /dev/tty.
+
+    NOT stdin.isatty(): under `curl ... | bash` stdin is the pipe, but the
+    user's terminal is still reachable and getpass reads /dev/tty directly.
+    """
+
+    try:
+        return os.isatty(os.open("/dev/tty", os.O_RDWR))
+    except OSError:
+        return False
+
+
 def _refuse_no_vault(home) -> None:
-    tty = sys.stdin.isatty() and sys.stderr.isatty()
+    tty = _tty_available()
     print(
         f"✗ Master password required — no secure vault exists at {home}.\n"
         "  This Hermes fork encrypts ALL state (sessions, configs, keys, logs)\n"

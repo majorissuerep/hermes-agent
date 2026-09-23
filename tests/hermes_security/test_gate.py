@@ -40,7 +40,7 @@ def _args(command=None, **kw):
 
 
 def test_no_vault_refuses_noninteractive(_arm_gate, monkeypatch, capsys):
-    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+    monkeypatch.setattr(vault_gate, "_tty_available", lambda: False)
     with pytest.raises(SystemExit) as e:
         vault_gate.gate_startup(_args("config"))
     assert e.value.code == 2
@@ -50,8 +50,11 @@ def test_no_vault_refuses_noninteractive(_arm_gate, monkeypatch, capsys):
 
 def test_no_vault_offers_migration_on_tty(_arm_gate, monkeypatch):
     home = _arm_gate
-    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
-    monkeypatch.setattr(sys.stderr, "isatty", lambda: True)
+    monkeypatch.setattr(vault_gate, "_tty_available", lambda: True)
+    # the migrate flow the gate invokes reads vault_cmd's own tty seam
+    from hermes_cli import vault_cmd as _vc
+
+    monkeypatch.setattr(_vc, "_tty_available", lambda: True)
     import getpass
 
     answers = iter(["y", "pw-tty-offer-99", "pw-tty-offer-99"])
@@ -64,13 +67,13 @@ def test_no_vault_offers_migration_on_tty(_arm_gate, monkeypatch):
 
 def test_chat_is_gated(_arm_gate, monkeypatch):
     """command=None (interactive chat) must NOT bypass."""
-    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+    monkeypatch.setattr(vault_gate, "_tty_available", lambda: False)
     with pytest.raises(SystemExit):
         vault_gate.gate_startup(_args(None))
 
 
 def test_gateway_command_gated(_arm_gate, monkeypatch):
-    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+    monkeypatch.setattr(vault_gate, "_tty_available", lambda: False)
     with pytest.raises(SystemExit):
         vault_gate.gate_startup(_args("gateway"))
 
@@ -83,7 +86,7 @@ def test_read_only_surfaces_pass(_arm_gate):
 
 
 def test_update_without_check_is_gated(_arm_gate, monkeypatch):
-    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+    monkeypatch.setattr(vault_gate, "_tty_available", lambda: False)
     with pytest.raises(SystemExit):
         vault_gate.gate_startup(_args("update"))
 
@@ -113,7 +116,7 @@ def test_locked_vault_wrong_password_exits(_arm_gate, monkeypatch, capsys):
 def test_locked_vault_noninteractive_without_password_exits(_arm_gate, monkeypatch):
     home = _arm_gate
     hv.init_vault(home, "gate-pw-3", _allow_existing_state=True)
-    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+    monkeypatch.setattr(vault_gate, "_tty_available", lambda: False)
     with pytest.raises(SystemExit) as e:
         vault_gate.gate_startup(_args("config"))
     assert e.value.code == 2
