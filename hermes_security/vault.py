@@ -243,6 +243,18 @@ _SCAFFOLD_DIRS = frozenset(
         "cache/scratch", "state-snapshots",
     }
 )
+
+# Same as migrate._SKIP_DIRS — code/artifact trees with no user content.
+# Duplicated here so vault_status is self-contained (no cross-submodule import
+# beyond the lazy vault probe).
+_SKIP_DIRS = frozenset(
+    {
+        "hermes-agent", "uv", "venv", ".venv", "node_modules", "__pycache__",
+        "skills", "optional-skills", "plugins", "pets", "skins", "tui-widgets",
+        "desktop-plugins", ".git", "graphify", "lsp", "bin", "cache",
+        "image_cache", "audio_cache",
+    }
+)
 _SCAFFOLD_FILES = frozenset({"SOUL.md"})
 
 
@@ -418,3 +430,109 @@ def clear_vault_cache() -> None:
 
     with _VAULT_LOCK:
         _VAULTS.clear()
+
+
+# ---------------------------------------------------------------------------
+# Status: inspect the vault WITHOUT unlocking (no crypto import needed).
+# ---------------------------------------------------------------------------
+
+# File magic for encrypted envelopes (from hermes_security.io).
+# Duplicated so status stays import-free of the crypto stack.
+_ENVELOPE_MAGIC = b"HRMVAULT\x00"
+
+# SQLite file header. SQLCipher files are indistinguishable from stdlib SQLite
+# by header alone (both start with "SQLite format 3\0"); inside a vaulted home,
+# all .db/.sqlite/.sqlite3 files ARE SQLCipher.
+_SQLITE_MAGIC = b"SQLite format 3\x00"
+_DB_SUFFIXES = (".db", ".sqlite", ".sqlite3")
+
+
+def _is_in_skip_dir(rel: Path | str) -> bool:
+    parts = Path(rel).parts
+    return any(part in _SKIP_DIRS for part in parts)
+
+
+def count_encrypted_files(home: Path | str) -> tuple[int, int, int]:
+    """Count encrypted files, SQLCipher databases, and frame streams under *home*.
+
+    Returns (envelope_count, db_count, frame_stream_count).  A file is counted
+    as an envelope if it starts with the ``HRMVAULT`` magic.  Databases are
+    identified by the SQLite header plus a ``.db``/``.sqlite``/``.sqlite3``
+    suffix (inside a vaulted home, these are always SQLCipher).  Frame streams
+    are ``*.log`` and ``*.jsonl`` files that carry the ``HRMVAULT`` magic
+    (encrypted append-only streams).
+
+    No vault key is needed — this is a metadata-only scan.  Code/artifact trees
+    (``hermes-agent``, ``.venv``, ``node_modules``, etc.) are skipped; they
+    contain no user content.
+    """
+    home_path = Path(home).expanduser().resolve()
+    envelopes = 0
+    dbs = 0
+    frames = 0
+    if not home_path.is_dir():
+        return 0, 0, 0
+    for path in sorted(home_path.rglob("*")):
+        if not path.is_file():
+            continue
+        if path.name == _META_FILENAME or path.name.startswith(".hermes-vault."):
+            continue
+        if path.name.endswith(".lock"):
+            continue  # advisory flock sidecars
+        rel = path.relative_to(home_path)
+        if _is_in_skip_dir(rel):
+            continue
+        try:
+            with open(path, "rb") as fh:
+                head = fh.read(16)
+        except OSError:
+            continue
+        if head.startswith(_ENVELOPE_MAGIC):
+            envelopes += 1
+            if path.suffix in (".log", ".jsonl"):
+                frames += 1
+        elif path.suffix in _DB_SUFFIXES and head[:15] == _SQLITE_MAGIC:
+            dbs += 1
+    return envelopes, dbs, frames
+
+
+def vault_status(home: Path | str | None = None) -> dict:
+    """Inspect the vault at *home* WITHOUT unlocking it.
+
+    Returns a dict with:
+      - ``home``: resolved home path
+      - ``exists``: whether vault metadata is present
+      - ``unlocked``: whether this process has the vault unlocked
+      - ``meta``: vault metadata dict (KDF params, salt, version) OR None
+      - ``encrypted_files``: (envelopes, dbs, frames) tuple
+      - ``integrity``: ``ok`` or ``corrupt`` (metadata readable)
+    """
+    if home is None:
+        from hermes_constants import get_hermes_home
+
+        home = get_hermes_home()
+    home_path = Path(home).expanduser().resolve()
+    exists = vault_exists(home_path)
+    unlocked = is_unlocked(home_path)
+    meta: dict | None = None
+    integrity = "no_vault"
+    if exists:
+        try:
+            meta = _load_meta(home_path)
+            if meta is None:
+                integrity = "corrupt"
+            else:
+                integrity = "ok"
+        except VaultIntegrityError:
+            integrity = "corrupt"
+    envelopes, dbs, frames = (0, 0, 0)
+    if exists and integrity == "ok":
+        envelopes, dbs, frames = count_encrypted_files(home_path)
+    return {
+        "home": str(home_path),
+        "exists": exists,
+        "unlocked": unlocked,
+        "meta": meta,
+        "encrypted_files": (envelopes, dbs, frames),
+        "integrity": integrity,
+    }

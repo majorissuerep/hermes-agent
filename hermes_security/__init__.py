@@ -47,6 +47,8 @@ __all__ = [
     "clear_vault_cache",
     "is_unlocked",
     "lock_now",
+    "vault_status",
+    "count_encrypted_files",
 ]
 
 _LAZY = {
@@ -55,6 +57,8 @@ _LAZY = {
     "clear_vault_cache": ("hermes_security.vault", "clear_vault_cache"),
     "is_unlocked": ("hermes_security.vault", "is_unlocked"),
     "lock_now": ("hermes_security.vault", "lock_now"),
+    "vault_status": ("hermes_security.vault", "vault_status"),
+    "count_encrypted_files": ("hermes_security.vault", "count_encrypted_files"),
 }
 
 

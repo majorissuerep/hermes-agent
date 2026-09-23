@@ -680,9 +680,16 @@ def _make_run_env(env: dict) -> dict:
     """Build a run environment with a sane PATH and provider-var stripping. The process env is
     the LAUNCH profile's; under a routed home override its ``.env`` residue is dropped first
     (``strip_launch_profile_env``, a no-op for the launch profile) so the backend's own ``env``
-    and the served profile's declared passthrough names are what the child sees."""
-    return _scrubbed_env([(dict(strip_launch_profile_env(os.environ.copy()) | env), True)], frozenset(),
-                         lambda p: _prepend_git_bash_dirs(_append_missing_sane_path_entries(p)))
+    and the served profile's declared passthrough names are what the child sees.
+    Fork: ``SHELL`` is always set to the user's native login shell (passwd
+    entry) so nested tools (vim :!, ssh, tmux) spawn the USER's shell instead
+    of /bin/sh — user-native terminals."""
+    from tools.environments.user_shell import ensure_shell_env_var
+
+    run_env = _scrubbed_env([(dict(strip_launch_profile_env(os.environ.copy()) | env), True)], frozenset(),
+                            lambda p: _prepend_git_bash_dirs(_append_missing_sane_path_entries(p)))
+    ensure_shell_env_var(run_env)
+    return run_env
 
 
 # --- Hermes venv / repo-root detection (module-level, computed once) ---
@@ -719,10 +726,29 @@ def _resolve_shell_init_files() -> list[str]:
     missing dropped). ``auto_source_bashrc`` applies only without an explicit list:
     ~/.profile and ~/.bash_profile first (no interactivity guard; where
     n/nvm/asdf/pyenv add PATH), ~/.bashrc last (Debian's returns early when
-    non-interactive, but guard-less bashrcs keep working)."""
+    non-interactive, but guard-less bashrcs keep working).
+    Fork (user-native terminals): the user's OWN shell rc files come first —
+    a zsh user's ~/.zprofile/~/.zshrc, dash's nothing, etc. — so the snapshot
+    captures THEIR environment, not a bash approximation of it."""
     explicit, auto_bashrc = _read_terminal_shell_init_config()
-    candidates = explicit or (["~/.profile", "~/.bash_profile", "~/.bashrc"]
-                              if auto_bashrc and not _IS_WINDOWS else [])
+    user_rc: list[str] = []
+    if not explicit and auto_bashrc and not _IS_WINDOWS:
+        try:
+            from tools.environments.user_shell import resolve_user_shell
+
+            name = Path(resolve_user_shell()).name.lower()
+            rc_by_shell = {
+                "zsh": ["~/.zprofile", "~/.zshrc"],
+                "ksh": ["~/.kshrc"],
+                "mksh": ["~/.kshrc"],
+            }
+            user_rc = rc_by_shell.get(name, [])
+        except Exception:
+            user_rc = []
+    candidates = explicit or (
+        [*user_rc, "~/.profile", "~/.bash_profile", "~/.bashrc"]
+        if auto_bashrc and not _IS_WINDOWS else []
+    )
     resolved: list[str] = []
     for raw in candidates:
         try:

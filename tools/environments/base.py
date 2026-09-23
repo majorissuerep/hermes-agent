@@ -326,9 +326,14 @@ class BaseEnvironment(ABC):
         return shlex.quote(path)
 
     def _wrap_command(self, command: str, cwd: str) -> str:
-        """Full bash script: source snapshot, cd, run, re-dump env, emit CWD markers."""
+        """Full bash script: source snapshot, cd, run, re-dump env, emit CWD markers.
+        Fork (user-native terminals): the user's command executes under their
+        native login shell when it is not bash."""
+        from tools.environments.user_shell import resolve_user_shell
+
         return _wrap_command_script(
             command,
+            user_shell=resolve_user_shell(),
             passthrough_names=self._snapshot_excluded_passthrough_names(),
             snapshot_ready=self._snapshot_ready,
             **self._snapshot_script_kwargs(cwd))

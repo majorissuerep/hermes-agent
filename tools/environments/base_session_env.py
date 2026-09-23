@@ -124,9 +124,45 @@ def _passthrough_save_restore(names: Iterable[str]) -> tuple[list[str], list[str
     return save, restore
 
 
+def _user_command_invocation(escaped_command: str, user_shell: str | None, env_dump_path: str | None = None) -> str:
+    """Fork (user-native terminals): how the user's command executes.
+
+    - bash user (or shell unknown): plain ``eval`` — byte-identical to
+      upstream behavior.
+    - other POSIX-family shell (zsh/dash/ksh/...): the command runs under the
+      USER's shell via ``<shell> -c`` so their syntax applies.  Because a
+      child cannot mutate this shell's environment, the child also runs
+      ``export -p`` into *env_dump_path*; the caller sources it back so
+      ``export FOO=1`` persists across commands exactly like upstream.
+      (POSIX-family ``export -p`` output — ``export K=V`` / ksh-dash forms
+      and zsh's ``typeset -x K=V`` — parses in bash, which treats ``typeset``
+      as ``declare``.)
+    - exotic shells (fish/nushell/pwsh): handed off with ``-c`` for their
+      native syntax; cross-command export persistence is not portable and is
+      not attempted (session env still flows IN via the sourced snapshot).
+    """
+
+    if not user_shell:
+        return f"eval '{escaped_command}'"
+    from pathlib import Path as _P
+
+    name = _P(user_shell).name.lower()
+    if name == "bash":
+        return f"eval '{escaped_command}'"
+    if name in {"sh", "dash", "ash", "ksh", "mksh", "posh", "yash", "zsh"}:
+        dump_clause = ""
+        if env_dump_path:
+            dump_clause = f"\nexport -p > {env_dump_path} 2>/dev/null || true"
+        return f"{user_shell} -c '{escaped_command}{dump_clause}'"
+    # fish / nushell / powershell: native -c handoff, no env round-trip.
+    return f"{user_shell} -c '{escaped_command}'"
+
+
 def _wrap_command_script(
     command: str, *, quoted_cwd: str, quoted_snap: str, snap_tmp_template: str,
-    passthrough_names: Iterable[str], snapshot_ready: bool, cwd_marker: str) -> str:
+    passthrough_names: Iterable[str], snapshot_ready: bool, cwd_marker: str,
+    user_shell: str | None = None,
+) -> str:
     """Per-command bash script: source snapshot, cd, run, re-dump env, emit CWD marker.
     ``source`` stdout goes to /dev/null because macOS bash 3.2 / some Homebrew builds echo
     ``declare -x`` lines when sourcing. AI_AGENT/HERMES_AGENT advertise the harness to remote
@@ -136,6 +172,12 @@ def _wrap_command_script(
     succeeding so a failed dump never replaces a good snapshot. ``umask 077`` is applied after
     the user's command so snapshot files (which may carry secrets) are private without
     changing the command's umask.
+
+    Fork (user-native terminals): the snapshot machinery stays bash (it is
+    Hermes' own dialect), but the user's COMMAND executes under their native
+    login shell when it differs from bash: the environment sourced from the
+    snapshot is exported, then the command runs via ``$user_shell -c`` so
+    zsh/dash/ksh users get their own shell's syntax and rc-derived env.
     """
     escaped = command.replace("'", "'\\''")
     save, restore = _passthrough_save_restore(passthrough_names)
@@ -148,7 +190,16 @@ def _wrap_command_script(
         'export GIT_PAGER="${GIT_PAGER:-cat}" PAGER="${PAGER:-cat}"',
         # ``--`` keeps hyphen-prefixed directory names from being parsed as options.
         f"builtin cd -- {quoted_cwd} || exit 126",
-        f"eval '{escaped}'",
+    ]
+    # Fork (user-native terminals): POSIX-family non-bash shells dump their
+    # post-command env to a side file this shell sources back, preserving
+    # export persistence across commands.
+    user_shell_name = (user_shell or "").rsplit("/", 1)[-1].lower()
+    env_dump = f"{quoted_snap}.userenv" if user_shell_name not in ("", "bash") else None
+    parts.append(_user_command_invocation(escaped, user_shell, env_dump))
+    if env_dump:
+        parts.append(f"source {env_dump} >/dev/null 2>&1 || true; rm -f {env_dump}")
+    parts += [
         "__hermes_ec=$?",
         "umask 077"]
     if snapshot_ready:

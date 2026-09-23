@@ -129,8 +129,27 @@ def cmd_vault(args: Any) -> int:
         if not vault_mod.vault_exists(home):
             print(f"○ No vault at {home} (state writes will be refused; run 'hermes vault init')")
             return 1
+        status = vault_mod.vault_status(home)
+        meta = status["meta"]
         print(f"● Vault present at {home}")
-        print(f"  Unlocked in this process: {'yes' if vault_mod.is_unlocked(home) else 'no'}")
+        print(f"  Integrity        : {status['integrity']}")
+        print(f"  Unlocked in proc : {'yes' if status['unlocked'] else 'no'}")
+        if meta:
+            kdf = meta.get("kdf", "unknown")
+            n = meta.get("kdf_n", "?")
+            r = meta.get("kdf_r", "?")
+            p = meta.get("kdf_p", "?")
+            print(f"  KDF              : {kdf} (n={n}, r={r}, p={p})")
+            print(f"  Version          : v{meta.get('version', '?')}")
+            # salt is public metadata; show length for verification
+            salt_b64 = meta.get("salt", "")
+            if salt_b64:
+                import base64 as _b64
+                print(f"  Salt             : {_b64.b64decode(salt_b64).hex()} ({len(salt_b64)} b64 chars)")
+        envelopes, dbs, frames = status["encrypted_files"]
+        print(f"  Encrypted files  : {envelopes} envelope(s), {dbs} database(s), {frames} frame stream(s)")
+        if not status["unlocked"]:
+            print(f"  (use 'hermes vault unlock' or set HERMES_MASTER_PASSWORD to unlock)")
         return 0
 
     if command == "unlock":
