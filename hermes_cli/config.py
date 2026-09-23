@@ -110,9 +110,17 @@ def _warn_config_parse_failure(
 
     Fork: vault-lock failures are NOT parse failures — the file is fine, the
     process just hasn't supplied the master password yet. The startup gate
-    owns that message; no warning, no .corrupt backup here.
+    owns that message; no warning, no .corrupt backup here. This includes
+    VaultIntegrityError: a wrong master password fails envelope
+    authentication, which is a credential problem, not a damaged file
+    (a REAL integrity failure also surfaces through the gate's unlock).
     """
-    if type(exc).__name__ in {"VaultLockedError", "VaultNotInitializedError", "WrongMasterPasswordError"}:
+    if type(exc).__name__ in {
+        "VaultLockedError",
+        "VaultNotInitializedError",
+        "WrongMasterPasswordError",
+        "VaultIntegrityError",
+    }:
         return
     try:
         st = config_path.stat()
