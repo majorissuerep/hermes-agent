@@ -18,7 +18,12 @@ trap cleanup EXIT
 
 docker_run() {  # run inside the container as the rehearsal user (login shell, no stdin)
     docker exec -u luoman -e HOME=/home/luoman "$CTF" bash -lc "$1"
+    local rc=$?
+    # A verification gate must not exit 0 when any step failed.
+    [ "$rc" -ne 0 ] && REHEARSAL_FAILED=1
+    return "$rc"
 }
+REHEARSAL_FAILED=0
 
 phase1_native() {
     echo "════ PHASE 1: native (upstream) hermes install + real state ════"
@@ -124,19 +129,27 @@ PYEOF
     docker_run '
         export HERMES_MASTER_PASSWORD="'"$PASS"'"
         echo "[2] config read-back:"
-        hermes config get model.default
-        hermes config get ui.theme
+        got_model=$(hermes config get model.default)
+        got_theme=$(hermes config get ui.theme)
+        echo "   model.default: $got_model"
+        echo "   ui.theme:      $got_theme"
+        [ "$got_model" = "anthropic/claude-sonnet-4-20250514" ] || { echo "   FAIL: model.default lost"; exit 1; }
+        [ "$got_theme" = "dark" ] || { echo "   FAIL: ui.theme lost"; exit 1; }
+        echo "   OK: config round-tripped"
     '
     # [3] At-rest bytes: DB and config must NOT be plaintext
     docker_run '
         echo "[3] at-rest encryption scan:"
-        if grep -aq "SQLite format 3" ~/.hermes/state.db 2>/dev/null; then echo "   FAIL: state.db plaintext SQLite header"; else echo "   OK: state.db has no plaintext SQLite header"; fi
-        if grep -aq "rehearsal-session-alpha" ~/.hermes/state.db; then echo "   FAIL: session id plaintext in state.db"; else echo "   OK: no session ids plaintext in state.db"; fi
-        if grep -aq "claude-sonnet" ~/.hermes/config.yaml 2>/dev/null; then "   FAIL: config.yaml plaintext"; else echo "   OK: config.yaml not plaintext"; fi
+        fail=0
+        if grep -aq "SQLite format 3" ~/.hermes/state.db 2>/dev/null; then echo "   FAIL: state.db plaintext SQLite header"; fail=1; else echo "   OK: state.db has no plaintext SQLite header"; fi
+        if grep -aq "rehearsal-session-alpha" ~/.hermes/state.db; then echo "   FAIL: session id plaintext in state.db"; fail=1; else echo "   OK: no session ids plaintext in state.db"; fi
+        if grep -aq "claude-sonnet" ~/.hermes/config.yaml 2>/dev/null; then echo "   FAIL: config.yaml plaintext"; fail=1; else echo "   OK: config.yaml not plaintext"; fi
         for f in ~/.hermes/logs/*.log; do
             [ -e "$f" ] || continue
-            if grep -aqiE "plugin|registered" "$f"; then echo "   WARN: plaintext line in $f"; else echo "   OK: $f not plaintext"; fi
+            if grep -aqiE "plugin|registered" "$f"; then echo "   FAIL: plaintext line in $f"; fail=1; else echo "   OK: $f not plaintext"; fi
         done
+        [ -e ~/.hermes/state.db ] || { echo "   FAIL: state.db missing"; fail=1; }
+        exit "$fail"
     '
     # [4] Whole-home plaintext sweep (excluding code dirs and the backup tar)
     docker_run '
@@ -147,6 +160,7 @@ PYEOF
           ~/.hermes 2>/dev/null | tee '"$WORK"'/leaks.txt
         hits=$(wc -l < '"$WORK"'/leaks.txt)
         echo "   plaintext hits: ${hits:-0} (0 required)"
+        [ "${hits:-0}" -eq 0 ] || exit 1
     '
     # [5] Restorable: pre-migration backup tar exists and its plaintext round-trips
     docker_run '
@@ -176,16 +190,19 @@ PYEOF
           --exclude-dir=hermes-agent --exclude-dir=hermes-rehearsal \
           ~ 2>/dev/null | wc -l)
         echo "   files containing plaintext session data: $hits (0 required)"
+        [ "$hits" -eq 0 ] || exit 1
     '
     # [7] Wrong password must fail closed
     docker_run '
         echo "[7] wrong-password refusal:"
-        if HERMES_MASTER_PASSWORD=wrong-password-123 hermes config get model.default; then echo "   FAIL: accepted wrong password"; else echo "   OK: refused (exit $?)"; fi
+        if HERMES_MASTER_PASSWORD=wrong-password-123 hermes config get model.default; then echo "   FAIL: accepted wrong password"; exit 1; else echo "   OK: refused (exit $?)"; fi
     '
     # [8] Updater pinned to the fork (no way out)
     docker_run '
         echo "[8] updater origin check:"
-        git -C ~/.hermes/hermes-agent remote get-url origin
+        origin=$(git -C ~/.hermes/hermes-agent remote get-url origin)
+        echo "   origin: $origin"
+        case "$origin" in *majorissuerep/hermes-agent*) echo "   OK: pinned to the fork";; *) echo "   FAIL: origin not the fork"; exit 1;; esac
     '
 }
 
@@ -194,7 +211,11 @@ main() {
     phase1_native
     phase2_takeover
     phase3_verify
-    echo "════ rehearsal complete ════"
+    if [ "$REHEARSAL_FAILED" -ne 0 ]; then
+        echo "════ rehearsal FAILED ════"
+        exit 1
+    fi
+    echo "════ rehearsal complete: ALL CHECKS PASSED ════"
 }
 
 main "$@"
