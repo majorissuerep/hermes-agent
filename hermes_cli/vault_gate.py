@@ -1,18 +1,36 @@
-"""Fail-closed vault startup gate — deliberately crypto-free.
+"""Mandatory master-password gate — deliberately crypto-free.
+
+This fork's key feature is master-password protection of ALL state. Policy:
+
+- EVERY state-touching command requires a vault (initialized) AND an unlocked
+  vault (master password supplied). That includes chat, gateway, serve,
+  config, cron, update, doctor — everything.
+- Only pure management/read-only surfaces bypass: ``secure-vault``/``vault``
+  themselves, ``--version``, ``--help``, and ``update --check`` (diagnostics
+  that persist nothing sensitive).
+- No vault at all: REFUSE with instructions; on an interactive TTY offer to
+  run the migration flow right there. Non-interactive callers (systemd,
+  cron, serve) must set HERMES_MASTER_PASSWORD and create the vault first.
+- ``HERMES_ALLOW_NO_VAULT=1`` is the documented escape for CI/embedded test
+  harnesses only — set by tests/conftest.py, never in production installs.
 
 Importing this module must NEVER pull ``cryptography`` (its native lib locks
-on Windows self-update; upstream keeps it out of update dispatch).  The heavy
-``hermes_cli.vault_cmd`` (and with it the crypto stack) loads ONLY when a
-vault actually exists at the active home.
+on Windows self-update; upstream keeps it out of update dispatch). The heavy
+``hermes_cli.vault_cmd`` (and the crypto stack) loads ONLY when a vault
+actually exists at the active home or the migrate offer is accepted.
 """
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 from typing import Any
 
 _META_FILENAME = ".hermes-vault"
+
+# Commands that manage the vault or are pure read-only diagnostics.
+_READ_ONLY_COMMANDS = frozenset({"secure-vault", "vault"})
 
 
 def vault_exists_light(home) -> bool:
@@ -20,31 +38,61 @@ def vault_exists_light(home) -> bool:
     return (Path(home) / _META_FILENAME).is_file()
 
 
-def gate_startup(args: Any) -> None:
-    """State-touching commands need an unlocked vault.
+def _is_read_only(args: Any, command: Any) -> bool:
+    if command in _READ_ONLY_COMMANDS or getattr(args, "version", False):
+        return True
+    # `hermes update --check`: pure diagnostic (git status + cache stamp).
+    if command == "update" and getattr(args, "check", False):
+        return True
+    return False
 
-    - Read-only surfaces (``--version``, ``secure-vault``/``vault`` themselves)
-      bypass.
-    - No vault: bootstrap mode — plaintext writes stay possible (installs,
-      tests), with a one-line warning on interactive TTYs.
-    - Vault present but locked: prompt once (TTY) or read
-      ``HERMES_MASTER_PASSWORD`` (daemons); wrong password exits before any
-      state is touched.
-    """
+
+def _refuse_no_vault(home) -> None:
+    tty = sys.stdin.isatty() and sys.stderr.isatty()
+    print(
+        f"✗ Master password required — no secure vault exists at {home}.\n"
+        "  This Hermes fork encrypts ALL state (sessions, configs, keys, logs)\n"
+        "  with your master password. It refuses to run unencrypted.",
+        file=sys.stderr,
+    )
+    if tty:
+        answer = input("Create the vault now? (backs up and encrypts this home) [Y/n] ").strip().lower()
+        if answer in {"", "y", "yes"}:
+            from types import SimpleNamespace
+
+            from hermes_cli.vault_cmd import cmd_vault
+
+            rc = cmd_vault(SimpleNamespace(vault_command="migrate", yes=True))
+            if rc == 0:
+                return  # vault created + unlocked inline; caller proceeds
+            raise SystemExit(rc or 2)
+        print(
+            "  Run 'hermes secure-vault migrate' to set it up, then retry.",
+            file=sys.stderr,
+        )
+    else:
+        print(
+            "  Non-interactive process: create the vault once from a terminal\n"
+            "  ('hermes secure-vault migrate'), then set HERMES_MASTER_PASSWORD\n"
+            "  in this service's environment (systemd unit / EnvironmentFile).",
+            file=sys.stderr,
+        )
+    raise SystemExit(2)
+
+
+def gate_startup(args: Any) -> None:
+    """Master-password gate for every state-touching command."""
 
     command = getattr(args, "command", None)
-    if command in (None, "secure-vault", "vault") or getattr(args, "version", False):
+    if _is_read_only(args, command):
         return
     from hermes_constants import get_hermes_home
 
     home = get_hermes_home()
     if not vault_exists_light(home):
-        if sys.stderr.isatty():
-            print(
-                f"⚠ No secure vault at {home} — new state is written UNENCRYPTED.\n"
-                "  Run 'hermes secure-vault migrate' to switch to encrypted storage.",
-                file=sys.stderr,
-            )
+        if os.environ.get("HERMES_ALLOW_NO_VAULT") == "1":
+            return  # documented CI/embedded harness escape (tests/conftest.py)
+        _refuse_no_vault(home)
         return
     from hermes_cli.vault_cmd import gate_locked_vault
 

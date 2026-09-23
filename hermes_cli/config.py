@@ -107,7 +107,13 @@ def _warn_config_parse_failure(
     ``fallback`` selects the message wording: ``"defaults"`` (fresh process, nothing else to serve) or
     ``"last-known-good"`` (in-process retention of the previously loaded config — see the codex#31188 port
     in ``_load_config_impl``).
+
+    Fork: vault-lock failures are NOT parse failures — the file is fine, the
+    process just hasn't supplied the master password yet. The startup gate
+    owns that message; no warning, no .corrupt backup here.
     """
+    if type(exc).__name__ in {"VaultLockedError", "VaultNotInitializedError", "WrongMasterPasswordError"}:
+        return
     try:
         st = config_path.stat()
         sig = file_signature(st)

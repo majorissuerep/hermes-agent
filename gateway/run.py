@@ -5986,6 +5986,14 @@ def main():
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
     args = parser.parse_args()
 
+    # Fork: master-password gate. The gateway is a long-running state writer
+    # (state.db, sessions, cron) and never passes through the CLI gate — it
+    # must refuse to start without an unlocked vault. Non-interactive by
+    # nature: HERMES_MASTER_PASSWORD in the unit/EnvironmentFile unlocks it.
+    from hermes_cli.vault_gate import gate_startup
+
+    gate_startup(args)
+
     config = None
     if args.config:
         import yaml

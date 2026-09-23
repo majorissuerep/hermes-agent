@@ -112,6 +112,12 @@ if _hermes_home_points_at_production(os.environ.get("HERMES_HOME", "")):
 # env instead of stripping markers.
 os.environ["HERMES_TEST_ISOLATION"] = os.environ.get("HERMES_HOME", "") or "1"
 
+# Fork: the master-password gate refuses vault-less homes in production, but
+# most upstream tests exercise vault-less flows. This is the sanctioned CI
+# escape (see hermes_cli/vault_gate.py); vault-specific tests in
+# tests/hermes_security/ re-arm the gate by clearing it per-test.
+os.environ.setdefault("HERMES_ALLOW_NO_VAULT", "1")
+
 #: HERMES_HOME as it stood when conftest was imported - i.e. before any test
 #: module could import code that configures logging. Recorded so the guard in
 #: tests/test_log_isolation.py can assert the sandbox existed AT THAT MOMENT.
