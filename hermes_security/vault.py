@@ -1,0 +1,365 @@
+"""Master-password vault: scrypt root key, HKDF domain separation, AES-GCM envelopes.
+
+The root key never touches disk.  The home contains only a public metadata
+file (KDF parameters + random salt + password verifier).  The verifier lets
+us reject a wrong password at unlock time before any file is decrypted.
+"""
+
+from __future__ import annotations
+
+import base64
+import json
+import os
+import secrets
+import tempfile
+import threading
+from pathlib import Path
+from typing import Any, Optional
+
+from cryptography.exceptions import InvalidTag
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
+
+from hermes_security.errors import (
+    PlaintextStateError,
+    VaultError,
+    VaultIntegrityError,
+    VaultLockedError,
+    VaultNotInitializedError,
+    WrongMasterPasswordError,
+)
+_MAGIC = b"HRMVAULT\x00"
+_VERSION = 1
+_NONCE_BYTES = 12
+_ROOT_KEY_BYTES = 32
+_SALT_BYTES = 32
+_META_FILENAME = ".hermes-vault"
+_VERIFIER_PLAINTEXT = b"hermes-vault-v1-verifier"
+
+# scrypt parameters for new vaults.  Stored per-vault in metadata so future
+# releases can tighten them without invalidating existing vaults.
+_SCRYPT_N = 2 ** 15
+_SCRYPT_R = 8
+_SCRYPT_P = 1
+
+
+def _b64e(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).decode("ascii")
+
+
+def _b64d(text: str) -> bytes:
+    return base64.urlsafe_b64decode(text.encode("ascii"))
+
+
+def _derive_root_key(password: str | bytes, salt: bytes, n: int, r: int, p: int) -> bytes:
+    kdf = Scrypt(salt=salt, length=_ROOT_KEY_BYTES, n=n, r=r, p=p)
+    pw = password.encode("utf-8") if isinstance(password, str) else password
+    return kdf.derive(pw)
+
+
+def _fsync_directory(path: Path) -> None:
+    if os.name == "nt":
+        return
+    try:
+        fd = os.open(path, os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def _atomic_write(path: Path, data: bytes, *, mode: int = 0o600) -> None:
+    """Write *data* to *path* atomically: temp file + fsync + rename + dir fsync."""
+
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    fd, temp_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=str(path.parent))
+    temp_path = Path(temp_name)
+    try:
+        os.fchmod(fd, mode)
+        with os.fdopen(fd, "wb", closefd=True) as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temp_path, path)
+        _fsync_directory(path.parent)
+    except BaseException:
+        try:
+            temp_path.unlink()
+        except OSError:
+            pass
+        raise
+
+
+def _load_meta(home: Path) -> Optional[dict[str, Any]]:
+    meta_path = home / _META_FILENAME
+    try:
+        raw = meta_path.read_bytes()
+    except FileNotFoundError:
+        return None
+    try:
+        meta = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise VaultIntegrityError(f"Vault metadata at {meta_path} is corrupt") from exc
+    if not isinstance(meta, dict):
+        raise VaultIntegrityError(f"Vault metadata at {meta_path} is corrupt")
+    return meta
+
+
+class Vault:
+    """An unlocked vault for one Hermes home.  Plaintext exists only in this process."""
+
+    def __init__(self, home: Path, master_key: bytes) -> None:
+        self.home = Path(home).expanduser().resolve()
+        self.master_key = master_key
+
+    # -- key derivation ----------------------------------------------------
+
+    def derive_key(self, purpose: str) -> bytes:
+        if not purpose or "\x00" in purpose:
+            raise ValueError("Vault purpose must be a non-empty text label")
+        return HKDF(
+            algorithm=hashes.SHA256(),
+            length=32,
+            salt=None,
+            info=("hermes/vault/v1/" + purpose).encode("utf-8"),
+        ).derive(self.master_key)
+
+    # -- envelopes ----------------------------------------------------------
+
+    def _aad(self, purpose: str, relpath: str) -> bytes:
+        return f"hermes-vault|{_VERSION}|{purpose}|{relpath}".encode("utf-8")
+
+    def encrypt(self, plaintext: bytes, *, purpose: str, relpath: str) -> bytes:
+        nonce = secrets.token_bytes(_NONCE_BYTES)
+        ciphertext = AESGCM(self.derive_key("file:" + purpose)).encrypt(
+            nonce, plaintext, self._aad(purpose, relpath)
+        )
+        return _MAGIC + bytes((_VERSION,)) + nonce + ciphertext
+
+    def decrypt(self, envelope: bytes, *, purpose: str, relpath: str) -> bytes:
+        prefix_size = len(_MAGIC) + 1 + _NONCE_BYTES
+        if len(envelope) < prefix_size + 16 or not envelope.startswith(_MAGIC):
+            raise VaultIntegrityError("File is not a Hermes encrypted envelope")
+        version = envelope[len(_MAGIC)]
+        if version != _VERSION:
+            raise VaultIntegrityError(f"Unsupported vault format version: {version}")
+        nonce_start = len(_MAGIC) + 1
+        nonce = envelope[nonce_start : nonce_start + _NONCE_BYTES]
+        ciphertext = envelope[nonce_start + _NONCE_BYTES :]
+        try:
+            return AESGCM(self.derive_key("file:" + purpose)).decrypt(
+                nonce, ciphertext, self._aad(purpose, relpath)
+            )
+        except InvalidTag as exc:
+            raise VaultIntegrityError(
+                f"Vault authentication failed for {relpath!r} (purpose {purpose!r})"
+            ) from exc
+
+    # -- path policy ---------------------------------------------------------
+
+    def _resolve(self, path: Path | str) -> tuple[Path, str]:
+        candidate = Path(path).expanduser()
+        if not candidate.is_absolute():
+            candidate = self.home / candidate
+        candidate = candidate.resolve(strict=False)
+        try:
+            rel = candidate.relative_to(self.home)
+        except ValueError as exc:
+            raise ValueError(
+                f"Encrypted Hermes files must stay inside the Hermes home ({self.home})"
+            ) from exc
+        return candidate, rel.as_posix()
+
+    def write_bytes(self, path: Path | str, plaintext: bytes, *, purpose: str) -> Path:
+        target, rel = self._resolve(path)
+        envelope = self.encrypt(plaintext, purpose=purpose, relpath=rel)
+        _atomic_write(target, envelope)
+        return target
+
+    def read_bytes(self, path: Path | str, *, purpose: str) -> bytes:
+        target, rel = self._resolve(path)
+        try:
+            envelope = target.read_bytes()
+        except FileNotFoundError:
+            raise
+        except OSError as exc:
+            raise VaultIntegrityError(f"Cannot read encrypted file at {target}") from exc
+        return self.decrypt(envelope, purpose=purpose, relpath=rel)
+
+
+# -- process-level vault registry -----------------------------------------
+
+_VAULTS: dict[Path, Vault] = {}
+_VAULT_LOCK = threading.RLock()
+
+
+def find_vault_home(path: Path | str) -> Path:
+    """Walk up from *path* to the nearest directory holding vault metadata.
+
+    Files can live anywhere under the home (logs/, sessions/, profiles/...),
+    so the vault for a file is the first ancestor with ``.hermes-vault``.
+    Falls back to the active Hermes home when no ancestor carries metadata.
+    """
+
+    candidate = Path(path).expanduser().resolve(strict=False)
+    if candidate.is_file() or candidate.suffix:
+        candidate = candidate.parent
+    for directory in (candidate, *candidate.parents):
+        if (directory / _META_FILENAME).is_file():
+            return directory
+    from hermes_constants import get_hermes_home
+
+    return Path(get_hermes_home()).resolve()
+
+
+def vault_meta_path(home: Path | str) -> Path:
+    return Path(home).expanduser() / _META_FILENAME
+
+
+def vault_exists(home: Path | str) -> bool:
+    return vault_meta_path(home).exists()
+
+
+def init_vault(home: Path | str, password: str | bytes) -> None:
+    """Create vault metadata for *home*.  Fails if state already exists."""
+
+    home_path = Path(home).expanduser().resolve()
+    if vault_exists(home_path):
+        raise VaultError(f"A vault already exists at {home_path}")
+    if home_path.exists() and any(home_path.iterdir()):
+        names = ", ".join(sorted(item.name for item in home_path.iterdir())[:10])
+        raise PlaintextStateError(
+            "Refusing to initialize a vault over pre-existing state: " + names
+        )
+    home_path.mkdir(parents=True, exist_ok=True, mode=0o700)
+    os.chmod(home_path, 0o700)
+
+    salt = secrets.token_bytes(_SALT_BYTES)
+    root_key = _derive_root_key(password, salt, _SCRYPT_N, _SCRYPT_R, _SCRYPT_P)
+    meta = {
+        "version": _VERSION,
+        "kdf": "scrypt",
+        "kdf_n": _SCRYPT_N,
+        "kdf_r": _SCRYPT_R,
+        "kdf_p": _SCRYPT_P,
+        "salt": _b64e(salt),
+        "verifier": _b64e(_make_verifier(root_key, salt)),
+    }
+    _atomic_write(home_path / _META_FILENAME, json.dumps(meta).encode("utf-8"))
+
+
+def _make_verifier(root_key: bytes, salt: bytes) -> bytes:
+    verifier_key = HKDF(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=salt,
+        info=b"hermes/vault/v1/verifier",
+    ).derive(root_key)
+    nonce = secrets.token_bytes(_NONCE_BYTES)
+    return nonce + AESGCM(verifier_key).encrypt(nonce, _VERIFIER_PLAINTEXT, b"hermes-vault-verifier")
+
+
+def _check_verifier(root_key: bytes, salt: bytes, verifier: bytes) -> bool:
+    verifier_key = HKDF(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=salt,
+        info=b"hermes/vault/v1/verifier",
+    ).derive(root_key)
+    nonce, ciphertext = verifier[:_NONCE_BYTES], verifier[_NONCE_BYTES:]
+    try:
+        plain = AESGCM(verifier_key).decrypt(nonce, ciphertext, b"hermes-vault-verifier")
+    except InvalidTag:
+        return False
+    return plain == _VERIFIER_PLAINTEXT
+
+
+def _zero(buf: bytearray | bytes) -> None:
+    if isinstance(buf, bytearray):
+        for i in range(len(buf)):
+            buf[i] = 0
+
+
+def unlock(home: Path | str, password: str | bytes) -> Vault:
+    """Verify the master password and cache the unlocked vault for this process."""
+
+    home_path = Path(home).expanduser().resolve()
+    meta = _load_meta(home_path)
+    if meta is None:
+        raise VaultNotInitializedError(
+            f"No vault at {home_path}; run 'hermes vault init' first"
+        )
+    with _VAULT_LOCK:
+        cached = _VAULTS.get(home_path)
+        if cached is not None:
+            return cached
+
+    salt = _b64d(meta.get("salt", ""))
+    verifier = _b64d(meta.get("verifier", ""))
+    if len(salt) != _SALT_BYTES or len(verifier) < _NONCE_BYTES + 16:
+        raise VaultIntegrityError(f"Vault metadata at {home_path} is corrupt")
+    n, r, p = (int(meta.get(k, d)) for k, d in (("kdf_n", _SCRYPT_N), ("kdf_r", _SCRYPT_R), ("kdf_p", _SCRYPT_P)))
+    if meta.get("kdf") != "scrypt" or n <= 0 or r <= 0 or p <= 0:
+        raise VaultIntegrityError(f"Vault metadata at {home_path} has unsupported KDF parameters")
+
+    root_key = _derive_root_key(password, salt, n, r, p)
+    if not _check_verifier(root_key, salt, verifier):
+        raise WrongMasterPasswordError("The master password does not open this vault")
+    vault = Vault(home=home_path, master_key=root_key)
+    with _VAULT_LOCK:
+        _VAULTS[home_path] = vault
+    return vault
+
+
+def get_vault(home: Path | str | None = None) -> Vault:
+    """Return the unlocked vault for *home* (default: the active Hermes home)."""
+
+    if home is None:
+        from hermes_constants import get_hermes_home
+
+        home = get_hermes_home()
+    home_path = Path(home).expanduser().resolve()
+    with _VAULT_LOCK:
+        vault = _VAULTS.get(home_path)
+    if vault is None:
+        if not vault_exists(home_path):
+            raise VaultNotInitializedError(
+                f"No vault at {home_path}; run 'hermes vault init' first"
+            )
+        raise VaultLockedError(
+            f"The vault at {home_path} is locked; supply the master password to unlock"
+        )
+    return vault
+
+
+def is_unlocked(home: Path | str | None = None) -> bool:
+    if home is None:
+        from hermes_constants import get_hermes_home
+
+        home = get_hermes_home()
+    home_path = Path(home).expanduser().resolve()
+    with _VAULT_LOCK:
+        return home_path in _VAULTS
+
+
+def lock_now(home: Path | str | None = None) -> None:
+    """Drop the process-local master key for *home*."""
+
+    if home is None:
+        from hermes_constants import get_hermes_home
+
+        home = get_hermes_home()
+    home_path = Path(home).expanduser().resolve()
+    with _VAULT_LOCK:
+        _VAULTS.pop(home_path, None)
+
+
+def clear_vault_cache() -> None:
+    """Forget every process-local unlocked key (tests, profile switches)."""
+
+    with _VAULT_LOCK:
+        _VAULTS.clear()
