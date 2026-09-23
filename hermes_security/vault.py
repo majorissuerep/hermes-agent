@@ -232,18 +232,60 @@ _CODE_ENTRIES = frozenset(
     {"hermes-agent", "uv", "venv", ".venv"}
 )
 
+# The deterministic first-run scaffold (ensure_hermes_home): known empty
+# directories plus the stock SOUL.md persona template. Public boilerplate,
+# never user content — the vault re-seals SOUL.md on first write.
+_SCAFFOLD_MARKER_FILES = frozenset({".last_prune"})
+_SCAFFOLD_DIRS = frozenset(
+    {
+        "cron", "sessions", "logs", "logs/curator", "memories", "pairing",
+        "hooks", "image_cache", "audio_cache", "skills", "cache",
+        "cache/scratch", "state-snapshots",
+    }
+)
+_SCAFFOLD_FILES = frozenset({"SOUL.md"})
+
 
 def _has_user_state(directory: Path) -> bool:
-    return any(item.name not in _CODE_ENTRIES for item in directory.iterdir())
+    for item in directory.iterdir():
+        if item.name in _CODE_ENTRIES:
+            continue
+        if item.is_dir():
+            if _dir_is_scaffold(item):
+                continue
+            return True
+        if item.is_file() and item.name in _SCAFFOLD_FILES:
+            continue
+        return True
+    return False
 
 
-def init_vault(home: Path | str, password: str | bytes) -> None:
-    """Create vault metadata for *home*.  Fails if user state already exists."""
+def _dir_is_scaffold(directory: Path) -> bool:
+    """A scaffold directory holds no user content: only known marker files
+    (`.last_prune` prune stamps) or nothing at all."""
+
+    for path in directory.rglob("*"):
+        if path.is_file() and path.name not in _SCAFFOLD_MARKER_FILES:
+            return False
+    return True
+
+
+def init_vault(
+    home: Path | str,
+    password: str | bytes,
+    *,
+    _allow_existing_state: bool = False,
+) -> None:
+    """Create vault metadata for *home*.
+
+    Refuses to overlay existing USER state unless ``_allow_existing_state`` is
+    set (used by the migration path, which converts that state in place).
+    """
 
     home_path = Path(home).expanduser().resolve()
     if vault_exists(home_path):
         raise VaultError(f"A vault already exists at {home_path}")
-    if home_path.exists() and _has_user_state(home_path):
+    if home_path.exists() and not _allow_existing_state and _has_user_state(home_path):
         names = ", ".join(sorted(item.name for item in home_path.iterdir())[:10])
         raise PlaintextStateError(
             "Refusing to initialize a vault over pre-existing state: " + names

@@ -40,6 +40,18 @@ from hermes_cli.archive_safe import (
     safe_extract_targz,
 )
 
+
+def _vault_maybe_connect(db_path, **kwargs):
+    """Fork: sqlite3.connect that routes vaulted-home databases to SQLCipher."""
+    try:
+        from hermes_security import sqlite as _hsql
+
+        return _hsql.maybe_connect(db_path, **kwargs)
+    except ImportError:
+        import sqlite3
+
+        return sqlite3.connect(str(db_path), **kwargs)
+
 ARCHIVE_FORMAT = "hermes-kanban-board"
 ARCHIVE_FORMAT_VERSION = 1
 
@@ -62,8 +74,8 @@ def _placeholders(items) -> str:
 def _snapshot_db(source: Path, target: Path) -> None:
     """Consistent copy of ``source`` via the online-backup API (a file copy
     would miss pages still in the ``-wal`` sidecar and could tear)."""
-    with contextlib.closing(sqlite3.connect(str(source))) as src, \
-            contextlib.closing(sqlite3.connect(str(target))) as dst:
+    with contextlib.closing(_vault_maybe_connect(str(source))) as src, \
+            contextlib.closing(_vault_maybe_connect(str(target))) as dst:
         src.backup(dst)
 
 
@@ -139,7 +151,7 @@ def export_board(
         _snapshot_db(db_path, staged / "kanban.db")
         # The snapshot is a private file with no other writers, so plain
         # commit/close is enough — no need for the board DB's WAL dance.
-        with contextlib.closing(sqlite3.connect(str(staged / "kanban.db"))) as snapshot:
+        with contextlib.closing(_vault_maybe_connect(str(staged / "kanban.db"))) as snapshot:
             _scrub_local_state(snapshot)
             snapshot.commit()
             counts = _count_rows(snapshot)

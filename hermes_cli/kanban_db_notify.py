@@ -239,7 +239,16 @@ def count_notify_subs(
     query = "SELECT COUNT(*) FROM kanban_notify_subs"
     if clauses:
         query += " WHERE " + " AND ".join(clauses)
-    conn = sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True)
+    # Fork: vaulted-home boards are SQLCipher.
+    try:
+        from hermes_security import sqlite as _hsql
+
+        if _hsql.is_vaulted(path):
+            conn = _hsql.connect(path.resolve().as_uri() + "?mode=ro", uri=True)
+        else:
+            conn = sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True)
+    except ImportError:
+        conn = sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True)
     try:
         try:
             row = conn.execute(query, params).fetchone()

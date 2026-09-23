@@ -1,4 +1,4 @@
-"""``hermes vault`` subcommand parser."""
+"""``hermes vault`` subcommand parser (browser autofill vault — upstream)."""
 
 from __future__ import annotations
 

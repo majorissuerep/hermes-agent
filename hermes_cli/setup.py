@@ -513,45 +513,14 @@ _SEND_CONSENT_EXPLAINER = (
 
 
 def setup_telemetry(config: dict):
-    """Configure the local shared-metrics subscriber and optional sending."""
-    print_header("Shared Metrics")
-    _info("Shared metrics contain only bounded counters and histograms.",
-          "Collection is local. Sending them to Nous is a separate opt-in.")
-    shared_metrics = _sub_dict(_sub_dict(config, "telemetry"), "shared_metrics")
-    current = shared_metrics.get("enabled") is True
-    shared_metrics["enabled"] = prompt_yes_no("Enable local shared metrics?", default=current)
-    if not shared_metrics["enabled"]:
-        print_info("Local shared metrics disabled.")
-        # Sending cannot outlive collection (send=true would log an error every run, never send).
-        if shared_metrics.get("send") is True:
-            shared_metrics["send"] = False
-            print_info("Sending shared metrics disabled as well.")
-        # Turning collection off withdraws send consent too. Recorded unconditionally: the send
-        # key may already be false while the consent window is still open, and it must close.
-        _record_send_consent_change(enabled=False)
-        return
-    print_success("Local shared metrics enabled.")
-    _info(*_SEND_CONSENT_EXPLAINER)
-    shared_metrics["send"] = prompt_yes_no("Send shared metrics to Nous?", default=shared_metrics.get("send") is True)
-    _record_send_consent_change(enabled=shared_metrics["send"])
-    if shared_metrics["send"]:
-        print_success("Sending shared metrics enabled.")
-    else:
-        print_info("Sending shared metrics disabled (collection stays local).")
+    """Fork: telemetry removed. This section no longer exists; kept as a no-op
+    shim so old call sites (tools_config) stay functional without prompting."""
+    return None
 
 
 def _record_send_consent_change(*, enabled: bool) -> None:
-    """Reconcile consent windows at the moment the user decides — same single writer as the relay
-    and the sender, so wizard, relay and mid-pass callers cannot disagree."""
-    try:
-        from hermes_cli.observability.shared_metrics import SharedMetricsStore
-        from hermes_cli.observability.shared_metrics_sender import reconcile_send_consent
-        from hermes_cli.sqlite_util import write_txn
-        with SharedMetricsStore()._connection() as connection, write_txn(connection):
-            reconcile_send_consent(connection, enabled)
-    except Exception:
-        # Never block the wizard on telemetry bookkeeping; the relay reconciles on the next hook.
-        logger.debug("Unable to record shared-metrics consent change", exc_info=True)
+    """Fork: telemetry removed — nothing to record."""
+    return None
 
 
 # Extracted sections, re-exported so callers and test patches keep resolving through
@@ -573,7 +542,6 @@ SETUP_SECTIONS = [
     ("terminal", "Terminal Backend", setup_terminal_backend),
     ("gateway", "Messaging Platforms (Gateway)", setup_gateway),
     ("tools", "Tools", setup_tools),
-    ("telemetry", "Shared Metrics", setup_telemetry),
     ("agent", "Agent Settings", setup_agent_settings),
 ]
 

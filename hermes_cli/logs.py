@@ -174,6 +174,20 @@ def _read_tail(path: Path, num_lines: int, *, has_filters: bool = False, **filte
 
 
 def _read_all_lines(path: Path) -> list:
+    # Fork: inside a vaulted home, logs/agent.log etc. are encrypted frame
+    # streams (the vault frame handler wrote every byte of them; vault init
+    # refuses pre-existing state, so there is no legacy plaintext log).
+    try:
+        from hermes_security import frames as _frames
+        from hermes_security.vault import find_vault_home
+
+        if find_vault_home(path) is not None and path.exists():
+            text = b"".join(_frames.read_frames(path, purpose="log")).decode(
+                "utf-8", errors="replace"
+            )
+            return [ln if ln.endswith("\n") else ln + "\n" for ln in text.splitlines(True)]
+    except Exception:
+        pass
     with open(path, "r", encoding="utf-8", errors="replace") as f:
         return f.readlines()
 

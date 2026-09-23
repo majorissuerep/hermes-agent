@@ -85,22 +85,25 @@ def _sqlcipher_module() -> Any:
     return sqlcipher
 
 
-def connect(db_path: Path | str, *, purpose: str = _PURPOSE, **kwargs: Any):
+def connect(db_path: Path | str, *, purpose: str = _PURPOSE, key_path: Path | str | None = None, **kwargs: Any):
     """Open (creating if needed) a SQLCipher database keyed by the vault.
 
     The key is bound to the database's path relative to its vault home, so
     one database's key cannot open another's file even under a different
-    profile.  The key is applied and verified with an immediate schema read
-    so a wrong key fails HERE, at connect time, not later on first use.
+    profile.  ``key_path`` overrides the path the key is derived from (the
+    migration staging file is keyed for its FINAL name).  The key is applied
+    and verified with an immediate schema read so a wrong key fails HERE, at
+    connect time, not later on first use.
     """
 
     target = _materialize(db_path)
     home = find_vault_home(target)
     vault = get_vault(home)
+    key_source = _materialize(key_path) if key_path is not None else target
     try:
-        rel = target.resolve(strict=False).relative_to(home).as_posix()
+        rel = key_source.resolve(strict=False).relative_to(home).as_posix()
     except ValueError:
-        rel = target.name  # outside a known home: still filename-bound
+        rel = key_source.name  # outside a known home: still filename-bound
     key = vault.derive_key(f"{purpose}:{rel}")
     hexkey = key.hex()
 

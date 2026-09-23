@@ -442,6 +442,18 @@ class MemoryStore:
             # STRICT on purpose: errors="replace" would hand read-modify-write callers a lossy view that a
             # subsequent save persists over the real bytes — the wipe class documented above. Undecodable
             # bytes must surface as read_ok=False.
+            # Fork: envelope-aware read inside a vaulted home (locked vault raises
+            # VaultLockedError, which is not caught here on purpose — memory must
+            # fail closed like every other state reader).
+            from hermes_security.io import _home_for
+
+            if _home_for(path) is not None:
+                from hermes_security.io import read_text as _seal_read
+
+                text = _seal_read(path, purpose="memory")
+                if text is None:
+                    return "", False
+                return text.lstrip("\ufeff"), True
             return path.read_text(encoding="utf-8-sig"), True
         except (OSError, UnicodeDecodeError):
             return "", False
@@ -460,7 +472,17 @@ class MemoryStore:
     @staticmethod
     def _write_file(path: Path, entries: List[str]):
         """Atomic temp-file + rename: readers never see a truncated file. Also used by
-        agent/learning_mutations.py."""
+        agent/learning_mutations.py. Fork: envelope write inside a vaulted home."""
+        try:
+            from hermes_security.io import _home_for
+
+            if _home_for(path) is not None:
+                from hermes_security.io import write_text as _seal_write
+
+                _seal_write(path, ENTRY_DELIMITER.join(entries), purpose="memory")
+                return
+        except ImportError:
+            pass
         try:
             atomic_write_text(path, ENTRY_DELIMITER.join(entries), tmp_prefix=".mem_")
         except OSError as e:

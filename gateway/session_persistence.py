@@ -290,8 +290,20 @@ class SessionPersistenceMixin:
         if not sessions_file.exists():
             return
         try:
-            with open(sessions_file, "r", encoding="utf-8") as f:
-                data = json.load(f)
+            # Fork: envelope-aware read inside a vaulted home.
+            _payload = None
+            _home_for = None
+            _seal_read = None
+            try:
+                from hermes_security.io import _home_for, read_json as _seal_read
+            except ImportError:
+                pass
+            if _seal_read is not None and _home_for is not None and _home_for(sessions_file) is not None:
+                _payload = _seal_read(sessions_file, purpose="sessions-index")
+            if _payload is None:
+                with open(sessions_file, "r", encoding="utf-8") as f:
+                    _payload = json.load(f)
+            data = _payload
             imported = 0
             for key, entry_data in data.items():
                 # "_"-prefixed keys are sentinels (e.g. "_README"), not entries.
@@ -472,8 +484,19 @@ class SessionPersistenceMixin:
                     del fast_persisted[key]
 
     def _save_sessions_json(self, data: Dict[str, Any]) -> None:
-        """Write the legacy sessions.json mirror of the routing index (atomic + fsync)."""
-        atomic_json_write(self.sessions_dir / "sessions.json", {"_README": _SESSIONS_JSON_README, **data}, mode=0o600)
+        """Write the legacy sessions.json mirror of the routing index (atomic + fsync).
+        Fork: envelope-aware inside a vaulted home."""
+        _target = self.sessions_dir / "sessions.json"
+        _home_for = None
+        _seal_write = None
+        try:
+            from hermes_security.io import _home_for, write_json as _seal_write
+        except ImportError:
+            pass
+        if _seal_write is not None and _home_for is not None and _home_for(_target) is not None:
+            _seal_write(_target, {"_README": _SESSIONS_JSON_README, **data}, purpose="sessions-index")
+            return
+        atomic_json_write(_target, {"_README": _SESSIONS_JSON_README, **data}, mode=0o600)
 
     def _save_entries(self) -> None:
         """Snapshot latest state under ``_lock`` and persist after releasing it."""

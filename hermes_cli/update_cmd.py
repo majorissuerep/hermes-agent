@@ -547,16 +547,12 @@ def _cmd_update_check(branch: str = "main", *, branch_explicit: bool = False):
     depth_args = ["--depth", "1"] if is_shallow else []
 
     # Probe locally for an 'upstream' remote before a network fetch non-forks always fail.
+    # Fork: updates ALWAYS come from origin (the fork). Never fetch upstream,
+    # even when a leftover 'upstream' remote exists in the local clone.
     fetch_result = None
-    if branch == "main" and _git_run(git_cmd, ["remote", "get-url", "upstream"]).returncode == 0:
-        print("→ Fetching from upstream...")
-        fetch_result = _git_run(git_cmd, ["fetch"] + depth_args + ["upstream", branch], network=True)
-    if fetch_result is not None and fetch_result.returncode == 0:
-        compare_branch = f"upstream/{branch}"
-    else:
-        print("→ Fetching from origin...")
-        fetch_result = _git_run(git_cmd, ["fetch"] + depth_args + ["origin", branch], network=True)
-        compare_branch = f"origin/{branch}"
+    print("→ Fetching from origin...")
+    fetch_result = _git_run(git_cmd, ["fetch"] + depth_args + ["origin", branch], network=True)
+    compare_branch = f"origin/{branch}"
 
     if fetch_result.returncode != 0:
         _print_fetch_failure(fetch_result.stderr)

@@ -14,6 +14,17 @@ import time
 from pathlib import Path
 from typing import Callable, Iterator
 
+def _vault_maybe_connect(db_path, **kwargs):
+    """Fork: sqlite3.connect that routes vaulted-home databases to SQLCipher."""
+    try:
+        from hermes_security import sqlite as _hsql
+
+        return _hsql.maybe_connect(db_path, **kwargs)
+    except ImportError:
+        import sqlite3
+
+        return sqlite3.connect(str(db_path), **kwargs)
+
 
 def open_db(
     path: Path | str,
@@ -42,7 +53,7 @@ def open_db(
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     # Resolved at call time: fd-leak tests patch ``sqlite3.connect`` through the caller's module.
-    conn = sqlite3.connect(path, timeout=busy_timeout_ms / 1000, check_same_thread=check_same_thread)
+    conn = _vault_maybe_connect(path, timeout=busy_timeout_ms / 1000, check_same_thread=check_same_thread)
     try:
         conn.row_factory = row_factory
         conn.execute(f"PRAGMA busy_timeout={int(busy_timeout_ms)}")

@@ -28,6 +28,17 @@ from utils import (
 
 from hermes_cli.sizefmt import format_bytes as _format_size
 
+def _vault_maybe_connect(db_path, **kwargs):
+    """Fork: sqlite3.connect that routes vaulted-home databases to SQLCipher."""
+    try:
+        from hermes_security import sqlite as _hsql
+
+        return _hsql.maybe_connect(db_path, **kwargs)
+    except ImportError:
+        import sqlite3
+
+        return sqlite3.connect(str(db_path), **kwargs)
+
 logger = logging.getLogger(__name__)
 
 # --- Exclusion rules ---
@@ -321,7 +332,7 @@ def _query_ro_sqlite(path: Path, fn):
     """Run ``fn(conn)`` on a read-only connection to *path*; return ``(value, None)`` or ``(None, exc)``."""
     conn = None
     try:
-        conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=1.0)
+        conn = _vault_maybe_connect(f"file:{path}?mode=ro", uri=True, timeout=1.0)
         return fn(conn), None
     except Exception as exc:
         return None, exc
@@ -336,7 +347,7 @@ def _safe_copy_db(src: Path, dst: Path, *, timeout_seconds: float = 10.0) -> boo
     """
     conn = backup_conn = None
     try:
-        # sqlite3.connect() creates a missing destination with the process
+        # _vault_maybe_connect() creates a missing destination with the process
         # umask, which is commonly 0022 (0644).  Snapshot databases contain
         # session and tool state, so create the inode owner-only before SQLite
         # writes its first byte.  O_NOFOLLOW also refuses a planted symlink on
@@ -353,8 +364,8 @@ def _safe_copy_db(src: Path, dst: Path, *, timeout_seconds: float = 10.0) -> boo
                 os.close(secure_fd)
         # timeout=0.0 disables sqlite3's implicit busy wait so the progress callback owns the
         # full locked-source deadline instead of adding the default timeout before each callback.
-        conn = sqlite3.connect(f"file:{src}?mode=ro", uri=True, timeout=0.0)
-        backup_conn = sqlite3.connect(str(dst))
+        conn = _vault_maybe_connect(f"file:{src}?mode=ro", uri=True, timeout=0.0)
+        backup_conn = _vault_maybe_connect(str(dst))
         busy_deadline = time.monotonic() + max(0.0, timeout_seconds)
 
         def _check_backup_progress(status: int, _remaining: int, _total: int) -> None:
@@ -518,11 +529,11 @@ def _safe_restore_db(src: Path, dst: Path) -> bool:
     (``False``) and the caller reports the file as skipped.
     """
     try:
-        dst_conn = sqlite3.connect(str(dst))
+        dst_conn = _vault_maybe_connect(str(dst))
         # Checkpoint first so the backup starts clean rather than writing on top of a deep WAL.
         with suppress(Exception):
             dst_conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-        with closing(sqlite3.connect(f"file:{src}?mode=ro", uri=True)) as src_conn:
+        with closing(_vault_maybe_connect(f"file:{src}?mode=ro", uri=True)) as src_conn:
             src_conn.backup(dst_conn)
         dst_conn.close()
         with suppress(Exception):
@@ -838,7 +849,7 @@ def _count_session_rows(path: Path) -> Optional[Tuple[int, int]]:
     if not path.is_file():
         return None
     try:
-        conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        conn = _vault_maybe_connect(f"file:{path}?mode=ro", uri=True)
     except sqlite3.Error:
         return None
     try:

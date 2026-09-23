@@ -48,6 +48,7 @@ class SQLiteRuntimeInfo:
 
 _PROBE_SCRIPT = """
 import json, sqlite3, sys
+
 conn = sqlite3.connect(":memory:")
 try:
     row = conn.execute("SELECT sqlite_source_id()").fetchone()

@@ -81,8 +81,23 @@ def load_newest_good_backup(config_path: Path) -> Optional[dict]:
         return None
     try:
         from utils import fast_safe_load
-        with newest[0].open(encoding="utf-8") as f:
-            data = fast_safe_load(f)
+        # Fork: the backup is a byte-copy of the config envelope — read it
+        # through the same envelope path (decrypts in a vaulted home).
+        _text = None
+        _home_for = None
+        _seal_read = None
+        try:
+            from hermes_security.io import _home_for, read_text as _seal_read
+        except ImportError:
+            pass
+        if _seal_read is not None and _home_for is not None and _home_for(newest[0]) is not None:
+            _text = _seal_read(newest[0], purpose="config")
+        if _text is not None:
+            import io as _io
+            data = fast_safe_load(_io.StringIO(_text))
+        else:
+            with newest[0].open(encoding="utf-8") as f:
+                data = fast_safe_load(f)
     except Exception as exc:
         logger.warning("Last-known-good backup %s is unreadable: %s", newest[0], exc)
         return None

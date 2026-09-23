@@ -396,6 +396,7 @@ from hermes_cli.subcommands.plugins import build_plugins_parser
 from hermes_cli.subcommands.mcp import build_mcp_parser
 from hermes_cli.subcommands.claw import build_claw_parser
 from hermes_cli.subcommands.vault import build_vault_parser
+from hermes_cli.subcommands.secure_vault import build_secure_vault_parser
 from hermes_cli.subcommands.moa import build_moa_parser
 from hermes_cli.subcommands.fallback import build_fallback_parser
 from hermes_cli.subcommands.worktree import build_worktree_parser
@@ -3139,6 +3140,11 @@ def _try_fast_serve_launch() -> bool:
     if unknown:
         return False
 
+    # Fork: fail-closed vault gate (serve touches state).
+    from hermes_cli.vault_cmd import gate_startup
+
+    gate_startup(args)
+
     cmd_dashboard(args)
     return True
 
@@ -3184,6 +3190,10 @@ def _try_fast_chat_launch() -> bool:
 
     if getattr(args, "yolo", False):
         os.environ["HERMES_YOLO_MODE"] = "1"
+    # Fork: fail-closed vault gate (chat touches state).
+    from hermes_cli.vault_cmd import gate_startup
+
+    gate_startup(args)
     _prepare_agent_startup(args)
 
     if getattr(args, "oneshot", None):
@@ -3446,6 +3456,7 @@ def _build_cli_parser():
     build_monitoring_parser(subparsers, cmd_monitoring=cmd_monitoring)
     build_claw_parser(subparsers, cmd_claw=cmd_claw)
     build_vault_parser(subparsers)
+    build_secure_vault_parser(subparsers)
     build_update_parser(subparsers, cmd_update=cmd_update)
     build_uninstall_parser(subparsers, cmd_uninstall=cmd_uninstall)
     build_acp_parser(subparsers, cmd_acp=cmd_acp)
@@ -3584,6 +3595,13 @@ def main():
     # _YOLO_MODE_FROZEN at import; set later (inside cmd_chat) it does nothing.
     if getattr(args, "yolo", False):
         os.environ["HERMES_YOLO_MODE"] = "1"
+
+    # Fork: fail-closed vault gate. State-touching commands need an unlocked
+    # master-password vault (prompt once on a TTY; HERMES_MASTER_PASSWORD for
+    # daemons). Runs before plugin discovery so no state reader runs locked.
+    from hermes_cli.vault_cmd import gate_startup
+
+    gate_startup(args)
 
     # Plugin discovery + shell hooks once, gated so introspection commands
     # (hooks list, cron list, gateway status, ...) pay no discovery cost and

@@ -847,21 +847,8 @@ def _reconcile_store_consent(store: SharedMetricsStore, send_enabled: bool) -> N
 
 
 def enabled() -> bool:
-    """Return the shared-metrics policy for the active Hermes profile."""
-    profile_key = relay_runtime.current_profile_key()
-    try:
-        config: Any = _raw_config()
-    except Exception:
-        logger.debug("Unable to read Hermes shared-metrics policy", exc_info=True)
-        config = None
-    for key in ("telemetry", "shared_metrics"):
-        config = config.get(key) if isinstance(config, dict) else None
-    if isinstance(config, dict) and config.get("enabled") is True:
-        return True
-    with _RUNTIME_LOCK:
-        runtime = _RUNTIMES.pop(profile_key, None)
-        if isinstance(runtime, _Runtime):
-            runtime.deactivate()
+    """Return the shared-metrics policy for the active Hermes profile.
+    Fork: telemetry removed — the relay is permanently disabled."""
     return False
 
 

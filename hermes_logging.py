@@ -409,15 +409,75 @@ class _ManagedRotatingFileHandler(RotatingFileHandler):
 
 def _new_file_handler(
     path: Path, *, level: int, max_bytes: int, backup_count: int, formatter
-) -> "_ManagedRotatingFileHandler":
-    """Create the ``logs/`` directory and a configured ``_ManagedRotatingFileHandler``."""
+) -> "_ManagedRotatingFileHandler | _VaultFrameHandler":
+    """Create the ``logs/`` directory and a configured file handler.
+    Fork: inside a vaulted home every log line is an encrypted frame."""
     mkdir_under_hermes_home(path.parent)
+    try:
+        from hermes_security import frames as _frames
+        from hermes_security.vault import find_vault_home
+
+        if find_vault_home(path) is not None:
+            handler = _VaultFrameHandler(
+                path, purpose="log", max_bytes=max_bytes, backup_count=backup_count
+            )
+            handler.setLevel(level)
+            return handler
+    except Exception:
+        pass
     handler = _ManagedRotatingFileHandler(
         str(path), maxBytes=max_bytes, backupCount=backup_count, encoding="utf-8"
     )
     handler.setLevel(level)
     handler.setFormatter(formatter)
     return handler
+
+
+class _VaultFrameHandler(logging.Handler):
+    """Log handler writing each record as an encrypted frame (size-rotated).
+
+    Each formatted line is sealed into its own AES-GCM frame; a truncated
+    crash tail is ignored on read.  Rotation keeps a single generation
+    (``<name>.1``).  ``hermes logs`` reads back through hermes_security.frames.
+    """
+
+    def __init__(self, path: Path, *, purpose: str, max_bytes: int, backup_count: int):
+        super().__init__()
+        from hermes_security import frames as _frames
+
+        self._frames = _frames
+        self.path = Path(path)
+        self.baseFilename = str(self.path)  # Router/rotator compatibility
+        self.maxBytes = max(64 * 1024, int(max_bytes or 0))
+        self.backupCount = max(1, int(backup_count or 1))
+        self._purpose = purpose
+        self._max_bytes = self.maxBytes
+        self._backup_count = self.backupCount
+        self._written = 0
+        try:
+            self._written = self.path.stat().st_size if self.path.exists() else 0
+        except OSError:
+            self._written = 0
+
+    def _rotate_if_needed(self, incoming: int) -> None:
+        if self._written + incoming <= self._max_bytes:
+            return
+        try:
+            self._frames.rotate(self.path)
+        except OSError:
+            pass
+        self._written = 0
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            message = self.format(record)
+            payload = (message + "\n").encode("utf-8", errors="replace")
+            # frame overhead estimate: length prefix + nonce + GCM tag
+            self._rotate_if_needed(len(payload) + 64)
+            self._frames.append(self.path, payload, purpose=self._purpose)
+            self._written += len(payload) + 64
+        except Exception:  # pragma: no cover - logging must never raise
+            self.handleError(record)
 
 
 class _ProfileRoutingFileHandler(logging.Handler):
@@ -427,8 +487,10 @@ class _ProfileRoutingFileHandler(logging.Handler):
     or dashboard event loop. Per-home handlers keep rotation, redaction and managed perms.
     """
 
-    def __init__(self, existing: RotatingFileHandler, profile_homes: Sequence[Path]) -> None:
-        """Take over *existing*'s path, level, rotation, formatter and filters."""
+    def __init__(self, existing, profile_homes: Sequence[Path]) -> None:
+        """Take over *existing*'s path, level, rotation, formatter and filters.
+        Fork: *existing* may be a _VaultFrameHandler (vaulted home) — it exposes
+        ``baseFilename``/``maxBytes``/``backupCount`` for exactly this takeover."""
         super().__init__(level=existing.level)
         resolved = Path(existing.baseFilename).resolve()
         self.baseFilename = str(resolved)

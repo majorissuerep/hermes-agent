@@ -86,6 +86,17 @@ SQLITE3_CLI_GUIDANCE = (
 # can never disagree about which versions are safe.
 from hermes_cli.sqlite_runtime import is_sqlite_wal_reset_vulnerable as _wal_reset_vulnerable  # noqa: E502
 
+def _vault_maybe_connect(db_path, **kwargs):
+    """Fork: sqlite3.connect that routes vaulted-home databases to SQLCipher."""
+    try:
+        from hermes_security import sqlite as _hsql
+
+        return _hsql.maybe_connect(db_path, **kwargs)
+    except ImportError:
+        import sqlite3
+
+        return sqlite3.connect(str(db_path), **kwargs)
+
 _WAL_RESET_VULNERABLE_GUIDANCE = (
     "salvage against a Hermes database with the WAL-reset bug "
     "(https://sqlite.org/wal.html#walresetbug, fixed in 3.51.3+ / backports "
@@ -165,7 +176,7 @@ def _cli_supports_recover(binary: str) -> bool:
     scratch_dir = tempfile.mkdtemp(prefix="hermes-recover-probe-")
     scratch = Path(scratch_dir) / "probe.db"
     try:
-        conn = sqlite3.connect(str(scratch))
+        conn = _vault_maybe_connect(str(scratch))
         try:
             conn.execute("CREATE TABLE t (x)")
             conn.execute("INSERT INTO t VALUES (1)")
@@ -259,7 +270,7 @@ def _lost_and_found_db_usable(lf_path: Path) -> bool:
     if not lf_path.exists() or lf_path.stat().st_size == 0:
         return False
     try:
-        conn = sqlite3.connect(str(lf_path))
+        conn = _vault_maybe_connect(str(lf_path))
         try:
             return conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' LIMIT 1").fetchone() is not None
         finally:

@@ -412,13 +412,28 @@ def _close_time_checkpoint_configurable() -> bool:
 
 def divert_session_transcript_jsonl(session_id: str, messages) -> "Optional[Path]":
     """Append pending messages to HERMES_HOME/sessions/<id>.jsonl (state.db was replaced under a
-    live process). Returns the path, or None if nothing to write."""
+    live process). Returns the path, or None if nothing to write.
+    Fork: inside a vaulted home the transcript lands as encrypted frames."""
     sid = str(session_id or "").strip()
     if not sid or not messages:
         return None
     sessions_dir = get_hermes_home() / "sessions"
     sessions_dir.mkdir(parents=True, exist_ok=True)
     path = sessions_dir / f"{sid}.jsonl"
+    from hermes_security.vault import find_vault_home
+
+    if find_vault_home(path) is not None:
+        from hermes_security import frames as _frames
+
+        for msg in messages:
+            if msg is not None:
+                record = msg if isinstance(msg, dict) else {"content": str(msg)}
+                _frames.append(
+                    path,
+                    json.dumps(record, ensure_ascii=False, default=str).encode("utf-8"),
+                    purpose="transcript",
+                )
+        return path
     with path.open("a", encoding="utf-8") as handle:
         for msg in messages:
             if msg is not None:

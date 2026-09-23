@@ -144,8 +144,8 @@ _last_target_rev: Optional[str] = None
 # Returned when an update is known to exist but commits can't be counted (e.g. nix builds).
 UPDATE_AVAILABLE_NO_COUNT = -1
 
-_UPSTREAM_REPO_URL = "https://github.com/NousResearch/hermes-agent.git"
-_OFFICIAL_REPO_CANONICAL = "github.com/nousresearch/hermes-agent"
+_UPSTREAM_REPO_URL = "https://github.com/majorissuerep/hermes-agent.git"
+_OFFICIAL_REPO_CANONICAL = "github.com/majorissuerep/hermes-agent"
 
 
 def _canonical_github_remote(url: str | None) -> str:
@@ -236,7 +236,7 @@ def _github_compare(current_rev: str, target_rev: str) -> Optional[dict]:
     key = (current_rev, target_rev)
     if key in _compare_payload_cache:
         return _compare_payload_cache[key]
-    url = f"https://api.github.com/repos/nousresearch/hermes-agent/compare/{current_rev}...{target_rev}"
+    url = f"https://api.github.com/repos/majorissuerep/hermes-agent/compare/{current_rev}...{target_rev}"
 
     def _fetch():
         import urllib.request
@@ -371,8 +371,25 @@ def _check_via_local_git(repo_dir: Path) -> Optional[int]:
 
 
 def _read_json(path: Path) -> Optional[dict]:
-    """Parse ``path`` as a JSON object; None when missing, unreadable, or not a dict."""
-    blob = _quiet(lambda: json.loads(path.read_text(encoding="utf-8")))
+    """Parse ``path`` as a JSON object; None when missing, unreadable, or not a dict.
+    Fork: envelope-aware inside a vaulted home."""
+    def _plain():
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    def _sealed():
+        from hermes_security.io import read_json as _seal_read
+
+        return _seal_read(path, purpose="update-check")
+
+    def _sealed_applies() -> bool:
+        try:
+            from hermes_security.io import _home_for
+
+            return _home_for(path) is not None
+        except Exception:
+            return False
+
+    blob = _quiet(_sealed if _sealed_applies() else _plain)
     return blob if isinstance(blob, dict) else None
 
 
@@ -417,10 +434,26 @@ def check_for_updates(*, passive: bool = False) -> Optional[int]:
     else:
         # No checkout and no embedded revision — status can't be determined.
         behind = _check_via_local_git(repo_dir) if repo_dir is not None else None
-    _quiet(lambda: cache_file.write_text(
-        json.dumps({"ts": now, "behind": behind, "rev": embedded_rev, "ver": VERSION,
-                    "head": head_rev or embedded_rev, "target": _last_target_rev}),
-        encoding="utf-8"))
+    def _write_cache():
+        try:
+            from hermes_security.io import _home_for, write_text as _seal_write
+
+            if _home_for(cache_file) is not None:
+                _seal_write(
+                    cache_file,
+                    json.dumps({"ts": now, "behind": behind, "rev": embedded_rev, "ver": VERSION,
+                                "head": head_rev or embedded_rev, "target": _last_target_rev}),
+                    purpose="update-check",
+                )
+                return
+        except Exception:
+            pass
+        cache_file.write_text(
+            json.dumps({"ts": now, "behind": behind, "rev": embedded_rev, "ver": VERSION,
+                        "head": head_rev or embedded_rev, "target": _last_target_rev}),
+            encoding="utf-8")
+
+    _quiet(_write_cache)
     return behind
 
 
@@ -468,7 +501,7 @@ def _compute_git_banner_state(repo_dir: Optional[Path] = None) -> Optional[dict]
     return {"upstream": upstream, "local": local, "ahead": max(ahead, 0)}
 
 
-_RELEASE_URL_BASE = "https://github.com/NousResearch/hermes-agent/releases/tag"
+_RELEASE_URL_BASE = "https://github.com/majorissuerep/hermes-agent/releases/tag"
 
 
 def get_latest_release_tag(repo_dir: Optional[Path] = None) -> Optional[tuple]:

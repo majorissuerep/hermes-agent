@@ -23,6 +23,17 @@ from pathlib import Path
 from typing import Any
 from typing import Optional
 
+def _vault_maybe_connect(db_path, **kwargs):
+    """Fork: sqlite3.connect that routes vaulted-home databases to SQLCipher."""
+    try:
+        from hermes_security import sqlite as _hsql
+
+        return _hsql.maybe_connect(db_path, **kwargs)
+    except ImportError:
+        import sqlite3
+
+        return sqlite3.connect(str(db_path), **kwargs)
+
 
 # ---------------------------------------------------------------------------
 # Connection helpers
@@ -57,15 +68,26 @@ def _resolve_busy_timeout_ms() -> int:
 def _sqlite_connect(path: Path) -> sqlite3.Connection:
     """Open a Kanban SQLite connection via ``connect_tracked``: while registered,
     byte-level probes of the file are refused because an ``open()``/``close()``
-    would cancel this process's POSIX advisory locks (see ``sqlite_safe_read``)."""
+    would cancel this process's POSIX advisory locks (see ``sqlite_safe_read``).
+    Fork: vaulted-home boards are SQLCipher — the connect shim applies the key
+    and the matching Connection/Row classes."""
     from hermes_cli.sqlite_safe_read import connect_tracked
 
     busy_timeout_ms = _resolve_busy_timeout_ms()
+    connect_fn = sqlite3.connect
+    connect_kwargs: dict = {"isolation_level": None, "timeout": busy_timeout_ms / 1000.0}
+    try:
+        from hermes_security import sqlite as _hsql
+
+        if _hsql.is_vaulted(path):
+            connect_fn = _hsql.connect
+            connect_kwargs["factory"] = _hsql.connection_class()
+    except Exception:
+        pass
     conn = connect_tracked(
         path,
-        connect_fn=sqlite3.connect,
-        isolation_level=None,
-        timeout=busy_timeout_ms / 1000.0,
+        connect_fn=connect_fn,
+        **connect_kwargs,
     )
     try:
         # Explicit PRAGMA (besides connect(timeout=)) so it is observable and
@@ -264,7 +286,7 @@ def _looks_like_tls_record_at(data: bytes, offset: int) -> bool:
 
 def _validate_sqlite_header(path: Path) -> None:
     """Fail early with an actionable error for non-SQLite Kanban DB files.
-    ``sqlite3.connect()`` creates missing and zero-byte files, so those pass;
+    ``_vault_maybe_connect()`` creates missing and zero-byte files, so those pass;
     non-empty files must carry the SQLite header, so a corrupt page 0 isn't
     collapsed into a generic PRAGMA error and the gateway's corrupt-board
     handling can identify the board by fingerprint."""
@@ -677,7 +699,7 @@ def connect(db_path: Optional[Path] = None, *, board: Optional[str] = None) -> s
     if kanban_path_is_fenced(path):
         # Reads must not enter schema/backfill write transactions. Never create a
         # missing board or migrate on a descendant's behalf; the owner initializes it.
-        conn = sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True)
+        conn = _vault_maybe_connect(path.resolve().as_uri() + "?mode=ro", uri=True)
         conn.row_factory = sqlite3.Row
         conn.text_factory = _kb._lossy_text
         if not _schema_is_present(conn):

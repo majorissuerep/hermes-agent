@@ -472,38 +472,9 @@ class SharedMetricsSender:
     # -- entry point -------------------------------------------------------
 
     def send_pending(self) -> SendOutcome:
-        """Run one bounded pass, one claim+send at a time, re-checking consent before each
-        send so revoking `send` mid-pass stops the remainder. Never raises."""
-        outcome = SendOutcome()
-        seen: set[str] = set()
-
-        for _ in range(MAX_PACKAGES_PER_PASS):
-            if not self._still_consented():
-                # Reconcile through the single consent writer so the window closes at its
-                # last confirmed moment.
-                logger.info("Shared-metrics sending disabled mid-pass; stopping")
-                self._reconcile(send_enabled=False)
-                break
-            try:
-                package = self._claim_next(self._now(), seen)
-            except Exception:
-                logger.warning("Unable to select shared-metrics packages", exc_info=True)
-                break
-            if package is None:
-                break
-
-            seen.add(package["package_id"])
-            if package.get("skip"):
-                # Unusable row already marked rejected during the claim.
-                result = "rejected"
-            else:
-                try:
-                    result = self._send_one(package)
-                except Exception:
-                    logger.warning("Unable to send shared-metrics package", exc_info=True)
-                    result = "deferred"
-            setattr(outcome, result, getattr(outcome, result) + 1)
-        return outcome
+        """Fork: telemetry removed. This fork never transmits shared metrics;
+        any queued packages stay local and unsent."""
+        return SendOutcome(sent=0, rejected=0, deferred=0)
 
     def _reconcile(self, *, send_enabled: bool) -> None:
         """Run the single consent writer from within a pass."""
