@@ -64,13 +64,25 @@ swap_source() {
 build_venv() {
     say "→ Building venv from the lock..."
     cd "$INSTALL_DIR"
+    # Python >=3.14 is rejected by requires-python; prefer explicit 3.13/3.11
+    # interpreters before a bare python3 that may be too new.
+    pick_python() {
+        for cand in python3.13 python3.12 python3.11 python3; do
+            command -v "$cand" >/dev/null || continue
+            if "$cand" -c "import sys; sys.exit(0 if sys.version_info < (3, 14) and sys.version_info >= (3, 11) else 1)" 2>/dev/null; then
+                echo "$cand"; return 0
+            fi
+        done
+        return 1
+    }
+    PYBIN=$(pick_python) || die "no python between 3.11 and 3.13 found"
     if command -v uv >/dev/null; then
-        uv venv .venv --python 3.11 >/dev/null 2>&1 || true
+        uv venv --python "$PYBIN" .venv >/dev/null 2>&1 || "$PYBIN" -m venv .venv
         uv pip install --python .venv/bin/python -e . >/dev/null 2>&1 \
             || uv sync --all-extras >/dev/null 2>&1 \
             || die "dependency install failed"
     else
-        python3 -m venv .venv 2>/dev/null || python3.11 -m venv .venv || die "no python3.11"
+        "$PYBIN" -m venv .venv || die "venv creation failed"
         .venv/bin/pip install --quiet --upgrade pip >/dev/null
         .venv/bin/pip install --quiet -e . >/dev/null 2>&1 || .venv/bin/pip install --quiet sqlcipher3-binary cryptography >/dev/null
     fi
