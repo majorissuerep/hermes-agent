@@ -22,10 +22,10 @@ docker_run() {  # run inside the container as the rehearsal user (login shell, n
 
 phase1_native() {
     echo "════ PHASE 1: native (upstream) hermes install + real state ════"
-    # Bundles mounted read-only from the host (docker cp of 1GB bundles
-    # corrupted them; a volume mount is atomic and copies nothing).
+    # Source trees mounted read-only from the host (github HTTP git is
+    # 429-rate-limited from this egress; GB-scale docker cp corrupted).
     docker run -d --name "$CTF" \
-        -v ~/hermes-rehearsal-bundles:/bundles:ro "$IMAGE" sleep infinity >/dev/null
+        -v ~/hermes-rehearsal-src:/bundles:ro "$IMAGE" sleep infinity >/dev/null
     docker exec "$CTF" bash -c '
         dnf -y install git python3.13 python3-pip sudo >/dev/null 2>&1
         useradd -m luoman 2>/dev/null || true
@@ -33,12 +33,10 @@ phase1_native() {
         install -d -o luoman -g luoman /home/luoman/hermes-rehearsal
         git --version && python3.13 --version
     '
-    # Native hermes: upstream tree shipped in as a git bundle (host github
-    # HTTP git is 429-rate-limited from this egress).
+    # Native hermes: upstream tree from the mounted read-only mirror.
     docker_run '
         set -e
-        cp /bundles/upstream.bundle '"$WORK"'/upstream.bundle && chmod u+w '"$WORK"'/upstream.bundle
-        git clone --quiet '"$WORK"'/upstream.bundle ~/.hermes/hermes-agent
+        git clone --quiet --depth 1 --no-local /bundles/upstream ~/.hermes/hermes-agent
         cd ~/.hermes/hermes-agent
         python3.13 -m venv .venv
         .venv/bin/pip install --quiet --upgrade pip >/dev/null
@@ -86,8 +84,7 @@ phase2_takeover() {
     # to the fork HTTPS remote afterwards.
     docker_run '
         set -e
-        cp /bundles/fork.bundle '"$WORK"'/fork.bundle && chmod u+w '"$WORK"'/fork.bundle
-        git clone --quiet '"$WORK"'/fork.bundle '"$WORK"'/fork-src
+        git clone --quiet --depth 1 --no-local /bundles/fork '"$WORK"'/fork-src
         git -C '"$WORK"'/fork-src remote remove origin 2>/dev/null || true
         FORK_SRC='"$WORK"'/fork-src bash '"$WORK"'/fork-src/scripts/takeover.sh
     '
