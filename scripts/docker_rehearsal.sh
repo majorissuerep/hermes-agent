@@ -32,7 +32,7 @@ phase1_native() {
     # Native hermes: upstream clone at the documented install location
     docker_run '
         set -e
-        git clone --quiet https://github.com/NousResearch/hermes-agent.git ~/.hermes/hermes-agent
+        git clone --quiet --depth 1 https://github.com/NousResearch/hermes-agent.git ~/.hermes/hermes-agent
         cd ~/.hermes/hermes-agent
         python3.13 -m venv .venv
         .venv/bin/pip install --quiet --upgrade pip >/dev/null
