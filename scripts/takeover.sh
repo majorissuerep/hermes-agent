@@ -64,9 +64,13 @@ swap_source() {
         mv "$INSTALL_DIR" "$INSTALL_DIR.pre-fork-$STAMP"
     fi
     say "→ Cloning fork into $INSTALL_DIR..."
-    git clone --quiet --branch vault "$FORK_SRC" "$INSTALL_DIR" 2>/dev/null \
-        || git clone --quiet --branch vault "$FORK_HTTPS" "$INSTALL_DIR" \
-        || die "clone failed (tried FORK_SRC then HTTPS)"
+    if ! git clone --quiet --branch vault "$FORK_SRC" "$INSTALL_DIR" 2>/tmp/hermes-takeover-clone.log; then
+        if ! git clone --quiet --branch vault "$FORK_HTTPS" "$INSTALL_DIR" 2>>/tmp/hermes-takeover-clone.log; then
+            echo "✗ clone failed (tried FORK_SRC then HTTPS) — root cause:" >&2
+            tail -5 /tmp/hermes-takeover-clone.log >&2
+            die "if rate-limited: clone manually and rerun with FORK_SRC=/path/to/clone"
+        fi
+    fi
     # Pin origin to the fork repo regardless of where the tree came from.
     git -C "$INSTALL_DIR" remote set-url origin "$FORK_HTTPS" 2>/dev/null || true
 }
@@ -93,14 +97,25 @@ build_venv() {
         [ -x .venv/bin/python ] || {
             PYBIN=$(pick_python) && "$PYBIN" -m venv .venv
         }
-        uv pip install --python .venv/bin/python -e . >/dev/null 2>&1 \
-            || uv sync --all-extras >/dev/null 2>&1 \
-            || die "dependency install failed"
+        # Lock-first: 'uv sync' is deterministic and never re-resolves.
+        # 'uv pip install -e .' (lockless) also hard-fails on any invalid
+        # PEP 440 version string in pyproject — keep it only as a fallback.
+        if ! uv sync --all-extras >/tmp/hermes-takeover-sync.log 2>&1; then
+            if ! uv pip install --python .venv/bin/python -e . >/tmp/hermes-takeover-install.log 2>&1; then
+                echo "✗ dependency install failed — root cause:" >&2
+                tail -5 /tmp/hermes-takeover-sync.log /tmp/hermes-takeover-install.log >&2
+                die "see above; logs kept in /tmp/hermes-takeover-*.log"
+            fi
+        fi
     else
         PYBIN=$(pick_python) || die "no python between 3.11 and 3.13 found"
         "$PYBIN" -m venv .venv || die "venv creation failed"
         .venv/bin/pip install --quiet --upgrade pip >/dev/null
-        .venv/bin/pip install --quiet -e . >/dev/null 2>&1 || .venv/bin/pip install --quiet sqlcipher3-binary cryptography >/dev/null
+        if ! .venv/bin/pip install --quiet -e . >/tmp/hermes-takeover-install.log 2>&1; then
+            echo "✗ pip install failed — root cause:" >&2
+            tail -8 /tmp/hermes-takeover-install.log >&2
+            die "see above"
+        fi
     fi
     [[ -x .venv/bin/python ]] || die "venv missing python"
 }
