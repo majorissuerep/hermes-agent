@@ -15,6 +15,7 @@ expands it) and can never be re-resolved through a profile's secret scope
 from __future__ import annotations
 
 import copy
+import io
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
@@ -77,8 +78,12 @@ def load_user_config_effective(config_path: Optional[Path] = None, *, fail_close
             _LAST_GOOD_USER_RAW.setdefault(path_key, copy.deepcopy(raw))
         elif user_sig is not None:
             try:
-                with open(config_path, encoding="utf-8") as f:
-                    loaded = fast_safe_load(f)
+                # Fork: envelope-aware read (decrypts in a vaulted home; raises
+                # WrongMasterPasswordError/VaultLockedError instead of decoding
+                # ciphertext as UTF-8). A plain open() here produced bogus
+                # "formatting error" spam and .corrupt backups of ciphertext.
+                text = _config._hermes_io().read_text(config_path, purpose="config")
+                loaded = fast_safe_load(io.StringIO(text)) if text is not None else {}
             except Exception as exc:
                 if fail_closed:
                     raise
