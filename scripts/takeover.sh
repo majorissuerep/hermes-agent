@@ -147,6 +147,15 @@ main() {
     swap_source
     build_venv
     install_launcher
+    # Secrets-management bootstrap (agentic workflow): the 1Password CLI is
+    # part of this project's install surface. Best-effort — a failed install
+    # never blocks the takeover; rerun scripts/install_op.sh manually.
+    if bash "$INSTALL_DIR/scripts/install_op.sh" --check >/dev/null 2>&1; then
+        say "→ 1Password CLI (op): already installed"
+    else
+        say "→ Installing 1Password CLI (op)…"
+        bash "$INSTALL_DIR/scripts/install_op.sh" || say "  ○ op install failed — run scripts/install_op.sh later"
+    fi
     migrate_state
     say ""
     say "✓ Fork installed at $INSTALL_DIR"
