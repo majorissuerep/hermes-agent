@@ -1,6 +1,7 @@
 """Shared utility functions for hermes-agent."""
 
 import errno
+import io
 import json
 import logging
 import os
@@ -445,7 +446,11 @@ def _roundtrip_load(path: Path):
     # PyYAML (every reader in the tree) tolerates duplicate keys (last wins); refusing them here
     # would turn a file the CLI can read into one it cannot write.
     yaml_rt.allow_duplicate_keys = True
-    data = yaml_rt.load(path.read_text(encoding="utf-8")) if path.exists() else None
+    # Fork: config.yaml may be an encrypted envelope on disk.
+    from hermes_security.io import read_text as _seal_read
+
+    raw_text = _seal_read(path, purpose="config")
+    data = yaml_rt.load(raw_text) if raw_text is not None else None
     return yaml_rt, data if isinstance(data, CommentedMap) else CommentedMap(data or {})
 
 
@@ -455,7 +460,15 @@ def _roundtrip_dump(path: Path, yaml_rt, config, *, extra_content: "str | None" 
         if extra_content:
             f.write(extra_content)
 
-    _atomic_write(path, _write, prefix=f".{path.stem}_", mode=_preserve_file_mode(path))
+    # Fork: writes inside a vaulted home land as encrypted envelopes.
+    from hermes_security.io import _home_for, write_text as _seal_write
+
+    if _home_for(path) is not None:
+        buf = io.StringIO()
+        _write(buf)
+        _seal_write(path, buf.getvalue(), purpose="config")
+    else:
+        _atomic_write(path, _write, prefix=f".{path.stem}_", mode=_preserve_file_mode(path))
 
 
 def atomic_roundtrip_yaml_update(path: Union[str, Path], key_path: str, value: Any) -> None:
@@ -548,7 +561,16 @@ def atomic_roundtrip_yaml_save(path: Union[str, Path], new_state: dict, *,
 
     mkdir_under_hermes_home(path.parent)
     require_readable_config_before_write(path)
-    creating = not path.exists() or not path.read_text(encoding="utf-8").strip()
+    # Fork: envelope-aware "is this file new/empty" check (plaintext read of an
+    # envelope would always look non-empty of binary junk; a plaintext file in
+    # a vaulted home must surface as the read-time failure, not silently merge).
+    from hermes_security.io import _home_for, read_text as _seal_read
+
+    if _home_for(path) is not None:
+        existing_text = _seal_read(path, purpose="config")
+        creating = existing_text is None or not existing_text.strip()
+    else:
+        creating = not path.exists() or not path.read_text(encoding="utf-8").strip()
     yaml_rt, existing = _roundtrip_load(path)
 
     def _unchanged(current: Any, value: Any) -> bool:

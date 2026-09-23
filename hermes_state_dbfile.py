@@ -577,14 +577,32 @@ def _connect_tracked_db(path, tracking_path=None, **kwargs):
     EXCLUSIVE).  The ONLY tolerated fallback is the helper being absent (scaffold/embed installs
     without hermes_cli); a real connection failure must propagate — a silent untracked retry
     would disable the guard for that connection."""
+    # Fork: databases inside a vaulted home are SQLCipher — the vault-derived
+    # key is applied and verified here, before any tracking registration.
+    try:
+        from hermes_security import sqlite as hermes_secure_sqlite
+    except ImportError:
+        hermes_secure_sqlite = None
     try:
         from hermes_cli.sqlite_safe_read import connect_tracked
     except ImportError:
         logger.debug("hermes_cli.sqlite_safe_read unavailable; opening %s untracked "
                      "(byte-probe guard inactive in this install)", path)
+        if hermes_secure_sqlite is not None and hermes_secure_sqlite.is_vaulted(path):
+            return hermes_secure_sqlite.connect(path, **kwargs)
         return sqlite3.connect(str(path), **kwargs)
-    # Open through THIS module's sqlite3.connect so tests patching hermes_state.sqlite3.connect keep control.
-    return connect_tracked(path, tracking_path=tracking_path, connect_fn=sqlite3.connect, **kwargs)
+    # Open through THIS module's connect shim so tests patching hermes_state.sqlite3.connect keep control.
+    if hermes_secure_sqlite is not None and hermes_secure_sqlite.is_vaulted(path):
+        # The tracking factory must wrap SQLCIPHER's Connection, not stdlib
+        # sqlite3.Connection: a stdlib-derived connection silently ignores
+        # ``PRAGMA key`` and lands on disk as plaintext SQLite.
+        kwargs.setdefault("factory", hermes_secure_sqlite.connection_class())
+
+        def connect_fn(p, **kw):
+            return hermes_secure_sqlite.connect(p, **kw)
+    else:
+        connect_fn = sqlite3.connect
+    return connect_tracked(path, tracking_path=tracking_path, connect_fn=connect_fn, **kwargs)
 
 
 def _preopen_header(path: Path, probe_bytes: int, force: bool) -> Optional[bytes]:
@@ -618,9 +636,21 @@ def is_zeroed_state_db(path: Path, *, probe_bytes: int = 100, force: bool = Fals
 
 def has_invalid_sqlite_header_preopen(path: Path, *, probe_bytes: int = 100, force: bool = False) -> bool:
     """A pre-existing state.db whose first page is not SQLite: 0-byte, NUL, or clobbered page 0
-    (#102198).  Zeroed files are the subset :func:`is_zeroed_state_db` names."""
+    (#102198).  Zeroed files are the subset :func:`is_zeroed_state_db` names.
+    Fork: a SQLCipher database (vaulted home) legitimately has a random-looking
+    header — only a PLAINTEXT-expected file with a non-SQLite header is invalid."""
     head = _preopen_header(path, probe_bytes, force)
-    return head is not None and not head.startswith(b"SQLite format 3")
+    if head is None or head.startswith(b"SQLite format 3"):
+        return False
+    # Vaulted databases are SQLCipher: their header is ciphertext.
+    try:
+        from hermes_security import sqlite as _hsql
+
+        if _hsql.is_vaulted(path):
+            return False
+    except Exception:
+        pass
+    return True
 
 
 @contextlib.contextmanager

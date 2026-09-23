@@ -660,36 +660,49 @@ def _empty_auth_store() -> Dict[str, Any]:
 
 def _load_auth_store(auth_file: Optional[Path] = None) -> Dict[str, Any]:
     auth_file = auth_file or _auth_file_path()
-    if not auth_file.exists():
-        return _empty_auth_store()
+    # Fork: auth.json inside a vaulted home is an encrypted envelope.
+    _home_for = None
+    _seal_read = None
     try:
-        raw = json.loads(auth_file.read_text(encoding="utf-8-sig"))
-    except OSError:
-        # Exists but unreadable (EMFILE, EACCES, EIO, stalled mount): contents are not bad, and this
-        # module read-modify-writes everywhere, so an empty store here is one _save_auth_store()
-        # away from erasing every credential. Fail loudly.
-        logger.warning(
-            "auth: could not read %s, leaving the store on disk untouched "
-            "rather than degrading to an empty one",
-            auth_file, exc_info=True)
-        raise
-    except Exception as exc:
-        # Genuine corruption: unparseable JSON or non-UTF-8 bytes. Preserve a copy, but never
-        # advertise a backup that was not written.
-        corrupt_path = auth_file.with_suffix(".json.corrupt")
+        from hermes_security.io import _home_for, read_json as _seal_read
+    except ImportError:
+        pass
+    if _seal_read is not None and _home_for is not None and _home_for(auth_file) is not None:
+        payload = _seal_read(auth_file, purpose="auth")
+        if payload is None:
+            return _empty_auth_store()
+        raw = payload
+    else:
+        if not auth_file.exists():
+            return _empty_auth_store()
         try:
-            shutil.copy2(auth_file, corrupt_path)
-            preserved = True
-        except Exception:
-            preserved = False
-            logger.debug("auth: could not preserve a copy of the corrupt store at %s", corrupt_path,
-                         exc_info=True)
-        logger.warning(
-            "auth: failed to parse %s (%s), starting with empty store. %s %s",
-            auth_file, exc,
-            "Corrupt file preserved at" if preserved else "A copy could NOT be preserved at",
-            corrupt_path)
-        return _empty_auth_store()
+            raw = json.loads(auth_file.read_text(encoding="utf-8-sig"))
+        except OSError:
+            # Exists but unreadable (EMFILE, EACCES, EIO, stalled mount): contents are not bad, and this
+            # module read-modify-writes everywhere, so an empty store here is one _save_auth_store()
+            # away from erasing every credential. Fail loudly.
+            logger.warning(
+                "auth: could not read %s, leaving the store on disk untouched "
+                "rather than degrading to an empty one",
+                auth_file, exc_info=True)
+            raise
+        except Exception as exc:
+            # Genuine corruption: unparseable JSON or non-UTF-8 bytes. Preserve a copy, but never
+            # advertise a backup that was not written.
+            corrupt_path = auth_file.with_suffix(".json.corrupt")
+            try:
+                shutil.copy2(auth_file, corrupt_path)
+                preserved = True
+            except Exception:
+                preserved = False
+                logger.debug("auth: could not preserve a copy of the corrupt store at %s", corrupt_path,
+                             exc_info=True)
+            logger.warning(
+                "auth: failed to parse %s (%s), starting with empty store. %s %s",
+                auth_file, exc,
+                "Corrupt file preserved at" if preserved else "A copy could NOT be preserved at",
+                corrupt_path)
+            return _empty_auth_store()
 
     if isinstance(raw, dict) and (
         isinstance(raw.get("providers"), dict) or isinstance(raw.get("credential_pool"), dict)):
@@ -708,10 +721,21 @@ def _load_auth_store(auth_file: Optional[Path] = None) -> Dict[str, Any]:
 
 def _save_private_json(target: Path, data: Any, *, fsync_dir: bool = False, **dump_kwargs: Any) -> None:
     """0600 credential JSON under a 0700 parent (``secure_parent_dir`` refuses ``/``, top-level dirs
-    and the install tree). ``atomic_json_write`` creates the temp file 0600 before any byte lands."""
+    and the install tree). ``atomic_json_write`` creates the temp file 0600 before any byte lands.
+    Fork: inside a vaulted home the JSON lands as an encrypted envelope instead."""
     from hermes_constants import mkdir_under_hermes_home
     mkdir_under_hermes_home(target.parent)
     secure_parent_dir(target)
+    # Fork: envelope write when vaulted.
+    _home_for = None
+    _seal_write = None
+    try:
+        from hermes_security.io import _home_for, write_json as _seal_write
+    except ImportError:
+        pass
+    if _seal_write is not None and _home_for is not None and _home_for(target) is not None:
+        _seal_write(target, data, purpose="auth")
+        return
     atomic_json_write(target, data, mode=0o600, fsync_dir=fsync_dir, **dump_kwargs)
 
 

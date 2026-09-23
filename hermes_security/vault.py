@@ -224,13 +224,26 @@ def vault_exists(home: Path | str) -> bool:
     return vault_meta_path(home).exists()
 
 
+# Entries that are CODE, not user state: the git checkout of the app itself,
+# its virtualenvs, and the uv tool cache that live inside the home on git
+# installs. They contain no user content (bytes are public), so they neither
+# block vault init nor get encrypted. Everything else IS user state.
+_CODE_ENTRIES = frozenset(
+    {"hermes-agent", "uv", "venv", ".venv"}
+)
+
+
+def _has_user_state(directory: Path) -> bool:
+    return any(item.name not in _CODE_ENTRIES for item in directory.iterdir())
+
+
 def init_vault(home: Path | str, password: str | bytes) -> None:
-    """Create vault metadata for *home*.  Fails if state already exists."""
+    """Create vault metadata for *home*.  Fails if user state already exists."""
 
     home_path = Path(home).expanduser().resolve()
     if vault_exists(home_path):
         raise VaultError(f"A vault already exists at {home_path}")
-    if home_path.exists() and any(home_path.iterdir()):
+    if home_path.exists() and _has_user_state(home_path):
         names = ", ".join(sorted(item.name for item in home_path.iterdir())[:10])
         raise PlaintextStateError(
             "Refusing to initialize a vault over pre-existing state: " + names

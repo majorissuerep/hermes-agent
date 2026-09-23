@@ -289,25 +289,43 @@ def load_env_file(env_path: Path) -> Dict[str, str]:
     external secrets over it).
     """
     key = str(env_path)
+    # Fork: envelope-aware read — decrypts when the .env lives in a vaulted
+    # home; a plaintext .env there is a hard PlaintextStateError.
+    _seal_read = None
     try:
-        with open(env_path, "rb") as handle:
-            fingerprint = file_signature(os.fstat(handle.fileno()))
-            with _ENV_FILE_CACHE_LOCK:
-                cached = _ENV_FILE_CACHE.get(key)
-                if cached is not None and cached[0] == fingerprint:
-                    _ENV_FILE_CACHE.move_to_end(key)
-                    return dict(cached[1])
-            raw = handle.read()
-            # Same descriptor: a rewrite that landed between the fstat and the read is parsed but not
-            # stored under the pre-write fingerprint.
-            settled = file_signature(os.fstat(handle.fileno())) == fingerprint
-    except OSError:
-        # Gone or unreadable: drop any entry so a stale map cannot outlive the file.
-        invalidate_env_file_cache(env_path)
-        return {}
+        from hermes_security.io import _home_for, read_text as _seal_read
+
+        vaulted = _home_for(env_path) is not None
+    except Exception:
+        vaulted = False
+    if vaulted and _seal_read is not None:
+        text = _seal_read(env_path, purpose="env")
+        raw = (text or "").encode("utf-8")
+        settled = True
+        fingerprint = None
+    else:
+        text = None
+        raw = b""
+        fingerprint = None
+        try:
+            with open(env_path, "rb") as handle:
+                fingerprint = file_signature(os.fstat(handle.fileno()))
+                with _ENV_FILE_CACHE_LOCK:
+                    cached = _ENV_FILE_CACHE.get(key)
+                    if cached is not None and cached[0] == fingerprint:
+                        _ENV_FILE_CACHE.move_to_end(key)
+                        return dict(cached[1])
+                raw = handle.read()
+                # Same descriptor: a rewrite that landed between the fstat and the read is parsed but not
+                # stored under the pre-write fingerprint.
+                settled = file_signature(os.fstat(handle.fileno())) == fingerprint
+        except OSError:
+            # Gone or unreadable: drop any entry so a stale map cannot outlive the file.
+            invalidate_env_file_cache(env_path)
+            return {}
 
     secrets = _parse_env_text(_decode_env_bytes(raw))
-    if settled:
+    if settled and fingerprint is not None:
         with _ENV_FILE_CACHE_LOCK:
             _ENV_FILE_CACHE[key] = (fingerprint, dict(secrets))
             _ENV_FILE_CACHE.move_to_end(key)

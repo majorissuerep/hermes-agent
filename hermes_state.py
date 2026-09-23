@@ -440,6 +440,24 @@ def _foreign_state_db_holders(db_path: Path) -> List[Tuple[int, str]]:
 # one-shots, recovery flows, and read-only cross-profile opens use SessionDB() directly with their own close().
 
 
+def _vaulted_row_factory(db_path) -> "sqlite3.Row":
+    """Fork: the Row class matching the connection type for *db_path*.
+
+    SQLCipher connections must use SQLCipher's Row: stdlib ``sqlite3.Row``
+    rejects sqlcipher cursors, and plain tuples break every ``row["col"]``
+    reader in the state layer.
+    """
+
+    try:
+        from hermes_security import sqlite as _hsql
+
+        if _hsql.is_vaulted(db_path):
+            return _hsql.row_class()
+    except Exception:
+        pass
+    return sqlite3.Row
+
+
 class SessionDB(
     SessionSessionsMixin, SessionFtsSetupMixin, SessionSearchMixin, SessionSchemaMixin,
     SessionPortabilityMixin, SessionTelegramTopicsMixin, SessionCompressionMixin,
@@ -715,7 +733,9 @@ class SessionDB(
             read_only_db_uri(self.db_path), tracking_path=self.db_path, uri=True,
             check_same_thread=False, timeout=timeout, isolation_level=None,
         )
-        conn.row_factory = sqlite3.Row
+        # Fork: SQLCipher connections need SQLCipher's Row (stdlib Row rejects
+        # sqlcipher cursors).
+        conn.row_factory = _vaulted_row_factory(self.db_path)
         return conn
 
     def _handle_quarantine_if_invalid(self, already_locked: bool = False) -> None:
@@ -748,7 +768,9 @@ class SessionDB(
             str(self.db_path), check_same_thread=False, timeout=1.0, isolation_level=None,
         )
         try:
-            conn.row_factory = sqlite3.Row
+            # Fork: a SQLCipher connection needs SQLCipher's Row; stdlib Row
+            # rejects sqlcipher cursors (TypeError on first fetchone()).
+            conn.row_factory = _vaulted_row_factory(self.db_path)
             mode = apply_wal_with_fallback(conn, db_label="state.db")
             # "wal" is also the *assumed* mode when the on-disk probe was blocked by a concurrent opener
             # (#86515): the lock-free mode=ro read pool needs a confirmed WAL header, so confirm it here.

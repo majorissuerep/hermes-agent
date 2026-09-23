@@ -11,6 +11,7 @@ drop_stale_root_modules()
 
 import copy
 import difflib
+import io
 import json
 import logging
 import os
@@ -501,6 +502,14 @@ def get_config_path() -> Path:
     return get_hermes_home() / "config.yaml"
 
 
+def _hermes_io():
+    """Fork: envelope-aware config/config-adjacent file I/O (decrypted reads)."""
+
+    from hermes_security import io as _io
+
+    return _io
+
+
 def require_parseable_user_config(*, ignore_user_config: bool = False) -> None:
     """Reject an existing invalid config before a non-interactive agent run.
     Interactive surfaces keep ``load_config()``'s recovery behavior so the operator can repair
@@ -512,10 +521,10 @@ def require_parseable_user_config(*, ignore_user_config: bool = False) -> None:
 
     config_path = get_config_path()
     try:
-        with open(config_path, encoding="utf-8") as f:
-            data = fast_safe_load(f)
-    except FileNotFoundError:
-        return
+        text = _hermes_io().read_text(config_path, purpose="config")
+        if text is None:
+            return
+        data = fast_safe_load(io.StringIO(text))
     except Exception as exc:
         parse_error = exc
     else:
@@ -1004,8 +1013,8 @@ def check_config_version(*, raise_on_parse_error: bool = False) -> Tuple[int, in
         return latest, latest
 
     try:
-        with open(config_path, encoding="utf-8") as f:
-            config = fast_safe_load(f)
+        text = _hermes_io().read_text(config_path, purpose="config")
+        config = fast_safe_load(io.StringIO(text)) if text is not None else {}
     except Exception as e:
         _warn_config_parse_failure(config_path, e)
         if raise_on_parse_error:
@@ -2000,8 +2009,8 @@ def _read_raw_config_impl(*, want_deepcopy: bool) -> Dict[str, Any]:
             return copy.deepcopy(hit) if want_deepcopy else hit
 
         try:
-            with open(config_path, encoding="utf-8") as f:
-                data = fast_safe_load(f) or {}
+            text = _hermes_io().read_text(config_path, purpose="config")
+            data = fast_safe_load(io.StringIO(text)) if text is not None else {}
         except Exception as e:
             _warn_config_parse_failure(config_path, e)
             return {}
@@ -2028,8 +2037,8 @@ def read_user_config_raw(config_path: Optional[Path] = None) -> Dict[str, Any]:
     if config_path is None:
         config_path = get_config_path()
     try:
-        with open(config_path, encoding="utf-8") as f:
-            data = fast_safe_load(f) or {}
+        raw_text = _hermes_io().read_text(config_path, purpose="config")
+        data = fast_safe_load(io.StringIO(raw_text)) if raw_text is not None else {}
     except FileNotFoundError:
         return {}
     return data if isinstance(data, dict) else {}
@@ -2078,8 +2087,8 @@ def require_readable_config_before_write(config_path: Optional[Path] = None) -> 
         raise _refuse_overwrite(config_path, "cannot be accessed", exc, _FIX_PERMS) from exc
 
     try:
-        with open(config_path, encoding="utf-8") as f:
-            loaded = fast_safe_load(f)
+        loaded = _hermes_io().read_text(config_path, purpose="config")
+        loaded = fast_safe_load(io.StringIO(loaded)) if loaded is not None else {}
     except OSError as exc:
         raise _refuse_overwrite(config_path, "cannot be read", exc, _FIX_PERMS) from exc
     except Exception as exc:
@@ -2356,8 +2365,8 @@ def _load_config_impl(*, want_deepcopy: bool) -> Dict[str, Any]:
 
         if user_sig is not None:
             try:
-                with open(config_path, encoding="utf-8") as f:
-                    user_config = fast_safe_load(f) or {}
+                user_text = _hermes_io().read_text(config_path, purpose="config")
+                user_config = fast_safe_load(io.StringIO(user_text)) if user_text is not None else {}
 
                 if "max_turns" in user_config:
                     agent_user_config = dict(user_config.get("agent") or {})
@@ -2560,9 +2569,14 @@ def sanitize_env_file() -> int:
 
 def _read_env_lines(env_path: Path) -> list:
     """Read ``.env`` lines, normalized. Explicit UTF-8 (Windows defaults to cp1252) with BOM
-    tolerance (Notepad adds one)."""
-    with open(env_path, encoding="utf-8-sig", errors="replace") as f:
-        return _sanitize_env_lines(f.readlines())
+    tolerance (Notepad adds one). Fork: envelope-aware (decrypts when vaulted)."""
+    _io = _hermes_io()
+    text = _io.read_text(env_path, purpose="env")
+    if text is None:
+        return []
+    import io as _io_mod
+
+    return _sanitize_env_lines(_io_mod.StringIO(text).readlines())
 
 
 def _write_env_lines(env_path: Path, lines: list, *, preserve_mode: bool) -> None:
@@ -2574,19 +2588,25 @@ def _write_env_lines(env_path: Path, lines: list, *, preserve_mode: bool) -> Non
         original_mode = stat.S_IMODE(env_path.stat().st_mode) if preserve_mode else None
     except OSError:
         pass
-    fd, tmp_path = tempfile.mkstemp(dir=str(env_path.parent), suffix=".tmp", prefix=".env_")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.writelines(lines)
-            f.flush()
-            os.fsync(f.fileno())
-        atomic_replace(tmp_path, env_path)
-    except BaseException:
+    # Fork: .env inside a vaulted home is written as an encrypted envelope.
+    from hermes_security.io import _home_for, write_text as _seal_write
+
+    if _home_for(env_path) is not None:
+        _seal_write(env_path, "".join(lines), purpose="env")
+    else:
+        fd, tmp_path = tempfile.mkstemp(dir=str(env_path.parent), suffix=".tmp", prefix=".env_")
         try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
-        raise
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.writelines(lines)
+                f.flush()
+                os.fsync(f.fileno())
+            atomic_replace(tmp_path, env_path)
+        except BaseException:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
     if original_mode is not None:
         try:
             os.chmod(env_path, original_mode)
