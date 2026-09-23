@@ -289,16 +289,17 @@ def load_env_file(env_path: Path) -> Dict[str, str]:
     external secrets over it).
     """
     key = str(env_path)
-    # Fork: envelope-aware read — decrypts when the .env lives in a vaulted
-    # home; a plaintext .env there is a hard PlaintextStateError.
-    _seal_read = None
-    try:
-        from hermes_security.io import _home_for, read_text as _seal_read
+    # Fork: envelope-aware read. The vault probe is a pure metadata check
+    # (walk-up for .hermes-vault) so the crypto stack loads ONLY inside a
+    # vaulted home — cryptography must stay out of update dispatch.
+    _META = ".hermes-vault"
+    vaulted = any(
+        (parent / _META).is_file()
+        for parent in Path(env_path).expanduser().resolve(strict=False).parents
+    )
+    if vaulted:
+        from hermes_security.io import read_text as _seal_read
 
-        vaulted = _home_for(env_path) is not None
-    except Exception:
-        vaulted = False
-    if vaulted and _seal_read is not None:
         text = _seal_read(env_path, purpose="env")
         raw = (text or "").encode("utf-8")
         settled = True

@@ -4,11 +4,14 @@ Every read/write chokepoint routes through here.  Rules:
 
 - A file inside a home with vault metadata is an envelope on disk; reads
   decrypt, writes encrypt.  Plaintext never touches the disk.
-- No vault metadata in any ancestor AND the file is inside the active
-  Hermes home: writing is refused (fail-closed) — run ``hermes vault init``.
-  Reading a missing file returns None / {} as before.
+- No vault anywhere: reads pass through (pre-vault flows must keep working);
+  writes inside the active Hermes home are REFUSED (fail-closed) — the write
+  path is the enforcement point.
 - Reading a vaulted file that is NOT an envelope is a PlaintextStateError
   (someone dropped a plaintext file into a vaulted home).
+
+Import discipline: the vault probe is metadata-only (no crypto imports) so
+this module is safe to import in crypto-free processes (update dispatch).
 
 Text helpers mirror Path.read_text/write_text; bytes helpers are the
 primitives.  Purpose labels are fixed per logical file kind so ciphertext
@@ -21,21 +24,26 @@ import json
 from pathlib import Path
 from typing import Any, Optional
 
-from hermes_security.errors import PlaintextStateError, VaultIntegrityError
-from hermes_security.vault import (
-    _META_FILENAME,
-    find_vault_home,
-    get_vault,
-    vault_exists,
-)
+from hermes_security.errors import PlaintextStateError
 
+_META_FILENAME = ".hermes-vault"
 _MAGIC = b"HRMVAULT\x00"
 
 
+def _vault():
+    """Deferred import: hermes_security.vault pulls the crypto stack."""
+
+    from hermes_security import vault
+
+    return vault
+
+
 def _home_for(path: Path | str) -> Optional[Path]:
-    """Nearest vaulted ancestor of *path*, else None."""
+    """Nearest vaulted ancestor of *path*, else None. Metadata-only check."""
 
     candidate = Path(path).expanduser().resolve(strict=False)
+    if candidate.is_file() or candidate.suffix:
+        candidate = candidate.parent
     for directory in (candidate, *candidate.parents):
         if (directory / _META_FILENAME).is_file():
             return directory
@@ -62,11 +70,12 @@ def read_bytes(path: Path | str, *, purpose: str) -> Optional[bytes]:
                 f"{target} is plaintext inside a vaulted home ({home}); "
                 "refusing to read unprotected state"
             )
-        vault = get_vault(home)
-        return vault.decrypt(raw, purpose=purpose, relpath=_rel(target, home))
+        return _vault().get_vault(home).decrypt(
+            raw, purpose=purpose, relpath=_rel(target, home)
+        )
     # No vault anywhere: plaintext reads pass through (the write path is the
-    # enforcement point — it refuses NEW plaintext inside the active home;
-    # reading existing plaintext never crashes a pre-vault or vault-less flow).
+    # enforcement point; reading existing plaintext never crashes a pre-vault
+    # or vault-less flow).
     return raw
 
 
@@ -74,7 +83,7 @@ def write_bytes(path: Path | str, data: bytes, *, purpose: str) -> Path:
     """Envelope-aware write: encrypts when inside a vaulted home.
 
     Refuses to write plaintext when the target is inside the active Hermes
-    home but no vault exists there (fresh install: run ``hermes vault init``).
+    home but no vault exists there (run ``hermes secure-vault migrate``).
     """
 
     target = Path(path).expanduser()
@@ -84,17 +93,16 @@ def write_bytes(path: Path | str, data: bytes, *, purpose: str) -> Path:
 
         active = Path(get_hermes_home()).expanduser().resolve(strict=False)
         resolved = target.resolve(strict=False)
-        if resolved == active or active in resolved.parents or resolved in (active,):
+        if resolved == active or active in resolved.parents:
             raise PlaintextStateError(
                 f"{target} is inside the Hermes home but no vault is initialized; "
-                "run 'hermes vault init' first"
+                "run 'hermes secure-vault migrate' first"
             )
         # Outside the Hermes home entirely (temp files, exports): pass through.
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(data)
         return target
-    vault = get_vault(home)
-    return vault.write_bytes(target, data, purpose=purpose)
+    return _vault().get_vault(home).write_bytes(target, data, purpose=purpose)
 
 
 def _rel(target: Path, home: Path) -> str:

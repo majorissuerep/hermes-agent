@@ -119,6 +119,10 @@ def test_update_network_git_calls_never_prompt_for_credentials():
         call = src[m.start():i]
         if re.search(r'git_cmd \+ \["(fetch|pull|push)"', call):
             calls.append(call)
-    assert calls, "expected network git calls in update_cmd"
+    # Fork: network calls route through _git_run(network=True); those are
+    # guarded centrally in _git_run itself. Direct subprocess.run network
+    # calls (if any remain) must still spread the no-prompt kwargs.
+    guarded_wrapper = "_no_prompt_git_kwargs()" in inspect.getsource(update_cmd._git_run)
+    assert calls or guarded_wrapper, "expected network git calls in update_cmd"
     missing = [c for c in calls if "_no_prompt_git_kwargs()" not in c]
     assert not missing, missing

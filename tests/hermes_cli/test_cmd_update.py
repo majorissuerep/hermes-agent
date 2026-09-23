@@ -479,9 +479,16 @@ class TestCmdUpdateBranchFallback:
         add_remote.assert_not_called()
         mark_skip.assert_not_called()
         captured = capsys.readouterr()
-        assert "Skipping upstream setup (non-interactive run)." in captured.out
+        # Fork: upstream sync is REMOVED. No prompt, no remote mutation, and
+        # the completion line says the fork's own origin was the source.
+        assert "Skipping upstream setup" not in captured.out
         assert "official repo not checked" in captured.out
         assert "Already up to date!" not in captured.out
+        commands = [c for c in mock_run.call_args_list]
+        assert not any(
+            "upstream" in " ".join(str(a) for a in c.args[0]) and "fetch" in " ".join(str(a) for a in c.args[0])
+            for c in commands
+        ), "fork updater must never fetch upstream"
 
     @pytest.mark.parametrize(
         ("health_after_repair", "runtime_status", "expected_runtime_checks"),
@@ -1076,7 +1083,8 @@ class TestCmdUpdateCheckBranchFlag:
     def test_check_default_main_still_prefers_upstream(
         self, mock_run, _mock_method, capsys
     ):
-        """No --branch (or --branch=None) preserves the upstream-then-origin probe."""
+        """No --branch (or --branch=None) preserves the upstream-then-origin probe.
+        Fork: upstream probing is REMOVED — the check always uses origin."""
         mock_run.side_effect = self._check_side_effect(
             target_branch="main", verify_ok=True, commit_count="0"
         )
@@ -1085,11 +1093,10 @@ class TestCmdUpdateCheckBranchFlag:
         cmd_update(args)
 
         commands = [" ".join(str(a) for a in c.args[0]) for c in mock_run.call_args_list]
-        # Should have tried upstream first.
-        assert any("fetch" in c and "upstream" in c for c in commands), commands
-        # Compare ref is upstream/main (upstream fetch succeeded).
+        # Fork contract: origin only, upstream never touched.
+        assert not any("fetch" in c and "upstream" in c for c in commands), commands
         rev_list_cmds = [c for c in commands if "rev-list" in c]
-        assert any("upstream/main" in c for c in rev_list_cmds), rev_list_cmds
+        assert rev_list_cmds and all("upstream/main" not in c for c in rev_list_cmds), rev_list_cmds
 
 
 class TestCmdUpdateZipBranchRefusal:

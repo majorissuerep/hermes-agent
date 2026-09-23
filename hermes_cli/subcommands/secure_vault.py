@@ -4,8 +4,9 @@ from __future__ import annotations
 
 
 def build_secure_vault_parser(subparsers) -> None:
-    """Attach the fork's master-password vault subcommand."""
-    from hermes_cli.vault_cmd import cmd_vault
+    """Attach the fork's master-password vault subcommand.
+    Deferred handler import: registering the parser must not load the crypto
+    stack (cryptography must stay out of update dispatch)."""
 
     parser = subparsers.add_parser(
         "secure-vault",
@@ -27,4 +28,10 @@ def build_secure_vault_parser(subparsers) -> None:
         "unlock = unlock for this process; status = show state; lock = drop this process's keys",
     )
     parser.add_argument("--yes", action="store_true", help="migrate: skip the confirmation prompt")
-    parser.set_defaults(func=cmd_vault)
+
+    def _run(args):
+        from hermes_cli.vault_cmd import cmd_vault
+
+        return cmd_vault(args)
+
+    parser.set_defaults(func=_run)

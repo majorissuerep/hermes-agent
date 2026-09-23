@@ -12,6 +12,7 @@ from __future__ import annotations
 import getpass
 import os
 import sys
+from pathlib import Path
 from typing import Any, List, Optional
 
 from hermes_security import errors as vault_errors
@@ -154,31 +155,18 @@ def cmd_vault(args: Any) -> int:
     return 1
 
 
-def gate_startup(args: Any) -> None:
-    """Fail-closed startup gate: state-touching commands need an unlocked vault.
+def _vault_exists_light(home) -> bool:
+    """Cheap vault probe WITHOUT importing the crypto stack (cryptography
+    must stay out of update dispatch: its native lib locks on Windows
+    self-update). Mirrors vault._META_FILENAME."""
+    return (Path(home) / ".hermes-vault").is_file()
 
-    Read-only surfaces (``--version``, ``vault`` itself, ``--help``) bypass.
-    A vaulted-but-locked home prompts once for the master password (TTY) or
-    reads ``HERMES_MASTER_PASSWORD`` (daemons/cron). A vaulted home whose
-    password is wrong/unavailable exits before any state is touched.
-    """
 
-    from hermes_constants import get_hermes_home
+def gate_locked_vault(args: Any, home) -> None:
+    """Locked-vault half of the startup gate (crypto stack already loaded)."""
 
-    command = getattr(args, "command", None)
-    if command in (None, "secure-vault", "vault") or getattr(args, "version", False):
-        return
-    home = get_hermes_home()
-    if not vault_mod.vault_exists(home):
-        # Pre-migration bootstrap mode: state writes land plaintext (upstream
-        # behavior) so installs/tests work before `secure-vault migrate` runs.
-        # Visible signal, never a silent pass.
-        print(
-            f"⚠ No secure vault at {home} — new state is written UNENCRYPTED.\n"
-            "  Run 'hermes secure-vault migrate' to switch to encrypted storage.",
-            file=sys.stderr,
-        )
-        return
+    from hermes_security import vault as vault_mod
+
     if vault_mod.is_unlocked(home):
         return
     try:

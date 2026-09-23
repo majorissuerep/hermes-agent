@@ -13,7 +13,18 @@ Design contract:
 - Append-only streams (logs, transcripts) use per-record AES-GCM frames.
 - Plaintext state where encrypted state is required is a hard, fail-closed
   error.  There is no implicit migration and no fallback to plaintext.
+
+Import discipline: importing ANY submodule of this package must not drag the
+crypto stack (``cryptography``) into processes that never touch a vault —
+notably update dispatch, whose native crypto lib locks on Windows
+self-update.  ``errors`` and the lazy attribute imports below keep the
+package import cheap; the heavy modules (vault → cryptography, sqlite →
+sqlcipher3) load only when actually used.
 """
+
+from __future__ import annotations
+
+from typing import Any
 
 from hermes_security.errors import (
     PlaintextStateError,
@@ -22,13 +33,6 @@ from hermes_security.errors import (
     VaultLockedError,
     VaultNotInitializedError,
     WrongMasterPasswordError,
-)
-from hermes_security.vault import (
-    Vault,
-    clear_vault_cache,
-    get_vault,
-    is_unlocked,
-    lock_now,
 )
 
 __all__ = [
@@ -44,3 +48,21 @@ __all__ = [
     "is_unlocked",
     "lock_now",
 ]
+
+_LAZY = {
+    "Vault": ("hermes_security.vault", "Vault"),
+    "get_vault": ("hermes_security.vault", "get_vault"),
+    "clear_vault_cache": ("hermes_security.vault", "clear_vault_cache"),
+    "is_unlocked": ("hermes_security.vault", "is_unlocked"),
+    "lock_now": ("hermes_security.vault", "lock_now"),
+}
+
+
+def __getattr__(name: str) -> Any:
+    try:
+        module_name, attr = _LAZY[name]
+    except KeyError:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}") from None
+    import importlib
+
+    return getattr(importlib.import_module(module_name), attr)

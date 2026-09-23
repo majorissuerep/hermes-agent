@@ -3141,7 +3141,7 @@ def _try_fast_serve_launch() -> bool:
         return False
 
     # Fork: fail-closed vault gate (serve touches state).
-    from hermes_cli.vault_cmd import gate_startup
+    from hermes_cli.vault_gate import gate_startup
 
     gate_startup(args)
 
@@ -3191,7 +3191,7 @@ def _try_fast_chat_launch() -> bool:
     if getattr(args, "yolo", False):
         os.environ["HERMES_YOLO_MODE"] = "1"
     # Fork: fail-closed vault gate (chat touches state).
-    from hermes_cli.vault_cmd import gate_startup
+    from hermes_cli.vault_gate import gate_startup
 
     gate_startup(args)
     _prepare_agent_startup(args)
@@ -3599,7 +3599,7 @@ def main():
     # Fork: fail-closed vault gate. State-touching commands need an unlocked
     # master-password vault (prompt once on a TTY; HERMES_MASTER_PASSWORD for
     # daemons). Runs before plugin discovery so no state reader runs locked.
-    from hermes_cli.vault_cmd import gate_startup
+    from hermes_cli.vault_gate import gate_startup
 
     gate_startup(args)
 
