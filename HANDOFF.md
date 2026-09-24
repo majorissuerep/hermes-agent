@@ -12,8 +12,10 @@ defining feature: **mandatory master-password at-rest encryption of ALL user
 state** — plus the hardening that grew around it.
 
 - Repo: https://github.com/majorissuerep/hermes-agent (gh CLI authed as
-  majorissuerep). Branches `vault` == `main` (kept in lockstep; `vault` is
-  the default and what takeover installs). Tag `v1.0.1`, GH release exists.
+  majorissuerep). `main` is the ONLY install/update channel: takeover clones
+  it and `hermes update` tracks it. Feature work lands via PRs into `main`.
+  The old `vault` branch is retired (a stale `vault` shipped the pre-fix
+  sealed-.env loader to a real machine). Tag `v1.0.1`, GH release exists.
 - Local checkout: `/home/luoman/hermes-agent` (this machine). Worktree clean.
 - Version line: `1.0.1` / `2026.9.23`. NOTE the PEP 440 lesson: the first
   release was tagged `1.0.0-vault` which is INVALID PEP 440 — it made
@@ -87,10 +89,10 @@ installs; fixed 2b25325a).
 ## 4. Install / takeover (scripts/takeover.sh)
 
 curl -fsSL https://raw.githubusercontent.com/majorissuerep/hermes-agent/
-vault/scripts/takeover.sh | bash
+main/scripts/takeover.sh | bash
 
 Pipeline: stop hermes (ALL venvs, double-sweep for watchdog respawns —
-see §5) → move old tree aside (kept) → clone fork branch vault (FORK_SRC
+see §5) → move old tree aside (kept) → clone fork branch main (FORK_SRC
 env overrides source for offline/429-rate-limited egress; origin re-pinned
 to the fork) → venv (uv-first, provisions 3.11; lock-first `uv sync`) →
 launcher → op bootstrap → `secure-vault migrate` (prompts master password

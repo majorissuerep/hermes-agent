@@ -82,8 +82,8 @@ swap_source() {
         mv "$INSTALL_DIR" "$INSTALL_DIR.pre-fork-$STAMP"
     fi
     say "→ Cloning fork into $INSTALL_DIR..."
-    if ! git clone --quiet --branch vault "$FORK_SRC" "$INSTALL_DIR" 2>/tmp/hermes-takeover-clone.log; then
-        if ! git clone --quiet --branch vault "$FORK_HTTPS" "$INSTALL_DIR" 2>>/tmp/hermes-takeover-clone.log; then
+    if ! git clone --quiet --branch main "$FORK_SRC" "$INSTALL_DIR" 2>/tmp/hermes-takeover-clone.log; then
+        if ! git clone --quiet --branch main "$FORK_HTTPS" "$INSTALL_DIR" 2>>/tmp/hermes-takeover-clone.log; then
             echo "✗ clone failed (tried FORK_SRC then HTTPS) — root cause:" >&2
             tail -5 /tmp/hermes-takeover-clone.log >&2
             die "if rate-limited: clone manually and rerun with FORK_SRC=/path/to/clone"
