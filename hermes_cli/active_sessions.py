@@ -229,8 +229,16 @@ def _read_entries(path: Path, *, strict: bool = False) -> list[dict[str, Any]]:
         return ActiveSessionRegistryError(f"active session registry {what}: {path}")
 
     try:
-        with open(path, "r", encoding="utf-8") as fh:
-            data = json.load(fh)
+        # Fork: envelope-aware read (migration seals runtime/active_sessions.json;
+        # a plain open() hits ciphertext, every chat then dies on the lease check).
+        from hermes_security.io import read_text as _sealed_read_text
+
+        _text = _sealed_read_text(path, purpose="state")
+        if _text is None:
+            return []
+        import json as _json
+
+        data = _json.loads(_text)
     except FileNotFoundError:
         return []
     except Exception as exc:
@@ -295,6 +303,16 @@ def _valid_process_start(v: Any) -> bool:
 
 
 def _write_entries(path: Path, entries: list[dict[str, Any]]) -> None:
+    # Fork: envelope-aware write inside a vaulted home (same shape as
+    # gateway.status._write_json_file); plaintext otherwise (vault-less homes).
+    try:
+        from hermes_security.io import _home_for, write_text as _seal_write
+    except ImportError:
+        _home_for = _seal_write = None
+    payload = json.dumps({"entries": entries}, indent=None, sort_keys=True)
+    if _seal_write is not None and _home_for is not None and _home_for(path) is not None:
+        _seal_write(path, payload, purpose="state")
+        return
     atomic_json_write(path, {"entries": entries}, indent=None, sort_keys=True)
 
 
