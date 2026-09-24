@@ -19,6 +19,13 @@ from gateway.config import UNAUTHORIZED_DM_BEHAVIORS, Platform, PlatformConfig, 
 logger = logging.getLogger("gateway.config")
 
 
+def _hermes_io_read_text(path: Path, *, purpose: str) -> Optional[str]:
+    """Fork: envelope-aware config read (late import — same shape as ``hermes_cli.config._hermes_io``)."""
+    from hermes_security import io as _io
+
+    return _io.read_text(path, purpose=purpose)
+
+
 def load_legacy_gateway_json(home: Path) -> Any:
     """Legacy ``gateway.json`` base layer (config.yaml keys always win). Malformed → ``{}`` + warning."""
     path = home / "gateway.json"
@@ -390,8 +397,20 @@ def read_yaml_layers(home: Path) -> dict:
     config_yaml_path = home / "config.yaml"
     yaml_cfg: dict = {}
     if config_yaml_path.exists():
-        with open(config_yaml_path, encoding="utf-8") as f:
-            yaml_cfg = yaml.safe_load(f) or {}
+        # Fork: envelope-aware read (config.yaml is sealed in a vaulted home; a plain
+        # open() decodes ciphertext as UTF-8 and the gateway silently falls back to
+        # env-only config — platform authz (allowed_chats) would run on defaults).
+        # Locked-vault/credential errors propagate to the caller's existing
+        # warn-and-fallback (same contract as hermes_cli.config_effective).
+        from hermes_cli.config import _VAULT_CREDENTIAL_ERRORS
+
+        try:
+            text = _hermes_io_read_text(config_yaml_path, purpose="config")
+        except Exception as exc:
+            if type(exc).__name__ not in _VAULT_CREDENTIAL_ERRORS:
+                raise
+            text = None
+        yaml_cfg = yaml.safe_load(text) or {} if text is not None else {}
 
     # Managed scope: overlay administrator-pinned values (this loader bypasses
     # hermes_cli.config.load_config, so managed quick_commands / stt would otherwise be ignored).
