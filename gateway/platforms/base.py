@@ -1099,6 +1099,11 @@ def validate_media_delivery_path(path: str, session_key: str = "") -> Optional[s
         resolved_root = _resolve_path(root, expand=True)
         if resolved_root is not None and _path_is_within(resolved, resolved_root):
             return str(resolved)
+    # OS sandbox: a model-emitted path outside the session's grants must not be exfiltrated
+    # through the chat either (Hermes' own caches above stay deliverable).
+    from hermes_security.sandbox.paths import read_block_reason
+    if read_block_reason(str(resolved), session_key=session_key or None):
+        return None
     # Non-strict (default): anything not denylisted (/etc, /proc, ~/.ssh, Hermes-root secrets).
     from gateway.media_policy import media_delivery_strict
     if not media_delivery_strict():

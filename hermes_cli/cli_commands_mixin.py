@@ -1112,6 +1112,18 @@ class CLICommandsMixin:
             tools_disable_enable_command(Namespace(**ns))
         _cp(*buf.getvalue().splitlines())
 
+    def _handle_sandbox_command(self, cmd: str):
+        """Handle /sandbox — per-session OS sandbox grants (shared parser, hermes_cli.sandbox_command).
+        Tool changes with --now reset the session, like /tools enable (no mid-conversation
+        prompt-cache break)."""
+        from hermes_cli.sandbox_command import dispatch_sandbox_command
+        from hermes_security.sandbox.session import current_session_key
+        reply = dispatch_sandbox_command(_command_arg(cmd), session_key=current_session_key())
+        _cp(*reply.text.splitlines())
+        if reply.reset_session:
+            self.new_session()
+            _cp(_dim("Session reset. New sandbox tool set is active."))
+
     def _handle_profile_command(self):
         """Display active profile name and home directory."""
         from hermes_cli.slash_exec import CommandContext, execute_command

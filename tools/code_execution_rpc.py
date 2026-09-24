@@ -75,8 +75,6 @@ def _rpc_server_loop(server_sock: socket.socket, task_id: str, tool_call_log: li
     overrides how an allowed, budgeted call runs: per-call sandboxes use the default (the thread
     carries the cell's context); session kernels rebind each call to the CURRENT cell's authority.
     """
-    if dispatch is None:
-        dispatch = _default_dispatch(task_id)
     conn = None
     try:
         server_sock.settimeout(0.05)
@@ -88,7 +86,24 @@ def _rpc_server_loop(server_sock: socket.socket, task_id: str, tool_call_log: li
                 continue
         if conn is None:
             return
-        conn.settimeout(300)
+        _serve_rpc_connection(conn, task_id, tool_call_log, tool_call_counter, max_tool_calls,
+                              allowed_tools, rpc_token, dispatch=dispatch, idle_timeout=300)
+    except socket.timeout:
+        logger.debug("RPC listener socket timeout")
+    except OSError as e:
+        logger.debug("RPC listener socket error: %s", e, exc_info=True)
+
+
+def _serve_rpc_connection(conn: socket.socket, task_id: str, tool_call_log: list,
+                          tool_call_counter: list, max_tool_calls: int, allowed_tools: frozenset,
+                          rpc_token: str, dispatch=None, idle_timeout: float | None = 300):
+    """Serve newline-delimited JSON requests on one connected socket until it disconnects or
+    idles ``idle_timeout`` seconds (None = never: a sandboxed kernel's inherited socket cannot
+    be re-established, so it lives as long as the kernel). Always closes ``conn``."""
+    if dispatch is None:
+        dispatch = _default_dispatch(task_id)
+    try:
+        conn.settimeout(idle_timeout)
         buf = b""
         while True:
             try:
@@ -116,15 +131,14 @@ def _rpc_server_loop(server_sock: socket.socket, task_id: str, tool_call_log: li
                     ) if _rpc_token_ok(request, rpc_token) else tool_error("Unauthorized RPC request")
                 conn.sendall((resp + "\n").encode())
     except socket.timeout:
-        logger.debug("RPC listener socket timeout")
+        logger.debug("RPC connection idle timeout")
     except OSError as e:
-        logger.debug("RPC listener socket error: %s", e, exc_info=True)
+        logger.debug("RPC connection error: %s", e, exc_info=True)
     finally:
-        if conn:
-            try:
-                conn.close()
-            except OSError as e:
-                logger.debug("RPC conn close error: %s", e)
+        try:
+            conn.close()
+        except OSError as e:
+            logger.debug("RPC conn close error: %s", e)
 
 
 def _rpc_poll_loop(env, rpc_dir: str, task_id: str, tool_call_log: list, tool_call_counter: list,

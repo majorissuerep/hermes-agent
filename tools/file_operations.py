@@ -421,8 +421,12 @@ class ShellFileOperations(LintMixin, SearchMixin, FileOperations):
             'mkdir -p "$d"; '
             'tmp="$(mktemp -p "$d" ' + tmpl + ' 2>/dev/null '
             '|| mktemp "$d/.hermes-tmp.$$.XXXXXX" 2>/dev/null '
-            '|| { tmp="$d/.hermes-tmp.$$"; : > "$tmp" && echo "$tmp"; })"; '
-            '[ -n "$tmp" ] || { echo "atomic write: could not create temp file" >&2; exit 1; }; '
+            '|| { tmp="$d/.hermes-tmp.$$"; : 2>/dev/null > "$tmp" && echo "$tmp"; } || true)"; '
+            # No temp in the target's dir (read-only dir, or a sandbox grant on the single
+            # file): an existing regular file is still written, in place — not atomic, but the
+            # only write the caller is permitted.
+            '[ -n "$tmp" ] || { if [ -f "$t" ] && [ ! -L "$t" ]; then cat > "$t"; exit $?; fi; '
+            'echo "atomic write: could not create temp file" >&2; exit 1; }; '
             "trap 'rm -f \\\"$tmp\\\"' EXIT; "
             'if [ -e "$t" ]; then '
             'm="$(stat -c%a "$t" 2>/dev/null || stat -f%Lp "$t" 2>/dev/null || true)"; '

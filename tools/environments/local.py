@@ -900,6 +900,14 @@ class LocalEnvironment(BaseEnvironment):
         ``tempfile.gettempdir()``; backend env before process env so terminal.env
         overrides work. Windows: ``%TEMP%`` often has spaces that break unquoted bash,
         so always the HERMES_HOME cache dir with forward slashes (bash- and Python-valid)."""
+        if not _IS_WINDOWS:
+            from hermes_security.sandbox.policy import is_enabled as _sandbox_enabled
+            if _sandbox_enabled():
+                # Snapshot/cwd files must live inside the sandbox's private temp dir: the
+                # shared terminal cache holds every other session's env snapshot.
+                from hermes_security.sandbox.policy import session_tmp_dir
+                from hermes_security.sandbox.session import current_session_key
+                return session_tmp_dir(current_session_key())
         if _IS_WINDOWS:
             cache_dir = (_default_terminal_temp_dir()
                          or Path(tempfile.gettempdir()) / "hermes_terminal")
@@ -964,8 +972,14 @@ class LocalEnvironment(BaseEnvironment):
             cmd_string = _prepend_shell_init(cmd_string, _resolve_shell_init_files())
         args = [bash, *(["-l"] if login else []), "-c", cmd_string]
         self._recover_cwd()
+        run_env = _make_run_env(self.env)
+        # Model-driven commands (terminal, file tools, snapshots) run inside the session's
+        # OS sandbox when it is enabled; raises (e.g. on Windows) rather than run unconfined.
+        from hermes_security.sandbox.spawn import apply_env, sandboxed_spawn
+        args, sandbox_env = sandboxed_spawn(args)
+        apply_env(run_env, sandbox_env)
         proc = subprocess.Popen(
-            args, text=True, env=_make_run_env(self.env), encoding="utf-8", errors="replace",
+            args, text=True, env=run_env, encoding="utf-8", errors="replace",
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             stdin=subprocess.PIPE if stdin_data is not None else subprocess.DEVNULL,
             start_new_session=True, cwd=self.cwd,

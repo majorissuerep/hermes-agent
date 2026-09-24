@@ -1723,6 +1723,28 @@ DEFAULT_CONFIG = {
         # for one login without changing this key.
         "codex_login_flow": "device_code",
     },
+    # OS-native, default-deny sandbox for everything the model runs (terminal, file tools,
+    # background processes, execute_code, subagents): Landlock + seccomp on Linux, Seatbelt on
+    # macOS. Hermes itself stays unconfined. When enabled, a session sees ONLY the tools in
+    # `tools` + its presets, and its processes see ONLY the OS baseline (/usr, /etc, ...), a
+    # private temp dir and the granted paths. Per-session changes: /sandbox (CLI + gateway);
+    # persistent ones: `hermes sandbox`. See website/docs/user-guide/features/sandbox.md.
+    "sandbox": {
+        "enabled": False,
+        # Presets applied to every session: coding, research, workspace, workspace-ro,
+        # toolchains, shell-rc, git, network, files — or a name from `presets` below.
+        "default_presets": [],
+        # Allowed model tools: tool names, toolsets (terminal, file, web, ...) or "*".
+        "tools": [],
+        # Always-granted paths: "PATH" (read-only) or "PATH:rw". Tokens: @cwd, @path.
+        "grants": [],
+        "network": False,        # sandboxed processes may open internet connections
+        "unix_sockets": False,   # may create UNIX sockets (docker.sock / session bus = escape)
+        "subagents": "inherit",  # inherit | readonly (subagents lose write grants)
+        "scan_on_grant": True,   # scan a path for secrets before granting it
+        # Custom presets: {name: {description, grants: [], tools: [], network: bool, include: []}}
+        "presets": {},
+    },
     "security": {  # Security: pre-exec scanning via tirith plus related guards.
         "allow_private_urls": False,  # allow requests to private/internal IPs (OpenWrt, VPNs)
         # CIDR blocks a local TUN proxy answers DNS with (Mihomo/Clash fake-ip, Surge enhanced).

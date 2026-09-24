@@ -454,6 +454,9 @@ def _parse_tool_call(agent, tool_call, *, flatten_probe: bool = False) -> _Parse
     scope_block = None
     if parse_error is None:
         name, args, scope_block = _unwrap_tool_search_call(agent, name, args, flatten_probe=flatten_probe)
+    if scope_block is None:
+        from hermes_security.sandbox.tool_policy import tool_block_reason
+        scope_block = tool_block_reason(name)
     return _ParsedCall(tool_call, name, args, [], parse_error, scope_block)
 
 

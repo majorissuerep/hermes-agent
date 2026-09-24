@@ -1084,6 +1084,9 @@ def _load_tools(agent, enabled_toolsets, disabled_toolsets):
     drops = side_agent_tool_drops(agent)
     if drops:
         agent.tools = [t for t in agent.tools if t["function"]["name"] not in drops]
+    # Sandboxed session: only the tools its policy allows are ever shown to the model.
+    from hermes_security.sandbox.tool_policy import filter_tool_definitions
+    agent.tools = filter_tool_definitions(agent.tools)
 
     agent.valid_tool_names = {tool["function"]["name"] for tool in agent.tools} if agent.tools else set()
     # Kanban guidance is session-static for the dispatcher-owned worker only. Profiles may
@@ -2092,6 +2095,9 @@ def _inject_context_engine_tools(agent):
             _tname = _schema["name"]
             if _tname in _existing_tool_names:
                 continue  # already registered via plugin/cache path
+            from hermes_security.sandbox.tool_policy import tool_block_reason
+            if tool_block_reason(_tname):
+                continue
             agent.tools.append({"type": "function", "function": _schema})
             for _names in (agent.valid_tool_names, agent._context_engine_tool_names, _existing_tool_names):
                 _names.add(_tname)

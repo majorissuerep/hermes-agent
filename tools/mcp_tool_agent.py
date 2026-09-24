@@ -53,7 +53,11 @@ def _tool_defs_content_changed(agent, new_defs: list) -> bool:
 
 
 def _drop_side_agent_tools(agent, new_defs: list, new_names: set) -> tuple:
+    """Drop what this agent may not expose: the sandbox allowlist, then side-agent drops."""
+    from hermes_security.sandbox.tool_policy import filter_tool_definitions
     from tools.connectors.turn import side_agent_tool_drops
+    new_defs = filter_tool_definitions(new_defs)
+    new_names = new_names & {_def_name(entry) for entry in new_defs}
     drops = side_agent_tool_drops(agent)
     if not drops:
         return new_defs, new_names

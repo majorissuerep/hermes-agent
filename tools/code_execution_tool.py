@@ -266,11 +266,15 @@ def _connect():
         Linux and macOS)
       - a string of the form ``tcp://127.0.0.1:<port>`` (Windows, where
         AF_UNIX is unreliable — the parent falls back to loopback TCP)
+      - ``fd://<n>``: an inherited connected socket (OS-sandboxed kernels)
     """
     global _sock
     if _sock is None:
         endpoint = os.environ["HERMES_RPC_SOCKET"]
-        if endpoint.startswith("tcp://"):
+        if endpoint.startswith("fd://"):
+            # Sandboxed kernel: an inherited, already-connected socket (it may not create one).
+            _sock = socket.socket(fileno=int(endpoint[len("fd://"):]))
+        elif endpoint.startswith("tcp://"):
             # tcp://host:port  (host is always 127.0.0.1 in practice — we
             # only bind loopback server-side)
             _host_port = endpoint[len("tcp://"):]
