@@ -514,6 +514,26 @@ CREATE TABLE IF NOT EXISTS gateway_heartbeats (
     host TEXT NOT NULL DEFAULT ''
 );
 
+-- Session deck: the user's OPEN sessions, active until explicitly closed (``/close``,
+-- ``hermes deck close``, another session). Rows are links, never transcripts: the lineage
+-- ROOT id (compression tip resolved on read) plus routing. ``handle`` is the stable short
+-- address (``#7``); AUTOINCREMENT so a closed handle is never reissued to another session.
+-- ``state``/``last_seen_at`` are the host's periodic runtime snapshot.
+CREATE TABLE IF NOT EXISTS deck_sessions (
+    handle INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL UNIQUE,
+    surface TEXT NOT NULL DEFAULT '',
+    cwd TEXT NOT NULL DEFAULT '',
+    group_name TEXT NOT NULL DEFAULT '',
+    parent_handle INTEGER,
+    state TEXT NOT NULL DEFAULT 'idle',
+    opened_at REAL NOT NULL,
+    last_seen_at REAL NOT NULL,
+    closed_at REAL,
+    close_reason TEXT,
+    closed_by TEXT
+);
+
 CREATE TABLE IF NOT EXISTS compression_locks (
     session_id TEXT PRIMARY KEY,
     holder TEXT NOT NULL,

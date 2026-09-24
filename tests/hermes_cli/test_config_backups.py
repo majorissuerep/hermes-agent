@@ -38,3 +38,24 @@ def test_legacy_siblings_move_but_user_named_copies_stay(tmp_path: Path):
     assert (root / "config.yaml.corrupt.20260729-093706.bak").exists()
     assert (tmp_path / "config.yaml.bak-my-note").read_text() == "mine"
     assert not list(tmp_path.glob("config.yaml.bak.*")) and not list(tmp_path.glob("config.yaml.corrupt.*"))
+
+
+def test_sealed_backup_reads_back_and_dedupes_on_plaintext(tmp_path: Path, monkeypatch):
+    """Fork: an envelope binds its path into the AAD, so a byte copy is undecryptable at the backup's
+    path — the last-known-good safety net silently never worked in a vaulted home."""
+    from hermes_cli.config_backups import load_newest_good_backup
+    from hermes_security import migrate as mig
+    from hermes_security import vault as hv
+
+    home = tmp_path / ".hermes"
+    home.mkdir()
+    cfg = home / "config.yaml"
+    cfg.write_text("model: sealed\n")
+    monkeypatch.setenv("HERMES_HOME", str(home))
+    assert mig.migrate_home(home, "backup-password").ok
+    hv.clear_vault_cache()
+    hv.unlock(home, "backup-password")
+
+    assert backup_config(cfg, "good") is not None
+    assert backup_config(cfg, "good") is None  # same plaintext, fresh nonce: still a duplicate
+    assert load_newest_good_backup(cfg) == {"model": "sealed"}

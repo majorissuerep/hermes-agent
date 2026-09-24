@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
 import sqlite3
 import tarfile
@@ -71,16 +72,24 @@ class MigrationReport:
 
 
 def repair_clobbered_state(home: Path | str) -> dict:
-    """Re-seal plaintext state files inside a VAULTED home (fork).
+    """Bring every state file in a VAULTED home back to its canonical sealed form (fork).
 
-    The clobber scenario: an old-venv process (watchdog-respawned gateway,
-    stale --yolo session) rewrote sealed envelopes (.env, config-adjacent
-    files) as plaintext AFTER migration. This re-seals every eligible
-    plaintext file back into an envelope. Databases are REPORTED, never
-    re-sealed here — a plaintext DB inside a vaulted home means the vault
-    was bypassed wholesale and needs investigation, not silent wrapping.
+    Each file is judged by its class, exactly as migration classified it —
+    never by "does it start with the envelope magic": SQLCipher pages and
+    frame streams carry no magic, and wrapping them in an envelope makes them
+    unreadable (the first repair did exactly that to every DB and log).
 
-    Returns {sealed: [relpaths], skipped_dbs: [relpaths]}.
+    - databases: SQLCipher left alone; an envelope-wrapped DB is unwrapped
+      back to its SQLCipher bytes (verified before the swap); plaintext
+      SQLite is REPORTED (vault bypass — investigate, never silently wrap).
+    - frame streams (.log/.jsonl): valid frames kept; plaintext appended by a
+      non-vault process (whole file or tail) re-framed; envelope-wrapped
+      streams unwrapped.
+    - everything else: plaintext re-sealed with its canonical purpose. A
+      ``.env`` whose content is not text (ciphertext mangled by the old
+      NUL-stripping sanitizer) is restored from the newest pre-migration tar.
+    - ``hermes-agent.*`` code trees (takeover's rollback copy) that migration
+      sealed are restored to plaintext: they are public code, not state.
     """
 
     home_path = Path(home).expanduser().resolve()
@@ -88,30 +97,236 @@ def repair_clobbered_state(home: Path | str) -> dict:
         raise vault_errors.VaultNotInitializedError(f"No vault at {home_path}")
     vault = vault_mod.get_vault(home_path, allow_env_unlock=False)
 
-    from hermes_security.io import _MAGIC as _ENVELOPE_MAGIC
-
-    db_suffixes = (".db", ".sqlite", ".sqlite3")
-    sealed: list[str] = []
-    skipped_dbs: list[str] = []
+    report: dict = {"sealed": [], "unwrapped": [], "reframed": [], "restored": [],
+                    "unrecoverable": [], "skipped_dbs": [], "code_files": 0}
     for path, rel in _iter_files(home_path):
+        kind = _classify(path)
+        if kind == "skip" or path.is_symlink():
+            continue  # never repair through a link (it may point outside the home)
         try:
-            head = path.open("rb").read(max(16, len(_ENVELOPE_MAGIC)))
-        except OSError:
+            with path.open("rb") as handle:
+                head = handle.read(16)
+            if kind == "db":
+                _repair_db(vault, path, rel, head, report)
+            elif kind == "frames":
+                _repair_frames(vault, path, rel, report)
+            else:
+                _repair_envelope(vault, home_path, path, rel, head, report)
+        except Exception as exc:  # noqa: BLE001 - one file must not stop the sweep
+            report["unrecoverable"].append(f"{rel.as_posix()}: {type(exc).__name__}: {exc}")
+    report["code_files"] = _restore_code_trees(vault, home_path, report)
+    return report
+
+
+def _frame_purpose(path: Path) -> str:
+    return "log" if path.suffix == ".log" else "transcript"
+
+
+def _repair_db(vault, path: Path, rel: Path, head: bytes, report: dict) -> None:
+    if head.startswith(b"SQLite format 3\x00"):
+        report["skipped_dbs"].append(rel.as_posix())
+        return
+    if not head.startswith(_MAGIC):
+        return  # SQLCipher: already canonical
+    inner = vault.decrypt(path.read_bytes(), purpose=_purpose_for(rel), relpath=rel.as_posix())
+    staging = path.with_name(path.name + ".repair-new")
+    staging.write_bytes(inner)
+    try:
+        if not inner.startswith(b"SQLite format 3\x00"):
+            from hermes_security import sqlite as hsql
+
+            conn = hsql.connect(staging, key_path=path)
+            try:
+                conn.execute("SELECT count(*) FROM sqlite_master").fetchone()
+            finally:
+                conn.close()
+        os_replace(staging, path)
+    finally:
+        staging.unlink(missing_ok=True)
+    report["unwrapped"].append(rel.as_posix())
+    if inner.startswith(b"SQLite format 3\x00"):
+        report["skipped_dbs"].append(rel.as_posix())
+
+
+def _text_lines(data: bytes, *, jsonl: bool) -> Optional[list[bytes]]:
+    """Plaintext log lines, or None when *data* is not text (a binary tail)."""
+
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+    if "\x00" in text:
+        return None
+    return [line.encode("utf-8") for line in text.splitlines() if line.strip() or not jsonl]
+
+
+def _is_mangled_text(data: bytes) -> bool:
+    """Ciphertext pushed through a text sanitizer: the old one decoded with errors=replace and
+    stripped NULs, so the result is valid UTF-8 that still starts with the envelope magic and is
+    full of U+FFFD."""
+
+    return (
+        data.startswith(_MAGIC.rstrip(b"\x00"))
+        or "\ufffd".encode("utf-8") in data
+        or _text_lines(data, jsonl=False) is None
+    )
+
+
+def _parse_mixed(vault, blob: bytes, *, purpose: str, jsonl: bool) -> Optional[tuple[list[bytes], bool]]:
+    """Parse a log that interleaves frames with plaintext lines a non-vault process appended.
+
+    Returns ``(payloads, saw_plaintext)``, or None when a chunk is neither a frame, a text line, nor
+    a crash-truncated final frame (a length prefix claiming more bytes than remain — readers
+    tolerate it; it is dropped when the stream is rebuilt anyway).
+    """
+
+    payloads: list[bytes] = []
+    saw_text = False
+    offset = 0
+    while offset < len(blob):
+        frame = sec_frames.decode_frame_at(blob, offset, vault=vault, purpose=purpose)
+        if frame is not None:
+            payloads.append(frame[0])
+            offset = frame[1]
             continue
-        if head.startswith(_ENVELOPE_MAGIC):
-            continue  # already sealed
-        if path.suffix in db_suffixes and head.startswith(b"SQLite format 3\x00"):
-            skipped_dbs.append(str(rel))
+        newline = blob.find(b"\n", offset)
+        end = len(blob) if newline < 0 else newline + 1
+        line = _text_lines(blob[offset:end], jsonl=jsonl)
+        if line is None:
+            remaining = len(blob) - offset
+            if remaining < 4 or sec_frames._LENGTH.unpack_from(blob, offset)[0] + 4 > remaining:
+                break  # truncated final frame
+            return None
+        payloads.extend(line)
+        saw_text = True
+        offset = end
+    return payloads, saw_text
+
+
+def _split_envelope_prefix(vault, blob: bytes, *, relpath: str, purpose: str, frame_purpose: str, jsonl: bool):
+    """``(plaintext, trailing_payloads)`` for an envelope that log appends kept growing.
+
+    A log wrapped into an envelope by the old repair stays a log: its handlers keep appending (frames
+    from vault-aware processes, plaintext lines from old-venv ones) after the envelope, so the file is
+    ``envelope || appends``. The envelope has no length field; the split is the offset whose suffix
+    parses to EOF as appends AND whose prefix authenticates.
+    """
+
+    minimum = len(_MAGIC) + 1 + 12 + 16
+    for offset in range(minimum, len(blob)):
+        # Cheap candidate filter before the O(n) checks: a frame starts here, or a text line does.
+        if sec_frames.decode_frame_at(blob, offset, vault=vault, purpose=frame_purpose) is None \
+                and _text_lines(blob[offset : offset + 16], jsonl=False) is None:
+            continue
+        parsed = _parse_mixed(vault, blob[offset:], purpose=frame_purpose, jsonl=jsonl)
+        if not parsed or not parsed[0]:
             continue
         try:
-            # Canonical purpose per file class — the reader decrypts with the
-            # same purpose (it is bound into the AAD), so a repaired file must
-            # be sealed exactly as migration would have sealed it.
-            vault.write_bytes(path, path.read_bytes(), purpose=_purpose_for(rel))
-            sealed.append(str(rel))
-        except Exception:
+            return vault.decrypt(blob[:offset], purpose=purpose, relpath=relpath), parsed[0]
+        except vault_errors.VaultIntegrityError:
             continue
-    return {"sealed": sealed, "skipped_dbs": skipped_dbs}
+    raise vault_errors.VaultIntegrityError(f"{relpath}: envelope does not authenticate")
+
+
+def _repair_frames(vault, path: Path, rel: Path, report: dict) -> None:
+    raw = path.read_bytes()
+    wrapped = raw.startswith(_MAGIC)
+    purpose = _frame_purpose(path)
+    jsonl = path.suffix == ".jsonl"
+    appended: list[bytes] = []
+    source = raw
+    if wrapped:
+        try:
+            source = vault.decrypt(raw, purpose=_purpose_for(rel), relpath=rel.as_posix())
+        except vault_errors.VaultIntegrityError:
+            source, appended = _split_envelope_prefix(
+                vault, raw, relpath=rel.as_posix(), purpose=_purpose_for(rel),
+                frame_purpose=purpose, jsonl=jsonl)
+    parsed = _parse_mixed(vault, source, purpose=purpose, jsonl=jsonl)
+    if parsed is None:
+        raise RuntimeError("neither frames nor text (binary content mid-stream); left as is")
+    payloads, saw_text = parsed
+    if not wrapped and not saw_text:
+        return  # clean frame stream (a truncated tail is tolerated by readers)
+    payloads.extend(appended)
+    rebuilt = sec_frames.encode_frames(payloads, vault=vault, purpose=purpose)
+    if sec_frames.split_stream(rebuilt, vault=vault, purpose=purpose)[0] != payloads:
+        raise RuntimeError("frame roundtrip mismatch")
+    vault_mod._atomic_write(path, rebuilt)
+    report["reframed" if saw_text or appended else "unwrapped"].append(rel.as_posix())
+
+
+def _repair_envelope(vault, home: Path, path: Path, rel: Path, head: bytes, report: dict) -> None:
+    purpose = _purpose_for(rel)
+    if head.startswith(_MAGIC):
+        if purpose != "env":
+            return  # sealed; only .env content is sanity-checked (it gates every command)
+        content = vault.decrypt(path.read_bytes(), purpose=purpose, relpath=rel.as_posix())
+    else:
+        content = path.read_bytes()
+    if purpose == "env" and _is_mangled_text(content):
+        _restore_env_from_backup(vault, home, path, rel, content, report)
+        return
+    if head.startswith(_MAGIC):
+        return
+    vault.write_bytes(path, content, purpose=purpose)
+    report["sealed"].append(rel.as_posix())
+
+
+def _restore_env_from_backup(vault, home: Path, path: Path, rel: Path, garbage: bytes, report: dict) -> None:
+    """A mangled .env is not recoverable from itself; the pre-migration tar
+    (written OUTSIDE the home by migrate_home) holds the last plaintext copy."""
+
+    member = rel.as_posix()
+    for tar_path in sorted(home.parent.glob(f"hermes-premigration-{home.name}-*.tar"), reverse=True):
+        try:
+            with tarfile.open(tar_path) as tar:
+                extracted = tar.extractfile(member)
+                original = extracted.read() if extracted is not None else None
+        except (KeyError, OSError, tarfile.TarError):
+            continue
+        if original is None or _is_mangled_text(original):
+            continue
+        # Keep the mangled bytes (sealed) instead of destroying the evidence.
+        vault.write_bytes(path.with_name(path.name + ".clobbered"), garbage, purpose="state")
+        vault.write_bytes(path, original, purpose=_purpose_for(rel))
+        report["restored"].append(f"{member} (from {tar_path})")
+        return
+    report["unrecoverable"].append(
+        f"{member}: content is not text (mangled ciphertext) and no pre-migration "
+        f"backup in {home.parent} holds it — re-enter these secrets"
+    )
+
+
+def _restore_code_trees(vault, home: Path, report: dict) -> int:
+    """Unseal public ``hermes-agent.*`` code trees that migration wrongly sealed."""
+
+    restored = 0
+    for tree in sorted(home.glob("hermes-agent.*")):
+        if not tree.is_dir() or tree.is_symlink():
+            continue
+        for dirpath, dirnames, filenames in os.walk(tree):
+            dirnames[:] = [d for d in dirnames if d not in _SKIP_DIRS]
+            for name in filenames:
+                path = Path(dirpath) / name
+                if path.is_symlink():
+                    continue
+                rel = path.relative_to(home)
+                try:
+                    raw = path.read_bytes()
+                    data = raw
+                    if raw.startswith(_MAGIC):
+                        data = vault.decrypt(raw, purpose=_purpose_for(rel), relpath=rel.as_posix())
+                    if path.suffix in _FRAME_SUFFIXES and data:
+                        payloads, consumed = sec_frames.split_stream(data, vault=vault, purpose=_frame_purpose(path))
+                        if payloads and consumed == len(data):
+                            data = b"\n".join(payloads) + b"\n"
+                    if data != raw:
+                        vault_mod._atomic_write(path, data, mode=path.stat().st_mode & 0o777)
+                        restored += 1
+                except Exception as exc:  # noqa: BLE001
+                    report["unrecoverable"].append(f"{rel.as_posix()}: {type(exc).__name__}: {exc}")
+    return restored
 
 
 def _iter_files(home: Path):
@@ -119,10 +334,7 @@ def _iter_files(home: Path):
         if not path.is_file() and not path.is_symlink():
             continue
         rel = path.relative_to(home)
-        parts = rel.parts
-        if parts and parts[0] in _SKIP_DIRS:
-            continue
-        if any(part in _SKIP_DIRS for part in parts):
+        if vault_mod._is_in_skip_dir(rel):
             continue
         if path.name == ".hermes-vault" or path.name.startswith(".hermes-vault."):
             continue

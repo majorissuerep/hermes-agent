@@ -5,6 +5,7 @@ import { AlternateScreen, Box, NoSelect, ScrollBox, Text } from '@hermes/ink'
 import { useStore } from '@nanostores/react'
 import { Fragment, memo, type MutableRefObject, useEffect, useMemo, useRef } from 'react'
 
+import { $deck, DECK_MODE } from '../app/deckStore.js'
 import { useGateway } from '../app/gatewayContext.js'
 import type { AppLayoutProps } from '../app/interfaces.js'
 import { $isBlocked, $overlayState, patchOverlayState } from '../app/overlayStore.js'
@@ -26,7 +27,7 @@ import { ActiveWidgetSlot, AmbientDock, AmbientRail, useAmbientRailWidth } from 
 
 import { AgentsOverlay } from './agentsOverlay.js'
 import { LiveAgentsPanel } from './agentsPanel.js'
-import { GoodVibesHeart, StatusRule, StickyPromptTracker, TranscriptScrollbar } from './appChrome.js'
+import { GoodVibesHeart, statusDeckLabel, StatusRule, StickyPromptTracker, TranscriptScrollbar } from './appChrome.js'
 import { FloatingOverlays, PromptZone } from './appOverlays.js'
 import { Banner, Panel, SessionPanel } from './branding.js'
 import { FpsOverlay } from './fpsOverlay.js'
@@ -381,6 +382,7 @@ const ComposerPane = memo(function ComposerPane({
           onModelSelect={actions.onModelSelect}
           onNewLiveSession={actions.newLiveSession}
           onNewPromptSession={actions.newPromptSession}
+          onQuit={actions.quit}
           onResumeSelect={actions.resumeById}
           pagerPageSize={composer.pagerPageSize}
         />
@@ -487,6 +489,7 @@ const StatusRulePane = memo(function StatusRulePane({
   status
 }: Pick<AppLayoutProps, 'composer' | 'status'> & { at: 'bottom' | 'top' }) {
   const ui = useStore($uiState)
+  const deck = useStore($deck)
 
   if (ui.statusBar !== at) {
     return null
@@ -501,6 +504,7 @@ const StatusRulePane = memo(function StatusRulePane({
         cols={composer.cols}
         compacting={ui.compacting}
         cwdLabel={status.cwdLabel}
+        deckLabel={DECK_MODE ? statusDeckLabel(deck.ref, deck.openCount) : undefined}
         focusView={ui.focusView}
         indicatorStyle={ui.indicatorStyle}
         lastTurnEndedAt={status.lastTurnEndedAt}

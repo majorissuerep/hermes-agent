@@ -99,6 +99,12 @@ def format_config_parse_failure(config_path: Path, exc: Exception, *, fallback: 
     return f"Your settings file ({config_path}) has a formatting error{at}. {fallback_msg} {repair}"
 
 
+# Fork: config reads that failed on the vault credential, not on the file's content.
+_VAULT_CREDENTIAL_ERRORS = frozenset({
+    "VaultLockedError", "VaultNotInitializedError", "WrongMasterPasswordError", "VaultIntegrityError",
+})
+
+
 def _warn_config_parse_failure(
     config_path: Path, exc: Exception, *, fallback: str = "defaults") -> None:
     """Surface a config.yaml parse failure to log and stderr (once per file signature).
@@ -115,12 +121,7 @@ def _warn_config_parse_failure(
     authentication, which is a credential problem, not a damaged file
     (a REAL integrity failure also surfaces through the gate's unlock).
     """
-    if type(exc).__name__ in {
-        "VaultLockedError",
-        "VaultNotInitializedError",
-        "WrongMasterPasswordError",
-        "VaultIntegrityError",
-    }:
+    if type(exc).__name__ in _VAULT_CREDENTIAL_ERRORS:
         return
     try:
         st = config_path.stat()
@@ -2287,7 +2288,9 @@ def _last_known_good_fallback(config_path: Path, path_key: str, cache_sig, exc: 
     # See #31188.
     lkg = _LAST_EXPANDED_CONFIG_BY_PATH.get(path_key)
     fallback = "last-known-good"
-    if lkg is None:
+    # Fork: a locked vault locks the backup too — trying it only logged "backup unreadable" on every
+    # locked command. The gate clears the config caches after unlock, so the real file loads then.
+    if lkg is None and type(exc).__name__ not in _VAULT_CREDENTIAL_ERRORS:
         # Fresh process (CLI restart, `hermes config get`): nothing loaded yet in this process, so
         # fall back to the newest byte-exact copy the last successful parse left in backups/config/.
         # It holds the raw file (``${VAR}`` templates intact), so it goes through the same

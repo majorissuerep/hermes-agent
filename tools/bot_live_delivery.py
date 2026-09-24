@@ -43,8 +43,14 @@ def find_canonical_owner(profile_home: Path | str) -> dict[str, Any] | None:
         session_id = db.get_compression_tip(row["id"]) if row else None
     finally:
         db.close()
-    if not session_id:
-        return None
+    return find_session_owner(home, session_id) if session_id else None
+
+
+def find_session_owner(profile_home: Path | str, session_id: str) -> dict[str, Any] | None:
+    """The lease of whichever process runs ``session_id`` (the stored TIP id) right now, or None."""
+    from hermes_cli.active_sessions import active_session_registry_snapshot
+
+    home = Path(profile_home).resolve()
     for entry in active_session_registry_snapshot(registry_home=home):
         if entry["session_id"] == session_id:
             return {**entry, "profile_home": str(home)}
@@ -53,7 +59,11 @@ def find_canonical_owner(profile_home: Path | str) -> dict[str, Any] | None:
 
 def find_canonical_live_owner(profile_home: Path | str) -> dict[str, Any] | None:
     """Only advertised consumers may receive owner-pinned mailbox deliveries."""
-    entry = find_canonical_owner(profile_home)
+    return live_owner_pin(find_canonical_owner(profile_home))
+
+
+def live_owner_pin(entry: dict[str, Any] | None) -> dict[str, Any] | None:
+    """The mailbox pin for a registry entry whose owner advertises it consumes deliveries, else None."""
     meta = (entry or {}).get("metadata") or {}
     if entry and meta.get("bot_live_delivery_consumer") is True and meta.get("live_session_id"):
         return {key: entry[key] for key in ("profile_home", "session_id", "lease_id")} | {

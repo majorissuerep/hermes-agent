@@ -495,7 +495,7 @@ export interface GatewayEventHandlerContext {
     // Session carried across a transport loss or child exit, cleared after resume.
     recoverSidRef?: MutableRefObject<null | string>
     resetSession: () => void
-    resumeById: (id: string) => Promise<void>
+    resumeById: (id: string, profile?: string) => Promise<void>
     setCatalog: StateSetter<null | SlashCatalog>
   }
   submission: {
@@ -551,7 +551,7 @@ export interface SlashHandlerContext {
     newLiveSession: (msg?: string, title?: string) => void
     newSession: (msg?: string, title?: string) => void
     resetVisibleHistory: (info?: null | SessionInfo) => void
-    resumeById: (id: string) => void
+    resumeById: (id: string, profile?: string) => void
     setSessionStartedAt: StateSetter<number>
   }
   slashFlightRef: MutableRefObject<number>
@@ -583,7 +583,8 @@ export interface AppLayoutActions {
   newLiveSession: () => void
   newPromptSession: (prompt: string, modelArg?: string) => void
   onModelSelect: (value: string) => void
-  resumeById: (id: string) => void
+  quit: () => void
+  resumeById: (id: string, profile?: string) => void
   setStickyPrompt: (value: string) => void
 }
 
@@ -648,7 +649,8 @@ export interface AppOverlaysProps {
   onModelSelect: (value: string) => void
   onNewLiveSession: () => void
   onNewPromptSession: (prompt: string, modelArg?: string) => void
-  onResumeSelect: (sessionId: string) => void
+  onQuit: () => void
+  onResumeSelect: (sessionId: string, profile?: string) => void
   onSecretSubmit: (value: string) => void
   onSudoSubmit: (pw: string) => void
   onVaultUnlockSubmit: (password: string) => void

@@ -763,6 +763,150 @@
       }
     },
     {
+      "name": "deck.close",
+      "summary": "Close an open session: ends its runtime wherever it lives and removes it from the deck.",
+      "params": [
+        {
+          "name": "params",
+          "schema": {
+            "$ref": "#/components/schemas/DeckTargetParams"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/DeckCloseResult"
+        }
+      }
+    },
+    {
+      "name": "deck.detach",
+      "summary": "This client stops showing a deck session; the session keeps running (detached when no client is left).",
+      "params": [
+        {
+          "name": "params",
+          "schema": {
+            "$ref": "#/components/schemas/DeckDetachParams"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/DeckDetachResult"
+        }
+      }
+    },
+    {
+      "name": "deck.interrupt",
+      "summary": "Stop the target's running turn (host-owned sessions only).",
+      "params": [
+        {
+          "name": "params",
+          "schema": {
+            "$ref": "#/components/schemas/DeckTargetParams"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/DeckInterruptResult"
+        }
+      }
+    },
+    {
+      "name": "deck.list",
+      "summary": "Open sessions across profiles, most recently active first.",
+      "params": [
+        {
+          "name": "params",
+          "schema": {
+            "$ref": "#/components/schemas/DeckListParams"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/DeckListResult"
+        }
+      }
+    },
+    {
+      "name": "deck.peek",
+      "summary": "The target's row plus its last user/assistant messages.",
+      "params": [
+        {
+          "name": "params",
+          "schema": {
+            "$ref": "#/components/schemas/DeckPeekParams"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/DeckPeekResult"
+        }
+      }
+    },
+    {
+      "name": "deck.register",
+      "summary": "Mark a live session open in the deck: it now survives client disconnects until closed.",
+      "params": [
+        {
+          "name": "params",
+          "schema": {
+            "$ref": "#/components/schemas/DeckRegisterParams"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/DeckRegisterResult"
+        }
+      }
+    },
+    {
+      "name": "deck.resolve",
+      "summary": "Resolve a ref to its row (what a client needs to session.resume it with the right profile).",
+      "params": [
+        {
+          "name": "params",
+          "schema": {
+            "$ref": "#/components/schemas/DeckTargetParams"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/DeckResolveResult"
+        }
+      }
+    },
+    {
+      "name": "deck.send",
+      "summary": "Queue a message as the target's next user turn (never mid-turn); wakes a dormant target.",
+      "params": [
+        {
+          "name": "params",
+          "schema": {
+            "$ref": "#/components/schemas/DeckSendParams"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/DeckSendResult"
+        }
+      }
+    },
+    {
       "name": "delegation.pause",
       "summary": "Block/unblock NEW spawns globally (active children keep running); returns the new state.",
       "params": [
@@ -11645,6 +11789,590 @@
           "cancel_at_period_end"
         ],
         "title": "CurrentSubscription",
+        "type": "object"
+      },
+      "DeckChangedPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "open_count": {
+            "title": "Open Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "open_count"
+        ],
+        "title": "DeckChangedPayload",
+        "type": "object"
+      },
+      "DeckCloseResult": {
+        "additionalProperties": false,
+        "properties": {
+          "ref": {
+            "title": "Ref",
+            "type": "string"
+          },
+          "closed": {
+            "title": "Closed",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ref",
+          "closed"
+        ],
+        "title": "DeckCloseResult",
+        "type": "object"
+      },
+      "DeckClosedPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "ref": {
+            "title": "Ref",
+            "type": "string"
+          },
+          "closed_by": {
+            "title": "Closed By",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ref",
+          "closed_by"
+        ],
+        "title": "DeckClosedPayload",
+        "type": "object"
+      },
+      "DeckDetachParams": {
+        "additionalProperties": false,
+        "properties": {
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id"
+        ],
+        "title": "DeckDetachParams",
+        "type": "object"
+      },
+      "DeckDetachResult": {
+        "additionalProperties": false,
+        "properties": {
+          "detached": {
+            "title": "Detached",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "detached"
+        ],
+        "title": "DeckDetachResult",
+        "type": "object"
+      },
+      "DeckInterruptResult": {
+        "additionalProperties": false,
+        "properties": {
+          "ref": {
+            "title": "Ref",
+            "type": "string"
+          },
+          "interrupted": {
+            "title": "Interrupted",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ref",
+          "interrupted"
+        ],
+        "title": "DeckInterruptResult",
+        "type": "object"
+      },
+      "DeckListParams": {
+        "additionalProperties": false,
+        "properties": {
+          "profile": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Profile"
+          },
+          "profiles": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Profiles"
+          },
+          "include_closed": {
+            "default": false,
+            "title": "Include Closed",
+            "type": "boolean"
+          }
+        },
+        "title": "DeckListParams",
+        "type": "object"
+      },
+      "DeckListResult": {
+        "additionalProperties": false,
+        "properties": {
+          "sessions": {
+            "items": {
+              "$ref": "#/components/schemas/DeckSession"
+            },
+            "title": "Sessions",
+            "type": "array"
+          },
+          "open_count": {
+            "title": "Open Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "sessions",
+          "open_count"
+        ],
+        "title": "DeckListResult",
+        "type": "object"
+      },
+      "DeckMessage": {
+        "additionalProperties": false,
+        "properties": {
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "role",
+          "text"
+        ],
+        "title": "DeckMessage",
+        "type": "object"
+      },
+      "DeckPeekParams": {
+        "additionalProperties": false,
+        "properties": {
+          "profile": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Profile"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          },
+          "from_session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "From Session Id"
+          },
+          "limit": {
+            "default": 12,
+            "title": "Limit",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "target"
+        ],
+        "title": "DeckPeekParams",
+        "type": "object"
+      },
+      "DeckPeekResult": {
+        "additionalProperties": false,
+        "properties": {
+          "session": {
+            "$ref": "#/components/schemas/DeckSession"
+          },
+          "messages": {
+            "items": {
+              "$ref": "#/components/schemas/DeckMessage"
+            },
+            "title": "Messages",
+            "type": "array"
+          }
+        },
+        "required": [
+          "session",
+          "messages"
+        ],
+        "title": "DeckPeekResult",
+        "type": "object"
+      },
+      "DeckRegisterParams": {
+        "additionalProperties": false,
+        "properties": {
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          },
+          "group": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Group"
+          },
+          "parent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Parent"
+          }
+        },
+        "required": [
+          "session_id"
+        ],
+        "title": "DeckRegisterParams",
+        "type": "object"
+      },
+      "DeckRegisterResult": {
+        "additionalProperties": false,
+        "properties": {
+          "ref": {
+            "title": "Ref",
+            "type": "string"
+          },
+          "handle": {
+            "title": "Handle",
+            "type": "integer"
+          },
+          "profile": {
+            "title": "Profile",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ref",
+          "handle",
+          "profile"
+        ],
+        "title": "DeckRegisterResult",
+        "type": "object"
+      },
+      "DeckResolveResult": {
+        "additionalProperties": false,
+        "properties": {
+          "session": {
+            "$ref": "#/components/schemas/DeckSession"
+          }
+        },
+        "required": [
+          "session"
+        ],
+        "title": "DeckResolveResult",
+        "type": "object"
+      },
+      "DeckSendParams": {
+        "additionalProperties": false,
+        "properties": {
+          "profile": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Profile"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          },
+          "from_session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "From Session Id"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "wait_s": {
+            "default": 0.0,
+            "title": "Wait S",
+            "type": "number"
+          }
+        },
+        "required": [
+          "target",
+          "message"
+        ],
+        "title": "DeckSendParams",
+        "type": "object"
+      },
+      "DeckSendResult": {
+        "additionalProperties": false,
+        "properties": {
+          "ref": {
+            "title": "Ref",
+            "type": "string"
+          },
+          "delivery_id": {
+            "title": "Delivery Id",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "woke": {
+            "title": "Woke",
+            "type": "boolean"
+          },
+          "reply": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Reply"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Error"
+          }
+        },
+        "required": [
+          "ref",
+          "delivery_id",
+          "status",
+          "woke"
+        ],
+        "title": "DeckSendResult",
+        "type": "object"
+      },
+      "DeckSession": {
+        "additionalProperties": false,
+        "description": "``session_deck._project`` + the host's live runtime id.",
+        "properties": {
+          "ref": {
+            "title": "Ref",
+            "type": "string"
+          },
+          "profile": {
+            "title": "Profile",
+            "type": "string"
+          },
+          "handle": {
+            "title": "Handle",
+            "type": "integer"
+          },
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          },
+          "tip_session_id": {
+            "title": "Tip Session Id",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "cwd": {
+            "title": "Cwd",
+            "type": "string"
+          },
+          "surface": {
+            "title": "Surface",
+            "type": "string"
+          },
+          "group_name": {
+            "title": "Group Name",
+            "type": "string"
+          },
+          "parent_handle": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Parent Handle"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          },
+          "owner_surface": {
+            "title": "Owner Surface",
+            "type": "string"
+          },
+          "owner_pid": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Owner Pid"
+          },
+          "live_session_id": {
+            "title": "Live Session Id",
+            "type": "string"
+          },
+          "message_count": {
+            "title": "Message Count",
+            "type": "integer"
+          },
+          "opened_at": {
+            "title": "Opened At",
+            "type": "number"
+          },
+          "last_active": {
+            "title": "Last Active",
+            "type": "number"
+          },
+          "estimated_cost_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Estimated Cost Usd"
+          }
+        },
+        "required": [
+          "ref",
+          "profile",
+          "handle",
+          "session_id",
+          "tip_session_id",
+          "title",
+          "model",
+          "cwd",
+          "surface",
+          "group_name",
+          "state",
+          "owner_surface",
+          "live_session_id",
+          "message_count",
+          "opened_at",
+          "last_active"
+        ],
+        "title": "DeckSession",
+        "type": "object"
+      },
+      "DeckTargetParams": {
+        "additionalProperties": false,
+        "description": "``target`` is a deck ref; ``from_session_id`` (a live runtime id) identifies a SESSION acting as\nthe sender, and makes a bare ``#N`` relative to that session's profile.",
+        "properties": {
+          "profile": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Profile"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          },
+          "from_session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "From Session Id"
+          }
+        },
+        "required": [
+          "target"
+        ],
+        "title": "DeckTargetParams",
         "type": "object"
       },
       "DelegationPauseParams": {
@@ -36425,6 +37153,30 @@
           "name": "payload",
           "schema": {
             "$ref": "#/components/schemas/ChangeSignalPayload"
+          }
+        }
+      ]
+    },
+    {
+      "name": "deck.changed",
+      "summary": "The open-session set or a session's runtime state changed (broadcast).",
+      "params": [
+        {
+          "name": "payload",
+          "schema": {
+            "$ref": "#/components/schemas/DeckChangedPayload"
+          }
+        }
+      ]
+    },
+    {
+      "name": "deck.closed",
+      "summary": "This session was closed through the deck; its runtime is ending.",
+      "params": [
+        {
+          "name": "payload",
+          "schema": {
+            "$ref": "#/components/schemas/DeckClosedPayload"
           }
         }
       ]

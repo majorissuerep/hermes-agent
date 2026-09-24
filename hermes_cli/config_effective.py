@@ -41,7 +41,8 @@ def _recover_user_raw(config_path: Path, path_key: str, exc: Exception) -> Dict[
     else the newest ``good`` copy in backups/config/, else ``{}`` (warned as defaults)."""
     raw = _LAST_GOOD_USER_RAW.get(path_key)
     fallback = "last-known-good"
-    if raw is None:
+    # Fork: a locked vault locks the backup too; the gate reloads config after unlock.
+    if raw is None and type(exc).__name__ not in _config._VAULT_CREDENTIAL_ERRORS:
         from hermes_cli.config_backups import load_newest_good_backup
         raw = load_newest_good_backup(config_path)
         fallback = "last-known-good-backup"

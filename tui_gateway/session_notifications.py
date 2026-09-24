@@ -595,11 +595,12 @@ def _notif_handle_ready(sid, session, events, emitted, registry, fmt, deferred, 
 
 def _poll_bot_live_delivery_once(sid: str, session: dict) -> bool:
     """Run one durable envelope only after local FIFO/continuations yield the idle boundary."""
-    from tools.bot_live_delivery import claim_pending_delivery, complete_delivery, find_canonical_live_owner, has_mailbox
+    from pathlib import Path
+
+    from tools.bot_live_delivery import claim_pending_delivery, complete_delivery, has_mailbox
 
     home = _session_home(session)
-    # Most profiles never receive a delivery: without a mailbox there is nothing to claim, and the owner
-    # lookup below costs a state.db open plus the exclusive active-session registry lock every pass (#111719).
+    # Most profiles never receive a delivery: without a mailbox there is nothing to claim (#111719).
     if not has_mailbox(home):
         return False
     with _session_turn_admission(session) as admitted:
@@ -608,13 +609,12 @@ def _poll_bot_live_delivery_once(sid: str, session: dict) -> bool:
                 "_auto_continue_scheduled")) or session.get("agent") is None:
             return False
         lease = session.get("active_session_lease")
-        if lease is None or getattr(lease, "released", False):
+        if lease is None or getattr(lease, "released", False) or not session.get("session_key"):
             return False
-        owner = find_canonical_live_owner(home)
-        if (not owner or owner.get("lease_id") != lease.lease_id
-                or owner.get("live_session_id") != sid
-                or owner.get("session_id") != session.get("session_key")):
-            return False
+        # Claim only envelopes pinned to THIS session's own lease: a sender (Bot Chat relay, session deck)
+        # pins the exact owner it resolved, so another runtime or a later lease can never execute it.
+        owner = {"profile_home": str(Path(home).resolve()), "session_id": session["session_key"],
+                 "lease_id": lease.lease_id, "live_session_id": sid}
         # The mailbox matches each envelope to this pinned lease/live id and compression lineage.
         claimed = claim_pending_delivery(home, owner)
         if claimed is None:

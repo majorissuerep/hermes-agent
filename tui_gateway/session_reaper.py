@@ -367,6 +367,9 @@ def _sweep_orphaned_session_rows() -> list[str]:
             if isinstance(session, dict):
                 candidates += [getattr(session.get("agent"), "session_id", None), session.get("session_key")]
             live_ids.update(str(c) for c in candidates if c)
+    # An open deck session is dormant, not orphaned: ending its row would un-open it behind the user's back.
+    with contextlib.suppress(Exception):
+        live_ids.update(row["tip_session_id"] for row in db.deck_rows())
     swept = db.sweep_orphaned_sessions(
         max_idle_seconds=_SESSION_TTL_S, sources=_ORPHAN_SWEEP_SOURCES, exclude_ids=tuple(sorted(live_ids)))
     if swept:

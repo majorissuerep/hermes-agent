@@ -218,6 +218,15 @@ function statusSessionCountLabel(count: number) {
   return `${count} ${count === 1 ? 'session' : 'sessions'}`
 }
 
+/** Deck mode: this session's address plus the machine-wide open count (`#3 · 5 open`). */
+export function statusDeckLabel(ref: null | string, openCount: number) {
+  if (!ref) {
+    return openCount > 0 ? `${openCount} open` : ''
+  }
+
+  return openCount > 0 ? `${ref} · ${openCount} open` : ref
+}
+
 // Colour the battery read-out by its (Python-computed) category. Inverted vs
 // the context bar — a full battery is "good", an empty one "critical".
 function batteryColor(info: BatteryInfo, t: Theme): string {
@@ -515,6 +524,7 @@ export function StatusRule({
   bgCount,
   lastTurnEndedAt,
   liveSessionCount,
+  deckLabel,
   sessionTitle,
   sessionStartedAt,
   turnStartedAt,
@@ -605,7 +615,9 @@ export function StatusRule({
     return false
   }
 
-  const sessionCountText = liveSessionCount > 0 ? statusSessionCountLabel(liveSessionCount) : ''
+  const sessionCountText =
+    deckLabel !== undefined ? deckLabel : liveSessionCount > 0 ? statusSessionCountLabel(liveSessionCount) : ''
+
   const compressions = typeof usage.compressions === 'number' ? usage.compressions : 0
 
   // Dev-only readout (HERMES_DEV_CREDITS). The server omits the key entirely unless the
@@ -952,6 +964,8 @@ interface StatusRuleProps {
   bgCount: number
   lastTurnEndedAt?: null | number
   liveSessionCount: number
+  /** Deck mode: replaces the live-session count (`#3 · 5 open`); see statusDeckLabel. */
+  deckLabel?: string
   busy: boolean
   // Context compaction in progress — FaceTicker freezes on "compacting".
   compacting?: boolean

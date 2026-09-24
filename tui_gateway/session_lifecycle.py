@@ -360,8 +360,10 @@ def _finalize_session(session: dict | None, end_reason: str = "tui_close") -> No
     if (history_ready := session.get("resume_history_ready")) is not None and not history_ready.is_set():
         session["resume_history_error"] = "session resume cancelled"
         history_ready.set()
-    _desktop_automatic_cleanup = (
-        end_reason in _AUTOMATIC_SESSION_END_REASONS and _session_source(session).strip().lower() == "desktop")
+    # Deck sessions share Desktop's rule: an automatic reclaim frees the runtime but the conversation stays
+    # open (the deck shows it dormant) until the user closes it.
+    _desktop_automatic_cleanup = end_reason in _AUTOMATIC_SESSION_END_REASONS and (
+        _session_source(session).strip().lower() == "desktop" or bool(session.get("deck")))
     # Automatic Desktop cleanup releases its lease inside the lifecycle guard below; other paths keep force/end semantics.
     if not _desktop_automatic_cleanup:
         _release_active_session_slot(session)
@@ -753,6 +755,10 @@ def _schedule_ws_orphan_reap(
     """After a grace window, reap session ``sid`` iff it's still orphaned. Called from the WS-disconnect path; a
     reconnect or ``session.resume`` cancels the reap by re-binding a live transport. Disabled when grace is 0."""
     if _WS_ORPHAN_REAP_GRACE_S <= 0:
+        return
+    # Deck sessions are open until explicitly closed: losing the last client parks them detached, never
+    # reaps them (idle TTL / LRU still reclaim the runtime; the conversation stays open — methods_deck).
+    if (_sessions.get(sid) or {}).get("deck"):
         return
 
     def _reap() -> None:

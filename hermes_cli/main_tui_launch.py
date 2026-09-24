@@ -729,7 +729,8 @@ def _launch_tui(
     provider: Optional[str] = None, toolsets: object = None, skills: object = None,
     verbose: Optional[bool] = None, quiet: bool = False, query: Optional[str] = None,
     image: Optional[str] = None, worktree: bool = False, checkpoints: bool = False,
-    pass_session_id: bool = False, max_turns: Optional[int] = None, accept_hooks: bool = False):
+    pass_session_id: bool = False, max_turns: Optional[int] = None, accept_hooks: bool = False,
+    deck_profile: Optional[str] = None, deck_cwd: Optional[str] = None, deck_home: bool = False):
     """Replace current process with the TUI."""
     from hermes_cli.main import PROJECT_ROOT
     tui_dir = PROJECT_ROOT / "ui-tui"
@@ -739,12 +740,25 @@ def _launch_tui(
     # the single factory; keep secrets (the TUI/agent needs provider creds).
     from tools.environments.local import build_subprocess_env
     env = build_subprocess_env(scrub_secrets=False, inherit_profile_home=True)
-    from hermes_cli.shared_session_attach import configure_tui_attachment
-    try:
-        configure_tui_attachment(env, resume_session_id)
-    except (ValueError, RuntimeError) as exc:
-        print(f"Error: {exc}", file=sys.stderr)
-        raise SystemExit(1) from None
+    # Deck mode: the session lives in the machine session host. Per-launch overrides the backend reads from
+    # ITS env (model, toolsets, skills, worktree, ...) cannot reach a shared host, so those launches keep a
+    # private backend.
+    local_only = any((model, provider, toolsets, skills, worktree, checkpoints, pass_session_id,
+                      max_turns is not None, accept_hooks, verbose, quiet))
+    from hermes_cli.tui_deck_launch import configure_deck_host, print_deck_exit_summary
+    deck_mode = not local_only and configure_deck_host(
+        env, profile=deck_profile, cwd=deck_cwd, required=deck_home or deck_profile is not None)
+    if (deck_home or deck_profile is not None) and not deck_mode:
+        raise SystemExit(1)
+    if deck_home:
+        env["HERMES_TUI_DECK_HOME"] = "1"
+    if not deck_mode:
+        from hermes_cli.shared_session_attach import configure_tui_attachment
+        try:
+            configure_tui_attachment(env, resume_session_id)
+        except (ValueError, RuntimeError) as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            raise SystemExit(1) from None
     try:
         from hermes_cli.config import apply_terminal_config_to_env
         apply_terminal_config_to_env(env=env)
@@ -807,7 +821,10 @@ def _launch_tui(
             code = 130
 
         if code in {0, 130}:
-            _print_tui_exit_summary(resume_session_id, active_session_file)
+            if deck_mode:
+                print_deck_exit_summary(active_session_file, deck_profile)
+            else:
+                _print_tui_exit_summary(resume_session_id, active_session_file)
     finally:
         with contextlib.suppress(OSError):
             os.unlink(active_session_file)

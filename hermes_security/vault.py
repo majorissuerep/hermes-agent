@@ -548,6 +548,40 @@ def unlock(home: Path | str, password: str | bytes) -> Vault:
     return vault
 
 
+def unlocked_homes() -> list[Path]:
+    with _VAULT_LOCK:
+        return list(_VAULTS)
+
+
+def export_unlocked_key(home: Path | str) -> bytes:
+    """The unlocked master key of *home*, for handing to a child process (``hermes_security.handoff``)."""
+
+    home_path = Path(home).expanduser().resolve()
+    with _VAULT_LOCK:
+        vault = _VAULTS.get(home_path)
+    if vault is None:
+        raise VaultLockedError(f"The vault at {home_path} is not unlocked in this process")
+    return bytes(vault.master_key)
+
+
+def adopt_unlocked_key(home: Path | str, master_key: bytes) -> Vault:
+    """Cache a master key handed over by a parent process, after proving it against the verifier:
+    a wrong or forged key is refused exactly like a wrong password."""
+
+    home_path = Path(home).expanduser().resolve()
+    meta = _load_meta(home_path)
+    if meta is None:
+        raise VaultNotInitializedError(f"No vault at {home_path}")
+    salt, verifier = _b64d(meta.get("salt", "")), _b64d(meta.get("verifier", ""))
+    if len(salt) != _SALT_BYTES or len(verifier) < _NONCE_BYTES + 16:
+        raise VaultIntegrityError(f"Vault metadata at {home_path} is corrupt")
+    if not _check_verifier(bytes(master_key), salt, verifier):
+        raise WrongMasterPasswordError("The handed-over key does not open this vault")
+    vault = Vault(home=home_path, master_key=bytes(master_key))
+    with _VAULT_LOCK:
+        return _VAULTS.setdefault(home_path, vault)
+
+
 def _read_key_file(path: str) -> bytes:
     """Read a raw 32-byte X25519 key from *path* (base64 or hex text)."""
 
@@ -651,7 +685,15 @@ _DB_SUFFIXES = (".db", ".sqlite", ".sqlite3")
 
 
 def _is_in_skip_dir(rel: Path | str) -> bool:
+    """True for paths inside a public code/artifact tree (never encrypted).
+
+    ``hermes-agent.<anything>`` covers the install's moved-aside siblings
+    (takeover's ``hermes-agent.pre-fork-<stamp>`` rollback copy): migration
+    sealed one of those into 17k envelopes, making the rollback tree unusable.
+    """
     parts = Path(rel).parts
+    if parts and parts[0].startswith("hermes-agent."):
+        return True
     return any(part in _SKIP_DIRS for part in parts)
 
 

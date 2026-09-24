@@ -157,8 +157,10 @@ _DETAIL_MODES = frozenset({"hidden", "collapsed", "expanded"})
 # open; bot_relay.* = a FULL one-turn agent conversation (600s); setup.* / session.active_list =
 # Desktop-polled and under GIL pressure block the WS read loop (false "needs setup", stalled
 # interrupts); voice.*/wake.* = SYNCHRONOUS faster-whisper install (300s); session.workspace.move =
-# git subprocess probes on an arbitrary (maybe slow) mount.
+# git subprocess probes on an arbitrary (maybe slow) mount; deck.* = a state.db pass over every profile, and
+# deck.send may block up to wait_s for the target's reply.
 _LONG_HANDLERS = frozenset({
+    "deck.send", "deck.list", "deck.peek", "deck.close",
     "session.foreign.list", "session.foreign.preview", "session.foreign.import",
     "billing.state", "subscription.state", "subscription.preview", "subscription.change",
     "subscription.resume", "subscription.upgrade", "usage.bars", "session.usage", "billing.step_up",
@@ -3342,7 +3344,7 @@ from . import (  # noqa: E402
     methods_session_control as _methods_session_control, methods_subagents as _methods_subagents,
     methods_vault as _methods_vault, methods_free_tier as _methods_free_tier,
     methods_connectors as _methods_connectors, methods_connectors_account as _methods_connectors_account,
-    methods_onboarding as _methods_onboarding)
+    methods_onboarding as _methods_onboarding, methods_deck as _methods_deck)
 
 for _m in (
     _session_transports, _session_reaper, _session_lifecycle, _session_workdir, _compute_host_bridge, _model_switch,
@@ -3353,6 +3355,6 @@ for _m in (
     _methods_config_set, _methods_complete, _methods_tools, _methods_profiles, _methods_images,
     _methods_bot_relay, _prompt_turn, _billing_view, _methods_projects, _methods_session_foreign,
     _methods_session_control, _methods_subagents, _methods_vault, _methods_free_tier, _methods_connectors,
-    _methods_connectors_account, _methods_onboarding):
+    _methods_connectors_account, _methods_onboarding, _methods_deck):
     _m.register(sys.modules[__name__])
 del _m

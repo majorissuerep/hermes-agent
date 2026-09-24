@@ -308,18 +308,29 @@ def cmd_vault(args: Any) -> int:
         from hermes_security.migrate import repair_clobbered_state
 
         report = repair_clobbered_state(home)
-        if report["sealed"]:
-            print(f"✓ Re-sealed {len(report['sealed'])} plaintext file(s) into envelopes:")
-            for rel in report["sealed"][:20]:
+        sections = (
+            ("sealed", "✓ Re-sealed {n} plaintext file(s) into envelopes:"),
+            ("unwrapped", "✓ Unwrapped {n} database/stream file(s) a previous repair wrapped in envelopes:"),
+            ("reframed", "✓ Re-framed {n} log/transcript stream(s) holding plaintext:"),
+            ("restored", "✓ Restored {n} mangled file(s) from the pre-migration backup:"),
+            ("skipped_dbs", "⚠ {n} PLAINTEXT database(s) left untouched (vault bypass suspected — investigate):"),
+            ("unrecoverable", "✗ {n} file(s) could not be repaired:"),
+        )
+        for key, title in sections:
+            items = report[key]
+            if not items:
+                continue
+            print(title.format(n=len(items)))
+            for rel in items[:20]:
                 print(f"    {rel}")
-            if len(report["sealed"]) > 20:
-                print(f"    … and {len(report['sealed']) - 20} more")
-        else:
-            print("○ No plaintext state files found (home is fully sealed)")
-        if report["skipped_dbs"]:
-            print(f"⚠ {len(report['skipped_dbs'])} PLAINTEXT database(s) left untouched (vault bypass suspected — investigate):")
-            for rel in report["skipped_dbs"][:10]:
-                print(f"    {rel}")
+            if len(items) > 20:
+                print(f"    … and {len(items) - 20} more")
+        if report["code_files"]:
+            print(f"✓ Restored {report['code_files']} file(s) in hermes-agent.* code trees to plaintext (public code)")
+        if not any(report[key] for key, _ in sections) and not report["code_files"]:
+            print("○ Nothing to repair (every state file is in its canonical sealed form)")
+        if report["unrecoverable"]:
+            return 1
         return 0
 
     if command == "lock":
@@ -345,9 +356,13 @@ def gate_locked_vault(args: Any, home) -> None:
 
     if vault_mod.is_unlocked(home):
         return
+    from hermes_security.handoff import adopt_inherited_key
+
     try:
-        password = _password_from_env_or_prompt()
-        vault_mod.unlock(home, password)
+        # A detached child (the session host) inherits its launcher's unlocked key over a pipe fd.
+        if not (adopt_inherited_key() and vault_mod.is_unlocked(home)):
+            password = _password_from_env_or_prompt()
+            vault_mod.unlock(home, password)
         # An import-time config read (parser build, plugin discovery) ran while
         # the vault was locked and cached the degraded empty parse; drop every
         # config cache so post-unlock loads see the real decrypted file.
@@ -362,6 +377,18 @@ def gate_locked_vault(args: Any, home) -> None:
                 obj = getattr(_cfg, key)
                 if isinstance(obj, dict):
                     obj.clear()
+        # The import-time dotenv load ran locked and deferred the sealed .env;
+        # without this reload no .env key ever reaches the process.
+        from hermes_cli.env_loader import load_hermes_dotenv
+
+        try:
+            load_hermes_dotenv()
+        except Exception as exc:  # noqa: BLE001 - a bad .env must not block 'secure-vault repair' advice
+            print(
+                f"⚠ hermes: sealed .env not loaded ({type(exc).__name__}); "
+                "run 'hermes secure-vault repair'",
+                file=sys.stderr,
+            )
     except vault_errors.WrongMasterPasswordError:
         print("✗ Wrong master password")
         raise SystemExit(2)

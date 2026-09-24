@@ -116,6 +116,8 @@ LAZY_DEPS: dict[str, tuple[str, ...]] = {
     # install on the sealed Docker image (durable-target only).
     "memory.supermemory": ("supermemory==3.50.0",),
     "memory.mem0": ("mem0ai>=2.0.10,<3",),
+    # Local encrypted memory: in-RAM LanceDB index + local ONNX embeddings (plugins/memory/lancedb).
+    "memory.lancedb": ("lancedb==0.39.0", "fastembed==0.8.1"),
 
     # ─── Messaging platforms (lazy-installable on demand) ──────────────────
     "platform.telegram": ("python-telegram-bot[webhooks]==22.8",),

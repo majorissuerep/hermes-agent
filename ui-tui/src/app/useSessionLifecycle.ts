@@ -20,6 +20,7 @@ import { asRpcResult } from '../lib/rpc.js'
 import type { Msg, PanelSection, SessionInfo } from '../types.js'
 
 import { applyConnectionRequest, clearConnectionOperation } from './connectionOperationStore.js'
+import { DECK_MODE, deckCreateParams, deckResumeParams, registerDeckSession } from './deckStore.js'
 import type { ComposerActions, GatewayRpc, StateSetter } from './interfaces.js'
 import { patchOverlayState } from './overlayStore.js'
 import { scheduleResumeScrollToBottom } from './sessionResumeView.js'
@@ -144,10 +145,24 @@ export function useSessionLifecycle(opts: UseSessionLifecycleOptions) {
     sys
   } = opts
 
+  // Deck mode: moving away from a session DETACHES it — it stays open (and running) in the host.
   const closeSession = useCallback(
     (targetSid?: null | string) =>
-      targetSid ? rpc<SessionCloseResponse>('session.close', { session_id: targetSid }) : Promise.resolve(null),
+      !targetSid
+        ? Promise.resolve(null)
+        : DECK_MODE
+          ? rpc('deck.detach', { session_id: targetSid })
+          : rpc<SessionCloseResponse>('session.close', { session_id: targetSid }),
     [rpc]
+  )
+
+  const announceDeckSession = useCallback(
+    (sessionId: string) => {
+      registerDeckSession(gw, sessionId).catch((e: unknown) =>
+        sys(`warning: session is not in the deck (${e instanceof Error ? e.message : String(e)})`)
+      )
+    },
+    [gw, sys]
   )
 
   const cancelResumeScrollRef = useRef<null | (() => void)>(null)
@@ -210,7 +225,7 @@ export function useSessionLifecycle(opts: UseSessionLifecycleOptions) {
         await closeSession(previousSid)
       }
 
-      const r = await rpc<SessionCreateResponse>('session.create', { cols: colsRef.current })
+      const r = await rpc<SessionCreateResponse>('session.create', { cols: colsRef.current, ...deckCreateParams() })
 
       if (!r) {
         patchUiState({ status: 'ready' })
@@ -278,10 +293,22 @@ export function useSessionLifecycle(opts: UseSessionLifecycleOptions) {
       }
 
       signalFreshSessionBoundary(previousSid, r.session_id, onFreshSessionStarted)
+      announceDeckSession(r.session_id)
 
       return r.session_id
     },
-    [closeSession, colsRef, onFreshSessionStarted, panel, resetSession, rpc, setHistoryItems, setSessionStartedAt, sys]
+    [
+      announceDeckSession,
+      closeSession,
+      colsRef,
+      onFreshSessionStarted,
+      panel,
+      resetSession,
+      rpc,
+      setHistoryItems,
+      setSessionStartedAt,
+      sys
+    ]
   )
 
   const newSession = useCallback(
@@ -335,6 +362,7 @@ export function useSessionLifecycle(opts: UseSessionLifecycleOptions) {
             usage: usageFrom(info)
           })
           hydrateLiveSessionInflight(r.inflight)
+          announceDeckSession(r.session_id)
 
           if (r.pending_connection) {
             applyConnectionRequest(r.pending_connection)
@@ -348,11 +376,12 @@ export function useSessionLifecycle(opts: UseSessionLifecycleOptions) {
           patchUiState({ status: 'ready' })
         })
     },
-    [gw, resetSession, scrollRef, setHistoryItems, setSessionStartedAt, sys]
+    [announceDeckSession, gw, resetSession, scrollRef, setHistoryItems, setSessionStartedAt, sys]
   )
 
+  // ``profile`` (deck mode): the deck spans profiles, so a row carries the profile its session lives in.
   const resumeById = useCallback(
-    (id: string) => {
+    (id: string, profile?: string) => {
       patchOverlayState({ sessions: false })
       patchUiState({ status: 'resuming…' })
 
@@ -367,7 +396,11 @@ export function useSessionLifecycle(opts: UseSessionLifecycleOptions) {
         const previousSid = getUiState().sid
 
         return gw
-          .request<SessionResumeResult>('session.resume', { cols: colsRef.current, session_id: id })
+          .request<SessionResumeResult>('session.resume', {
+            cols: colsRef.current,
+            session_id: id,
+            ...deckResumeParams(profile)
+          })
           .then(raw => {
             const r = asRpcResult<SessionResumeResult>(raw)
 
@@ -398,6 +431,7 @@ export function useSessionLifecycle(opts: UseSessionLifecycleOptions) {
               usage: usageFrom(info)
             })
             hydrateLiveSessionInflight(r.inflight)
+            announceDeckSession(r.session_id)
 
             if (r.pending_connection) {
               applyConnectionRequest(r.pending_connection)
@@ -418,7 +452,19 @@ export function useSessionLifecycle(opts: UseSessionLifecycleOptions) {
           })
       })
     },
-    [closeSession, colsRef, gw, panel, resetSession, rpc, scrollRef, setHistoryItems, setSessionStartedAt, sys]
+    [
+      announceDeckSession,
+      closeSession,
+      colsRef,
+      gw,
+      panel,
+      resetSession,
+      rpc,
+      scrollRef,
+      setHistoryItems,
+      setSessionStartedAt,
+      sys
+    ]
   )
 
   const guardBusySessionSwitch = useCallback(

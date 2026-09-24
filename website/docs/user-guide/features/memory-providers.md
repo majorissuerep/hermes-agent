@@ -1,7 +1,7 @@
 ---
 sidebar_position: 4
 title: "Memory Providers"
-description: "External memory provider plugins — Honcho, OpenViking, Mem0, Hindsight, Holographic, RetainDB, ByteRover, Supermemory"
+description: "External memory provider plugins — Honcho, OpenViking, Mem0, Hindsight, Holographic, LanceDB, RetainDB, ByteRover, Supermemory"
 ---
 
 # Memory Providers
@@ -22,7 +22,7 @@ Or set manually in `~/.hermes/config.yaml`:
 
 ```yaml
 memory:
-  provider: openviking   # or honcho, mem0, hindsight, holographic, retaindb, byterover, supermemory
+  provider: openviking   # or honcho, mem0, hindsight, holographic, lancedb, retaindb, byterover, supermemory
 ```
 
 ## How It Works
@@ -509,6 +509,42 @@ hermes config set memory.provider holographic
 - `contradict` — automated detection of conflicting facts
 - Trust scoring with asymmetric feedback (+0.05 helpful / -0.10 unhelpful)
 
+### LanceDB
+
+Encrypted, fully local cross-session memory: every conversation turn, remembered fact and subagent result is sealed into the Hermes vault and searchable later by meaning **and** keywords, in ~50 languages. Built for this fork's at-rest encryption: nothing readable ever reaches disk.
+
+| | |
+|---|---|
+| **Best for** | Private long-term memory that recalls past sessions without any cloud service |
+| **Requires** | The Hermes vault (`hermes secure-vault migrate`); `lancedb` + `fastembed` (installed with the fork, or lazy-installed on first use) |
+| **Data storage** | `$HERMES_HOME/lancedb-memory/memories.jsonl`: a vault frame stream (AES-GCM per record). The LanceDB index lives only in RAM, rebuilt from the log on start |
+| **Cost** | Free. The embedding model runs locally (ONNX); its public weights (~220 MB) are downloaded once into `$HERMES_HOME/cache/fastembed` |
+
+**Tools:** `lance_recall` (hybrid / semantic / keyword search with kind, session, time-range and tag filters), `lance_memory` (remember, update, forget, get, related, timeline, sessions, session, stats)
+
+**Setup:**
+```bash
+hermes memory setup    # select "lancedb"
+# Or manually:
+hermes config set memory.provider lancedb
+```
+
+**Config:** `config.yaml` under `plugins.lancedb-memory`
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `embedding_model` | `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2` | Any fastembed text model; switching re-embeds stored memories in the background |
+| `capture_turns` | `true` | Store every completed turn (user + assistant, clipped) for episodic recall |
+| `mirror_builtin` | `true` | Mirror built-in `memory` tool writes (MEMORY.md / USER.md) as searchable facts |
+| `recall_limit` | `4` | Memories auto-recalled per turn (`0` disables auto-recall; tools still work) |
+| `recall_min_similarity` | `0.25` | Cosine floor for auto-recall; hits must also score ≥ half of the best hit |
+
+**How it works:**
+- Each turn, relevant memories from *other* sessions are recalled into the turn (this session's turns are already in context). Auto-recall ranks with reciprocal-rank fusion of vector and BM25 results, then gates on similarity so an unrelated prompt recalls nothing.
+- Writes append one encrypted frame under a cross-process lock; every reader catches up from its last byte offset, so the gateway, CLI and TUI sharing a profile see each other's memories immediately.
+- `forget` rewrites the log without the erased record (no ciphertext left in the stream); superseded versions are compacted automatically.
+- Subagent, cron and flush agents can read memory but never write turns into it.
+
 ---
 
 ### RetainDB
@@ -680,6 +716,7 @@ hermes memory setup
 | **Mem0** | Cloud/Self-hosted | Free/Paid | 4 | `mem0ai` | Server-side LLM extraction + self-hosted/OSS modes |
 | **Hindsight** | Cloud/Local | Free/Paid | 3 | `hindsight-client` | Knowledge graph + reflect synthesis |
 | **Holographic** | Local | Free | 2 | None | HRR algebra + trust scoring |
+| **LanceDB** | Local (vault-encrypted) | Free | 2 | `lancedb`, `fastembed` | Encrypted hybrid recall across sessions + session/timeline navigation |
 | **RetainDB** | Cloud | $20/mo | 10 | `requests` | Delta compression |
 | **ByteRover** | Local/Cloud | Free/Paid | 3 | `brv` CLI | Pre-compression extraction |
 | **Supermemory** | Cloud/Self-hosted | Free/Paid | 4 | `supermemory` | Context fencing + session graph ingest + multi-container |
@@ -689,7 +726,7 @@ hermes memory setup
 
 Each provider's data is isolated per [profile](../profiles.md):
 
-- **Local storage providers** (Holographic, ByteRover) use `$HERMES_HOME/` paths which differ per profile
+- **Local storage providers** (Holographic, LanceDB, ByteRover) use `$HERMES_HOME/` paths which differ per profile
 - **Config file providers** (Honcho, Mem0, Hindsight, Supermemory) store config in `$HERMES_HOME/` so each profile has its own credentials
 - **Cloud providers** (RetainDB) auto-derive profile-scoped project names
 - **Env var providers** (OpenViking) are configured via each profile's `.env` file
