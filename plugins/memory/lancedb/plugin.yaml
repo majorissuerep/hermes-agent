@@ -1,0 +1,6 @@
+name: lancedb
+version: 0.1.0
+description: "LanceDB memory — vault-encrypted local cross-session memory: hybrid (vector + BM25) recall with a local multilingual embedding model, session/timeline navigation."
+pip_dependencies:
+  - lancedb==0.39.0
+  - fastembed==0.8.1
