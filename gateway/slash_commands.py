@@ -938,6 +938,20 @@ class GatewaySlashCommandsMixin(
         # system prompt/tool schema (prompt-cache prefix is sacred).
         return run_approval_mode_command(requested).message
 
+    async def _handle_sandbox_command(self, event: MessageEvent) -> Union[str, EphemeralReply]:
+        """Handle /sandbox — this session's OS sandbox. Grants reach the host filesystem, so
+        anything beyond viewing needs a gateway admin (unconfigured policies: unrestricted)."""
+        from gateway.slash_access import policy_for_source
+        from hermes_cli.sandbox_command import dispatch_sandbox_command
+        args = event.get_command_args().strip()
+        sub = args.split(maxsplit=1)[0].lower() if args else "status"
+        if sub not in ("status", "presets", "help") and not policy_for_source(
+                self.config, event.source).is_admin(event.source.user_id):
+            return "Only gateway admins can change the sandbox."
+        reply = dispatch_sandbox_command(args, session_key=self._session_key_for_source(event.source))
+        text = reply.text + ("\nSend /new to start the new session." if reply.reset_session else "")
+        return EphemeralReply(text)
+
     async def _handle_yolo_command(self, event: MessageEvent) -> Union[str, EphemeralReply]:
         """Handle /yolo — toggle dangerous command approval bypass for this session only."""
         from tools.approval import disable_session_yolo, enable_session_yolo, is_session_yolo_enabled

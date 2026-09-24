@@ -45,6 +45,7 @@ hermes [global-options] <command> [subcommand/options]
 | `hermes gateway` | Run or manage the messaging gateway service. |
 | `hermes proxy` | Local OpenAI-compatible proxy that attaches OAuth provider credentials. See [Subscription Proxy](../user-guide/features/subscription-proxy.md). |
 | `hermes egress` | Outbound credential-injection firewall for remote terminal sandboxes (iron-proxy). Disabled by default. See [Egress proxy](../user-guide/egress/iron-proxy.md). |
+| `hermes sandbox` | OS-native default-deny sandbox (Landlock+seccomp / Seatbelt) for model tools, files and processes. See [Sandbox](../user-guide/features/sandbox.md). |
 | `hermes lsp` | Manage Language Server Protocol integration (semantic diagnostics for write_file/patch). |
 | `hermes setup` | Interactive setup wizard for all or part of the configuration. |
 | `hermes whatsapp` | Configure and pair the WhatsApp bridge. |
@@ -655,6 +656,27 @@ On-demand vulnerability scan against [OSV.dev](https://osv.dev). Covers the Herm
 | `--skip-venv` | off | Skip scanning the Hermes Python venv. |
 | `--skip-plugins` | off | Skip scanning plugin requirements files. |
 | `--skip-mcp` | off | Skip scanning pinned MCP servers in `config.yaml`. |
+
+
+## `hermes sandbox`
+
+```bash
+hermes sandbox <subcommand>
+```
+
+Configures the kernel-enforced sandbox for new sessions (`sandbox:` in config.yaml). Per-session grants use the `/sandbox` slash command. See [Sandbox](../user-guide/features/sandbox.md).
+
+| Subcommand | Description |
+|------------|-------------|
+| `status` | Backend (Landlock ABI / Seatbelt), presets, allowed tools, expanded grants, network. |
+| `setup` | Guided: pick default presets, enable, run `check`. |
+| `enable [--preset P]...` / `disable` | Turn the sandbox on/off for new sessions. |
+| `grant PATH[:ro\|:rw] [--force]` / `revoke PATH` | Persistent grants (scanned first; `--force` accepts findings). |
+| `tools [list\|add\|remove] NAMES` | Default allowed tools/toolsets (`*` = all). |
+| `preset [list\|add\|remove] NAMES` / `presets` | Default presets / list the catalog. |
+| `scan PATH` | Report credential files and secrets a grant would expose (exit 1 on findings). |
+| `check` | Live self-test: 8 confinement probes on this machine (exit 1 on any failure). |
+| `run [--preset P] [--grant G] [--net] [--explain] -- CMD` | Run a command inside the current policy (debug grants). |
 
 
 ## `hermes login` / `hermes logout` *(Deprecated)*

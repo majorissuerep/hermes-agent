@@ -404,6 +404,27 @@ def raise_if_read_blocked(path: str) -> None:
         raise ValueError(blocked)
 
 
+def get_model_read_block_error(path: str) -> Optional[str]:
+    """``get_read_block_error`` for reads the MODEL requests (tools), plus the session's
+    sandbox grants. User-initiated reads (``@file`` references, attachments) use the plain
+    guard. A file the user granted by exact path (e.g. a project ``.env``) is readable even
+    though the denylist would refuse it; Hermes' own stores never are."""
+    from hermes_security.sandbox.paths import is_explicit_file_grant, read_block_reason
+    blocked = get_read_block_error(path)
+    if blocked and is_explicit_file_grant(path):
+        resolved = Path(path).expanduser().resolve()
+        if not any(_is_under(resolved, hd) for hd in _hermes_dirs()):
+            blocked = None
+    return blocked or read_block_reason(path)
+
+
+def raise_if_model_read_blocked(path: str) -> None:
+    """``raise_if_read_blocked`` with the session's sandbox grants (model-supplied paths)."""
+    blocked = get_model_read_block_error(path)
+    if blocked:
+        raise ValueError(blocked)
+
+
 def _resolve_active_profile_name() -> str:
     """Active profile name from HERMES_HOME: ``~/.hermes`` -> ``"default"``,
     ``~/.hermes/profiles/X`` -> ``"X"``; ``"default"`` on any resolution failure."""

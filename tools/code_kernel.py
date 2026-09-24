@@ -311,6 +311,8 @@ class SessionKernel:
         self.tmpdir = self.rpc_token = self.sentinel = ""
         self.sock_path: Optional[str] = None
         self.server_sock: Optional[socket.socket] = None
+        # Sandboxed kernels cannot create sockets: they inherit one end of a socketpair.
+        self.rpc_conn: Optional[socket.socket] = None
         self.stop_event = threading.Event()
         self.death_pipe_w: Optional[int] = None
         self.tool_call_log: List = []
@@ -347,6 +349,13 @@ class SessionKernel:
             from tools.code_execution_tool import _kill_process_group
             _kill_process_group(self.proc, escalate=True)
         sock, self.server_sock = self.server_sock, None
+        conn, self.rpc_conn = self.rpc_conn, None
+        try:
+            if conn is not None:
+                conn.shutdown(socket.SHUT_RDWR)  # wakes the serving thread's blocking recv
+                conn.close()
+        except OSError:
+            pass
         try:
             if sock is not None:
                 sock.close()
@@ -489,6 +498,12 @@ def _rpc_forever(kernel: SessionKernel, max_tool_calls: int,
         if authority is None:
             return tool_error("No active execute_code cell: this kernel has no cell authority installed.")
         return authority.dispatch(tool_name, tool_args)
+    if kernel.rpc_conn is not None:
+        from tools.code_execution_rpc import _serve_rpc_connection
+        _serve_rpc_connection(kernel.rpc_conn, "", kernel.tool_call_log, kernel.tool_call_counter,
+                              max_tool_calls, sandbox_tools, kernel.rpc_token, dispatch=_dispatch,
+                              idle_timeout=None)
+        return
     while not kernel.stop_event.is_set():
         _rpc_server_loop(kernel.server_sock, "", kernel.tool_call_log, kernel.tool_call_counter,
                          max_tool_calls, sandbox_tools, kernel.stop_event, kernel.rpc_token,
@@ -578,6 +593,22 @@ def _bind_rpc_socket(kernel: SessionKernel) -> str:
     return rpc_endpoint
 
 
+def _inherited_rpc_socket(kernel: SessionKernel) -> Tuple[str, socket.socket]:
+    """Sandboxed kernels: a connected socketpair; the child end is inherited as ``fd://N``
+    (the sandbox forbids creating AF_UNIX sockets, which would otherwise reach the Docker
+    socket or the session bus)."""
+    parent_end, child_end = socket.socketpair()
+    kernel.rpc_conn = parent_end
+    return f"fd://{child_end.fileno()}", child_end
+
+
+def _python_runtime_dirs(child_python: str) -> List[str]:
+    """Read-only dirs the kernel interpreter needs: its venv and the base installation."""
+    real = os.path.realpath(child_python)
+    dirs = {sys.prefix, sys.base_prefix, sys.exec_prefix, os.path.dirname(os.path.dirname(real))}
+    return sorted(d for d in dirs if d and d != "/")
+
+
 def _parent_process_handle(child_env: Dict[str, str]):
     """Windows: open an inheritable SYNCHRONIZE handle to this process for the kernel's parent-death
     watchdog. Returns (handle, CloseHandle, startupinfo) or (None, None, None); fails open."""
@@ -614,7 +645,15 @@ def _spawn(kernel: SessionKernel, *, child_python: str, child_cwd: str,
     kernel.tmpdir = tempfile.mkdtemp(prefix="hermes_kernel_")
     kernel.rpc_token = secrets.token_urlsafe(32)
     kernel.sentinel = "@@HERMES-KERNEL-" + secrets.token_urlsafe(16) + "@@"
-    rpc_endpoint = _bind_rpc_socket(kernel)
+    from hermes_security.sandbox.policy import is_enabled as _sandbox_enabled
+    sandboxed = _sandbox_enabled()
+    child_rpc_sock: Optional[socket.socket] = None
+    if sandboxed:
+        from hermes_security.sandbox.spawn import require_backend
+        require_backend()  # before any kernel resources exist: never an unconfined fallback
+        rpc_endpoint, child_rpc_sock = _inherited_rpc_socket(kernel)
+    else:
+        rpc_endpoint = _bind_rpc_socket(kernel)
     for name, src in (("hermes_tools.py", generate_hermes_tools_module(list(sandbox_tools))),
                       ("hermes_kernel_runner.py", KERNEL_RUNNER_SOURCE)):
         Path(kernel.tmpdir, name).write_text(src, encoding="utf-8")
@@ -634,9 +673,16 @@ def _spawn(kernel: SessionKernel, *, child_python: str, child_cwd: str,
         death_r, kernel.death_pipe_w = os.pipe()
         child_env["HERMES_KERNEL_PARENT_DEATH_FD"] = str(death_r)
         pass_fds = (death_r,)
+    argv = [child_python, os.path.join(kernel.tmpdir, "hermes_kernel_runner.py")]
+    if sandboxed:
+        from hermes_security.sandbox.spawn import apply_env, sandboxed_spawn
+        pass_fds += (child_rpc_sock.fileno(),)
+        argv, sandbox_env = sandboxed_spawn(argv, extra_read=_python_runtime_dirs(child_python),
+                                            extra_write=[kernel.tmpdir])
+        apply_env(child_env, sandbox_env)
     try:
         kernel.proc = subprocess.Popen(
-            [child_python, os.path.join(kernel.tmpdir, "hermes_kernel_runner.py")],
+            argv,
             # Strict mode passes an empty cwd: the kernel's staging dir plays the per-call tmpdir's role.
             cwd=child_cwd or kernel.tmpdir, env=child_env, start_new_session=True,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.PIPE,
@@ -648,6 +694,8 @@ def _spawn(kernel: SessionKernel, *, child_python: str, child_cwd: str,
             close_handle(parent_handle)
         if death_r is not None:
             os.close(death_r)
+        if child_rpc_sock is not None:
+            child_rpc_sock.close()
     # Deliberately NOT propagate_context_to_thread: that would freeze the spawning cell's
     # context/callbacks into the server thread for life. Authority is rebound per cell.
     for target, args in ((_rpc_forever, (kernel, max_tool_calls, sandbox_tools)),

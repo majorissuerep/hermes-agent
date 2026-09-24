@@ -135,6 +135,7 @@ def inject_memory_provider_tools(agent: Any) -> int:
             )
         return 0
 
+    from hermes_security.sandbox.tool_policy import tool_block_reason as _sandbox_blocks
     get_schemas = getattr(memory_manager, "get_all_tool_schemas", None)
     if not callable(get_schemas):
         return 0
@@ -150,7 +151,7 @@ def inject_memory_provider_tools(agent: Any) -> int:
                 "Memory provider returned a tool schema with no resolvable "
                 "name; skipping to avoid poisoning the request (%r)", raw_schema,
             )
-        elif schema["name"] not in existing_tool_names:
+        elif schema["name"] not in existing_tool_names and not _sandbox_blocks(schema["name"]):
             tools.append({"type": "function", "function": schema})
             agent.valid_tool_names.add(schema["name"])
             existing_tool_names.add(schema["name"])

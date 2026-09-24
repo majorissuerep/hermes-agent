@@ -528,6 +528,7 @@ class ProcessSession:
     pid_scope: str = "host"                     # "host" for local/PTY PIDs, "sandbox" for env-local PIDs
     systemd_unit: str = ""                      # transient scope unit name when spawned under systemd-run
     handoff_note: str = ""                      # why a subagent handed this process to its parent (rides the notice)
+    _sandbox_env: Dict[str, Optional[str]] = field(default_factory=dict, repr=False)  # private TMPDIR when sandboxed
     # Watcher/notification routing (persisted for crash recovery)
     # systemd_unit: str = ""                      # transient scope unit name when spawned under systemd-run
     # (#70716)
@@ -1119,6 +1120,9 @@ class ProcessRegistry(ProcessCheckpointMixin):
         the supervised gateway (own cgroup: an OOM kills only the worker, not the
         gateway and its messaging control plane)."""
         argv = [_find_shell(), "-lic", f"set +m; {safe_command}"]
+        # The session's OS sandbox wraps the shell INSIDE any systemd scope below.
+        from hermes_security.sandbox.spawn import sandboxed_spawn
+        argv, session._sandbox_env = sandboxed_spawn(argv)
         # This applies to both pipe mode and the PTY path above. See #70716.
         in_supervised_gateway = _IS_LINUX and _is_supervised_gateway_process()
         if in_supervised_gateway and _systemd_run_user_scope_available():
@@ -1165,7 +1169,8 @@ class ProcessRegistry(ProcessCheckpointMixin):
         else:
             from ptyprocess import PtyProcess as _PtyProcessCls
         pty_argv = self._scope_argv(session, safe_command, session.id, "PTY")
-        pty_env = self._spawn_env(env_vars)
+        from hermes_security.sandbox.spawn import apply_env
+        pty_env = apply_env(self._spawn_env(env_vars), session._sandbox_env)
         if session.systemd_unit:
             pty_env = systemd_user_bus_env(pty_env)
         # A PTY is a real TTY, so pager-happy tools (git log/diff, man) WILL page and
@@ -1213,7 +1218,8 @@ class ProcessRegistry(ProcessCheckpointMixin):
         _popen_kwargs = {"creationflags": windows_hide_flags()} if _IS_WINDOWS else {}
         unit_suffix = f"{session.id}-pipe-fallback" if pty_scope_attempted else session.id
         spawn_argv = self._scope_argv(session, safe_command, unit_suffix, "Local")
-        spawn_env = self._spawn_env(env_vars)
+        from hermes_security.sandbox.spawn import apply_env
+        spawn_env = apply_env(self._spawn_env(env_vars), session._sandbox_env)
         if session.systemd_unit:
             spawn_env = systemd_user_bus_env(spawn_env)
         # start_new_session is REQUIRED with systemd-run --scope too: the scope does not

@@ -627,6 +627,20 @@ def _secret_url_error(url: str) -> Optional[dict]:
     return None
 
 
+def _sandbox_file_url_error(url: str) -> Optional[str]:
+    """The browser engine runs outside the OS sandbox, so a ``file://`` page (or its
+    ``view-source:``) must name a path the session was granted."""
+    from urllib.parse import unquote, urlparse
+    target = url.strip()
+    while target.lower().startswith("view-source:"):
+        target = target[len("view-source:"):].strip()
+    parsed = urlparse(target)
+    if parsed.scheme.lower() != "file":
+        return None
+    from hermes_security.sandbox.paths import read_block_reason
+    return read_block_reason(unquote(parsed.path) or "/")
+
+
 def _url_policy_error(url: str, *, auto_local: bool = False) -> Optional[dict]:
     """Backend-aware URL checks on an already-normalized URL; None if allowed. Ordered floors:
     (1) cloud metadata / IMDS refused UNCONDITIONALLY (a local Chromium on a cloud VM still
@@ -648,6 +662,9 @@ def _url_policy_error(url: str, *, auto_local: bool = False) -> Optional[dict]:
         return _err("Blocked: URL targets a cloud metadata endpoint")
     if not local and not auto_local and not _cloud._allow_private_urls() and not _is_safe_url(url):
         return _err("Blocked: URL targets a private or internal address")
+    file_denied = _sandbox_file_url_error(url)
+    if file_denied:
+        return _err(file_denied)
     blocked = check_website_access(url)
     if blocked:
         return _err(blocked["message"],

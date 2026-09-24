@@ -18,7 +18,7 @@ import time
 from contextlib import ExitStack
 from pathlib import Path
 
-from agent.file_safety import get_nt_namespace_error, get_read_block_error
+from agent.file_safety import get_model_read_block_error, get_nt_namespace_error, get_read_block_error
 from agent.tool_result_classification import GUARDRAIL_REFUSAL_KEY
 from tools.binary_extensions import has_binary_extension
 from tools.skill_provenance import is_background_review
@@ -236,7 +236,7 @@ def _filter_read_blocked_search_results(result, task_id: str = "default") -> int
 
     def _allowed(path: str) -> bool:
         nonlocal omitted
-        if get_read_block_error(_resolved_match_path(path, task_id)):
+        if get_model_read_block_error(_resolved_match_path(path, task_id)):
             omitted += 1
             return False
         return True
@@ -638,7 +638,7 @@ def read_file_tool(path: str, offset: int = 1, limit: int = DEFAULT_READ_LIMIT, 
         # credential stores). Runs BEFORE document extraction so a
         # protected SQLite store (state.db) cannot be read through the extractor. Pass the RESOLVED path: the denylist's own
         # resolve() uses the process cwd and would miss a relative "auth.json".
-        block_error = get_read_block_error(str(_resolved))
+        block_error = get_model_read_block_error(str(_resolved))
         if block_error:
             return tool_error(block_error)
 
@@ -1069,7 +1069,7 @@ def search_tool(pattern: str, target: str = "content", path: str = ".",
             # path is itself denylisted (that error wins).
             if isinstance(exc, RuntimeError) and not get_read_block_error(path):
                 raise
-        block_error = get_read_block_error(resolved_search_path)
+        block_error = get_model_read_block_error(resolved_search_path)
         if block_error:
             return tool_error(block_error)
 

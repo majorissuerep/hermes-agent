@@ -165,7 +165,8 @@ def _check_sensitive_path(filepath: str, task_id: str = "default") -> str | None
             f"Refusing to write to Hermes config file: {filepath}\n"
             "Agent cannot modify security-sensitive configuration. "
             "Edit ~/.hermes/config.yaml directly or use 'hermes config' instead.")
-    return None
+    from hermes_security.sandbox.paths import write_block_reason
+    return write_block_reason(candidates[0])
 
 
 # ── Protected agent-instruction files (always-ask approval gate) ─────────

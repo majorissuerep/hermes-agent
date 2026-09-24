@@ -108,6 +108,18 @@ _record_scope_trust` keys trust on the home; a secondary never adopts the launch
 for a same-named server, and `mcp_tool_handlers.py::_trust_gate_check` consults the calling
 session's profile.
 
+**Every model-driven spawn goes through the OS sandbox seam.** `hermes_security.sandbox.spawn.
+sandboxed_spawn(argv)` returns the argv wrapped in the session's Landlock+seccomp / Seatbelt policy
+plus the private `TMPDIR` (unchanged when `sandbox.enabled` is off) and RAISES when enabled but
+unenforceable — never fall back to an unconfined spawn. Current callers: `LocalEnvironment._run_bash`
+(terminal + every file-tool shell op), `ProcessRegistry._scope_argv` (background/PTY, inside any
+systemd scope), `code_kernel._spawn` (kernels get their RPC socket as an inherited `fd://N`: the
+sandbox forbids creating AF_UNIX sockets). In-process reads of model-supplied paths use
+`agent.file_safety.get_model_read_block_error` / `raise_if_model_read_blocked` (grant-aware);
+user-initiated reads (`@file`, attachments) keep the plain guard. Tool allowlist:
+`hermes_security/sandbox/tool_policy.py` (schema filter at `_load_tools` + dispatch block in
+`tool_executor._parse_tool_call`). Docs: `website/docs/user-guide/features/sandbox.md`.
+
 **Background-process teardown signals the parent first.** `process_registry.py::ProcessRegistry.
 _terminate_host_pid` snapshots the descendants, SIGTERMs only the recorded parent, waits
 `terminal.daemon_term_grace_seconds` for it to exit and reap its own children, then SIGTERMs the

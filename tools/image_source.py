@@ -92,11 +92,11 @@ def _guard_credential_read(host_target: Path, src: str) -> None:
         # reject them incidentally. Same chokepoint the image-gen/video-gen provider plugins enforce on
         # model-supplied local paths. Import is best-effort (guard unavailability must not break image
         # loading); a real block always propagates.
-        from agent.file_safety import raise_if_read_blocked
+        from agent.file_safety import raise_if_model_read_blocked
     except Exception:  # noqa: BLE001 — guard unavailable: proceed
         return
     try:
-        raise_if_read_blocked(str(host_target))
+        raise_if_model_read_blocked(str(host_target))
     except ValueError as exc:
         raise SourceUnsafe(str(exc), src=src, origin="file")
 

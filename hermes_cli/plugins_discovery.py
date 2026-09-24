@@ -184,7 +184,12 @@ def collect_directory_manifests() -> List[PluginManifest]:
     user_dir = get_hermes_home() / "plugins"
     logger.debug("Scanning user plugins: %s", user_dir)
     _scan("user", user_dir, "user")
-    if _origin._env_enabled("HERMES_ENABLE_PROJECT_PLUGINS"):
+    from hermes_security.sandbox.policy import is_enabled as _sandbox_enabled
+    if _origin._env_enabled("HERMES_ENABLE_PROJECT_PLUGINS") and _sandbox_enabled():
+        # A sandboxed model may write the workspace; code it plants there must never be
+        # loaded into the unconfined Hermes process on the next start.
+        logger.warning("Project plugins ignored: the OS sandbox is enabled (sandbox.enabled)")
+    elif _origin._env_enabled("HERMES_ENABLE_PROJECT_PLUGINS"):
         project_dir = Path.cwd() / ".hermes" / "plugins"
         logger.debug("Scanning project plugins: %s", project_dir)
         _scan("project", project_dir, "project")
