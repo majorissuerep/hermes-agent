@@ -27,6 +27,34 @@ DEFAULT_KEEP = 5
 _LEGACY_SIBLING_GLOBS = ("config.yaml.bak.[0-9]*", "config.yaml.corrupt.*.bak", "config.yaml.bak-pre-migrate-*")
 
 
+def _sealed_home(path: Path) -> bool:
+    """True when *path* lives in a vaulted home (fork). Metadata-only probe, no crypto import."""
+    from hermes_security.io import _home_for
+
+    return _home_for(path) is not None
+
+
+def _read_backup_bytes(backup: Path) -> bytes:
+    """Plaintext of a sealed backup (fork). Backups are sealed at their own path with purpose
+    ``config``; migration sealed pre-existing ones as ``state``; copies made by the old byte-copy
+    still carry ``config.yaml``'s path in their AAD. Try each; the last error is the real one."""
+    from hermes_security.errors import VaultIntegrityError
+    from hermes_security.io import _home_for
+    from hermes_security.vault import get_vault
+
+    raw = backup.read_bytes()
+    home = _home_for(backup)
+    rel = backup.resolve().relative_to(home).as_posix()
+    vault = get_vault(home)
+    error: VaultIntegrityError | None = None
+    for relpath, purpose in ((rel, "config"), (rel, "state"), ("config.yaml", "config")):
+        try:
+            return vault.decrypt(raw, purpose=purpose, relpath=relpath)
+        except VaultIntegrityError as exc:
+            error = exc
+    raise error
+
+
 def backups_dir(config_path: Path) -> Path:
     return config_path.parent / BACKUPS_SUBDIR
 
@@ -58,16 +86,28 @@ def backup_config(config_path: Path, reason: str, *, keep: int = DEFAULT_KEEP) -
         # stale "identical" verdict when successive writes share size+mtime
         # (coarse-mtime filesystems), silently skipping backups of CHANGED
         # configs. Configs are tiny; reading bytes is deterministic.
-        if existing and config_path.read_bytes() == existing[0].read_bytes():
+        sealed = _sealed_home(config_path)
+        if sealed:
+            # Fork: an envelope binds its own path into the AAD, so a byte copy is undecryptable at
+            # the backup's path — re-seal the plaintext there instead, and compare plaintext (every
+            # seal uses a fresh nonce, so ciphertexts of identical configs never match).
+            from hermes_security.io import read_bytes, write_bytes
+            current = read_bytes(config_path, purpose="config")
+            if existing and current == _read_backup_bytes(existing[0]):
+                return None
+        elif existing and config_path.read_bytes() == existing[0].read_bytes():
             return None
         dest = root / f"{config_path.name}.{reason}.{time.strftime('%Y%m%d-%H%M%S')}"
         if dest.is_symlink() or dest.exists():  # never write through a planted link
             return None
-        shutil.copy2(config_path, dest)
+        if sealed:
+            write_bytes(dest, current, purpose="config")
+        else:
+            shutil.copy2(config_path, dest)
         for stale in [dest, *existing][keep:]:
             stale.unlink(missing_ok=True)
         return dest
-    except OSError as exc:
+    except (OSError, RuntimeError) as exc:  # RuntimeError: vault errors (locked / unauthenticated copy)
         logger.warning("Could not back up %s (%s): %s", config_path, reason, exc)
         return None
 
@@ -84,20 +124,9 @@ def load_newest_good_backup(config_path: Path) -> Optional[dict]:
         return None
     try:
         from utils import fast_safe_load
-        # Fork: the backup is a byte-copy of the config envelope — read it
-        # through the same envelope path (decrypts in a vaulted home).
-        _text = None
-        _home_for = None
-        _seal_read = None
-        try:
-            from hermes_security.io import _home_for, read_text as _seal_read
-        except ImportError:
-            pass
-        if _seal_read is not None and _home_for is not None and _home_for(newest[0]) is not None:
-            _text = _seal_read(newest[0], purpose="config")
-        if _text is not None:
+        if _sealed_home(newest[0]):
             import io as _io
-            data = fast_safe_load(_io.StringIO(_text))
+            data = fast_safe_load(_io.StringIO(_read_backup_bytes(newest[0]).decode("utf-8")))
         else:
             with newest[0].open(encoding="utf-8") as f:
                 data = fast_safe_load(f)

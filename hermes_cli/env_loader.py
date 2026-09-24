@@ -262,23 +262,71 @@ def _sanitize_loaded_credentials() -> None:
         )
 
 
-def _load_dotenv_with_fallback(path: Path, *, override: bool, load_pass: int | None = None) -> None:
+def _vault_home_for_env(path: Path) -> Path | None:
+    """The vaulted home that seals *path*, else None (fork).
+
+    Metadata-only walk-up, so a vault-less home never loads the crypto stack (update dispatch); a
+    file in a public code tree under the home (the checkout's own project ``.env``) is never sealed.
+    """
+    from hermes_security.io import _home_for
+
+    home = _home_for(path)
+    if home is None:
+        return None
+    from hermes_security.vault import _is_in_skip_dir
+
+    try:
+        rel = Path(path).expanduser().resolve(strict=False).relative_to(home)
+    except ValueError:
+        return home
+    return None if _is_in_skip_dir(rel) else home
+
+
+def _read_sealed_env(path: Path) -> str | None:
+    """Decrypted text of a sealed dotenv file; None while the vault is locked (the startup gate
+    reloads after unlock — see ``vault_cmd.gate_locked_vault``)."""
+    from hermes_security.errors import VaultLockedError
+    from hermes_security.io import read_text
+
+    try:
+        return read_text(path, purpose="env")
+    except VaultLockedError:
+        return None
+
+
+def _load_dotenv_with_fallback(path: Path, *, override: bool, load_pass: int | None = None) -> bool:
     """Load one dotenv file into ``os.environ`` like ``dotenv.load_dotenv`` — same parser, same
     ``${VAR}`` / ``${VAR:-default}`` / precedence rules — except that ``${VAR}`` resolves against the value
     VAR had before this process's earlier passes published it (see ``_DOTENV_PUBLISHED``).
 
     ``load_pass`` groups the layered files of one ``load_hermes_dotenv`` call: within a pass a later layer
     (project, managed) still sees the earlier layer's output, as it always did; only OTHER passes' output
-    is peeled. A bare call (``hermes send``'s direct reload) is its own pass."""
-    raw = path.read_bytes()
-    try:
-        # utf-8-sig strips a leading BOM (PowerShell 5.1 / Notepad); plain utf-8 would keep U+FEFF on the
-        # first key name and silently drop it from os.environ under its canonical name.
-        text = raw.decode("utf-8-sig")
-    except UnicodeDecodeError:
-        if raw.startswith(codecs.BOM_UTF8):  # strip the BOM by hand: utf-8-sig can't once we decode latin-1
-            raw = raw[len(codecs.BOM_UTF8) :]
-        text = raw.decode("latin-1")
+    is peeled. A bare call (``hermes send``'s direct reload) is its own pass.
+
+    Returns False when nothing was loaded because the file is sealed in a still-locked vault. Fork: a
+    sealed file is decrypted first — parsing the envelope bytes as dotenv text spammed a parse warning
+    per ciphertext line and crashed on embedded NULs, and no key ever reached ``os.environ``."""
+    if _vault_home_for_env(path) is not None:
+        text = _read_sealed_env(path)
+        if text is None:
+            return False
+        if text.startswith("HRMVAULT") or "\ufffd" in text:
+            # Ciphertext a text sanitizer mangled before it was sealed: one pointer, not a parse
+            # warning per garbage line.
+            from hermes_security.errors import VaultIntegrityError
+
+            raise VaultIntegrityError(f"{path} holds mangled ciphertext; run 'hermes secure-vault repair'")
+        text = text.removeprefix("\ufeff")
+    else:
+        raw = path.read_bytes()
+        try:
+            # utf-8-sig strips a leading BOM (PowerShell 5.1 / Notepad); plain utf-8 would keep U+FEFF on the
+            # first key name and silently drop it from os.environ under its canonical name.
+            text = raw.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            if raw.startswith(codecs.BOM_UTF8):  # strip the BOM by hand: utf-8-sig can't once we decode latin-1
+                raw = raw[len(codecs.BOM_UTF8) :]
+            text = raw.decode("latin-1")
     # Imported here, not at module level: gateway tests stub ``sys.modules["dotenv"]`` with a bare module
     # exposing only ``load_dotenv``, and ``gateway.run`` imports this module at import time.
     from dotenv.main import DotEnv
@@ -315,6 +363,7 @@ def _load_dotenv_with_fallback(path: Path, *, override: bool, load_pass: int | N
             os.environ[name] = value
             _DOTENV_PUBLISHED[name] = (baseline, value, load_pass)
     _sanitize_loaded_credentials()  # httpx encodes headers as ASCII
+    return True
 
 
 def _sanitize_env_file_if_needed(path: Path) -> None:
@@ -322,6 +371,11 @@ def _sanitize_env_file_if_needed(path: Path) -> None:
     decode: UTF-16 (Notepad "Unicode") is rewritten as clean UTF-8; UTF-32 is refused (left untouched) so
     we never fall through to the errors=replace corruption path."""
     if not path.exists():
+        return
+    # Fork (vault): a file inside a vaulted home is never rewritten as text here. NUL-stripping a sealed
+    # envelope destroyed its ciphertext (the clobber incident); a non-envelope file there is
+    # ``secure-vault repair``'s job, not a sanitizer's.
+    if _vault_home_for_env(path) is not None:
         return
     try:
         from hermes_cli.config import _sanitize_env_lines
@@ -333,11 +387,7 @@ def _sanitize_env_file_if_needed(path: Path) -> None:
     except Exception:
         return
 
-    # Fork (vault): an encrypted envelope (.env sealed by the vault) is NOT
-    # text to sanitize — NUL-stripping + rewriting it in place DESTROYS the
-    # ciphertext (this exact bug clobbered a migrated .env: dotenv then
-    # choked on ~188 lines of envelope bytes). Envelopes pass through; the
-    # envelope-aware reader in agent.secret_scope.load_env_file handles them.
+    # Fork (vault): an envelope outside any vaulted home (a copied/exported file) is not text either.
     if raw.startswith(b"HRMVAULT\x00"):
         return
 
@@ -438,8 +488,7 @@ def load_hermes_dotenv(
     if project_env_path and project_env_path.exists():
         _sanitize_env_file_if_needed(project_env_path)
 
-    if user_env.exists():
-        _load_dotenv_with_fallback(user_env, override=True, load_pass=load_pass)
+    if user_env.exists() and _load_dotenv_with_fallback(user_env, override=True, load_pass=load_pass):
         loaded.append(user_env)
         _clear_known_keys_missing_from_dotenv(user_env)  # mirrors reload_env(): inherited keys must not leak
 

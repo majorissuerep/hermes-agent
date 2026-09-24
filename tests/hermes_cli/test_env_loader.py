@@ -687,3 +687,29 @@ def test_dotenv_published_dashboard_session_token_still_reloads(tmp_path, monkey
     (home / ".env").write_text("HERMES_DASHBOARD_SESSION_TOKEN=second\n", encoding="utf-8")
     load_hermes_dotenv(hermes_home=home)
     assert os.environ["HERMES_DASHBOARD_SESSION_TOKEN"] == "second"
+
+
+def test_sealed_env_is_deferred_while_locked_and_loaded_after_unlock(tmp_path, monkeypatch, capsys):
+    """Fork: a sealed .env must never be parsed as dotenv text (ciphertext → parse-warning spam, NUL
+    ValueError, no key ever loaded). Locked: nothing loads, the file is untouched. Unlocked: keys load."""
+    from hermes_security import migrate as mig
+    from hermes_security import vault as hv
+
+    home = tmp_path / "hermes"
+    home.mkdir()
+    (home / ".env").write_text("SEALED_DOTENV_KEY=from-vault\n", encoding="utf-8")
+    monkeypatch.setenv("HERMES_HOME", str(home))
+    monkeypatch.delenv("HERMES_MASTER_PASSWORD", raising=False)
+    monkeypatch.delenv("SEALED_DOTENV_KEY", raising=False)
+    assert mig.migrate_home(home, "env-loader-password").ok
+    hv.clear_vault_cache()
+    sealed = (home / ".env").read_bytes()
+
+    assert load_hermes_dotenv(hermes_home=home) == []
+    assert "SEALED_DOTENV_KEY" not in os.environ
+    assert (home / ".env").read_bytes() == sealed
+    assert "python-dotenv" not in capsys.readouterr().err
+
+    hv.unlock(home, "env-loader-password")
+    assert load_hermes_dotenv(hermes_home=home) == [home / ".env"]
+    assert os.environ["SEALED_DOTENV_KEY"] == "from-vault"

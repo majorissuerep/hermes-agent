@@ -651,7 +651,15 @@ _DB_SUFFIXES = (".db", ".sqlite", ".sqlite3")
 
 
 def _is_in_skip_dir(rel: Path | str) -> bool:
+    """True for paths inside a public code/artifact tree (never encrypted).
+
+    ``hermes-agent.<anything>`` covers the install's moved-aside siblings
+    (takeover's ``hermes-agent.pre-fork-<stamp>`` rollback copy): migration
+    sealed one of those into 17k envelopes, making the rollback tree unusable.
+    """
     parts = Path(rel).parts
+    if parts and parts[0].startswith("hermes-agent."):
+        return True
     return any(part in _SKIP_DIRS for part in parts)
 
 
