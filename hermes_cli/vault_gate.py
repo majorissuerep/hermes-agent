@@ -32,6 +32,13 @@ _META_FILENAME = ".hermes-vault"
 # Commands that manage the vault or are pure read-only diagnostics.
 _READ_ONLY_COMMANDS = frozenset({"secure-vault", "vault"})
 
+# `hermes deck` verbs that touch NO local state: they are RPCs to the already-unlocked session host over its
+# 0600-token loopback socket (the same authority any same-user process has). Gating them would make an
+# agent's `hermes deck send` (no TTY, no password in its terminal) fail in every vaulted home. Spawning a
+# missing host still unlocks through `session_host._ensure_root_vault_unlocked`. `attach` and bare `deck`
+# launch a TUI that reads config, so they stay gated.
+_HOST_ONLY_DECK_VERBS = frozenset({"ls", "list", "send", "peek", "close", "interrupt"})
+
 
 def vault_exists_light(home) -> bool:
     """Cheap vault probe without importing the crypto stack."""
@@ -43,6 +50,8 @@ def _is_read_only(args: Any, command: Any) -> bool:
         return True
     # `hermes update --check`: pure diagnostic (git status + cache stamp).
     if command == "update" and getattr(args, "check", False):
+        return True
+    if command == "deck" and getattr(args, "deck_command", None) in _HOST_ONLY_DECK_VERBS:
         return True
     return False
 

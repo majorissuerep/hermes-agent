@@ -12,6 +12,7 @@
   "/bundles": null,
   "/busy": "terminal",
   "/clear": "terminal",
+  "/close": "terminal",
   "/codex-runtime": null,
   "/codex_runtime": null,
   "/commands": null,

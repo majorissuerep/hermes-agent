@@ -7,3 +7,8 @@
 # against _SAFE_IDENT_RE immediately above, so no attacker-controlled
 # identifier can reach the query string.
 B608:hermes_security/migrate.py:identifier-validated interpolation (see _SAFE_IDENT_RE guard)
+
+# Session deck (2026-09-24).
+B404:hermes_cli/session_host.py:subprocess launches the session host only — our own interpreter + fixed module argv
+B603:hermes_cli/session_host.py:argv is [sys.executable, -m, hermes_cli.main, -p, default, serve, --port, 0]; no shell, no external input
+B608:hermes_state_deck.py:interpolates the module-constant column list and a constant WHERE clause; every value is a bound parameter

@@ -120,3 +120,24 @@ def test_locked_vault_noninteractive_without_password_exits(_arm_gate, monkeypat
     with pytest.raises(SystemExit) as e:
         vault_gate.gate_startup(_args("config"))
     assert e.value.code == 2
+
+
+@pytest.mark.parametrize("verb", ["ls", "send", "peek", "close", "interrupt"])
+def test_host_only_deck_verbs_pass_a_locked_vault(_arm_gate, monkeypatch, verb):
+    """An agent's `hermes deck send` has no TTY and no password; the verbs only talk to the unlocked host."""
+    hv.init_vault(_arm_gate, "gate-pw-deck")
+    hv.clear_vault_cache()
+    monkeypatch.setattr(vault_gate, "_tty_available", lambda: False)
+    vault_gate.gate_startup(_args("deck", deck_command=verb))
+
+
+@pytest.mark.parametrize("verb", ["attach", None])
+def test_deck_verbs_that_launch_a_tui_stay_gated(_arm_gate, monkeypatch, verb):
+    hv.init_vault(_arm_gate, "gate-pw-deck")
+    hv.clear_vault_cache()
+    monkeypatch.setattr(vault_gate, "_tty_available", lambda: False)
+    from hermes_cli import vault_cmd as _vc
+
+    monkeypatch.setattr(_vc, "_tty_available", lambda: False)
+    with pytest.raises(SystemExit):
+        vault_gate.gate_startup(_args("deck", deck_command=verb))
