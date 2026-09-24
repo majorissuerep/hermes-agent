@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import contextlib
 import re
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional
@@ -65,26 +66,40 @@ def deck_profiles() -> List[str]:
     return [name for name in list_profile_names() if (profile_home(name) / "state.db").is_file()]
 
 
+# One handle per state.db for the life of the process: the host's snapshot loop and every open deck view
+# poll these every few seconds, and opening a SessionDB runs its schema pass. SessionDB is thread-safe.
+_DB_CACHE: Dict[Path, Any] = {}
+_DB_CACHE_LOCK = threading.Lock()
+
+
 @contextlib.contextmanager
 def open_db(profile: str) -> Iterator[Any]:
     from hermes_state import SessionDB
 
-    db = SessionDB(db_path=profile_home(profile) / "state.db")
-    try:
-        yield db
-    finally:
-        db.close()
+    path = (profile_home(profile) / "state.db").resolve()
+    with _DB_CACHE_LOCK:
+        db = _DB_CACHE.get(path)
+        if db is None:
+            db = _DB_CACHE[path] = SessionDB(db_path=path)
+    yield db
 
 
 def live_owner(profile: str, tip_session_id: str) -> Optional[Dict[str, Any]]:
     """The active-session lease of whatever process runs this conversation now, or None (dormant)."""
-    from tools.bot_live_delivery import find_session_owner
-
-    return find_session_owner(profile_home(profile), tip_session_id)
+    return _owners(profile).get(tip_session_id)
 
 
-def _project(profile: str, row: Dict[str, Any]) -> Dict[str, Any]:
-    owner = live_owner(profile, row["tip_session_id"])
+def _owners(profile: str) -> Dict[str, Dict[str, Any]]:
+    """Every live lease in ``profile``, by stored session id — one registry read for a whole listing."""
+    from hermes_cli.active_sessions import active_session_registry_snapshot
+
+    home = profile_home(profile)
+    return {entry["session_id"]: {**entry, "profile_home": str(home)}
+            for entry in active_session_registry_snapshot(registry_home=home)}
+
+
+def _project(profile: str, row: Dict[str, Any], owners: Optional[Dict[str, Dict[str, Any]]] = None) -> Dict[str, Any]:
+    owner = (owners if owners is not None else _owners(profile)).get(row["tip_session_id"])
     state = row["state"] if owner is not None else "dormant"
     if owner is not None and state == "dormant":
         state = "idle"
@@ -96,8 +111,9 @@ def list_deck(profiles: Optional[List[str]] = None, *, include_closed: bool = Fa
     """Open sessions across ``profiles`` (default: all), most recently active first."""
     rows: List[Dict[str, Any]] = []
     for profile in profiles if profiles is not None else deck_profiles():
+        owners = _owners(profile)
         with open_db(profile) as db:
-            rows.extend(_project(profile, row) for row in db.deck_rows(include_closed=include_closed))
+            rows.extend(_project(profile, row, owners) for row in db.deck_rows(include_closed=include_closed))
     return sorted(rows, key=lambda r: r["last_active"], reverse=True)
 
 

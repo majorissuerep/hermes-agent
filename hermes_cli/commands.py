@@ -304,8 +304,10 @@ COMMAND_REGISTRY: list[CommandDef] = [
                args_hint="[nous|local]"),
 
     # Exit
-    CommandDef("quit", "Exit the CLI (use --delete to also remove session history)", "Exit",
-               cli_only=True, aliases=("exit",), args_hint="[--delete]", desktop="terminal")]
+    CommandDef("quit", "Exit the CLI; the session stays open in the deck (--delete also removes history)",
+               "Exit", cli_only=True, aliases=("exit",), args_hint="[--delete]", desktop="terminal"),
+    CommandDef("close", "Close this session for good: it leaves the deck (/quit leaves it open)", "Exit",
+               cli_only=True, desktop="terminal")]
 
 
 # Distinguishes ``mixed`` (subcommands plus free-text) from ``options``; no subcommands => ``text``.

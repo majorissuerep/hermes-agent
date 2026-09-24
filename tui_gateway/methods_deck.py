@@ -38,16 +38,8 @@ _deck_runtime = types.SimpleNamespace(thread=None, last_states={}, adopt_checked
 
 def _deck_profile_of_home(home) -> str:
     """Profile name owning ``home`` (None = this host's launch profile)."""
-    if not home:
-        return _current_profile_name()
-    from hermes_cli.profiles import list_profile_names
-    from hermes_cli.session_deck import profile_home
-    resolved = Path(home).resolve()
-    for name in list_profile_names():
-        with contextlib.suppress(Exception):
-            if profile_home(name) == resolved:
-                return name
-    return _current_profile_name()
+    from hermes_constants import profile_name_for_home as _name_for_home
+    return (_name_for_home(home) if home else None) or _current_profile_name()
 
 
 def _deck_runtime_state(sid: str, session: dict) -> str:
@@ -89,22 +81,26 @@ def _deck_row_payload(row: dict, index: dict | None = None) -> dict:
 
 
 def _deck_caller(params: dict) -> tuple:
-    """``(sender dict, default profile, sender ref or None)`` for a deck verb. A ``from_session_id`` names a
-    live session in this host acting as the sender; otherwise the actor is the user on ``params.profile``."""
-    from hermes_cli.session_deck import DeckRef
+    """``(sender dict, default profile, sender ref or None)`` for a deck verb. ``from_session_id`` names the
+    SESSION acting as the sender — a live runtime id in this host, or a stored session id (an agent running
+    ``hermes deck`` from its terminal passes its ``HERMES_SESSION_ID``). Absent, the actor is the user."""
+    from hermes_cli.session_deck import DeckRef, open_db
     sid = str(params.get("from_session_id") or "")
-    if sid:
-        session = _sessions.get(sid)
-        if session is None:
-            raise LookupError(f"sender session {sid} is not live in this host")
-        mark = session.get("deck")
+    if sid and (session := _sessions.get(sid)) is not None:
         profile = _deck_profile_of_home(session.get("profile_home"))
-        if not mark:
+        if not (mark := session.get("deck")):
             return {"name": f"an unregistered session in profile {profile}"}, profile, None
         ref = DeckRef(mark["profile"], mark["handle"])
-        key = _session_lookup_key(session, fallback=sid)
-        return {"ref": str(ref), "title": _session_live_title(session, key)}, profile, ref
+        return {"ref": str(ref), "title": _session_live_title(session, _session_lookup_key(session, fallback=sid))}, \
+            profile, ref
     profile = _response_profile_name(params.get("profile"))
+    if sid:
+        with open_db(profile) as db:
+            row = db.deck_row_for_session(sid)
+        if row is not None and row["closed_at"] is None:
+            ref = DeckRef(profile, row["handle"])
+            return {"ref": str(ref), "title": row["title"]}, profile, ref
+        return {"name": f"session {sid} (not in the deck)"}, profile, None
     return {"name": "the user (hermes deck)"}, profile, None
 
 
@@ -270,6 +266,23 @@ def _(rid, params: dict) -> dict:
         return _err(rid, 4029, refusal)
     _deck_changed()
     return _ok(rid, {"ref": str(DeckRef(profile, handle)), "handle": handle, "profile": profile})
+
+
+@method("deck.detach")
+def _(rid, params: dict) -> dict:
+    """The deck-mode replacement for ``session.close`` when a client moves away from a session."""
+    sid = str(params.get("session_id") or "")
+    session = _sessions.get(sid)
+    if session is None:
+        return _ok(rid, {"detached": False})
+    if not session.get("deck"):
+        return _err(rid, 4022, "not a deck session; use session.close")
+    transport = current_transport()
+    with _session_resume_lock, _sessions_lock:
+        others = _detach_session_transport(session, transport)
+        if not others and (session.get("transport") is transport or not _session_has_live_transport(session)):
+            session["transport"] = _detached_ws_transport
+    return _ok(rid, {"detached": True})
 
 
 @method("deck.resolve")

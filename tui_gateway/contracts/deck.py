@@ -65,6 +65,18 @@ method("deck.register", params=DeckRegisterParams, result=DeckRegisterResult,
        doc="Mark a live session open in the deck: it now survives client disconnects until closed.")
 
 
+class DeckDetachParams(Params):
+    session_id: str  # live runtime id
+
+
+class DeckDetachResult(Result):
+    detached: bool
+
+
+method("deck.detach", params=DeckDetachParams, result=DeckDetachResult,
+       doc="This client stops showing a deck session; the session keeps running (detached when no client is left).")
+
+
 class DeckTargetParams(ProfileParams):
     """``target`` is a deck ref; ``from_session_id`` (a live runtime id) identifies a SESSION acting as
     the sender, and makes a bare ``#N`` relative to that session's profile."""

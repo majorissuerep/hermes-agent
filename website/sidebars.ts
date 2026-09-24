@@ -57,6 +57,7 @@ const sidebars: SidebarsConfig = {
           ],
         },
         'user-guide/sessions',
+        'user-guide/session-deck',
         'user-guide/session-storage-recovery',
         'user-guide/profiles',
         'user-guide/profile-distributions',

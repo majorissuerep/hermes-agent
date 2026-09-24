@@ -44,6 +44,7 @@ from hermes_cli.cli_tui_mixin import CLITuiMixin
 from hermes_cli.cli_process_notifications import CLIProcessNotificationsMixin
 from hermes_cli.cli_init_mixin import CLIInitMixin
 from hermes_cli.cli_tui_runtime_mixin import CLITuiRuntimeMixin
+from hermes_cli.cli_deck_mixin import CLIDeckMixin
 # Extracted clusters (mechanical split, #116911); re-exported here so `cli.<name>` stays the seam.
 from hermes_cli.cli_shutdown import (  # noqa: F401,E402
     _CLEANUP_STEPS,
@@ -852,7 +853,7 @@ from hermes_cli.cli_chat_turn_mixin import CLIChatTurnMixin
 _PASTE_REF_RE = re.compile(r'\[Pasted text #\d+: \d+ lines \u2192 (.+?)\]')
 
 
-class HermesCLI(CLIInitMixin, CLITuiRuntimeMixin, CLIProcessNotificationsMixin, CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin, CLITuiMixin, CLIStatusBarMixin, CLIVoiceMixin, CLIModelSwitchMixin, CLISessionMixin, CLIStreamMixin, CLIModalMixin, CLITerminalMixin, CLIInfoMixin, CLILoopsMixin, CLIChatTurnMixin):
+class HermesCLI(CLIInitMixin, CLITuiRuntimeMixin, CLIProcessNotificationsMixin, CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin, CLITuiMixin, CLIStatusBarMixin, CLIVoiceMixin, CLIModelSwitchMixin, CLISessionMixin, CLIStreamMixin, CLIModalMixin, CLITerminalMixin, CLIInfoMixin, CLILoopsMixin, CLIChatTurnMixin, CLIDeckMixin):
     """Interactive REPL for the Hermes Agent."""
 
     # Seeded -q first message (see _should_seed_interactive); run() re-creates
@@ -885,8 +886,9 @@ class HermesCLI(CLIInitMixin, CLITuiRuntimeMixin, CLIProcessNotificationsMixin, 
         self._init_runtime_state(resume)
 
 
-    def _claim_active_session(self, surface: str = "cli", *, stderr: bool = False) -> bool:
-        """Claim a global active-session slot for this CLI process."""
+    def _claim_active_session(self, surface: str = "cli", *, stderr: bool = False, deck: bool = False) -> bool:
+        """Claim a global active-session slot for this CLI process. ``deck``: the interactive REPL, which
+        consumes deck messages at idle — a one-shot ``-q`` run never would, so it must not advertise it."""
         if self._active_session_lease is not None:
             return True
         try:
@@ -898,7 +900,7 @@ class HermesCLI(CLIInitMixin, CLITuiRuntimeMixin, CLIProcessNotificationsMixin, 
                 config=self.config,
                 # Writer identity: a re-claim by this process replaces its own entry.
                 # See #94595.
-                metadata={"live_session_id": str(self.session_id)},
+                metadata=self._deck_lease_metadata() if deck else {"live_session_id": str(self.session_id)},
             )
         except Exception as exc:
             logger.warning("Failed to claim active session slot: %s", exc)
@@ -1364,8 +1366,9 @@ class HermesCLI(CLIInitMixin, CLITuiRuntimeMixin, CLIProcessNotificationsMixin, 
 
     def run(self):
         """Run the interactive CLI loop with persistent input at bottom."""
-        if not self._claim_active_session("cli"):
+        if not self._claim_active_session("cli", deck=True):
             return
+        self._deck_register()
 
         self._tui_print_startup()
         self._tui_init_run_state()

@@ -2,6 +2,7 @@ import { Box, stringWidth, Text } from '@hermes/ink'
 import { useStore } from '@nanostores/react'
 import type { ReactNode } from 'react'
 
+import { DECK_MODE } from '../app/deckStore.js'
 import { useGateway } from '../app/gatewayContext.js'
 import type { AppOverlaysProps } from '../app/interfaces.js'
 import { $overlayState, hasFloatingPanel, patchOverlayState } from '../app/overlayStore.js'
@@ -18,6 +19,7 @@ import { listRowStyle } from './overlayPrimitives.js'
 import { PetPicker } from './petPicker.js'
 import { PluginsHub } from './pluginsHub.js'
 import { ApprovalPrompt, ClarifyPrompt, ConfirmPrompt } from './prompts.js'
+import { SessionDeck } from './sessionDeck.js'
 import { SkillsHub } from './skillsHub.js'
 import { SubscriptionOverlay } from './subscriptionOverlay.js'
 import { WidgetGrid, type WidgetGridWidget } from './widgetGrid.js'
@@ -207,6 +209,7 @@ export function FloatingOverlays({
   onModelSelect,
   onNewLiveSession,
   onNewPromptSession,
+  onQuit,
   onResumeSelect,
   pagerPageSize
 }: Pick<
@@ -219,6 +222,7 @@ export function FloatingOverlays({
   | 'onModelSelect'
   | 'onNewLiveSession'
   | 'onNewPromptSession'
+  | 'onQuit'
   | 'onResumeSelect'
   | 'pagerPageSize'
 >) {
@@ -247,7 +251,26 @@ export function FloatingOverlays({
   // column it never binds, so rendering is identical to the pre-grid layout.
   const widgets: WidgetGridWidget[] = []
 
-  if (overlay.sessions) {
+  if (overlay.sessions && DECK_MODE) {
+    // Deck mode: every "sessions" entry point (Ctrl+X, /sessions, the status-bar count) opens the deck.
+    widgets.push({
+      id: 'sessions',
+      render: width => (
+        <FloatBox color={theme.color.border}>
+          <SessionDeck
+            currentSessionId={sid}
+            gw={gw}
+            maxWidth={width}
+            onCancel={() => patchOverlayState({ sessions: false })}
+            onNew={onNewLiveSession}
+            onOpen={row => onResumeSelect(row.tip_session_id, row.profile)}
+            onQuit={onQuit}
+            t={theme}
+          />
+        </FloatBox>
+      )
+    })
+  } else if (overlay.sessions) {
     widgets.push({
       id: 'sessions',
       render: width => (

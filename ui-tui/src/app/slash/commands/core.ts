@@ -22,6 +22,7 @@ import {
   isRemoteShellSession
 } from '../../../lib/terminalSetup.js'
 import type { Msg, PanelSection } from '../../../types.js'
+import { $deck, DECK_HOME, DECK_MODE } from '../../deckStore.js'
 import type { StatusBarMode } from '../../interfaces.js'
 import { patchOverlayState } from '../../overlayStore.js'
 import { patchUiState } from '../../uiStore.js'
@@ -126,7 +127,7 @@ export const coreCommands: SlashCommand[] = [
 
   {
     aliases: ['exit'],
-    help: 'exit hermes',
+    help: 'exit hermes (a deck session stays open — /close ends it)',
     name: 'quit',
     run: (_arg, ctx) => {
       // In the hosted dashboard chat there is no in-page restart path after
@@ -143,6 +144,30 @@ export const coreCommands: SlashCommand[] = [
       }
 
       ctx.session.die()
+    }
+  },
+
+  {
+    help: 'close this session for good — it leaves the deck (/quit only detaches it)',
+    name: 'close',
+    run: (_arg, ctx) => {
+      const { ref } = $deck.get()
+
+      // Without the session host a session already ends with its terminal: /close is /quit.
+      if (!DECK_MODE || !ref) {
+        return ctx.session.die()
+      }
+
+      void ctx.gateway.rpc<{ closed: boolean }>('deck.close', { target: ref }).then(result => {
+        if (!result) {
+          return
+        }
+
+        // `hermes deck` returns to the deck (the host's deck.closed event opens it); a plain terminal exits.
+        if (!DECK_HOME) {
+          ctx.session.die()
+        }
+      })
     }
   },
 

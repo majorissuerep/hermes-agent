@@ -202,6 +202,13 @@ class SessionMaintenanceMixin:
         # Pinned is a durable "keep" flag: bulk prune/delete/archive exclude pinned rows unless opted in.
         if not include_pinned:
             clauses.append("COALESCE(s.pinned, 0) = 0")
+        # An OPEN deck conversation (and everything descended from it) is kept like a pin: the deck promises
+        # it survives until the user closes it, however long it sits dormant.
+        clauses.append(
+            "s.id NOT IN (WITH RECURSIVE deck_lineage(id) AS ("
+            "SELECT session_id FROM deck_sessions WHERE closed_at IS NULL "
+            "UNION SELECT c.id FROM sessions c JOIN deck_lineage d ON c.parent_session_id = d.id) "
+            "SELECT id FROM deck_lineage)")
         return " AND ".join(clauses), params
 
     def _prune_where(self, older_than_days, source, filters) -> Tuple[str, list]:

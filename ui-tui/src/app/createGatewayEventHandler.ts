@@ -28,6 +28,7 @@ import { defaultThemeForCurrentBackground, fromSkin, skinIsLight, type Theme, th
 import type { Msg, SessionInfo, SubagentProgress } from '../types.js'
 
 import { applyConnectionRequest, applyConnectionUpdate } from './connectionOperationStore.js'
+import { $deck, DECK_HOME, patchDeck } from './deckStore.js'
 import { applyDelegationStatus, getDelegationState } from './delegationStore.js'
 import type { GatewayEventHandlerContext, NoticeLevel } from './interfaces.js'
 import { getOverlayState, patchOverlayState } from './overlayStore.js'
@@ -747,6 +748,14 @@ export function createGatewayEventHandler(ctx: GatewayEventHandlerContext): (ev:
       return
     }
 
+    // `hermes deck`: land on the deck; the user picks (or starts) the session.
+    if (DECK_HOME && !getUiState().sid) {
+      patchUiState({ status: 'deck' })
+      patchOverlayState({ sessions: true })
+
+      return
+    }
+
     // Opt-in: when `display.tui_auto_resume_recent` is true, look up
     // the most recent human-facing session and resume it instead of
     // forging a brand-new one.  Mirrors classic CLI's `hermes -c` /
@@ -822,6 +831,24 @@ export function createGatewayEventHandler(ctx: GatewayEventHandlerContext): (ev:
         }
 
         return
+
+      case 'deck.changed':
+        patchDeck({ generation: $deck.get().generation + 1, openCount: ev.payload?.open_count ?? 0 })
+
+        return
+      case 'deck.closed': {
+        // Closed from elsewhere (another session, `hermes deck close`): the runtime is ending. Drop it and
+        // put the deck in front so the next move is one keystroke away.
+        const by = ev.payload?.closed_by ? ` by ${ev.payload.closed_by}` : ''
+        sys(`■ ${ev.payload?.ref ?? 'this session'} was closed${by}`)
+        ctx.session.resetSession()
+        patchDeck({ ref: null })
+        patchUiState({ status: 'closed' })
+        patchOverlayState({ sessions: true })
+
+        return
+      }
+
       case 'session.info': {
         let info = ev.payload as SessionInfo | undefined
 

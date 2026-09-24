@@ -52,6 +52,7 @@ class CLITuiRuntimeMixin:
         for step in (
             self._check_termios_drift,
             lambda: self._drain_process_notifications("cli-idle"),
+            self._deck_idle_tick,
             self._maybe_fire_loop_tick,
             self._maybe_resume_parked_goal,
         ):
@@ -62,6 +63,7 @@ class CLITuiRuntimeMixin:
         """Route one submitted input: file drop, /resume pick, ! shell, slash command, or a chat turn."""
         from cli import _DIM, _PASTE_REF_RE, _RST, _cprint, _detect_file_drop, _looks_like_slash_command, _strip_leaked_bracketed_paste_wrappers, _strip_leaked_terminal_responses_with_meta
         from tools.process_registry_notifications import TimelineNotification
+        self._deck_note_input(user_input)
         user_input, is_voice_input, is_seeded_query = self._tui_unwrap_input(user_input)
         if not user_input:
             return
@@ -119,10 +121,13 @@ class CLITuiRuntimeMixin:
         self._pet_turn_error = self._pet_reasoning = False
         self._turn_summary_begin()
         self._app.invalidate()
+        self._last_chat_response = None
         try:
-            self.chat(notification_preview or user_input, images=submit_images or None, voice_input=is_voice_input)
+            self._last_chat_response = self.chat(
+                notification_preview or user_input, images=submit_images or None, voice_input=is_voice_input)
         finally:
             self._tui_after_turn()
+            self._deck_after_turn()
 
     def _tui_run_slash_input(self, user_input: str):
         """Dispatch a slash command. Returns the pending agent seed to run as a chat turn, else None."""

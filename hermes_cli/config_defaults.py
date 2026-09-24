@@ -2227,6 +2227,10 @@ DEFAULT_CONFIG = {
     # Automatic cleanup of ~/.hermes/state.db, which otherwise grows without bound and slows FTS5
     # inserts, /resume listing, and insights queries.
     "sessions": {
+        # Session deck: `hermes --tui` sessions run in the machine session host, so a closed terminal
+        # detaches instead of killing the session; every session stays open (listed by `hermes deck`)
+        # until /close. false = the pre-deck behaviour (the session lives and dies with its terminal).
+        "host": True,
         # Prune ENDED sessions inactive for retention_days (activity = freshest of live activity /
         # latest message / creation) about once per min_interval_hours at startup. Open, pinned, or mid-turn sessions
         # are never deleted; stale automation sessions whose process died are *closed*, then get a

@@ -88,6 +88,21 @@ profile's does not, and that `os.environ` is unchanged afterwards.
 | Plugin compat notice | — | `plugins.compat_report` (see `plugins/AGENTS.md`) |
 | Connection operations (desktop card) | desktop `store/connection-request.ts` | `connection.request` → `connection.update`* → `connection.respond {op_id}`; `connectors.operation.status`. The op lives in `tools/connectors/live.py`; the card never parks the tool thread (`methods_connectors.py`). |
 
+## Session deck (`methods_deck.py`)
+
+`hermes --tui` attaches to ONE machine-level `hermes serve` (the session host; `hermes_cli/session_host.py`
+discovers or spawns it via the host rendezvous record) instead of spawning a private backend, so a terminal
+is a client and losing it detaches the session. A session is a *deck session* once a client calls
+`deck.register` (or the snapshot loop adopts a live session whose conversation has an open deck row):
+`_schedule_ws_orphan_reap` never arms for it, and automatic reclaim (`idle_timeout`, `lru_evict`,
+`tui_shutdown`) leaves its state.db row open like Desktop's — the deck row (`hermes_state_deck.py`) is the
+authority on "open", ended only by `deck.close` / `/close`. Clients in deck mode `deck.detach` instead of
+`session.close` when they move away. Cross-session messages go through the owner-pinned mailbox
+(`tools/bot_live_delivery.py`); `_poll_bot_live_delivery_once` claims only envelopes pinned to the session's
+OWN lease and runs each as a normal turn at an idle boundary (alternation/cache safe). A dormant target is
+woken by dispatching `session.resume` with the detached sentinel bound. User docs:
+`website/docs/user-guide/session-deck.md`.
+
 ## Shared subagent snapshots
 
 `subagent.list({session_id})` returns `{subagents, delegations}` for the calling

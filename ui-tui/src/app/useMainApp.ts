@@ -52,6 +52,7 @@ import { applyAgentSnapshot } from './agentRoster.js'
 import { createGatewayEventHandler } from './createGatewayEventHandler.js'
 import { createServerRequestHandler } from './createServerRequestHandler.js'
 import { createSlashHandler } from './createSlashHandler.js'
+import { DECK_MODE } from './deckStore.js'
 import { planGatewayRecovery } from './gatewayRecovery.js'
 import { getInputSelection } from './inputSelectionStore.js'
 import { type GatewayRpc, type StateSetter, type TranscriptRow } from './interfaces.js'
@@ -1306,16 +1307,19 @@ export function useMainApp(gw: GatewayClient) {
       // must respect the busy guard just like the `/resume` slash path.
       // (Switching between live sessions and `+ new` keep the current session
       // running, so those stay unguarded — that's the orchestrator's purpose.)
-      resumeById: (id: string) => {
-        if (session.guardBusySessionSwitch('switch sessions')) {
+      quit: die,
+      // Deck mode leaves the running session going in the host (detach, not close), so no busy guard there.
+      resumeById: (id: string, profile?: string) => {
+        if (!DECK_MODE && session.guardBusySessionSwitch('switch sessions')) {
           return
         }
 
-        session.resumeById(id)
+        session.resumeById(id, profile)
       },
       setStickyPrompt
     }),
     [
+      die,
       answerApproval,
       answerClarify,
       answerClarifyQuestion,
