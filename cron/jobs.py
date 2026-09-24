@@ -1298,8 +1298,16 @@ def _parse_jobs_file(jobs_file: Path) -> Tuple[Any, bool]:
     """Tolerant jobs.json parse -> ``(data, used_strict_fallback)``: utf-8-sig absorbs a BOM, strict
     failure retries with ``strict=False``. IO/fallback errors propagate (caller decides repair vs
     bail)."""
-    with open(jobs_file, "r", encoding="utf-8-sig") as f:
-        raw = f.read()
+    # Fork: envelope-aware read (migration seals cron/jobs.json; a plain open() hits
+    # ciphertext and every tick dies with "Cron database corrupted"). utf-8-sig
+    # semantics preserved: a BOM from Windows editors must still load (env-class dialect).
+    from hermes_security.io import read_text as _sealed_read_text
+
+    raw = _sealed_read_text(jobs_file, purpose="state")
+    if raw is None:
+        raise FileNotFoundError(str(jobs_file))
+    if raw.startswith("\ufeff"):
+        raw = raw.lstrip("\ufeff")
     try:
         return json.loads(raw), False
     except json.JSONDecodeError:
@@ -1494,8 +1502,19 @@ def _save_jobs_unlocked(
                 _unlink_quiet(tmp_path)
                 tmp_path = None
                 continue
-            atomic_replace(tmp_path, jobs_file)
-            tmp_path = None
+            # Fork: envelope-aware write inside a vaulted home (migration seals
+            # cron/jobs.json); the staged plaintext temp still feeds the merge guards.
+            try:
+                from hermes_security.io import _home_for, write_text as _seal_write
+            except ImportError:
+                _home_for = _seal_write = None
+            if _seal_write is not None and _home_for is not None and _home_for(jobs_file) is not None:
+                _seal_write(jobs_file, Path(tmp_path).read_text(encoding="utf-8"), purpose="state")
+                _unlink_quiet(tmp_path)
+                tmp_path = None
+            else:
+                atomic_replace(tmp_path, jobs_file)
+                tmp_path = None
             _secure_file(jobs_file)
             _preserve_file_ownership(jobs_file, _stat_before)
             # Invalidate (never refresh) the stamp: a refresh would let a nested save certify disk
