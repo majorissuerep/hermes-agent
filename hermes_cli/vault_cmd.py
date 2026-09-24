@@ -356,9 +356,13 @@ def gate_locked_vault(args: Any, home) -> None:
 
     if vault_mod.is_unlocked(home):
         return
+    from hermes_security.handoff import adopt_inherited_key
+
     try:
-        password = _password_from_env_or_prompt()
-        vault_mod.unlock(home, password)
+        # A detached child (the session host) inherits its launcher's unlocked key over a pipe fd.
+        if not (adopt_inherited_key() and vault_mod.is_unlocked(home)):
+            password = _password_from_env_or_prompt()
+            vault_mod.unlock(home, password)
         # An import-time config read (parser build, plugin discovery) ran while
         # the vault was locked and cached the degraded empty parse; drop every
         # config cache so post-unlock loads see the real decrypted file.
