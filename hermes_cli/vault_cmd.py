@@ -295,6 +295,33 @@ def cmd_vault(args: Any) -> int:
             print(f"  [{i}] {slot.get('type', '?')}")
         return 0
 
+    if command == "repair":
+        if not vault_mod.vault_exists(home):
+            print(f"✗ No vault at {home}; run 'hermes secure-vault migrate' first")
+            return 1
+        password = _password_from_env_or_prompt()
+        try:
+            vault_mod.unlock(home, password)
+        except vault_errors.WrongMasterPasswordError:
+            print("✗ Wrong master password")
+            return 1
+        from hermes_security.migrate import repair_clobbered_state
+
+        report = repair_clobbered_state(home)
+        if report["sealed"]:
+            print(f"✓ Re-sealed {len(report['sealed'])} plaintext file(s) into envelopes:")
+            for rel in report["sealed"][:20]:
+                print(f"    {rel}")
+            if len(report["sealed"]) > 20:
+                print(f"    … and {len(report['sealed']) - 20} more")
+        else:
+            print("○ No plaintext state files found (home is fully sealed)")
+        if report["skipped_dbs"]:
+            print(f"⚠ {len(report['skipped_dbs'])} PLAINTEXT database(s) left untouched (vault bypass suspected — investigate):")
+            for rel in report["skipped_dbs"][:10]:
+                print(f"    {rel}")
+        return 0
+
     if command == "lock":
         vault_mod.lock_now(home)
         print("✓ Vault locked in this process (keys dropped)")

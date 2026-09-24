@@ -333,6 +333,14 @@ def _sanitize_env_file_if_needed(path: Path) -> None:
     except Exception:
         return
 
+    # Fork (vault): an encrypted envelope (.env sealed by the vault) is NOT
+    # text to sanitize — NUL-stripping + rewriting it in place DESTROYS the
+    # ciphertext (this exact bug clobbered a migrated .env: dotenv then
+    # choked on ~188 lines of envelope bytes). Envelopes pass through; the
+    # envelope-aware reader in agent.secret_scope.load_env_file handles them.
+    if raw.startswith(b"HRMVAULT\x00"):
+        return
+
     # ORDER MATTERS: BOM_UTF32_LE (FF FE 00 00) startswith BOM_UTF16_LE (FF FE); UTF-16 first would mangle it.
     force_utf8_rewrite = False
     if raw.startswith(codecs.BOM_UTF32_LE) or raw.startswith(codecs.BOM_UTF32_BE):

@@ -37,7 +37,25 @@ command -v git >/dev/null || die "git not found"
 stop_hermes() {
     say "→ Stopping running Hermes services..."
     systemctl --user stop 'hermes-gateway*' 2>/dev/null || true
+    # Kill EVERY hermes process from ANY venv (old install, respawned
+    # gateway, stale --yolo session, kernel runners). A surviving
+    # plaintext-mode process fights the vault mid-migration and clobbers
+    # sealed envelopes (real incident: watchdog-respawned old-venv gateway
+    # NUL-stripped a sealed .env into garbage).
+    pkill -f 'hermes-agent/. *gateway run' 2>/dev/null || true
     pkill -f 'gateway run' 2>/dev/null || true
+    pkill -f 'hermes_kernel_runner' 2>/dev/null || true
+    pkill -f 'hermes-agent.*--yolo' 2>/dev/null || true
+    pkill -f 'hermes-agent/hermes ' 2>/dev/null || true
+    sleep 1
+    # Watchdogs respawn their victims: after the first sweep, kill any
+    # survivor once more and report if something STILL refuses to die.
+    if pgrep -f 'hermes-agent/(venv|.venv)/bin' >/dev/null 2>&1; then
+        pkill -9 -f 'hermes-agent/(venv|.venv)/bin' 2>/dev/null || true
+        sleep 1
+        pgrep -f 'hermes-agent/(venv|.venv)/bin' >/dev/null 2>&1 \
+            && say "  ⚠ hermes processes still alive — stop them before migrating (pgrep -af hermes)"
+    fi
     # desktop serve backend dies with the app; give DBs a moment to close
     sleep 2
 }

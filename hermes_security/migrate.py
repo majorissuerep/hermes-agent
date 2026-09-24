@@ -70,6 +70,50 @@ class MigrationReport:
         return not self.failures
 
 
+def repair_clobbered_state(home: Path | str) -> dict:
+    """Re-seal plaintext state files inside a VAULTED home (fork).
+
+    The clobber scenario: an old-venv process (watchdog-respawned gateway,
+    stale --yolo session) rewrote sealed envelopes (.env, config-adjacent
+    files) as plaintext AFTER migration. This re-seals every eligible
+    plaintext file back into an envelope. Databases are REPORTED, never
+    re-sealed here — a plaintext DB inside a vaulted home means the vault
+    was bypassed wholesale and needs investigation, not silent wrapping.
+
+    Returns {sealed: [relpaths], skipped_dbs: [relpaths]}.
+    """
+
+    home_path = Path(home).expanduser().resolve()
+    if not vault_mod.vault_exists(home_path):
+        raise vault_errors.VaultNotInitializedError(f"No vault at {home_path}")
+    vault = vault_mod.get_vault(home_path, allow_env_unlock=False)
+
+    from hermes_security.io import _MAGIC as _ENVELOPE_MAGIC
+
+    db_suffixes = (".db", ".sqlite", ".sqlite3")
+    sealed: list[str] = []
+    skipped_dbs: list[str] = []
+    for path, rel in _iter_files(home_path):
+        try:
+            head = path.open("rb").read(max(16, len(_ENVELOPE_MAGIC)))
+        except OSError:
+            continue
+        if head.startswith(_ENVELOPE_MAGIC):
+            continue  # already sealed
+        if path.suffix in db_suffixes and head.startswith(b"SQLite format 3\x00"):
+            skipped_dbs.append(str(rel))
+            continue
+        try:
+            # Canonical purpose per file class — the reader decrypts with the
+            # same purpose (it is bound into the AAD), so a repaired file must
+            # be sealed exactly as migration would have sealed it.
+            vault.write_bytes(path, path.read_bytes(), purpose=_purpose_for(rel))
+            sealed.append(str(rel))
+        except Exception:
+            continue
+    return {"sealed": sealed, "skipped_dbs": skipped_dbs}
+
+
 def _iter_files(home: Path):
     for path in sorted(home.rglob("*")):
         if not path.is_file() and not path.is_symlink():
