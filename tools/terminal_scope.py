@@ -124,7 +124,7 @@ def build_profile_terminal_scope(
     env_path = home / ".env"
     if env_path.exists():
         # load_env_file swallows OSError by design (secret scope fails soft); an unreadable
-        # profile .env must fail closed here.
+        # profile .env must fail closed here. (Fork: load_env_file is envelope-aware.)
         try:
             env_path.read_bytes()
         except Exception as exc:

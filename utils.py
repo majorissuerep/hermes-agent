@@ -644,8 +644,13 @@ def load_yaml_file_readonly(path: Union[str, Path]) -> Any:
         cached = _YAML_FILE_CACHE.get(key)
         if cached is not None and cached[0] == sig:
             return cached[1]
-    with open(path, encoding="utf-8") as f:
-        data = fast_safe_load(f)
+    # Fork: envelope-aware read (config.yaml is sealed in a vaulted home; a plain
+    # open() decodes ciphertext as UTF-8 and every consumer — terminal scope is the
+    # load-bearing one — fails closed on a parse error that is not a parse error).
+    from hermes_security.io import read_text as _sealed_read_text
+
+    text = _sealed_read_text(path, purpose="config")
+    data = fast_safe_load(text) if text is not None else None
     with _YAML_FILE_CACHE_LOCK:
         _YAML_FILE_CACHE[key] = (sig, data)
     return data
