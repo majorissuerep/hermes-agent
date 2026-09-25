@@ -48,9 +48,12 @@ state** — plus the hardening that grew around it.
 - Crypto-free invariant: update dispatch and the gate must never import
   `cryptography` (Windows self-update lock); import-trace verified.
 
-Credential flows: `HERMES_MASTER_PASSWORD` (env, daemons/non-TTY creation
-AND unlock), `--private-key` / `HERMES_VAULT_PRIVATE_KEY` (path to raw
-32-byte base64/hex). TTY detection probes `/dev/tty`, NOT stdin.isatty
+Credential flows: TTY passphrase (humans), `--private-key` /
+`HERMES_VAULT_PRIVATE_KEY` (path to raw 32-byte base64/hex — the ONLY
+non-interactive credential), `migrate --key-only --key-out F` (non-TTY
+creation; the key file is the sole credential). POLICY: the passphrase is
+NEVER read from the environment (env leaks via /proc/environ, children,
+EnvironmentFiles). TTY detection probes `/dev/tty`, NOT stdin.isatty
 (curl|bash has piped stdin but a live /dev/tty — refusing on isatty broke
 installs; fixed 2b25325a).
 
@@ -176,7 +179,7 @@ after killing surviving old-venv processes.
 
     hermes secure-vault status | migrate | unlock | lock | repair
     hermes secure-vault keygen | add-key --public-key F | remove-key --slot N | slots
-    env creds: HERMES_MASTER_PASSWORD=... or HERMES_VAULT_PRIVATE_KEY=/path
+    env creds: HERMES_VAULT_PRIVATE_KEY=/path (key file only; passphrase is never env)
     scanner gate: bash scripts/security_scan.sh   (ALL CLEAN required)
     tests:        bash scripts/run_tests.sh <paths>
     fresh install: see §4 command; offline: FORK_SRC=/path takeover.sh
