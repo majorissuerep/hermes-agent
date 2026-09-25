@@ -61,6 +61,25 @@ stop_hermes() {
 }
 
 # ── 2/3. Swap the source tree ───────────────────────────────────────────────
+_bounded_git() {
+    # Bounded wait without GNU coreutils: macOS ships no `timeout` command, and a
+    # bare `timeout 60 ...` exits 127 there — takeover then "continued on the
+    # existing checkout" and rebuilt STALE code (real incident: a Mac kept
+    # resolving sqlcipher3-binary 0.6.0 from the pre-#10 pyproject).
+    if command -v timeout >/dev/null 2>&1; then
+        timeout 60 "$@"
+    else
+        "$@" &
+        local _pid=$!
+        ( sleep 60; kill -9 $_pid 2>/dev/null ) &
+        local _watchdog=$!
+        wait $_pid
+        local _rc=$?
+        kill -9 $_watchdog 2>/dev/null
+        return $_rc
+    fi
+}
+
 swap_source() {
     if [[ -d "$INSTALL_DIR/.git" ]]; then
         origin_url="$(git -C "$INSTALL_DIR" remote get-url origin 2>/dev/null || true)"
@@ -68,11 +87,20 @@ swap_source() {
             say "→ Fork already checked out at $INSTALL_DIR; updating..."
             # Fetch failure must NEVER block a takeover whose tree is local:
             # bounded wait, then warn and continue on the existing checkout.
-            if timeout 60 git -C "$INSTALL_DIR" fetch origin --quiet 2>/dev/null; then
+            if _bounded_git git -C "$INSTALL_DIR" fetch origin --quiet 2>/dev/null; then
                 local_branch="$(git -C "$INSTALL_DIR" rev-parse --abbrev-ref HEAD)"
                 git -C "$INSTALL_DIR" reset --hard "origin/$local_branch" --quiet
             else
                 say "  ○ origin unreachable — continuing on the existing checkout"
+            fi
+            # Staleness guard: the sync below builds THIS tree; if it is behind
+            # origin/main the user gets a loud, actionable message instead of a
+            # silently stale install (the macOS sqlcipher3 incident).
+            if git -C "$INSTALL_DIR" rev-parse --verify -q origin/main >/dev/null; then
+                if ! git -C "$INSTALL_DIR" merge-base --is-ancestor HEAD origin/main; then
+                    say "  ⚠ checkout at $INSTALL_DIR is BEHIND origin/main — building old code"
+                    say "    fix: git -C $INSTALL_DIR fetch origin && git -C $INSTALL_DIR checkout -B main origin/main"
+                fi
             fi
             return
         fi
@@ -108,6 +136,18 @@ build_venv() {
         done
         return 1
     }
+    if ! command -v uv >/dev/null; then
+        # macOS/stock hosts have no uv and often no python 3.11-3.13 (CLT ships
+        # 3.9); the pip fallback below would die at pick_python. uv provisions a
+        # managed 3.11 itself, so installing it is the self-sufficient path.
+        say "→ uv not found — installing to ~/.local/bin (astral.sh install script)..."
+        if curl -fsSL https://astral.sh/uv/install.sh | sh >/tmp/hermes-takeover-uv.log 2>&1; then
+            export PATH="$HOME/.local/bin:$PATH"
+        else
+            say "  ○ uv install failed — falling back to system python (needs 3.11-3.13):"
+            tail -3 /tmp/hermes-takeover-uv.log >&2 || true
+        fi
+    fi
     if command -v uv >/dev/null; then
         # uv provisions a managed 3.11 itself — no system interpreter needed
         # (hosts whose only python3 is >=3.14 would otherwise die here).
