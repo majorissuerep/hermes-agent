@@ -55,6 +55,18 @@ def open_db(
     # Resolved at call time: fd-leak tests patch ``sqlite3.connect`` through the caller's module.
     conn = _vault_maybe_connect(path, timeout=busy_timeout_ms / 1000, check_same_thread=check_same_thread)
     try:
+        # Fork: stdlib sqlite3.Row rejects sqlcipher3 cursors ("Row() argument 1 must be
+        # sqlite3.Cursor"); a vaulted-home DB routed to SQLCipher by _vault_maybe_connect must
+        # get SQLCipher's Row (same shape: string-indexable). Mirrors
+        # hermes_state._vaulted_row_factory.
+        if row_factory is sqlite3.Row:
+            try:
+                from hermes_security import sqlite as _hsql
+
+                if _hsql.is_vaulted(path):
+                    row_factory = _hsql.row_class()
+            except ImportError:
+                pass
         conn.row_factory = row_factory
         conn.execute(f"PRAGMA busy_timeout={int(busy_timeout_ms)}")
         if wal:
