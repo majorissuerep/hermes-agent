@@ -796,3 +796,29 @@ def test_lock_bits_on_cmd_backspace_alias():
     assert _parse("\x1b[127;137u") == [Keys.ControlU]  # Cmd+Backspace + NumLock
     assert _parse("\x1b[127;73u") == [Keys.ControlU]   # Cmd+Backspace + Caps
     assert _parse("\x1b[3;137~") == [Keys.ControlK]    # Cmd+FwdDel + NumLock
+
+
+def test_bare_csi_u_forms_map_to_their_keys():
+    """Regression (VS Code on macOS incident): parameterless CSI-u reports.
+
+    The kitty spec says the modifier defaults to 1 when absent, and real emitters
+    (VS Code's xterm.js under the disambiguate push) send the BARE spelling for
+    plain keys — Space as ``ESC[32u``, Enter as ``ESC[13u``. Unmapped, the parser
+    eats ESC as an Escape keypress and INSERTS the rest literally ("[32u" garbage
+    instead of a space; same class as lazygit#3237 / kimi-code#1984)."""
+    assert _parse("\x1b[32u") == [" "]                # plain Space
+    assert _parse("\x1b[13u") == [Keys.ControlM]      # plain Enter (submits)
+    assert _parse("\x1b[9u") == [Keys.ControlI]       # plain Tab
+    assert _parse("\x1b[127u") == [Keys.ControlH]     # plain Backspace
+    assert _parse("\x1b[27u") == [Keys.Escape]        # plain Esc (pre-existing)
+
+
+def test_bare_csi_u_space_does_not_leak_literal_text():
+    """The user-visible failure: Space typing "[32u" into the input line.
+
+    Before the fix the ESC was consumed as an Escape keypress and '[32u' arrived
+    as four literal characters — assert the parser never emits that shape."""
+    keys = _parse("\x1b[32u")
+    assert keys == [" "]
+    assert "[32u" not in keys
+    assert Keys.Escape not in keys

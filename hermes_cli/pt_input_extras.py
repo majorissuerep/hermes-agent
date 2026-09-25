@@ -274,6 +274,16 @@ def _modify_other_keys_aliases(ANSI_SEQUENCES: dict, Keys) -> dict[str, object]:
     _install_paired(5, {9: Keys.ControlI, 127: alt_backspace})  # Ctrl+Tab degrades to Tab
     _install_paired(1, {9: Keys.ControlI, 13: Keys.ControlM, 32: " ", 127: Keys.ControlH})
 
+    # BARE CSI-u forms (no modifier param): per the kitty spec the modifier defaults to 1, but
+    # real emitters send the parameterless spelling — VS Code's xterm.js reports plain Space as
+    # ESC[32u and Enter as ESC[13u under the disambiguate push, and plain Esc as ESC[27u (that
+    # one is already mapped above). Unmapped, prompt_toolkit eats the ESC as an Escape keypress
+    # and INSERTS the rest literally — "[32u" garbage in the input line (the VS Code-on-macOS
+    # incident; same class as lazygit#3237 / kimi-code#1984). Same targets as modifier 1 above;
+    # setdefault keeps any existing mapping (Shift+Enter aliases ran first).
+    for codepoint, key_val in ((9, Keys.ControlI), (13, Keys.ControlM), (32, " "), (127, Keys.ControlH)):
+        _put(f"\x1b[{codepoint}u", key_val)
+
     # Lock twins for the legacy CSI-letter / CSI-tilde forms kitty keeps using under the
     # disambiguate push (Down with NumLock on = ESC[1;129B; Alt+Left = ESC[1;131D). Derived from
     # whatever the table already maps for the base modifier, stock entries included.
