@@ -295,6 +295,16 @@ def _validate_sqlite_header(path: Path) -> None:
             return
     except OSError:
         return
+    # Fork: a vaulted-home board is SQLCipher — page 1 is ciphertext and must NOT
+    # be byte-probed for the plaintext SQLite header (the probe condemned every
+    # sealed board as "not a valid SQLite database" and quarantined dispatch).
+    try:
+        from hermes_security import sqlite as _hsql
+
+        if _hsql.is_vaulted(path):
+            return
+    except ImportError:
+        pass
     # Byte-level probe: must run BEFORE any connection to this path exists
     # (read_header_bytes_preopen refuses once one is live, because the close()
     # would cancel this process's POSIX locks).
@@ -652,6 +662,19 @@ def _schema_is_present(conn: sqlite3.Connection) -> bool:
     return row is not None
 
 
+def _vaulted_row_factory(db_path) -> "sqlite3.Row":
+    """Fork: SQLCipher's Row for vaulted-home boards (stdlib Row rejects
+    sqlcipher3 cursors); stdlib Row otherwise."""
+    try:
+        from hermes_security import sqlite as _hsql
+
+        if _hsql.is_vaulted(db_path):
+            return _hsql.row_class()
+    except Exception:
+        pass
+    return sqlite3.Row
+
+
 def _open_configured(path: Path, under_lock) -> tuple[sqlite3.Connection, Any]:
     """Open ``path`` with the kanban PRAGMA set, then run ``under_lock(conn)``.
     WAL activation and ``under_lock`` share the ``_INIT_LOCK`` critical section:
@@ -660,7 +683,7 @@ def _open_configured(path: Path, under_lock) -> tuple[sqlite3.Connection, Any]:
     ``_INITIALIZED_PATHS`` is populated. Closed if anything raises."""
     conn = _sqlite_connect(path)
     try:
-        conn.row_factory = sqlite3.Row
+        conn.row_factory = _vaulted_row_factory(path)
         conn.text_factory = _kb._lossy_text
         with _INIT_LOCK:
             # WAL doesn't work on network filesystems; the helper falls back to
@@ -700,7 +723,7 @@ def connect(db_path: Optional[Path] = None, *, board: Optional[str] = None) -> s
         # Reads must not enter schema/backfill write transactions. Never create a
         # missing board or migrate on a descendant's behalf; the owner initializes it.
         conn = _vault_maybe_connect(path.resolve().as_uri() + "?mode=ro", uri=True)
-        conn.row_factory = sqlite3.Row
+        conn.row_factory = _vaulted_row_factory(path)
         conn.text_factory = _kb._lossy_text
         if not _schema_is_present(conn):
             conn.close()
