@@ -157,6 +157,7 @@ PYEOF
         grep -rlaE "rehearsal-session|claude-sonnet|debt total|native-before-takeover" \
           --include="*.db" --include="*.yaml" --include="*.json" --include="*.log" \
           --include="*.jsonl" --include=".env" --exclude-dir=hermes-agent \
+          --exclude-dir="hermes-agent.pre-fork-*" \
           ~/.hermes 2>/dev/null | tee '"$WORK"'/leaks.txt
         hits=$(wc -l < '"$WORK"'/leaks.txt)
         echo "   plaintext hits: ${hits:-0} (0 required)"
