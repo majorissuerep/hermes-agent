@@ -68,7 +68,7 @@ def _sqlcipher_module() -> Any:
     except ImportError as exc:
         raise SQLCipherUnavailableError(
             "SQLCipher is required; this Hermes fork refuses to create plaintext "
-            "SQLite state. Install sqlcipher3-binary."
+            "SQLite state. Install sqlcipher3 (macOS/Windows) or sqlcipher3-binary (Linux x86_64)."
         ) from exc
     # Prove the runtime really has SQLCipher: the pragma must exist.
     probe = sqlcipher.connect(":memory:")
