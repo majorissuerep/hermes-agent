@@ -135,11 +135,25 @@ def _stamp_is_current(stamp_file: Path, current_hash: Callable[[], str], **expec
 
     ``current_hash`` is only evaluated once the cheaper checks pass (it walks the
     source tree).
+
+    Fork: stamps live under ``$HERMES_HOME`` and ``secure-vault migrate`` seals every
+    pre-existing home-root file, so the read must be envelope-aware. A sealed stamp
+    read as plaintext raises UnicodeDecodeError and crashed ``hermes update``'s
+    desktop phase; any unreadable/unparseable stamp is simply not current (the
+    caller rebuilds) — fail-open-to-rebuild, never fail-the-update.
     """
+    from hermes_security import io as vault_io
+
     if not stamp_file.is_file():
         return False
     try:
-        stamp_data = json.loads(stamp_file.read_text(encoding="utf-8"))
+        raw = vault_io.read_state_text(stamp_file, purpose="build_stamp")
+    except Exception:
+        return False
+    if raw is None:
+        return False
+    try:
+        stamp_data = json.loads(raw)
     except (OSError, json.JSONDecodeError):
         return False
     if not isinstance(stamp_data, dict):
@@ -151,13 +165,19 @@ def _stamp_is_current(stamp_file: Path, current_hash: Callable[[], str], **expec
 
 
 def _write_build_stamp(stamp_file: Path, label: str, current_hash: Callable[[], str], **extra) -> None:
-    """Write ``{contentHash, **extra, builtAt}``; never lets stamp-writing fail a build."""
+    """Write ``{contentHash, **extra, builtAt}``; never lets stamp-writing fail a build.
+
+    Fork: envelope-aware so the stamp round-trips in a vaulted home (seals in-home,
+    plaintext outside — same policy as every other home-root state file)."""
     try:
-        stamp_file.parent.mkdir(parents=True, exist_ok=True)
         content_hash = current_hash()
         from datetime import datetime, timezone
         stamp_data = {"contentHash": content_hash, **extra, "builtAt": datetime.now(timezone.utc).isoformat()}
-        stamp_file.write_text(json.dumps(stamp_data, indent=2) + "\n", encoding="utf-8")
+        from hermes_security import io as vault_io
+
+        vault_io.write_state_text(
+            stamp_file, json.dumps(stamp_data, indent=2) + "\n", purpose="build_stamp"
+        )
     except Exception as exc:
         logger.debug("Failed to write %s build stamp: %s", label, exc)
 

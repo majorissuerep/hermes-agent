@@ -558,11 +558,19 @@ def _npm_lock_cache_file(hermes_root: Path, scope: str = "") -> Path:
 
 
 def _npm_stamp_matches(hermes_root: Path, current: str, scope: str = "") -> bool:
-    """True when the recorded digest for *scope* equals *current*; a missing/unreadable stamp never matches."""
+    """True when the recorded digest for *scope* equals *current*; a missing/unreadable stamp never matches.
+
+    Fork: the stamp lives in the vaulted home root, so it is a sealed envelope once the
+    vault is active — read it envelope-aware. A plaintext read of ciphertext raises
+    UnicodeDecodeError and crashed ``hermes update`` post-swap (same sealed-state class
+    as the config/cron/kanban readers)."""
+    from hermes_security import io as vault_io
+
     try:
-        return _npm_lock_cache_file(hermes_root, scope).read_text(encoding="utf-8").strip() == current
-    except OSError:
+        recorded = vault_io.read_state_text(_npm_lock_cache_file(hermes_root, scope), purpose="npm_lock_stamp")
+    except Exception:
         return False
+    return recorded is not None and recorded.strip() == current
 
 
 def _clear_npm_lockfile_hash(hermes_root: Path, scope: str = "") -> None:
@@ -577,7 +585,13 @@ def _record_npm_lockfile_hash(hermes_root: Path, scope: str = "") -> None:
     if digest is None:
         return
     try:
-        _npm_lock_cache_file(hermes_root, scope).write_text(digest, encoding="utf-8")
+        from hermes_security import io as vault_io
+
+        # Envelope-aware write: seals inside the vaulted home, plaintext in a
+        # vault-less home (tests), so the stamp stays readable by this reader.
+        vault_io.write_state_text(
+            _npm_lock_cache_file(hermes_root, scope), digest, purpose="npm_lock_stamp"
+        )
     except OSError:
         logger.debug("Could not write npm lockfile hash cache")
 

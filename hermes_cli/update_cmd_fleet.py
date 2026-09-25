@@ -72,9 +72,13 @@ def _write_legacy_fleet_restart_pending_marker(
             lines.append(f"expected_sha={expected_sha}")
         if runtimes is not None:
             lines.append("inventory=" + json.dumps({"version": 1, "runtimes": runtimes}))
-        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        # Fork: envelope-aware — the marker lives in the vaulted home root; a plaintext
+        # write there both leaks update state at rest and trips secure-vault repair.
+        from hermes_security import io as vault_io
+
+        vault_io.write_state_text(path, "\n".join(lines) + "\n", purpose="fleet_restart_marker")
         return True
-    except OSError as exc:
+    except Exception as exc:
         logger.debug("Could not write legacy fleet-restart-pending marker: %s", exc)
         return False
 
@@ -157,8 +161,14 @@ def _obligation_fields() -> dict[str, str] | None:
         # unrelated legacy marker's inventory cannot discharge terms nobody can read: fail closed.
         return None
     try:
-        text = _fleet_restart_pending_marker_path().read_text(encoding="utf-8")
+        from hermes_security import io as vault_io
+
+        text = vault_io.read_state_text(
+            _fleet_restart_pending_marker_path(), purpose="fleet_restart_marker"
+        )
     except (OSError, UnicodeError):
+        return None
+    if text is None:
         return None
     legacy: dict[str, str] = {}
     for line in text.splitlines():

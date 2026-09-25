@@ -117,6 +117,36 @@ def read_text(path: Path | str, *, purpose: str, encoding: str = "utf-8") -> Opt
     return None if data is None else data.decode(encoding)
 
 
+def write_state_text(path: Path | str, text: str, *, purpose: str) -> Path:
+    """Envelope-aware state write that stays plaintext in a vault-less home.
+
+    Convention (active_sessions, gateway.status): seal only when the target has a
+    vaulted ancestor; vault-less homes (tests, pre-migrate) keep plain files.
+    Raises whatever the underlying write raises on genuine I/O errors.
+    """
+    target = Path(path).expanduser()
+    if _home_for(target) is not None:
+        return write_text(target, text, purpose=purpose)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(text, encoding="utf-8")
+    return target
+
+
+def read_state_text(path: Path | str, *, purpose: str) -> Optional[str]:
+    """Envelope-aware state read mirroring :func:`write_state_text`: decrypts inside a
+    vaulted home, passes ciphertext through untouched when no vault exists (a stray
+    envelope there is the caller's ``current`` check to fail, not ours to raise on)."""
+    target = Path(path).expanduser()
+    if _home_for(target) is not None:
+        return read_text(target, purpose=purpose)
+    try:
+        return target.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    except UnicodeDecodeError:
+        return None
+
+
 def write_text(path: Path | str, text: str, *, purpose: str, encoding: str = "utf-8") -> Path:
     return write_bytes(path, text.encode(encoding), purpose=purpose)
 
