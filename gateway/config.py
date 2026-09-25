@@ -605,6 +605,12 @@ class GatewayConfig:
     # An explicit value (config.yaml, GATEWAY_MULTIPLEX_PROFILES, a constructor argument) is honoured
     # verbatim. Every reader tests truthiness, so an unresolved ``None`` never multiplexes by accident.
     multiplex_profiles: Optional[bool] = None
+    # Fork (external-surface lockdown): gateway.external_platforms: false hard-disables EVERY
+    # external messaging platform REGARDLESS of how it was enabled — an explicit YAML block, or
+    # env credentials (the env-enablement pass runs after from_dict and force-enables platforms
+    # like TELEGRAM_BOT_TOKEN; without this field the kill switch never saw them). LOCAL
+    # (CLI/TUI/desktop/dashboard), api_server and webhook surfaces are unaffected.
+    external_platforms: bool = True
     # Public HTTPS endpoint for scoped RoomLink calls (an API key alone must never advertise a
     # route); HERMES_ROOM_LINK_URL overrides.
     room_link_url: Optional[str] = None
@@ -776,15 +782,21 @@ class GatewayConfig:
         # treated as a vulnerability surface. LOCAL (CLI/TUI/desktop/
         # dashboard) keeps working. Default ON for external platforms when
         # the key is absent preserves per-platform opt-in; flipping the key
-        # to false is the one-switch kill.
-        external_platforms = _coerce_bool(data.get("external_platforms"), True)
+        # to false is the one-switch kill. ``pick`` honors both the top-level
+        # and the nested ``gateway.`` spelling (the bridge also copies it).
+        external_platforms = _coerce_bool(pick("external_platforms"), True)
 
         def platforms_with_lockdown(key: str, parse, *, dicts_only: bool = False) -> dict:
             out = by_platform(key, parse, dicts_only=dicts_only)
             if not external_platforms:
+                # Same non-messaging set as _relay / _start_check_access_policy: LOCAL
+                # (CLI/TUI/desktop) plus the api_server (dashboard) and webhook surfaces —
+                # the comment above promises the dashboard keeps working, and the dashboard
+                # IS api_server.
+                skip = {Platform.LOCAL, Platform.API_SERVER, Platform.WEBHOOK}
                 locked = 0
                 for plat, cfg in list(out.items()):
-                    if plat is not Platform.LOCAL and getattr(cfg, "enabled", False):
+                    if plat not in skip and getattr(cfg, "enabled", False):
                         cfg.enabled = False
                         locked += 1
                 if locked:
@@ -799,6 +811,7 @@ class GatewayConfig:
 
         return cls(
             platforms=platforms_with_lockdown("platforms", PlatformConfig.from_dict, dicts_only=True),
+            external_platforms=external_platforms,
             reset_triggers=data.get("reset_triggers", ["/new", "/reset"]),
             quick_commands=_coerce_dict(data.get("quick_commands", {})),
             sessions_dir=Path(data["sessions_dir"]) if "sessions_dir" in data else get_hermes_home() / "sessions",

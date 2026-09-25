@@ -500,9 +500,33 @@ def _scrub_explicit_markers(config: GatewayConfig) -> None:
     for platform_config in config.platforms.values():
         platform_config.extra.pop("_enabled_explicit", None)
 
+
+def _enforce_external_platforms_lockdown(config: GatewayConfig) -> None:
+    """Fork kill switch, LAST step of the env pass: ``gateway.external_platforms: false``
+    disables every external messaging platform REGARDLESS of how it was enabled — YAML blocks
+    (already handled in ``from_dict``) or env credentials (the steps above, which force-enable
+    on token presence and re-enabled Telegram on a token-bearing box with the switch set).
+    LOCAL/api_server/webhook stay untouched (non-messaging surfaces)."""
+    if getattr(config, "external_platforms", True):
+        return
+    skip = {Platform.LOCAL, Platform.API_SERVER, Platform.WEBHOOK}
+    locked = 0
+    for platform, platform_config in config.platforms.items():
+        if platform in skip or not platform_config.enabled:
+            continue
+        platform_config.enabled = False
+        locked += 1
+    if locked:
+        logger.warning(
+            "gateway.external_platforms: false — force-disabled %d external platform adapter(s) "
+            "after env enablement (LOCAL surfaces unaffected)",
+            locked,
+        )
+
 # Order is significant: a home channel only attaches to a platform that already exists (Telegram's
 # reply mode may create the entry first; Discord reads home first). Relay disabling runs after the
-# plugin pass; the marker scrub must be last.
+# plugin pass; the external-platforms lockdown is LAST so env enablement cannot re-enable what
+# the kill switch disabled; the marker scrub runs before it (markers are consumed by then).
 _ENV_STEPS: tuple = (
     _Cred(Platform.TELEGRAM, ("TELEGRAM_BOT_TOKEN",), token="TELEGRAM_BOT_TOKEN"),
     _ReplyMode(Platform.TELEGRAM, "TELEGRAM_REPLY_TO_MODE"),
@@ -639,6 +663,7 @@ _ENV_STEPS: tuple = (
     _enable_plugin_platforms_from_env,
     _relay,
     _scrub_explicit_markers,
+    _enforce_external_platforms_lockdown,
 )
 
 

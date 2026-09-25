@@ -96,6 +96,10 @@ _TOPLEVEL_BRIDGE: tuple = (
     ("stt", "stt", "presence", lambda v: isinstance(v, dict), None),
     *_presence("stt_echo_transcripts", "group_sessions_per_user", "thread_sessions_per_user"),
     ("multiplex_profiles", "multiplex_profiles", "gwdata", None, None),
+    # Fork kill switch must be reachable in its documented nested form (hermes config set
+    # gateway.external_platforms false) — without this row the nested key never reached
+    # GatewayConfig.from_dict and the switch silently did nothing (MS73-HB1 incident).
+    ("external_platforms", "external_platforms", "presence", None, None),
     *_presence("room_link_url"),
     ("profile_routes", "profile_routes", "none", lambda v: isinstance(v, list), None),
     *_presence("max_concurrent_sessions"),
