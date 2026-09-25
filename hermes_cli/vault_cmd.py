@@ -3,8 +3,9 @@
 The vault is the fork's mandatory at-rest encryption layer.  ``init`` creates
 vault metadata for the active Hermes home (refusing to overlay existing user
 state); every later start of a state-touching command prompts for the master
-password once per process (``HERMES_MASTER_PASSWORD`` covers daemons and
-cron).
+password once per process on the TTY, or unlocks from a key file
+(``HERMES_VAULT_PRIVATE_KEY`` — a PATH, never a passphrase, in the env; the
+passphrase itself is never read from the environment).
 """
 
 from __future__ import annotations
@@ -61,18 +62,17 @@ def _load_key_file(path: str) -> bytes:
 
 
 def _prompt_new_password() -> str:
-    # Non-interactive callers (scripts, takeover, CI): honor the env password
-    # for CREATION too — it was already the unlock path for daemons.
-    env_pw = os.environ.get("HERMES_MASTER_PASSWORD")
-    if env_pw and not _tty_available():
-        if len(env_pw) < 8:
-            print("✗ HERMES_MASTER_PASSWORD must be at least 8 characters.")
-            raise SystemExit(2)
-        return env_pw
-    if not _tty_available() and not env_pw:
+    # Fork: the passphrase is NEVER read from the environment (env vars leak via
+    # /proc/<pid>/environ, child inheritance and unit EnvironmentFiles — that
+    # contradicts the vault's threat model). Interactive creation prompts on the
+    # TTY; non-interactive callers create + add a key slot and use the key file.
+    if not _tty_available():
         print(
-            "✗ No terminal available to create a master password. "
-            "Set HERMES_MASTER_PASSWORD for non-interactive use."
+            "✗ No terminal available to create a master password.\n"
+            "  Interactive: run 'hermes secure-vault migrate' from a terminal.\n"
+            "  Non-interactive: not supported — create the vault once interactively,\n"
+            "  then 'hermes secure-vault keygen' + 'add-key' for daemons (key file, never env).",
+            file=sys.stderr,
         )
         raise SystemExit(2)
     while True:
@@ -88,13 +88,14 @@ def _prompt_new_password() -> str:
 
 
 def _password_from_env_or_prompt(*, confirm: str = "Unlock master password: ") -> str:
-    env_pw = os.environ.get("HERMES_MASTER_PASSWORD")
-    if env_pw:
-        return env_pw
+    # Fork: NO env passphrase, ever. Non-interactive unlock is the key-file path
+    # (HERMES_VAULT_PRIVATE_KEY), handled in get_vault; this is the human path.
     if not _tty_available():
         print(
-            "✗ The vault is locked and no terminal is available. "
-            "Set HERMES_MASTER_PASSWORD for non-interactive use."
+            "✗ The vault is locked and no terminal is available.\n"
+            "  Unlock with a key file (HERMES_VAULT_PRIVATE_KEY=/path/to/key, 0600, never a\n"
+            "  passphrase in the environment), or run 'hermes secure-vault unlock' in a terminal.",
+            file=sys.stderr,
         )
         raise SystemExit(2)
     return getpass.getpass(confirm)
@@ -120,11 +121,53 @@ def cmd_vault(args: Any) -> int:
         print(f"  files     -> envelopes : {len(report.envelopes)}")
         print(f"  streams   -> frames    : {len(report.frame_streams)}")
         print(f"  total: {total} item(s)")
-        if getattr(args, "yes", False) is not True:
+        if getattr(args, "yes", False) is not True and not getattr(args, "key_only", False):
             answer = input("\nProceed with migration? A full tar backup is written first. [y/N] ").strip().lower()
             if answer not in {"y", "yes"}:
                 print("Aborted; nothing was changed.")
                 return 1
+        if getattr(args, "key_only", False):
+            # Fork policy: no passphrase may be created from/for a non-interactive
+            # context. The vault is sealed to a fresh X25519 public key; the private
+            # half goes to a 0600 file. That key file is the ONLY credential.
+            import secrets as _secrets
+
+            private_key, public_key = vault_mod.generate_keypair()
+            key_out = Path(getattr(args, "key_out", None) or (home / "vault.key")).expanduser()
+            if key_out.parent != Path(home):
+                key_out.parent.mkdir(parents=True, exist_ok=True)
+            key_out.write_bytes(vault_mod._b64e(private_key).encode("ascii"))
+            os.chmod(key_out, 0o600)
+            # Random one-time internal passphrase, discarded immediately: the scrypt
+            # slot keeps the vault readable by future add-key runs (a passphrase slot
+            # is metadata-only here); the durable credential is the key file.
+            one_time = _secrets.token_urlsafe(48)
+            print("→ Backing up and migrating (this can take a minute)...")
+            report = mig.migrate_home(home, one_time)
+            if not report.ok:
+                print("✗ Migration finished WITH FAILURES (backup kept):")
+                for failure in report.failures:
+                    print(f"    {failure}")
+                if report.backup_path:
+                    print(f"  Backup: {report.backup_path}")
+                return 1
+            try:
+                vault_mod.add_key_slot(home, public_key_raw=public_key, password=one_time)
+            finally:
+                del one_time
+            leftovers = mig.scan_for_plaintext(home)
+            if leftovers:
+                print(f"✗ Plaintext remains after migration: {leftovers}")
+                print(f"  Backup: {report.backup_path}")
+                return 1
+            print(f"✓ Migration complete ({len(report.databases)} DBs, {len(report.envelopes)} files, {len(report.frame_streams)} streams)")
+            print(f"  Private key (ONLY credential, 0600): {key_out}")
+            print(f"  Unlock with: HERMES_VAULT_PRIVATE_KEY={key_out}")
+            if report.backup_path:
+                print(f"  Pre-migration backup: {report.backup_path}")
+                print("  Verify everything works, then delete it (it is PLAINTEXT).")
+            print("  LOSE THE KEY FILE = LOSE THE DATA. There is no recovery.")
+            return 0
         password = _prompt_new_password()
         print("→ Backing up and migrating (this can take a minute)...")
         report = mig.migrate_home(home, password)
@@ -200,7 +243,7 @@ def cmd_vault(args: Any) -> int:
         envelopes, dbs, frames = status["encrypted_files"]
         print(f"  Encrypted files  : {envelopes} envelope(s), {dbs} database(s), {frames} frame stream(s)")
         if not status["unlocked"]:
-            print(f"  (use 'hermes secure-vault unlock' or set HERMES_MASTER_PASSWORD to unlock)")
+            print(f"  (use 'hermes secure-vault unlock', or HERMES_VAULT_PRIVATE_KEY=<key-file path>, to unlock)")
         return 0
 
     if command == "unlock":
@@ -361,8 +404,14 @@ def gate_locked_vault(args: Any, home) -> None:
     try:
         # A detached child (the session host) inherits its launcher's unlocked key over a pipe fd.
         if not (adopt_inherited_key() and vault_mod.is_unlocked(home)):
-            password = _password_from_env_or_prompt()
-            vault_mod.unlock(home, password)
+            # Daemon path FIRST: a key file (PATH in env, never secret material). Then
+            # the human path: TTY passphrase. The passphrase is never read from env.
+            key_path = os.environ.get("HERMES_VAULT_PRIVATE_KEY")
+            if key_path:
+                vault_mod.unlock_with_private_key(home, _load_key_file(key_path))
+            else:
+                password = _password_from_env_or_prompt()
+                vault_mod.unlock(home, password)
         # An import-time config read (parser build, plugin discovery) ran while
         # the vault was locked and cached the degraded empty parse; drop every
         # config cache so post-unlock loads see the real decrypted file.

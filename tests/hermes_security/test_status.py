@@ -231,7 +231,7 @@ def test_cli_status_rich_output(vaulted_home, capsys):
     assert "Encrypted files" in out
     assert "envelope" in out
     assert "database" in out
-    assert "unlock" in out.lower() or "HERMES_MASTER_PASSWORD" in out
+    assert "unlock" in out.lower() or "HERMES_VAULT_PRIVATE_KEY" in out
 
 
 def test_cli_status_locked(vaulted_home, capsys):

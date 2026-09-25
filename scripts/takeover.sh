@@ -203,8 +203,38 @@ migrate_state() {
         return 0
     fi
     say "→ Migrating $HERMES_HOME onto the encrypted vault..."
-    say "  (full tar backup first; you will set the master password)"
-    "$LAUNCHER" secure-vault migrate --yes
+    say "  (full tar backup first)"
+    # Fork policy: the master passphrase is NEVER created from or read by a
+    # non-interactive context (curl|bash has no TTY trust boundary for a
+    # passphrase; env vars leak via /proc/environ, children, EnvironmentFiles).
+    # Non-interactive installs create a KEY-ONLY vault: the private key file
+    # (0600) is the sole credential. A human can later add a passphrase slot
+    # interactively ('hermes secure-vault migrate' offers it on a TTY).
+    if _tty_available; then
+        "$LAUNCHER" secure-vault migrate --yes
+    else
+        KEY_OUT="${HERMES_VAULT_KEY_OUT:-$HERMES_HOME/vault.key}"
+        if ! "$LAUNCHER" secure-vault migrate --yes --key-only --key-out "$KEY_OUT"; then
+            die "key-only migration failed — run 'hermes secure-vault migrate' interactively"
+        fi
+        say ""
+        say "✓ Vault created. Private key (ONLY credential): $KEY_OUT"
+        say "  Daemons: HERMES_VAULT_PRIVATE_KEY=$KEY_OUT (a PATH, never a passphrase)"
+        say "  Interactive passphrase slot: hermes secure-vault add-key later, from a terminal"
+    fi
+}
+
+_tty_available() {
+    # Same probe as hermes_cli/vault_gate._tty_available: a real terminal is reachable
+    # through /dev/tty (NOT stdin.isatty — under curl|bash stdin is the script pipe).
+    local _py
+    _py="python3"
+    command -v "$_py" >/dev/null 2>&1 || _py="$INSTALL_DIR/.venv/bin/python"
+    "$_py" -c 'import os,sys
+try:
+    sys.exit(0 if os.isatty(os.open("/dev/tty", os.O_RDWR)) else 1)
+except OSError:
+    sys.exit(1)'
 }
 
 main() {

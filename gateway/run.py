@@ -5989,7 +5989,8 @@ def main():
     # Fork: master-password gate. The gateway is a long-running state writer
     # (state.db, sessions, cron) and never passes through the CLI gate — it
     # must refuse to start without an unlocked vault. Non-interactive by
-    # nature: HERMES_MASTER_PASSWORD in the unit/EnvironmentFile unlocks it.
+    # nature: unlocks from a key file (HERMES_VAULT_PRIVATE_KEY — a PATH to a
+    # 0600 key, never a passphrase, in the unit/EnvironmentFile).
     from hermes_cli.vault_gate import gate_startup
 
     gate_startup(args)

@@ -96,10 +96,30 @@ def test_allow_no_vault_escape(_arm_gate, monkeypatch):
     vault_gate.gate_startup(_args("config"))  # passes
 
 
-def test_locked_vault_env_password_unlocks(_arm_gate, monkeypatch):
+def test_locked_vault_env_password_is_refused(_arm_gate, monkeypatch, capsys):
+    """Fork policy (inverted contract): the passphrase is NEVER read from the environment —
+    even a CORRECT one must leave the vault locked (env leaks via /proc/environ, children,
+    unit EnvironmentFiles). The daemon path is a key file (HERMES_VAULT_PRIVATE_KEY)."""
     home = _arm_gate
     hv.init_vault(home, "gate-pw-1", _allow_existing_state=True)
     monkeypatch.setenv("HERMES_MASTER_PASSWORD", "gate-pw-1")
+    monkeypatch.setattr(vault_gate, "_tty_available", lambda: False)
+    with pytest.raises(SystemExit) as e:
+        vault_gate.gate_startup(_args("config"))
+    assert e.value.code == 2
+    assert not hv.is_unlocked(home)
+
+
+def test_locked_vault_key_file_unlocks(_arm_gate, monkeypatch, tmp_path):
+    """The sanctioned non-interactive credential: a 0600 key file (PATH in env)."""
+    home = _arm_gate
+    hv.init_vault(home, "gate-pw-1", _allow_existing_state=True)
+    priv, pub = hv.generate_keypair()
+    hv.add_key_slot(home, public_key_raw=pub, password="gate-pw-1")
+    hv.clear_vault_cache()
+    key_file = tmp_path / "gate.key"
+    key_file.write_bytes(hv._b64e(priv).encode("ascii"))
+    monkeypatch.setenv("HERMES_VAULT_PRIVATE_KEY", str(key_file))
     vault_gate.gate_startup(_args("config"))
     assert hv.is_unlocked(home)
 
@@ -107,7 +127,7 @@ def test_locked_vault_env_password_unlocks(_arm_gate, monkeypatch):
 def test_locked_vault_wrong_password_exits(_arm_gate, monkeypatch, capsys):
     home = _arm_gate
     hv.init_vault(home, "gate-pw-2", _allow_existing_state=True)
-    monkeypatch.setenv("HERMES_MASTER_PASSWORD", "wrong-one")
+    monkeypatch.setattr(vault_gate, "_tty_available", lambda: False)
     with pytest.raises(SystemExit) as e:
         vault_gate.gate_startup(_args("config"))
     assert e.value.code == 2
