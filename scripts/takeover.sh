@@ -118,11 +118,18 @@ build_venv() {
         # Lock-first: 'uv sync' is deterministic and never re-resolves.
         # 'uv pip install -e .' (lockless) also hard-fails on any invalid
         # PEP 440 version string in pyproject — keep it only as a fallback.
-        if ! uv sync --all-extras >/tmp/hermes-takeover-sync.log 2>&1; then
-            if ! uv pip install --python .venv/bin/python -e . >/tmp/hermes-takeover-install.log 2>&1; then
-                echo "✗ dependency install failed — root cause:" >&2
-                tail -5 /tmp/hermes-takeover-sync.log /tmp/hermes-takeover-install.log >&2
-                die "see above; logs kept in /tmp/hermes-takeover-*.log"
+        # NO --all-extras: the matrix extra (python-olm) has manylinux x86_64
+        # cp310-cp313 wheels only — on macOS/Windows/py3.14 uv would try an
+        # sdist build (libolm+cmake) and the whole takeover dies (MS73-HB1
+        # fell back to base deps this way). Messaging platforms land via the
+        # [messaging] extra; everything heavy stays lazy-installed per [all].
+        if ! uv sync --all-extras --no-extra matrix >/tmp/hermes-takeover-sync.log 2>&1; then
+            if ! uv sync --extra messaging >/tmp/hermes-takeover-sync.log 2>&1; then
+                if ! uv pip install --python .venv/bin/python -e . >/tmp/hermes-takeover-install.log 2>&1; then
+                    echo "✗ dependency install failed — root cause:" >&2
+                    tail -5 /tmp/hermes-takeover-sync.log /tmp/hermes-takeover-install.log >&2
+                    die "see above; logs kept in /tmp/hermes-takeover-*.log"
+                fi
             fi
         fi
     else
