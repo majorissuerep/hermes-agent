@@ -33,6 +33,16 @@ def build_secure_vault_parser(subparsers) -> None:
     )
     parser.add_argument("--yes", action="store_true", help="migrate: skip the confirmation prompt")
     parser.add_argument(
+        "--key-only", action="store_true",
+        help="migrate: non-interactive creation for daemons/scripts — generate an X25519 pair, "
+        "seal the vault to the PUBLIC half, write the private key to --key-out (0600). "
+        "The vault has NO passphrase; the private key file is the ONLY credential.",
+    )
+    parser.add_argument(
+        "--key-out", default=None,
+        help="migrate --key-only: where to write the private key (default: <home>/vault.key, 0600)",
+    )
+    parser.add_argument(
         "--public-key", default=None,
         help="add-key: path to a raw 32-byte public key file (base64 or hex)",
     )

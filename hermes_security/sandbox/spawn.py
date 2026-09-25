@@ -112,7 +112,10 @@ def sandboxed_spawn(argv: list[str], *, extra_read: Iterable[str] = (),
     return wrap_argv(argv, spec), env
 
 
-# The vault's unlock credentials (non-interactive gateway/serve deployments export them).
+# Vault unlock credentials to scrub from sandboxed children. The passphrase env var is no
+# longer READ anywhere (fork policy: never a passphrase in the environment) but is still
+# scrubbed here so a stale exported value on legacy hosts cannot leak into a sandbox child;
+# HERMES_VAULT_PRIVATE_KEY carries only a PATH.
 _VAULT_CREDENTIALS = ("HERMES_MASTER_PASSWORD", "HERMES_VAULT_PRIVATE_KEY")
 
 

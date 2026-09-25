@@ -10,7 +10,8 @@ This fork's key feature is master-password protection of ALL state. Policy:
   that persist nothing sensitive).
 - No vault at all: REFUSE with instructions; on an interactive TTY offer to
   run the migration flow right there. Non-interactive callers (systemd,
-  cron, serve) must set HERMES_MASTER_PASSWORD and create the vault first.
+  cron, serve) unlock with a key file (HERMES_VAULT_PRIVATE_KEY — a PATH,
+  never a passphrase, in the environment).
 - ``HERMES_ALLOW_NO_VAULT=1`` is the documented escape for CI/embedded test
   harnesses only — set by tests/conftest.py, never in production installs.
 
@@ -95,8 +96,10 @@ def _refuse_no_vault(home) -> None:
     else:
         print(
             "  Non-interactive process: create the vault once from a terminal\n"
-            "  ('hermes secure-vault migrate'), then set HERMES_MASTER_PASSWORD\n"
-            "  in this service's environment (systemd unit / EnvironmentFile).",
+            "  ('hermes secure-vault migrate'), add a key slot ('hermes secure-vault\n"
+            "  keygen' + 'add-key --public-key <file>'), and unlock with the key file:\n"
+            "  HERMES_VAULT_PRIVATE_KEY=/path/to/key (0600). The passphrase is never\n"
+            "  read from the environment.",
             file=sys.stderr,
         )
     raise SystemExit(2)

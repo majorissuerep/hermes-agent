@@ -93,15 +93,15 @@ phase2_takeover() {
         set -e
         git clone --quiet --depth 1 --no-local /bundles/fork '"$WORK"'/fork-src
         git -C '"$WORK"'/fork-src remote remove origin 2>/dev/null || true
-        # Non-interactive: docker exec has no TTY, so the vault password must
-        # come from the environment for BOTH creation and unlock.
-        HERMES_MASTER_PASSWORD='"$PASS"' FORK_SRC='"$WORK"'/fork-src bash '"$WORK"'/fork-src/scripts/takeover.sh
+        # Fork policy: NO passphrase in the environment, ever (env leaks via
+        # /proc/environ, children, EnvironmentFiles). Non-interactive installs
+        # create a KEY-ONLY vault; the private key file is the sole credential.
+        HERMES_VAULT_KEY_OUT='"$WORK"'/vault.key FORK_SRC='"$WORK"'/fork-src bash '"$WORK"'/fork-src/scripts/takeover.sh
     '
-    # Safety net: if the vault still is not there (e.g. install-only run),
-    # drive migrate explicitly with the env password.
+    # Safety net: if the vault still is not there, drive key-only migrate explicitly.
     if ! docker_run 'test -f ~/.hermes/.hermes-vault' 2>/dev/null; then
-        echo "(vault not yet created — running migrate with env password)"
-        docker_run 'HERMES_MASTER_PASSWORD='"$PASS"' bash '"$WORK"'/fork-src/scripts/takeover.sh' || true
+        echo "(vault not yet created — running key-only migrate)"
+        docker_run 'HERMES_VAULT_KEY_OUT='"$WORK"'/vault.key bash '"$WORK"'/fork-src/scripts/takeover.sh' || true
     fi
 }
 
@@ -110,7 +110,7 @@ phase3_verify() {
     # [1] Sessions survived and read back under the master password
     docker_run '
         set -e
-        export HERMES_MASTER_PASSWORD="'"$PASS"'"
+        export HERMES_VAULT_PRIVATE_KEY='"$WORK"'/vault.key
         cd ~/.hermes/hermes-agent
         echo "[1] session read-back under the fork:"
         .venv/bin/python - <<PYEOF
@@ -127,7 +127,7 @@ PYEOF
     '
     # [2] Config still reads back through the envelope
     docker_run '
-        export HERMES_MASTER_PASSWORD="'"$PASS"'"
+        export HERMES_VAULT_PRIVATE_KEY='"$WORK"'/vault.key
         echo "[2] config read-back:"
         got_model=$(hermes config get model.default)
         got_theme=$(hermes config get ui.theme)
@@ -195,8 +195,11 @@ PYEOF
     '
     # [7] Wrong password must fail closed
     docker_run '
-        echo "[7] wrong-password refusal:"
-        if HERMES_MASTER_PASSWORD=wrong-password-123 hermes config get model.default; then echo "   FAIL: accepted wrong password"; exit 1; else echo "   OK: refused (exit $?)"; fi
+        echo "[7] wrong-credential refusal (bad key file):"
+        echo "not-a-key" > '"$WORK"'/wrong.key
+        if HERMES_VAULT_PRIVATE_KEY='"$WORK"'/wrong.key hermes config get model.default; then echo "   FAIL: accepted wrong key"; exit 1; else echo "   OK: refused (exit $?)"; fi
+        echo "[7b] env passphrase must NOT unlock (policy):"
+        if HERMES_MASTER_PASSWORD=anything hermes config get model.default; then echo "   FAIL: env passphrase unlocked"; exit 1; else echo "   OK: refused (exit $?)"; fi
     '
     # [8] Updater pinned to the fork (no way out)
     docker_run '

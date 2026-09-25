@@ -606,11 +606,12 @@ def _read_key_file(path: str) -> bytes:
 def get_vault(home: Path | str | None = None, *, allow_env_unlock: bool = True) -> Vault:
     """Return the unlocked vault for *home* (default: the active Hermes home).
 
-    Fork: when the vault is locked but ``HERMES_MASTER_PASSWORD`` is set
-    (daemons, gateways, cron), auto-unlock instead of raising — background
-    writers like the log-frame handler must not crash-log on every record
-    merely because no TTY prompt is possible. Callers that want strict
-    failure pass ``allow_env_unlock=False``."""
+    Fork: non-interactive unlock comes ONLY from ``HERMES_VAULT_PRIVATE_KEY`` (a PATH to a
+    0600 key file — never secret material in the environment) or the parent's pipe-fd key
+    handoff. The passphrase is NEVER read from the environment: env vars leak through
+    ``/proc/<pid>/environ``, child inheritance and unit EnvironmentFiles, which contradicts
+    the vault's threat model. Daemons unlock with a key slot; humans unlock on a TTY.
+    Callers that want strict failure pass ``allow_env_unlock=False``."""
 
     if home is None:
         from hermes_constants import get_hermes_home
@@ -631,9 +632,6 @@ def get_vault(home: Path | str | None = None, *, allow_env_unlock: bool = True) 
             if key_path:
                 private_key = _read_key_file(key_path)
                 return unlock_with_private_key(home_path, private_key)
-            env_pw = _environ.get("HERMES_MASTER_PASSWORD")
-            if env_pw:
-                return unlock(home_path, env_pw)
         raise VaultLockedError(
             f"The vault at {home_path} is locked; supply the master password to unlock"
         )
