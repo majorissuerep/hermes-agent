@@ -614,6 +614,15 @@ def _ensure_default_soul_md(home: Path) -> None:
             return
         if existing is not None and not is_legacy_template_soul(existing):
             return
+    if vaulted and soul_path.is_symlink() and not soul_path.exists():
+        # Resolve the parent, not the broken leaf (Python 3.11 raises on cycles).
+        # Replace the link with ciphertext; no plaintext seed may touch this home.
+        from hermes_security.vault import get_vault, _atomic_write
+        owner = get_vault(state_io._home_for(home))
+        rel = (home.resolve() / "SOUL.md").relative_to(owner.home).as_posix()
+        _atomic_write(soul_path, owner.encrypt(DEFAULT_SOUL_MD.encode("utf-8"),
+                                              purpose="state", relpath=rel))
+        return
     try:
         if vaulted:
             state_io.write_text(soul_path, DEFAULT_SOUL_MD, purpose="state")

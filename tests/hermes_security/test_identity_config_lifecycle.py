@@ -47,6 +47,26 @@ assert classic['agent']['max_turns'] == effective['agent']['max_turns'] == 17
         vault.clear_vault_cache()
 
 
+def test_soul_thread_reads_follow_home_override_a_b_a(tmp_path):
+    from agent.prompt_builder import load_soul_md
+    from hermes_constants import set_hermes_home_override, reset_hermes_home_override
+    from hermes_security import io
+
+    homes = [tmp_path / label for label in ("first", "second")]
+    for home in homes:
+        home.mkdir()
+        vault.init_vault(home, PASSWORD)
+        vault.unlock(home, PASSWORD)
+        io.write_text(home / "SOUL.md", f"Identity belongs to {home.name}", purpose="state")
+    for home in (homes[0], homes[1], homes[0]):
+        token = set_hermes_home_override(home)
+        try:
+            assert load_soul_md() == f"Identity belongs to {home.name}"
+        finally:
+            reset_hermes_home_override(token)
+    vault.clear_vault_cache()
+
+
 @pytest.mark.parametrize("fault", ["locked", "tampered", "plaintext"])
 def test_cli_vault_errors_do_not_become_defaults(tmp_path, fault):
     home = tmp_path / "home"
