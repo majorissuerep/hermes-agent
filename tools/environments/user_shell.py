@@ -41,7 +41,7 @@ def resolve_user_shell() -> str:
         import pwd
 
         try:
-            entry = pwd.getpwuid(os.getuid())
+            entry = pwd.getpwuid(os.getuid())  # windows-footgun: ok — POSIX-only branch
             if entry.pw_shell:
                 candidates.append(entry.pw_shell)
         except (KeyError, OSError):
