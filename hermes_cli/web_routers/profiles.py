@@ -881,7 +881,8 @@ async def get_profile_soul(name: str):
         # Probe and read in one hop (two round-trips would widen the check/read window).
         if not soul_path.exists():
             return _MISSING
-        return soul_path.read_text(encoding="utf-8")
+        from hermes_security import io
+        return io.read_text(soul_path, purpose="state")
 
     content = await _read_off_loop(_run, "SOUL.md", OSError)
     if content is _MISSING:
@@ -894,13 +895,8 @@ async def update_profile_soul(name: str, body: ProfileSoulUpdate):
     soul_path = _resolve_profile_dir(name) / "SOUL.md"
 
     def _run():
-        from utils import atomic_write_text
-        # Atomic: a bare write_text() truncates SOUL.md before the new body lands, and the
-        # paired GET reports an unreadable file as "never set" — so an interrupted save would
-        # make the editor's next Save persist an empty document. preserve_mode keeps an
-        # existing file's mode/owner; create_mode=0o644 covers the first save (profiles
-        # chmods only .env to 0600 and SOUL.md is not a secret).
-        atomic_write_text(soul_path, body.content, preserve_mode=True, create_mode=0o644)
+        from hermes_cli.profiles_soul import write_profile_soul
+        write_profile_soul(soul_path.parent, body.content)
 
     try:
         # Temp file + fsync + replace blocks for as long as the filesystem takes to commit.

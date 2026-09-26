@@ -1046,12 +1046,17 @@ def _resolve_clone_source(clone_from: Optional[str]) -> Path:
     return source_dir
 
 
-def _seed_file_if_missing(path: Path, text: str, mode: Optional[int] = None) -> None:
+def _seed_file_if_missing(path: Path, text: str, mode: Optional[int] = None,
+                          *, destination: Optional[Path] = None) -> None:
     """Best-effort: write *text* to *path* unless it already exists; never raises."""
     if path.exists():
         return
     with contextlib.suppress(OSError):
-        path.write_text(text, encoding="utf-8")
+        if path.name == "SOUL.md":
+            from hermes_cli.profiles_soul import write_profile_soul
+            write_profile_soul(path.parent, text, destination=destination)
+        else:
+            path.write_text(text, encoding="utf-8")
         if mode is not None:
             os.chmod(str(path), mode)
 
@@ -1257,7 +1262,8 @@ def create_profile(
             stripped = strip_channel_settings(staging, include_state=clone_all, source_dir=source_dir)
             if stripped:
                 logger.info("profile %s: cloned without messaging channels %s", canon, stripped)
-        _finish_profile_layout(staging, no_skills=no_skills, clone_all=clone_all, description=description)
+        _finish_profile_layout(staging, no_skills=no_skills, clone_all=clone_all, description=description,
+                               final_profile_dir=profile_dir)
         os.rename(staging, profile_dir)
     except BaseException:
         shutil.rmtree(staging, ignore_errors=True)
@@ -1286,7 +1292,7 @@ def _clone_staging_dir(profile_dir: Path) -> Path:
 
 
 def _finish_profile_layout(profile_dir: Path, *, no_skills: bool, clone_all: bool,
-                           description: Optional[str]) -> None:
+                           description: Optional[str], final_profile_dir: Optional[Path] = None) -> None:
     """Seed files a fresh profile owns from day one; runs on the staging tree before publish."""
     # Seed an empty .env so the profile owns a credentials file from day one. Without it,
     # profile-scoped env writes (dashboard Channels/Keys pages, `hermes -p <name> auth add`)
@@ -1297,7 +1303,7 @@ def _finish_profile_layout(profile_dir: Path, *, no_skills: bool, clone_all: boo
     # Default SOUL.md to customize immediately (skipped when a clone already provided one).
     with contextlib.suppress(Exception):  # best-effort — don't fail profile creation over this
         from hermes_cli.default_soul import DEFAULT_SOUL_MD
-        _seed_file_if_missing(profile_dir / "SOUL.md", DEFAULT_SOUL_MD)
+        _seed_file_if_missing(profile_dir / "SOUL.md", DEFAULT_SOUL_MD, destination=final_profile_dir)
 
     # Opt-out marker read by seed_profile_skills() and `hermes update`'s all-profile sync
     # (the feature still works via the empty skills/ dir if this fails).
