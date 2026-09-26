@@ -160,14 +160,15 @@ class TestSoulIoIsOffTheEventLoop:
     def test_get_soul_reads_off_loop(self, client, profile_dir: Path, monkeypatch):
         (profile_dir / "SOUL.md").write_text(SOUL, encoding="utf-8")
         seen: list[tuple[str, bool]] = []
-        real_read_text = Path.read_text
+        from hermes_security import io
+        real_read_text = io.read_text
 
-        def probing_read_text(self, *args, **kwargs):
-            if self.name == "SOUL.md":
+        def probing_read_text(path, *args, **kwargs):
+            if Path(path).name == "SOUL.md":
                 TestSoulIoIsOffTheEventLoop._probe(seen, "read")
-            return real_read_text(self, *args, **kwargs)
+            return real_read_text(path, *args, **kwargs)
 
-        monkeypatch.setattr(Path, "read_text", probing_read_text)
+        monkeypatch.setattr(io, "read_text", probing_read_text)
 
         r = client.get("/api/profiles/demo/soul")
 
