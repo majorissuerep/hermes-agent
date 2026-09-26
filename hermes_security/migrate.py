@@ -329,18 +329,33 @@ def _restore_code_trees(vault, home: Path, report: dict) -> int:
     return restored
 
 
-def _iter_files(home: Path):
-    for path in sorted(home.rglob("*")):
-        if not path.is_file() and not path.is_symlink():
-            continue
-        rel = path.relative_to(home)
-        if vault_mod._is_in_skip_dir(rel):
-            continue
-        if path.name == ".hermes-vault" or path.name.startswith(".hermes-vault."):
-            continue
-        if path.name.endswith(".lock"):
-            continue  # advisory flock sidecars, no content
-        yield path, rel
+def _iter_files(home: Path, *, onerror=None):
+    def failed(exc):
+        if onerror is None:
+            # A first-run home has nothing to migrate yet. Scanners still report it.
+            if isinstance(exc, FileNotFoundError) and exc.filename == str(home):
+                return
+            raise exc
+        onerror(exc)
+
+    # rglob suppresses directory-read failures, falsely certifying incomplete scans.
+    for root, directories, files in os.walk(home, onerror=failed):
+        parent = Path(root)
+        links = [name for name in directories if (parent / name).is_symlink()]
+        directories[:] = sorted(name for name in directories if name not in links
+                                and not vault_mod._is_in_skip_dir((parent / name).relative_to(home)))
+        for name in sorted(files + links):
+            path = parent / name
+            if not path.is_file() and not path.is_symlink():
+                continue
+            rel = path.relative_to(home)
+            if vault_mod._is_in_skip_dir(rel):
+                continue
+            if path.name == ".hermes-vault" or path.name.startswith(".hermes-vault."):
+                continue
+            if path.name.endswith(".lock"):
+                continue  # advisory flock sidecars, no content
+            yield path, rel
 
 
 def _sha(data: bytes) -> str:
@@ -622,7 +637,10 @@ def scan_for_plaintext(home: Path | str) -> list[str]:
 
     home = Path(home).expanduser().resolve()
     offenders = []
-    for path, rel in _iter_files(home):
+    def unreadable(exc):
+        offenders.append(Path(exc.filename or home).relative_to(home).as_posix())
+
+    for path, rel in _iter_files(home, onerror=unreadable):
         try:
             if path.suffix in _DB_SUFFIXES:
                 owner = vault_mod.find_vault_home(path)

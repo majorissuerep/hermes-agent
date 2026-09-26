@@ -4,6 +4,29 @@ import pytest
 from hermes_security import frames, io, migrate, vault
 
 
+@pytest.mark.linux_only
+def test_scan_does_not_skip_unreadable_subtrees(tmp_path):
+    import os
+    if os.geteuid() == 0:
+        pytest.skip("root bypasses directory mode denial")
+    home = tmp_path / "vault"
+    vault.init_vault(home, "synthetic-scan-test")
+    vault.unlock(home, "synthetic-scan-test")
+    blocked = home / "blocked"
+    blocked.mkdir()
+    (blocked / "state.json").write_text('{"secret":"synthetic"}')
+    blocked.chmod(0)
+    try:
+        assert "blocked" in migrate.scan_for_plaintext(home)
+    finally:
+        blocked.chmod(0o700)
+        vault.clear_vault_cache()
+
+
+def test_scan_missing_root_is_not_clean(tmp_path):
+    assert migrate.scan_for_plaintext(tmp_path / "missing")
+
+
 @pytest.mark.parametrize("relative,raw", [
     ("sessions/plain.jsonl", b'{"role":"user","content":"canary"}\n'),
     ("sessions/bom.jsonl", b'\xef\xbb\xbf{"x":1}\n'),
