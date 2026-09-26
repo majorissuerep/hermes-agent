@@ -67,7 +67,7 @@ def _ensure_root_vault_unlocked(root: Path) -> None:
     vault_mod.unlock(root, _password_from_env_or_prompt(confirm="Unlock the session host (machine vault): "))
 
 
-def _spawn_host() -> None:
+def _spawn_host() -> subprocess.Popen:
     from hermes_constants import get_default_hermes_root
     from tools.environments.local import build_subprocess_env
 
@@ -94,7 +94,7 @@ def _spawn_host() -> None:
             env.update(handoff[1])
             kwargs["pass_fds"] = (handoff[0],)
     try:
-        subprocess.Popen(argv, **kwargs)  # noqa: S603 — our own interpreter + module
+        return subprocess.Popen(argv, **kwargs)  # noqa: S603 — our own interpreter + module
     finally:
         if handoff is not None:
             os.close(handoff[0])
@@ -104,14 +104,27 @@ def ensure_host(*, timeout_s: float = _SPAWN_TIMEOUT_S) -> str:
     """The live host's WS URL, starting the host if none answers."""
     if url := host_ws_url():
         return url
-    _spawn_host()
+    from hermes_cli.session_host_diagnostics import write_startup_receipt
+
+    started = time.monotonic()
+    child = _spawn_host()
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
-        time.sleep(_POLL_S)
         if url := host_ws_url():
+            write_startup_receipt(status="ready", pid=child.pid, started=started)
             return url
+        if (exit_code := child.poll()) is not None:
+            receipt = write_startup_receipt(status="exited", pid=child.pid, started=started,
+                                            exit_code=exit_code)
+            raise HostUnavailable(
+                f"the session host exited with exit code {exit_code}; "
+                f"startup receipt: {receipt or 'unavailable'} — inspect `hermes logs errors` "
+                "or run `hermes serve` in a terminal")
+        time.sleep(min(_POLL_S, max(0, deadline - time.monotonic())))
+    receipt = write_startup_receipt(status="timeout", pid=child.pid, started=started)
     raise HostUnavailable(
-        f"the session host did not come up within {timeout_s:.0f}s — run `hermes serve` in a terminal to see why")
+        f"the session host did not come up within {timeout_s:.0f}s; "
+        f"startup receipt: {receipt or 'unavailable'} — run `hermes serve` in a terminal to see why")
 
 
 class HostClient:
