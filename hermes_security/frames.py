@@ -14,6 +14,7 @@ import secrets
 import struct
 import sys
 from collections import OrderedDict
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Callable, Iterator, Optional
 
@@ -40,7 +41,7 @@ def _complete_stream(blob: bytes, *, vault, purpose: str) -> list[bytes]:
     payloads, consumed = split_stream(blob, vault=vault, purpose=purpose, strict=True)
     if consumed != len(blob):
         raise VaultIntegrityError(
-            "Incomplete trailing frame; refusing to change the stream. "
+            "Incomplete trailing frame; stream is not complete. "
             "Recover it with secure-vault repair before retrying.")
     return payloads
 
@@ -72,6 +73,19 @@ def _funlock(fd: int) -> None:
     import fcntl
 
     fcntl.flock(fd, fcntl.LOCK_UN)
+
+
+@contextmanager
+def stream_lock(path: Path | str):
+    """Serialize complete readers with the same sidecar used by append/rewrite."""
+    target = Path(path).expanduser()
+    target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    with open(target.with_suffix(target.suffix + ".lock"), "ab") as lock_file:
+        _flock(lock_file.fileno())
+        try:
+            yield
+        finally:
+            _funlock(lock_file.fileno())
 
 
 class FrameDecodeError(VaultError):
@@ -120,7 +134,11 @@ def append(path: Path | str, payload: bytes, *, purpose: str) -> None:
 
 
 def read_frames(path: Path | str, *, purpose: str) -> Iterator[bytes]:
-    """Yield authentic frames; tolerate only an incomplete tail, never a failed tag."""
+    """Prefix-recovery/log-display reader, not a complete-store snapshot.
+
+    Tolerate only an incomplete tail (including an append in flight), never a
+    failed tag. Complete storage readers hold stream_lock and use _complete_stream.
+    """
 
     vault = get_vault(find_vault_home(path))
     target = Path(path).expanduser()

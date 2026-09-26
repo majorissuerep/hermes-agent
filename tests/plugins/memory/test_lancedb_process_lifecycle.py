@@ -46,8 +46,12 @@ def test_memory_put_never_acknowledges_hidden_record(home):
         assert store.path.read_bytes() == damaged
     else:
         assert _store(home).get(after["id"]) is not None
-    recovered = _store(home).get(first["id"])
-    assert recovered is not None and recovered["text"] == "before interruption"
+    with pytest.raises(VaultIntegrityError):
+        _store(home).get(first["id"])
+    # Prefix recovery remains explicit for log display/repair, not MemoryStore reads.
+    from hermes_security import frames
+    recovered = [json.loads(raw) for raw in frames.read_frames(store.path, purpose="transcript")]
+    assert recovered[0]["rec"]["id"] == first["id"]
 
 
 def test_fresh_process_observes_writes_and_erasures(home):
