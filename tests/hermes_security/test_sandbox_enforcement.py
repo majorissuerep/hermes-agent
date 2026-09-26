@@ -78,10 +78,15 @@ def test_single_file_rw_grant_is_writable_without_opening_its_directory(sandbox_
 
 
 def test_unix_sockets_are_closed_until_the_session_opens_them(sandbox_home):
+    import shlex
     import sys
     _, _, task = sandbox_home
-    probe = f"{sys.executable} -I -S -c 'import socket; socket.socket(socket.AF_UNIX); print(\"SOCK\" + \"OK\")'"
-    assert "SOCKOK" not in _call("terminal", task, command=probe)["output"]
+    # uv-managed Python need not live in the OS baseline (/usr). This test
+    # exercises socket policy, not accidental access to the host interpreter.
+    _sandbox(f"grant {shlex.quote(sys.base_prefix)}:ro --force")
+    probe = f"{shlex.quote(sys.executable)} -I -S -c 'import socket; socket.socket(socket.AF_UNIX); print(\"SOCK\" + \"OK\")'"
+    denied = _call("terminal", task, command=probe)["output"]
+    assert "SOCKOK" not in denied and "PermissionError" in denied
     _sandbox("unix on")
     assert "SOCKOK" in _call("terminal", task, command=probe)["output"]
 

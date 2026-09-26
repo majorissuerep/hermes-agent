@@ -40,19 +40,25 @@ jobs:
           sha256sum pyproject.toml uv.lock package-lock.json
       - name: Run isolated fork contracts (no retries)
         run: |
-          scripts/run_tests.sh \
-            tests/hermes_security/ \
-            tests/plugins/memory/test_lancedb*.py \
-            tests/scripts/test_security_scan_contract.py \
-            tests/hermes_state/test_deck_registry.py \
-            tests/hermes_cli/test_cli_deck.py \
-            tests/tui_gateway/test_deck_host.py \
-            tests/gateway/test_external_platforms_kill_switch.py \
-            tests/tools/test_user_native_shell.py \
-            tests/agent/test_prompt_cache_boundary.py \
-            tests/agent/test_prompt_cache_scope.py \
-            tests/hermes_cli/test_config_loader_e2e.py \
-            -j 2 --file-retries 0
+          paths=(
+            tests/hermes_security/
+            tests/plugins/memory/test_lancedb*.py
+            tests/scripts/test_security_scan_contract.py
+            tests/hermes_state/test_deck_registry.py
+            tests/hermes_cli/test_cli_deck.py
+            tests/hermes_cli/test_host_startup_diagnostics.py
+            tests/tui_gateway/test_deck_host.py
+            tests/gateway/test_external_platforms_kill_switch.py
+            tests/tools/test_user_native_shell.py
+            tests/agent/test_prompt_cache_boundary.py
+            tests/agent/test_prompt_cache_scope.py
+            tests/hermes_cli/test_config_loader_e2e.py
+          )
+          # The canonical runner tolerates missing explicit paths. This gate must not.
+          for path in "${paths[@]}"; do
+            test -e "$path" || { printf 'Missing required test path: %s\n' "$path"; exit 1; }
+          done
+          scripts/run_tests.sh "${paths[@]}" -j 2 --file-retries 0
 
   acceptance:
     name: Fork acceptance
