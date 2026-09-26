@@ -229,9 +229,7 @@ jobs:
   # the live comment poller can list failed jobs in the PR comment.
   # ─────────────────────────────────────────────────────────────────────
   all-checks-pass:
-    # The personal fork still requires the old check name. Reuse this gate's
-    # result until branch protection can be switched after a green CI run.
-    name: ${{ github.repository == 'majorissuerep/hermes-agent' && 'Fork acceptance' || 'All required checks pass' }}
+    name: All required checks pass
     needs:
       - detect
       - tests
@@ -290,6 +288,21 @@ jobs:
               sys.exit(1)
           print('All checks passed (or were skipped)')
           "
+
+  # Temporary compatibility for the fork's existing branch protection.
+  # This checks the SAME aggregate result, not a second suite. Remove after
+  # the required check is migrated to All required checks pass.
+  fork-protection-compat:
+    name: Fork acceptance
+    needs: all-checks-pass
+    if: always() && github.repository == 'majorissuerep/hermes-agent'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Require the CI gate to pass
+        env:
+          RESULT: ${{ needs.all-checks-pass.result }}
+        run: test "$RESULT" = success
 
   # ─────────────────────────────────────────────────────────────────────
   # CI timing report: collect per-job/step durations from the GitHub API,
