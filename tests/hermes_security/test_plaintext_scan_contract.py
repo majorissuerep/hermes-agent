@@ -28,6 +28,7 @@ def test_scan_missing_root_is_not_clean(tmp_path):
 
 
 @pytest.mark.parametrize("relative,raw", [
+    ("plaintext-canary.lock", b"synthetic secret"),
     ("sessions/plain.jsonl", b'{"role":"user","content":"canary"}\n'),
     ("sessions/bom.jsonl", b'\xef\xbb\xbf{"x":1}\n'),
     ("logs/broken.log", b'\x00\x00\x10\x00partial'),

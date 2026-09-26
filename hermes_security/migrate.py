@@ -353,8 +353,8 @@ def _iter_files(home: Path, *, onerror=None):
                 continue
             if path.name == ".hermes-vault" or path.name.startswith(".hermes-vault."):
                 continue
-            if path.name.endswith(".lock"):
-                continue  # advisory flock sidecars, no content
+            if path.name.endswith(".lock") and path.stat().st_size == 0:
+                continue  # empty advisory sidecars only; a suffix cannot exempt content
             yield path, rel
 
 
