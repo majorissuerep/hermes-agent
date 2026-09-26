@@ -18,7 +18,7 @@ def write_startup_receipt(*, status: str, pid: int, started: float, exit_code: i
                        "elapsed_seconds": round(time.monotonic() - started, 3)})
     try:
         if io._home_for(path) is not None:
-            io.write_text(path, text, purpose="state")
+            io.write_text(path, text, purpose="state", encoding="utf-8")
         else:
             # Vault-less test/pre-migration roots still get private files from creation.
             _atomic_write(path, text.encode("utf-8"), mode=0o600)
