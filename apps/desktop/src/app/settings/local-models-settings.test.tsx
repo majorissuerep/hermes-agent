@@ -131,7 +131,8 @@ beforeEach(() => {
   mocked.getLocalModelsStatus.mockResolvedValue(BASE_STATUS)
   mocked.getLocalHardware.mockResolvedValue(BASE_HARDWARE)
   mocked.getLocalCatalog.mockResolvedValue({ models: [FITTING_MODEL, SPILLED_MODEL, REFUSED_MODEL] })
-  mocked.getLocalModelsJobs.mockResolvedValue({ jobs: [] })
+  // The registry is authoritative; its background poll must agree with seeded jobs.
+  mocked.getLocalModelsJobs.mockImplementation(async () => ({ jobs: [...$localRuntimeJobs.get()] }))
   $localRuntimeJobs.set([])
 })
 
