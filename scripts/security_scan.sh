@@ -43,7 +43,14 @@ fi
 run_check gitleaks gitleaks detect --source . --no-banner --no-git --redact
 run_check bandit bandit -r hermes_security/ hermes_cli/vault_cmd.py hermes_cli/vault_gate.py \
     hermes_cli/config_backups.py -q
-run_check pip-audit pip-audit
+# Audit the project environment, not pip-audit's own isolated installation.
+PYTHON=.venv/bin/python
+if [ ! -x "$PYTHON" ]; then PYTHON=.venv/Scripts/python.exe; fi
+if [ -x "$PYTHON" ] && SITE=$("$PYTHON" -c 'import sysconfig; print(sysconfig.get_path("purelib"))') && [ -d "$SITE" ]; then
+    run_check pip-audit pip-audit --path "$SITE"
+else
+    printf 'NOT_RUN: pip-audit (project virtualenv/site-packages unavailable)\n'; FAIL=1
+fi
 # Semgrep otherwise exits zero even with findings; strict rejects engine warnings.
 run_check semgrep semgrep scan --config p/python --config p/security-audit \
     --metrics=off --error --strict --quiet hermes_security/ hermes_cli/vault_cmd.py hermes_cli/vault_gate.py

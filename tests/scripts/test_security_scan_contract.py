@@ -53,6 +53,12 @@ def scanner(tmp_path):
         tool = binaries / name
         tool.write_text(f"#!{sys.executable}\n" + STUB)
         tool.chmod(0o700)
+    python = root / ".venv/bin/python"
+    python.parent.mkdir(parents=True)
+    site = root / ".venv/site-packages"
+    site.mkdir()
+    python.write_text(f"#!{sys.executable}\nprint({str(site)!r})\n")
+    python.chmod(0o700)
     calls = tmp_path / "calls"
     env = {"PATH": str(binaries), "HOME": str(tmp_path), "SCANNER_CALLS": str(calls)}
     bash = shutil.which("bash")
@@ -74,6 +80,18 @@ def test_missing_findings_and_errors_never_pass(scanner, tool, mode):
     result = run(tool, mode)
     assert result.returncode != 0, result.stdout + result.stderr
     assert "ALL CLEAN" not in result.stdout
+
+
+@pytest.mark.parametrize("missing", [".venv/bin/python", ".venv/site-packages"])
+def test_security_gate_requires_project_environment(scanner, tmp_path, missing):
+    target = tmp_path / "repo" / missing
+    if target.is_dir():
+        target.rmdir()
+    else:
+        target.unlink()
+    run, _ = scanner
+    result = run()
+    assert result.returncode != 0, result.stdout
 
 
 def test_all_clean_means_every_required_engine_executed(scanner):
