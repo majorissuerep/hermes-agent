@@ -596,23 +596,47 @@ def migrate_home(home: Path | str, password: str | bytes, *, dry_run: bool = Fal
 
 
 def scan_for_plaintext(home: Path | str) -> list[str]:
-    """Every state file under *home* that is NOT ciphertext (excludes code/skill trees)."""
+    """State paths whose encryption cannot be verified (including unreadable/locked state).
+
+    Code, skills and cache roots retain the migration exclusion policy. An empty
+    result qualifies only those inspected paths, not excluded trees.
+    """
+    from hermes_security import io as state_io
+    from hermes_security import sqlite as state_sqlite
 
     home = Path(home).expanduser().resolve()
     offenders = []
     for path, rel in _iter_files(home):
         try:
-            head = open(path, "rb").read(16)
-        except OSError:
-            continue
-        if path.suffix in _DB_SUFFIXES:
-            if head.startswith(b"SQLite format 3"):
-                offenders.append(rel.as_posix())
-        elif path.suffix in _FRAME_SUFFIXES:
-            # frame streams start with a u32 BE length; heuristic: no plaintext BOM/text
-            if head.startswith(b"SQLite") or (head[:4].isascii() and head[:1].isalpha()):
-                offenders.append(rel.as_posix())
-        else:
-            if not head.startswith(_MAGIC):
-                offenders.append(rel.as_posix())
+            if path.suffix in _DB_SUFFIXES:
+                owner = vault_mod.find_vault_home(path)
+                vault = vault_mod.get_vault(owner)
+                key = vault.derive_key(f"sqlcipher:{path.relative_to(owner).as_posix()}").hex()
+                # Inspection must not create a database or modify journal settings.
+                conn = state_sqlite._sqlcipher_module().connect(path.as_uri() + "?mode=ro", uri=True)
+                try:
+                    conn.execute(f"PRAGMA key = \"x'{key}'\"")
+                    valid = conn.execute("PRAGMA integrity_check").fetchall() == [("ok",)]
+                finally:
+                    conn.close()
+            elif path.suffix in _FRAME_SUFFIXES:
+                raw = path.read_bytes()
+                vault = vault_mod.get_vault(vault_mod.find_vault_home(path))
+                _, consumed = sec_frames.split_stream(raw, vault=vault, purpose=_frame_purpose(path))
+                valid = consumed == len(raw)
+            else:
+                owner = state_io._home_for(path)
+                if owner is None:
+                    valid = False
+                elif path.parent == owner / "backups" / "config" and path.name.startswith("config.yaml."):
+                    from hermes_cli.config_backups import _read_backup_bytes
+                    # The backup reader supports current and historical authenticated AADs.
+                    _read_backup_bytes(path)
+                    valid = True
+                else:
+                    valid = state_io.read_bytes(path, purpose=_purpose_for(path.relative_to(owner))) is not None
+        except (OSError, ValueError, vault_errors.VaultError, sqlite3.DatabaseError):
+            valid = False
+        if not valid:
+            offenders.append(rel.as_posix())
     return offenders
