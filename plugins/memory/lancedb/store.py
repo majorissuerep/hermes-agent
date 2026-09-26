@@ -152,7 +152,7 @@ class MemoryStore:
         """Apply frames appended since the last read (by any process); full reload after a rewrite."""
         from hermes_security import frames
 
-        with self._lock:
+        with self._lock, frames.stream_lock(self.path):
             if self._table is None:
                 self._reset()
             try:
@@ -169,8 +169,8 @@ class MemoryStore:
             with open(self.path, "rb") as fh:
                 fh.seek(self._offset)
                 blob = fh.read()
-            payloads, consumed = frames.split_stream(blob, vault=self._vault(), purpose=FRAME_PURPOSE)
-            self._offset += consumed
+            payloads = frames._complete_stream(blob, vault=self._vault(), purpose=FRAME_PURPOSE)
+            self._offset += len(blob)
             self._frames_seen += len(payloads)
             self._apply(payloads)
 

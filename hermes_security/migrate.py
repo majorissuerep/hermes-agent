@@ -329,18 +329,33 @@ def _restore_code_trees(vault, home: Path, report: dict) -> int:
     return restored
 
 
-def _iter_files(home: Path):
-    for path in sorted(home.rglob("*")):
-        if not path.is_file() and not path.is_symlink():
-            continue
-        rel = path.relative_to(home)
-        if vault_mod._is_in_skip_dir(rel):
-            continue
-        if path.name == ".hermes-vault" or path.name.startswith(".hermes-vault."):
-            continue
-        if path.name.endswith(".lock"):
-            continue  # advisory flock sidecars, no content
-        yield path, rel
+def _iter_files(home: Path, *, onerror=None):
+    def failed(exc):
+        if onerror is None:
+            # A first-run home has nothing to migrate yet. Scanners still report it.
+            if isinstance(exc, FileNotFoundError) and exc.filename == str(home):
+                return
+            raise exc
+        onerror(exc)
+
+    # rglob suppresses directory-read failures, falsely certifying incomplete scans.
+    for root, directories, files in os.walk(home, onerror=failed):
+        parent = Path(root)
+        links = [name for name in directories if (parent / name).is_symlink()]
+        directories[:] = sorted(name for name in directories if name not in links
+                                and not vault_mod._is_in_skip_dir((parent / name).relative_to(home)))
+        for name in sorted(files + links):
+            path = parent / name
+            if not path.is_file() and not path.is_symlink():
+                continue
+            rel = path.relative_to(home)
+            if vault_mod._is_in_skip_dir(rel):
+                continue
+            if path.name == ".hermes-vault" or path.name.startswith(".hermes-vault."):
+                continue
+            if path.name.endswith(".lock") and path.stat().st_size == 0:
+                continue  # empty advisory sidecars only; a suffix cannot exempt content
+            yield path, rel
 
 
 def _sha(data: bytes) -> str:
@@ -349,10 +364,16 @@ def _sha(data: bytes) -> str:
 
 def _backup_home(home: Path, dest_dir: Path) -> Path:
     stamp = time.strftime("%Y%m%d-%H%M%S")
-    backup = dest_dir / f"hermes-premigration-{home.name}-{stamp}.tar"
-    with tarfile.open(backup, "w") as tar:
-        for path, rel in _iter_files(home):
-            tar.add(str(path), arcname=str(rel), recursive=False)
+    fd, name = tempfile.mkstemp(prefix=f"hermes-premigration-{home.name}-{stamp}-",
+                                suffix=".tar", dir=dest_dir)
+    backup = Path(name)
+    # mkstemp is owner-only from creation, not after the sensitive first write.
+    with os.fdopen(fd, "wb") as handle:
+        with tarfile.open(fileobj=handle, mode="w") as tar:
+            for path, rel in _iter_files(home):
+                tar.add(str(path), arcname=str(rel), recursive=False)
+        handle.flush()
+        os.fsync(handle.fileno())
     return backup
 
 
@@ -375,6 +396,12 @@ def _conn_fingerprint(conn) -> str:
     # non-crypto-documented digest so scanners and auditors do not have to
     # re-litigate MD5's role here on every pass.
     h = hashlib.sha256()
+    for pragma in ("user_version", "application_id"):
+        h.update(repr((pragma, conn.execute(f"PRAGMA {pragma}").fetchone()[0])).encode())
+    for row in conn.execute(
+        "SELECT type, name, tbl_name, sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY type, name"
+    ):
+        h.update(repr(row).encode("utf-8"))
     tables = [r[0] for r in conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
     ).fetchall()]
@@ -404,8 +431,12 @@ def _export_to_sqlcipher(source: Path, target: Path, hexkey: str) -> None:
 
     conn = sqlcipher.connect(str(source))
     try:
-        conn.execute(f"ATTACH DATABASE '{target}' AS enc KEY \"x'{hexkey}'\"")
+        conn.execute(f"ATTACH DATABASE ? AS enc KEY \"x'{hexkey}'\"", (str(target),))
         conn.execute("SELECT sqlcipher_export('enc')")
+        # sqlcipher_export deliberately excludes these application-owned header fields.
+        for pragma in ("user_version", "application_id"):
+            value = int(conn.execute(f"PRAGMA main.{pragma}").fetchone()[0])
+            conn.execute(f"PRAGMA enc.{pragma} = {value}")
         conn.execute("DETACH DATABASE enc")
     finally:
         conn.close()
@@ -596,23 +627,50 @@ def migrate_home(home: Path | str, password: str | bytes, *, dry_run: bool = Fal
 
 
 def scan_for_plaintext(home: Path | str) -> list[str]:
-    """Every state file under *home* that is NOT ciphertext (excludes code/skill trees)."""
+    """State paths whose encryption cannot be verified (including unreadable/locked state).
+
+    Code, skills and cache roots retain the migration exclusion policy. An empty
+    result qualifies only those inspected paths, not excluded trees.
+    """
+    from hermes_security import io as state_io
+    from hermes_security import sqlite as state_sqlite
 
     home = Path(home).expanduser().resolve()
     offenders = []
-    for path, rel in _iter_files(home):
+    def unreadable(exc):
+        offenders.append(Path(exc.filename or home).relative_to(home).as_posix())
+
+    for path, rel in _iter_files(home, onerror=unreadable):
         try:
-            head = open(path, "rb").read(16)
-        except OSError:
-            continue
-        if path.suffix in _DB_SUFFIXES:
-            if head.startswith(b"SQLite format 3"):
-                offenders.append(rel.as_posix())
-        elif path.suffix in _FRAME_SUFFIXES:
-            # frame streams start with a u32 BE length; heuristic: no plaintext BOM/text
-            if head.startswith(b"SQLite") or (head[:4].isascii() and head[:1].isalpha()):
-                offenders.append(rel.as_posix())
-        else:
-            if not head.startswith(_MAGIC):
-                offenders.append(rel.as_posix())
+            if path.suffix in _DB_SUFFIXES:
+                owner = vault_mod.find_vault_home(path)
+                vault = vault_mod.get_vault(owner)
+                key = vault.derive_key(f"sqlcipher:{path.relative_to(owner).as_posix()}").hex()
+                # Inspection must not create a database or modify journal settings.
+                conn = state_sqlite._sqlcipher_module().connect(path.as_uri() + "?mode=ro", uri=True)
+                try:
+                    conn.execute(f"PRAGMA key = \"x'{key}'\"")
+                    valid = conn.execute("PRAGMA integrity_check").fetchall() == [("ok",)]
+                finally:
+                    conn.close()
+            elif path.suffix in _FRAME_SUFFIXES:
+                raw = path.read_bytes()
+                vault = vault_mod.get_vault(vault_mod.find_vault_home(path))
+                _, consumed = sec_frames.split_stream(raw, vault=vault, purpose=_frame_purpose(path))
+                valid = consumed == len(raw)
+            else:
+                owner = state_io._home_for(path)
+                if owner is None:
+                    valid = False
+                elif path.parent == owner / "backups" / "config" and path.name.startswith("config.yaml."):
+                    from hermes_cli.config_backups import _read_backup_bytes
+                    # The backup reader supports current and historical authenticated AADs.
+                    _read_backup_bytes(path)
+                    valid = True
+                else:
+                    valid = state_io.read_bytes(path, purpose=_purpose_for(path.relative_to(owner))) is not None
+        except (OSError, ValueError, vault_errors.VaultError, sqlite3.DatabaseError):
+            valid = False
+        if not valid:
+            offenders.append(rel.as_posix())
     return offenders

@@ -602,14 +602,22 @@ def _secure_file(path):
 def _ensure_default_soul_md(home: Path) -> None:
     """Seed DEFAULT_SOUL_MD on first run; upgrade a legacy comment-only scaffold in place.
     A SOUL.md the user actually customized is never touched."""
+    from hermes_security import io as state_io
+
+    vaulted = state_io._home_for(home) is not None
     soul_path = home / "SOUL.md"
     if soul_path.exists():
         try:
-            existing = soul_path.read_text(encoding="utf-8")
+            existing = (state_io.read_text(soul_path, purpose="state", encoding="utf-8") if vaulted
+                        else soul_path.read_text(encoding="utf-8"))
         except (OSError, UnicodeDecodeError):
             return
-        if not is_legacy_template_soul(existing):
+        if existing is not None and not is_legacy_template_soul(existing):
             return
+    if vaulted:
+        from hermes_cli.profiles_soul import write_profile_soul
+        write_profile_soul(home, DEFAULT_SOUL_MD)
+        return
     try:
         soul_path.write_text(DEFAULT_SOUL_MD, encoding="utf-8")
     except OSError:

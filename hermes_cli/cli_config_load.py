@@ -272,14 +272,19 @@ def load_cli_config() -> Dict[str, Any]:
     _file_has_terminal_config = False
 
     if config_path.exists():
+        from hermes_security.errors import VaultError
         try:
-            with open(config_path, "r", encoding="utf-8") as f:
-                from hermes_cli.config import _normalize_root_model_keys
+            from hermes_cli.config import _normalize_root_model_keys
+            from hermes_security.io import read_text
 
-                file_config = _normalize_root_model_keys(fast_safe_load(f) or {})
+            file_config = _normalize_root_model_keys(
+                fast_safe_load(read_text(config_path, purpose="config") or "") or {})
 
             _file_has_terminal_config = "terminal" in file_config
             _merge_file_config(defaults, file_config)
+        except VaultError:
+            # A locked, corrupt or plaintext vaulted config is not an absent config.
+            raise
         except Exception as e:
             logger.warning("Failed to load cli-config.yaml: %s", e)
 
