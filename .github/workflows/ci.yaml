@@ -51,6 +51,7 @@ jobs:
       rust: ${{ steps.classify.outputs.rust }}
       docker_meta: ${{ steps.classify.outputs.docker_meta }}
       mcp_catalog: ${{ steps.classify.outputs.mcp_catalog }}
+      plugin_catalog: ${{ steps.classify.outputs.plugin_catalog }}
       ci_review: ${{ steps.classify.outputs.ci_review }}
       ci_review_files: ${{ steps.classify.outputs.ci_review_files }}
       event_name: ${{ github.event_name }}
@@ -60,8 +61,6 @@ jobs:
         id: classify
         uses: ./.github/actions/detect-changes
         with:
-          sparse-checkout: scripts/ci/classify_changes.py
-          sparse-checkout-cone-mode: false
           github-token: ${{ github.token }}
 
   # ─────────────────────────────────────────────────────────────────────
@@ -142,6 +141,12 @@ jobs:
     if: needs.detect.outputs.site == 'true'
     uses: ./.github/workflows/docs-site-checks.yml
 
+  plugin-catalog:
+    name: Plugin catalog admission
+    needs: detect
+    if: needs.detect.outputs.event_name == 'pull_request' && needs.detect.outputs.plugin_catalog == 'true'
+    uses: ./.github/workflows/plugin-catalog-ci.yml
+
   history-check:
     name: Deny unrelated histories
     needs: detect
@@ -215,8 +220,8 @@ jobs:
 
   # ─────────────────────────────────────────────────────────────────────
   # Gate: runs after everything. ``if: always()`` ensures it reports a
-  # status even when some deps were skipped. Only actual ``failure``
-  # results cause it to fail; ``skipped`` is treated as success.
+  # status even when some deps were skipped. Only ``success`` and
+  # intentionally ``skipped`` jobs pass; cancellation cannot pass the gate.
   #
   # Branch protection should require ONLY this check.
   #
@@ -224,7 +229,9 @@ jobs:
   # the live comment poller can list failed jobs in the PR comment.
   # ─────────────────────────────────────────────────────────────────────
   all-checks-pass:
-    name: All required checks pass
+    # The personal fork still requires the old check name. Reuse this gate's
+    # result until branch protection can be switched after a green CI run.
+    name: ${{ github.repository == 'majorissuerep/hermes-agent' && 'Fork acceptance' || 'All required checks pass' }}
     needs:
       - detect
       - tests
@@ -235,10 +242,12 @@ jobs:
       - rust-tests
       - e2e-desktop
       - docs-site
+      - plugin-catalog
       - history-check
       - contributor-check
       - uv-lockfile
       - case-collision-check
+      - infographic-check
       - lockfile-diff
       - docker-lint
       - profile-artifact-check
@@ -271,7 +280,7 @@ jobs:
           print(f'needs-json={json.dumps(compact)}')
           with open('$GITHUB_OUTPUT', 'a') as f:
               f.write(f'needs-json={json.dumps(compact)}\n')
-          failed = [name for name, info in needs.items() if info['result'] == 'failure']
+          failed = [name for name, info in needs.items() if info['result'] not in ('success', 'skipped')]
           for name, info in sorted(needs.items()):
               result = info['result']
               icon = '✅' if result in ('success', 'skipped') else '❌'

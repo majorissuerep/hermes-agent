@@ -44,11 +44,12 @@ DEFAULT = {
     "desktop_updater": True,
     "rust": True,
     "mcp_catalog": False,
+    "plugin_catalog": True,
     "ci_review": True,
 }
 
 
-def _lanes(python=False, frontend=False, site=False, scan=False, deps=False, uv_lock=False, npm_lock=False, installer=False, desktop_updater=False, rust=False, mcp_catalog=False, docker_meta=False, ci_review=False, python_prod=None, nix=None, docker=None) -> dict[str, bool]:
+def _lanes(python=False, frontend=False, site=False, scan=False, deps=False, uv_lock=False, npm_lock=False, installer=False, desktop_updater=False, rust=False, mcp_catalog=False, plugin_catalog=False, docker_meta=False, ci_review=False, python_prod=None, nix=None, docker=None) -> dict[str, bool]:
     # python_prod tracks python except for tests-only diffs; default it to
     # python so the majority of cases don't need to spell it out.
     #
@@ -73,6 +74,7 @@ def _lanes(python=False, frontend=False, site=False, scan=False, deps=False, uv_
         "desktop_updater": desktop_updater,
         "rust": rust,
         "mcp_catalog": mcp_catalog,
+        "plugin_catalog": plugin_catalog,
         "ci_review": ci_review,
     }
 
@@ -238,6 +240,14 @@ CASES = {
     "mcp_catalog.py → mcp_catalog": (
         ["hermes_cli/mcp_catalog.py"],
         _lanes(python=True, scan=True, mcp_catalog=True),
+    ),
+    "plugin catalog entry → admission validation": (
+        ["plugin-catalog/example.yaml"],
+        _lanes(python=True, plugin_catalog=True),
+    ),
+    "plugin catalog removal → admission validation": (
+        ["plugin-catalog/removed.yaml"],
+        _lanes(python=True, plugin_catalog=True),
     ),
     # CI-sensitive files require explicit review label.
     "eslint config → ci_review": (
