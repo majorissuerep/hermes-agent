@@ -70,7 +70,9 @@ def test_repair_recovers_the_clobbered_home(tmp_path, monkeypatch):
     vault.write_bytes(db, db.read_bytes(), purpose="state")
     log = home / "logs" / "agent.log"
     vault.write_bytes(log, log.read_bytes() + b"old venv plaintext\n", purpose="state")
-    sec_frames.append(log, b"appended after the wrap", purpose="log")
+    # Reproduce an OLD writer's invalid stream; current append correctly refuses it.
+    with log.open("ab") as handle:
+        handle.write(sec_frames.encode_frames([b"appended after the wrap"], vault=vault, purpose="log"))
     env = home / ".env"
     env.write_text(env.read_bytes().decode("utf-8", errors="replace").replace("\x00", ""), encoding="utf-8")
 

@@ -169,7 +169,7 @@ class MemoryStore:
             with open(self.path, "rb") as fh:
                 fh.seek(self._offset)
                 blob = fh.read()
-            payloads, consumed = frames.split_stream(blob, vault=self._vault(), purpose=FRAME_PURPOSE)
+            payloads, consumed = frames.split_stream(blob, vault=self._vault(), purpose=FRAME_PURPOSE, strict=True)
             self._offset += consumed
             self._frames_seen += len(payloads)
             self._apply(payloads)
