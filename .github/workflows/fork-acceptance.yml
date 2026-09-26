@@ -47,6 +47,8 @@ jobs:
             tests/hermes_state/test_deck_registry.py
             tests/hermes_cli/test_cli_deck.py
             tests/hermes_cli/test_host_startup_diagnostics.py
+            tests/hermes_cli/test_web_profile_soul_writes.py
+            tests/hermes_cli/test_web_profiles_off_loop.py
             tests/tui_gateway/test_deck_host.py
             tests/gateway/test_external_platforms_kill_switch.py
             tests/tools/test_user_native_shell.py
