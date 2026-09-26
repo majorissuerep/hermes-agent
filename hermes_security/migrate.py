@@ -349,10 +349,16 @@ def _sha(data: bytes) -> str:
 
 def _backup_home(home: Path, dest_dir: Path) -> Path:
     stamp = time.strftime("%Y%m%d-%H%M%S")
-    backup = dest_dir / f"hermes-premigration-{home.name}-{stamp}.tar"
-    with tarfile.open(backup, "w") as tar:
-        for path, rel in _iter_files(home):
-            tar.add(str(path), arcname=str(rel), recursive=False)
+    fd, name = tempfile.mkstemp(prefix=f"hermes-premigration-{home.name}-{stamp}-",
+                                suffix=".tar", dir=dest_dir)
+    backup = Path(name)
+    # mkstemp is owner-only from creation, not after the sensitive first write.
+    with os.fdopen(fd, "wb") as handle:
+        with tarfile.open(fileobj=handle, mode="w") as tar:
+            for path, rel in _iter_files(home):
+                tar.add(str(path), arcname=str(rel), recursive=False)
+        handle.flush()
+        os.fsync(handle.fileno())
     return backup
 
 
@@ -375,6 +381,12 @@ def _conn_fingerprint(conn) -> str:
     # non-crypto-documented digest so scanners and auditors do not have to
     # re-litigate MD5's role here on every pass.
     h = hashlib.sha256()
+    for pragma in ("user_version", "application_id"):
+        h.update(repr((pragma, conn.execute(f"PRAGMA {pragma}").fetchone()[0])).encode())
+    for row in conn.execute(
+        "SELECT type, name, tbl_name, sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY type, name"
+    ):
+        h.update(repr(row).encode("utf-8"))
     tables = [r[0] for r in conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
     ).fetchall()]
@@ -404,8 +416,12 @@ def _export_to_sqlcipher(source: Path, target: Path, hexkey: str) -> None:
 
     conn = sqlcipher.connect(str(source))
     try:
-        conn.execute(f"ATTACH DATABASE '{target}' AS enc KEY \"x'{hexkey}'\"")
+        conn.execute(f"ATTACH DATABASE ? AS enc KEY \"x'{hexkey}'\"", (str(target),))
         conn.execute("SELECT sqlcipher_export('enc')")
+        # sqlcipher_export deliberately excludes these application-owned header fields.
+        for pragma in ("user_version", "application_id"):
+            value = int(conn.execute(f"PRAGMA main.{pragma}").fetchone()[0])
+            conn.execute(f"PRAGMA enc.{pragma} = {value}")
         conn.execute("DETACH DATABASE enc")
     finally:
         conn.close()
