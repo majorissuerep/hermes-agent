@@ -63,11 +63,17 @@ def _read_text_with_timeout(path: Path, timeout: Optional[float] = None) -> Opti
 
     def _reader() -> None:
         try:
-            result.put((True, path.read_text(encoding="utf-8")))
+            if path.name == "SOUL.md":
+                from hermes_security.io import read_text
+                text = read_text(path, purpose="state")
+            else:
+                text = path.read_text(encoding="utf-8")
+            result.put((True, text))
         except Exception as exc:  # re-raised on the caller thread
             result.put((False, exc))
 
-    threading.Thread(target=_reader, daemon=True, name=f"context-read:{path.name}").start()
+    from agent.memory_provider import spawn_context_thread
+    spawn_context_thread(_reader, name=f"context-read:{path.name}").start()
     try:
         ok, value = result.get(timeout=timeout)
     except queue.Empty:
