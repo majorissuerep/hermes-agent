@@ -34,7 +34,7 @@ def sandbox_home(tmp_path, monkeypatch):
         "enabled": True, "tools": ["terminal", "file", "code_execution"], "grants": [f"{ws}:rw"]}}))
     task = f"sbx-{uuid.uuid4().hex[:8]}"
     yield ws, outside, task
-    from tools.terminal_tool import cleanup_vm
+    from tools.terminal_tool_lifecycle import cleanup_vm
     cleanup_vm(task)
 
 

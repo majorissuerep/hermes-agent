@@ -22,6 +22,9 @@ FORK_HTTPS="https://github.com/majorissuerep/hermes-agent.git"
 # updates track majorissuerep/hermes-agent.
 FORK_SRC="${FORK_SRC:-$FORK_SSH}"
 HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
+SCRATCH_DIR="${TMPDIR:-$HERMES_HOME/cache/scratch}"
+mkdir -p "$SCRATCH_DIR"
+chmod 700 "$SCRATCH_DIR"
 INSTALL_DIR="$HERMES_HOME/hermes-agent"
 LAUNCHER="$HOME/.local/bin/hermes"
 STAMP="$(date +%Y%m%d-%H%M%S)"
@@ -110,10 +113,10 @@ swap_source() {
         mv "$INSTALL_DIR" "$INSTALL_DIR.pre-fork-$STAMP"
     fi
     say "→ Cloning fork into $INSTALL_DIR..."
-    if ! git clone --quiet --branch main "$FORK_SRC" "$INSTALL_DIR" 2>/tmp/hermes-takeover-clone.log; then
-        if ! git clone --quiet --branch main "$FORK_HTTPS" "$INSTALL_DIR" 2>>/tmp/hermes-takeover-clone.log; then
+    if ! git clone --quiet --branch main "$FORK_SRC" "$INSTALL_DIR" 2>"$SCRATCH_DIR/hermes-takeover-clone.log"; then
+        if ! git clone --quiet --branch main "$FORK_HTTPS" "$INSTALL_DIR" 2>>"$SCRATCH_DIR/hermes-takeover-clone.log"; then
             echo "✗ clone failed (tried FORK_SRC then HTTPS) — root cause:" >&2
-            tail -5 /tmp/hermes-takeover-clone.log >&2
+            tail -5 "$SCRATCH_DIR/hermes-takeover-clone.log" >&2
             die "if rate-limited: clone manually and rerun with FORK_SRC=/path/to/clone"
         fi
     fi
@@ -141,11 +144,11 @@ build_venv() {
         # 3.9); the pip fallback below would die at pick_python. uv provisions a
         # managed 3.11 itself, so installing it is the self-sufficient path.
         say "→ uv not found — installing to ~/.local/bin (astral.sh install script)..."
-        if curl -fsSL https://astral.sh/uv/install.sh | sh >/tmp/hermes-takeover-uv.log 2>&1; then
+        if curl -fsSL https://astral.sh/uv/install.sh | sh >"$SCRATCH_DIR/hermes-takeover-uv.log" 2>&1; then
             export PATH="$HOME/.local/bin:$PATH"
         else
             say "  ○ uv install failed — falling back to system python (needs 3.11-3.13):"
-            tail -3 /tmp/hermes-takeover-uv.log >&2 || true
+            tail -3 "$SCRATCH_DIR/hermes-takeover-uv.log" >&2 || true
         fi
     fi
     if command -v uv >/dev/null; then
@@ -163,12 +166,12 @@ build_venv() {
         # sdist build (libolm+cmake) and the whole takeover dies (MS73-HB1
         # fell back to base deps this way). Messaging platforms land via the
         # [messaging] extra; everything heavy stays lazy-installed per [all].
-        if ! uv sync --all-extras --no-extra matrix >/tmp/hermes-takeover-sync.log 2>&1; then
-            if ! uv sync --extra messaging >/tmp/hermes-takeover-sync.log 2>&1; then
-                if ! uv pip install --python .venv/bin/python -e . >/tmp/hermes-takeover-install.log 2>&1; then
+        if ! uv sync --all-extras --no-extra matrix >"$SCRATCH_DIR/hermes-takeover-sync.log" 2>&1; then
+            if ! uv sync --extra messaging >"$SCRATCH_DIR/hermes-takeover-sync.log" 2>&1; then
+                if ! uv pip install --python .venv/bin/python -e . >"$SCRATCH_DIR/hermes-takeover-install.log" 2>&1; then
                     echo "✗ dependency install failed — root cause:" >&2
-                    tail -5 /tmp/hermes-takeover-sync.log /tmp/hermes-takeover-install.log >&2
-                    die "see above; logs kept in /tmp/hermes-takeover-*.log"
+                    tail -5 "$SCRATCH_DIR/hermes-takeover-sync.log" "$SCRATCH_DIR/hermes-takeover-install.log" >&2
+                    die "see above; logs kept in $SCRATCH_DIR/hermes-takeover-*.log"
                 fi
             fi
         fi
@@ -176,9 +179,9 @@ build_venv() {
         PYBIN=$(pick_python) || die "no python between 3.11 and 3.13 found"
         "$PYBIN" -m venv .venv || die "venv creation failed"
         .venv/bin/pip install --quiet --upgrade pip >/dev/null
-        if ! .venv/bin/pip install --quiet -e . >/tmp/hermes-takeover-install.log 2>&1; then
+        if ! .venv/bin/pip install --quiet -e . >"$SCRATCH_DIR/hermes-takeover-install.log" 2>&1; then
             echo "✗ pip install failed — root cause:" >&2
-            tail -8 /tmp/hermes-takeover-install.log >&2
+            tail -8 "$SCRATCH_DIR/hermes-takeover-install.log" >&2
             die "see above"
         fi
     fi
