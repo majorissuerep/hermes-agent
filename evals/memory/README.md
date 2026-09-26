@@ -32,7 +32,7 @@ python evals/memory/frame_append_benchmark.py /absolute/base/tree > /tmp/frame-b
 python evals/memory/frame_append_benchmark.py /absolute/candidate/tree > /tmp/frame-candidate.json
 ```
 
-Three independent temporary vaults per log size; 256-byte payloads; one cold append and
+Three independent temporary vaults per log size; 257-byte payloads; one cold append and
 20 warm appends per trial; counts of 100, 1,000 and 10,000 existing records. All acknowledged
 payloads must survive reopening. Raw samples are included, not only averages. Invalid tree
 or repetition arguments fail nonzero. Temporary roots are removed after each trial.
@@ -40,7 +40,7 @@ or repetition arguments fail nonzero. Temporary roots are removed after each tri
 This measures encrypted frame append cost only: not end-to-end memory-put latency,
 retrieval ranking, OS power-loss durability, model quality, or performance at larger sizes.
 The strict writer validates changed streams and hashes the existing bytes under the lock
-on warm appends. That is an O(log-bytes) integrity cost, not a speedup. Measure cold-start
+on warm appends. That cost grows linearly with log size; it is not a speedup. Measure cold-start
 and multiwriter costs separately before drawing scale conclusions.
 
 ## Task-quality boundary
