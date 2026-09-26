@@ -608,7 +608,7 @@ def _ensure_default_soul_md(home: Path) -> None:
     soul_path = home / "SOUL.md"
     if soul_path.exists():
         try:
-            existing = (state_io.read_text(soul_path, purpose="state") if vaulted
+            existing = (state_io.read_text(soul_path, purpose="state", encoding="utf-8") if vaulted
                         else soul_path.read_text(encoding="utf-8"))
         except (OSError, UnicodeDecodeError):
             return

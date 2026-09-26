@@ -882,7 +882,7 @@ async def get_profile_soul(name: str):
         if not soul_path.exists():
             return _MISSING
         from hermes_security import io
-        return io.read_text(soul_path, purpose="state")
+        return io.read_text(soul_path, purpose="state", encoding="utf-8")
 
     content = await _read_off_loop(_run, "SOUL.md", OSError)
     if content is _MISSING:
