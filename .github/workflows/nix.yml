@@ -33,6 +33,9 @@ jobs:
   # flake inputs. On push the classifier fails open and every lane is true.
   detect:
     name: Detect affected areas
+    # The store cache and larger build runner belong to upstream; personal
+    # forks cannot schedule the 32-core runner and otherwise queue forever.
+    if: github.repository == 'NousResearch/hermes-agent'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
