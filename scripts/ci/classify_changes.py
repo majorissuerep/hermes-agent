@@ -35,6 +35,7 @@ Lanes:
   lives under ``apps/``, so without this lane a Rust change matched ``frontend``
   and only the TypeScript matrix ran.
 * ``mcp_catalog`` — bundled MCP catalog / installer review.
+* ``plugin_catalog`` — validate changed plugin catalog entries.
 
 Docker is not a lane — it builds on push-to-main and release only,
 never per-PR.
@@ -250,6 +251,7 @@ def classify(files: list[str]) -> dict[str, bool]:
         "desktop_updater": any(_is_desktop_updater(f) for f in files),
         "rust": any(_is_rust(f) for f in files),
         "mcp_catalog": any(_is_mcp_catalog(f) for f in files),
+        "plugin_catalog": any(f.startswith("plugin-catalog/") for f in files),
         "ci_review": any(_is_ci_review(f) for f in files),
         "nix": python_prod or frontend or any(_is_nix(f) for f in files)
     }
@@ -269,6 +271,7 @@ def classify(files: list[str]) -> dict[str, bool]:
         ret["rust"] = True
         ret["nix"] = True
         ret["ci_review"] = True
+        ret["plugin_catalog"] = True
 
         # explicitly skip mcp catalog here. it's not needed unless those files are modified.
     return ret

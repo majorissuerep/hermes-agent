@@ -19,6 +19,10 @@ from agent import relay_runtime
 from hermes_cli.observability import relay_shared_metrics
 from hermes_cli.plugins import PluginManager
 
+unsupported_shared_metrics = pytest.mark.skip(
+    reason="Fork disables shared-metrics collection and sending"
+)
+
 
 class _Request:
     def __init__(self, headers: dict[str, Any], content: dict[str, Any]) -> None:
@@ -258,6 +262,7 @@ def real_binding_runtime(tmp_path, monkeypatch):
     relay_runtime._reset_for_tests()
 
 
+@unsupported_shared_metrics
 def test_direct_runtime_records_without_enabling_a_plugin(direct_runtime, tmp_path):
     base = {
         "session_id": "sensitive-session",
@@ -474,6 +479,7 @@ def test_direct_runtime_records_without_enabling_a_plugin(direct_runtime, tmp_pa
     }
 
 
+@unsupported_shared_metrics
 def test_real_binding_drives_lifecycle_aggregation_export_and_snapshot(
     real_binding_runtime,
     tmp_path,
@@ -738,6 +744,7 @@ def test_real_binding_drives_lifecycle_aggregation_export_and_snapshot(
         assert canary not in serialized_analytics
 
 
+@unsupported_shared_metrics
 def test_real_binding_correlates_plugin_approval_denial_to_tool_metric(
     real_binding_runtime,
     tmp_path,
@@ -837,6 +844,7 @@ def test_real_binding_correlates_plugin_approval_denial_to_tool_metric(
     assert "sensitive" not in json.dumps(snapshot)
 
 
+@unsupported_shared_metrics
 def test_real_binding_aggregates_tool_and_approval_timeouts(
     real_binding_runtime,
     tmp_path,
@@ -1056,6 +1064,7 @@ def test_core_task_instrumentation_preserves_prompt_history_and_tool_schema(
     assert json.dumps(agent.tools, ensure_ascii=False, sort_keys=True) == tools_before
 
 
+@unsupported_shared_metrics
 def test_skipped_turn_does_not_finish_another_sessions_matching_task(
     direct_runtime,
     monkeypatch,
@@ -1178,7 +1187,8 @@ def test_managed_config_cannot_override_shared_metrics_consent(
             config.load_config_readonly()["telemetry"]["shared_metrics"]["enabled"]
             is managed_enabled
         )
-        assert relay_shared_metrics.enabled() is (profile_enabled is True)
+        # Fork policy overrides both profile and managed telemetry requests.
+        assert relay_shared_metrics.enabled() is False
     finally:
         reset_hermes_home_override(token)
         relay_shared_metrics._reset_for_tests()
@@ -1186,81 +1196,31 @@ def test_managed_config_cannot_override_shared_metrics_consent(
         managed_scope.invalidate_managed_cache()
 
 
-
-
-def test_disabling_shared_metrics_stops_collection_and_shutdown_export(
-    tmp_path, monkeypatch
-):
-    from hermes_cli.observability.shared_metrics import SharedMetricsStore
-
+def test_fork_does_not_collect_or_export_even_with_explicit_consent(tmp_path, monkeypatch):
     fake = _Relay()
     profile = tmp_path / "profile"
-    policy = {"enabled": True}
     monkeypatch.setenv("HERMES_HOME", str(profile))
     monkeypatch.setattr(relay_runtime, "_load_nemo_relay", lambda: fake)
     monkeypatch.setattr(
         "hermes_cli.config.read_raw_config_readonly",
-        lambda: {"telemetry": {"shared_metrics": dict(policy)}},
+        lambda: {"telemetry": {"shared_metrics": {"enabled": True, "send": True}}},
     )
     relay_shared_metrics._reset_for_tests()
     relay_runtime._reset_for_tests()
-
-    relay_shared_metrics.start_task_run(
-        session_id="session",
-        task_id="task",
-        platform="cli",
-    )
-    runtime = relay_shared_metrics._get_runtime()
-    assert runtime is not None
-    policy["enabled"] = False
 
     assert not relay_shared_metrics.enabled()
-    counters_before_stale_event = runtime.subscriber.store.counter_snapshot()
-    runtime.subscriber(
-        SimpleNamespace(
-            kind="scope",
-            category="function",
-            category_profile=None,
-            name="hermes.task_run",
-            scope_category="start",
-            metadata={
-                "hermes.metrics.schema_version": "hermes.metrics.event.v1",
-                relay_runtime.RUNTIME_INSTANCE_KEY: runtime.host.runtime_id,
-            },
-            data={"entrypoint": "interactive", "execution_surface": "cli"},
-        )
-    )
-    assert runtime.subscriber.store.counter_snapshot() == counters_before_stale_event
-    assert (
-        runtime.start_task({
-            "session_id": "session",
-            "task_id": "stale-runtime-task",
-            "platform": "cli",
-        })
-        is None
+    relay_shared_metrics.start_task_run(
+        session_id="session", task_id="task", platform="cli",
     )
     relay_shared_metrics.finish_task_run(
-        session_id="session",
-        task_id="task",
-        platform="cli",
+        session_id="session", task_id="task", platform="cli",
         result={"completed": True},
     )
+    assert relay_shared_metrics._RUNTIMES == {}
+    assert fake.events == []
+    assert not (profile / "telemetry").exists()
     relay_shared_metrics._reset_for_tests()
-
-    root = profile / "telemetry" / "shared_metrics"
-    store = SharedMetricsStore(root / "metrics.sqlite3", root / "outbox")
-    assert [row["metric_name"] for row in store.counter_snapshot()] == [
-        "hermes.client.active",
-        "hermes.task_run.started"
-    ]
-    assert list((root / "outbox").glob("*.json")) == []
     relay_runtime._reset_for_tests()
-
-
-
-
-
-
 
 
 def test_sync_session_runner_releases_lock_before_callback(direct_runtime):
@@ -1659,6 +1619,7 @@ def test_subagent_agent_boundary_closes_its_own_scope(
 
 
 
+@unsupported_shared_metrics
 def test_terminal_model_error_retains_the_failed_route(direct_runtime):
     base = {
         "session_id": "s1",
@@ -1693,6 +1654,7 @@ def test_terminal_model_error_retains_the_failed_route(direct_runtime):
     }
 
 
+@unsupported_shared_metrics
 def test_nonretryable_provider_error_can_recover_within_one_logical_call(
     direct_runtime,
 ):
@@ -1733,6 +1695,7 @@ def test_nonretryable_provider_error_can_recover_within_one_logical_call(
     }
 
 
+@unsupported_shared_metrics
 def test_same_request_id_is_isolated_between_tasks(direct_runtime):
     common = {
         "session_id": "s1",
@@ -1775,6 +1738,7 @@ def test_same_request_id_is_isolated_between_tasks(direct_runtime):
     assert all(fields["retry_count_bucket"] == "0" for fields in task_ends)
 
 
+@unsupported_shared_metrics
 def test_reused_tool_call_id_is_counted_for_each_provider_request(direct_runtime):
     base = {
         "session_id": "s1",
@@ -1821,6 +1785,7 @@ def test_reused_tool_call_id_is_counted_for_each_provider_request(direct_runtime
     assert task_end[2]["output"]["tool_call_count_bucket"] == "2"
 
 
+@unsupported_shared_metrics
 def test_partial_terminal_context_reuses_the_pending_tool_span(direct_runtime):
     base = {
         "session_id": "s1",
@@ -1861,6 +1826,7 @@ def test_partial_terminal_context_reuses_the_pending_tool_span(direct_runtime):
     assert task_end[2]["output"]["tool_call_count_bucket"] == "1"
 
 
+@unsupported_shared_metrics
 def test_partial_terminal_variants_do_not_double_count_a_completed_call(
     direct_runtime,
 ):
@@ -1904,6 +1870,7 @@ def test_partial_terminal_variants_do_not_double_count_a_completed_call(
     assert task_end[2]["output"]["tool_call_count_bucket"] == "1"
 
 
+@unsupported_shared_metrics
 def test_ambiguous_partial_terminal_does_not_create_a_phantom_tool_span(
     direct_runtime,
 ):
@@ -1952,6 +1919,7 @@ def test_ambiguous_partial_terminal_does_not_create_a_phantom_tool_span(
     assert task_end[2]["output"]["tool_call_count_bucket"] == "2"
 
 
+@unsupported_shared_metrics
 def test_reused_task_id_starts_a_new_run_for_each_turn(direct_runtime):
     for turn_id in ("turn-1", "turn-2"):
         base = {
@@ -2002,6 +1970,7 @@ def test_reused_task_id_starts_a_new_run_for_each_turn(direct_runtime):
     )
 
 
+@unsupported_shared_metrics
 def test_late_tool_result_does_not_attach_to_reused_task_id(direct_runtime):
     first = {
         "session_id": "reused-session",
@@ -2085,6 +2054,7 @@ def test_late_tool_result_does_not_attach_to_reused_task_id(direct_runtime):
     ] == ["1", "1"]
 
 
+@unsupported_shared_metrics
 def test_pending_tool_is_closed_and_counted_when_task_is_interrupted(direct_runtime):
     base = {
         "session_id": "s1",
@@ -2143,6 +2113,7 @@ def test_pending_tool_is_closed_and_counted_when_task_is_interrupted(direct_runt
     assert len(task_starts) == 1
 
 
+@unsupported_shared_metrics
 def test_pending_tool_uses_the_outer_task_timeout_outcome(direct_runtime):
     base = {
         "session_id": "s1",
@@ -2214,6 +2185,7 @@ def test_late_model_start_does_not_create_an_orphan_after_task_completion(
     ] == []
 
 
+@unsupported_shared_metrics
 def test_approval_without_tool_context_is_counted_as_unattributed(direct_runtime):
     base = {
         "session_id": "s1",
@@ -2251,6 +2223,7 @@ def test_approval_without_tool_context_is_counted_as_unattributed(direct_runtime
     }
 
 
+@unsupported_shared_metrics
 def test_approval_with_unmatched_tool_id_is_counted_as_unattributed(direct_runtime):
     base = {
         "session_id": "s1",
@@ -2288,6 +2261,7 @@ def test_approval_with_unmatched_tool_id_is_counted_as_unattributed(direct_runti
     }
 
 
+@unsupported_shared_metrics
 def test_tool_category_comes_from_runtime_registry_metadata(
     direct_runtime,
     monkeypatch,
@@ -2328,6 +2302,9 @@ def test_tool_category_comes_from_runtime_registry_metadata(
         event for event in direct_runtime.events if event[0] == "tool.call_end"
     ]
     assert tool_end[2]["tool_category"] == "terminal"
+
+
+@unsupported_shared_metrics
 def test_task_retry_count_survives_provider_fallback_ordinal_reset(direct_runtime):
     base = {
         "session_id": "s1",
@@ -2388,6 +2365,7 @@ def test_task_retry_count_survives_provider_fallback_ordinal_reset(direct_runtim
     assert task_end[2]["output"]["retry_count_bucket"] == "2"
 
 
+@unsupported_shared_metrics
 def test_failed_flush_keeps_daily_export_open_for_later_task(
     direct_runtime, tmp_path, monkeypatch, caplog
 ):
@@ -2447,6 +2425,7 @@ def test_failed_flush_keeps_daily_export_open_for_later_task(
     assert "Hermes shared-metrics task flush failed" in caplog.text
 
 
+@unsupported_shared_metrics
 def test_skill_lifecycle_flows_through_relay_to_a_privacy_safe_package(
     direct_runtime,
     tmp_path,
@@ -2502,6 +2481,7 @@ def test_skill_lifecycle_flows_through_relay_to_a_privacy_safe_package(
     assert "private-skill-name" not in json.dumps(package)
 
 
+@unsupported_shared_metrics
 def test_skill_lifecycle_with_only_task_id_uses_unique_task_scope(direct_runtime):
     runtime = relay_shared_metrics._get_runtime()
     assert runtime is not None
@@ -2528,6 +2508,7 @@ def test_skill_lifecycle_with_only_task_id_uses_unique_task_scope(direct_runtime
     assert mark[2]["handle"] == task.handle
 
 
+@unsupported_shared_metrics
 def test_skill_task_only_correlation_does_not_guess_across_sessions(direct_runtime):
     runtime = relay_shared_metrics._get_runtime()
     assert runtime is not None
@@ -2616,6 +2597,7 @@ def test_skill_lifecycle_does_not_fallback_across_an_explicit_session(
     ] == []
 
 
+@unsupported_shared_metrics
 def test_real_binding_concurrent_task_close_skips_pop_under_sibling_scope(
     real_binding_runtime, caplog,
 ):

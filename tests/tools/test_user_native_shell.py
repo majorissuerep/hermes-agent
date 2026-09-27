@@ -45,6 +45,18 @@ def test_bash_user_gets_upstream_eval():
     assert script == "eval 'echo hi'"
 
 
+def test_windows_git_bash_path_uses_upstream_eval():
+    shell = r"C:\Program Files\Git\bin\bash.exe"
+    assert bse._user_command_invocation("echo hi", shell) == "eval 'echo hi'"
+    script = bse._wrap_command_script(
+        "echo hi", quoted_cwd="/c/Users/test", quoted_snap="/c/tmp/snap",
+        snap_tmp_template="/c/tmp/snap.tmp.X", passthrough_names=(),
+        snapshot_ready=True, cwd_marker="__M__", user_shell=shell,
+    )
+    assert "eval 'echo hi'" in script
+    assert ".userenv" not in script
+
+
 def test_none_shell_gets_upstream_eval():
     assert bse._user_command_invocation("echo hi", None) == "eval 'echo hi'"
 

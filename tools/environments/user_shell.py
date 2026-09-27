@@ -20,7 +20,6 @@ entries can name shells absent on this host.
 from __future__ import annotations
 
 import os
-import pwd
 import shutil
 from pathlib import Path
 
@@ -38,12 +37,15 @@ def resolve_user_shell() -> str:
     """The user's native login shell binary path (bash fallback guaranteed)."""
 
     candidates: list[str] = []
-    try:
-        entry = pwd.getpwuid(os.getuid())
-        if entry.pw_shell:
-            candidates.append(entry.pw_shell)
-    except (KeyError, OSError):
-        pass
+    if os.name == "posix":
+        import pwd
+
+        try:
+            entry = pwd.getpwuid(os.getuid())  # windows-footgun: ok — POSIX-only branch
+            if entry.pw_shell:
+                candidates.append(entry.pw_shell)
+        except (KeyError, OSError):
+            pass
     env_shell = os.environ.get("SHELL", "")
     if env_shell:
         candidates.append(env_shell)

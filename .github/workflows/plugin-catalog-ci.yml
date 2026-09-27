@@ -1,7 +1,7 @@
 name: Plugin Catalog CI
 
-# Admission gate for plugin-catalog entries. Fires ONLY on PRs touching
-# plugin-catalog/** so it can never go red on unrelated PRs.
+# Admission gate for plugin-catalog entries. Called by CI only when a PR
+# touches plugin-catalog/** (or the change classifier fails open).
 #
 # Two gates:
 #   structural            — cheap schema check, no hermes install needed
@@ -11,9 +11,7 @@ name: Plugin Catalog CI
 #                            `hermes plugins validate`.
 
 on:
-  pull_request:
-    paths:
-      - "plugin-catalog/**"
+  workflow_call:
 
 permissions:
   contents: read

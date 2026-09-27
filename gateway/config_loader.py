@@ -23,7 +23,7 @@ def _hermes_io_read_text(path: Path, *, purpose: str) -> Optional[str]:
     """Fork: envelope-aware config read (late import — same shape as ``hermes_cli.config._hermes_io``)."""
     from hermes_security import io as _io
 
-    return _io.read_text(path, purpose=purpose)
+    return _io.read_text(path, purpose=purpose, encoding="utf-8")
 
 
 def load_legacy_gateway_json(home: Path) -> Any:

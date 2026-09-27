@@ -140,7 +140,7 @@ after killing surviving old-venv processes.
 - Shell scripts: bash -n + shellcheck -S warning (both clean) + live
   execution of every reachable branch; deb-only branches proven in a
   Debian container (pass-through sudo stub, stdin closed).
-- Live CLI proof pattern: fresh /tmp home + HERMES_HOME + env password,
+- Live CLI proof pattern: fresh $TMPDIR-backed home + HERMES_HOME + env password,
   drive the real command chain, grep for the contract lines.
 - A/B attribution for any upstream-suite failure: clean base worktree at
   38c289c014, same command, compare failure sets (pre-existing vs

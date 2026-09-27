@@ -16,7 +16,6 @@ name: CI
 
 on:
   pull_request:
-  push:
     branches: [main]
 
 permissions:
@@ -30,8 +29,8 @@ concurrency:
 jobs:
   # ─────────────────────────────────────────────────────────────────────
   # detect: run the classifier once. Every downstream job reads its outputs
-  # to decide whether to run. On push/dispatch the classifier fails open
-  # (all lanes true) so post-merge validation is never weakened.
+  # to decide which PR checks must run. Strict branch protection requires
+  # this aggregate check on the latest base before merging.
   # ─────────────────────────────────────────────────────────────────────
   detect:
     name: Detect affected areas
@@ -51,6 +50,7 @@ jobs:
       rust: ${{ steps.classify.outputs.rust }}
       docker_meta: ${{ steps.classify.outputs.docker_meta }}
       mcp_catalog: ${{ steps.classify.outputs.mcp_catalog }}
+      plugin_catalog: ${{ steps.classify.outputs.plugin_catalog }}
       ci_review: ${{ steps.classify.outputs.ci_review }}
       ci_review_files: ${{ steps.classify.outputs.ci_review_files }}
       event_name: ${{ github.event_name }}
@@ -60,8 +60,6 @@ jobs:
         id: classify
         uses: ./.github/actions/detect-changes
         with:
-          sparse-checkout: scripts/ci/classify_changes.py
-          sparse-checkout-cone-mode: false
           github-token: ${{ github.token }}
 
   # ─────────────────────────────────────────────────────────────────────
@@ -142,6 +140,12 @@ jobs:
     if: needs.detect.outputs.site == 'true'
     uses: ./.github/workflows/docs-site-checks.yml
 
+  plugin-catalog:
+    name: Plugin catalog admission
+    needs: detect
+    if: needs.detect.outputs.event_name == 'pull_request' && needs.detect.outputs.plugin_catalog == 'true'
+    uses: ./.github/workflows/plugin-catalog-ci.yml
+
   history-check:
     name: Deny unrelated histories
     needs: detect
@@ -215,8 +219,8 @@ jobs:
 
   # ─────────────────────────────────────────────────────────────────────
   # Gate: runs after everything. ``if: always()`` ensures it reports a
-  # status even when some deps were skipped. Only actual ``failure``
-  # results cause it to fail; ``skipped`` is treated as success.
+  # status even when some deps were skipped. Only ``success`` and
+  # intentionally ``skipped`` jobs pass; cancellation cannot pass the gate.
   #
   # Branch protection should require ONLY this check.
   #
@@ -235,10 +239,12 @@ jobs:
       - rust-tests
       - e2e-desktop
       - docs-site
+      - plugin-catalog
       - history-check
       - contributor-check
       - uv-lockfile
       - case-collision-check
+      - infographic-check
       - lockfile-diff
       - docker-lint
       - profile-artifact-check
@@ -271,7 +277,7 @@ jobs:
           print(f'needs-json={json.dumps(compact)}')
           with open('$GITHUB_OUTPUT', 'a') as f:
               f.write(f'needs-json={json.dumps(compact)}\n')
-          failed = [name for name, info in needs.items() if info['result'] == 'failure']
+          failed = [name for name, info in needs.items() if info['result'] not in ('success', 'skipped')]
           for name, info in sorted(needs.items()):
               result = info['result']
               icon = '✅' if result in ('success', 'skipped') else '❌'
@@ -284,8 +290,8 @@ jobs:
 
   # ─────────────────────────────────────────────────────────────────────
   # CI timing report: collect per-job/step durations from the GitHub API,
-  # cache them on main (as a baseline), and on PRs generate an HTML diff
-  # report with a gantt chart + per-step breakdown. The report is uploaded
+  # cache a baseline per PR, and generate an HTML diff against the previous
+  # successful run of that PR with a gantt chart + per-step breakdown. The report is uploaded
   # as an artifact and a markdown summary is written to $GITHUB_STEP_SUMMARY.
   #
   # The live comment poller dynamically fetches all review-status-* artifacts
@@ -302,15 +308,15 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - name: Restore baseline cache (PR only)
-        if: github.event_name == 'pull_request'
+      - name: Restore timing baseline
         uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: ci-timings-baseline.json
-          # Prefix-match: exact key will never hit (run_id differs), so
-          # restore-keys finds the most recent baseline from main.
-          key: ci-timings-baseline-never-exact
+          # Prefer the previous successful run of this PR. Existing main
+          # baselines can seed the first run until their cache expires.
+          key: ci-timings-pr-${{ github.event.pull_request.number }}-never-exact
           restore-keys: |
+            ci-timings-pr-${{ github.event.pull_request.number }}-
             ci-timings-baseline-
 
       - name: Collect timings and generate report
@@ -363,20 +369,13 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           cat ci-timings-summary.md >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Save baseline cache (main only)
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: |
-          # Degraded runs (API rate-limited) produce no ci-timings.json —
-          # skip rather than fail, and never cache an empty baseline.
-          if [ -f ci-timings.json ]; then
-            cp ci-timings.json ci-timings-baseline.json
-          else
-            echo "No timings JSON this run — skipping baseline update"
-          fi
+      - name: Prepare baseline from this successful run
+        if: needs.all-checks-pass.result == 'success' && hashFiles('ci-timings.json') != ''
+        run: cp ci-timings.json ci-timings-baseline.json
 
-      - name: Upload baseline to cache (main only)
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && hashFiles('ci-timings-baseline.json') != ''
+      - name: Save timing baseline for subsequent PR runs
+        if: needs.all-checks-pass.result == 'success' && hashFiles('ci-timings.json') != ''
         uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: ci-timings-baseline.json
-          key: ci-timings-baseline-${{ github.run_id }}
+          key: ci-timings-pr-${{ github.event.pull_request.number }}-${{ github.run_id }}

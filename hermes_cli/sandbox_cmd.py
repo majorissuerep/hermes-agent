@@ -154,7 +154,7 @@ def _scan(args) -> int:
 
 def _probe(spec: dict, shell: str) -> tuple[int, str]:
     from hermes_security.sandbox.spawn import wrap_argv
-    proc = subprocess.run(wrap_argv(["/bin/sh", "-c", shell], spec), capture_output=True, text=True, timeout=60)
+    proc = subprocess.run(wrap_argv(["/bin/sh", "-c", shell], spec), capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60)
     return proc.returncode, (proc.stdout + proc.stderr).strip()
 
 
@@ -170,8 +170,8 @@ def _check(args) -> int:
         outside = Path(work, "outside")
         granted.mkdir()
         outside.mkdir()
-        (granted / "in.txt").write_text("granted\n")
-        (outside / "secret.txt").write_text("secret\n")
+        (granted / "in.txt").write_text("granted\n", encoding="utf-8")
+        (outside / "secret.txt").write_text("secret\n", encoding="utf-8")
         policy = SandboxPolicy(enabled=True, grants=(Grant(str(granted), "rw"),))
         spec = policy.launch_spec()
         q = lambda p: "'" + str(p).replace("'", "'\\''") + "'"  # noqa: E731

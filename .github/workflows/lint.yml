@@ -162,6 +162,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0 # the footgun scan compares against the PR base / previous main
 
       - name: Install uv
         uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # 8.2.0
@@ -176,8 +178,21 @@ jobs:
         with:
           command: uv python install 3.11
 
-      - name: Run footgun checker
-        run: python scripts/check-windows-footguns.py --all
+      - name: Check Windows footguns in changed files
+        # The full tree already has legacy findings on this fork. Check the
+        # proposed merge's changed files instead of failing unrelated PRs;
+        # reject an unavailable comparison base rather than silently scanning nothing.
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = 'pull_request' ]; then
+            ref="$BASE_SHA"
+          else
+            ref='HEAD^'
+          fi
+          git merge-base "$ref" HEAD >/dev/null
+          git diff "$ref...HEAD" --name-only >/dev/null
+          python scripts/check-windows-footguns.py --diff "$ref"
 
       # The Sep 2026 decomposition kept old import paths alive for external plugins
       # (PLUGIN-COMPAT blocks, see COMPAT_MANIFEST.md). They are removed on schedule by

@@ -7,6 +7,7 @@ No module state lives here; ``BaseEnvironment`` supplies quoting hooks.
 
 import re
 import shlex
+from pathlib import PureWindowsPath
 from typing import Iterable
 
 # Bridged per-session vars (gateway.session_context._VAR_MAP) are injected fresh onto every
@@ -144,9 +145,7 @@ def _user_command_invocation(escaped_command: str, user_shell: str | None, env_d
 
     if not user_shell:
         return f"eval '{escaped_command}'"
-    from pathlib import Path as _P
-
-    name = _P(user_shell).name.lower()
+    name = PureWindowsPath(user_shell).name.lower().removesuffix(".exe")
     if name == "bash":
         return f"eval '{escaped_command}'"
     if name in {"sh", "dash", "ash", "ksh", "mksh", "posh", "yash", "zsh"}:
@@ -194,7 +193,7 @@ def _wrap_command_script(
     # Fork (user-native terminals): POSIX-family non-bash shells dump their
     # post-command env to a side file this shell sources back, preserving
     # export persistence across commands.
-    user_shell_name = (user_shell or "").rsplit("/", 1)[-1].lower()
+    user_shell_name = PureWindowsPath(user_shell or "").name.lower().removesuffix(".exe")
     env_dump = f"{quoted_snap}.userenv" if user_shell_name not in ("", "bash") else None
     parts.append(_user_command_invocation(escaped, user_shell, env_dump))
     if env_dump:

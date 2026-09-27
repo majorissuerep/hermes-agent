@@ -83,7 +83,7 @@ def load_user_config_effective(config_path: Optional[Path] = None, *, fail_close
                 # WrongMasterPasswordError/VaultLockedError instead of decoding
                 # ciphertext as UTF-8). A plain open() here produced bogus
                 # "formatting error" spam and .corrupt backups of ciphertext.
-                text = _config._hermes_io().read_text(config_path, purpose="config")
+                text = _config._hermes_io().read_text(config_path, purpose="config", encoding="utf-8")
                 loaded = fast_safe_load(io.StringIO(text)) if text is not None else {}
             except Exception as exc:
                 if fail_closed:

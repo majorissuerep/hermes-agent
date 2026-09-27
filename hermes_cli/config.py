@@ -536,7 +536,7 @@ def require_parseable_user_config(*, ignore_user_config: bool = False) -> None:
 
     config_path = get_config_path()
     try:
-        text = _hermes_io().read_text(config_path, purpose="config")
+        text = _hermes_io().read_text(config_path, purpose="config", encoding="utf-8")
         if text is None:
             return
         data = fast_safe_load(io.StringIO(text))
@@ -1036,7 +1036,7 @@ def check_config_version(*, raise_on_parse_error: bool = False) -> Tuple[int, in
         return latest, latest
 
     try:
-        text = _hermes_io().read_text(config_path, purpose="config")
+        text = _hermes_io().read_text(config_path, purpose="config", encoding="utf-8")
         config = fast_safe_load(io.StringIO(text)) if text is not None else {}
     except Exception as e:
         _warn_config_parse_failure(config_path, e)
@@ -2032,7 +2032,7 @@ def _read_raw_config_impl(*, want_deepcopy: bool) -> Dict[str, Any]:
             return copy.deepcopy(hit) if want_deepcopy else hit
 
         try:
-            text = _hermes_io().read_text(config_path, purpose="config")
+            text = _hermes_io().read_text(config_path, purpose="config", encoding="utf-8")
             data = fast_safe_load(io.StringIO(text)) if text is not None else {}
         except Exception as e:
             _warn_config_parse_failure(config_path, e)
@@ -2060,7 +2060,7 @@ def read_user_config_raw(config_path: Optional[Path] = None) -> Dict[str, Any]:
     if config_path is None:
         config_path = get_config_path()
     try:
-        raw_text = _hermes_io().read_text(config_path, purpose="config")
+        raw_text = _hermes_io().read_text(config_path, purpose="config", encoding="utf-8")
         data = fast_safe_load(io.StringIO(raw_text)) if raw_text is not None else {}
     except FileNotFoundError:
         return {}
@@ -2110,7 +2110,7 @@ def require_readable_config_before_write(config_path: Optional[Path] = None) -> 
         raise _refuse_overwrite(config_path, "cannot be accessed", exc, _FIX_PERMS) from exc
 
     try:
-        loaded = _hermes_io().read_text(config_path, purpose="config")
+        loaded = _hermes_io().read_text(config_path, purpose="config", encoding="utf-8")
         loaded = fast_safe_load(io.StringIO(loaded)) if loaded is not None else {}
     except OSError as exc:
         raise _refuse_overwrite(config_path, "cannot be read", exc, _FIX_PERMS) from exc
@@ -2390,8 +2390,10 @@ def _load_config_impl(*, want_deepcopy: bool) -> Dict[str, Any]:
 
         if user_sig is not None:
             try:
-                user_text = _hermes_io().read_text(config_path, purpose="config")
+                user_text = _hermes_io().read_text(config_path, purpose="config", encoding="utf-8")
                 user_config = fast_safe_load(io.StringIO(user_text)) if user_text is not None else {}
+                if user_config is None:
+                    user_config = {}  # An empty YAML document is a valid first-run config.
 
                 if "max_turns" in user_config:
                     agent_user_config = dict(user_config.get("agent") or {})
@@ -2596,7 +2598,7 @@ def _read_env_lines(env_path: Path) -> list:
     """Read ``.env`` lines, normalized. Explicit UTF-8 (Windows defaults to cp1252) with BOM
     tolerance (Notepad adds one). Fork: envelope-aware (decrypts when vaulted)."""
     _io = _hermes_io()
-    text = _io.read_text(env_path, purpose="env")
+    text = _io.read_text(env_path, purpose="env", encoding="utf-8-sig")
     if text is None:
         return []
     import io as _io_mod

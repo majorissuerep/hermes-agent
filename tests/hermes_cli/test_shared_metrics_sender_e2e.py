@@ -19,6 +19,10 @@ import pytest
 from hermes_cli.observability.shared_metrics import SharedMetricsStore
 from hermes_cli.observability.shared_metrics_sender import SharedMetricsSender
 
+unsupported_shared_metrics = pytest.mark.skip(
+    reason="Fork disables shared-metrics collection and sending"
+)
+
 INSTALL_ID = "12a73e97-4de9-4766-830d-9ca1192c0420"
 NOW = datetime(2026, 8, 26, 12, 0, tzinfo=timezone.utc)
 
@@ -157,6 +161,7 @@ def _sender(store, server):
 
 
 class TestRealTransport:
+    @unsupported_shared_metrics
     def test_a_package_is_delivered_and_marked_sent(self, store, server):
         _add(store, "pkg-1")
         outcome = _sender(store, server).send_pending()
@@ -171,17 +176,20 @@ class TestRealTransport:
             ).fetchone()[0]
         assert state == "sent"
 
+    @unsupported_shared_metrics
     def test_the_stable_install_id_crosses_the_wire_as_is(self, store, server):
         """Product decision 2026-08-27: the raw install_id is transmitted."""
         _add(store, "pkg-1", metrics=40)
         _sender(store, server).send_pending()
         assert Ingest.received[0]["body"]["install_id"] == INSTALL_ID
 
+    @unsupported_shared_metrics
     def test_content_type_is_json(self, store, server):
         _add(store, "pkg-1")
         _sender(store, server).send_pending()
         assert Ingest.received[0]["headers"]["content-type"] == "application/json"
 
+    @unsupported_shared_metrics
     def test_a_realistic_package_is_gzipped_over_the_wire(self, store, server):
         # ~40 metrics matches the real outbox's larger packages.
         _add(store, "pkg-1", metrics=120)
@@ -190,6 +198,7 @@ class TestRealTransport:
         assert record["headers"].get("content-encoding") == "gzip"
         assert record["raw_len"] < record["decoded_len"]
 
+    @unsupported_shared_metrics
     def test_the_server_can_parse_what_we_send(self, store, server):
         """Proves the bytes are valid JSON after transport and decompression."""
         original = _add(store, "pkg-1", metrics=120)
@@ -198,6 +207,7 @@ class TestRealTransport:
         assert received["metrics"] == original["metrics"]
         assert received["resource"] == original["resource"]
 
+    @unsupported_shared_metrics
     def test_400_is_permanent(self, store, server):
         _add(store, "pkg-1")
         Ingest.script = [(400, {"error": "invalid_envelope"}, {})]
@@ -205,6 +215,7 @@ class TestRealTransport:
         assert outcome.rejected == 1
         assert len(Ingest.received) == 1
 
+    @unsupported_shared_metrics
     def test_429_is_honoured(self, store, server):
         _add(store, "pkg-1")
         Ingest.script = [(429, {"error": "rate_limited"}, {"Retry-After": "90"})]
@@ -216,6 +227,7 @@ class TestRealTransport:
             ).fetchone()[0]
         assert retry_at == "2026-08-26T12:01:30Z"
 
+    @unsupported_shared_metrics
     def test_5xx_retries_then_succeeds(self, store, server):
         _add(store, "pkg-1")
         Ingest.script = [
@@ -226,6 +238,7 @@ class TestRealTransport:
         assert outcome.sent == 1
         assert len(Ingest.received) == 2
 
+    @unsupported_shared_metrics
     def test_a_retry_sends_identical_bytes(self, store, server):
         _add(store, "pkg-1", metrics=5)
         Ingest.script = [(503, {}, {}), (202, {}, {})]
@@ -236,6 +249,7 @@ class TestRealTransport:
             "the raw request bytes must match, not just the parsed body"
         )
 
+    @unsupported_shared_metrics
     def test_a_gzipped_retry_is_byte_identical_on_the_wire(self, store, server):
         """gzip embeds an mtime by default, which would break this."""
         _add(store, "pkg-1", metrics=200)
@@ -245,6 +259,7 @@ class TestRealTransport:
         assert first["headers"].get("content-encoding") == "gzip"
         assert first["raw"] == second["raw"]
 
+    @unsupported_shared_metrics
     def test_several_packages_in_one_pass(self, store, server):
         for i in range(5):
             _add(store, f"pkg-{i}")
@@ -255,11 +270,19 @@ class TestRealTransport:
     def test_the_outbox_directory_is_untouched(self, store, server, tmp_path):
         _add(store, "pkg-1")
         marker = store.outbox_directory / "pkg-1.json"
-        marker.write_text('{"kept": true}')
-        _sender(store, server).send_pending()
+        marker.write_text('{"kept": true}', encoding="utf-8")
+        outcome = _sender(store, server).send_pending()
+        assert outcome.sent == 0
+        assert Ingest.received == []
+        with store._connection() as connection:
+            row = connection.execute(
+                "SELECT send_state, send_attempts FROM package_outbox WHERE package_id = 'pkg-1'"
+            ).fetchone()
+        assert tuple(row) == (None, 0)
         assert marker.exists()
-        assert json.loads(marker.read_text()) == {"kept": True}
+        assert json.loads(marker.read_text(encoding="utf-8")) == {"kept": True}
 
+    @unsupported_shared_metrics
     def test_a_dead_server_defers_without_raising(self, store, server):
         _add(store, "pkg-1")
         host, port = server.server_address

@@ -151,6 +151,7 @@ Type `/` in the CLI to open the autocomplete menu. Built-in commands are case-in
 | Command | Description |
 |---------|-------------|
 | `/quit` | Exit the CLI (also: `/exit`). |
+| `/close` | Close this session permanently and remove it from the session deck. `/quit` leaves it open. |
 
 ### Dynamic CLI slash commands
 
