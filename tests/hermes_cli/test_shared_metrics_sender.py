@@ -132,7 +132,7 @@ def _add_package(store, package_id, period_day, *, exported=True, install_id=INS
             ),
         )
     path = store.outbox_directory / f"{package_id}.json"
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True))
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
     return path
 
 
@@ -929,7 +929,7 @@ class TestResilience:
         assert _row(store, "bad")["send_state"] == "rejected"
 
     def test_send_pending_never_raises_on_a_broken_database(self, store, tmp_path):
-        store.database_path.write_text("this is not a database")
+        store.database_path.write_text("this is not a database", encoding="utf-8")
         outcome = _sender(store, FakeTransport(FakeResponse(202))).send_pending()
         assert outcome.sent == 0
 
