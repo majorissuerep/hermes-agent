@@ -15,6 +15,11 @@ from hermes_cli.tools_config import (
 )
 
 
+unsupported_shared_metrics = pytest.mark.skip(
+    reason="Fork disables shared-metrics collection and sending"
+)
+
+
 def _config(**shared):
     return {"telemetry": {"shared_metrics": shared}}
 
@@ -44,7 +49,22 @@ class TestMenuLabel:
         assert "sending to Nous" in label
 
 
+def test_fork_tools_toggle_does_not_prompt_or_save_requested_telemetry(monkeypatch):
+    config = _config(enabled=True, send=True)
+    monkeypatch.setattr(
+        "hermes_cli.setup.prompt_yes_no",
+        lambda *_args, **_kwargs: pytest.fail("prompted for disabled telemetry"),
+    )
+    monkeypatch.setattr(
+        "hermes_cli.tools_config.save_config",
+        lambda *_args, **_kwargs: pytest.fail("saved disabled telemetry"),
+    )
+    _configure_shared_metrics_interactive(config)
+    assert config == _config(enabled=True, send=True)
+
+
 class TestToggle:
+    @unsupported_shared_metrics
     def test_enabling_send_persists(self, monkeypatch):
         config = _config(enabled=True)
         saved = {}
@@ -74,6 +94,7 @@ class TestToggle:
         _configure_shared_metrics_interactive(config)
         assert saved == []
 
+    @unsupported_shared_metrics
     def test_disabling_collection_also_disables_sending(self, monkeypatch):
         """The toggle must not leave send=true with nothing to send."""
         config = _config(enabled=True, send=True)

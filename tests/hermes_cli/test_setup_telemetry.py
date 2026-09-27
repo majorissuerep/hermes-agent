@@ -4,15 +4,32 @@ from __future__ import annotations
 
 import argparse
 
+import pytest
+
 from hermes_cli.config import DEFAULT_CONFIG
 from hermes_cli.setup import setup_telemetry
 from hermes_cli.subcommands.setup import build_setup_parser
+
+unsupported_shared_metrics = pytest.mark.skip(
+    reason="Fork disables shared-metrics collection and sending"
+)
 
 
 def test_shared_metrics_are_registered_disabled_by_default():
     assert DEFAULT_CONFIG["telemetry"]["shared_metrics"]["enabled"] is False
 
 
+def test_fork_setup_does_not_prompt_or_change_requested_telemetry(monkeypatch):
+    config = {"telemetry": {"shared_metrics": {"enabled": True, "send": True}}}
+    monkeypatch.setattr(
+        "hermes_cli.setup.prompt_yes_no",
+        lambda *_args, **_kwargs: pytest.fail("prompted for disabled telemetry"),
+    )
+    setup_telemetry(config)
+    assert config == {"telemetry": {"shared_metrics": {"enabled": True, "send": True}}}
+
+
+@unsupported_shared_metrics
 def test_setup_telemetry_enables_shared_metrics(monkeypatch):
     config = {}
     monkeypatch.setattr(
@@ -25,6 +42,7 @@ def test_setup_telemetry_enables_shared_metrics(monkeypatch):
     assert config["telemetry"]["shared_metrics"]["enabled"] is True
 
 
+@unsupported_shared_metrics
 def test_disabling_collection_closes_the_send_consent_window(monkeypatch, tmp_path):
     """`hermes tools` -> disable shared metrics must withdraw send consent.
 

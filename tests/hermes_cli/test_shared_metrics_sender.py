@@ -25,6 +25,10 @@ from hermes_cli.observability.shared_metrics_sender import (
 )
 from hermes_cli.sqlite_util import write_txn
 
+unsupported_shared_metrics = pytest.mark.skip(
+    reason="Fork disables shared-metrics collection and sending"
+)
+
 INSTALL_ID = "12a73e97-4de9-4766-830d-9ca1192c0420"
 NOW = datetime(2026, 8, 26, 12, 0, tzinfo=timezone.utc)
 ENDPOINT = "https://telemetry.test/v1/telemetry"
@@ -167,6 +171,21 @@ def _sender(store, transport, **kwargs):
     )
 
 
+def test_disabled_sender_leaves_consented_exported_package_untouched(store):
+    path = _add_package(store, "pkg-1", "2026-08-26")
+    before = _row(store, "pkg-1")
+    payload = path.read_bytes()
+    transport = FakeTransport(FakeResponse(202))
+
+    outcome = _sender(store, transport).send_pending()
+
+    assert outcome.sent == outcome.rejected == outcome.deferred == 0
+    assert transport.calls == []
+    assert _row(store, "pkg-1") == before
+    assert path.read_bytes() == payload
+
+
+@unsupported_shared_metrics
 class TestContractResponses:
     def test_202_marks_sent(self, store):
         _add_package(store, "pkg-1", "2026-08-26")
@@ -264,6 +283,7 @@ class TestContractResponses:
 
 
 class TestConsentGate:
+    @unsupported_shared_metrics
     def test_packages_from_before_opt_in_are_never_sent(self, store):
         # Consent opens on Aug 24; the "old" package's period predates it.
         _clear_consent(store)
@@ -274,6 +294,7 @@ class TestConsentGate:
         _sender(store, transport).send_pending()
         assert [b["package_id"] for b in transport.bodies] == ["new"]
 
+    @unsupported_shared_metrics
     def test_a_period_straddling_opt_in_day_is_sent_whole(self, store):
         """The head/tail bug: both packages for the opt-in period must go."""
         _add_package(store, "head", "2026-08-26")
@@ -310,6 +331,7 @@ class TestConsentGate:
         _sender(store, transport).send_pending()
         assert transport.calls == []
 
+    @unsupported_shared_metrics
     def test_revoking_then_re_enabling_never_releases_the_off_window(self, store):
         """The R3/R5 leak: re-opt-in must not release the refused interval.
 
@@ -351,6 +373,7 @@ class TestConsentGate:
             "the consented backlog was destroyed by the revoke/re-enable cycle"
         )
 
+    @unsupported_shared_metrics
     def test_a_package_from_after_re_enabling_is_sent(self, store):
         """The revocation handling must not wedge sending off permanently."""
         _clear_consent(store)
@@ -373,6 +396,7 @@ class TestConsentGate:
         assert len(transport.calls) == 1
 
 
+@unsupported_shared_metrics
 class TestIdentity:
     def test_the_stable_install_id_is_transmitted_as_is(self, store):
         """Product decision 2026-08-27: no pseudonymization.
@@ -451,6 +475,7 @@ class TestClaimingAndBounds:
         _sender(store, second).send_pending()
         assert second.calls == [], "backoff must survive within the same process"
 
+    @unsupported_shared_metrics
     def test_a_deferred_package_is_retried_once_due(self, store):
         _add_package(store, "pkg-1", "2026-08-26")
         _sender(store, FakeTransport(FakeResponse(429, retry_after="60"))).send_pending()
@@ -465,11 +490,13 @@ class TestClaimingAndBounds:
         later.send_pending()
         assert len(transport.calls) == 1
 
+    @unsupported_shared_metrics
     def test_attempts_are_counted(self, store):
         _add_package(store, "pkg-1", "2026-08-26")
         _sender(store, FakeTransport(FakeResponse(429))).send_pending()
         assert _row(store, "pkg-1")["send_attempts"] == 1
 
+    @unsupported_shared_metrics
     def test_a_pass_is_bounded(self, store):
         for i in range(MAX_PACKAGES_PER_PASS + 5):
             _add_package(store, f"pkg-{i:02d}", "2026-08-26")
@@ -477,6 +504,7 @@ class TestClaimingAndBounds:
         outcome = _sender(store, transport).send_pending()
         assert outcome.sent == MAX_PACKAGES_PER_PASS
 
+    @unsupported_shared_metrics
     def test_two_concurrent_passes_do_not_double_send(self, store):
         """Claiming is what stops two Hermes processes duplicating work.
 
@@ -530,6 +558,7 @@ class TestClaimingAndBounds:
             "lease expires before a single package can legally finish"
         )
 
+    @unsupported_shared_metrics
     def test_a_slow_multi_package_pass_does_not_lose_its_lease(self, store):
         """Regression: a batch-wide lease expired while later rows were sent.
 
@@ -574,6 +603,7 @@ class TestClaimingAndBounds:
             f"a concurrent pass re-sent {second_posts} after a lease expired"
         )
 
+    @unsupported_shared_metrics
     def test_a_re_eligible_head_row_does_not_starve_the_tail(self, store):
         """Regression: `seen` terminated the pass instead of skipping a row.
 
@@ -725,6 +755,7 @@ class TestClaimingAndBounds:
         )
         assert lease_after == expected
 
+    @unsupported_shared_metrics
     def test_a_lapsed_claimant_resuming_after_reclaim_cannot_double_post(
         self, store
     ):
@@ -806,6 +837,7 @@ class TestClaimingAndBounds:
             "a lapsed claimant's backoff overwrote the live claim's lease"
         )
 
+    @unsupported_shared_metrics
     def test_an_expired_lease_is_reclaimed(self, store):
         """A process killed mid-pass must not strand its packages."""
         _add_package(store, "pkg-1", "2026-08-26")
@@ -821,6 +853,7 @@ class TestClaimingAndBounds:
         later.send_pending()
         assert len(transport.calls) == 1
 
+    @unsupported_shared_metrics
     def test_a_lapsed_sender_cannot_resurrect_a_sent_package(self, store):
         """Terminal state must win over a straggler's write."""
         _add_package(store, "pkg-1", "2026-08-26")
@@ -835,6 +868,7 @@ class TestClaimingAndBounds:
 
 
 class TestResilience:
+    @unsupported_shared_metrics
     def test_a_corrupt_row_does_not_stop_the_pass(self, store):
         _add_package(store, "good", "2026-08-26")
         with store._connection() as connection:
@@ -863,6 +897,7 @@ class TestResilience:
             '{"install_id": null}',
         ],
     )
+    @unsupported_shared_metrics
     def test_valid_json_that_is_not_a_usable_package_is_skipped(
         self, store, payload_json
     ):
@@ -902,6 +937,7 @@ class TestResilience:
 class TestConsentRevocation:
     """`send: false` must stop an in-flight pass, not just the next one."""
 
+    @unsupported_shared_metrics
     def test_revoking_consent_mid_pass_stops_further_sends(self, store):
         for i in range(4):
             _add_package(store, f"pkg-{i}", "2026-08-26")

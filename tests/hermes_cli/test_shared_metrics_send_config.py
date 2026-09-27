@@ -31,9 +31,9 @@ class TestDefaults:
         assert shared["enabled"] is False
         assert shared["send"] is False
 
-    def test_default_endpoint_is_production(self):
+    def test_fork_default_endpoint_is_blank(self):
         shared = DEFAULT_CONFIG["telemetry"]["shared_metrics"]
-        assert shared["endpoint"] == DEFAULT_ENDPOINT
+        assert shared["endpoint"] == ""
         assert DEFAULT_ENDPOINT.startswith("https://")
 
     def test_empty_config_sends_nothing(self):
