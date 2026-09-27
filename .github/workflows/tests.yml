@@ -97,12 +97,13 @@ jobs:
         # test_durations.json from the checkout; without this restore the
         # file is absent on a fresh runner and the scaler is inert.
         # Exact key never matches (run_id differs); restore-keys picks the
-        # most recent cache saved by a main push. PRs read, only main writes.
+        # previous run of this PR, or an existing main baseline while available.
         uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: test_durations.json
-          key: test-durations-never-exact
+          key: test-durations-pr-${{ github.event.pull_request.number }}-never-exact
           restore-keys: |
+            test-durations-pr-${{ github.event.pull_request.number }}-
             test-durations-
 
       - name: Run tests
@@ -143,14 +144,14 @@ jobs:
           OPENAI_API_KEY: ""
           NOUS_API_KEY: ""
 
-      - name: Save per-file duration cache (main only)
+      - name: Save per-file duration cache for subsequent PR runs
         # Only green first-attempt durations are written by the runner, so
-        # a hang on main cannot ratchet its own bound upward.
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && hashFiles('test_durations.json') != ''
+        # a failed file cannot ratchet its own bound upward.
+        if: hashFiles('test_durations.json') != ''
         uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: test_durations.json
-          key: test-durations-${{ github.run_id }}
+          key: test-durations-pr-${{ github.event.pull_request.number }}-${{ github.run_id }}
 
   e2e:
     runs-on: ubuntu-latest
