@@ -118,7 +118,7 @@ class TestCaptureLogSnapshot:
         from hermes_cli import debug
 
         monkeypatch.setattr(debug, "_resolve_log_path", lambda _name: log_path)
-        log_path.write_text("")
+        log_path.write_text("", encoding="utf-8")
 
         snap = debug._capture_log_snapshot("agent", tail_lines=10)
         assert snap.path == log_path
@@ -134,7 +134,7 @@ class TestCaptureLogSnapshot:
         # backward-reading loop so the truncation path actually fires.
         line = "A" * 99 + "\n"  # 100 bytes per line
         num_lines = 200  # 20000 bytes
-        (hermes_home / "logs" / "agent.log").write_text(line * num_lines)
+        (hermes_home / "logs" / "agent.log").write_text(line * num_lines, encoding="utf-8")
 
         # max_bytes = 1000 = 100 * 10 → cut at byte 20000 - 1000 = 19000,
         # and byte 19000 - 1 is '\n'.  Boundary hit → keep all 10 lines.
@@ -187,7 +187,7 @@ class TestMissingLogNote:
         """An empty file means the app ran and logged nothing — a different fact."""
         from hermes_cli.debug import _capture_log_snapshot
 
-        (hermes_home / "logs" / "desktop.log").write_text("")
+        (hermes_home / "logs" / "desktop.log").write_text("", encoding="utf-8")
 
         snap = _capture_log_snapshot("desktop", tail_lines=10)
         assert snap.tail_text == "(file empty)"
@@ -235,8 +235,8 @@ class TestCaptureLogSnapshotRedaction:
         (logs_dir / "agent.log").write_text(
             f"2026-04-12 17:00:00 INFO config: api_key={_REDACT_FIXTURE_TOKEN} loaded\n"
         )
-        (logs_dir / "errors.log").write_text("")
-        (logs_dir / "gateway.log").write_text("")
+        (logs_dir / "errors.log").write_text("", encoding="utf-8")
+        (logs_dir / "gateway.log").write_text("", encoding="utf-8")
         return home
 
     def test_default_redacts_tail_and_full_text(self, hermes_home_with_secret):
@@ -462,7 +462,7 @@ class TestRunDebugShareRedaction:
         (logs_dir / "agent.log").write_text(
             f"2026-04-12 17:00:00 INFO config: api_key={_REDACT_FIXTURE_TOKEN} loaded\n"
         )
-        (logs_dir / "errors.log").write_text("")
+        (logs_dir / "errors.log").write_text("", encoding="utf-8")
         (logs_dir / "gateway.log").write_text(
             f"2026-04-12 17:00:01 INFO gateway.run: token {_REDACT_FIXTURE_TOKEN}\n"
         )
@@ -667,7 +667,7 @@ class TestScheduleAutoDelete:
         pending_path = _pending_file()
         assert pending_path.exists()
 
-        entries = json.loads(pending_path.read_text())
+        entries = json.loads(pending_path.read_text(encoding="utf-8"))
         assert len(entries) == 2
         urls = {e["url"] for e in entries}
         assert urls == {"https://paste.rs/abc", "https://paste.rs/def"}
