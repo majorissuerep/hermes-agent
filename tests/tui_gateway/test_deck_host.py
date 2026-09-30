@@ -23,11 +23,16 @@ def live(tmp_path):
         record = server._deferred_session_record(f"stored-{sid}", cols=80, cwd=str(tmp_path), history=[], lease=None)
         with server._sessions_lock:
             server._sessions[sid] = record
-        made.append(sid)
+        made.append((sid, record))
         return record
 
     yield make
-    for sid in made:
+    for sid, record in made:
+        # deck.close pops the session before its worker finishes importing/finalizing.
+        # Keep the fixture's profile and DBs alive until that work has unwound.
+        if (worker := record.get("_run_thread")) is not None:
+            worker.join(timeout=20)
+            assert not worker.is_alive(), "deck-close worker did not finish"
         with server._sessions_lock:
             record = server._sessions.pop(sid, None)
         if record and record.get("active_session_lease") is not None:
