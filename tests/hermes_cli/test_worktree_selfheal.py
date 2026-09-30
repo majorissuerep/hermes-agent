@@ -17,11 +17,17 @@ from pathlib import Path
 
 import pytest
 
+from hermes_cli._subprocess_compat import noninteractive_git_env
+
 
 def _git(cwd, *args, check=True):
-    return subprocess.run(
-        ["git", *args], cwd=str(cwd), capture_output=True, text=True, check=check
+    result = subprocess.run(
+        ["git", *args], cwd=str(cwd), capture_output=True, encoding="utf-8",
+        stdin=subprocess.DEVNULL, env=noninteractive_git_env(),
     )
+    if check:
+        assert result.returncode == 0, result.stderr
+    return result
 
 
 @pytest.fixture
@@ -31,7 +37,9 @@ def repo(tmp_path):
     _git(root, "init", "-q", "-b", "main")
     _git(root, "config", "user.email", "t@t")
     _git(root, "config", "user.name", "t")
-    (root / "f.txt").write_text("x\n")
+    _git(root, "config", "gc.auto", "0")
+    _git(root, "config", "maintenance.auto", "false")
+    (root / "f.txt").write_text("x\n", encoding="utf-8")
     _git(root, "add", "-A")
     _git(root, "commit", "-qm", "init")
     return root
@@ -98,14 +106,15 @@ class TestMaintainPackHealth:
         pack_dir = repo / ".git" / "objects" / "pack"
         pack_dir.mkdir(parents=True, exist_ok=True)
         for i in range(n):
-            (repo / f"p{i}.txt").write_text(f"{i}\n")
+            (repo / f"p{i}.txt").write_text(f"{i}\n", encoding="utf-8")
             _git(repo, "add", "-A")
             _git(repo, "commit", "-qm", f"c{i}")
             sha = _git(repo, "rev-parse", f"HEAD^{{commit}}").stdout.strip()
             # One pack per commit object: pipe the sha into pack-objects.
             subprocess.run(
                 ["git", "pack-objects", "-q", str(pack_dir / f"tpack{i}")],
-                input=f"{sha}\n", cwd=str(repo), capture_output=True, text=True, check=True,
+                input=f"{sha}\n", cwd=str(repo), capture_output=True, encoding="utf-8", check=True,
+                env=noninteractive_git_env(),
             )
         return self._pack_count(repo)
 
@@ -136,7 +145,7 @@ class TestMaintainPackHealth:
 
         cli._maintain_pack_health(str(repo))
 
-        assert self._pack_count(repo) == made, "below threshold must be a no-op"  # noqa: same-count contract
+        assert self._pack_count(repo) == made, "below threshold must be a no-op"
 
     def test_fail_soft_on_missing_pack_dir(self, tmp_path):
         from cli import _maintain_pack_health
@@ -176,14 +185,16 @@ class TestRepackStampede:
         shim_dir.mkdir()
         pidfile = tmp_path / "grandchild.pid"
         shim = shim_dir / "git"
-        shim.write_text(f"#!/bin/sh\nsleep 300 &\necho $! > {pidfile}\nwait\n")
+        shim.write_text(
+            f"#!/bin/sh\nsleep 300 &\necho $! > {pidfile}\nwait\n", encoding="utf-8"
+        )
         shim.chmod(0o755)
         monkeypatch.setenv("PATH", f"{shim_dir}{os.pathsep}{os.environ['PATH']}")
         monkeypatch.setattr(worktree_ops, "_REPACK_TIMEOUT", 1)
 
         worktree_ops._run_bounded_repack(str(tmp_path))
 
-        grandchild = int(pidfile.read_text().strip())
+        grandchild = int(pidfile.read_text(encoding="utf-8").strip())
         deadline = time.time() + 5
         while time.time() < deadline:
             if not Path(f"/proc/{grandchild}").exists():
