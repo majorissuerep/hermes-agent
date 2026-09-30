@@ -936,6 +936,43 @@ class TestCollectShareBundle:
         # With redaction it must be scrubbed everywhere.
         assert secret not in "\n".join(redacted.values())
 
+    def test_redaction_scrubs_dump_and_logged_url_credentials(self, hermes_home):
+        from hermes_cli.debug import collect_share_bundle
+
+        fallback_key = "fixture-fallback-key"
+        fallback_token = "fallback-url-token-0123456789"
+        aws_signature = "aws-signature-secret-0123456789"
+        alias_signature = "fixture-alias-signature"
+        log_token = "log-url-token-0123456789"
+        log_password = "proxy-password-0123456789"
+        (hermes_home / "config.yaml").write_text(
+            "fallback_providers:\n"
+            "  - provider: custom\n"
+            "    model: backup-model\n"
+            f'    base_url: "https://backup.example/v1?token={fallback_token}'
+            f'&X-Amz-Signature={aws_signature}&%78_amz_signature={alias_signature}"\n'
+            f"    api_key: {fallback_key}\n",
+            encoding="utf-8",
+        )
+        (hermes_home / "logs" / "agent.log").write_text(
+            "2026-09-29 01:00:00 INFO agent: fetch "
+            f"https://files.example.com/export.csv?token={log_token}&page=2\n"
+            f"2026-09-29 01:00:01 INFO agent: proxy "
+            f"http://alice:{log_password}@proxy.example:8080\n",
+            encoding="utf-8",
+        )
+
+        bundle = collect_share_bundle(log_lines=20, redact=True)
+        content = "\n".join(bundle.values())
+
+        assert "backup-model" in content
+        assert all(secret not in content for secret in (
+            fallback_key, fallback_token, aws_signature, alias_signature, log_token, log_password,
+        ))
+        assert "?token=***" in content
+        assert "%78_amz_signature=***" in content
+        assert "alice:***@proxy.example:8080" in content
+
 
 
 
@@ -1128,4 +1165,3 @@ class TestShareConsentGate:
 
         mock_upload.assert_not_called()
         assert "Aborted" not in capsys.readouterr().out
-
