@@ -203,13 +203,15 @@ def test_locked_child_roundtrip_is_encrypted_profile_isolated_and_cache_safe(
             ):
                 assert path.read_bytes().startswith(b"HRMVAULT\x00")
                 assert secret.encode() not in path.read_bytes()
-                text = io.read_text(path, purpose=purpose)
+                text = io.read_text(path, purpose=purpose, encoding="utf-8")
                 if purpose == "config":
                     assert "# preserve my settings" in text and "skin: default" in text
                     assert secret not in text and "${SERVICE_TOKEN}" in text
                 else:
                     assert secret in text
-            assert secret not in io.read_text(sibling / ".env", purpose="env")
+            assert secret not in io.read_text(
+                sibling / ".env", purpose="env", encoding="utf-8"
+            )
 
         work_before = (work / "config.yaml").read_bytes()
         assert cli("rm", "demo", "--via-host")["removed"]

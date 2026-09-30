@@ -16,8 +16,8 @@ Use, configure, theme, extend, and orchestrate Hermes Agent.
 |---|---|
 | Source | Bundled (installed by default) |
 | Path | `skills/autonomous-ai-agents/hermes-agent` |
-| Version | `3.2.0` |
-| Author | Hermes Agent + Teknium |
+| Version | `3.3.0` |
+| Author | Teknium + Hermes Agent |
 | License | MIT |
 | Platforms | linux, macos, windows |
 | Tags | `hermes`, `setup`, `configuration`, `multi-agent`, `spawning`, `cli`, `gateway`, `bots`, `bot-mode`, `features`, `themes`, `skins`, `desktop-plugins`, `tui-widgets`, `petdex`, `development` |
@@ -100,6 +100,15 @@ $HERMES_HOME/skills/        Installed skills
 ```
 
 Profiles use `~/.hermes/profiles/<name>/` with the same layout. When a profile is active, resolve the real home from `$HERMES_HOME` — never hardcode `~/.hermes`.
+
+In this encrypted fork, these state files are vault envelopes on disk. A logged-in
+session holds its unlocked key in the Hermes process; a `terminal` child does not.
+Use the existing host operations for self-configuration. For MCP setup, load
+`references/native-mcp.md` and run `hermes mcp add NAME --via-host ...`, followed by
+`hermes mcp test NAME --via-host`. The host performs the encrypted writes and the
+command returns JSON. Never decrypt state into temporary files, request a master
+password in chat, or give a terminal child vault keys. If a setting has no host
+operation, use the logged-in settings UI or a human-operated CLI that can unlock.
 
 ## Routing Table — load the reference for the task
 
@@ -227,4 +236,4 @@ terminal(command="tmux new-session -d -s resumed 'hermes --resume 20260225_14305
 - **Message role alternation** — never two assistant or two user messages in a row; only `tool` results can repeat.
 - **Secrets in `.env`, settings in `config.yaml`** — never tell a user to put a non-credential setting in `.env`.
 - **Profile-safe paths** — `get_hermes_home()` in code, `$HERMES_HOME` when resolving paths in a session.
-- **Never hand-edit `config.yaml` for the user** — use `hermes config set KEY VAL`; a stray indent can corrupt the file and break the live gateway.
+- **Never hand-edit Hermes state** — use the capability's operational interface. MCP changes from a logged-in session use `hermes mcp ... --via-host`; ordinary `hermes config set` needs its own unlocked vault. Saving an MCP entry takes effect next session; do not automatically run `/reload-mcp`.
