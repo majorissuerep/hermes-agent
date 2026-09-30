@@ -146,7 +146,11 @@ def _connect():
             "No logged-in session host is running; start 'hermes --tui' or 'hermes serve' and unlock it"
         )
     root = get_default_hermes_root().resolve()
-    if not record.home or Path(record.home).resolve() != root:
+    if not record.home:
+        raise HostUnavailable(
+            "Restart the logged-in session host to publish its Hermes root, then retry"
+        )
+    if Path(record.home).resolve() != root:
         raise HostUnavailable(
             "The session host belongs to a different Hermes root; use the host's profile/home"
         )

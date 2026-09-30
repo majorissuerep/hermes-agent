@@ -77,7 +77,8 @@ The caller's active home selects its profile; `hermes -p work mcp ... --via-host
 targets `work`. The client verifies that the authenticated host belongs to the
 same Hermes root. Missing hosts, locked target vaults and transport failures never
 fall back to direct disk writes or spawn another host. Reconnect the logged-in host
-and retry. A terminal running in a separate container or SSH target must reach the
+and retry. If an older host has not published its Hermes root, restart that host
+after updating Hermes. A terminal running in a separate container or SSH target must reach the
 backend that owns the session. Sandbox filesystem and network grants still apply.
 
 For catalog connections, prefer the existing `manage_connections` setup flow when

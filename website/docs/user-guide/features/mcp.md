@@ -89,7 +89,8 @@ or chat. OAuth authorization remains available through the logged-in MCP setting
 The active profile and `hermes -p work ...` select the target. A missing host, wrong
 Hermes root, or locked target vault fails without falling back to direct file writes
 or starting another host. Log in with `hermes --tui` or start `hermes serve` and unlock
-it. Remote terminal backends need to run this command on the backend that owns the
+it. After updating from a version that did not publish the host's Hermes root,
+restart the host once. Remote terminal backends need to run this command on the backend that owns the
 session; a container's unrelated Hermes install is a different host.
 
 ## Catalog: one-click install for Nous-approved MCPs

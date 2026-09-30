@@ -20,6 +20,39 @@ if TYPE_CHECKING:  # pragma: no cover - annotation only
 _log = logging.getLogger("hermes_cli.web_server")
 
 
+def _publish_host_record(host: str, port: int, token: str) -> None:
+    """Publish the bound backend through the private machine rendezvous."""
+    from gateway import host_rendezvous as hr
+    from hermes_constants import get_default_hermes_root
+
+    outcome, error = hr.claim_host_lock(hr.ROLE_SERVE)
+    if outcome is hr.HostLockOutcome.COULD_NOT_OPEN:
+        _log.warning(
+            "Host backend lock could not be opened (%s); this backend is not discoverable. "
+            "This is NOT another backend holding it.", error)
+        return
+    if outcome is hr.HostLockOutcome.HELD_BY_OTHER:
+        owner = hr.read_record(hr.ROLE_SERVE)
+        _log.warning(
+            "Another backend already owns this host (%s); this one bound anyway "
+            "(observe-only). Multiplex-only expects exactly one backend per host.",
+            hr.describe(owner) if owner else "owner unknown",
+        )
+        return
+    hr.publish_record(
+        hr.ROLE_SERVE,
+        host=host,
+        port=port,
+        profiles=hr.served_profiles(),
+        # A terminal client must not apply this host's writes to another root.
+        home=str(get_default_hermes_root().resolve()),
+        # Gated GET / withholds this token; local clients authenticate through rendezvous.
+        token=token,
+    )
+    # SIGTERM is the normal stop and does not run atexit here.
+    hr.cleanup_on_exit(hr.ROLE_SERVE)
+
+
 def _process_start_marker(pid: int) -> str:
     """Return a cross-runtime marker for the current incarnation of ``pid``.
 

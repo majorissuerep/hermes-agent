@@ -66,14 +66,13 @@ def host(tmp_path, monkeypatch):
     while not backend.started and thread.is_alive() and time.monotonic() < deadline:
         time.sleep(0.01)
     assert backend.started
-    assert hr.publish_record(
-        hr.ROLE_SERVE,
-        host="127.0.0.1",
-        port=port,
-        token=token,
-        home=str(root),
-        profiles=["default", "work"],
-    )
+    from hermes_cli.web_server_lifecycle import _publish_host_record
+
+    # A named-profile launcher still publishes the machine root, as serve does.
+    with monkeypatch.context() as launch:
+        launch.setenv("HERMES_HOME", str(work))
+        _publish_host_record("127.0.0.1", port, token)
+    assert hr.read_record(hr.ROLE_SERVE) is not None
 
     def cli(*argv, profile="default", stdin=None, expected=0):
         env = dict(os.environ)
@@ -109,6 +108,8 @@ def host(tmp_path, monkeypatch):
         backend.should_exit = True
         thread.join(timeout=15)
         sock.close()
+        hr.clear_record(hr.ROLE_SERVE)
+        hr.release_host_lock(hr.ROLE_SERVE)
         set_multiplex_active(was_multiplex)
         vault.clear_vault_cache()
 
@@ -302,6 +303,17 @@ def test_host_failures_never_fall_back_to_direct_writes_or_report_success(
     )
     assert not json.loads(failed.stdout)["ok"]
     assert (work / "config.yaml").read_bytes() == saved
+
+    # An already-running older host needs a restart to publish its root.
+    record = hr.read_record(hr.ROLE_SERVE)
+    hr.publish_record(
+        hr.ROLE_SERVE,
+        host=record.host,
+        port=record.port,
+        token=hr.read_token(hr.ROLE_SERVE),
+    )
+    older = cli("list", "--via-host", expected=1)
+    assert "Restart" in json.loads(older.stdout)["error"]
 
     # A valid token for a host serving another root is not authority to write ours.
     hr.publish_record(
