@@ -627,9 +627,6 @@ def test_references_parallel_interrupt_aborts_wait(monkeypatch):
 
     def fake_call_llm(**kwargs):
         if kwargs["provider"] == "fast":
-            # Simulate the interrupt arriving right after the fast reference
-            # finishes, while the wedged one is still in flight.
-            fake_agent._interrupt_requested = True
             return _response("fast output")
         # "wedged" — never returns within the test unless released, standing
         # in for a reference whose own (possibly very long) timeout hasn't
@@ -639,6 +636,12 @@ def test_references_parallel_interrupt_aborts_wait(monkeypatch):
 
     monkeypatch.setattr(moa_loop, "call_llm", fake_call_llm)
 
+    def interrupt_after_completion(_done, _total, label):
+        # The LLM return still needs extraction/accounting before its future
+        # finishes. Interrupt only after that result has been collected.
+        if label == "fast:m1":
+            fake_agent._interrupt_requested = True
+
     refs = [
         {"provider": "fast", "model": "m1"},
         {"provider": "wedged", "model": "m2"},
@@ -647,6 +650,7 @@ def test_references_parallel_interrupt_aborts_wait(monkeypatch):
         start = time.monotonic()
         out = moa_loop._run_references_parallel(
             refs, [{"role": "user", "content": "hi"}], agent=fake_agent,
+            progress_callback=interrupt_after_completion,
         )
         elapsed = time.monotonic() - start
 
