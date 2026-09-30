@@ -72,6 +72,21 @@ Do not add a surface-specific goal parser. ACP has no goal command or goal loop 
 
 ## Config system (`hermes_cli/config.py`)
 
+### Agent-driven operations in the encrypted fork
+
+An agent's terminal child does not inherit the session host's vault key. MCP
+management uses `hermes mcp <action> --via-host` (`mcp_host.py`), a noninteractive
+client of the existing `mcp.servers.*` RPCs, with profile resolved from the caller's
+home. The precise `vault_gate.py` exemption applies only to supported host-only
+actions; normal CLI commands still unlock. Attach only to a live authenticated
+host serving the same root, never spawn one or fall back to disk. Credentials enter
+through `set-api-key --value-stdin`, never argv. Adds save without discovery; `test`
+probes separately, and mutations report `activation: next_session` without reloading
+live tool arrays. Extend capability-specific operations; do not add generic remote
+shell execution or give terminal children vault keys. E2E:
+`tests/hermes_cli/test_mcp_host.py` uses real CLI children and the ASGI/WS route with
+two encrypted homes under multiplexing.
+
 - **config.yaml option:** add to `DEFAULT_CONFIG`. Bump `_config_version` ONLY to actively
   migrate/transform existing config (rename keys, restructure); new keys deep-merge automatically.
   Top-level sections (non-exhaustive): `model, agent, terminal, compression, display, stt, tts,
