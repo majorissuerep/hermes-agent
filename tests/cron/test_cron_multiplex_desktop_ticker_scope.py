@@ -33,7 +33,9 @@ def test_standalone_fallback_pool_keeps_profile_scope(tmp_path, monkeypatch):
     sec_home = tmp_path / "profiles" / "ops"
     for home in (default_home, sec_home):
         (home / "cron").mkdir(parents=True)
-        (home / "config.yaml").write_text("platforms:\n  telegram:\n    enabled: true\n")
+        (home / "config.yaml").write_text(
+            "platforms:\n  telegram:\n    enabled: true\n", encoding="utf-8"
+        )
     monkeypatch.setenv("HERMES_HOME", str(default_home))
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "DEFAULT-TOKEN")
     set_multiplex_active(True)
