@@ -40,11 +40,16 @@ def build_mcp_parser(subparsers, *, cmd_mcp: Callable) -> None:
         help="Timeout in seconds for initial connection and tool discovery")
     mcp_add_p.add_argument(
         "--env", nargs="*", default=[], help="Environment variables for stdio servers (KEY=VALUE)")
+    mcp_add_p.add_argument(
+        "--config-json", help="Server config as JSON, or '-' for stdin (requires --via-host)")
+    mcp_add_p.add_argument(
+        "--header", action="append", default=[],
+        help="HTTP header NAME=VALUE; repeat for more headers (requires --via-host)")
 
     mcp_rm_p = mcp_sub.add_parser("remove", aliases=["rm"], help="Remove an MCP server")
     mcp_rm_p.add_argument("name", help="Server name to remove")
 
-    mcp_sub.add_parser("list", aliases=["ls"], help="List configured MCP servers")
+    mcp_list_p = mcp_sub.add_parser("list", aliases=["ls"], help="List configured MCP servers")
 
     mcp_test_p = mcp_sub.add_parser("test", help="Test MCP server connection")
     mcp_test_p.add_argument("name", help="Server name to test")
@@ -70,10 +75,24 @@ def build_mcp_parser(subparsers, *, cmd_mcp: Callable) -> None:
     # Catalog (Nous-approved MCPs shipped with the repo)
     mcp_sub.add_parser(
         "picker", help="Interactive catalog picker (also the default for `hermes mcp`)")
-    mcp_sub.add_parser("catalog", help="List Nous-approved MCPs available for one-click install")
+    mcp_catalog_p = mcp_sub.add_parser("catalog", help="List Nous-approved MCPs available for one-click install")
     mcp_install_p = mcp_sub.add_parser(
         "install", help="Install a catalog MCP by name (e.g. `hermes mcp install deepwiki`)")
     mcp_install_p.add_argument("identifier", help="Catalog entry name (or `official/<name>`)")
+
+    mcp_key_p = mcp_sub.add_parser(
+        "set-api-key", help="Store an MCP credential through the logged-in session host")
+    mcp_key_p.add_argument("name", help="Configured server name")
+    mcp_key_p.add_argument("--env-var", help="Credential variable name (defaults to MCP_<NAME>_API_KEY)")
+    mcp_key_p.add_argument(
+        "--value-stdin", action="store_true", required=True,
+        help="Read the credential from stdin, keeping it out of argv")
+    mcp_key_p.set_defaults(via_host=True)
+
+    for operational in (mcp_add_p, mcp_rm_p, mcp_list_p, mcp_test_p, mcp_catalog_p, mcp_key_p):
+        operational.add_argument(
+            "--via-host", action="store_true", default=argparse.SUPPRESS,
+            help="Use the logged-in session host; noninteractive JSON output, no vault key needed in this process")
 
     add_accept_hooks_flag(mcp_parser)
     mcp_parser.set_defaults(func=cmd_mcp)

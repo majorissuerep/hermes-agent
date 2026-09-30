@@ -1086,6 +1086,13 @@ _MCP_USAGE = (
 
 def mcp_command(args):
     """Main dispatcher for ``hermes mcp`` subcommands."""
+    if getattr(args, "via_host", False):
+        from hermes_cli.mcp_host import mcp_host_command
+
+        return mcp_host_command(args)
+    if getattr(args, "config_json", None) is not None or getattr(args, "header", None):
+        _error("--config-json and --header require --via-host")
+        return 2
     action = getattr(args, "mcp_action", None)
     if action == "serve":
         from mcp_serve import run_mcp_server

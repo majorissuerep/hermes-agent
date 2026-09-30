@@ -26,13 +26,10 @@ The `mcpServers` block in your `~/.claude.json` maps to `mcp_servers` in Hermes'
 
 1. MCP support ships with the standard install — no extra step needed.
 
-2. Add an MCP server to `~/.hermes/config.yaml`:
+2. Add an MCP server through the CLI from a terminal where you can unlock the vault:
 
-```yaml
-mcp_servers:
-  filesystem:
-    command: "npx"
-    args: ["-y", "@modelcontextprotocol/server-filesystem", "/home/user/projects"]
+```bash
+hermes mcp add filesystem --command npx --args -y @modelcontextprotocol/server-filesystem /path/to/projects
 ```
 
 3. Start Hermes:
@@ -50,6 +47,51 @@ List the files in /home/user/projects and summarize the repo structure.
 ```
 
 Hermes will discover the MCP server's tools and use them like any other tool.
+
+### Add servers from a logged-in session
+
+This fork encrypts Hermes-owned state on disk. The session host holds the unlocked
+vault; commands run by the agent's terminal tool do not inherit that key. Use
+`--via-host` to ask the already-running host to manage its profile's MCP entries:
+
+```bash
+hermes mcp list --via-host
+hermes mcp add time --via-host --command uvx --args mcp-server-time
+hermes mcp test time --via-host
+hermes mcp remove time --via-host
+```
+
+These commands are noninteractive and return JSON. `add` persists a validated
+entry without connecting or prompting; `test` performs discovery and returns a
+nonzero exit code on failure. Review the result before claiming the server works.
+Existing names are refused. Saves preserve YAML comments and encryption, and do
+not reload an open conversation. Start a new session to use the tools, or explicitly
+choose `/reload-mcp now` to pay the prompt-cache cost.
+
+`--via-host` also works on `catalog`. For an advanced server entry, pass JSON rather
+than editing the encrypted config file:
+
+```bash
+hermes mcp add internal --via-host --config-json '{"url":"https://mcp.example.com/mcp","headers":{"Authorization":"Bearer ${MCP_INTERNAL_API_KEY}"},"tools":{"include":["lookup"]}}'
+```
+
+`--config-json -` reads the entry from stdin. Ordinary flags override corresponding
+JSON fields; put `--args` last because everything following it is server argv.
+`--header 'NAME=VALUE'` adds an HTTP header and can be repeated.
+
+Credentials belong in the profile's encrypted `.env`. `hermes mcp set-api-key internal
+--value-stdin` reads one credential line from stdin through the host and stores an
+Authorization reference in config. Add `--env-var SERVICE_TOKEN` for a stdio server
+or a custom credential name. Use a masked settings prompt or a trusted secret
+source to supply stdin; never put the credential or vault password in shell argv
+or chat. OAuth authorization remains available through the logged-in MCP settings UI.
+
+The active profile and `hermes -p work ...` select the target. A missing host, wrong
+Hermes root, or locked target vault fails without falling back to direct file writes
+or starting another host. Log in with `hermes --tui` or start `hermes serve` and unlock
+it. After updating from a version that did not publish the host's Hermes root,
+restart the host once. Remote terminal backends need to run this command on the backend that owns the
+session; a container's unrelated Hermes install is a different host.
 
 ## Catalog: one-click install for Nous-approved MCPs
 

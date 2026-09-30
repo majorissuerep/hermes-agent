@@ -1,4 +1,4 @@
-# Native MCP Client
+# Native MCP Operations
 
 Hermes Agent has a built-in MCP client that connects to MCP servers at startup, discovers their tools, and makes them available as first-class tools the agent can call directly. No bridge CLI needed -- tools from MCP servers appear alongside built-in tools like `terminal`, `read_file`, etc.
 
@@ -15,40 +15,84 @@ For ad-hoc, one-off MCP tool calls from the terminal without configuring anythin
 
 ## Prerequisites
 
-- **mcp Python package** -- optional dependency; install with `pip install mcp`. If not installed, MCP support is silently disabled.
+- A logged-in session host (`hermes --tui` or `hermes serve`) with the target vault unlocked for `--via-host` operations.
+- **MCP Python SDK** -- use the project's pinned MCP extra in the Hermes environment. Do not install an unbounded SDK version into the live agent.
 - **Node.js** -- required for `npx`-based MCP servers (most community servers)
 - **uv** -- required for `uvx`-based MCP servers (Python-based servers)
 
-Install the MCP SDK:
-
-```bash
-pip install mcp
-# or, if using uv:
-uv pip install mcp
-```
-
 ## Quick Start
 
-Add MCP servers to `~/.hermes/config.yaml` under the `mcp_servers` key:
+From a logged-in Hermes session, use `terminal` to run the host operations:
 
-```yaml
-mcp_servers:
-  time:
-    command: "uvx"
-    args: ["mcp-server-time"]
+```bash
+hermes mcp list --via-host
+hermes mcp add time --via-host --command uvx --args mcp-server-time
+hermes mcp test time --via-host
 ```
 
-Restart Hermes Agent. On startup it will:
-1. Connect to the server
-2. Discover available tools
-3. Register them with the prefix `mcp_time_*`
-4. Inject them into all platform toolsets
+`--via-host` attaches to the existing authenticated session host. That process
+already holds the vault key and writes the encrypted configuration for the
+caller's profile. A `terminal` child does not inherit the logged-in vault key.
+Never read, patch, replace or temporarily decrypt `config.yaml`, `.env`, or token
+files. Never ask for the vault password in chat or pass vault keys to the terminal.
 
-You can then use the tools naturally -- just ask the agent to get the current time.
+`add` saves without prompting or contacting the server; `test` separately connects,
+discovers tools and disconnects. Read the JSON result and exit status. Exit 0 is
+success, 1 is an operational failure (including a failed probe), and 2 is invalid
+input. Do not claim a working connection based only on a successful save.
+
+Mutations report `activation: next_session`; start a new session to use the tools.
+Do not automatically invoke `/reload-mcp`. If the user explicitly wants immediate
+activation, explain the cache cost and use `/reload-mcp now` on the logged-in UI.
+
+### HTTP and advanced entries
+
+```bash
+hermes mcp add internal --via-host --url https://mcp.example.com/mcp --header 'Authorization=Bearer ${MCP_INTERNAL_API_KEY}'
+hermes mcp add scoped --via-host --config-json '{"command":"uvx","args":["mcp-server-time"],"tools":{"include":["get_current_time"]},"trust":"untrusted"}'
+```
+
+`--config-json -` reads a server entry from stdin. Explicit flags override matching
+JSON fields. Put `--args` last: later tokens belong to the server, including flags.
+Existing server names fail; do not remove another connection just to make an add
+succeed. Use the MCP settings UI to edit an existing connection.
+
+### Credentials and authorization
+
+Use `${VAR}` references in `env` and `headers`. `hermes mcp set-api-key NAME
+--value-stdin` stores one credential line from stdin in the profile's encrypted
+`.env` and installs an Authorization reference for HTTP. Add `--env-var
+SERVICE_TOKEN` for a stdio server's credential. Supply stdin from a trusted secret
+source or let the user use a masked MCP settings prompt. Never put literal secrets
+in shell arguments, generated scripts or chat.
+
+For OAuth, add `--auth oauth` and have the user authorize in the logged-in MCP
+settings UI. `test` reports missing OAuth tokens; a saved entry is not proof that
+authorization completed. `hermes mcp login NAME` remains a human-operated CLI flow
+and needs its own unlocked vault.
+
+### Profile selection and failures
+
+The caller's active home selects its profile; `hermes -p work mcp ... --via-host`
+targets `work`. The client verifies that the authenticated host belongs to the
+same Hermes root. Missing hosts, locked target vaults and transport failures never
+fall back to direct disk writes or spawn another host. Reconnect the logged-in host
+and retry. If an older host has not published its Hermes root, restart that host
+after updating Hermes. A terminal running in a separate container or SSH target must reach the
+backend that owns the session. Sandbox filesystem and network grants still apply.
+
+For catalog connections, prefer the existing `manage_connections` setup flow when
+available. Inspect catalog entries with `hermes mcp catalog --via-host`; the custom
+host add path uses explicit transport config or a supported CLI preset.
+
+Remove with `hermes mcp remove NAME --via-host`, then verify with `list --via-host`.
 
 ## Configuration Reference
 
 Each entry under `mcp_servers` is a server name mapped to its config. There are two transport types: **stdio** (command-based) and **HTTP** (url-based).
+
+The YAML below documents the data shape; it is not an instruction to edit files.
+Pass the corresponding server object with `--config-json`, or use the MCP settings UI.
 
 ### Stdio Transport (command + args)
 
@@ -70,7 +114,7 @@ mcp_servers:
   server_name:
     url: "https://my-server.example.com/mcp"   # (required) server URL
     headers:                                     # (optional) HTTP headers
-      Authorization: "Bearer sk-..."
+      Authorization: "Bearer ${MCP_SERVER_API_KEY}"
     timeout: 180               # (optional) per-tool-call timeout in seconds, default: 120
     connect_timeout: 60        # (optional) initial connection timeout in seconds, default: 60
 ```
@@ -95,7 +139,7 @@ Note: A server config must have either `command` (stdio) or `url` (HTTP), not bo
 
 When Hermes Agent starts, `discover_mcp_tools()` is called during tool initialization:
 
-1. Reads `mcp_servers` from `~/.hermes/config.yaml`
+1. Reads `mcp_servers` through the profile's vault-aware config loader
 2. For each server, spawns a connection in a dedicated background event loop
 3. Initializes the MCP session and calls `list_tools()` to discover available tools
 4. Registers each tool in the Hermes tool registry
@@ -154,7 +198,7 @@ mcp_servers:
   remote_api:
     url: "https://mcp.example.com/mcp"
     headers:
-      Authorization: "Bearer sk-..."
+      Authorization: "Bearer ${MCP_SERVER_API_KEY}"
 ```
 
 If HTTP support is not available in your installed `mcp` version, the server will fail with an ImportError and other servers will continue normally.
@@ -177,7 +221,7 @@ mcp_servers:
     args: ["-y", "@modelcontextprotocol/server-github"]
     env:
       # Only this token is passed to the subprocess
-      GITHUB_PERSONAL_ACCESS_TOKEN: "ghp_..."
+      GITHUB_PERSONAL_ACCESS_TOKEN: "${GITHUB_PERSONAL_ACCESS_TOKEN}"
 ```
 
 ### Credential Stripping in Error Messages
@@ -193,15 +237,12 @@ If an MCP tool call fails, any credential-like patterns in the error message are
 
 ### "MCP SDK not available -- skipping MCP tool discovery"
 
-The `mcp` Python package is not installed. Install it:
-
-```bash
-pip install mcp
-```
+Repair the Hermes environment using the project's pinned MCP dependencies;
+`hermes doctor` from an unlocked human-operated CLI can diagnose the install.
 
 ### "No MCP servers configured"
 
-No `mcp_servers` key in `~/.hermes/config.yaml`, or it's empty. Add at least one server.
+Run `hermes mcp list --via-host` for the calling profile, then add with `--via-host`.
 
 ### "Failed to connect to MCP server 'X'"
 
@@ -213,16 +254,13 @@ Common causes:
 
 ### "MCP server 'X' requires HTTP transport but mcp.client.streamable_http is not available"
 
-Your `mcp` package version doesn't include HTTP client support. Upgrade:
-
-```bash
-pip install --upgrade mcp
-```
+The environment does not match the project's pinned MCP SDK. Repair that environment
+through the normal update/install flow from an unlocked human-operated CLI.
 
 ### Tools not appearing
 
-- Check that the server is listed under `mcp_servers` (not `mcp` or `servers`)
-- Ensure the YAML indentation is correct
+- Confirm the calling profile with `hermes mcp list --via-host`
+- Run `hermes mcp test NAME --via-host` and inspect its JSON result
 - Look at Hermes Agent startup logs for connection messages
 - Tool names are prefixed with `mcp_{server}_{tool}` -- look for that pattern
 
@@ -263,7 +301,7 @@ mcp_servers:
     command: "npx"
     args: ["-y", "@modelcontextprotocol/server-github"]
     env:
-      GITHUB_PERSONAL_ACCESS_TOKEN: "ghp_xxxxxxxxxxxxxxxxxxxx"
+      GITHUB_PERSONAL_ACCESS_TOKEN: "${GITHUB_PERSONAL_ACCESS_TOKEN}"
     timeout: 60
 ```
 
@@ -276,7 +314,7 @@ mcp_servers:
   company_api:
     url: "https://mcp.mycompany.com/v1/mcp"
     headers:
-      Authorization: "Bearer sk-xxxxxxxxxxxxxxxxxxxx"
+      Authorization: "Bearer ${MCP_SERVER_API_KEY}"
       X-Team-Id: "engineering"
     timeout: 180
     connect_timeout: 30
@@ -298,12 +336,12 @@ mcp_servers:
     command: "npx"
     args: ["-y", "@modelcontextprotocol/server-github"]
     env:
-      GITHUB_PERSONAL_ACCESS_TOKEN: "ghp_xxxxxxxxxxxxxxxxxxxx"
+      GITHUB_PERSONAL_ACCESS_TOKEN: "${GITHUB_PERSONAL_ACCESS_TOKEN}"
 
   company_api:
     url: "https://mcp.internal.company.com/mcp"
     headers:
-      Authorization: "Bearer sk-xxxxxxxxxxxxxxxxxxxx"
+      Authorization: "Bearer ${MCP_SERVER_API_KEY}"
     timeout: 300
 ```
 
@@ -341,4 +379,4 @@ Disable sampling for untrusted servers with `sampling: { enabled: false }`.
 - Tool results are returned as JSON with either `{"result": "..."}` or `{"error": "..."}`
 - The native MCP client is independent of `mcporter` -- you can use both simultaneously
 - Server connections are persistent and shared across all conversations in the same agent process
-- Adding or removing servers requires restarting the agent (no hot-reload currently)
+- Adds/removals take effect in a new session by default. `/reload-mcp now` explicitly opts into cache invalidation; do not run it automatically.

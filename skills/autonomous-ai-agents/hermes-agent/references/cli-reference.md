@@ -69,6 +69,12 @@ hermes mcp add NAME (--url or --command) | remove | list | test NAME
 hermes mcp catalog | install NAME     Curated catalog install
 hermes mcp configure NAME             Toggle tool selection
 hermes mcp serve                      Run Hermes as an MCP server
+hermes mcp add NAME --via-host ...    Noninteractive setup through the unlocked session host
+hermes mcp list --via-host            Read configured servers as JSON
+hermes mcp test NAME --via-host       Probe in the owning profile; nonzero on failure
+hermes mcp remove NAME --via-host     Remove through the host; takes effect next session
+hermes mcp set-api-key NAME --value-stdin --env-var TOKEN_NAME
+                                     Store a piped credential through the host
 ```
 Details (transport, tool discovery, catalog): `references/native-mcp.md`.
 
