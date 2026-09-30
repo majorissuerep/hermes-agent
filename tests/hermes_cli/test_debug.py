@@ -118,7 +118,7 @@ class TestCaptureLogSnapshot:
         from hermes_cli import debug
 
         monkeypatch.setattr(debug, "_resolve_log_path", lambda _name: log_path)
-        log_path.write_text("")
+        log_path.write_text("", encoding="utf-8")
 
         snap = debug._capture_log_snapshot("agent", tail_lines=10)
         assert snap.path == log_path
@@ -134,7 +134,7 @@ class TestCaptureLogSnapshot:
         # backward-reading loop so the truncation path actually fires.
         line = "A" * 99 + "\n"  # 100 bytes per line
         num_lines = 200  # 20000 bytes
-        (hermes_home / "logs" / "agent.log").write_text(line * num_lines)
+        (hermes_home / "logs" / "agent.log").write_text(line * num_lines, encoding="utf-8")
 
         # max_bytes = 1000 = 100 * 10 → cut at byte 20000 - 1000 = 19000,
         # and byte 19000 - 1 is '\n'.  Boundary hit → keep all 10 lines.
@@ -187,7 +187,7 @@ class TestMissingLogNote:
         """An empty file means the app ran and logged nothing — a different fact."""
         from hermes_cli.debug import _capture_log_snapshot
 
-        (hermes_home / "logs" / "desktop.log").write_text("")
+        (hermes_home / "logs" / "desktop.log").write_text("", encoding="utf-8")
 
         snap = _capture_log_snapshot("desktop", tail_lines=10)
         assert snap.tail_text == "(file empty)"
@@ -235,8 +235,8 @@ class TestCaptureLogSnapshotRedaction:
         (logs_dir / "agent.log").write_text(
             f"2026-04-12 17:00:00 INFO config: api_key={_REDACT_FIXTURE_TOKEN} loaded\n"
         )
-        (logs_dir / "errors.log").write_text("")
-        (logs_dir / "gateway.log").write_text("")
+        (logs_dir / "errors.log").write_text("", encoding="utf-8")
+        (logs_dir / "gateway.log").write_text("", encoding="utf-8")
         return home
 
     def test_default_redacts_tail_and_full_text(self, hermes_home_with_secret):
@@ -462,7 +462,7 @@ class TestRunDebugShareRedaction:
         (logs_dir / "agent.log").write_text(
             f"2026-04-12 17:00:00 INFO config: api_key={_REDACT_FIXTURE_TOKEN} loaded\n"
         )
-        (logs_dir / "errors.log").write_text("")
+        (logs_dir / "errors.log").write_text("", encoding="utf-8")
         (logs_dir / "gateway.log").write_text(
             f"2026-04-12 17:00:01 INFO gateway.run: token {_REDACT_FIXTURE_TOKEN}\n"
         )
@@ -667,7 +667,7 @@ class TestScheduleAutoDelete:
         pending_path = _pending_file()
         assert pending_path.exists()
 
-        entries = json.loads(pending_path.read_text())
+        entries = json.loads(pending_path.read_text(encoding="utf-8"))
         assert len(entries) == 2
         urls = {e["url"] for e in entries}
         assert urls == {"https://paste.rs/abc", "https://paste.rs/def"}
@@ -936,6 +936,43 @@ class TestCollectShareBundle:
         # With redaction it must be scrubbed everywhere.
         assert secret not in "\n".join(redacted.values())
 
+    def test_redaction_scrubs_dump_and_logged_url_credentials(self, hermes_home):
+        from hermes_cli.debug import collect_share_bundle
+
+        fallback_key = "fixture-fallback-key"
+        fallback_token = "fallback-url-token-0123456789"
+        aws_signature = "aws-signature-secret-0123456789"
+        alias_signature = "fixture-alias-signature"
+        log_token = "log-url-token-0123456789"
+        log_password = "proxy-password-0123456789"
+        (hermes_home / "config.yaml").write_text(
+            "fallback_providers:\n"
+            "  - provider: custom\n"
+            "    model: backup-model\n"
+            f'    base_url: "https://backup.example/v1?token={fallback_token}'
+            f'&X-Amz-Signature={aws_signature}&%78_amz_signature={alias_signature}"\n'
+            f"    api_key: {fallback_key}\n",
+            encoding="utf-8",
+        )
+        (hermes_home / "logs" / "agent.log").write_text(
+            "2026-09-29 01:00:00 INFO agent: fetch "
+            f"https://files.example.com/export.csv?token={log_token}&page=2\n"
+            f"2026-09-29 01:00:01 INFO agent: proxy "
+            f"http://alice:{log_password}@proxy.example:8080\n",
+            encoding="utf-8",
+        )
+
+        bundle = collect_share_bundle(log_lines=20, redact=True)
+        content = "\n".join(bundle.values())
+
+        assert "backup-model" in content
+        assert all(secret not in content for secret in (
+            fallback_key, fallback_token, aws_signature, alias_signature, log_token, log_password,
+        ))
+        assert "?token=***" in content
+        assert "%78_amz_signature=***" in content
+        assert "alice:***@proxy.example:8080" in content
+
 
 
 
@@ -1128,4 +1165,3 @@ class TestShareConsentGate:
 
         mock_upload.assert_not_called()
         assert "Aborted" not in capsys.readouterr().out
-

@@ -33,7 +33,9 @@ def test_standalone_fallback_pool_keeps_profile_scope(tmp_path, monkeypatch):
     sec_home = tmp_path / "profiles" / "ops"
     for home in (default_home, sec_home):
         (home / "cron").mkdir(parents=True)
-        (home / "config.yaml").write_text("platforms:\n  telegram:\n    enabled: true\n")
+        (home / "config.yaml").write_text(
+            "platforms:\n  telegram:\n    enabled: true\n", encoding="utf-8"
+        )
     monkeypatch.setenv("HERMES_HOME", str(default_home))
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "DEFAULT-TOKEN")
     set_multiplex_active(True)
@@ -154,3 +156,53 @@ def test_desktop_ticker_gates_on_profile_gateway_running(tmp_path, monkeypatch, 
     assert all(gate(name, home) for name, home in homes)
     running.update(home for _, home in homes)
     assert not any(gate(name, home) for name, home in homes)
+
+
+@pytest.mark.parametrize(
+    ("routed_env_line", "expected"),
+    [
+        ("", "managed-key"),
+        ("ORG_API_KEY=user-key\n", "managed-key"),
+    ],
+    ids=["managed-only", "managed-beats-user"],
+)
+def test_routed_fire_scope_carries_managed_env_authority(
+    tmp_path, monkeypatch, routed_env_line, expected
+):
+    """Routed multiplex scopes preserve managed-only secrets and their precedence."""
+    from agent import secret_scope
+    from cron.scheduler_provider import _profile_cron_scope
+    from hermes_cli import managed_scope
+    from hermes_constants import get_hermes_home
+
+    launch = tmp_path / "launch"
+    routed = launch / "profiles" / "ops"
+    peer = launch / "profiles" / "peer"
+    managed = tmp_path / "managed"
+    for home in (launch, routed, peer, managed):
+        (home / "cron").mkdir(parents=True)
+    (routed / ".env").write_text(
+        routed_env_line + "PROFILE_ONLY=ops-value\n", encoding="utf-8"
+    )
+    (peer / ".env").write_text("PROFILE_ONLY=peer-value\n", encoding="utf-8")
+    (managed / ".env").write_text("ORG_API_KEY=managed-key\n", encoding="utf-8")
+    monkeypatch.setenv("HERMES_HOME", str(launch))
+    monkeypatch.setenv("HERMES_MANAGED_DIR", str(managed))
+    monkeypatch.setenv("ORG_API_KEY", "managed-key")
+    managed_scope.invalidate_managed_cache()
+
+    for home, expected_profile_value in (
+        (routed, "ops-value"), (peer, "peer-value"), (routed, "ops-value")
+    ):
+        with _profile_cron_scope(home):
+            previous_multiplex = secret_scope.is_multiplex_active()
+            token = secret_scope.set_secret_scope(
+                secret_scope.build_profile_secret_scope(get_hermes_home())
+            )
+            try:
+                secret_scope.set_multiplex_active(True)
+                assert secret_scope.get_secret("ORG_API_KEY") == expected
+                assert secret_scope.get_secret("PROFILE_ONLY") == expected_profile_value
+            finally:
+                secret_scope.reset_secret_scope(token)
+                secret_scope.set_multiplex_active(previous_multiplex)
