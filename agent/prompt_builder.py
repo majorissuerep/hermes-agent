@@ -1346,6 +1346,15 @@ def _label_visible_entries(visible_entries: list[dict], skills_by_category: dict
         skills_by_category.setdefault(category, []).append((fm, desc))
 
 
+PROJECT_GRAPH_GUIDANCE = (
+    "For repeated questions or planned follow-up work on the same codebase or document collection, "
+    "load skill_view(name='graphify') before broad exploration. Build or refresh its reusable project "
+    "graph, query it first, then verify findings against the source. Reuse the graph across requests "
+    "and refresh changed files rather than rediscovering the project. Skip indexing for a small "
+    "one-off lookup or when the user opts out.\n"
+)
+
+
 def _render_skills_index(
     skills_by_category: dict[str, list[tuple[str, str]]], category_descriptions: dict[str, str],
     compact_categories: "frozenset[str] | None", available_tools: "set[str] | None",
@@ -1376,10 +1385,15 @@ def _render_skills_index(
             if name not in seen:
                 seen.add(name)
                 index_lines.append(f"    - {name}: {desc}" if desc else f"    - {name}")
+    graph_guidance = PROJECT_GRAPH_GUIDANCE if (
+        any(name == "graphify" for entries in skills_by_category.values() for name, _ in entries)
+        and (available_tools is None or {"terminal", "skill_view"} <= available_tools)
+    ) else ""
     from agent.oneshot_footprint import ONESHOT_SKILLS_LOAD_GUIDANCE, is_single_query_session
     if is_single_query_session():
         return (
             ONESHOT_SKILLS_LOAD_GUIDANCE
+            + "\n" + graph_guidance
             + "\n<available_skills>\n" + "\n".join(index_lines) + "\n</available_skills>"
             + hidden_note
         )
@@ -1397,7 +1411,8 @@ def _render_skills_index(
         "If a skill has issues, fix it with skill_manage(action='patch').\n"
         "After difficult/iterative tasks, offer to save as a skill. If a skill you loaded was missing steps, "
         "had wrong commands, or needed pitfalls you discovered, update it before finishing.\n"
-        "\n"
+        + graph_guidance
+        + "\n"
         "<available_skills>\n"
         + "\n".join(index_lines) + "\n"
         "</available_skills>\n\n"
