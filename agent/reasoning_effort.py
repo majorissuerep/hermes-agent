@@ -21,7 +21,9 @@ _KIMI_K3_SLUG_RE = re.compile(r"(?:^|[^a-z0-9])k3(?:[^a-z0-9]|$)")
 
 # Canonical low→high ordering for nearest-level clamping. Includes "none" so an explicit
 # disable can be clamped when a provider publishes it as a level. ``ultra`` is Hermes-internal
-# (the Codex product tier): no wire accepts it, every declared set stops at ``max``.
+# (the Codex product tier): the Codex backend publishes it for gpt-6.1/astra/sol and the 5.6
+# trio (live catalog 2026-10-02), but no other wire accepts it and every other declared set
+# stops at ``max``; keep it out of wire vocabularies until a second provider adopts it.
 EFFORT_LADDER: tuple[str, ...] = ("none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra")
 
 #: Widest OpenAI-compatible wire vocabulary (OpenRouter, Nous Portal).
@@ -36,6 +38,8 @@ CODEX_LEGACY_EFFORTS: tuple[str, ...] = ("none", "low", "medium", "high", "xhigh
 CODEX_ASTRA_EFFORTS: tuple[str, ...] = ("low", "medium", "high", "xhigh", "max")
 ASTRA_MODEL_IDS: frozenset[str] = frozenset({"gpt-6-astra", "gpt-6-astra-900k"})
 #: GPT-6 Sol/Terra/Luna (the 5.6 successors; ``-pro``/``-900k``/dated snapshots share the prefix).
+#: ``gpt-6.1`` is boundary-matched so the dot release never matches the gpt-6 prefixes below.
+GPT61_MODEL_RE = re.compile(r"(?:^|[^a-z0-9])gpt-6\.1(?:[^a-z0-9]|$)")
 GPT6_TIER_PREFIXES: tuple[str, ...] = ("gpt-6-sol", "gpt-6-luna")
 DAYBREAK_MODEL_IDS: frozenset[str] = frozenset(
     {"gpt-daybreak-blue-latest", "gpt-daybreak-blue-latest-900k"}
@@ -94,6 +98,17 @@ def is_astra_model(model: Optional[str]) -> bool:
     return (model or "").strip().lower().rsplit("/", 1)[-1] in ASTRA_MODEL_IDS
 
 
+def is_gpt61_model(model: Optional[str]) -> bool:
+    """``gpt-6.1``-generation slug (``gpt-6.1-sol``, dated snapshots, ``vendor/`` prefixed).
+
+    Boundary-matched so the dot release is never confused with the gpt-6 dash tiers
+    (``gpt-6-sol``) nor with a stray substring. Single home for the generation predicate;
+    effort vocabulary, context metadata and the Codex curated fallback key off it.
+    """
+    bare = (model or "").strip().lower().rsplit("/", 1)[-1]
+    return bool(GPT61_MODEL_RE.search(bare))
+
+
 def codex_supported_efforts(model: Optional[str]) -> tuple[str, ...]:
     """Supported effort set for an OpenAI/Codex Responses model."""
     if is_astra_model(model):
@@ -101,7 +116,7 @@ def codex_supported_efforts(model: Optional[str]) -> tuple[str, ...]:
     bare = (model or "").strip().lower().rsplit("/", 1)[-1]
     return (
         CODEX_GPT56_EFFORTS
-        if "gpt-5.6" in bare or bare.startswith(GPT6_TIER_PREFIXES) or bare in DAYBREAK_MODEL_IDS
+        if "gpt-5.6" in bare or bare.startswith(GPT6_TIER_PREFIXES) or bare in DAYBREAK_MODEL_IDS or is_gpt61_model(bare)
         else CODEX_LEGACY_EFFORTS
     )
 

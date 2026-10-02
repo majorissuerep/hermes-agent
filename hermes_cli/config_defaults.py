@@ -113,6 +113,13 @@ DEFAULT_CONFIG = {
         # otherwise wedge the turn until the idle watchdog discards the already-billed response
         # (#103864). 0 skips the drain. Well-behaved endpoints close immediately and never wait this long.
         "stream_drain_timeout": 2.0,
+        # Wall-clock budget for one codex app-server turn (``codex_app_server`` runtime) before
+        # Hermes stops waiting. The codex daemon answers RPCs and keeps working past this deadline;
+        # on expiry Hermes accepts any completed assistant text as the response, then interrupts the
+        # daemon-side turn so a still-running old turn cannot bleed into the next one. Persistent-
+        # mode models (gpt-6.1-sol at high effort) legitimately run tens of minutes — raise this
+        # rather than watching "turn reached deadline" warnings.
+        "codex_turn_timeout": 1800.0,
         # Empty-response retry guard. Empty retries re-send the full input at full price; this stops
         # re-billing deterministic empties (unsignaled refusals, zero output tokens) while failing
         # open on ambiguous evidence (missing usage, any tokens, model/provider change).

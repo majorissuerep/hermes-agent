@@ -158,6 +158,38 @@ def test_astra_requires_live_codex_account_discovery(monkeypatch, tmp_path):
     assert entitled[entitled.index("gpt-6-astra") + 1] == "gpt-6-astra-900k"
 
 
+def test_identity_stamped_cache_is_account_discovery_evidence_for_astra(tmp_path, monkeypatch):
+    """codex's own ``models_cache.json`` (identity + fetched_at stamped by the account's client)
+    is discovery evidence with the same standing as Hermes' live probe: astra listed there
+    survives the offline fallback so the picker matches what the subscription actually carries.
+    A legacy/hand-written cache without the stamp keeps the drop (previous test)."""
+    from hermes_cli import codex_models
+
+    (tmp_path / "models_cache.json").write_text(
+        json.dumps({
+            "fetched_at": "2026-10-02T21:26:32.768322382Z",
+            "identity": "a60ff0f593fca685e75d4ac1703c781831cb4810be9e60f359625c8e42630c17",
+            "models": [
+                {"slug": "gpt-6.1-sol", "priority": 1},
+                {"slug": "gpt-6-astra", "priority": 2},
+                {"slug": "gpt-6-sol", "priority": 3},
+            ],
+        }),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path))
+    monkeypatch.setattr(codex_models, "_fetch_models_from_api", lambda _token: [])
+
+    ids = get_codex_model_ids(access_token="stale-token")
+    assert "gpt-6-astra" in ids
+    assert "gpt-6.1-sol" in ids
+    assert ids[ids.index("gpt-6-astra") + 1] == "gpt-6-astra-900k"  # variant synthesis intact
+    # The config.toml default is still only a hint: astra there without cache evidence is dropped.
+    (tmp_path / "config.toml").write_text('model = "gpt-6-astra"\n', encoding="utf-8")
+    (tmp_path / "models_cache.json").unlink()
+    assert "gpt-6-astra" not in get_codex_model_ids(access_token="stale-token")
+
+
 
 
 

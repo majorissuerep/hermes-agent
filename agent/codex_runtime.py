@@ -26,6 +26,26 @@ _codex_watchdog_state_var: contextvars.ContextVar[Any | None] = contextvars.Cont
 )
 
 _DEFAULT_STREAM_DRAIN_TIMEOUT = 2.0
+_DEFAULT_CODEX_TURN_TIMEOUT = 1800.0
+
+
+def _codex_turn_timeout() -> float:
+    """``agent.codex_turn_timeout`` (seconds) — wall-clock budget for one codex app-server turn.
+
+    The codex daemon keeps working past the deadline while still answering RPCs; persistent-mode
+    models (gpt-6.1-sol, high effort) legitimately run tens of minutes. On expiry Hermes accepts
+    any completed assistant text and interrupts the daemon-side turn so it cannot bleed into the
+    next user turn. Lowered legacy default (600s) observed truncating real turns (#C4, Oct 2026).
+    """
+    try:
+        from hermes_cli.config import load_config_readonly
+        agent_cfg = load_config_readonly().get("agent")
+        value = agent_cfg.get("codex_turn_timeout") if isinstance(agent_cfg, dict) else None
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return max(60.0, float(value))
+    except Exception:
+        pass
+    return _DEFAULT_CODEX_TURN_TIMEOUT
 
 
 def _stream_drain_timeout() -> float:
@@ -635,7 +655,7 @@ def run_codex_app_server_turn(agent, *, user_message: str, original_user_message
     _ensure_codex_session(agent, messages)
     try:
         _start_codex_thread(agent)
-        turn = agent._codex_session.run_turn(user_input=user_message)
+        turn = agent._codex_session.run_turn(user_input=user_message, turn_timeout=_codex_turn_timeout())
     except Exception as exc:
         logger.exception("codex app-server turn failed")
         _close_codex_session(agent)

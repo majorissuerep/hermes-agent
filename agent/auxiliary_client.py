@@ -618,7 +618,9 @@ def _is_codex_gpt54_or_gpt55(model: Optional[str], provider: Optional[str] = Non
         return False
     if "astra" in bare:
         return "900k" not in bare
-    return bare == "gpt-daybreak-blue-latest" or any(
+    from agent.reasoning_effort import is_gpt61_model
+
+    return bare == "gpt-daybreak-blue-latest" or is_gpt61_model(bare) or any(
         bare == fam or bare.startswith(fam + "-") or bare.startswith(fam + ".")
         for fam in ("gpt-5.4", "gpt-5.5", "gpt-5.6", "gpt-6-sol", "gpt-6-luna"))
 

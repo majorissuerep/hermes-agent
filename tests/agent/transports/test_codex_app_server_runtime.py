@@ -448,3 +448,41 @@ class TestSpawnEnvSecretStripping:
         env = self._capture_spawn_env(monkeypatch)
         assert env.get("OPENAI_API_KEY") == "sk-codex-needs-this"
 
+
+
+class TestCodexTurnTimeoutConfig:
+    """``agent.codex_turn_timeout`` feeds ``run_codex_app_server_turn``'s turn budget.
+
+    gpt-6.1-sol turns at high effort legitimately exceed the old hardcoded 600s (daemon logs,
+    Oct 2026); the knob defaults to 1800s, reads the config value, floors at 60s, and is what
+    the runtime passes as ``turn_timeout`` (never the legacy default)."""
+
+    def test_reader_default_and_config_override(self, monkeypatch, tmp_path):
+        import agent.codex_runtime as codex_runtime
+
+        monkeypatch.setattr(
+            "hermes_cli.config.load_config_readonly",
+            lambda: {"agent": {"codex_turn_timeout": 900}},
+        )
+        assert codex_runtime._codex_turn_timeout() == 900.0
+
+        monkeypatch.setattr(
+            "hermes_cli.config.load_config_readonly",
+            lambda: {"agent": {"codex_turn_timeout": 5}},
+        )
+        assert codex_runtime._codex_turn_timeout() == 60.0  # floored
+
+        monkeypatch.setattr(
+            "hermes_cli.config.load_config_readonly",
+            lambda: {"agent": {}},
+        )
+        assert codex_runtime._codex_turn_timeout() == codex_runtime._DEFAULT_CODEX_TURN_TIMEOUT == 1800.0
+
+    def test_runtime_passes_the_configured_timeout(self, monkeypatch):
+        """The turn budget must flow from the config reader into run_turn (not the 600s default)."""
+        import inspect
+
+        import agent.codex_runtime as codex_runtime
+
+        source = inspect.getsource(codex_runtime.run_codex_app_server_turn)
+        assert "_codex_turn_timeout()" in source
