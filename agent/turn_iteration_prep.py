@@ -205,6 +205,8 @@ def prepare_iteration(
                     current_turn_user_idx, _reanchored_idx, agent.session_id or "-",
                 )
                 current_turn_user_idx = _reanchored_idx
+    from agent.policy_sidecars import get_sidecars
+    get_sidecars(agent).prepare(agent, messages, user_message, current_turn_user_idx=current_turn_user_idx)
     return IterationPrep(
         action="fallthrough", messages=messages, request_logger=request_logger,
         current_turn_user_idx=current_turn_user_idx,

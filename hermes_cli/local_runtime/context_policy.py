@@ -64,7 +64,7 @@ def initial_window(profile: ModelProfile, budget: HardwareBudget, *, flash_atten
     everywhere, capped at native. ``overhead_bytes`` is runtime cost beyond weights+KV; zero keeps
     this pure physics for decision-table tests, production callers pass it.
     """
-    refusal = physics_check(profile, budget, FLOOR, flash_attention=flash_attention,
+    refusal = physics_check(profile, budget, min(FLOOR, profile.n_ctx_train or FLOOR), flash_attention=flash_attention,
                             overhead_bytes=overhead_bytes)
     if refusal:
         return refusal
@@ -117,12 +117,14 @@ class LaunchPlan:
 
 def plan_launch(profile: ModelProfile, budget: HardwareBudget, *, mtp_capable: bool = False,
                 fixed_overhead: int = RUNTIME_OVERHEAD_BYTES,
-                requested_window: int | None = None) -> LaunchPlan:
+                requested_window: int | None = None, context_cap: int | None = None) -> LaunchPlan:
     """Window first, then prefill; price both postures at the effective window.
 
     A restored window may fit only under lean MTP. Evaluate it before discarding it because
     stacked exceeds memory, and keep deliberate spill when neither posture is resident.
     """
+    if context_cap is not None:
+        profile = replace(profile, n_ctx_train=min(profile.n_ctx_train or context_cap, context_cap))
     if mtp_capable and profile.kv_scale == 1.0:
         profile = replace(profile, kv_scale=1.2)
 

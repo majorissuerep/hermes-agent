@@ -20,7 +20,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from agent.agent_runtime_helpers import switch_model
+from agent.model_switch_runtime import switch_model
 
 
 # ---------------------------------------------------------------------------

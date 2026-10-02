@@ -832,6 +832,10 @@ def _execute_tool(function_name: str, function_args: Dict[str, Any], original_ar
         dispatch_kwargs["user_task"] = user_task
 
     def _dispatch(next_args: Dict[str, Any]) -> Any:
+        from agent.tool_policy import review_current_call
+        blocked = review_current_call(function_name, next_args)
+        if blocked is not None:
+            return blocked
         from tools.connectors import dispatch_connector_call, is_connector_name
         if is_connector_name(function_name):
             return dispatch_connector_call(function_name, next_args, ids.tool_call_id)

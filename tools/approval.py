@@ -954,6 +954,7 @@ def _run_approval_gate(
     advice: str = "Find an alternative approach that avoids this action.",
     cron_deny_message: str = "", single_query_deny_message: str = "", unattended_deny_message: str = "",
     autoapprove_log_prefix: str, fail_closed_when_no_human: bool = False, no_human_block_message: str = "",
+    mandatory: bool = False,
 ) -> dict:
     """Shared human-approval gate for a flagged action (tool call or write): decision core for
     :func:`request_tool_approval` and the file-tool write gates.
@@ -970,14 +971,21 @@ def _run_approval_gate(
     # ``approvals.mode: off`` is the third bypass source (the Desktop "Approvals: off" toggle writes it); the shell
     # guards honour it, so every action routed through this gate (computer_use, plugin rules, SSH-config writes,
     # dangerous-pattern prompts) must too, or "off" still prompts on those surfaces.
-    if _yolo_active() or approval_context._get_approval_mode() == "off":
+    if not mandatory and (_yolo_active() or approval_context._get_approval_mode() == "off"):
         return _approved()
     session_key = get_current_session_key()
+    # Explicit human grants still apply to mandatory gates. Their callers use
+    # exact operation/scope keys; mode=off and unattended defaults are not grants.
     if is_approved(session_key, pattern_key):
         return _approved()
 
     approval_callback, is_cli, is_gateway, is_ask = _presence(approval_callback)
     if not is_cli and not is_gateway and not is_ask:
+        if mandatory:
+            return _blocked(
+                "BLOCKED: the tool reviewer requires human confirmation, but no approval channel is available.",
+                pattern_key=pattern_key, description=description,
+            )
         log_args = (autoapprove_log_prefix, pattern_key, description)
         # Every unattended context resolves instantly — never a pending approval nobody can answer.
         deny_messages = {
@@ -1092,7 +1100,8 @@ def check_dangerous_command(command: str, env_type: str,
     )
 
 
-def request_tool_approval(tool_name: str, reason: str, *, rule_key: str = "", approval_callback=None) -> dict:
+def request_tool_approval(tool_name: str, reason: str, *, rule_key: str = "", approval_callback=None,
+                          display_target: str = "", mandatory: bool = False) -> dict:
     """Escalate an arbitrary tool call to the human-approval gate.
 
     Entry point for a plugin ``pre_tool_call`` hook returning ``{"action": "approve", ...}``:
@@ -1111,12 +1120,13 @@ def request_tool_approval(tool_name: str, reason: str, *, rule_key: str = "", ap
         # Namespaced so plugin-rule approvals share the allowlist machinery without ever colliding with a real
         # command pattern key; the display target is a synthetic label for the display/allowlist layer.
         pattern_key=f"plugin_rule:{rule_key}", description=description,
-        display_target=f"<{tool_name}> (plugin approval rule)", approval_callback=approval_callback,
+        display_target=display_target or f"<{tool_name}> (plugin approval rule)", approval_callback=approval_callback,
         subject=subject, advice="Find an alternative approach.",
         autoapprove_log_prefix=f"plugin-escalated tool call '{tool_name}' in non-interactive non-gateway context",
         fail_closed_when_no_human=True,
         no_human_block_message=(f"BLOCKED: {subject} but no interactive user or gateway is present "
                                 "to approve it. A plugin flagged this action for human confirmation."),
+        mandatory=mandatory,
     )
 
 

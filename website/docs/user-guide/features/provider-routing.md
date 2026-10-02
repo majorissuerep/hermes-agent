@@ -11,6 +11,9 @@ When using [OpenRouter](https://openrouter.ai) as your LLM provider, Hermes Agen
 
 OpenRouter routes requests to many providers (e.g., Anthropic, Google, AWS Bedrock, Together AI). Provider routing lets you optimize for cost, speed, quality, or enforce specific provider requirements.
 
+For automatic selection among your own models, including warm-cache versus cold-context
+costs and task complexity, configure [local model sidecars](./model-sidecars.md).
+
 :::note
 [Nous Portal](../../integrations/nous-portal.md) decides routing centrally per model and does not accept caller-supplied provider preferences; Hermes never sends the `provider` object to Portal, so `provider_routing` is simply ignored there.
 :::

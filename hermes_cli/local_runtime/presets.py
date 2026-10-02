@@ -95,9 +95,11 @@ def preset_for_model(gguf: Path, budget: HardwareBudget,
     mmproj_path = _asset_path(entry.mmproj) if entry is not None else None
     fixed_overhead = RUNTIME_OVERHEAD_BYTES + (
         entry.mmproj.size_bytes if entry is not None and mmproj_path is not None else 0)
+    from hermes_cli.local_runtime.sidecar_models import context_cap_for_model
     plan = plan_launch(profile, budget, mtp_capable=is_mtp, fixed_overhead=fixed_overhead,
                        requested_window=(load_window_overrides().get(model_id)
-                                         if requested_window is None else requested_window))
+                                         if requested_window is None else requested_window),
+                       context_cap=context_cap_for_model(model_id))
     decision = plan.decision
     if isinstance(decision, PhysicsRefusal):
         return PresetEntry(model_id=model_id, window=0, spilled=False, refusal=decision.message)

@@ -405,6 +405,7 @@ from hermes_cli.subcommands.worktree import build_worktree_parser
 from hermes_cli.subcommands.browser import build_browser_parser
 from hermes_cli.subcommands.secrets import build_secrets_parser
 from hermes_cli.subcommands.codex_runtime import build_codex_runtime_parser
+from hermes_cli.subcommands.graphify import build_graphify_parser
 from hermes_cli.subcommands.egress import build_egress_parser
 from hermes_cli.subcommands.migrate import build_migrate_parser
 from hermes_cli.subcommands.checkpoints import build_checkpoints_parser
@@ -2810,7 +2811,7 @@ _BUILTIN_SUBCOMMANDS = frozenset(
         "acp", "approvals", "auth", "backup", "bundles", "checkpoints", "claw", "codex-runtime", "completion",
         "computer-use",
         "config", "console", "cron", "curator", "dashboard", "deck", "serve", "debug", "doctor",
-        "dump", "egress", "fallback", "gateway", "hooks", "import", "import-agent", "insights",
+        "dump", "egress", "fallback", "gateway", "graphify", "hooks", "import", "import-agent", "insights",
         "gui", "desktop", "kanban", "login", "logout", "logs", "lsp", "mcp", "memory", "migrate", "moa",
         "journey", "memory-graph", "learning",
         "model", "monitoring", "pairing", "pause", "peer", "pets", "plugins", "portal", "profile",
@@ -3401,6 +3402,7 @@ def _build_cli_parser():
     build_egress_parser(subparsers)
     build_migrate_parser(subparsers)
     build_codex_runtime_parser(subparsers)
+    build_graphify_parser(subparsers)
     build_gateway_parser(
         subparsers, cmd_gateway=cmd_gateway, cmd_proxy=cmd_proxy, cmd_gateway_enroll=cmd_gateway_enroll
     )

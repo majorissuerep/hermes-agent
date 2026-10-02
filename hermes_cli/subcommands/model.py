@@ -34,3 +34,5 @@ def build_model_parser(subparsers, *, cmd_model: Callable) -> None:
         "--insecure", action="store_true",
         help="Disable TLS verification for Nous login (testing only)")
     model_parser.set_defaults(func=cmd_model)
+    from hermes_cli.subcommands.model_sidecars import build_sidecars_parser
+    build_sidecars_parser(model_parser.add_subparsers(dest="model_command"))

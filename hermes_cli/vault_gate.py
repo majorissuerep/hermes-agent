@@ -11,6 +11,8 @@ This fork's key feature is master-password protection of ALL state. Policy:
 - Host-only deck verbs and supported ``mcp ... --via-host`` operations attach
   to the already-unlocked authenticated session host; they do not access local
   encrypted state or inherit its key.
+- ``graphify`` builds project-local artifacts and reads no Hermes credentials
+  or encrypted state, so it is also available to an agent's terminal child.
 - No vault at all: REFUSE with instructions; on an interactive TTY offer to
   run the migration flow right there. Non-interactive callers (systemd,
   cron, serve) unlock with a key file (HERMES_VAULT_PRIVATE_KEY — a PATH,
@@ -56,6 +58,8 @@ def _is_read_only(args: Any, command: Any) -> bool:
     if command == "update" and getattr(args, "check", False):
         return True
     if command == "deck" and getattr(args, "deck_command", None) in _HOST_ONLY_DECK_VERBS:
+        return True
+    if command == "graphify" and not getattr(args, "oneshot", None):
         return True
     from hermes_cli.mcp_host import is_host_mcp_command
 

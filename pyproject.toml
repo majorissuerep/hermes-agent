@@ -57,6 +57,10 @@ dependencies = [
   # self-heal path for lean/broken installs — keep the pin below and the
   # lazy pin in lockstep.
   "firecrawl-anydoc==0.2.4",
+  # Bundled project knowledge graphs: the graphify skill uses local AST
+  # parsing and Hermes' own session for document extraction. Ship the runtime
+  # from the first install so repeated project work needs no extra setup.
+  "graphifyy==0.9.73",
   # Bumped from 2.12.5 to 2.13.4 to pull in pydantic-core 2.46.4.
   # pydantic-core 2.41.5 (pulled by 2.12.5) segfaults when the OpenAI SDK's
   # Responses API resource is exercised from a non-main thread, which is the
@@ -553,6 +557,7 @@ faster-whisper = false
 fire = false
 firecrawl-anydoc = false
 firecrawl-py = false
+graphifyy = false
 google-api-python-client = false
 google-auth = false
 google-auth-httplib2 = false

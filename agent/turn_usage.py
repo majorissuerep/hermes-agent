@@ -84,6 +84,9 @@ def record_response_usage(
     # must remain observable.
     agent.session_api_calls += 1
     if not (hasattr(response, 'usage') and response.usage):
+        sidecars = getattr(agent, "_policy_sidecars", None)
+        if sidecars and sidecars.router:
+            sidecars.router.note_response(agent, None, api_duration=api_duration)
         if getattr(compressor, "awaiting_real_usage_after_compression", False):
             # No usage -> cannot adjudicate the prior compaction; consume the
             # pending verdict so later readings aren't charged to it and
@@ -99,6 +102,9 @@ def record_response_usage(
         return ResponseUsageOutcome(compression_attempts=compression_attempts, rearmed=rearmed)
 
     canonical_usage = normalize_usage(response.usage, provider=agent.provider, api_mode=agent.api_mode)
+    sidecars = getattr(agent, "_policy_sidecars", None)
+    if sidecars and sidecars.router:
+        sidecars.router.note_response(agent, canonical_usage, api_duration=api_duration)
     # Aggregator-only usage kept for pricing: advisor tokens are priced at each advisor's
     # OWN model rate and added as dollars below.
     aggregator_usage = canonical_usage

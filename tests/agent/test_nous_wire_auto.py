@@ -62,7 +62,7 @@ class TestHook:
     def _auto(self, monkeypatch):
         monkeypatch.setattr(_providers, "_nous_anthropic_wire", lambda: "auto")
         self.switches = []
-        monkeypatch.setattr("agent.agent_runtime_helpers.switch_model",
+        monkeypatch.setattr("agent.model_switch_runtime.switch_model",
                             lambda agent, m, p, api_key="", base_url="", api_mode="", **k: self.switches.append(api_mode) or setattr(agent, "api_mode", api_mode))
 
     def test_gmi_cleared_schedules_once_and_applies_at_next_iteration(self, monkeypatch):
@@ -109,7 +109,7 @@ class TestHook:
 
         def boom(*a, **k):
             raise RuntimeError("no client")
-        monkeypatch.setattr("agent.agent_runtime_helpers.switch_model", boom)
+        monkeypatch.setattr("agent.model_switch_runtime.switch_model", boom)
         a = _agent()
         assert nous_wire.maybe_switch_wire_after_first_response(a, _resp(id="msg_01abc"), 1) is True
         assert nous_wire.apply_pending_wire_switch(a) is False

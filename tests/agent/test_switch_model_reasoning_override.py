@@ -45,7 +45,7 @@ class TestSwitchModelReasoningOverride:
 
     def test_primary_runtime_includes_reasoning_config(self):
         """After switch_model, _primary_runtime should contain reasoning_config key."""
-        from agent.agent_runtime_helpers import switch_model
+        from agent.model_switch_runtime import switch_model
 
         agent = self._make_fake_agent()
 

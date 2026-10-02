@@ -804,7 +804,7 @@ class TestSwitchModelRequestOverridesSnapshot:
     switched-to identity's overrides, not a stale or empty set."""
 
     def _switch(self, agent, **kwargs):
-        from agent.agent_runtime_helpers import switch_model
+        from agent.model_switch_runtime import switch_model
 
         with (
             patch("agent.process_bootstrap.OpenAI", return_value=MagicMock()),

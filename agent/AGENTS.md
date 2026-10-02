@@ -102,6 +102,12 @@ cache break — keep it the only one. Full detail:
   `_relay_sync_stream`, where `agent/auxiliary_hooks.py` emits `pre_auxiliary_call` /
   `post_auxiliary_call` (observer-only, fail-open, `aux_task` set); the main-loop
   `pre/post_api_request` events must NOT fire for aux calls (#79733).
+- Optional tool review and model routing live in `policy_sidecars.py`, `tool_policy.py`, and
+  `model_router.py`; configuration is snapshotted per agent in its owning profile scope.
+  `sidecar_client.py` uses one pinned auxiliary route with no cloud recovery ladder. Tool
+  review covers the common executor, inline handlers and registry dispatch, including nested
+  execute_code RPCs. Automatic routing calls `model_switch_runtime.py::switch_model` with
+  `preserve_prompt=True`; `tool_invocation.py::invoke_tool` owns direct agent invocation.
 - Fallback models and credential pools are resolution-chain code: E2E them with real imports
   against a temp `HERMES_HOME`, not mocks (root rubric).
 
