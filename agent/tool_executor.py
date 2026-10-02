@@ -642,7 +642,8 @@ def _blocked_tool_result(agent, ref: _ToolCallRef, *, block_message: Optional[st
     """Synthesize the result for a call blocked by scope/plugin (``block_message``) or by
     guardrail policy (``guardrail_decision``) and emit its terminal post_tool_call."""
     if block_message is not None:
-        result, error_type, error_message = json.dumps({"error": block_message}, ensure_ascii=False), block_error_type, block_message
+        result = block_message if block_error_type == "tool_policy_block" else json.dumps({"error": block_message}, ensure_ascii=False)
+        error_type, error_message = block_error_type, block_message
     else:
         result = agent._guardrail_block_result(guardrail_decision)
         error_type = "guardrail_block"
@@ -704,6 +705,12 @@ def _dispatch_authorized_once(
         if guardrail_decision.allows_execution:
             guardrail_decision = None
 
+    from agent.policy_sidecars import get_sidecars
+    sidecars = get_sidecars(agent)
+    if block_message is None and guardrail_decision is None and sidecars.guard:
+        block_error_type = "tool_policy_block"
+        block_message = sidecars.guard.review(ref.name, ref.args)
+
     if block_message is not None or guardrail_decision is not None:
         _advance_start_order()
         state.blocked = True
@@ -720,7 +727,9 @@ def _dispatch_authorized_once(
     from agent.terminal_approval_batch import prepare_current_terminal
     prepare_current_terminal(ref)
     _advance_start_order(lambda: _begin_tool_execution(agent, ref, display_index))
-    return _run_with_activity_heartbeat(agent, ref.name, lambda: execute(ref.args))
+    from agent.tool_policy import policy_scope
+    with policy_scope(sidecars.guard, reviewed_name=ref.name, reviewed_args=ref.args):
+        return _run_with_activity_heartbeat(agent, ref.name, lambda: execute(ref.args))
 
 
 def _run_agent_tool_execution_middleware(
@@ -1050,6 +1059,9 @@ def _commit_tool_result(
     """
     function_name, function_args, tool_call_id, effective_task_id = ref.name, ref.args, ref.call_id, ref.task_id
     if observed:
+        sidecars = getattr(agent, "_policy_sidecars", None)
+        if sidecars and sidecars.router and not blocked:
+            sidecars.router.note_tool_result(function_name, function_args, function_result, is_error)
         if not blocked:
             function_result = agent._append_guardrail_observation(
                 function_name, function_args, function_result, failed=is_error, tool_call_id=tool_call_id,
@@ -1607,18 +1619,22 @@ def _resolve_sequential_dispatch(agent, ref: _ToolCallRef, messages: list) -> _S
     function_name, function_args, effective_task_id, tool_call_id, middleware_trace = (
         ref.name, ref.args, ref.task_id, ref.call_id, ref.trace,
     )
+    from agent.tool_policy import run_inline_call
     if function_name != "delegate_task" and function_name in INLINE_TOOL_EXECUTORS:
         # Agent-level tools that need live AIAgent state; table shared with invoke_tool.
         inline_executor = INLINE_TOOL_EXECUTORS[function_name]
         inline_ctx = InlineToolContext(effective_task_id=effective_task_id, tool_call_id=tool_call_id, messages=messages)
-        return _SequentialDispatch(lambda next_args: inline_executor(agent, next_args, inline_ctx), finish_in_finally=False)
+        return _SequentialDispatch(lambda next_args: run_inline_call(
+            function_name, next_args, lambda: inline_executor(agent, next_args, inline_ctx)), finish_in_finally=False)
     if function_name == "delegate_task":
         spinner = _start_quiet_tool_spinner(agent, function_name, function_args, label=_delegate_spinner_label(function_args))
         agent._delegate_spinner = spinner
-        return _SequentialDispatch(agent._dispatch_delegate_task, spinner=spinner, is_delegate=True)
+        return _SequentialDispatch(lambda next_args: run_inline_call(
+            function_name, next_args, lambda: agent._dispatch_delegate_task(next_args)), spinner=spinner, is_delegate=True)
     if agent._context_engine_tool_names and function_name in agent._context_engine_tool_names:
         return _SequentialDispatch(
-            execute=lambda next_args: agent.context_compressor.handle_tool_call(function_name, next_args, messages=messages),
+            execute=lambda next_args: run_inline_call(function_name, next_args, lambda:
+                agent.context_compressor.handle_tool_call(function_name, next_args, messages=messages)),
             spinner=_start_quiet_tool_spinner(agent, function_name, function_args, gate=False),
             error_result=lambda e: json.dumps({"error": f"Context engine tool '{function_name}' failed: {e}"}),
             error_log="context_engine.handle_tool_call raised for %s: %s",
@@ -1626,7 +1642,8 @@ def _resolve_sequential_dispatch(agent, ref: _ToolCallRef, messages: list) -> _S
     if agent._memory_manager and agent._memory_manager.has_tool(function_name):
         # Memory-provider tools (hindsight_retain, honcho_search, ...) are not in the registry.
         return _SequentialDispatch(
-            execute=lambda next_args: agent._memory_manager.handle_tool_call(function_name, next_args),
+            execute=lambda next_args: run_inline_call(function_name, next_args, lambda:
+                agent._memory_manager.handle_tool_call(function_name, next_args)),
             spinner=_start_quiet_tool_spinner(agent, function_name, function_args),
             error_result=lambda e: json.dumps({"error": f"Memory tool '{function_name}' failed: {e}"}),
             error_log="memory_manager.handle_tool_call raised for %s: %s",

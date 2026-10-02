@@ -57,6 +57,8 @@ def test_switch_to_moa_pins_chat_completions(monkeypatch, incoming_api_mode):
     """
     from agent import agent_runtime_helpers as arh
 
+    from agent import model_switch_runtime as msr
+
     # Neutralize the post-swap machinery that needs a real AIAgent (credential
     # pool reload, context-compressor refresh, primary-runtime bookkeeping).
     # We only assert the api_mode invariant set in the moa client-build branch.
@@ -64,7 +66,7 @@ def test_switch_to_moa_pins_chat_completions(monkeypatch, incoming_api_mode):
 
     agent = _make_fake_agent()
     try:
-        arh.switch_model(
+        msr.switch_model(
             agent,
             new_model="frontier",
             new_provider="moa",

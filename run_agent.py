@@ -482,7 +482,7 @@ class AIAgent(
             self.model, self.base_url, getattr(self, "api_key", ""), config_context_length, return_load_result=True,
         )
 
-    switch_model = _forward("agent.agent_runtime_helpers", "switch_model")
+    switch_model = _forward("agent.model_switch_runtime", "switch_model")
 
     def _disable_codex_reasoning_replay(self, messages: Optional[List[Dict[str, Any]]] = None) -> Dict[str, int]:
         """On HTTP 400 ``invalid_encrypted_content``: disable Responses reasoning replay and pop
@@ -1362,7 +1362,7 @@ class AIAgent(
             subagent_id=function_args.get("subagent_id"), message=function_args.get("message"), parent_agent=self,
         )
 
-    _invoke_tool = _forward("agent.agent_runtime_helpers", "invoke_tool")
+    _invoke_tool = _forward("agent.tool_invocation", "invoke_tool")
 
     @staticmethod
     def _wrap_verbose(label: str, text: str, indent: str = "     ") -> str:
