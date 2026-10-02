@@ -242,7 +242,7 @@ def test_profiles_and_real_turns_keep_policy_cache_and_route_state_separate(tmp_
     monkeypatch.setenv("HERMES_HOME", str(homes[0]))
     for home, label in zip(homes, ("A", "B")):
         _save(home, _config(base, suffix=label, routing=True))
-        (home / ".env").write_text(f"SIDECAR_KEY=key-{label}\n")
+        (home / ".env").write_text(f"SIDECAR_KEY=key-{label}\n", encoding="utf-8")
     prior = is_multiplex_active()
     set_multiplex_active(True)
     agents = []

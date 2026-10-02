@@ -16,7 +16,7 @@ def test_project_graph_cli_uses_bundled_runtime_without_unlocking_hermes(tmp_pat
     monkeypatch.delenv("GRAPHIFY_OUT", raising=False)
     vault.init_vault(home, "graph-cli-test-password")
     vault.unlock(home, "graph-cli-test-password")
-    io.write_text(home / "config.yaml", "model: private-test-model\n", purpose="config")
+    io.write_text(home / "config.yaml", "model: private-test-model\n", purpose="config")  # windows-footgun: ok — sealed-state helper, UTF-8 by default
     encrypted_config = (home / "config.yaml").read_bytes()
     vault.clear_vault_cache()
     project = tmp_path / "codebase"

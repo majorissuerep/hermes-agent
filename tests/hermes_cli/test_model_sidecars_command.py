@@ -21,7 +21,7 @@ def vaulted_cli(tmp_path, monkeypatch):
     private, public = generate_keypair()
     add_key_slot(home, public_key_raw=public, unlocked_vault=vault)
     key = tmp_path / "test-private-key"
-    key.write_text(private.hex())
+    key.write_text(private.hex(), encoding="utf-8")
     key.chmod(0o600)
     monkeypatch.setenv("HERMES_VAULT_PRIVATE_KEY", str(key))
 
