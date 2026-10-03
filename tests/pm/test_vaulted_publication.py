@@ -30,7 +30,7 @@ assert not any(key in os.environ for key in (
         vault.init_vault(target, "pm-integration-password", _allow_existing_state=True)
         vault.unlock(target, "pm-integration-password")
         io.write_text(target / "config.yaml", '# preserve comment\nmodel: "private-canary"\n'
-                      'plugins: {enabled: [plain]}\n', purpose="config")
+                      'plugins: {enabled: [plain]}\n', purpose="config", encoding="utf-8")
         plugin = target / "plugins" / "plain"
         plugin.mkdir(parents=True)
         (plugin / "plugin.yaml").write_text("name: plain\n", encoding="utf-8")
@@ -66,7 +66,7 @@ def test_worker_reads_profile_union_and_publishes_only_ciphertext(client, vaulte
     client.sync_venv(explicit=True, plugins=Selection({
         "home": str(home), "enabled": [], "disabled": ["plain"],
     }))
-    text = io.read_text(home / "config.yaml", purpose="config")
+    text = io.read_text(home / "config.yaml", purpose="config", encoding="utf-8-sig")
     assert '# preserve comment' in text and 'model: "private-canary"' in text
     assert enabled_plugins_ordered() == {sibling / "plugins": ["plain"]}
     assert (sibling / "config.yaml").read_bytes() == previous_sibling

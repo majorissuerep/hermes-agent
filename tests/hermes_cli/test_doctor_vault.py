@@ -14,7 +14,7 @@ def home(tmp_path, monkeypatch):
     monkeypatch.setattr(doctor, "HERMES_HOME", target)
     vault.init_vault(target, "doctor-vault-password")
     vault.unlock(target, "doctor-vault-password")
-    io.write_text(target / "config.yaml", "memory: {memory_enabled: true, user_profile_enabled: true}\n", purpose="config")
+    io.write_text(target / "config.yaml", "memory: {memory_enabled: true, user_profile_enabled: true}\n", purpose="config", encoding="utf-8")
     try:
         yield target
     finally:
@@ -25,10 +25,10 @@ def test_doctor_reads_encrypted_credentials_persona_and_memory(home, capsys):
     from hermes_cli.doctor_config import _check_env_file
     from hermes_cli.doctor_state import _check_directory_structure
 
-    io.write_text(home / ".env", "OPENAI_API_KEY=doctor-private-canary\n", purpose="env")
-    io.write_text(home / "SOUL.md", "Persona private canary", purpose="state")
+    io.write_text(home / ".env", "OPENAI_API_KEY=doctor-private-canary\n", purpose="env", encoding="utf-8")
+    io.write_text(home / "SOUL.md", "Persona private canary", purpose="state", encoding="utf-8")
     memory = "Memory private canary"
-    io.write_text(home / "memories/MEMORY.md", memory, purpose="memory")
+    io.write_text(home / "memories/MEMORY.md", memory, purpose="memory", encoding="utf-8")
     assert not _check_env_file(False).issues
     assert not _check_directory_structure(False).issues
     output = capsys.readouterr().out
@@ -44,8 +44,8 @@ def test_doctor_repairs_missing_files_as_envelopes_and_refuses_locked_state(home
 
     assert _check_env_file(True).fixed == 1
     assert _check_directory_structure(True).fixed >= 1
-    assert io.read_text(home / ".env", purpose="env") == ""
-    assert "Hermes" in io.read_text(home / "SOUL.md", purpose="state")
+    assert io.read_text(home / ".env", purpose="env", encoding="utf-8-sig") == ""
+    assert "Hermes" in io.read_text(home / "SOUL.md", purpose="state", encoding="utf-8-sig")
     before = {path: path.read_bytes() for path in (home / ".env", home / "SOUL.md")}
     assert all(data.startswith(b"HRMVAULT\x00") for data in before.values())
     vault.lock_now(home)

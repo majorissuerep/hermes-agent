@@ -471,68 +471,65 @@ def _custom_provider_base_url_config_value(provider_info, resolved_base_url=""):
 
 def _save_custom_provider(base_url, api_key="", model="", context_length=None, name=None, api_mode=None,
                           key_env=""):
-    """Save a custom endpoint to ``custom_providers`` in config.yaml, deduplicated by base_url (an
-    existing entry gets model / context_length / api_mode updated). *key_env* set means the caller
-    already wrote the key to ``.env``; the entry references it instead of inlining the secret.
+    """Save endpoints in the canonical provider map, retaining existing route identity.
 
-    See #69449.
+    A legacy endpoint is promoted when edited; other legacy entries remain readable.
+    ``key_env`` references a key already written to .env instead of inlining it.
     """
     from hermes_cli.config import load_config, save_config
-    cfg = load_config()
-    providers = cfg.get("custom_providers") or []
-    if not isinstance(providers, list):
-        providers = []
-    for entry in providers:
-        if not (isinstance(entry, dict) and entry.get("base_url", "").rstrip("/") == base_url.rstrip("/")):
-            continue
-        changed = False
-        if model and entry.get("model") != model:
-            entry["model"] = model
-            changed = True
-        if model and context_length:
-            _ensure_dict_section(entry, "models")[model] = {"context_length": context_length}
-            changed = True
-        if api_mode:
-            if entry.get("api_mode") != api_mode:
-                entry["api_mode"] = api_mode
-                changed = True
-        elif "api_mode" in entry:
-            entry.pop("api_mode", None)
-            changed = True
-        if key_env and (entry.get("key_env") != key_env or entry.get("api_key")):
-            entry["key_env"] = key_env
-            entry.pop("api_key", None)
-            changed = True
-        if changed:
-            cfg["custom_providers"] = providers
-            save_config(cfg)
-        return  # already saved, updated if needed
+    from hermes_cli.config_providers import _custom_provider_entry_to_provider_config
+    from hermes_cli.providers import custom_provider_slug
 
-    name = name or _auto_provider_name(base_url)
-    entry = {"name": name, "base_url": base_url}
+    cfg = load_config()
+    providers = _ensure_dict_section(cfg, "providers")
+    route = base_url.rstrip("/")
+    provider_key = next((key for key, entry in providers.items()
+                         if isinstance(entry, dict)
+                         and str(entry.get("api", entry.get("base_url", ""))).rstrip("/") == route), None)
+    legacy = cfg.get("custom_providers")
+    matching_legacy = [entry for entry in (legacy if isinstance(legacy, list) else [])
+                       if isinstance(entry, dict) and entry.get("base_url", "").rstrip("/") == route]
+    created = provider_key is None
+    if created:
+        entry = (_custom_provider_entry_to_provider_config(matching_legacy[0])
+                 if matching_legacy else {"api": base_url, "name": name or _auto_provider_name(base_url)})
+        key_base = custom_provider_slug(entry["name"]).removeprefix("custom:")
+        provider_key = key_base
+        suffix = 2
+        while provider_key in providers:
+            provider_key = f"{key_base}-{suffix}"
+            suffix += 1
+        providers[provider_key] = entry
+    else:
+        entry = providers[provider_key]
+
+    if model:
+        entry["default_model"] = model
+    if model and context_length:
+        _ensure_dict_section(_ensure_dict_section(entry, "models"), model)["context_length"] = context_length
+    entry.pop("api_mode", None)
+    if api_mode:
+        entry["transport"] = api_mode
+    else:
+        entry.pop("transport", None)
     if key_env:
         entry["key_env"] = key_env
+        entry.pop("api_key", None)
     elif api_key:
         entry["api_key"] = api_key
-    if model:
-        entry["model"] = model
-    if api_mode:
-        entry["api_mode"] = api_mode
-    if model and context_length:
-        entry["models"] = {model: {"context_length": context_length}}
-
-    providers.append(entry)
-    cfg["custom_providers"] = providers
+    if matching_legacy:
+        cfg["custom_providers"] = [item for item in legacy if item not in matching_legacy]
     save_config(cfg)
-    print(f'  💾 Saved to custom providers as "{name}" (edit in config.yaml)')
+    if created:
+        print(f'  💾 Saved to custom providers as "{entry["name"]}" (edit in config.yaml)')
 
 
 def _remove_custom_provider(config):
     """Let the user remove a saved custom provider from config.yaml."""
-    from hermes_cli.config import load_config, save_config
+    from hermes_cli.config import get_compatible_custom_providers, load_config, save_config
     cfg = load_config()
-    providers = cfg.get("custom_providers") or []
-    if not isinstance(providers, list) or not providers:
+    providers = get_compatible_custom_providers(cfg)
+    if not providers:
         print("No custom providers configured.")
         return
 
@@ -561,8 +558,14 @@ def _remove_custom_provider(config):
         print("No change.")
         return
 
-    removed = providers.pop(idx)
-    cfg["custom_providers"] = providers
+    removed = providers[idx]
+    if removed.get("provider_key"):
+        cfg["providers"].pop(removed["provider_key"])
+    else:
+        cfg["custom_providers"] = [entry for entry in cfg["custom_providers"]
+                                   if not (isinstance(entry, dict)
+                                           and entry.get("name") == removed["name"]
+                                           and entry.get("base_url") == removed["base_url"])]
     save_config(cfg)
     removed_name = removed.get("name", "unnamed") if isinstance(removed, dict) else str(removed)
     print(f'✅ Removed "{removed_name}" from custom providers.')
@@ -938,7 +941,7 @@ def _build_provider_picker_rows(config: dict, active: str, provider_labels: dict
              bool(active) and key == active)
 
     ordered.append(("custom", "Custom endpoint (enter URL manually)", []))
-    if isinstance(config.get("custom_providers"), list) and config.get("custom_providers"):
+    if custom_provider_map:
         ordered.append(("remove-custom", "Remove a saved custom provider", []))
     ordered.append(("reasoning", "Reasoning effort for the current model...", []))
     ordered.append(("aux-config", "Configure auxiliary models...", []))
