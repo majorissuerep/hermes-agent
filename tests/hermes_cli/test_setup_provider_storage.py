@@ -17,15 +17,19 @@ def test_setup_creates_updates_and_removes_canonical_provider(tmp_path, monkeypa
     vault.unlock(home, "setup-provider-password")
     try:
         if legacy:
-            save_config({"custom_providers": [{"name": "Local server", "base_url": "http://127.0.0.1:8080/v1",
-                                               "extra_headers": {"X-Custom": "preserved"}}]})
+            monkeypatch.setenv("CUSTOM_ENDPOINT_URL", "http://127.0.0.1:8080/v1")
+            monkeypatch.setenv("CUSTOM_AUTH_HEADER", "private-header")
+            save_config({"custom_providers": [{"name": "Local server", "base_url": "${CUSTOM_ENDPOINT_URL}",
+                                               "extra_headers": {"X-Custom": "${CUSTOM_AUTH_HEADER}"}}]})
         _save_custom_provider("http://127.0.0.1:8080/v1", model="first", name="Local server",
                               key_env="HERMES_CUSTOM_LOCAL_API_KEY", api_mode="chat_completions")
         config = read_raw_config()
         first = get_compatible_custom_providers(config)[0]
         assert first["provider_key"] in config["providers"]
         if legacy:
-            assert first["extra_headers"] == {"X-Custom": "preserved"}
+            assert first["base_url"] == "${CUSTOM_ENDPOINT_URL}"
+            assert first["extra_headers"] == {"X-Custom": "${CUSTOM_AUTH_HEADER}"}
+            assert "private-header" not in repr(config)
             assert not config.get("custom_providers")
         _save_custom_provider("http://127.0.0.1:8080/v1/", model="second", context_length=12345,
                               key_env="HERMES_CUSTOM_LOCAL_API_KEY", api_mode="chat_completions")

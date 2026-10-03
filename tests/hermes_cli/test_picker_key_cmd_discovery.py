@@ -120,6 +120,6 @@ def test_setup_probe_credentials_never_become_saved_credentials(monkeypatch, rou
         assert choices == ["fallback"]
     saved = config_module.load_config()
     assert "transient-bearer" not in repr(saved)
-    persisted = saved[route]["gateway"] if route == "providers" else saved[route][0]
+    persisted = config_module.get_compatible_custom_providers(saved)[0]
     assert persisted["key_cmd"] == entry["key_cmd"]
     assert persisted.get("api_key", "") == static.get("api_key", "")

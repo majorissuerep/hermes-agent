@@ -10,6 +10,8 @@ from unittest.mock import patch
 
 import pytest
 
+from hermes_cli.config_providers import get_compatible_custom_providers
+
 
 @pytest.fixture
 def config_home(tmp_path, monkeypatch):
@@ -154,7 +156,7 @@ class TestCustomProviderModelSwitch:
         assert mock_fetch.call_args.args[0] == "sk-live-example-provider"
         config = yaml.safe_load(config_path.read_text()) or {}
         assert config["model"]["api_key"] == "${EXAMPLE_PROVIDER_API_KEY}"
-        assert config["custom_providers"][0]["api_key"] == "${EXAMPLE_PROVIDER_API_KEY}"
+        assert get_compatible_custom_providers(config)[0]["api_key"] == "${EXAMPLE_PROVIDER_API_KEY}"
         assert "sk-live-example-provider" not in config_path.read_text()
 
     def test_key_env_custom_provider_persists_reference_not_secret(self, config_home, monkeypatch):
@@ -190,7 +192,7 @@ class TestCustomProviderModelSwitch:
 
         config = yaml.safe_load(config_path.read_text()) or {}
         assert config["model"]["api_key"] == "${EXAMPLE_PROVIDER_API_KEY}"
-        assert config["custom_providers"][0]["key_env"] == "EXAMPLE_PROVIDER_API_KEY"
+        assert get_compatible_custom_providers(config)[0]["key_env"] == "EXAMPLE_PROVIDER_API_KEY"
         assert "sk-live-example-provider" not in config_path.read_text()
 
     def test_env_ref_base_url_preserves_api_key_ref_through_picker(
@@ -255,7 +257,9 @@ class TestCustomProviderModelSwitch:
         saved = config_path.read_text()
         config = yaml.safe_load(saved) or {}
         assert config["model"]["api_key"] == "${NEURALWATT_API_KEY}"
-        assert config["custom_providers"][0]["api_key"] == "${NEURALWATT_API_KEY}"
+        entry = get_compatible_custom_providers(config)[0]
+        assert entry["api_key"] == "${NEURALWATT_API_KEY}"
+        assert entry["base_url"] == "${NEURALWATT_API_BASE}"
         assert "sk-live-neuralwatt-secret" not in saved
 
 

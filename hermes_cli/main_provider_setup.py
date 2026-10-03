@@ -476,7 +476,7 @@ def _save_custom_provider(base_url, api_key="", model="", context_length=None, n
     A legacy endpoint is promoted when edited; other legacy entries remain readable.
     ``key_env`` references a key already written to .env instead of inlining it.
     """
-    from hermes_cli.config import load_config, save_config
+    from hermes_cli.config import load_config, read_raw_config, save_config
     from hermes_cli.config_providers import _custom_provider_entry_to_provider_config
     from hermes_cli.providers import custom_provider_slug
 
@@ -491,8 +491,16 @@ def _save_custom_provider(base_url, api_key="", model="", context_length=None, n
                        if isinstance(entry, dict) and entry.get("base_url", "").rstrip("/") == route]
     created = provider_key is None
     if created:
-        entry = (_custom_provider_entry_to_provider_config(matching_legacy[0])
-                 if matching_legacy else {"api": base_url, "name": name or _auto_provider_name(base_url)})
+        if matching_legacy:
+            # Moving to a new config path must carry raw templates, not the
+            # expanded URLs, headers, and credentials in the runtime view.
+            raw_legacy = read_raw_config().get("custom_providers", [])
+            index = legacy.index(matching_legacy[0])
+            source = (raw_legacy[index] if isinstance(raw_legacy, list) and index < len(raw_legacy)
+                      else matching_legacy[0])
+            entry = _custom_provider_entry_to_provider_config(source)
+        else:
+            entry = {"api": base_url, "name": name or _auto_provider_name(base_url)}
         key_base = custom_provider_slug(entry["name"]).removeprefix("custom:")
         provider_key = key_base
         suffix = 2
@@ -515,7 +523,7 @@ def _save_custom_provider(base_url, api_key="", model="", context_length=None, n
     if key_env:
         entry["key_env"] = key_env
         entry.pop("api_key", None)
-    elif api_key:
+    elif api_key and created and not matching_legacy:
         entry["api_key"] = api_key
     if matching_legacy:
         cfg["custom_providers"] = [item for item in legacy if item not in matching_legacy]
