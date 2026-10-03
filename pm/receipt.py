@@ -297,7 +297,7 @@ def latest() -> Optional[dict[str, Any]]:
 
                 return json.loads(read_text(point, purpose="state"))
             return json.loads(point.read_text(encoding="utf-8-sig"))
-    except (OSError, ValueError):
+    except (OSError, ValueError, RuntimeError):
         return None
     return None
 
