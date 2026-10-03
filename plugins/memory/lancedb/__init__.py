@@ -120,9 +120,9 @@ class LanceMemoryProvider(MemoryProvider):
         self._writes_enabled = str(kwargs.get("agent_context") or "primary") == "primary"
         home = Path(kwargs.get("hermes_home") or self._home())
         with suppress(Exception):
-            from tools.lazy_deps import ensure
+            from pm import ensure_import
 
-            ensure("memory.lancedb", prompt=False)
+            ensure_import("lancedb-memory")
         try:
             from .embedder import get_embedder, model_dim
             from .store import get_store
