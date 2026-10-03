@@ -21,7 +21,7 @@ from typing import Any, Dict, Optional, Tuple
 
 from hermes_cli import config as _config
 from hermes_cli import managed_scope
-from hermes_cli.config_read_errors import _warn_config_parse_failure
+from hermes_cli.config_read_errors import _VAULT_CREDENTIAL_ERRORS, _warn_config_parse_failure
 from utils import fast_safe_load
 
 # path -> raw user mapping from the last successful parse in this process; served (through the
@@ -43,7 +43,7 @@ def _recover_user_raw(config_path: Path, path_key: str, exc: Exception) -> Dict[
     raw = _LAST_GOOD_USER_RAW.get(path_key)
     fallback = "last-known-good"
     # Fork: a locked vault locks the backup too; the gate reloads config after unlock.
-    if raw is None and type(exc).__name__ not in _config._VAULT_CREDENTIAL_ERRORS:
+    if raw is None and type(exc).__name__ not in _VAULT_CREDENTIAL_ERRORS:
         from hermes_cli.config_backups import load_newest_good_backup
         raw = load_newest_good_backup(config_path)
         fallback = "last-known-good-backup"

@@ -243,7 +243,6 @@ def _read_tail(path: Path, num_lines: int, *, has_filters: bool = False, **filte
 
 
 def _read_all_lines(path: Path) -> list:
-@@FORK@@
     # Fork: inside a vaulted home, logs/agent.log etc. are encrypted frame
     # streams (the vault frame handler wrote every byte of them; vault init
     # refuses pre-existing state, so there is no legacy plaintext log).
@@ -259,7 +258,7 @@ def _read_all_lines(path: Path) -> list:
     except Exception:
         pass
     with open(path, "r", encoding="utf-8-sig", errors="replace") as f:
-        return f.readlines()        return f.readlines()
+        return f.readlines()
 
 
 def _read_last_n_lines(path: Path, n: int) -> list:

@@ -360,6 +360,18 @@ def load_env_file(env_path: Path) -> Dict[str, str]:
     returns a fresh dict: callers mutate what they get back (``build_profile_secret_scope`` layers
     external secrets over it).
     """
+    # Vault reads must authenticate on every call, including after lock_now().
+    # The plaintext cache below is only for unencrypted legacy/managed files.
+    from hermes_security import io as state_io
+
+    if state_io._home_for(env_path) is not None:
+        invalidate_env_file_cache(env_path)
+        try:
+            raw = state_io.read_bytes(env_path, purpose="env")
+        except OSError:
+            return {}
+        return _parse_env_text(_decode_env_bytes(raw)) if raw is not None else {}
+
     key = str(env_path)
     try:
         with open(env_path, "rb") as handle:

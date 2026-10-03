@@ -51,7 +51,7 @@ from utils import atomic_replace, fast_safe_load, file_signature, mkstemp_beside
 from hermes_cli.config_read_errors import (
     _CONFIG_PARSE_FAILURES, _FIX_PERMS, _FIX_YAML, FailedConfigRead, _backups_dir_display,
     _refuse_failed_read, _refuse_overwrite, _warn_config_parse_failure, _yaml_error_details,
-    _yaml_error_location)
+    _yaml_error_location, _VAULT_CREDENTIAL_ERRORS)
 
 logger = logging.getLogger(__name__)
 

@@ -201,7 +201,9 @@ class _Checkout:
 
 
 def _read_json(path: Path):
-    return _quiet(lambda: json.loads(path.read_text(encoding="utf-8-sig")))
+    from hermes_security.io import read_state_text
+
+    return _quiet(lambda: json.loads(read_state_text(path, purpose="update-check")))
 
 
 def _unsupported_reason(stamp: dict, root: Path, *, explicit_root: bool, embedded: Optional[str]) -> Optional[dict]:
@@ -260,10 +262,15 @@ def _cached_status(cache_file: Path, identity: dict, now: float) -> Optional[dic
 
 def _write_cache(cache_file: Path, identity: dict, now: float, result: dict) -> None:
     try:
+        from hermes_security.io import _home_for, write_json
         from utils import atomic_json_write
         cache_file.parent.mkdir(parents=True, exist_ok=True)
-        atomic_json_write(cache_file, {"identity": identity, "ts": now, "status": result})
-    except OSError as exc:
+        payload = {"identity": identity, "ts": now, "status": result}
+        if _home_for(cache_file) is not None:
+            write_json(cache_file, payload, purpose="update-check")
+        else:
+            atomic_json_write(cache_file, payload)
+    except Exception as exc:
         logger.debug("Could not cache source check: %s", exc)
 
 
