@@ -6,6 +6,13 @@ description: "Running Hermes Agent in Docker and using Docker as a terminal back
 
 # Hermes Docker Setup
 
+:::info Upstream image reference
+The `nousresearch/hermes-agent` images on this page are published by upstream.
+They do not contain this fork's encrypted vault or other fork changes. To install
+this fork, follow the [fork installation guide](../getting-started/installation.md).
+Keep an upstream container's data home separate from an encrypted fork home.
+:::
+
 There are two distinct ways Docker intersects with Hermes Agent:
 
 1. **Running Hermes IN Docker** — the agent itself runs inside a container (this page's primary focus)

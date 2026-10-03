@@ -6,6 +6,13 @@ description: "Which operating systems, distribution methods, and features Hermes
 
 # Platform Support
 
+:::info Fork installation
+Start with the [fork installation guide](./installation.md). The Nous Research
+desktop downloads, MSIX packages, Docker images, and Termux APT packages referenced
+below are upstream distributions; they do not include this fork's encrypted vault
+or other fork changes. Their support tiers describe upstream's release policy.
+:::
+
 Hermes Agent maintains support for many platforms and distribution methods, but we can't support every possible install method.
 
 ---
