@@ -311,9 +311,14 @@ def _write_health_reason(state_db_path: Path, *, should_fix: bool):
         check_info("state.db write-health probe skipped: store is held by a live writer and larger than 1 GB "
                    "(run 'hermes doctor --fix' to probe it)")
         return None
-    import sqlite3
     import tempfile
-    with tempfile.TemporaryDirectory() as tmp:
+    from hermes_security.sqlite import is_vaulted
+    from hermes_constants import get_scratch_dir
+
+    # A SQLCipher snapshot needs its own vault-bound key. Keep it under the
+    # same home so every repair/probe connection uses the encrypted driver.
+    scratch_root = get_scratch_dir(state_db_path.parent) if is_vaulted(state_db_path) else None
+    with tempfile.TemporaryDirectory(dir=scratch_root) as tmp:
         snapshot = Path(tmp) / "state.db"
         src = _vault_maybe_connect(read_only_db_uri(state_db_path), uri=True, timeout=1.0)
         try:
