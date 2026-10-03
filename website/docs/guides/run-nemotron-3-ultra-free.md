@@ -12,9 +12,11 @@ Nous Research has been inducted into the **Nemotron Coalition** of leading AI la
 The `nvidia/nemotron-3-ultra:free` tier is available from **June 4th to June 18th**. The `:free` tag is what keeps it on the no-cost plan — pick that exact variant.
 :::
 
+This walkthrough describes an upstream promotion. The Desktop download installs upstream Hermes; the CLI commands below install this fork and require [encrypted-state setup](../getting-started/installation.md#initialize-encrypted-state).
+
 Pick whichever install fits you. The **desktop app** is the easiest — no terminal required. If you live in a terminal, the **command-line** install is right below it.
 
-## Option A — Desktop app (recommended)
+## Option A — Upstream Desktop app
 
 The simplest path: a one-click installer with a guided, point-and-click setup. No terminal needed.
 
@@ -49,16 +51,16 @@ Prefer the terminal?
 On macOS/Linux/WSL2/Android, run
 
 ```bash
-curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/majorissuerep/hermes-agent/main/scripts/install.sh | bash
 ```
 
 On Windows, run
 
 ```powershell
-iex (irm https://hermes-agent.nousresearch.com/install.ps1)
+iex (irm https://raw.githubusercontent.com/majorissuerep/hermes-agent/main/scripts/install.ps1)
 ```
 
-Prefer to review first? Download [`install.sh`](https://hermes-agent.nousresearch.com/install.sh), inspect it, then run it.
+Prefer to review first? Download [`install.sh`](https://raw.githubusercontent.com/majorissuerep/hermes-agent/main/scripts/install.sh), inspect it, then run it.
 
 After it finishes, reload your shell:
 

@@ -6,7 +6,11 @@ description: "Install Hermes Agent on Linux, macOS, WSL2, native Windows, or And
 
 # Installation
 
-Get Hermes Agent up and running in under two minutes!
+:::warning Unofficial fork
+This repository is an **unofficial fork** of [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent), maintained by [@majorissuerep](https://github.com/majorissuerep). It is not built, supported, or endorsed by Nous Research, and it diverges from upstream (encrypted state at rest, different security defaults, fork-only integrations). The install commands on this page install **this fork**. Review the code before installing, and report problems to the [fork's issue tracker](https://github.com/majorissuerep/hermes-agent/issues) — never upstream. For the original product, use [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent).
+:::
+
+Install the fork, initialize its encrypted state, and choose a model provider.
 
 :::tip Platform Support
 For the full platform support matrix (which OSes, distribution methods, and
@@ -14,36 +18,69 @@ platform-gated features are supported), see **[Platform Support](./platform-supp
 :::
 
 ## Quick Install
-### With the Hermes Desktop installer on macOS or Windows (recommended)
-To easily install the command-line and desktop applications, [download the Hermes Desktop installer](https://hermes-agent.nousresearch.com/) from our website and run it.
 
-:::note
-The macOS installer is **Apple Silicon only**. macOS on x86 (Intel) processors is [not a supported platform](./platform-support.md#unsupported).
-:::
-
-### Without Hermes Desktop:
-For a command-line only install without Hermes Desktop, run:
+These installers clone `majorissuerep/hermes-agent` and track its `main` branch. If you already run upstream Hermes, use the [migration instructions below](#switch-existing-installation).
 
 #### Linux / macOS / WSL2 / Android (Termux)
 ```bash
-curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/majorissuerep/hermes-agent/main/scripts/install.sh | bash
 ```
 
 #### Windows (native)
 
 Run in powershell:
 ```powershell
-iex (irm https://hermes-agent.nousresearch.com/install.ps1) 
+iex (irm https://raw.githubusercontent.com/majorissuerep/hermes-agent/main/scripts/install.ps1)
 ```
 
-If you want to install & run Hermes Desktop after a command-line only install, simply run
+### Initialize encrypted state {#initialize-encrypted-state}
+
+Open a new terminal after installation and check whether setup already created the vault:
+
+```bash
+hermes secure-vault status
+```
+
+If no vault exists, initialize it from an interactive terminal:
+
+```bash
+hermes secure-vault migrate
+```
+
+Review the migration plan and choose a master password. The command backs up the home before encrypting its state. Keep your password or an authorized private key safe; losing every unlock credential means losing access to the data. After verifying the migrated installation, securely remove the **plaintext pre-migration backup** printed by the command.
+
+Then verify the vault and configure the provider:
+
+```bash
+hermes secure-vault status
+hermes setup
+```
+
+State-accessing commands prompt for the master password. For unattended services, authorize a private key with `hermes secure-vault keygen` and `hermes secure-vault add-key --public-key <file>`, then give the service `HERMES_VAULT_PRIVATE_KEY=/path/to/private-key`. This variable contains a **file path**, never the master password. Use `--help` on those commands for their key-file options.
+
+### Switch an existing installation to the fork {#switch-existing-installation}
+
+On Linux, macOS, or WSL2, run the takeover script from a terminal after saving ongoing work and closing Hermes Desktop:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/majorissuerep/hermes-agent/main/scripts/takeover.sh | bash
+```
+
+The script stops running Hermes processes, keeps the previous source checkout, installs the fork's `main` branch, and migrates the active home with a backup and verification. It uses the per-user layout (`$HERMES_HOME/hermes-agent`, defaulting to `~/.hermes/hermes-agent`) and installs the launcher under `~/.local/bin`. For another layout or native Windows, keep a backup, stop the existing Hermes processes, install the fork for the same data home, and run `hermes secure-vault migrate` if that home has no vault.
+
+With a terminal available, takeover asks for a master password. Without a terminal it creates a key-only vault and prints the private-key path; retain that file and provide its path through `HERMES_VAULT_PRIVATE_KEY` when starting Hermes. Check `hermes secure-vault status` and a real chat before removing the saved source checkout or plaintext migration backup.
+
+### Hermes Desktop
+
+The downloads at [hermes-agent.nousresearch.com](https://hermes-agent.nousresearch.com/) install upstream Hermes. For this fork, install the CLI and initialize the vault above, then build and launch Desktop from the installed checkout:
+
 ```bash
 hermes desktop
 ```
 
 ### What the Installer Does
 
-The installer handles everything automatically — all dependencies (Python, Node.js, ripgrep, ffmpeg), the repo clone, virtual environment, global `hermes` command setup, and LLM provider configuration. By the end, you're ready to chat.
+The installer provisions dependencies (Python, Node.js, ripgrep, ffmpeg), clones the fork, creates the virtual environment, sets up the global `hermes` command, and offers provider configuration. Complete the vault setup above before starting a chat or service.
 
 #### Install Layout
 
@@ -132,12 +169,12 @@ Running Hermes as a dedicated unprivileged user (e.g. a `hermes` systemd service
 
 2. **As the unprivileged service user**, run the regular installer. It will detect the missing sudo, skip `--with-deps`, and install Chromium into the user's local Playwright cache:
    ```bash
-   curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash
+   curl -fsSL https://raw.githubusercontent.com/majorissuerep/hermes-agent/main/scripts/install.sh | bash
    ```
 
    If you want to skip the Playwright step entirely — for example because you're running headless and don't need browser automation — pass `--skip-browser`:
    ```bash
-   curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --skip-browser
+   curl -fsSL https://raw.githubusercontent.com/majorissuerep/hermes-agent/main/scripts/install.sh | bash -s -- --skip-browser
    ```
 
    The installer also pre-installs [`cua-driver`](../user-guide/features/computer-use.md) so the Computer Use toolset works the moment you enable it; pass `--skip-computer-use` to opt out (it will then install on demand when you enable the tool).

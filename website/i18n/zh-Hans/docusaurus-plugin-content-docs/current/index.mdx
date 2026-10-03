@@ -11,6 +11,10 @@ import Link from "@docusaurus/Link";
 
 # Hermes Agent
 
+:::warning 非官方 fork
+本文档属于由 [@majorissuerep](https://github.com/majorissuerep) 维护的 [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent) 非官方 fork。下方命令安装本 fork 的 `main` 分支；Nous Research 未对本 fork 提供支持或背书。fork 的问题请提交到[本仓库](https://github.com/majorissuerep/hermes-agent/issues)。
+:::
+
 由 [Nous Research](https://nousresearch.com) 构建的自我改进 AI 智能体。唯一内置学习循环的智能体——它从经验中创建技能，在使用过程中持续改进，主动提示自身持久化知识，并在会话间不断深化对你的建模。
 
 <div
@@ -36,7 +40,7 @@ import Link from "@docusaurus/Link";
     快速开始 →
   </Link>
   <a
-    href="https://github.com/NousResearch/hermes-agent"
+    href="https://github.com/majorissuerep/hermes-agent"
     style={{
       display: "inline-block",
       padding: "0.6rem 1.2rem",
@@ -54,16 +58,18 @@ import Link from "@docusaurus/Link";
 **Linux / macOS / WSL2**
 
 ```bash
-curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/majorissuerep/hermes-agent/main/scripts/install.sh | bash
 ```
 
 **Windows（原生，PowerShell）** — _早期测试版，[详情 →](./user-guide/windows-native.md)_
 
 ```powershell
-iex (irm https://hermes-agent.nousresearch.com/install.ps1)
+iex (irm https://raw.githubusercontent.com/majorissuerep/hermes-agent/main/scripts/install.ps1)
 ```
 
 **Android（Termux）** — 与 Linux 相同的 curl 一行命令；安装程序会自动检测 Termux。
+
+安装后运行 `hermes secure-vault status`。若尚无 vault，请先在终端中执行 `hermes secure-vault migrate`，再进行设置或聊天。详情见[加密状态初始化](./getting-started/installation.md#initialize-encrypted-state)。已有上游安装请阅读[迁移说明](./getting-started/installation.md#switch-existing-installation)。上游 Desktop 下载提供的是上游版本；本 fork 完成 CLI 和 vault 设置后可运行 `hermes desktop`。
 
 请参阅完整的 **[安装指南](./getting-started/installation.md)**，了解安装程序的具体操作、按用户与 root 的目录布局以及 Windows 相关说明。
 

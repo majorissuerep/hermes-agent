@@ -6,6 +6,8 @@ description: "Install and deploy Hermes Agent with Nix — from quick `nix run` 
 
 # Nix & NixOS Setup
 
+The flake references below target this fork. After installing, complete [encrypted-state setup](./installation.md#initialize-encrypted-state) before configuring Hermes or starting a service; the Nix service also needs an authorized vault private key.
+
 :::warning Tier 2 platform
 Nix and NixOS are [Tier 2 platforms](./platform-support.md#tier-2). The flake and NixOS module documented here are maintained on a best-effort basis only. Commits to `main` may break these packages at any point in time.
 
@@ -42,17 +44,17 @@ No clone needed. Nix fetches, builds, and runs everything:
 
 ```bash
 # Run the desktop app
-nix run github:NousResearch/hermes-agent#desktop
+nix run github:majorissuerep/hermes-agent#desktop
 
 # Or install persistently
-nix profile install github:NousResearch/hermes-agent#desktop
+nix profile install github:majorissuerep/hermes-agent#desktop
 
 # run the tui
-nix run github:NousResearch/hermes-agent -- setup
-nix run github:NousResearch/hermes-agent -- --tui
+nix run github:majorissuerep/hermes-agent -- setup
+nix run github:majorissuerep/hermes-agent -- --tui
 
 # or install it in your profile
-nix profile install github:NousResearch/hermes-agent
+nix profile install github:majorissuerep/hermes-agent
 hermes setup
 hermes --tui
 ```
@@ -70,7 +72,7 @@ The `default` package adds ~700 MB to the closure. If you only need messaging pl
 <summary><strong>Running from a local clone</strong></summary>
 
 ```bash
-git clone https://github.com/NousResearch/hermes-agent.git
+git clone https://github.com/majorissuerep/hermes-agent.git
 cd hermes-agent
 nix develop
 hermes setup
@@ -95,7 +97,7 @@ This module needs NixOS. Hermes is an agent for one person. If you want an agent
 {
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    hermes-agent.url = "github:NousResearch/hermes-agent";
+    hermes-agent.url = "github:majorissuerep/hermes-agent";
   };
 
   outputs = { nixpkgs, hermes-agent, ... }: {
@@ -616,7 +618,7 @@ The option set is the same set that the NixOS module uses. It is `services.herme
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     home-manager.url = "github:nix-community/home-manager";
     home-manager.inputs.nixpkgs.follows = "nixpkgs";
-    hermes-agent.url = "github:NousResearch/hermes-agent";
+    hermes-agent.url = "github:majorissuerep/hermes-agent";
   };
 }
 ```
@@ -864,7 +866,7 @@ External flakes can override the package directly:
 
 ```nix
 {
-  inputs.hermes-agent.url = "github:NousResearch/hermes-agent";
+  inputs.hermes-agent.url = "github:majorissuerep/hermes-agent";
   outputs = { hermes-agent, nixpkgs, ... }: {
     nixpkgs.overlays = [ hermes-agent.overlays.default ];
     # Then:

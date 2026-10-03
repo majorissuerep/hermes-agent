@@ -11,7 +11,11 @@ import Link from "@docusaurus/Link";
 
 # Hermes Agent
 
-The self-improving AI agent built by [Nous Research](https://nousresearch.com). The only agent with a built-in learning loop — it creates skills from experience, improves them during use, nudges itself to persist knowledge, and builds a deepening model of who you are across sessions.
+:::warning Unofficial fork
+This documentation describes an **unofficial fork** of [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent), maintained by [@majorissuerep](https://github.com/majorissuerep). It is **not** built, supported, or endorsed by Nous Research; it diverges from upstream (encrypted state at rest, different security defaults, fork-only integrations) and is only tested on the maintainer's machines. The install commands here install the fork from its own git history — inspect them before running, and report problems to the [fork's issue tracker](https://github.com/majorissuerep/hermes-agent/issues), never upstream. For the original product, see [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent).
+:::
+
+A fork of the self-improving AI agent built by [Nous Research](https://nousresearch.com) (upstream). The only agent with a built-in learning loop — it creates skills from experience, improves them during use, nudges itself to persist knowledge, and builds a deepening model of who you are across sessions.
 
 <div
   style={{
@@ -60,7 +64,7 @@ The self-improving AI agent built by [Nous Research](https://nousresearch.com). 
     Download Desktop
   </a>
   <a
-    href="https://github.com/NousResearch/hermes-agent"
+    href="https://github.com/majorissuerep/hermes-agent"
     style={{
       display: "inline-block",
       padding: "0.6rem 1.2rem",
@@ -75,18 +79,12 @@ The self-improving AI agent built by [Nous Research](https://nousresearch.com). 
 
 ## Install
 
-### Windows or macOS
-
-To easily install the command-line and desktop applications, [download the Hermes Desktop installer](https://hermes-agent.nousresearch.com/) from our website and run it.
-
-### Without Hermes Desktop:
-
-For a command-line only install without Hermes Desktop, run:
+The commands below install this fork from `majorissuerep/hermes-agent` on `main`. For an existing upstream installation, follow [the migration instructions](./getting-started/installation.md#switch-existing-installation).
 
 #### Linux / macOS / WSL2 / Android (Termux)
 
 ```bash
-curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/majorissuerep/hermes-agent/main/scripts/install.sh | bash
 ```
 
 #### Windows (native)
@@ -94,8 +92,12 @@ curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash
 Run in powershell:
 
 ```powershell
-iex (irm https://hermes-agent.nousresearch.com/install.ps1)
+iex (irm https://raw.githubusercontent.com/majorissuerep/hermes-agent/main/scripts/install.ps1)
 ```
+
+After installation, check `hermes secure-vault status`. If no vault exists, run `hermes secure-vault migrate` from a terminal before setup or chat. See [encrypted-state setup](./getting-started/installation.md#initialize-encrypted-state).
+
+The [upstream Desktop downloads](https://hermes-agent.nousresearch.com/) install upstream Hermes. To use Desktop with this fork, install the CLI and initialize its vault, then run `hermes desktop`.
 
 See the full **[Installation Guide](./getting-started/installation.md)** for what the installer does, the per-user vs root layout, and Windows-specific notes. For the complete platform support matrix, see **[Platform Support](./getting-started/platform-support.md)**.
 

@@ -6,6 +6,8 @@ description: "如何为 Hermes Agent 做贡献 — 开发环境配置、代码�
 
 # 贡献指南
 
+本指南面向非官方 [majorissuerep/hermes-agent fork](https://github.com/majorissuerep/hermes-agent)。fork 的贡献请通过 PR 提交到本仓库的 `main`，并在 CI 检查通过后合并。上游贡献请提交到 [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent)。
+
 感谢您为 Hermes Agent 做贡献！本指南涵盖开发环境配置、代码库结构说明以及 PR 合并流程。
 
 ## 贡献优先级
@@ -43,7 +45,7 @@ description: "如何为 Hermes Agent 做贡献 — 开发环境配置、代码�
 对大多数贡献者来说，最好的开发启动方式和用户安装方式相同：运行标准安装器，然后在它克隆出的仓库里开发。安装器会创建 Hermes venv、配置 `hermes` 命令、为 `hermes update` 写入安装方式标记，并把完整 git 项目克隆到 `$HERMES_HOME/hermes-agent`（通常是 `~/.hermes/hermes-agent`）。这样你的开发环境会和 CLI、updater、lazy dependency installer、gateway、docs 默认假设的布局一致。
 
 ```bash
-curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/majorissuerep/hermes-agent/main/scripts/install.sh | bash
 cd "${HERMES_HOME:-$HOME/.hermes}/hermes-agent"
 
 # 在标准安装基础上添加开发/测试 extras。
@@ -65,7 +67,7 @@ scripts/run_tests.sh
 只有在你明确不想使用 Hermes managed install layout 时才使用这种方式（例如容器或 CI job 里的临时 clone）。如果这样安装，请确保运行的是这个 venv 里的 `hermes` entrypoint；运行系统 `python3 -m hermes_cli.main` 可能会加载无关的系统 Python 包。
 
 ```bash
-git clone https://github.com/NousResearch/hermes-agent.git
+git clone https://github.com/majorissuerep/hermes-agent.git
 cd hermes-agent
 
 # 使用 Python 3.11 创建虚拟环境
@@ -236,7 +238,7 @@ fix(security): prevent shell injection in sudo password piping
 
 ## 报告问题
 
-- 使用 [GitHub Issues](https://github.com/NousResearch/hermes-agent/issues)
+- 使用 [GitHub Issues](https://github.com/majorissuerep/hermes-agent/issues)
 - 请包含：操作系统、Python 版本、Hermes 版本（`hermes --version`）、完整错误堆栈
 - 包含复现步骤
 - 创建前请检查是否已有重复 issue
