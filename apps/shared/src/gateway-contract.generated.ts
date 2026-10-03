@@ -1233,6 +1233,99 @@ export interface ConnectorPolicySetResult {
   revision: string
   effective: ConnectorPolicyEffectiveUnrestricted | ConnectorPolicyEffectiveDenyAll | ConnectorPolicyEffectiveAllow | ConnectorPolicyEffectiveDeny
 }
+export interface DeckListParams {
+  profile?: string | null
+  profiles?: string[] | null
+  include_closed?: boolean
+}
+export interface DeckListResult {
+  sessions: DeckSession[]
+  open_count: number
+}
+/** ``session_deck._project`` + the host's live runtime id. */
+export interface DeckSession {
+  ref: string
+  profile: string
+  handle: number
+  session_id: string
+  tip_session_id: string
+  title: string
+  model: string
+  cwd: string
+  surface: string
+  group_name: string
+  parent_handle?: number | null
+  state: string
+  owner_surface: string
+  owner_pid?: number | null
+  live_session_id: string
+  message_count: number
+  opened_at: number
+  last_active: number
+  estimated_cost_usd?: number | null
+}
+export interface DeckRegisterParams {
+  session_id: string
+  group?: string | null
+  parent?: string | null
+}
+export interface DeckRegisterResult {
+  ref: string
+  handle: number
+  profile: string
+}
+export interface DeckDetachParams {
+  session_id: string
+}
+export interface DeckDetachResult {
+  detached: boolean
+}
+export interface DeckSendParams {
+  profile?: string | null
+  target: string
+  from_session_id?: string | null
+  message: string
+  wait_s?: number
+}
+export interface DeckSendResult {
+  ref: string
+  delivery_id: string
+  status: string
+  woke: boolean
+  reply?: string | null
+  error?: string | null
+}
+/** ``target`` is a deck ref; ``from_session_id`` (a live runtime id) identifies a SESSION acting as the sender, and makes a bare ``#N`` relative to that session's profile. */
+export interface DeckTargetParams {
+  profile?: string | null
+  target: string
+  from_session_id?: string | null
+}
+export interface DeckCloseResult {
+  ref: string
+  closed: boolean
+}
+export interface DeckInterruptResult {
+  ref: string
+  interrupted: boolean
+}
+export interface DeckPeekParams {
+  profile?: string | null
+  target: string
+  from_session_id?: string | null
+  limit?: number
+}
+export interface DeckPeekResult {
+  session: DeckSession
+  messages: DeckMessage[]
+}
+export interface DeckMessage {
+  role: string
+  text: string
+}
+export interface DeckResolveResult {
+  session: DeckSession
+}
 /** ``tools/bot_desktop/runtime.py::DesktopStatus`` plus the lease and the profile it speaks for. */
 export interface DisplayStatus {
   profile: string
@@ -4459,6 +4552,13 @@ export interface ConnectionUpdatePayload {
 }
 /** ``tools/connectors/contract.py::Actor``. */
 export type ConnectionActor = 'user' | 'backend_watcher' | 'clock'
+export interface DeckChangedPayload {
+  open_count: number
+}
+export interface DeckClosedPayload {
+  ref: string
+  closed_by: string
+}
 export interface RequestCancelPayload {
   id: string
   method: string
@@ -4962,6 +5062,22 @@ export interface RpcMethods {
   'connectors.tools': { params: ConnectorToolsParams; result: ConnectorToolsResult }
   /** List/add/remove/pause/resume cron jobs in the (optionally profile-scoped) cron store. */
   'cron.manage': { params: CronManageParams; result: CronManageResult }
+  /** Close an open session: ends its runtime wherever it lives and removes it from the deck. */
+  'deck.close': { params: DeckTargetParams; result: DeckCloseResult }
+  /** This client stops showing a deck session; the session keeps running (detached when no client is left). */
+  'deck.detach': { params: DeckDetachParams; result: DeckDetachResult }
+  /** Stop the target's running turn (host-owned sessions only). */
+  'deck.interrupt': { params: DeckTargetParams; result: DeckInterruptResult }
+  /** Open sessions across profiles, most recently active first. */
+  'deck.list': { params: DeckListParams; result: DeckListResult }
+  /** The target's row plus its last user/assistant messages. */
+  'deck.peek': { params: DeckPeekParams; result: DeckPeekResult }
+  /** Mark a live session open in the deck: it now survives client disconnects until closed. */
+  'deck.register': { params: DeckRegisterParams; result: DeckRegisterResult }
+  /** Resolve a ref to its row (what a client needs to session.resume it with the right profile). */
+  'deck.resolve': { params: DeckTargetParams; result: DeckResolveResult }
+  /** Queue a message as the target's next user turn (never mid-turn); wakes a dormant target. */
+  'deck.send': { params: DeckSendParams; result: DeckSendResult }
   /** Block/unblock NEW spawns globally (active children keep running); returns the new state. */
   'delegation.pause': { params: DelegationPauseParams; result: DelegationPauseResult }
   /** Running subagent tree plus the spawn pause flag and limits. */
@@ -5425,6 +5541,14 @@ export const RPC_METHODS = [
   'connectors.policy.set',
   'connectors.tools',
   'cron.manage',
+  'deck.close',
+  'deck.detach',
+  'deck.interrupt',
+  'deck.list',
+  'deck.peek',
+  'deck.register',
+  'deck.resolve',
+  'deck.send',
   'delegation.pause',
   'delegation.status',
   'diagnostics.share_nous',
@@ -5708,6 +5832,10 @@ export interface BackendGatewayEventMap {
   'connection.update': ConnectionUpdatePayload
   /** cron/jobs.json moved; refetch the cron list. */
   'cron.changed': ChangeSignalPayload
+  /** The open-session set or a session's runtime state changed (broadcast). */
+  'deck.changed': DeckChangedPayload
+  /** This session was closed through the deck; its runtime is ending. */
+  'deck.closed': DeckClosedPayload
   /** The install ended (0 ok, -1 cancelled, -2 no sudo: the command to run by hand was streamed). */
   'display.install.done': DisplayInstallDonePayload
   /** One line of package-manager output. */
@@ -5849,6 +5977,8 @@ export const GATEWAY_EVENT_TYPES = [
   'connection.request',
   'connection.update',
   'cron.changed',
+  'deck.changed',
+  'deck.closed',
   'display.install.done',
   'display.install.log',
   'display.lease',
