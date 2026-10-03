@@ -243,26 +243,24 @@ def _read_tail(path: Path, num_lines: int, *, has_filters: bool = False, **filte
 
 
 def _read_all_lines(path: Path) -> list:
-    # Fork: inside a vaulted home, logs/agent.log etc. are encrypted frame
-    # streams (the vault frame handler wrote every byte of them; vault init
-    # refuses pre-existing state, so there is no legacy plaintext log).
-    try:
-        from hermes_security.io import _home_for
-        from hermes_security import frames as _frames
+    from hermes_security.io import _home_for
 
-        if _home_for(path) is not None and path.exists():
-            text = b"".join(_frames.read_frames(path, purpose="log")).decode(
-                "utf-8", errors="replace"
-            )
-            return [ln if ln.endswith("\n") else ln + "\n" for ln in text.splitlines(True)]
-    except Exception:
-        pass
+    if _home_for(path) is not None:
+        from hermes_security import frames
+
+        text = b"".join(frames.read_frames(path, purpose="log")).decode("utf-8", errors="replace")
+        return [line if line.endswith("\n") else line + "\n" for line in text.splitlines(True)]
     with open(path, "r", encoding="utf-8-sig", errors="replace") as f:
         return f.readlines()
 
 
 def _read_last_n_lines(path: Path, n: int) -> list:
-    """Read the last N lines; files over 1MB are read in growing chunks from the end."""
+    """Read the last N lines; large plaintext files use backwards chunked reads."""
+    from hermes_security.io import _home_for
+
+    # Authenticated frames must be read from their boundaries, never arbitrary byte offsets.
+    if _home_for(path) is not None:
+        return _read_all_lines(path)[-n:]
     try:
         size = path.stat().st_size
         if size == 0:
@@ -295,6 +293,32 @@ def _read_last_n_lines(path: Path, n: int) -> list:
 def _follow_log(path: Path, **filters) -> None:
     """Poll a log file for new content and print matching lines."""
     keep = _LineFilter(**filters)
+    from hermes_security.io import _home_for
+
+    home = _home_for(path)
+    if home is not None:
+        from hermes_security import frames
+        from hermes_security.vault import get_vault
+
+        vault = get_vault(home)
+        with open(path, "rb") as stream:
+            existing = stream.read()
+            _, consumed = frames.split_stream(existing, vault=vault, purpose="log", strict=True)
+            pending = existing[consumed:]
+            del existing
+            while True:
+                chunk = stream.read(65536)
+                if not chunk:
+                    time.sleep(0.3)
+                    continue
+                pending += chunk
+                payloads, consumed = frames.split_stream(pending, vault=vault, purpose="log", strict=True)
+                pending = pending[consumed:]
+                for payload in payloads:
+                    for line in payload.decode("utf-8", errors="replace").splitlines(keepends=True):
+                        if keep(line):
+                            print(line, end="")
+                            sys.stdout.flush()
     with open(path, "r", encoding="utf-8-sig", errors="replace") as f:
         # Seek to end
         f.seek(0, 2)

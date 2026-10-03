@@ -937,7 +937,8 @@ class TestCollectShareBundle:
         ))
         assert "?token=***" in content
         assert "%78_amz_signature=***" in content
-        assert "alice:***@proxy.example:8080" in content
+        assert "proxy.example:8080" in content
+        assert "alice" not in content
 
     def test_redaction_masks_url_credentials(self, hermes_home):
         """Log-time redaction leaves ``?token=`` and ``user:pass@`` in URLs for tool flows;

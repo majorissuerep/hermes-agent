@@ -310,10 +310,18 @@ def _capture_log_snapshot(
         size = log_path.stat().st_size
         if size == 0:  # truncated between _resolve_log_path and stat
             return LogSnapshot(path=log_path, tail_text="(file empty)", full_text=None)
-        raw, start_offset, starts_on_boundary = _read_tail_bytes(
-            log_path, size, max_bytes, tail_lines
-        )
-        all_text = raw.decode("utf-8", errors="replace")
+        from hermes_security.io import _home_for
+
+        if _home_for(log_path) is not None:
+            from hermes_cli.logs import _read_all_lines
+
+            all_text = "".join(_read_all_lines(log_path))
+            start_offset, starts_on_boundary = 0, True
+        else:
+            raw, start_offset, starts_on_boundary = _read_tail_bytes(
+                log_path, size, max_bytes, tail_lines
+            )
+            all_text = raw.decode("utf-8", errors="replace")
         if redact:
             # The support scrub needs the complete logical field before either
             # the summary-line cap or full-log byte cap can remove its key.
