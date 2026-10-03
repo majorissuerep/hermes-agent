@@ -33,7 +33,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(github.repository == 'NousResearch/hermes-agent' && '[{"slice":1,"total":1}]' || '[{"slice":1,"total":3},{"slice":2,"total":3},{"slice":3,"total":3}]') }}
+        include: ${{ fromJSON(github.repository == 'NousResearch/hermes-agent' && '[{"slice":1,"total":1}]' || '[{"slice":1,"total":6},{"slice":2,"total":6},{"slice":3,"total":6},{"slice":4,"total":6},{"slice":5,"total":6},{"slice":6,"total":6}]') }}
     steps:
       - name: Checkout code
         uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a # v7.0.1
@@ -64,11 +64,12 @@ jobs:
           HERMES_E2E_MACHINE_ROOT: ${{ runner.temp }}\wm
           HERMES_E2E_PROFILES_ROOT: C:\Users
           HERMES_E2E_ARTIFACTS: ${{ runner.temp }}\win-update-e2e
-          # Seven simultaneous fresh installations exceed standard Windows runner
-          # resources and stall in dependency setup. Partition every journey across
-          # three machines, retaining the original deadlines and complete coverage.
+          # The neighbour-isolation journey itself installs two machines at once.
+          # Give each of the six files its own standard runner so another file cannot
+          # add a third simultaneous install and exhaust the 1500-second deadline.
+          # Keep every journey, the in-test concurrency, and the original deadlines.
           HERMES_TEST_SLICE: ${{ matrix.slice }}/${{ matrix.total }}
-          HERMES_TEST_WORKERS: ${{ github.repository == 'NousResearch/hermes-agent' && '6' || '2' }}
+          HERMES_TEST_WORKERS: ${{ github.repository == 'NousResearch/hermes-agent' && '6' || '1' }}
           HERMES_TEST_FILE_TIMEOUT: '2400'
           HERMES_TEST_FILE_RETRIES: '0'
           OPENROUTER_API_KEY: ''
