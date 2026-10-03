@@ -140,12 +140,16 @@ def test_serve_tree_kill_leaves_no_orphans_and_reboots(tmp_path: Path) -> None:
             assert first.pid in owned, f"ownership scan cannot see serve pid {first.pid} (saw {owned})"
 
             killed = taskkill_tree(first.pid)
-            assert killed.returncode == 0, killed.stderr
+            # A parent can exit after its child is killed but before taskkill reaches it,
+            # producing "no running instance" and a nonzero status for a successful teardown.
             # Ownership, not ancestry: anything the backend spawned detached (a broken
             # parent link taskkill /T cannot follow) still carries this profile's
             # HERMES_HOME / cwd, and is an orphan the Desktop quit leaves behind.
             left = owned_survivors(home, since=started, timeout=30)
-            assert not left, f"processes of the killed backend outlived taskkill /T /F: {left}"
+            assert not left, (
+                f"processes of the killed backend outlived taskkill /T /F: {left}\n"
+                f"taskkill rc={killed.returncode}: {killed.stdout}\n{killed.stderr}"
+            )
             wait_until(lambda: not _port_open(port), 30, f"port {port} to be released")
 
             second, port2 = _serve_ready(home)

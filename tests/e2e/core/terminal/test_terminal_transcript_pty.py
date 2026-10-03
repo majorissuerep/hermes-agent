@@ -143,7 +143,10 @@ def test_terminal_transcript_integrity(surface: str, scenario: str, tmp_path: Pa
     script = [r for turn in spec.turns for r in turn.responses]
     rows, cols = spec.rows, 100
     with FakeLLMServer(script, aux=lambda _req: Text(TITLE)) as llm:
-        term = PtyHermes(tmp_path, SURFACES[surface], llm, rows=rows, cols=cols)
+        # This lifecycle assertion covers private backends; deck-host sessions
+        # intentionally survive /exit and have their own persistence tests.
+        term = PtyHermes(tmp_path, SURFACES[surface], llm, rows=rows, cols=cols,
+                         extra_config="sessions:\n  host: false\n")
         try:
             term.wait_ready()
             expected_main = 0

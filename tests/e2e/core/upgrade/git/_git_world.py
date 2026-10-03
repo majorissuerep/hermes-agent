@@ -216,6 +216,8 @@ def world(root: Path, *, base: str, installer_ref: str | None = None,
         url = srv.url(REPO)
         (sb.home / ".gitconfig").write_text(
             f'[url "{url}"]\n  insteadOf = {I.OFFICIAL_HTTPS}\n  insteadOf = {I.OFFICIAL_SSH}\n'
+            '  insteadOf = https://github.com/NousResearch/hermes-agent.git\n'
+            '  insteadOf = git@github.com:NousResearch/hermes-agent.git\n'
             '[user]\n  name = user\n  email = user@example.invalid\n', encoding="utf-8")
         w = World(root=root, srv=srv, bare=bare, sb=sb)
         if preclone is not None:

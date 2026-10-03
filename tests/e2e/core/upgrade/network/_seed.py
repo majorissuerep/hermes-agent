@@ -199,6 +199,10 @@ def seed_install(root: Path) -> Installed:
     assert cp.returncode == 0, "seed install failed:\n" + I.describe(cp)
     # From here on the checkout talks to the official URL, which only the proxy can serve.
     (sb.home / ".gitconfig").write_text("", encoding="utf-8")
+    (sb.root / "wrap" / "git").unlink()
+    # The installer defaults to the fork. These channel/proxy tests explicitly
+    # exercise upstream release feeds, so give the sandbox that repository identity.
+    I.git("remote", "set-url", "origin", f"https://github.com/{REPOSITORY}.git", cwd=sb.checkout)
     gitroot = root / "gitroot"
     (gitroot / "NousResearch").mkdir(parents=True, exist_ok=True)
     (gitroot / "NousResearch" / "hermes-agent.git").symlink_to(origin)
