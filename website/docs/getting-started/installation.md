@@ -66,7 +66,7 @@ On Linux, macOS, or WSL2, run the takeover script from a terminal after saving o
 curl -fsSL https://raw.githubusercontent.com/majorissuerep/hermes-agent/main/scripts/takeover.sh | bash
 ```
 
-The script stops running Hermes processes, keeps the previous source checkout, installs the fork's `main` branch, and migrates the active home with a backup and verification. It uses the per-user layout (`$HERMES_HOME/hermes-agent`, defaulting to `~/.hermes/hermes-agent`) and installs the launcher under `~/.local/bin`. For another layout or native Windows, keep a backup, stop the existing Hermes processes, install the fork for the same data home, and run `hermes secure-vault migrate` if that home has no vault.
+The script stops running Hermes processes, keeps the previous source checkout, installs the fork's `main` branch, and migrates the active home with a backup and verification. It uses the same PM-managed Python, dependencies, app builds, and launcher as a fresh source installation. The source lives under `$HERMES_HOME/hermes-agent` (defaulting to `~/.hermes/hermes-agent`), and the launcher under `~/.local/bin`. For another layout or native Windows, keep a backup, stop the existing Hermes processes, install the fork for the same data home, and run `hermes secure-vault migrate` if that home has no vault.
 
 With a terminal available, takeover asks for a master password. Without a terminal it creates a key-only vault and prints the private-key path; retain that file and provide its path through `HERMES_VAULT_PRIVATE_KEY` when starting Hermes. Check `hermes secure-vault status` and a real chat before removing the saved source checkout or plaintext migration backup.
 

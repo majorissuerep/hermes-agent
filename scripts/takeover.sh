@@ -7,7 +7,7 @@
 #   1. Stops running hermes processes (gateway/desktop serve) cleanly.
 #   2. Moves the old source checkout aside (kept, not deleted).
 #   3. Clones the fork into the install location.
-#   4. Reuses the existing venv approach: builds a fresh venv from the lock.
+#   4. Prepares the pinned Python and dependencies through PM.
 #   5. Repoints the `hermes` launcher at the fork.
 #   6. Migrates ~/.hermes in place: full tar backup, then SQLCipher/envelope
 #      conversion with verification (interactive: you pick the master password).
@@ -126,77 +126,21 @@ swap_source() {
 
 # ── 4. Environment ──────────────────────────────────────────────────────────
 build_venv() {
-    say "→ Building venv from the lock..."
-    cd "$INSTALL_DIR"
-    # Python >=3.14 is rejected by requires-python; prefer explicit 3.13/3.11
-    # interpreters before a bare python3 that may be too new.
-    pick_python() {
-        for cand in python3.13 python3.12 python3.11 python3; do
-            command -v "$cand" >/dev/null || continue
-            if "$cand" -c "import sys; sys.exit(0 if sys.version_info < (3, 14) and sys.version_info >= (3, 11) else 1)" 2>/dev/null; then
-                echo "$cand"; return 0
-            fi
-        done
-        return 1
-    }
-    if ! command -v uv >/dev/null; then
-        # macOS/stock hosts have no uv and often no python 3.11-3.13 (CLT ships
-        # 3.9); the pip fallback below would die at pick_python. uv provisions a
-        # managed 3.11 itself, so installing it is the self-sufficient path.
-        say "→ uv not found — installing to ~/.local/bin (astral.sh install script)..."
-        if curl -fsSL https://astral.sh/uv/install.sh | sh >"$SCRATCH_DIR/hermes-takeover-uv.log" 2>&1; then
-            export PATH="$HOME/.local/bin:$PATH"
-        else
-            say "  ○ uv install failed — falling back to system python (needs 3.11-3.13):"
-            tail -3 "$SCRATCH_DIR/hermes-takeover-uv.log" >&2 || true
-        fi
-    fi
-    if command -v uv >/dev/null; then
-        # uv provisions a managed 3.11 itself — no system interpreter needed
-        # (hosts whose only python3 is >=3.14 would otherwise die here).
-        uv venv --python 3.11 .venv >/dev/null 2>&1 || uv venv .venv >/dev/null 2>&1 || true
-        [ -x .venv/bin/python ] || {
-            PYBIN=$(pick_python) && "$PYBIN" -m venv .venv
-        }
-        # Lock-first: 'uv sync' is deterministic and never re-resolves.
-        # 'uv pip install -e .' (lockless) also hard-fails on any invalid
-        # PEP 440 version string in pyproject — keep it only as a fallback.
-        # NO --all-extras: the matrix extra (python-olm) has manylinux x86_64
-        # cp310-cp313 wheels only — on macOS/Windows/py3.14 uv would try an
-        # sdist build (libolm+cmake) and the whole takeover dies (MS73-HB1
-        # fell back to base deps this way). Messaging platforms land via the
-        # [messaging] extra; everything heavy stays lazy-installed per [all].
-        if ! uv sync --all-extras --no-extra matrix >"$SCRATCH_DIR/hermes-takeover-sync.log" 2>&1; then
-            if ! uv sync --extra messaging >"$SCRATCH_DIR/hermes-takeover-sync.log" 2>&1; then
-                if ! uv pip install --python .venv/bin/python -e . >"$SCRATCH_DIR/hermes-takeover-install.log" 2>&1; then
-                    echo "✗ dependency install failed — root cause:" >&2
-                    tail -5 "$SCRATCH_DIR/hermes-takeover-sync.log" "$SCRATCH_DIR/hermes-takeover-install.log" >&2
-                    die "see above; logs kept in $SCRATCH_DIR/hermes-takeover-*.log"
-                fi
-            fi
-        fi
-    else
-        PYBIN=$(pick_python) || die "no python between 3.11 and 3.13 found"
-        "$PYBIN" -m venv .venv || die "venv creation failed"
-        .venv/bin/pip install --quiet --upgrade pip >/dev/null
-        if ! .venv/bin/pip install --quiet -e . >"$SCRATCH_DIR/hermes-takeover-install.log" 2>&1; then
-            echo "✗ pip install failed — root cause:" >&2
-            tail -8 "$SCRATCH_DIR/hermes-takeover-install.log" >&2
-            die "see above"
-        fi
-    fi
-    [[ -x .venv/bin/python ]] || die "venv missing python"
+    say "→ Preparing PM-managed Python and dependencies..."
+    bash "$INSTALL_DIR/scripts/install.sh" --dir "$INSTALL_DIR" \
+        --hermes-home "$HERMES_HOME" --non-interactive --stage python-deps
 }
 
 # ── 5. Launcher ─────────────────────────────────────────────────────────────
 install_launcher() {
-    say "→ Pointing 'hermes' at the fork..."
-    mkdir -p "$(dirname "$LAUNCHER")"
-    cat > "$LAUNCHER" <<EOF
-#!/usr/bin/env bash
-exec "$INSTALL_DIR/.venv/bin/python" -m hermes_cli.main "\$@"
-EOF
-    chmod +x "$LAUNCHER"
+    # Use the same publication and product builds as a fresh source install.
+    # A .venv launcher bypasses PM's selected generation after the next update.
+    local stage
+    for stage in products complete; do
+        bash "$INSTALL_DIR/scripts/install.sh" --dir "$INSTALL_DIR" \
+            --hermes-home "$HERMES_HOME" --non-interactive --stage "$stage"
+    done
+    [[ -x "$LAUNCHER" ]] || die "PM did not publish $LAUNCHER"
 }
 
 # ── 6. Migrate state ────────────────────────────────────────────────────────
@@ -228,16 +172,8 @@ migrate_state() {
 }
 
 _tty_available() {
-    # Same probe as hermes_cli/vault_gate._tty_available: a real terminal is reachable
-    # through /dev/tty (NOT stdin.isatty — under curl|bash stdin is the script pipe).
-    local _py
-    _py="python3"
-    command -v "$_py" >/dev/null 2>&1 || _py="$INSTALL_DIR/.venv/bin/python"
-    "$_py" -c 'import os,sys
-try:
-    sys.exit(0 if os.isatty(os.open("/dev/tty", os.O_RDWR)) else 1)
-except OSError:
-    sys.exit(1)'
+    # stdin is the script under curl | bash; /dev/tty is the human's terminal.
+    (: </dev/tty) 2>/dev/null
 }
 
 main() {
@@ -267,4 +203,7 @@ main() {
     say "      hermes chat                  # normal use (prompts for master password)"
 }
 
-main "$@"
+# Keep the real preparation functions available to the installation harness.
+if [ "${BASH_SOURCE[0]:-$0}" = "$0" ]; then
+    main "$@"
+fi

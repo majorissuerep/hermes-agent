@@ -24,8 +24,11 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 @pytest.mark.platforms("linux")
-@pytest.mark.parametrize("fault", [None, "missing-wheel", "bad-hash"])
-def test_current_installer_publishes_real_dependencies_and_warm_path(tmp_path, served, fault):
+@pytest.mark.parametrize("fault,takeover", [
+    (None, False), ("missing-wheel", False), ("bad-hash", False),
+    (None, True), ("missing-wheel", True),
+])
+def test_current_installer_publishes_real_dependencies_and_warm_path(tmp_path, served, fault, takeover):
     uv = shutil.which("uv")
     assert uv, "fresh-install acceptance requires real uv"
     python = Path(sys._base_executable).resolve()
@@ -69,6 +72,8 @@ def test_current_installer_publishes_real_dependencies_and_warm_path(tmp_path, s
         shutil.copytree(ROOT / name, source / name, ignore=shutil.ignore_patterns("__pycache__"))
     for name in ("utils.py", "hermes_constants.py", "hermes_yaml.py", "hermes_bootstrap.py", "setup-hermes.sh"):
         shutil.copy2(ROOT / name, source / name)
+    (source / "scripts").mkdir()
+    shutil.copy2(ROOT / "scripts/install.sh", source / "scripts/install.sh")
     # The CLI's user-facing text resolves through the i18n kernel (agent.i18n + the English catalog);
     # the rest of agent/ stays out so the tail cannot grow a dependency on the agent runtime.
     (source / "agent").mkdir()
@@ -126,16 +131,27 @@ def test_current_installer_publishes_real_dependencies_and_warm_path(tmp_path, s
     env["HERMES_REPO_URL"] = str(source)
     command = ["bash", str(ROOT / "scripts/install.sh"), "--dir", str(install),
                "--branch", "fixture", "--commit", commit, "--non-interactive", "--json"]
-    result = run(command, expected=1 if fault else 0)
+    if takeover:
+        # Exercise the fork takeover's real dependency/launcher boundary without
+        # stopping the developer's services or migrating their home.
+        run(["git", "clone", str(source), str(install)])
+        result = run([
+            "bash", "-c", 'source "$1"; INSTALL_DIR="$2"; build_venv; install_launcher',
+            "takeover", str(ROOT / "scripts/takeover.sh"), str(install),
+        ], expected=1 if fault else 0)
+    else:
+        result = run(command, expected=1 if fault else 0)
     assert not npm_called.exists()
     if fault:
         assert not (install / ".hermes-bootstrap-complete").exists()
         assert not (home / ".local/bin/hermes").exists()
         for facts in (home / ".hermes/installs").glob("*/facts.json"):
             assert "venv" not in json.loads(facts.read_text())["packages"]
-        assert '"stage":"python-deps"' in result.stdout
+        if not takeover:
+            assert '"stage":"python-deps"' in result.stdout
         return
-    assert '"stage":"python-deps"' in result.stdout
+    if not takeover:
+        assert '"stage":"python-deps"' in result.stdout
     assert json.loads((install / ".hermes-bootstrap-complete").read_text())["pinnedCommit"] == commit
     facts = next((home / ".hermes/installs").glob("*/facts.json"))
     selection = json.loads(facts.read_text())["packages"]["venv"]
