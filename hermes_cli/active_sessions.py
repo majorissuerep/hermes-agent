@@ -236,6 +236,7 @@ def _read_entries(path: Path, *, strict: bool = False) -> list[dict[str, Any]]:
         _text = _sealed_read_text(path, purpose="state")
         if _text is None:
             return []
+        _text = _text.removeprefix("\ufeff")  # utf-8-sig semantics for legacy plaintext files
         import json as _json
 
         data = _json.loads(_text)

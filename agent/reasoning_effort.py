@@ -41,6 +41,9 @@ ASTRA_MODEL_IDS: frozenset[str] = frozenset({"gpt-6-astra", "gpt-6-astra-900k"})
 #: ``gpt-6.1`` is boundary-matched so the dot release never matches the gpt-6 prefixes below.
 GPT61_MODEL_RE = re.compile(r"(?:^|[^a-z0-9])gpt-6\.1(?:[^a-z0-9]|$)")
 GPT6_TIER_PREFIXES: tuple[str, ...] = ("gpt-6-sol", "gpt-6-luna")
+#: GPT-6.1 Sol takes Astra's ``low..max`` ladder (``none`` 400s, live 2026-09-29) without Astra's
+#: account gating, so it stays in the static catalogs.
+NO_DISABLE_TIER_PREFIXES: tuple[str, ...] = ("gpt-6.1-sol",)
 DAYBREAK_MODEL_IDS: frozenset[str] = frozenset(
     {"gpt-daybreak-blue-latest", "gpt-daybreak-blue-latest-900k"}
 )
@@ -111,9 +114,9 @@ def is_gpt61_model(model: Optional[str]) -> bool:
 
 def codex_supported_efforts(model: Optional[str]) -> tuple[str, ...]:
     """Supported effort set for an OpenAI/Codex Responses model."""
-    if is_astra_model(model):
-        return CODEX_ASTRA_EFFORTS
     bare = (model or "").strip().lower().rsplit("/", 1)[-1]
+    if is_astra_model(model) or bare.startswith(NO_DISABLE_TIER_PREFIXES):
+        return CODEX_ASTRA_EFFORTS
     return (
         CODEX_GPT56_EFFORTS
         if "gpt-5.6" in bare or bare.startswith(GPT6_TIER_PREFIXES) or bare in DAYBREAK_MODEL_IDS or is_gpt61_model(bare)
@@ -239,12 +242,3 @@ def ox_alpha_reasoning_extras(reasoning_config: Optional[dict], model: Optional[
     effort = requested_effort(reasoning_config)
     clamped = clamp_effort(None if effort == "none" else effort, OX_ALPHA_EFFORTS, OX_ALPHA_OVERRIDES)
     return ({}, {"reasoning_effort": clamped}) if clamped in OX_ALPHA_EFFORTS else ({}, {})
-
-
-# ---- BEGIN PLUGIN-COMPAT (revert-scheduled; see COMPAT_MANIFEST.md) ----
-# Names external plugins imported from this module before the Sep 2026 decomposition.
-# Internal code MUST NOT use these (scripts/check_compat_pointers.py fails CI if it does).
-# The whole block is removed by reverting the commit that added it.
-
-CODEX_RESPONSES_EFFORTS: tuple[str, ...] = CODEX_GPT56_EFFORTS
-# ---- END PLUGIN-COMPAT ----

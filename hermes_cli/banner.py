@@ -4,12 +4,12 @@ import logging
 import os
 import re
 import shutil
-import subprocess
 import sys
 import threading
-import time
 from pathlib import Path
-from urllib.parse import urlparse
+from hermes_cli import source_check
+# Historical updater import (tests/compat/old_updater_surface.json). In-tree callers use the owner.
+from hermes_cli.source_check import _github_compare_behind  # noqa: F401
 from hermes_constants import get_hermes_home
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
@@ -24,6 +24,16 @@ logger = logging.getLogger(__name__)
 # ANSI building blocks for conversation display (``_DIM``/``_RST`` are imported by callbacks.py).
 _DIM = "\033[2m"
 _RST = "\033[0m"
+
+
+def _check_via_pypi() -> Optional[int]:
+    # Shim to stop the old updater doing work until relaunch. no registry query.
+    return None
+
+
+def check_via_pypi() -> Optional[int]:
+    # Shim to stop the old updater doing work until relaunch. status is unknown.
+    return None
 
 
 def _quiet(fn, default=None):
@@ -57,7 +67,8 @@ def _skin_color(key: str, fallback: str) -> str:
 
 # === ASCII Art & Branding ===
 
-from hermes_cli import __version__ as VERSION, __release_date__ as RELEASE_DATE
+from hermes_cli import __release_date__ as RELEASE_DATE
+from hermes_cli.version_info import get_version_info
 
 HERMES_AGENT_LOGO = """[bold #FFD700]██╗  ██╗███████╗██████╗ ███╗   ███╗███████╗███████╗       █████╗  ██████╗ ███████╗███╗   ██╗████████╗[/]
 [bold #FFD700]██║  ██║██╔════╝██╔══██╗████╗ ████║██╔════╝██╔════╝      ██╔══██╗██╔════╝ ██╔════╝████╗  ██║╚══██╔══╝[/]
@@ -483,8 +494,8 @@ def get_git_banner_state(repo_dir: Optional[Path] = None) -> Optional[dict]:
 def _baked_banner_state() -> Optional[dict]:
     """Banner state from the baked build SHA (Docker image path), or None."""
     def _baked():
-        from hermes_cli.build_info import get_build_sha
-        return get_build_sha(short=8)
+        from hermes_cli.version_info import get_code_identity
+        return get_code_identity().get("short_sha")
     baked = _quiet(_baked)
     return {"upstream": baked, "local": baked, "ahead": 0} if baked else None
 
@@ -493,11 +504,11 @@ def _compute_git_banner_state(repo_dir: Optional[Path] = None) -> Optional[dict]
     repo_dir = repo_dir or _resolve_repo_dir()
     if repo_dir is None:
         return _baked_banner_state()
-    upstream, local = (_git_stdout(["rev-parse", "--short=8", rev], cwd=repo_dir) for rev in ("origin/main", "HEAD"))
+    upstream, local = (source_check._git_stdout(["rev-parse", "--short=8", rev], cwd=repo_dir) for rev in ("origin/main", "HEAD"))
     if not upstream or not local:
         # Live-git lookup failed (e.g. shallow clone without origin/main).
         return _baked_banner_state()
-    ahead = _git_count(["rev-list", "--count", "origin/main..HEAD"], cwd=repo_dir) or 0
+    ahead = source_check._git_count(["rev-list", "--count", "origin/main..HEAD"], cwd=repo_dir) or 0
     return {"upstream": upstream, "local": local, "ahead": max(ahead, 0)}
 
 
@@ -511,14 +522,40 @@ def get_latest_release_tag(repo_dir: Optional[Path] = None) -> Optional[tuple]:
     """
     def _compute():
         rd = repo_dir or _resolve_repo_dir()
-        tag = _git_stdout(["describe", "--tags", "--abbrev=0"], cwd=rd, timeout=3) if rd else None
+        tag = source_check._git_stdout(["describe", "--tags", "--abbrev=0"], cwd=rd, timeout=3) if rd else None
         return (tag, f"{_RELEASE_URL_BASE}/{tag}") if tag else None
     return _memo("_latest_release_cache", _compute)
 
 
 def format_banner_version_label() -> str:
     """Return the version label shown in the startup banner title."""
-    base = f"Hermes Agent v{VERSION} ({RELEASE_DATE})"
+    from hermes_cli.config import get_project_root
+    from hermes_cli.steward import read_install_stamp
+    from hermes_cli.update_channel import is_canary_tag
+
+    stamp = read_install_stamp(get_project_root())
+    if stamp.get("distribution") == "desktop-app":
+        label = f"Hermes Agent v{get_version_info().derived_version}"
+        if stamp.get("source") == "commit-build":
+            return f"{label} · commit-build · {str(stamp.get('commit') or '')[:12]}"
+        if stamp.get("tag"):
+            channel = "canary" if is_canary_tag(stamp["tag"]) else "stable"
+            return f"{label} · {channel}"
+        if stamp.get("payload") == "bootstrap":
+            # The old installer shell's CLI backend: the shell never updates
+            # itself (`self`), the managed checkout under it does. Name the
+            # shell so it doesn't read as a plain packaged build.
+            return f"{label} · installer"
+        return label
+
+    base = f"Hermes Agent v{get_version_info().derived_version} ({RELEASE_DATE})"
+    from hermes_cli.config import load_config
+    from hermes_cli.update_channel import resolve_update_channel
+
+    channel = resolve_update_channel(_quiet(load_config), get_project_root())
+    if channel != "main":
+        head = source_check._git_stdout(["rev-parse", "HEAD"], cwd=get_project_root())
+        return f"{base} · {channel}" + (f" · local {head[:12]}" if head else "")
     state = get_git_banner_state()
     if not state:
         return base
@@ -549,7 +586,7 @@ def _skip_background_prefetch() -> bool:
     (``patch("subprocess.run")`` / ``patch("subprocess.Popen")``) can record
     that stray spawn in place of the call it meant to pin.  Importing
     ``tui_gateway.server`` starts this prefetch, which is what flaked
-    tests/tui_gateway/test_subprocess_encoding.py and test_bot_relay_methods.py.
+    tests/tui_gateway/test_bot_relay_methods.py.
     Nothing under pytest needs a live update check; tests that exercise the
     prefetch itself monkeypatch this predicate to False.
 
@@ -570,7 +607,7 @@ def prefetch_update_check():
 
     def _run():
         global _update_result
-        _update_result = check_for_updates(passive=True)
+        _update_result = source_check.check_for_updates(passive=True).get("behind")
         _update_check_done.set()
     _daemon(None, _run)
 
@@ -707,8 +744,9 @@ def banner_snapshot_fingerprint() -> Optional[str]:
     for p in paths:
         st = _quiet(p.stat)
         parts.append(f"{p.name}:{st.st_mtime_ns}:{st.st_size}" if st else f"{p.name}:absent")
-    # Code checkout: version + git HEAD when available (post-update change).
-    parts.append(str(VERSION))
+    # Code checkout: commit when known, otherwise its derived version.
+    version_info = get_version_info()
+    parts.append(version_info.commit or version_info.derived_version)
     state = get_git_banner_state()
     if state:
         parts.append(str(state.get("local", "")))
@@ -717,8 +755,8 @@ def banner_snapshot_fingerprint() -> Optional[str]:
 
 def load_banner_snapshot(enabled_toolsets: List[str] = None) -> Optional[Dict[str, Any]]:
     """Return the stored banner snapshot when its fingerprint is current."""
-    blob = _read_json(_banner_snapshot_path())
-    if blob is None:
+    blob = _quiet(lambda: json.loads(_banner_snapshot_path().read_text(encoding="utf-8-sig")))
+    if not isinstance(blob, dict):
         return None
     fp = banner_snapshot_fingerprint()
     if (not fp or blob.get("fingerprint") != fp
@@ -889,8 +927,8 @@ def _route_model_for_banner(provider: Any) -> str:
     no network. Empty when nothing resolves, so the caller keeps its "no model configured" line."""
     if (provider or "auto").strip().lower() not in ("auto", "nous"):
         return ""
-    from hermes_cli.anon_auth import GUEST_MODEL, guest_carries_inference
-    return GUEST_MODEL if guest_carries_inference() else ""
+    from hermes_cli.anon_auth import GUEST_MODEL, free_tier_route
+    return GUEST_MODEL if free_tier_route() else ""
 
 
 def _banner_left_lines(model: str, cwd: str, session_id, context_length, provider, *, accent: str, dim: str,

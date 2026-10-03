@@ -20,6 +20,13 @@ For ad-hoc, one-off MCP tool calls from the terminal without configuring anythin
 - **Node.js** -- required for `npx`-based MCP servers (most community servers)
 - **uv** -- required for `uvx`-based MCP servers (Python-based servers)
 
+- **MCP Python dependencies** — included in the standard PM install through the `all` extra. Use PM to add the `mcp` extra.
+
+Install the MCP SDK:
+
+```bash
+python -c "import pm; pm.sync_venv(['mcp'], explicit=True)"
+```
 ## Quick Start
 
 From a logged-in Hermes session, use `terminal` to run the host operations:
@@ -237,8 +244,13 @@ If an MCP tool call fails, any credential-like patterns in the error message are
 
 ### "MCP SDK not available -- skipping MCP tool discovery"
 
-Repair the Hermes environment using the project's pinned MCP dependencies;
-`hermes doctor` from an unlocked human-operated CLI can diagnose the install.
+The `mcp` Python package is not installed. Install it through PM (fork: from an
+unlocked human-operated CLI; `hermes doctor` there can diagnose the install):
+
+```bash
+python -c "import pm; pm.sync_venv(['mcp'], explicit=True)"
+```
+
 
 ### "No MCP servers configured"
 
@@ -254,8 +266,12 @@ Common causes:
 
 ### "MCP server 'X' requires HTTP transport but mcp.client.streamable_http is not available"
 
-The environment does not match the project's pinned MCP SDK. Repair that environment
-through the normal update/install flow from an unlocked human-operated CLI.
+If the MCP dependencies are damaged, rebuild the recorded environment through PM:
+
+```bash
+hermes pm repair
+```
+(Fork: run from an unlocked human-operated CLI; an agent's terminal child carries no vault key.)
 
 ### Tools not appearing
 

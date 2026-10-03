@@ -6,8 +6,7 @@ Tests that switch_model:
 3. Saves reasoning_config into _primary_runtime for fallback recovery
 """
 
-import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 
 class TestSwitchModelReasoningOverride:

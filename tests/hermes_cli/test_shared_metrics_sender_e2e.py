@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import gzip
 import json
-import sqlite3
 import threading
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
