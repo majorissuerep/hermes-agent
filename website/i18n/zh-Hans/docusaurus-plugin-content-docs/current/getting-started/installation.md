@@ -6,6 +6,10 @@ description: "在 Linux、macOS、WSL2 或原生 Windows 上安装 Hermes Agent"
 
 # 安装
 
+:::warning 非官方 fork
+本文档属于由 [@majorissuerep](https://github.com/majorissuerep) 维护的 [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent) 非官方 fork。下方命令安装本 fork 的 `main` 分支；Nous Research 未对本 fork 提供支持或背书。fork 的问题请提交到[本仓库](https://github.com/majorissuerep/hermes-agent/issues)。
+:::
+
 使用一行安装命令，两分钟内即可启动并运行 Hermes Agent。
 
 ## 快速安装
@@ -15,17 +19,17 @@ description: "在 Linux、macOS、WSL2 或原生 Windows 上安装 Hermes Agent"
 基于 git 的安装方式，跟踪 `main` 分支，可立即获取最新变更：
 
 ```bash
-curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/majorissuerep/hermes-agent/main/scripts/install.sh | bash
 ```
 
 ### Windows（原生，PowerShell）
 
-原生 Windows 无需 WSL 即可运行 Hermes——CLI、gateway、TUI 和工具均可原生运行。（原生安装与 WSL2 安装可干净共存；唯一仅限 WSL2 的功能见下方功能说明。）遇到 bug 请[提交 issue](https://github.com/NousResearch/hermes-agent/issues)。
+原生 Windows 无需 WSL 即可运行 Hermes——CLI、gateway、TUI 和工具均可原生运行。（原生安装与 WSL2 安装可干净共存；唯一仅限 WSL2 的功能见下方功能说明。）遇到 bug 请[提交 issue](https://github.com/majorissuerep/hermes-agent/issues)。
 
 打开 PowerShell 并运行：
 
 ```powershell
-iex (irm https://hermes-agent.nousresearch.com/install.ps1)
+iex (irm https://raw.githubusercontent.com/majorissuerep/hermes-agent/main/scripts/install.ps1)
 ```
 
 源码安装脚本克隆仓库，再由 PM 准备 Python 3.14、Node.js、npm、ripgrep、FFmpeg 和 Python 依赖。
@@ -63,6 +67,30 @@ Dashboard 终端使用 `pywinpty`/ConPTY，不再是尚未实现的 POSIX-only �
 以 root 身份运行不再自动选择 `/usr/local/lib` 的 FHS 布局。
 PM 的工具和 Python 环境代际位于独立目录，详见 [包管理](../reference/package-management.md)。
 不要为了修复应用而删除整个数据目录。
+
+### 初始化加密状态 {#initialize-encrypted-state}
+
+安装完成后打开新终端，运行 `hermes secure-vault status`。如果尚无 vault，请在交互式终端中执行：
+
+```bash
+hermes secure-vault migrate
+```
+
+确认迁移计划并设置主密码。迁移会先备份数据，再加密状态文件；验证成功后，请安全删除命令输出的**明文迁移备份**。务必保管好主密码或已授权的私钥，所有解锁凭据丢失后无法恢复数据。
+
+随后运行 `hermes secure-vault status` 和 `hermes setup`。访问状态的命令需要解锁 vault。无人值守服务应通过 `hermes secure-vault keygen` 和 `hermes secure-vault add-key --public-key <file>` 授权私钥，并设置 `HERMES_VAULT_PRIVATE_KEY=/path/to/private-key`。该变量保存的是**私钥文件路径**，绝不能填写主密码；具体选项见各命令的 `--help`。
+
+### 将已有安装迁移到本 fork {#switch-existing-installation}
+
+Linux、macOS 或 WSL2 用户应先保存正在进行的工作、关闭 Hermes Desktop，再从终端运行：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/majorissuerep/hermes-agent/main/scripts/takeover.sh | bash
+```
+
+脚本会停止 Hermes 进程、保留旧源码目录、安装本 fork 的 `main` 分支，并备份、加密和验证当前 home。它使用用户级布局（`$HERMES_HOME/hermes-agent`，默认为 `~/.hermes/hermes-agent`），启动器位于 `~/.local/bin`。其他布局或原生 Windows 应先备份并停止旧进程，为同一数据目录安装 fork，再在尚无 vault 时运行 `hermes secure-vault migrate`。
+
+有终端时脚本会询问主密码；没有终端时会生成仅私钥解锁的 vault 并输出私钥路径。请保管该文件，并通过 `HERMES_VAULT_PRIVATE_KEY` 将路径提供给 Hermes。确认 vault 状态和实际对话正常后，再移除旧源码和明文迁移备份。
 
 ### 安装后
 

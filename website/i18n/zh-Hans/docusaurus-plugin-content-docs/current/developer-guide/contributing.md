@@ -6,6 +6,8 @@ description: "如何为 Hermes Agent 做贡献 — 开发环境配置、代码�
 
 # 贡献指南
 
+本指南面向非官方 [majorissuerep/hermes-agent fork](https://github.com/majorissuerep/hermes-agent)。fork 的贡献请通过 PR 提交到本仓库的 `main`，并在 CI 检查通过后合并。上游贡献请提交到 [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent)。
+
 感谢您为 Hermes Agent 做贡献！本指南涵盖开发环境配置、代码库结构说明以及 PR 合并流程。
 
 ## 贡献优先级
@@ -227,7 +229,7 @@ fix(security): prevent shell injection in sudo password piping
 
 ## 报告问题
 
-- 使用 [GitHub Issues](https://github.com/NousResearch/hermes-agent/issues)
+- 使用 [GitHub Issues](https://github.com/majorissuerep/hermes-agent/issues)
 - 请包含：操作系统、Python 版本、Hermes 版本（`hermes --version`）、完整错误堆栈
 - 包含复现步骤
 - 创建前请检查是否已有重复 issue

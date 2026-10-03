@@ -6,6 +6,8 @@ description: "How to contribute to Hermes Agent — dev setup, code style, PR pr
 
 # Contributing
 
+This guide is for the unofficial [majorissuerep/hermes-agent fork](https://github.com/majorissuerep/hermes-agent). Submit fork contributions to its `main` branch through a PR and wait for the fork's CI checks before merging. Upstream contributions belong in [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent).
+
 Thank you for contributing to Hermes Agent! This guide covers setting up your dev environment, understanding the codebase, and getting your PR merged.
 
 ## Contribution Priorities
@@ -294,7 +296,7 @@ When you ask Hermes to review a PR in a repository that has `.agents/checks/`, t
 
 ## Reporting Issues
 
-- Use [GitHub Issues](https://github.com/NousResearch/hermes-agent/issues)
+- Use [GitHub Issues](https://github.com/majorissuerep/hermes-agent/issues)
 - Include: OS, Python version, Hermes version (`hermes --version`), full error traceback
 - Include steps to reproduce
 - Check existing issues before creating duplicates

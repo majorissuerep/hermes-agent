@@ -14,7 +14,9 @@ description: "如何将 Hermes Agent 更新至最新版本或将其卸载"
 hermes update
 ```
 
-此命令会从 `main` 拉取最新代码、更新依赖项，并提示你配置自上次更新以来新增的选项。
+在本 fork 中，此命令从 `majorissuerep/hermes-agent` 的 `main` 分支拉取最新代码、更新依赖项，并提示你配置新增选项。上游变更只有经过整合后才会进入本 fork 的更新渠道。更新需要解锁 vault；无人值守更新所需的私钥设置见[加密状态初始化](./installation.md#initialize-encrypted-state)。
+
+从上游版本切换到本 fork 时，请先按[迁移说明](./installation.md#switch-existing-installation)操作。
 
 :::tip
 `hermes update` 会自动检测新的配置选项并提示你添加。如果跳过了该提示，可手动运行 `hermes config check` 查看缺失的选项，再运行 `hermes config migrate` 以交互方式添加。

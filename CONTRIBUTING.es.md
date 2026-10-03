@@ -1,5 +1,7 @@
 # Contribuir a Hermes Agent
 
+Esta guía corresponde al fork no oficial [majorissuerep/hermes-agent](https://github.com/majorissuerep/hermes-agent). Envía las contribuciones del fork mediante un PR a `main` y espera a que pasen sus comprobaciones de CI.
+
 ¡Gracias por contribuir a Hermes Agent! Esta guía cubre todo lo que necesitas: configurar tu entorno de desarrollo, entender la arquitectura, decidir qué construir y conseguir que tu PR sea aceptado.
 
 ---
@@ -566,7 +568,7 @@ test(tools): añadir tests unitarios para file_operations
 
 ## Reportar Issues
 
-- Usa [GitHub Issues](https://github.com/NousResearch/hermes-agent/issues)
+- Usa [GitHub Issues](https://github.com/majorissuerep/hermes-agent/issues)
 - Incluye: SO, versión de Python, versión de Hermes (`hermes --version`), traza de error completa
 - Incluye pasos para reproducir
 - Verifica los issues existentes antes de crear duplicados

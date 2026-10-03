@@ -20,7 +20,7 @@ Hermes 可在 Windows 10 和 Windows 11 上原生运行——无需 WSL、Cygwin
 打开 **PowerShell**（或 Windows Terminal）并运行：
 
 ```powershell
-iex (irm https://hermes-agent.nousresearch.com/install.ps1)
+iex (irm https://raw.githubusercontent.com/majorissuerep/hermes-agent/main/scripts/install.ps1)
 ```
 
 无需管理员权限。安装程序会写入 `%LOCALAPPDATA%\hermes\`，并将 `hermes` 添加到你的**用户 PATH**——安装完成后打开新终端即可使用。
@@ -28,7 +28,7 @@ iex (irm https://hermes-agent.nousresearch.com/install.ps1)
 **安装程序选项：**
 
 ```powershell
-& ([scriptblock]::Create((irm https://hermes-agent.nousresearch.com/install.ps1))) -NonInteractive -Branch main
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/majorissuerep/hermes-agent/main/scripts/install.ps1))) -NonInteractive -Branch main
 ```
 
 | 参数 | 用途 |
@@ -45,16 +45,9 @@ iex (irm https://hermes-agent.nousresearch.com/install.ps1)
 
 当前脚本不接受 `-NoVenv` 或 `-Tag`；`-SkipSetup` 仍被接受，作为 `-NonInteractive` 的已弃用别名，以便旧的安装包装脚本继续兼容。
 
-### MSIX / App Installer 和 Microsoft Store
+### 上游桌面安装程序 {#desktop-installer-alternative}
 
-自包含 MSIX 要求 Windows 11 22H2 或更新版本。
-Windows 10 源码安装支持不代表 MSIX 支持 Windows 10。
-打开 `.appinstaller` 文件，Windows 会安装签名包并记录更新源。
-软件包包含 Python、Node 和基础依赖，首次启动无需克隆或编译源码。
-
-执行别名提供 `hermes`、`hermes-agent` 和 `hermes-acp`。
-用 `Get-Command hermes -All` 检查是否被其他安装覆盖。
-在 Windows 的应用执行别名设置中管理这些入口。
+上游网站提供的 Desktop 安装器安装的是上游 Hermes。使用本 fork 时，请运行上方的 PowerShell 安装命令，打开新终端，并按[加密状态初始化](../getting-started/installation.md#initialize-encrypted-state)完成 vault 设置。随后运行 `hermes desktop` 从本 fork 的源码构建并启动桌面应用。
 
 侧载版通过桌面 Update 控件交给 App Installer 更新。
 Hermes 先下载本地描述文件，再停止自己的后端、退出并等待包替换。

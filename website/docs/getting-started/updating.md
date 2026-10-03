@@ -30,10 +30,16 @@ For a managed source installation:
 hermes update
 ```
 
+For this fork, this pulls the latest code from `majorissuerep/hermes-agent` on `main`, updates dependencies, and prompts you to configure any new options. Upstream changes reach this channel only after they are integrated into the fork. The update requires an unlocked vault; unattended updates need an authorized private-key file as described in [encrypted-state setup](./installation.md#initialize-encrypted-state).
+
+To switch an upstream installation to the fork, follow [the migration instructions](./installation.md#switch-existing-installation) first.
+
 Source installs track `main`, the only valid source channel. The update
 prepares dependencies through PM and reports configuration changes and process-restart results.
 
-### Bundled desktop updates
+### Bundled desktop updates (upstream packages)
+
+The packages described below are upstream builds. This fork currently uses its source installation and update channel.
 
 On Windows, the sideload app checks the registered App Installer source. Apply
 downloads the `.appinstaller` descriptor before stopping app-owned backends,
@@ -193,7 +199,7 @@ hermes update --branch release-candidate
 hermes update --check --branch experimental   # preview behindness only
 ```
 
-If your local checkout is on a different branch, Hermes auto-stashes any uncommitted work, switches HEAD to the target branch, and then pulls. Branches that don't exist locally are auto-tracked from `origin/<name>` (`git checkout -B <name> origin/<name>`). Branches that don't exist anywhere fail cleanly — your stashed changes are restored before exit so you're never stranded in a weird state. The `main`-only fork-upstream sync logic is automatically skipped on non-`main` branches.
+If your local checkout is on a different branch, Hermes auto-stashes any uncommitted work, switches HEAD to the target branch, and then pulls. Branches that don't exist locally are auto-tracked from `origin/<name>` (`git checkout -B <name> origin/<name>`). Branches that don't exist anywhere fail cleanly — your stashed changes are restored before exit so you're never stranded in a weird state. Updates stay on the configured fork remote; upstream integration is a maintainer task.
 
 ### Checkout parked on a feature branch
 

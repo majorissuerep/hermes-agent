@@ -1,5 +1,7 @@
 # Contributing to Hermes Agent
 
+> **Unofficial fork** of [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent), maintained by [@majorissuerep](https://github.com/majorissuerep). Contributions to the fork go through the [fork's PRs](https://github.com/majorissuerep/hermes-agent/pulls) — the fork's CI must pass on the exact head before merge. Fixes that are generally useful upstream should ALSO be offered to upstream; fork-only changes stay here.
+
 Thank you for contributing to Hermes Agent! This guide covers everything you need: setting up your dev environment, understanding the architecture, deciding what to build, and getting your PR merged.
 
 ---
@@ -1016,7 +1018,7 @@ test(tools): add unit tests for file_operations
 
 ## Reporting Issues
 
-- Use [GitHub Issues](https://github.com/NousResearch/hermes-agent/issues)
+- Use [GitHub Issues](https://github.com/majorissuerep/hermes-agent/issues)
 - Include: OS, Python version, Hermes version (`hermes --version`), full error traceback
 - Include steps to reproduce
 - Check existing issues before creating duplicates

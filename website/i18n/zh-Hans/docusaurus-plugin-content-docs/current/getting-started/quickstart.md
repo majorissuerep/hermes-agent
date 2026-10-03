@@ -6,6 +6,10 @@ description: "与 Hermes Agent 的第一次对话——从安装到开始聊天�
 
 # 快速入门
 
+:::warning 非官方 fork
+本文档属于由 [@majorissuerep](https://github.com/majorissuerep) 维护的 [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent) 非官方 fork。下方命令安装本 fork 的 `main` 分支；Nous Research 未对本 fork 提供支持或背书。fork 的问题请提交到[本仓库](https://github.com/majorissuerep/hermes-agent/issues)。
+:::
+
 本页的 Python 依赖命令使用 [PM 准备的源码环境](../reference/package-management.md#developer-workflow)。
 依赖变更后，请重新激活该 checkout 并重启 Hermes。
 
@@ -51,23 +55,17 @@ description: "与 Hermes Agent 的第一次对话——从安装到开始聊天�
 
 ## 1. 安装 Hermes Agent
 
-### 在 macOS 或 Windows 上使用 Hermes Desktop 安装器（推荐）
-
-如需同时安装命令行与桌面应用，请从我们的官网[下载 Hermes Desktop 安装器](https://hermes-agent.nousresearch.com/)并运行。
-
-### 不使用 Hermes Desktop：
-
-仅安装命令行版本（跟踪 main 分支）：
+以下命令安装本 fork 的 `main` 分支。上游网站的 Desktop 安装器安装的是上游 Hermes。已有上游安装时，请先阅读[迁移说明](./installation.md#switch-existing-installation)。
 
 ```bash
 # Linux / macOS / WSL2
-curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/majorissuerep/hermes-agent/main/scripts/install.sh | bash
 ```
 
 源码脚本通过 PM 准备运行时。桌面软件包、Docker、Nix 和 Termux APT 是独立的安装方式。
 请勿使用 `pip install hermes-agent` 替代受管理的安装。
 
-Windows 原生安装可在 PowerShell 中运行 `iex (irm https://hermes-agent.nousresearch.com/install.ps1)`，无需 WSL。
+Windows 原生安装可在 PowerShell 中运行 `iex (irm https://raw.githubusercontent.com/majorissuerep/hermes-agent/main/scripts/install.ps1)`，无需 WSL。
 aarch64 Android 设备请使用 [Termux APT 指南](./termux.md)，而非上述脚本。
 
 安装完成后，重新加载 shell：
@@ -75,6 +73,8 @@ aarch64 Android 设备请使用 [Termux APT 指南](./termux.md)，而非上述�
 ```bash
 source ~/.bashrc   # 或 source ~/.zshrc
 ```
+
+运行 `hermes secure-vault status` 检查 vault。若尚未创建，请在交互式终端中执行 `hermes secure-vault migrate` 并设置主密码。访问状态的命令需要解锁 vault；备份及无人值守服务的设置见[加密状态初始化](./installation.md#initialize-encrypted-state)。完成后可运行 `hermes desktop` 从本 fork 的源码构建并启动桌面应用。
 
 详细的安装选项、前置条件和故障排查，请参阅 [安装指南](./installation.md)。
 

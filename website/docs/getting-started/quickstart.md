@@ -6,6 +6,10 @@ description: "Your first conversation with Hermes Agent — from install to chat
 
 # Hermes Agent Quickstart
 
+:::warning Unofficial fork
+This repository is an **unofficial fork** of [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent), maintained by [@majorissuerep](https://github.com/majorissuerep) — not built, supported, or endorsed by Nous Research. The install command on this page installs **this fork** from the fork's own git history; inspect it before running. Fork problems go to the [fork's issue tracker](https://github.com/majorissuerep/hermes-agent/issues), never upstream.
+:::
+
 Python dependency commands on this page use a
 [PM-prepared source checkout](../reference/package-management.md#developer-workflow).
 After a dependency change, reactivate the checkout and restart Hermes.
@@ -51,24 +55,21 @@ Pick the row that matches your goal:
 ---
 
 ## 1. Install Hermes Agent
-### With the Hermes Desktop installer on macOS or Windows (recommended)
-To easily install the command-line and desktop applications, [download the Hermes Desktop installer](https://hermes-agent.nousresearch.com/) from our website and run it.
 
-### Without Hermes Desktop:
-For a command-line only install without Hermes Desktop, run:
+The commands below install this fork's `main` branch. For an existing upstream installation, follow [the migration instructions](./installation.md#switch-existing-installation). Desktop downloads from the upstream website install upstream Hermes; use the fork's CLI installer here first.
 
 For aarch64 Android devices, use the separate [Termux APT guide](./termux.md).
 
 #### Linux / macOS / WSL2
 ```bash
-curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/majorissuerep/hermes-agent/main/scripts/install.sh | bash
 ```
 
 #### Windows (native)
 
 Run in powershell:
 ```powershell
-iex (irm https://hermes-agent.nousresearch.com/install.ps1) 
+iex (irm https://raw.githubusercontent.com/majorissuerep/hermes-agent/main/scripts/install.ps1)
 ```
 
 After it finishes, reload your shell:
@@ -76,6 +77,10 @@ After it finishes, reload your shell:
 ```bash
 source ~/.bashrc   # or source ~/.zshrc
 ```
+
+Check `hermes secure-vault status`. If no vault exists, run `hermes secure-vault migrate` from a terminal and choose a master password before continuing. The fork requires an unlocked vault for commands that access state. See [encrypted-state setup](./installation.md#initialize-encrypted-state) for backups and unattended services.
+
+Once the vault is ready, `hermes desktop` builds and launches Desktop from the fork's installed checkout.
 
 For detailed installation options, prerequisites, and troubleshooting, see the [Installation guide](./installation.md).
 
