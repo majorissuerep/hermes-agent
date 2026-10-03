@@ -196,6 +196,7 @@ def check_legacy_desktop_checkout() -> None:
 @doctor_check()
 def _check_directory_structure(should_fix: bool, f: Finding) -> None:
     """HERMES_HOME, expected subdirs, SOUL.md, and the enabled built-in memory files."""
+    from hermes_security.io import read_state_text, write_state_text
     try:
         check_legacy_desktop_checkout()
     except Exception:
@@ -213,7 +214,7 @@ def _check_directory_structure(should_fix: bool, f: Finding) -> None:
     # SOUL.md persona file
     soul_path = hermes_home / "SOUL.md"
     if soul_path.exists():
-        lines = soul_path.read_text(encoding="utf-8-sig").strip().splitlines()
+        lines = (read_state_text(soul_path, purpose="state") or "").strip().splitlines()
         if any(l.strip() and not l.strip().startswith(("<!--", "-->", "#")) for l in lines):
             check_ok(f"{_DHH}/SOUL.md exists (persona configured)")
         else:  # template comments only (no real content)
@@ -222,8 +223,8 @@ def _check_directory_structure(should_fix: bool, f: Finding) -> None:
         check_warn(f"{_DHH}/SOUL.md not found", "(create it to give Hermes a custom personality)")
         if should_fix:
             soul_path.parent.mkdir(parents=True, exist_ok=True)
-            soul_path.write_text("# Hermes Agent Persona\n\n<!-- Edit this file to customize how Hermes communicates. -->\n\n"
-                                 "You are Hermes, a helpful AI assistant.\n", encoding="utf-8")
+            write_state_text(soul_path, "# Hermes Agent Persona\n\n<!-- Edit this file to customize how Hermes communicates. -->\n\n"
+                             "You are Hermes, a helpful AI assistant.\n", purpose="state")
             check_ok(f"Created {_DHH}/SOUL.md with basic template")
             f.fixed += 1
     # Only enabled built-in stores: users can disable either legacy file target, and stale migration files
@@ -236,7 +237,8 @@ def _check_directory_structure(should_fix: bool, f: Finding) -> None:
                f"{_DHH}/memories/ not found")
     for fname in [n for on, n in ((_memory_enabled, "MEMORY.md"), (_user_profile_enabled, "USER.md")) if on and existed]:
         if (memories_dir / fname).exists():
-            check_ok(f"{fname} exists ({len((memories_dir / fname).read_text(encoding='utf-8-sig').strip())} chars)")
+            content = read_state_text(memories_dir / fname, purpose="memory") or ""
+            check_ok(f"{fname} exists ({len(content.strip())} chars)")
         else:
             check_info(f"{fname} not created yet (will be created when the agent first writes a memory)")
 
