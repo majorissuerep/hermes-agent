@@ -557,6 +557,7 @@ Encrypted, fully local cross-session memory: every conversation turn, remembered
 |---|---|
 | **Best for** | Private long-term memory that recalls past sessions without any cloud service |
 | **Requires** | The Hermes vault (`hermes secure-vault migrate`); `lancedb` + `fastembed` (installed with the fork, or lazy-installed on first use) |
+| **Platforms** | Linux x86_64/aarch64, Apple Silicon macOS, Windows x64. The managed runtime has no compatible LanceDB/ONNX wheels for Intel macOS, Windows ARM64 or Android. |
 | **Data storage** | `$HERMES_HOME/lancedb-memory/memories.jsonl`: a vault frame stream (AES-GCM per record). The LanceDB index lives only in RAM, rebuilt from the log on start |
 | **Cost** | Free. The embedding model runs locally (ONNX); its public weights (~220 MB) are downloaded once into `$HERMES_HOME/cache/fastembed` |
 

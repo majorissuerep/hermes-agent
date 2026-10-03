@@ -44,7 +44,7 @@ Use any model you want — OpenRouter, OpenAI, your own endpoint, and [many othe
 > [!WARNING]
 > **This installs the FORK** (this repository), not the original Hermes Agent. The one-liners below fetch the installer **from this fork's git history** — always [read it first](https://github.com/majorissuerep/hermes-agent/blob/main/scripts/install.sh) before piping anything into a shell. For the original, supported product use [the upstream installer](https://github.com/NousResearch/hermes-agent).
 
-### Linux, macOS, WSL2, Termux
+### Linux, macOS, WSL2
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/majorissuerep/hermes-agent/main/scripts/install.sh | bash
@@ -66,7 +66,7 @@ for Windows archive in Hermes' tool store. It does not replace your system Git.
 See [installation methods](https://hermes-agent.nousresearch.com/docs/getting-started/installation)
 for the separate MSIX/App Installer package and its update ownership.
 
-> **Android / Termux:** A signed APT repository is available for aarch64 devices, with a `stable` channel (tagged releases) and a prerelease `canary` channel. The package includes Python, Node.js, and the TUI. Use the [Termux guide](https://hermes-agent.nousresearch.com/docs/getting-started/termux), not the desktop/server installer script.
+> **Android / Termux:** The signed APT packages described in the [upstream Termux guide](https://hermes-agent.nousresearch.com/docs/getting-started/termux) contain upstream Hermes, without this fork’s vault and session features. This fork does not publish Termux packages.
 >
 > **Windows:** Native Windows is fully supported — the PowerShell one-liner above installs everything. If you'd rather use WSL2, the Linux command works there too. Native Windows install lives under `%LOCALAPPDATA%\hermes`; WSL2 installs under `~/.hermes` as on Linux.
 

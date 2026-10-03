@@ -8,6 +8,19 @@ description: "How Hermes Agent remembers across sessions — MEMORY.md, USER.md,
 
 Hermes Agent has bounded, curated memory that persists across sessions. This lets it remember your preferences, your projects, your environment, and things it has learned.
 
+## Encrypted memory in this fork
+
+The secure vault encrypts persistent memory files and the session database. Use
+`/memory` in an unlocked session to inspect memory; reading `MEMORY.md` or `USER.md`
+directly on disk shows encrypted data.
+
+The optional bundled `lancedb` memory provider keeps its durable memory store
+inside the vault and creates its search index in memory. Its local embedding
+runtime currently supports Linux x86_64/aarch64, Apple Silicon macOS, and Windows
+x64. The required LanceDB/ONNX wheels are unavailable for Intel macOS, Windows
+ARM64, and Android under the managed Python runtime; use the built-in memory
+provider on those platforms.
+
 ## How It Works
 
 Two files make up the agent's memory:
@@ -68,12 +81,7 @@ This matters on messaging platforms (Telegram, Discord, etc.), where a chat is d
 
 The most common report looks like this: you tell the agent where something lives (an Obsidian vault, a project directory, a server), it answers "Done, I'll remember that", and a fresh session has no idea what you mean. Work through these in order — the first one explains the large majority of cases.
 
-1. **Check whether the write actually happened.** Memory only persists when the model *calls the `memory` tool*; a sentence like "I've added that to my memory" is just text. Open the file and look for the entry:
-
-   ```bash
-   cat ~/.hermes/memories/MEMORY.md
-   cat ~/.hermes/memories/USER.md
-   ```
+1. **Check whether the write actually happened.** Memory only persists when the model *calls the `memory` tool*; a sentence like "I've added that to my memory" is just text. Run `/memory` in an unlocked session and look for the entry. The files on disk are encrypted in this fork.
 
    If the fact is not there, the model claimed a save it never made. Small local models (roughly under 30B parameters) and models with weak tool-calling do this often — they produce the confirmation without the tool call. Ask explicitly ("use the `memory` tool to save the vault path `/srv/vault`") and confirm the entry landed in the file. If it keeps happening, the fix is a stronger model for setup, not more instructions; once the entries exist, a smaller model reads them fine because they arrive in the system prompt.
 

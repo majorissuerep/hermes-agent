@@ -230,7 +230,11 @@ dependencies = [
 
 [project.optional-dependencies]
 # The fork's local memory provider encrypts its store through the vault.
-lancedb-memory = ["lancedb==0.39.0", "fastembed==0.8.1"]
+# Native LanceDB/ONNX wheels do not cover Intel macOS, Windows ARM64 or Android.
+lancedb-memory = [
+  "lancedb==0.39.0; ((sys_platform == 'darwin' and platform_machine == 'arm64') or (sys_platform == 'linux' and platform_machine == 'x86_64' and 'android' not in platform_release) or (sys_platform == 'linux' and platform_machine == 'aarch64' and 'android' not in platform_release) or (sys_platform == 'win32' and platform_machine == 'AMD64'))",
+  "fastembed==0.8.1; ((sys_platform == 'darwin' and platform_machine == 'arm64') or (sys_platform == 'linux' and platform_machine == 'x86_64' and 'android' not in platform_release) or (sys_platform == 'linux' and platform_machine == 'aarch64' and 'android' not in platform_release) or (sys_platform == 'win32' and platform_machine == 'AMD64'))",
+]
 # High-performance event loop — uvloop replaces the stdlib asyncio loop with
 # a libuv-backed implementation for ~2-4x throughput on uvicorn.  Gated as an
 # optional extra because libuv's ./configure does not run on Android/Termux
@@ -599,6 +603,7 @@ opt-in-extras = ["kittentts"]
 # single-authority for WHICH extra is supported WHERE.
 
 [tool.hermes.extras-platforms]
+lancedb-memory = "((sys_platform == 'darwin' and platform_machine == 'arm64') or (sys_platform == 'linux' and platform_machine == 'x86_64' and 'android' not in platform_release) or (sys_platform == 'linux' and platform_machine == 'aarch64' and 'android' not in platform_release) or (sys_platform == 'win32' and platform_machine == 'AMD64'))"
 # mautrix[encryption] → python-olm: linux-only wheels, no win/darwin build.
 matrix = "sys_platform == 'linux'"
 # grpcio (via google-cloud-pubsub) has no win_arm64 wheel.

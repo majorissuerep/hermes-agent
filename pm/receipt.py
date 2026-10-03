@@ -292,9 +292,11 @@ def latest() -> Optional[dict[str, Any]]:
     try:
         point = _receipt_dir() / "latest.json"
         if point.is_file():
-            from hermes_security.io import read_state_text
+            if _vaulted(point):
+                from hermes_security.io import read_state_text
 
-            return json.loads(read_state_text(point, purpose="state"))
+                return json.loads(read_state_text(point, purpose="state"))
+            return json.loads(point.read_text(encoding="utf-8-sig"))
     except (OSError, ValueError, RuntimeError):
         return None
     return None
@@ -311,7 +313,7 @@ def _receipt_name(data: dict[str, Any]) -> str:
 def _write_rotated(data: dict[str, Any]) -> Path:
     """Keep user receipts sealed; installed tool facts remain bootstrap-readable."""
     from pm.filesystem import lock_fd
-    from hermes_security.io import atomic_write_state_json
+    from pm.lock import _write
 
     d = _receipt_dir()
     d.mkdir(parents=True, exist_ok=True)
@@ -319,10 +321,22 @@ def _write_rotated(data: dict[str, Any]) -> Path:
     # Concurrent completions share latest.json; serialize its replacement.
     with (d / ".pm-write.lock").open("a+b") as lock:
         lock_fd(lock.fileno(), wait=True)
-        atomic_write_state_json(path, data, purpose="state")
-        atomic_write_state_json(d / "latest.json", data, purpose="state")
+        if _vaulted(path):
+            from hermes_security.io import atomic_write_state_json
+
+            atomic_write_state_json(path, data, purpose="state")
+            atomic_write_state_json(d / "latest.json", data, purpose="state")
+        else:
+            # PM also boots independently of the application package. No app
+            # or crypto imports before the operator initializes their vault.
+            _write(path, data)
+            _write(d / "latest.json", data)
         _rotate(d)
     return path
+
+
+def _vaulted(path: Path) -> bool:
+    return any((parent / ".hermes-vault").is_file() for parent in path.resolve().parents)
 
 
 def _rotate(d: Path) -> None:
