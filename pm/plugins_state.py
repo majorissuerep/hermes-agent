@@ -28,7 +28,9 @@ def read_home_selection(home: Path) -> Optional[dict[str, Any]]:
     """
     config_path = home / "config.yaml"
     try:
-        text = config_path.read_text(encoding="utf-8-sig")
+        from pm.state_io import read_text
+
+        text = read_text(config_path, purpose="config")
     except FileNotFoundError:
         return None
     except (OSError, UnicodeError) as exc:

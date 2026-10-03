@@ -269,6 +269,13 @@ def runtime_command(script: Path, args: tuple[str, ...] | list[str] = (), *,
 
 
 def run_cli(argv: list[str]) -> int:
+    from pm.plugins_state import dependency_homes
+    from pm.state_io import vault_home
+
+    if any(vault_home(home / "config.yaml") is not None for home in dependency_homes()):
+        from pm.client import _request
+
+        return _request("run_cli", {"argv": argv}, callbacks={"output": sys.stdout.write})
     result = subprocess.run(runtime_command(Path(__file__).with_name("launch.py"), argv),
                             env=runtime_environment())
     return result.returncode
