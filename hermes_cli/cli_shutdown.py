@@ -55,7 +55,7 @@ def _exit_watchdog_timeout() -> float:
 
 
 def _arm_exit_watchdog(timeout_s: float | None = None, *, from_signal: bool = False) -> None:
-    """Daemon timer that ``os._exit(0)``s after ``timeout_s`` once shutdown has begun.
+    """Daemon timer that forces exit after ``timeout_s`` once shutdown has begun.
 
     Backstop for a cleanup step wedged on network I/O and for interpreter teardown
     blocked joining non-daemon threads (ThreadPoolExecutor's atexit join). The daemon
@@ -73,6 +73,15 @@ def _arm_exit_watchdog(timeout_s: float | None = None, *, from_signal: bool = Fa
     # Never under pytest: a delayed os._exit(0) would silently kill the test worker.
     if os.environ.get("PYTEST_CURRENT_TEST"):
         return
+
+    # Cleanup runs in the one-shot driver's finally block. Preserve its pending
+    # SystemExit: a wedged provider thread must not turn a failed turn into rc=0.
+    pending = sys.exception()
+    exit_code = 0
+    if isinstance(pending, SystemExit):
+        exit_code = pending.code if isinstance(pending.code, int) else (0 if pending.code is None else 1)
+    elif pending is not None:
+        exit_code = 130 if isinstance(pending, KeyboardInterrupt) else 1
 
     def _watchdog():
         time.sleep(timeout_s)
@@ -93,7 +102,7 @@ def _arm_exit_watchdog(timeout_s: float | None = None, *, from_signal: bool = Fa
         with suppress(Exception):
             from tools.environments.base import kill_live_foreground_processes
             kill_live_foreground_processes(now=True)
-        os._exit(0)
+        os._exit(exit_code)
 
     with suppress(Exception):  # never block shutdown on watchdog setup
         threading.Thread(target=_watchdog, daemon=True, name="exit-watchdog").start()

@@ -45,6 +45,25 @@ class TestSignalArmLogic:
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+
+@pytest.mark.parametrize("code", [0, 1, 75, 78, 130])
+def test_watchdog_preserves_one_shot_status_during_wedged_cleanup(tmp_path, code):
+    env = dict(os.environ, HERMES_HOME=str(tmp_path), PYTHONPATH=_REPO_ROOT)
+    env.pop("PYTEST_CURRENT_TEST", None)
+    source = """
+import time
+import cli
+from hermes_cli.quiet_single_query import exit_single_query
+try:
+    exit_single_query(CODE)
+finally:
+    cli._arm_exit_watchdog(timeout_s=0.2)
+    time.sleep(60)
+""".replace("CODE", str(code))
+    result = subprocess.run([sys.executable, "-c", source], env=env,
+                            capture_output=True, text=True, timeout=30)
+    assert result.returncode == code, result.stderr
+
 # A minimal stand-in for the wedged-CLI shape: signal handlers mirror the
 # production wiring (arm-on-signal, then a graceful unwind that wedges), and
 # the main thread parks the way a stuck app.run() does.
