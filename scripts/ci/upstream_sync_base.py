@@ -10,7 +10,7 @@ from __future__ import annotations
 import subprocess
 import sys
 
-UPSTREAM = "3c9847f5e86e81c23335a54daa532de28eeffeb3"
+UPSTREAM = "343500b3547e12530457c2fda60ec687e25118b4"
 
 
 def select(base: str, head: str) -> str:

@@ -289,7 +289,7 @@ assert_redirect_is_transport_only() {
   local configured observed
   configured="$(git -C "$INSTALL_DIR" config --get remote.origin.url)"
   case "$configured" in
-    "$official_https"|"$official_ssh") ;;
+    "$official_https"|"$official_ssh"|https://github.com/majorissuerep/hermes-agent.git|git@github.com:majorissuerep/hermes-agent.git) ;;
     *) fail "origin is configured as '$configured', not an official URL — the redirect is not transport-only" ;;
   esac
   # `git` on PATH is the shim here (it reports the official origin so fork

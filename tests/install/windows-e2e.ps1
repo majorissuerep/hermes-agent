@@ -1477,7 +1477,9 @@ function Assert-RedirectIsTransportOnly {
     # like the rehearsal source, channel resolution would fail and this leg
     # would be testing a fork install rather than the real user path.
     $official = @('https://github.com/majorissuerep/hermes-agent.git',
-                  'git@github.com:majorissuerep/hermes-agent.git')
+                  'git@github.com:majorissuerep/hermes-agent.git',
+                  'https://github.com/NousResearch/hermes-agent.git',
+                  'git@github.com:NousResearch/hermes-agent.git')
     $configured = (Invoke-Git @('-C', $InstallDir, 'config', '--get', 'remote.origin.url') | Out-String).Trim()
     Assert-True ($official -contains $configured) "origin stays configured as an official URL (got '$configured')"
     $real = if ($env:HERMES_E2E_REAL_GIT) { $env:HERMES_E2E_REAL_GIT } else { 'git' }

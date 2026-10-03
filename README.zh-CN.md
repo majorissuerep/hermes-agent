@@ -40,7 +40,7 @@ curl -fsSL https://raw.githubusercontent.com/majorissuerep/hermes-agent/main/scr
 
 支持 Linux、macOS 和 WSL2。安装程序会自动处理平台特定的配置。
 
-> **Android / Termux：** aarch64 设备可使用预发布的 APT 软件包，其中包含 Python、Node.js 和 TUI。请按照 [Termux 指南](https://hermes-agent.nousresearch.com/docs/getting-started/termux)安装，不要使用桌面和服务器的安装脚本。
+> **Android / Termux：** [上游 Termux 指南](https://hermes-agent.nousresearch.com/docs/getting-started/termux)中的 APT 软件包是上游版本，不包含本分支的加密保险库和会话功能。本分支目前不发布 Termux 软件包。
 >
 > **Windows：** 在 PowerShell 中运行：
 > ```powershell

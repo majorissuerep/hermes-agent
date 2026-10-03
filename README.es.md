@@ -58,7 +58,7 @@ ripgrep, FFmpeg y las dependencias de Python. Si falta Git, descarga el archivo
 verificado de Git for Windows en el almacén de Hermes, sin reemplazar el Git
 del sistema. MSIX/App Installer es una distribución separada.
 
-> **Android / Termux:** Hay un paquete APT en pruebas para dispositivos aarch64. Incluye Python, Node.js y la TUI. Sigue la [guía de Termux](https://hermes-agent.nousresearch.com/docs/getting-started/termux), no el script de instalación para escritorio y servidor.
+> **Android / Termux:** Los paquetes APT de la [guía de Termux de upstream](https://hermes-agent.nousresearch.com/docs/getting-started/termux) contienen Hermes de upstream, sin la bóveda ni las funciones de sesión de este fork. Este fork no publica paquetes para Termux.
 >
 > **Windows:** Windows nativo es totalmente compatible — el comando de PowerShell de arriba instala todo. Si prefieres usar WSL2, el comando de Linux también funciona allí. La instalación nativa de Windows se encuentra en `%LOCALAPPDATA%\hermes`; WSL2 instala en `~/.hermes` como en Linux.
 
