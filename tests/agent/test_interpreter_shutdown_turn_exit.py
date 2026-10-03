@@ -66,7 +66,7 @@ def _make_agent(monkeypatch, completions):
     agent = AIAgent(
         model="test-model",
         api_key="test-key",
-        base_url="http://localhost:8080/v1",
+        base_url="http://127.0.0.1:1/v1",
         platform="cli",
         max_iterations=4,
         quiet_mode=True,

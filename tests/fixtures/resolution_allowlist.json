@@ -520,16 +520,6 @@
     "kind": "bare_which"
   },
   {
-    "path": "tools/environments/local.py",
-    "symbol": "_windows_bash_candidates",
-    "kind": "bare_which"
-  },
-  {
-    "path": "tools/environments/local_gitbash_probe.py",
-    "symbol": "_mandatory_aslr_enabled",
-    "kind": "bare_which"
-  },
-  {
     "path": "tools/environments/user_shell.py",
     "symbol": "_bash_fallback",
     "kind": "bare_which"

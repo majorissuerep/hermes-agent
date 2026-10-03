@@ -232,6 +232,12 @@ def _join_export_workers() -> None:
 
 @pytest.fixture
 def direct_runtime(tmp_path, monkeypatch):
+    # Exercise the imported relay algorithms in isolation. Production collection
+    # stays disabled; test_fork_does_not_collect_or_export covers that policy.
+    monkeypatch.setattr(relay_shared_metrics, "enabled", lambda:
+                        relay_shared_metrics._raw_config().get("telemetry", {}).get("shared_metrics", {}).get("enabled") is True)
+    monkeypatch.setattr("hermes_cli.observability.observe_lifecycle", relay_shared_metrics.observe_lifecycle)
+    monkeypatch.setattr("hermes_cli.observability.handles_hook", relay_shared_metrics.handles_hook)
     fake = _Relay()
     monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes-home"))
     monkeypatch.setattr(relay_runtime, "_load_nemo_relay", lambda: fake)
@@ -253,6 +259,10 @@ def direct_runtime(tmp_path, monkeypatch):
 
 @pytest.fixture
 def real_binding_runtime(tmp_path, monkeypatch):
+    monkeypatch.setattr(relay_shared_metrics, "enabled", lambda:
+                        relay_shared_metrics._raw_config().get("telemetry", {}).get("shared_metrics", {}).get("enabled") is True)
+    monkeypatch.setattr("hermes_cli.observability.observe_lifecycle", relay_shared_metrics.observe_lifecycle)
+    monkeypatch.setattr("hermes_cli.observability.handles_hook", relay_shared_metrics.handles_hook)
     relay = pytest.importorskip("nemo_relay")
     if getattr(relay, "_native", None) is None:
         pytest.skip("NeMo Relay native binding is unavailable on this platform")

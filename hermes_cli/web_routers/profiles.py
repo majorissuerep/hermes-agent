@@ -998,7 +998,7 @@ async def get_profile_soul(name: str):
         from hermes_security import io
         # Fork: envelope-aware read (SOUL.md is sealed in a vaulted home); utf-8-sig
         # semantics for legacy plaintext files.
-        text = io.read_text(soul_path, purpose="state", encoding="utf-8")
+        text = io.read_text(soul_path, purpose="state", encoding="utf-8-sig")
         return text.removeprefix("\ufeff") if text is not None else text
 
     content = await _read_off_loop(_run, "SOUL.md", OSError)

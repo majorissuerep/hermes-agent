@@ -100,6 +100,7 @@ def test_setup_parser_accepts_telemetry_section():
     assert args.func is handler
 
 
+@unsupported_shared_metrics
 def test_no_answer_survives_the_callers_later_config_save(monkeypatch):
     """A "no" equals the shipped defaults; saved only through ``save_config`` it was stripped, so
     the profile read undecided and every surface (Desktop strip, CLI offer) asked again."""

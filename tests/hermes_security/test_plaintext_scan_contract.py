@@ -4,7 +4,7 @@ import pytest
 from hermes_security import frames, io, migrate, vault
 
 
-@pytest.mark.linux_only
+@pytest.mark.platforms("linux")
 def test_scan_does_not_skip_unreadable_subtrees(tmp_path):
     import os
     if os.geteuid() == 0:

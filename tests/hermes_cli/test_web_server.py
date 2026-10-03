@@ -2446,6 +2446,7 @@ CONFIG_SCHEMA = ProviderConfigSchema(
 
             request.addfinalizer(vault.clear_vault_cache)
             assert migrate.migrate_home(get_hermes_home(), "custom-endpoint-test-password").ok
+            vault.unlock(get_hermes_home(), "custom-endpoint-test-password")
 
         save_env_value("HERMES_CUSTOM_127_0_0_1_8001_API_KEY", "secret-value")
         cfg = load_config()

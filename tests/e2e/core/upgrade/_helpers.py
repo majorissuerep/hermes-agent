@@ -116,6 +116,7 @@ def isolated_env(
         TIRITH_ENABLED="false",
         GIT_TERMINAL_PROMPT="0",
         GIT_CONFIG_NOSYSTEM="1",
+        HERMES_ALLOW_NO_VAULT="1",  # bootstrap/update harness; vault invariants have separate encrypted-home E2E
         GIT_CONFIG_GLOBAL=str(home / ".gitconfig"),
         GIT_AUTHOR_NAME="e2e", GIT_AUTHOR_EMAIL="e2e@example.invalid",
         GIT_COMMITTER_NAME="e2e", GIT_COMMITTER_EMAIL="e2e@example.invalid",

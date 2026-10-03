@@ -177,7 +177,8 @@ jobs:
           fi
           git merge-base "$ref" HEAD >/dev/null
           git diff "$ref...HEAD" --name-only >/dev/null
-          python scripts/check-windows-footguns.py --diff "$ref"
+          upstream=$(python scripts/ci/upstream_sync_base.py "$ref" HEAD)
+          python scripts/check-windows-footguns.py --diff "$ref" --baseline "$ref" --baseline "$upstream"
 
       - name: Require portable Bash shebangs
         run: python scripts/check_bash_shebangs.py

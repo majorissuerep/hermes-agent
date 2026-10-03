@@ -38,15 +38,16 @@ class _ReadFaults:
     """Counts parses of config.yaml and fails the chosen one with a transient EMFILE (intact file)."""
 
     def __init__(self, monkeypatch, path):
-        self.path, self.count, self.fail_at, real = str(path), 0, 0, config_mod.fast_safe_load
+        from hermes_security import io as state_io
+        self.path, self.count, self.fail_at, real = str(path), 0, 0, state_io.read_text
 
-        def flaky(stream):
-            if getattr(stream, "name", None) == self.path:
+        def flaky(path, **kwargs):
+            if str(path) == self.path:
                 self.count += 1
                 if self.count == self.fail_at:
                     raise OSError(errno.EMFILE, "Too many open files")
-            return real(stream)
-        monkeypatch.setattr(config_mod, "fast_safe_load", flaky)
+            return real(path, **kwargs)
+        monkeypatch.setattr(state_io, "read_text", flaky)
 
     def arm(self, fail_at=0):
         self.count, self.fail_at = 0, fail_at
@@ -114,7 +115,7 @@ def test_no_single_transient_read_error_reaches_the_file(write, last_known_good,
         faults.arm(k)
         try:
             write()
-        except RuntimeError:
+        except (RuntimeError, OSError):
             return "refused"
         return "ok"
 
@@ -170,6 +171,7 @@ def test_unreadable_config_serves_one_cached_fallback_until_it_reads(home, monke
         if blocked[0] and str(file) == str(path):
             raise OSError(errno.EMFILE, "Too many open files")
         return builtins.open(file, *args, **kwargs)
+    monkeypatch.setattr("hermes_security.io.open", guarded_open, raising=False)
     monkeypatch.setattr(config_mod, "open", guarded_open, raising=False)
     monkeypatch.setattr(config_backups, "load_newest_good_backup", lambda p: rebuilds.append(p) or real_backup(p))
 

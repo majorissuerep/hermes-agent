@@ -43,7 +43,7 @@ INSERT INTO sample VALUES (1, 'preserved');
         vault.clear_vault_cache()
 
 
-@pytest.mark.linux_only
+@pytest.mark.platforms("linux")
 def test_rollback_is_private_during_first_write_and_remains_restorable(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()

@@ -105,7 +105,7 @@ def _runner_scratch_root() -> str:
     else:
         root = f"/var/tmp/{name}"  # no-tmp: ok — /var/tmp is disk-backed by FHS, never tmpfs
     os.makedirs(root, exist_ok=True)
-    return root
+    return os.path.realpath(root)
 
 
 

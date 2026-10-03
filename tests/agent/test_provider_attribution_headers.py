@@ -138,7 +138,7 @@ def test_user_default_headers_override_sdk_user_agent(mock_openai):
     mock_openai.return_value = MagicMock()
     agent = AIAgent(
         api_key="test-key",
-        base_url="http://localhost:8080/v1",
+        base_url="http://127.0.0.1:1/v1",
         model="my-custom-model",
         provider="custom",
         quiet_mode=True,
@@ -151,7 +151,7 @@ def test_user_default_headers_override_sdk_user_agent(mock_openai):
     }), patch("hermes_cli.config.load_config_readonly", return_value={
         "model": {"default_headers": {"User-Agent": "curl/8.7.1", "X-Extra": "1"}},
     }):
-        agent._apply_client_headers_for_base_url("http://localhost:8080/v1")
+        agent._apply_client_headers_for_base_url("http://127.0.0.1:1/v1")
 
     headers = agent._client_kwargs["default_headers"]
     assert headers["User-Agent"] == "curl/8.7.1"

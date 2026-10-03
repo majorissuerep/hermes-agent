@@ -34,6 +34,7 @@ Suppress an intentional use (e.g. tests or platform-gated code) with:
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 import os
 import re
 import subprocess
@@ -754,6 +755,11 @@ def scan_file(path: Path, footguns: list[Footgun]) -> list[tuple[int, str, Footg
         text = path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return []
+    return scan_source(text, path, footguns)
+
+
+def scan_source(text: str, path: Path, footguns: list[Footgun]) -> list[tuple[int, str, Footgun]]:
+    """Scan source independently of storage, including historical merge inputs."""
     matches: list[tuple[int, str, Footgun]] = []
 
     # Track whether we're inside a triple-quoted string (docstring/raw block).
@@ -874,6 +880,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="Scan files changed vs. the given git ref (e.g. --diff main).",
     )
     p.add_argument(
+        "--baseline", action="append", default=[], metavar="REF",
+        help="Report only findings absent from these reviewed ancestors (repeatable).",
+    )
+    p.add_argument(
         "--list",
         action="store_true",
         help="List all known footgun rules and exit.",
@@ -890,6 +900,21 @@ def print_rules() -> None:
         print()
 
 
+def new_matches(matches, baseline_sources, path):
+    """Keep excess occurrences; identical inherited lines are counted, not blanket-allowed."""
+    inherited = Counter()
+    for source in baseline_sources:
+        inherited |= Counter((line.strip(), fg.name) for _, line, fg in scan_source(source, path, FOOTGUNS))
+    result = []
+    for match in matches:
+        key = (match[1].strip(), match[2].name)
+        if inherited[key]:
+            inherited[key] -= 1
+        else:
+            result.append(match)
+    return result
+
+
 def main(argv: list[str]) -> int:
     # Windows terminals default to cp1252, which can't encode the ✓/✗
     # characters used in the output. Reconfigure streams to UTF-8 so the
@@ -900,6 +925,9 @@ def main(argv: list[str]) -> int:
         sys.stderr.reconfigure(encoding="utf-8")
 
     args = parse_args(argv)
+    for ref in args.baseline:
+        # A typo or unavailable baseline must fail, never make the scan empty.
+        subprocess.run(["git", "merge-base", "--is-ancestor", ref, "HEAD"], cwd=REPO_ROOT, check=True)
 
     if args.list:
         print_rules()
@@ -938,6 +966,17 @@ def main(argv: list[str]) -> int:
     for path in iter_files(roots):
         files_scanned += 1
         matches = scan_file(path, FOOTGUNS)
+        if matches and args.baseline:
+            rel = path.relative_to(REPO_ROOT).as_posix()
+            sources = []
+            for ref in args.baseline:
+                exists = subprocess.run(["git", "ls-tree", ref, "--", rel], cwd=REPO_ROOT,
+                                        capture_output=True, text=True, check=True)
+                if exists.stdout:
+                    sources.append(subprocess.run(["git", "show", f"{ref}:{rel}"], cwd=REPO_ROOT,
+                                                  capture_output=True, text=True, encoding="utf-8",
+                                                  errors="replace", check=True).stdout)
+            matches = new_matches(matches, sources, path)
         for lineno, line, fg in matches:
             rel = path.relative_to(REPO_ROOT).as_posix()
             print(f"{rel}:{lineno}: [{fg.name}]")

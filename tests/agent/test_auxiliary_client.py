@@ -4405,7 +4405,7 @@ class TestAuxUnhealthyCache:
         from agent.auxiliary_client import call_llm, _is_provider_unhealthy
 
         hosted_url = "https://hosted.example/v1"
-        local_url = "http://127.0.0.1:8080/v1"
+        local_url = "http://127.0.0.1:1/v1"
         payment_error = Exception("Payment Required: weekly usage limit")
         payment_error.status_code = 402
 
@@ -4450,7 +4450,7 @@ class TestAuxUnhealthyCache:
         )
 
         hosted_url = "https://hosted.example/v1"
-        local_url = "http://127.0.0.1:8080/v1"
+        local_url = "http://127.0.0.1:1/v1"
         hosted_client = MagicMock(base_url=hosted_url)
         hosted_client.chat.completions.create.side_effect = _AuxAuth401("expired hosted key")
 
@@ -4793,8 +4793,8 @@ class TestCustomEndpointApiKeyInheritance:
         ("https://gw.example.com:443/v2", None, True),
         ("http://gw.example.com/v1", None, False),
         ("https://gw.example.com:8443/v1", None, False),
-        ("http://127.0.0.1:8080/v1", "", False),
-        ("http://127.0.0.1:8080/v1", lambda: "sk-live-cmd-key", False),
+        ("http://127.0.0.1:1/v1", "", False),
+        ("http://127.0.0.1:1/v1", lambda: "sk-live-cmd-key", False),
     ], ids=["same-origin", "http-downgrade", "other-port", "live-keyless", "live-key_cmd"])
     def test_main_key_goes_only_to_its_own_origin(self, tmp_path, monkeypatch, aux_base_url, live_key, inherits):
         """Same hostname is not the same endpoint: a different scheme or port must not receive
@@ -4816,7 +4816,7 @@ class TestCustomEndpointApiKeyInheritance:
         }))
         monkeypatch.setenv("HERMES_HOME", str(home))
         token = (None if live_key is None else
-                 set_runtime_main("custom", "local-model", base_url="http://127.0.0.1:8080/v1", api_key=live_key))
+                 set_runtime_main("custom", "local-model", base_url="http://127.0.0.1:1/v1", api_key=live_key))
         try:
             client, model = get_text_auxiliary_client("compression")
         finally:

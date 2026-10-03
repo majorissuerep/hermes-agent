@@ -13,7 +13,7 @@ import uuid
 
 import pytest
 
-pytestmark = pytest.mark.linux_only
+pytestmark = pytest.mark.platforms("linux")
 
 
 @pytest.fixture

@@ -112,7 +112,7 @@ def test_inline_local_responses_endpoint_keeps_its_configured_stale_budget(monke
     monkeypatch.setenv("HERMES_API_CALL_STALE_TIMEOUT", "3000")
     agent = run_agent.AIAgent(
         model="local-model", provider="custom", api_mode="codex_responses",
-        base_url="http://127.0.0.1:8080/v1", api_key="x", quiet_mode=True,
+        base_url="http://127.0.0.1:1/v1", api_key="x", quiet_mode=True,
         skip_context_files=True, skip_memory=True, platform="cron",
     )
     api_kwargs = {"model": "local-model", "input": [{"role": "user", "content": "x " * 60000}]}

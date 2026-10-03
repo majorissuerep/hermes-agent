@@ -21,7 +21,7 @@ sys.stdout.write(v.read_bytes(os.path.join(sys.argv[1], "secret.bin"), purpose="
 """
 
 
-@pytest.mark.linux_only  # pass_fds inheritance; the Windows host launcher does not hand off (documented)
+@pytest.mark.platforms("linux")  # pass_fds inheritance; the Windows host launcher does not hand off (documented)
 def test_child_reads_parent_sealed_state_via_inherited_fd(tmp_path, monkeypatch):
     home = tmp_path / "home"
     home.mkdir()

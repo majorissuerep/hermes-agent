@@ -6,7 +6,7 @@ Tests that switch_model:
 3. Saves reasoning_config into _primary_runtime for fallback recovery
 """
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 
 class TestSwitchModelReasoningOverride:
@@ -122,4 +122,3 @@ class TestSwitchModelReasoningOverride:
         result = restore_primary_runtime(agent)
         assert result is True
         assert agent.reasoning_config == {"enabled": True, "effort": "xhigh"}
-

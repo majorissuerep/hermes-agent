@@ -200,7 +200,7 @@ class TestNativeTurnDedupe:
         monkeypatch.setattr("model_tools.handle_function_call", _dispatch)
         monkeypatch.setattr(vision_tools, "_should_use_native_vision_fast_path", lambda: True)
 
-        agent = AIAgent(model="test-model", api_key="test-key", base_url="http://localhost:8080/v1",
+        agent = AIAgent(model="test-model", api_key="test-key", base_url="http://127.0.0.1:1/v1",
                         platform="cli", max_iterations=3, quiet_mode=True, skip_memory=True)
         agent._disable_streaming = True
         result = agent.run_conversation(parts)

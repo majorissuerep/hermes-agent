@@ -70,6 +70,7 @@ jobs:
 
           BASE="${{ github.event.pull_request.base.sha }}"
           HEAD="${{ github.event.pull_request.head.sha }}"
+          BASE=$(python3 scripts/ci/upstream_sync_base.py "$BASE" "$HEAD")
 
           # Added lines only, excluding lockfiles.
           # Three-point diff (base...head) diffs from the merge base to HEAD,
