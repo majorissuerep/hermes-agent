@@ -547,8 +547,6 @@ def _write_custom_endpoint(cfg: Dict[str, Any], body: CustomEndpointUpdate) -> T
         # Settings saves the row the list rendered. A legacy custom_providers
         # entry is not in providers, so resolving only there forked a keyless
         # twin and left the list row (and its key_env) behind.
-        from hermes_cli.config_providers import _custom_provider_entry_to_provider_config
-
         legacy = _pop_legacy_custom_provider(cfg, endpoint_id)
         converted = (
             _custom_provider_entry_to_provider_config(legacy, provider_key=endpoint_id)
@@ -562,7 +560,6 @@ def _write_custom_endpoint(cfg: Dict[str, Any], body: CustomEndpointUpdate) -> T
                 restored.append(legacy)
     if existing is None:
         existing = {}
-
 
     # Merge onto the existing entry rather than replacing it: a providers.<name>
     # block can carry hand-written keys the dashboard has no field for

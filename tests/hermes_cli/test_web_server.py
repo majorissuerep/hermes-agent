@@ -2346,7 +2346,8 @@ class TestWebServerEndpoints:
         model_cfg = load_config()["model"]
         assert model_cfg["api_key"] == "sk-legacy"
 
-    def test_saving_legacy_custom_provider_keeps_key_env(self):
+    @pytest.mark.parametrize("encrypted", [False, True], ids=["plaintext-fixture", "encrypted-home"])
+    def test_saving_legacy_custom_provider_keeps_key_env(self, encrypted, request):
         """Save on a legacy row must carry key_env onto providers and drop the list row.
 
         The panel omits api_key (it only shows ${KEY_ENV}). Resolving only inside
@@ -2365,6 +2366,13 @@ class TestWebServerEndpoints:
             "api_mode": "chat_completions",
         }]
         save_config(cfg)
+
+        if encrypted:
+            from hermes_constants import get_hermes_home
+            from hermes_security import migrate, vault
+
+            request.addfinalizer(vault.clear_vault_cache)
+            assert migrate.migrate_home(get_hermes_home(), "custom-endpoint-test-password").ok
 
         listed = {e["id"]: e for e in self.client.get("/api/providers/custom-endpoints").json()["endpoints"]}
         assert listed["qwen-local"]["source"] == "custom_providers"
