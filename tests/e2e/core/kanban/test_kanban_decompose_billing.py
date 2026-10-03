@@ -134,7 +134,7 @@ def gateway(b: Board) -> Iterator[subprocess.Popen]:
     # The child's HOME is itself the scratch board root, so ~/.hermes IS the temp home here; the
     # inherited live-system guard would refuse it (same as the delivery/tenancy gateway children).
     env.update({"HERMES_GATEWAY_LOCK_DIR": str(b.root / "gw-locks"), "PYTHONUNBUFFERED": "1",
-                "HERMES_STATE_DB_GUARD_BYPASS": "1"})
+                "HERMES_STATE_DB_GUARD_BYPASS": "1", "HERMES_ALLOW_NO_VAULT": "1"})
     log_path = b.root / "gateway.log"
     with open(log_path, "wb") as log:
         proc = subprocess.Popen([PY, "-m", "hermes_cli.main", "gateway", "run"], cwd=str(b.root),

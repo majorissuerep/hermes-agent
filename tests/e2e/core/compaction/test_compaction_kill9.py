@@ -90,7 +90,7 @@ def _child_env(home: Path) -> dict:
     # child-process escape hatch is safe because every path here lives under tmp_path.
     env = {k: v for k, v in os.environ.items() if not k.endswith("_API_KEY")}
     env.update(HOME=str(home), HERMES_HOME=str(home / ".hermes"), PYTHONPATH=str(REPO), PYTHONUNBUFFERED="1",
-               HERMES_STATE_DB_GUARD_BYPASS="1")
+               HERMES_STATE_DB_GUARD_BYPASS="1", HERMES_ALLOW_NO_VAULT="1")
     return env
 
 

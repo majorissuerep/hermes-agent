@@ -92,7 +92,7 @@ class Home:
             "TMPDIR": str(self.home), "HERMES_SHARED_AUTH_DIR": str(self.home / "shared"),
             "CODEX_HOME": str(self.home / ".codex"),
             # Child HOME is the fixture home, so its state.db is tmp_path's (guard's documented escape).
-            "HERMES_STATE_DB_GUARD_BYPASS": "1",
+            "HERMES_STATE_DB_GUARD_BYPASS": "1", "HERMES_ALLOW_NO_VAULT": "1",
             **self.sentinel.proxy_env()})
         env.update(extra or {})
         return env

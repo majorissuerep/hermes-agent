@@ -81,7 +81,7 @@ def _minimal_env(home: Path, hermes_home: Path, token: str, extra: dict[str, str
         # The child's HOME *is* the sandbox, so its "real" root (expanduser('~')/.hermes) is the tmp
         # home and the pytest-ancestry live-DB guard would refuse every open. The guard exists to keep
         # tests off the operator's state.db; Backend.start() asserts the sandbox is outside it.
-        HERMES_STATE_DB_GUARD_BYPASS="1",
+        HERMES_STATE_DB_GUARD_BYPASS="1", HERMES_ALLOW_NO_VAULT="1",
     )
     env.update(extra or {})
     return env

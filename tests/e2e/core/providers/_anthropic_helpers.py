@@ -66,7 +66,7 @@ class Rig:
             "HTTPS_PROXY": self.proxy.url, "https_proxy": self.proxy.url,
             "NO_PROXY": loopback, "no_proxy": loopback, "SSL_CERT_FILE": str(self.ca_pem),
             # The child's ~/.hermes/state.db IS the tmp home's db (see parity/_helpers.py).
-            "HERMES_STATE_DB_GUARD_BYPASS": "1",
+            "HERMES_STATE_DB_GUARD_BYPASS": "1", "HERMES_ALLOW_NO_VAULT": "1",
         })
         env.update(extra or {})
         return env

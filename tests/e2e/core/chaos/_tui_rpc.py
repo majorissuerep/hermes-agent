@@ -231,6 +231,7 @@ def env_for_gateway(base_env: dict[str, str], work: Path) -> dict[str, str]:
     # The child's HOME *is* the tmp root, so the live-DB guard (pytest ancestry) would
     # take our tmp state.db for "production"; the documented child opt-out is safe here.
     env["HERMES_STATE_DB_GUARD_BYPASS"] = "1"
+    env["HERMES_ALLOW_NO_VAULT"] = "1"
     env["PWD"] = str(work)
     tmp = work.parent / "tmp"
     tmp.mkdir(exist_ok=True)

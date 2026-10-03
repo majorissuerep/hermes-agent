@@ -198,7 +198,7 @@ def hermetic_env(home: Path, extra: dict[str, str]) -> dict[str, str]:
         "HOME": str(home), "HERMES_HOME": str(home / ".hermes"), "PYTHONPATH": str(REPO_ROOT),
         "PYTHONUNBUFFERED": "1", "NO_COLOR": "1", "TERM": "dumb",
         # The child's HOME is tmp_path; this is the state-db guard's documented child escape hatch.
-        "HERMES_STATE_DB_GUARD_BYPASS": "1",
+        "HERMES_STATE_DB_GUARD_BYPASS": "1", "HERMES_ALLOW_NO_VAULT": "1",
     })
     env.update(extra)
     return env

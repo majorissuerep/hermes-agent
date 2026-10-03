@@ -74,7 +74,7 @@ class WinHome:
             "NO_COLOR": "1",
             # The child's state.db lives under tmp_path; under a pytest ancestor the live-DB
             # guard would refuse it. Documented child-process escape hatch (tests/conftest.py).
-            "HERMES_STATE_DB_GUARD_BYPASS": "1",
+            "HERMES_STATE_DB_GUARD_BYPASS": "1", "HERMES_ALLOW_NO_VAULT": "1",
         })
         env.update(self.extra_env)
         env.update(extra or {})

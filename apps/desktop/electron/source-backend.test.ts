@@ -84,6 +84,7 @@ test.skipIf(process.platform === 'win32')(
       HERMES_HOME: path.join(home, '.hermes'),
       HERMES_RUNTIME_DIR: path.join(temp, 'tools'),
       HERMES_DISABLE_LAZY_INSTALLS: '1',
+      HERMES_ALLOW_NO_VAULT: '1',
       XDG_CONFIG_HOME: path.join(temp, 'config'),
       XDG_CONFIG_DIRS: path.join(temp, 'config'),
       PYTHONDONTWRITEBYTECODE: '1',

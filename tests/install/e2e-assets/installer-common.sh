@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # Driver-only setup; these helpers never install into the caller's real HOME.
 arm_source_redirect() {
+  # These fixtures create plaintext throwaway homes; vault coverage runs separately.
+  export HERMES_ALLOW_NO_VAULT=1
   local repo="$1" work="$2" serve="$3"
-  local https='https://github.com/NousResearch/hermes-agent.git'
-  local ssh='git@github.com:NousResearch/hermes-agent.git'
+  local https='https://github.com/majorissuerep/hermes-agent.git'
+  local ssh='git@github.com:majorissuerep/hermes-agent.git'
   local actual real_git quoted_git cfg="$work/gitconfig" shim="$work/shim"
   actual="$(git -C "$repo" remote get-url origin)"
   real_git="$(command -v git)"
@@ -15,7 +17,7 @@ arm_source_redirect() {
   export HERMES_E2E_REAL_GIT="$real_git"
   # A global file survives install.sh replacing GIT_CONFIG_COUNT/KEY_n/VALUE_n.
   printf '' > "$cfg"
-  for url in "$actual" "$https" "$ssh"; do
+  for url in "$actual" "$https" "$ssh" https://github.com/NousResearch/hermes-agent.git git@github.com:NousResearch/hermes-agent.git; do
     "$real_git" config --file "$cfg" --add "url.file://$serve.insteadOf" "$url"
   done
   export GIT_CONFIG_GLOBAL="$cfg"

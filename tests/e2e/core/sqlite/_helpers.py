@@ -80,7 +80,7 @@ def child_env(home: Path, hermes_home: Path) -> dict:
         "PYTHONUNBUFFERED": "1",
         # The child's HERMES_HOME *is* this chamber's private home, which the live-DB guard reads as
         # "the real Hermes root"; HOME/HERMES_HOME above already keep it off the production install.
-        "HERMES_STATE_DB_GUARD_BYPASS": "1",
+        "HERMES_STATE_DB_GUARD_BYPASS": "1", "HERMES_ALLOW_NO_VAULT": "1",
         "PYTHONPATH": os.pathsep.join(p for p in (str(REPO_ROOT), os.environ.get("PYTHONPATH", "")) if p),
     })
     return env

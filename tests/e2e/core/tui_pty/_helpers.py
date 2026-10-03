@@ -249,7 +249,7 @@ class TmuxTui:
                if not k.startswith(("HERMES_", "TMUX", "OPENAI_", "OPENROUTER_", "ANTHROPIC_"))}
         env.update(HOME=str(self.home), HERMES_HOME=str(self.hermes_home), PYTHONPATH=str(REPO_ROOT),
                    TMPDIR=str(root / "tmp"), LANG="C.UTF-8", LC_ALL="C.UTF-8", PYTHONUNBUFFERED="1",
-                   HERMES_STATE_DB_GUARD_BYPASS="1", HERMES_TUI_INLINE="1" if inline else "0",
+                   HERMES_STATE_DB_GUARD_BYPASS="1", HERMES_ALLOW_NO_VAULT="1", HERMES_TUI_INLINE="1" if inline else "0",
                    HERMES_TUI_DIR=str(tui_dir or private_tui_dir(root)))
         env.update(env_extra or {})
         argv = [sys.executable, "-m", "hermes_cli.main", "--tui", *args]

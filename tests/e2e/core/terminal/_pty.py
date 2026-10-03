@@ -121,7 +121,7 @@ class PtyHermes:
         env.update(
             HOME=str(self.home), HERMES_HOME=str(self.hermes_home), PYTHONPATH=str(REPO_ROOT),
             TMPDIR=str(root / "tmp"), TERM="xterm-256color", COLORTERM="truecolor",
-            PYTHONUNBUFFERED="1", HERMES_STATE_DB_GUARD_BYPASS="1",
+            PYTHONUNBUFFERED="1", HERMES_STATE_DB_GUARD_BYPASS="1", HERMES_ALLOW_NO_VAULT="1",
         )
         master, slave = os.openpty()
         self._set_winsize(master, rows, cols)

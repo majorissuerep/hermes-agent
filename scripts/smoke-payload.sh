@@ -29,7 +29,7 @@ try {
   mkdirSync(home)
   const env = { HOME: home, USERPROFILE: home, HERMES_HOME: join(home, '.hermes'),
     PYTHONUTF8: '1', PYTHONDONTWRITEBYTECODE: '1', HERMES_DISABLE_LAZY_INSTALLS: '1',
-    UV_OFFLINE: '1', npm_config_offline: 'true' }
+    HERMES_ALLOW_NO_VAULT: '1', UV_OFFLINE: '1', npm_config_offline: 'true' }
   // Keep OS process necessities only; no checkout, Python, PM, or Node overrides.
   for (const [key, value] of Object.entries(process.env)) {
     if (/^(path|systemroot|windir|comspec|pathext|temp|tmp)$/i.test(key)) env[key] = value

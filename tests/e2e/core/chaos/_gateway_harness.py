@@ -109,7 +109,7 @@ class GatewayProc:
             "HERMES_GATEWAY_MAX_STARTS": "0",
             # The child's HOME is the tmp root, so the live-DB guard (pytest ancestry) would take
             # its tmp state.db for "production"; the documented child opt-out is safe here.
-            "HERMES_STATE_DB_GUARD_BYPASS": "1",
+            "HERMES_STATE_DB_GUARD_BYPASS": "1", "HERMES_ALLOW_NO_VAULT": "1",
         })
         log = open(self.log_path, "wb")
         # Same process group as pytest (no start_new_session): when the runner kills a timed-out

@@ -72,9 +72,9 @@ UPDATE_TIMEOUT = 1200.0
 CMD_TIMEOUT = 300.0
 GATEWAY_READY_TIMEOUT = 240.0
 CANONICAL_URLS = (
-    "https://github.com/NousResearch/hermes-agent.git",
-    "https://github.com/NousResearch/hermes-agent",
-    "git@github.com:NousResearch/hermes-agent.git",
+    "https://github.com/majorissuerep/hermes-agent.git",
+    "https://github.com/majorissuerep/hermes-agent",
+    "git@github.com:majorissuerep/hermes-agent.git",
 )
 NEXT_MARKER = ".hermes-e2e-next"
 # Captured before any machine strips PATH: harness plumbing (serve.git, rev-parse) only.
@@ -209,7 +209,7 @@ class Machine:
             "GIT_CONFIG_GLOBAL": str(self.root / "e2e-gitconfig"),
             "NO_COLOR": "1",
             # state.db lives under tmp; under a pytest ancestor the live-DB guard would refuse it.
-            "HERMES_STATE_DB_GUARD_BYPASS": "1",
+            "HERMES_STATE_DB_GUARD_BYPASS": "1", "HERMES_ALLOW_NO_VAULT": "1",
         })
         env.update(extra or {})
         return env

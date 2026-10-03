@@ -70,7 +70,7 @@ def hermetic_env(home: Path, extra: dict[str, str] | None = None) -> dict[str, s
         no_proxy="127.0.0.1,localhost",
         # the live-DB guard treats $HOME/.hermes/state.db of a pytest descendant as production;
         # this HOME is the test's own tmp dir (asserted above).
-        HERMES_STATE_DB_GUARD_BYPASS="1",
+        HERMES_STATE_DB_GUARD_BYPASS="1", HERMES_ALLOW_NO_VAULT="1",
         HERMES_ACCEPT_HOOKS="1",
     )
     env.update(extra or {})

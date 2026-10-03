@@ -59,7 +59,7 @@ def test_migration_preserves_pm_products_but_seals_same_named_user_directories(t
     assert report.ok
     vault.unlock(home, "receipt-test-password")
     try:
-        assert artifact.read_text(encoding="utf-8") == '{"public": true}'
+        assert artifact.read_text(encoding="utf-8-sig") == '{"public": true}'
         assert b"private-install-notes" not in private.read_bytes()
         assert io.read_json(private, purpose="state")["secret"] == "private-install-notes"
     finally:

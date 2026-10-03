@@ -62,15 +62,14 @@ def _update(inst: S.Installed, assets: N.App | None = None, **edge_kw) -> S.Resu
         edge.close()
 
 
-def test_valid_stable_record_lands_exactly_on_its_commit(inst):
-    release, tip = _release_and_main_tip(inst, "valid")
+def test_fork_refuses_even_a_valid_upstream_stable_record(inst):
+    release, _tip = _release_and_main_tip(inst, "valid")
+    before = inst.state()
     r = _update(inst, N.static_app(S.stable_objects(release)))
-    assert r.rc == 0, "update to a valid stable record failed\n" + r.report(inst)
-    head = inst.head()
-    assert head != tip, "stable subscriber was moved to the unreleased main tip\n" + r.report(inst)
-    assert head == release, f"stable update landed on {head}, not the released {release}\n" + r.report(inst)
+    _refused(inst, r, before, "upstream stable record")
+    assert "own main branch" in r.out, r.report(inst)
     reads = [h.path for h in r.edge.proxy.requests(S.ASSETS)] if r.edge else []
-    assert STABLE in reads, f"the stable record was not read through the proxy: {reads}\n" + r.report(inst)
+    assert STABLE not in reads, "fork updater consulted an upstream release feed"
 
 
 def _refused(inst: S.Installed, r: S.Result, before: dict, what: str) -> None:

@@ -57,7 +57,7 @@ class FakeHome:
             "PYTHONPATH": str(REPO_ROOT), "PYTHONUNBUFFERED": "1", "NO_COLOR": "1", "TERM": "dumb",
             TAG_VAR: self.tag,
             # The child's ~/.hermes/state.db IS the tmp home's db; see parity/_helpers.py.
-            "HERMES_STATE_DB_GUARD_BYPASS": "1",
+            "HERMES_STATE_DB_GUARD_BYPASS": "1", "HERMES_ALLOW_NO_VAULT": "1",
         })
         env.update(extra or {})
         return env

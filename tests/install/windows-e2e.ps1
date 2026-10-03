@@ -120,6 +120,7 @@ $ProgressPreference = "SilentlyContinue"
 # Match an interactive Unicode console when Python output is piped into the
 # UTF-8 transcript. Old releases otherwise select cp1252 and crash on banners.
 $env:PYTHONIOENCODING = "utf-8"
+$env:HERMES_ALLOW_NO_VAULT = "1"
 [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false
 $OutputEncoding = [Console]::OutputEncoding
 
@@ -190,8 +191,8 @@ function Confirm-OldChat([string]$Out) {
     $script:ChatFailure = $false
 }
 
-$RepoUrlHttps = "https://github.com/NousResearch/hermes-agent.git"
-$RepoUrlSsh   = "git@github.com:NousResearch/hermes-agent.git"
+$RepoUrlHttps = "https://github.com/majorissuerep/hermes-agent.git"
+$RepoUrlSsh   = "git@github.com:majorissuerep/hermes-agent.git"
 
 function Write-Step([string]$Message) {
     Write-Host ""
@@ -252,6 +253,8 @@ function Set-GitRedirect {
 	insteadOf = $actualGitUrl
     insteadOf = $RepoUrlHttps
     insteadOf = $RepoUrlSsh
+    insteadOf = https://github.com/NousResearch/hermes-agent.git
+    insteadOf = git@github.com:NousResearch/hermes-agent.git
 "@ | Set-Content -LiteralPath $gitCfg -Encoding ASCII
     $env:GIT_CONFIG_GLOBAL = $gitCfg
 
@@ -1473,8 +1476,8 @@ function Assert-RedirectIsTransportOnly {
     # `git config --get remote.origin.url`. If the configured URL ever looked
     # like the rehearsal source, channel resolution would fail and this leg
     # would be testing a fork install rather than the real user path.
-    $official = @('https://github.com/NousResearch/hermes-agent.git',
-                  'git@github.com:NousResearch/hermes-agent.git')
+    $official = @('https://github.com/majorissuerep/hermes-agent.git',
+                  'git@github.com:majorissuerep/hermes-agent.git')
     $configured = (Invoke-Git @('-C', $InstallDir, 'config', '--get', 'remote.origin.url') | Out-String).Trim()
     Assert-True ($official -contains $configured) "origin stays configured as an official URL (got '$configured')"
     $real = if ($env:HERMES_E2E_REAL_GIT) { $env:HERMES_E2E_REAL_GIT } else { 'git' }

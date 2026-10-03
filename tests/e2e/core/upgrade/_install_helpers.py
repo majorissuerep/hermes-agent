@@ -141,7 +141,9 @@ def new_sandbox(root: Path, origin: Path | None = None, *, pythonpath: Path | No
     # A fresh machine: ~/.local/bin is NOT on PATH yet; the installer must wire it up.
     if origin is not None:
         (home / ".gitconfig").write_text(
-            f'[url "file://{origin}"]\n  insteadOf = {OFFICIAL_HTTPS}\n  insteadOf = {OFFICIAL_SSH}\n', encoding="utf-8")
+            f'[url "file://{origin}"]\n  insteadOf = {OFFICIAL_HTTPS}\n  insteadOf = {OFFICIAL_SSH}\n'
+            '  insteadOf = https://github.com/NousResearch/hermes-agent.git\n'
+            '  insteadOf = git@github.com:NousResearch/hermes-agent.git\n', encoding="utf-8")
     wrap.mkdir(exist_ok=True)
     real_git = shutil.which("git")
     shim = wrap / "git"

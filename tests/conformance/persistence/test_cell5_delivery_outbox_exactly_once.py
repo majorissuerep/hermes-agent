@@ -282,7 +282,7 @@ class Cell:
             "TMPDIR": str(self.root / "tmp"),
             # HOME/.hermes IS the temp home here, so the live-system guard would
             # read it as production; bypass it in the CHILD only.
-            "HERMES_STATE_DB_GUARD_BYPASS": "1",
+            "HERMES_STATE_DB_GUARD_BYPASS": "1", "HERMES_ALLOW_NO_VAULT": "1",
             "CELL5_JOURNAL": str(self.journal),
             "CELL5_ROLE": role,
             "CELL5_CHAT_ID": CHAT_ID,

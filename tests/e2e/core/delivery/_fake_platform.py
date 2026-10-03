@@ -520,7 +520,7 @@ class GatewayProcess:
             "HOME": str(self.home), "HERMES_HOME": str(self.hermes_home),
             # The child's HOME is itself a throwaway tmp dir, so ~/.hermes IS the temp home here; the
             # live-system guard (armed by the inherited isolation marker) would refuse it.
-            "HERMES_STATE_DB_GUARD_BYPASS": "1",
+            "HERMES_STATE_DB_GUARD_BYPASS": "1", "HERMES_ALLOW_NO_VAULT": "1",
             "HERMES_GATEWAY_LOCK_DIR": str(self.root / "gateway-locks"),
             "TZ": "UTC", "PYTHONHASHSEED": "0", "PYTHONUNBUFFERED": "1", "C12_PARENT_PID": str(os.getpid()),
             "HERMES_DISABLE_LAZY_INSTALLS": "1", "TIRITH_ENABLED": "false",

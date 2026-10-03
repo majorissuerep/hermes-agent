@@ -97,7 +97,7 @@ class E2EHome:
             "HOME": str(self.home), "HERMES_HOME": str(self.hermes_home), "PYTHONPATH": str(REPO_ROOT),
             "PYTHONUNBUFFERED": "1", "NO_COLOR": "1", "TERM": "dumb",
             "PARITY_TREE_TAG": self.tag,  # orphan-scan tag inherited by the whole tree
-            "HERMES_STATE_DB_GUARD_BYPASS": "1",  # child HOME is tmp_path by construction
+            "HERMES_STATE_DB_GUARD_BYPASS": "1", "HERMES_ALLOW_NO_VAULT": "1",  # child HOME is tmp_path by construction
         })
         env.update(self.extra_env)
         env.update(extra or {})

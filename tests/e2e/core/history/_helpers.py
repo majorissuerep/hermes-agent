@@ -327,7 +327,7 @@ def child_env(home: Path, hermes_home: Path, workdir: Path) -> dict[str, str]:
         HERMES_TEST_ISOLATION=str(hermes_home),
         # The child's state.db IS this test's sandbox db; the live-DB guard would refuse it
         # because a pytest ancestor is present.
-        HERMES_STATE_DB_GUARD_BYPASS="1",
+        HERMES_STATE_DB_GUARD_BYPASS="1", HERMES_ALLOW_NO_VAULT="1",
         PYTHONPATH=str(REPO_ROOT), PYTHONUNBUFFERED="1", NO_COLOR="1", TMPDIR=str(home),
         TZ="UTC", LANG="C.UTF-8", PYTHONHASHSEED="0",
     )

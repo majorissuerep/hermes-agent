@@ -22,7 +22,7 @@ def linter():
 
 def test_reviewed_ancestors_exclude_inherited_findings_but_not_new_duplicates(linter, tmp_path):
     path = tmp_path / "sample.py"
-    inherited = 'data = path.read_text(encoding="utf-8")\n'
+    inherited = 'data = path.read_text(encoding="utf-8")\n'  # windows-footgun: ok — linter input, never executed
     current = inherited * 2
     matches = linter.scan_source(current, path, linter.FOOTGUNS)
     added = linter.new_matches(matches, [inherited, inherited], path)
@@ -31,9 +31,9 @@ def test_reviewed_ancestors_exclude_inherited_findings_but_not_new_duplicates(li
 
 def test_reviewed_ancestors_do_not_exempt_changed_unsafe_reads(linter, tmp_path):
     path = tmp_path / "sample.py"
-    current = 'private = other.read_text(encoding="utf-8")\n'
+    current = 'private = other.read_text(encoding="utf-8")\n'  # windows-footgun: ok — linter input, never executed
     matches = linter.scan_source(current, path, linter.FOOTGUNS)
-    assert linter.new_matches(matches, ['data = path.read_text(encoding="utf-8")'], path) == matches
+    assert linter.new_matches(matches, ['data = path.read_text(encoding="utf-8")'], path) == matches  # windows-footgun: ok — linter input, never executed
 
 
 @pytest.mark.parametrize("source,expected", [

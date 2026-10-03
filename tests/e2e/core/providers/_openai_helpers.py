@@ -131,7 +131,7 @@ class Home:
             "HOME": str(self.home), "HERMES_HOME": str(self.hermes_home), "PYTHONPATH": str(REPO_ROOT),
             "PYTHONUNBUFFERED": "1", "NO_COLOR": "1", "TERM": "dumb",
             # The child's state.db lives under tmp_path; the live-DB guard's documented child escape hatch.
-            "HERMES_STATE_DB_GUARD_BYPASS": "1",
+            "HERMES_STATE_DB_GUARD_BYPASS": "1", "HERMES_ALLOW_NO_VAULT": "1",
         })
         env.update(extra or {})
         return env

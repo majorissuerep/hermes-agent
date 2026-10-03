@@ -70,7 +70,7 @@ class NativeHome:
             "TERM": "dumb",
             # The child's ~/.hermes/state.db IS the tmp home's db; under a pytest ancestor the
             # live-DB guard would refuse it. Documented child escape hatch; path is tmp by construction.
-            "HERMES_STATE_DB_GUARD_BYPASS": "1",
+            "HERMES_STATE_DB_GUARD_BYPASS": "1", "HERMES_ALLOW_NO_VAULT": "1",
             # Never reach real AWS/GCP metadata endpoints or shared config from a fake home.
             "AWS_EC2_METADATA_DISABLED": "true",
             "AWS_CONFIG_FILE": str(self.home / ".aws" / "config"),

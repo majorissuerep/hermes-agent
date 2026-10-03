@@ -11,6 +11,9 @@ import pytest
 def test_shim_removes_only_its_owned_profile(tmp_path, outcome):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
+    settings = bin_dir / "xdg-settings"
+    settings.write_text('#!/bin/sh\nprintf "%s\\n" google-chrome.desktop\n', encoding="utf-8")
+    settings.chmod(0o755)
     browser = bin_dir / "google-chrome"
     browser.write_text(
         '#!/usr/bin/env bash\ntrap "exit 0" TERM\n'

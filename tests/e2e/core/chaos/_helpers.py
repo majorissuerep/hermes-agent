@@ -129,7 +129,7 @@ def hermetic_env(home: Path, hermes_home: Path, tag: str) -> dict[str, str]:
         "CHAOS_TAG": tag,
         # HOME *is* the tmp root, so the live-DB guard (pytest ancestry) would read the
         # tmp state.db as "production"; the documented child opt-out is safe here.
-        "HERMES_STATE_DB_GUARD_BYPASS": "1",
+        "HERMES_STATE_DB_GUARD_BYPASS": "1", "HERMES_ALLOW_NO_VAULT": "1",
         "TZ": "UTC",
         "NO_COLOR": "1",
     })
