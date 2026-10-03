@@ -171,15 +171,17 @@ def _check_mcp_security(should_fix: bool, f: Finding) -> None:
 def _check_env_file(should_fix: bool, f: Finding) -> None:
     """Managed scope plus ~/.hermes/.env presence and provider credentials."""
     from hermes_cli.doctor import HERMES_HOME, PROJECT_ROOT, _DHH
+    from hermes_security.io import read_bytes, write_state_text
     managed_scope_check()
     env_path = HERMES_HOME / '.env'
     if env_path.exists():
         check_ok(f"{_DHH}/.env file exists")
         # UTF-8 first; latin-1 fallback for Windows Notepad/cp1252 files (matches env_loader._load_dotenv_with_fallback).
+        raw = read_bytes(env_path, purpose="env") or b""
         try:
-            content = env_path.read_text(encoding="utf-8-sig")
+            content = raw.decode("utf-8-sig")
         except UnicodeDecodeError:
-            content = env_path.read_text(encoding="latin-1")
+            content = raw.decode("latin-1")
         if not check_bool(_has_provider_env_config(content), "API key or custom endpoint configured", f"No API key found in {_DHH}/.env"):
             f.issues.append("Run 'hermes setup' to configure API keys")
     elif (PROJECT_ROOT / '.env').exists():  # project root as fallback
@@ -188,7 +190,7 @@ def _check_env_file(should_fix: bool, f: Finding) -> None:
         check_fail(f"{_DHH}/.env file missing")
         if should_fix:
             env_path.parent.mkdir(parents=True, exist_ok=True)
-            env_path.touch()
+            write_state_text(env_path, "", purpose="env")
             # .env holds API keys — touch() obeys umask (commonly 0o022, world-readable); tighten explicitly.
             with warn_on_error(""):
                 os.chmod(str(env_path), 0o600)

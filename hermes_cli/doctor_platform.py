@@ -86,6 +86,10 @@ def _read_journal_mode(db_path: Path) -> tuple[str | None, str | None]:
     if len(header) == 0:
         return None, "file is empty"
     if len(header) < 20 or not header.startswith(_SQLITE_HEADER_MAGIC):
+        from hermes_security.sqlite import is_vaulted
+
+        if is_vaulted(db_path):
+            return None, "SQLCipher header is encrypted; journal mode is not byte-readable"
         return None, "file is not a database"
     mode = {2: "wal", 1: "rollback"}.get(header[18])
     return (mode, None) if mode else (None, f"unrecognized file-format version {header[18]}")

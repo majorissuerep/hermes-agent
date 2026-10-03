@@ -1810,11 +1810,11 @@ CONFIG_SCHEMA = ProviderConfigSchema(
 
     def test_set_model_main_custom_persists_api_key_and_registers_provider(self):
         """A custom endpoint that requires auth must persist model.api_key (where
-        the runtime reads it) AND register a named custom_providers entry so the
+        the runtime reads it) AND register a named provider entry so the
         endpoint reappears as a ready row in the picker — matching the
         ``hermes model`` custom flow. Regression for the desktop loop where a
         keyed custom endpoint could never be configured from the GUI."""
-        from hermes_cli.config import load_config
+        from hermes_cli.config import get_compatible_custom_providers, load_config
 
         resp = self.client.post(
             "/api/model/set",
@@ -1836,9 +1836,8 @@ CONFIG_SCHEMA = ProviderConfigSchema(
         assert model_cfg["base_url"] == "https://text.example.com/v1"
         assert model_cfg["api_key"] == "sk-secret"
 
-        # Registered in custom_providers (dedup by base_url) so the picker shows
-        # a proper ready row instead of the "needs setup" dead-end.
-        custom = cfg.get("custom_providers") or []
+        # The same compatible view feeds the CLI and dashboard picker.
+        custom = get_compatible_custom_providers(cfg)
         assert any(
             isinstance(e, dict)
             and e.get("base_url") == "https://text.example.com/v1"
@@ -1846,6 +1845,9 @@ CONFIG_SCHEMA = ProviderConfigSchema(
             and e.get("model") == "gpt-oss-120b"
             for e in custom
         )
+
+        endpoints = self.client.get("/api/providers/custom-endpoints").json()["endpoints"]
+        assert any(entry["base_url"] == model_cfg["base_url"] for entry in endpoints)
 
 
     def test_deleting_the_active_custom_endpoint_clears_its_model_mirror(self):

@@ -67,6 +67,7 @@ def main():
     from pm.registry import load_package_definitions
     from pm.runtime import lease_current_runtime
     from pm.worker_operations import OPERATIONS
+    from pm.state_io import worker_state_io
     lease_current_runtime()
     context = request["context"]
     paths.repo_root = lambda: Path(context["repo"])
@@ -93,7 +94,8 @@ def main():
             raise RuntimeError(reply["error"])
         return reply["result"]
 
-    with receipt.worker_context(request.get("update_id")):
+    with receipt.worker_context(request.get("update_id")), worker_state_io(
+            lambda *args: callback("state_io", *args)):
         try:
             load_package_definitions(request.get("packages", []))
             operation = request["operation"]
@@ -106,6 +108,8 @@ def main():
             for name in ("progress", "download_progress"):
                 if name in request["callbacks"]:
                     arguments[name] = lambda *args, name=name: callback(name, *args)
+            if operation == "run_cli":
+                arguments["output"] = lambda text: callback("output", text)
             result = implementation(**arguments)
             if request["operation"] == "ensure":
                 result = None  # Runner is reconstructed from the caller's base env.

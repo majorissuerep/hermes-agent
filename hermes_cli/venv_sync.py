@@ -50,9 +50,13 @@ def _is_sealed(project_root: Path) -> bool:
 
 def check_runtime(project_root: Path) -> str | None:
     """One passive startup verdict; callers only choose stderr or logging."""
+    import sys
     import pm
+    from hermes_cli._parser import command_argv
     from hermes_cli.steward import read_install_stamp, sealed_steward
 
+    if command_argv(sys.argv[1:])[:1] in (["secure-vault"], ["vault"]):
+        return None  # Vault diagnostics/recovery must work while config is locked.
     if (Path(project_root) / ".git").exists() and read_install_stamp(project_root).get("updateMechanism") != "self":
         return None  # A developer's checkout does not owe managed products.
 
@@ -359,7 +363,7 @@ def prepare_launch(project_root: Path, argv: list[str]) -> Path | None:
     from hermes_cli._parser import command_argv
     from hermes_cli.steward import read_install_stamp
 
-    if (command_argv(argv)[:1] == ["pm"]
+    if (command_argv(argv)[:1] in (["pm"], ["secure-vault"], ["vault"])
             or _METADATA_FLAGS & set(argv)
             or os.environ.get("HERMES_DISABLE_LAZY_INSTALLS", "").lower() in ("1", "true", "yes")
             or not (root / ".git").exists()

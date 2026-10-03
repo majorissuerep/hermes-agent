@@ -834,7 +834,8 @@ def test_save_custom_provider_uses_provided_name(monkeypatch, tmp_path):
     monkeypatch.setattr("hermes_cli.config.save_config", _save)
 
     _save_custom_provider("http://localhost:11434/v1", name="Ollama")
-    entries = saved.get("custom_providers", [])
+    from hermes_cli.config_providers import get_compatible_custom_providers
+    entries = get_compatible_custom_providers(saved)
     assert len(entries) == 1
     assert entries[0]["name"] == "Ollama"
 
@@ -859,7 +860,8 @@ def test_save_custom_provider_references_the_key_instead_of_inlining_it(monkeypa
         key_env="HERMES_CUSTOM_LOCALHOST_11434_API_KEY",
     )
 
-    entry = saved["custom_providers"][0]
+    from hermes_cli.config_providers import get_compatible_custom_providers
+    entry = get_compatible_custom_providers(saved)[0]
     assert entry["key_env"] == "HERMES_CUSTOM_LOCALHOST_11434_API_KEY"
     assert "api_key" not in entry
     assert "sk-secret" not in yaml.safe_dump(saved)
