@@ -103,9 +103,24 @@ def _restore_auth_json(src: Path, dst: Path) -> bool:
     The live read and final write share the canonical auth-store lock, so a concurrent refresh
     cannot land between preservation and publish.
     """
+    from hermes_security import io as state_io
+    from hermes_security.errors import VaultError
+
+    target = _auth_restore_target(dst)
+    if target is None:
+        return False
     try:
-        snapshot_store = json.loads(src.read_text(encoding="utf-8-sig"))
-    except (OSError, ValueError, UnicodeError) as exc:
+        home = state_io._home_for(target)
+        if home is not None:
+            from hermes_security.vault import get_vault
+
+            raw = get_vault(home).decrypt(
+                src.read_bytes(), purpose="auth", relpath=target.resolve().relative_to(home).as_posix()
+            )
+            snapshot_store = json.loads(raw)
+        else:
+            snapshot_store = json.loads(src.read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError, UnicodeError, VaultError) as exc:
         logger.error("Refusing auth.json restore from %s: %s", src, exc)
         return False
     if not isinstance(snapshot_store, dict):
@@ -140,9 +155,6 @@ def _restore_auth_json(src: Path, dst: Path) -> bool:
             merge_snapshot_auth_preserving_live_single_use_grants,
         )
 
-        target = _auth_restore_target(dst)
-        if target is None:
-            return False
         with _auth_store_lock(target_path=target):
             live_store = _load_auth_store(target)
             restored = merge_snapshot_auth_preserving_live_single_use_grants(
@@ -189,21 +201,25 @@ def _safe_restore_db(src: Path, dst: Path) -> bool:
     # backup() copies pages without validating their contents; its fallback
     # copies bytes even when SQLite rejected the source. Neither may touch the
     # destination until the snapshot passes the existing bounded integrity policy.
-    source_check = verify_sqlite_integrity(src)
+    from hermes_security import sqlite as vault_sqlite
+
+    encrypted = vault_sqlite.is_vaulted(dst)
+    source_check = verify_sqlite_integrity(src, key_path=dst) if encrypted else verify_sqlite_integrity(src)
     if not source_check["valid"]:
         logger.error("Refusing SQLite restore from %s: %s", src, source_check["message"])
         return False
 
     dst_conn: Optional[sqlite3.Connection] = None
     try:
-        dst_conn = sqlite3.connect(str(dst))
+        dst_conn = vault_sqlite.connect(dst) if encrypted else sqlite3.connect(str(dst))
         try:
             # Force a WAL checkpoint so the backup starts from a clean
             # state rather than writing on top of a deep WAL.
             dst_conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         except Exception:
             pass
-        src_conn = sqlite3.connect(read_only_db_uri(src), uri=True)
+        src_conn = (vault_sqlite.connect(read_only_db_uri(src), key_path=dst, uri=True)
+                    if encrypted else sqlite3.connect(read_only_db_uri(src), uri=True))
         try:
             src_conn.backup(dst_conn)
         finally:

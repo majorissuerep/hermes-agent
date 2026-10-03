@@ -18,6 +18,11 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 
+def _vaulted(path: Path) -> bool:
+    # The emergency preflight must still run with broken application imports.
+    return any((parent / ".hermes-vault").is_file() for parent in path.resolve().parents)
+
+
 class _SQLiteBackupTimeout(RuntimeError):
     """Raised when a SQLite snapshot remains busy past its deadline."""
 
@@ -52,8 +57,14 @@ def _safe_copy_db(src: Path, dst: Path, *, timeout_seconds: float = 10.0) -> boo
                 os.close(secure_fd)
         # timeout=0.0 disables sqlite3's implicit busy wait so the progress callback owns the
         # full locked-source deadline instead of adding the default timeout before each callback.
-        conn = sqlite3.connect(f"{src.resolve().as_uri()}?mode=ro", uri=True, timeout=0.0)
-        backup_conn = sqlite3.connect(str(dst))
+        if _vaulted(src):
+            from hermes_security import sqlite as vault_sqlite
+
+            conn = vault_sqlite.connect(f"{src.resolve().as_uri()}?mode=ro", uri=True, timeout=0.0)
+            backup_conn = vault_sqlite.connect(dst, key_path=src)
+        else:
+            conn = sqlite3.connect(f"{src.resolve().as_uri()}?mode=ro", uri=True, timeout=0.0)
+            backup_conn = sqlite3.connect(str(dst))
         busy_deadline = time.monotonic() + max(0.0, timeout_seconds)
 
         def _check_backup_progress(status: int, _remaining: int, _total: int) -> None:
@@ -94,7 +105,12 @@ def preflight_state_db(home: Path) -> dict:
     try:
         if not _safe_copy_db(source, staged):
             raise RuntimeError("SQLite safe copy failed; previous emergency snapshots were retained")
-        connection = sqlite3.connect(str(staged))
+        if _vaulted(source):
+            from hermes_security import sqlite as vault_sqlite
+
+            connection = vault_sqlite.connect(staged, key_path=source)
+        else:
+            connection = sqlite3.connect(str(staged))
         try:
             result = connection.execute("PRAGMA quick_check").fetchall()
             if result != [("ok",)]:

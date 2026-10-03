@@ -97,9 +97,11 @@ def connect(db_path: Path | str, *, purpose: str = _PURPOSE, key_path: Path | st
     """
 
     target = _materialize(db_path)
-    home = find_vault_home(target)
-    vault = get_vault(home)
     key_source = _materialize(key_path) if key_path is not None else target
+    # A snapshot may be staged outside the home. Its key still belongs to the
+    # original database so publishing or archiving the staging file is safe.
+    home = find_vault_home(key_source)
+    vault = get_vault(home)
     try:
         rel = key_source.resolve(strict=False).relative_to(home).as_posix()
     except ValueError:
@@ -108,7 +110,8 @@ def connect(db_path: Path | str, *, purpose: str = _PURPOSE, key_path: Path | st
     hexkey = key.hex()
 
     sqlcipher = _sqlcipher_module()
-    conn = sqlcipher.connect(str(target), **kwargs)
+    connection_path = str(db_path) if kwargs.get("uri") else str(target)
+    conn = sqlcipher.connect(connection_path, **kwargs)
     try:
         conn.execute(f"PRAGMA key = \"x'{hexkey}'\"")
         # Force a schema read: wrong keys fail now, not on first query.
@@ -124,8 +127,13 @@ def _materialize(db_path: Path | str) -> Path:
 
     text = str(db_path)
     if text.startswith("file:"):
-        text = text[5:]
-        text = text.split("?", 1)[0]
+        from urllib.parse import urlsplit
+        from urllib.request import url2pathname
+
+        parsed = urlsplit(text)
+        text = url2pathname(parsed.path)
+        if parsed.netloc and parsed.netloc != "localhost":
+            text = f"//{parsed.netloc}{text}"
     return Path(text).expanduser()
 
 

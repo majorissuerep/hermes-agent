@@ -357,11 +357,16 @@ def _iter_backup_files(hermes_root: Path, out_path: Path, skipped_dirs: Optional
 
 # --- SQLite safe copy ---
 
-def _query_ro_sqlite(path: Path, fn):
+def _query_ro_sqlite(path: Path, fn, *, key_path: Optional[Path] = None):
     """Run ``fn(conn)`` on a read-only connection to *path*; return ``(value, None)`` or ``(None, exc)``."""
     conn = None
     try:
-        conn = sqlite3.connect(read_only_db_uri(path), uri=True, timeout=1.0)
+        from hermes_security import sqlite as vault_sqlite
+
+        if vault_sqlite.is_vaulted(key_path or path):
+            conn = vault_sqlite.connect(read_only_db_uri(path), key_path=key_path, uri=True, timeout=1.0)
+        else:
+            conn = sqlite3.connect(read_only_db_uri(path), uri=True, timeout=1.0)
         return fn(conn), None
     except Exception as exc:
         return None, exc
@@ -406,7 +411,7 @@ DEFAULT_INTEGRITY_CHECK_MAX_BYTES = 2 << 30  # 2 GiB
 
 def verify_sqlite_integrity(
     path: Path, *, check_header: bool = True, run_pragma: bool = True,
-    max_bytes: int = DEFAULT_INTEGRITY_CHECK_MAX_BYTES) -> dict:
+    max_bytes: int = DEFAULT_INTEGRITY_CHECK_MAX_BYTES, key_path: Optional[Path] = None) -> dict:
     """Verify a SQLite database: existence + minimum size, header magic, then a read-only
     ``PRAGMA integrity_check`` (or a cheap structural probe above ``max_bytes``)."""
     def _done(message: str, valid: bool = False, size: Optional[int] = None) -> dict:
@@ -420,7 +425,10 @@ def verify_sqlite_integrity(
     size = st.st_size
     if size < 100:  # SQLite minimum viable size (header + 1 page)
         return _done(f"too small ({size} bytes) to be a valid SQLite database", size=size)
-    if check_header:
+    from hermes_security import sqlite as vault_sqlite
+
+    encrypted = vault_sqlite.is_vaulted(key_path or path)
+    if check_header and not encrypted:
         # Refused when a live connection exists (close() would cancel this process's POSIX locks
         # — see sqlite_safe_read); verification targets offline snapshots/backup artifacts anyway.
         from hermes_cli.sqlite_safe_read import read_header_bytes_preopen
@@ -434,7 +442,7 @@ def verify_sqlite_integrity(
         # geometry catches malformed-schema and truncated-header-page classes without a data walk.
         _, exc = _query_ro_sqlite(path, lambda c: (
             c.execute("PRAGMA schema_version").fetchone(),
-            c.execute("SELECT count(*) FROM sqlite_master").fetchone()))
+            c.execute("SELECT count(*) FROM sqlite_master").fetchone()), key_path=key_path)
         if exc is not None:
             kind = "failed" if isinstance(exc, sqlite3.DatabaseError) else "error"
             return _done(f"schema probe {kind}: {exc}", size=size)
@@ -442,9 +450,9 @@ def verify_sqlite_integrity(
             f"size {size:,} bytes exceeds max_bytes {max_bytes:,}; "
             "skipped PRAGMA integrity_check (header + schema probe passed)",
             valid=True, size=size)
-    if run_pragma:
+    if run_pragma or encrypted:
         rows, exc = _query_ro_sqlite(
-            path, lambda c: [str(r[0]) for r in c.execute("PRAGMA integrity_check")])
+            path, lambda c: [str(r[0]) for r in c.execute("PRAGMA integrity_check")], key_path=key_path)
         if exc is not None:
             kind = "cannot open database" if isinstance(exc, sqlite3.DatabaseError) else "integrity check error"
             return _done(f"{kind}: {exc}", size=size)
