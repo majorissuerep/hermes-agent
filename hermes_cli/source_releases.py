@@ -78,6 +78,12 @@ def resolve_source_target(channel: str, git_cmd=None, cwd=None, *, repository=No
 
     validate_name(channel)
     repository = repository or source_repository(git_cmd, cwd)
+    # This fork publishes source on main. Never adopt an upstream release
+    # record (or a retirement redirect) as authority over the fork's checkout.
+    if repository.lower() == "majorissuerep/hermes-agent":
+        if channel != "main":
+            raise ValueError("This fork updates from its own main branch; select --channel main")
+        return SourceTarget(channel, channel, repository, branch="main")
     try:
         resolved = _resolve_channel(channel, repository)
     except ChannelNotFound:

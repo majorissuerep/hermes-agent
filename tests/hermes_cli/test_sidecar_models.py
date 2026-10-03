@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from hermes_cli.local_runtime.sidecar_models import MODELS, context_cap_for_model, download_verified
+from pm.downloader import DownloadError
 
 
 def test_download_is_atomic_verified_and_idempotent(tmp_path, monkeypatch):
@@ -17,9 +18,16 @@ def test_download_is_atomic_verified_and_idempotent(tmp_path, monkeypatch):
     requests = []
 
     class Handler(BaseHTTPRequestHandler):
+        def do_HEAD(self):
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(good)))
+            self.end_headers()
+
         def do_GET(self):
-            requests.append(self.path)
-            body = bodies.pop(0)
+            probe = self.headers.get("Range") == "bytes=0-0"
+            if not probe:
+                requests.append(self.path)
+            body = good if probe else bodies.pop(0)
             self.send_response(200)
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
@@ -36,7 +44,7 @@ def test_download_is_atomic_verified_and_idempotent(tmp_path, monkeypatch):
     try:
         kwargs = {"size_bytes": len(good), "sha256": hashlib.sha256(good).hexdigest()}
         url = f"http://127.0.0.1:{server.server_port}/model"
-        with pytest.raises(ValueError, match="SHA-256"):
+        with pytest.raises((ValueError, DownloadError), match="(?i)sha.?256"):
             download_verified(url, target, **kwargs)
         assert target.read_bytes() == b"previous complete file"
         assert not list(tmp_path.glob("*.part")) and not list(tmp_path.glob("*.verified"))

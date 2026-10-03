@@ -78,7 +78,7 @@ def _verified(path: Path, size: int, digest: str) -> bool:
 
 
 def download_verified(url: str, destination: Path, *, size_bytes: int, sha256: str, progress=None) -> Path:
-    from hermes_cli.local_runtime.binaries import _download, replace_when_released
+    from pm.downloader import Download, Source, replace_when_released
     if _verified(destination, size_bytes, sha256):
         return destination
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -88,13 +88,13 @@ def download_verified(url: str, destination: Path, *, size_bytes: int, sha256: s
     os.close(fd)
     temporary = Path(temporary)
     try:
-        def bounded_progress(done, _total):
+        def bounded_progress(done, _total, _ranges):
             if done > size_bytes:
                 raise ValueError("Model download exceeds its pinned size")
             if progress:
                 progress(done, size_bytes)
 
-        _download(url, temporary, progress=bounded_progress)
+        Download([Source(url, temporary, sha256)], resume=False, connections=1).run(progress=bounded_progress)
         if not _verified(temporary, size_bytes, sha256):
             raise ValueError("Model download failed size or SHA-256 verification")
         replace_when_released(temporary, destination)
@@ -111,7 +111,7 @@ def download_model(model_id: str, role: str, source: str = "huggingface", *, pro
     download_verified(model.url(source), cached, size_bytes=model.size_bytes, sha256=model.sha256, progress=progress)
     if not _verified(target, model.size_bytes, model.sha256):
         # Link the verified cache atomically; a running router never sees a partial GGUF.
-        from hermes_cli.local_runtime.binaries import replace_when_released
+        from pm.downloader import replace_when_released
         fd, link = tempfile.mkstemp(prefix=target.name + ".", suffix=".link", dir=target.parent)
         os.close(fd)
         temporary = Path(link)

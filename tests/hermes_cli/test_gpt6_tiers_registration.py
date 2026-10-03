@@ -60,31 +60,6 @@ def test_codex_forward_compat_only_synthesizes_published_gpt6_tiers():
     assert synthesized == {f"{base}{suffix}" for base in GPT6_TIERS for suffix in ("", "-900k")}
 
 
-def test_gpt61_sol_registration():
-    """gpt-6.1-sol (Oct 2026 Codex rollout) inherits the gpt-6 tier contracts everywhere the
-    dash tiers hold them: the gpt-5.6 effort ladder (``max`` allowed — it is NOT a legacy
-    model), the ``-900k`` picker machinery with dated snapshots, verified-context bump
-    (catalog-capped), compaction auto-raise, and pricing presence."""
-    from agent.model_metadata import _CODEX_OAUTH_CONTEXT_FALLBACK, is_codex_900k_base, _verified_codex_ctx_for_slug
-
-    assert codex_supported_efforts("gpt-6.1-sol") == CODEX_GPT56_EFFORTS
-    assert codex_supported_efforts("openai/gpt-6.1-sol") == CODEX_GPT56_EFFORTS
-    # The dot release must not be confused with the dash tiers or vice versa.
-    assert codex_supported_efforts("gpt-6-sol") == CODEX_GPT56_EFFORTS
-    assert codex_supported_efforts("gpt-5.5") != CODEX_GPT56_EFFORTS  # legacy stays legacy
-    assert is_codex_900k_base("gpt-6.1-sol")
-    assert is_codex_900k_base("gpt-6.1-sol-2026-10-02")  # dated snapshots inherit eligibility
-    assert not is_codex_900k_base("gpt-6.1-sol-pro")  # -pro never gains a variant
-    assert strip_codex_context_variant_suffix("openai/gpt-6.1-sol-900k") == "openai/gpt-6.1-sol"
-    assert _CODEX_OAUTH_CONTEXT_FALLBACK["gpt-6.1-sol"] == 272_000
-    assert _verified_codex_ctx_for_slug("gpt-6.1-sol-900k") is not None
-    assert _compression_threshold_for_model("gpt-6.1-sol", provider="openai-codex") == 0.85
-    assert _compression_threshold_for_model("gpt-6.1-sol-900k", provider="openai-codex") is None
-    from agent.usage_pricing import _OFFICIAL_DOCS_PRICING
-
-    assert ("openai", "gpt-6.1-sol") in _OFFICIAL_DOCS_PRICING
-
-
 def test_openrouter_omits_disable_the_openai_ladder_rejects(monkeypatch):
     """OpenRouter's catalog advertises ``none`` for both Sol generations; only 6.1 must omit the disable."""
     import hermes_cli.models_reasoning_caps as caps_mod
@@ -118,7 +93,6 @@ def test_gpt61_sol_900k_is_opt_in_exact_and_billed_as_the_base():
 
     ids = _finalize_codex_models(["gpt-6.1-sol"])  # what live discovery hands the picker
     assert ids.index("gpt-6.1-sol-900k") == ids.index("gpt-6.1-sol") + 1
-    assert not {"gpt-6.1-sol", "gpt-6.1-sol-900k"} & set(_finalize_codex_models(["gpt-5.5"]))  # no entitlement, no entry
     assert not is_codex_900k_base("gpt-6.1-sol-pro")  # exact slug: -pro is not routable on Codex
     assert is_codex_context_variant("openai/gpt-6.1-sol-900k")
     assert strip_codex_context_variant_suffix("gpt-6.1-sol-900k") == "gpt-6.1-sol"

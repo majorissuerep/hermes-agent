@@ -267,5 +267,5 @@ def get_codex_model_ids(access_token: Optional[str] = None, base_url: Optional[s
         if default_model and (not is_astra_model(default_model) or (cache_is_discovery and astra_in_cache))
         else []
     )
-    return CuratedFallbackModels(_finalize_codex_models(_drop_undiscovered_astra(_dedupe([
-        *kept_cache, *kept_default, *_drop_undiscovered_astra(DEFAULT_CODEX_MODELS)]))))
+    return CuratedFallbackModels(_finalize_codex_models(_dedupe([
+        *kept_cache, *kept_default, *_drop_undiscovered_astra(DEFAULT_CODEX_MODELS)])))

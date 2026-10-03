@@ -146,9 +146,7 @@ def test_branch_update_uses_real_refs_and_completion_request(update_tree, monkey
         return result
 
     monkeypatch.setattr(subprocess, 'run', fault)
-    fails = case in {'missing', 'check-missing', 'no-move', 'wrong-branch',
-                     'fork-upstream-wrong-branch', 'fork-upstream-reverted',
-                     'fork-late-wrong-branch', 'fork-late-reverted'}
+    fails = case in {'missing', 'check-missing', 'no-move', 'wrong-branch'}
     if fails:
         with pytest.raises(SystemExit) as error:
             cli_main.cmd_update(t.args)
@@ -165,12 +163,16 @@ def test_branch_update_uses_real_refs_and_completion_request(update_tree, monkey
             output = capsys.readouterr().out
             assert ('absent' if case == 'check-missing' else 'update') in output.lower()
             if case == 'check-upstream':
-                assert git(t.clone, 'rev-parse', 'upstream/main') == t.newer
+                assert 'upstream/main' not in git(t.clone, 'branch', '-r')
         else:
             request, = t.requests
             assert request['assume_yes'] is True
             assert request['gateway_mode'] is True
             expected = t.base if case == 'fork-no-upstream' else t.wanted if case == 'explicit' else t.newer
+            if case.startswith('fork-upstream'):
+                expected = t.base
+            elif case.startswith('fork-late'):
+                expected = t.wanted
             assert git(t.clone, 'rev-parse', 'HEAD') == expected
             assert request['source'] == str(t.clone)
             if case.startswith(('fork-upstream', 'fork-late')):
@@ -179,8 +181,8 @@ def test_branch_update_uses_real_refs_and_completion_request(update_tree, monkey
                 assert 'Code did not move' not in output
                 assert 'Already up to date' not in output
                 origin_before = t.wanted if case.startswith('fork-late') else t.base
-                assert git(t.origin, 'rev-parse', 'HEAD') == (t.newer if case.endswith('push-ok') else origin_before)
-                assert pushes and all((rc == 0) is case.endswith('push-ok') for rc in pushes)
+                assert git(t.origin, 'rev-parse', 'HEAD') == origin_before
+                assert pushes == []  # importing upstream is a reviewed PR operation, never an update side effect
                 if case.startswith('fork-late'):
                     assert local.read_bytes() == local_work
                     assert not git(t.clone, 'stash', 'list')
@@ -376,36 +378,19 @@ def test_stable_zip_consumes_the_same_commit_through_the_real_swap(update_tree, 
         server.server_close()
 
 
-@pytest.mark.parametrize('sync_phase', ['origin', 'early', 'late', 'late-other-branch'])
 @pytest.mark.parametrize('dirty', [False, True])
-def test_update_syntax_failure_restores_pre_update_head(update_tree, monkeypatch, capsys, sync_phase, dirty):
+def test_update_syntax_failure_restores_pre_update_head(update_tree, monkeypatch, capsys, dirty):
     t = update_tree
     git(t.clone, 'checkout', '-q', 'main')
     t.args.channel = 'main'
     monkeypatch.setattr(cli_main, '_sync_with_upstream_if_needed', _sync_with_upstream_if_needed)
-    if sync_phase != 'origin':
-        upstream = t.origin.parent / 'upstream'
-        git(t.origin.parent, 'clone', '-q', str(t.origin), str(upstream))
-        git(t.clone, 'remote', 'add', 'upstream', str(upstream))
-        if sync_phase == 'early':
-            git(t.origin, 'reset', '--hard', t.base)
-        remote = upstream
-    else:
-        remote = t.origin
+    remote = t.origin
     bad = remote / 'hermes_cli' / 'config.py'
     bad.parent.mkdir()
     bad.write_text('def broken(:\n', encoding='utf-8')
     git(remote, 'add', 'hermes_cli/config.py')
     git(remote, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
         '-c', 'commit.gpgsign=false', 'commit', '-qm', 'invalid syntax')
-    unexpected_head = git(remote, 'rev-parse', 'HEAD')
-    if sync_phase == 'late-other-branch':
-        def switch_after_sync(*args, **kwargs):
-            result = _sync_with_upstream_if_needed(*args, **kwargs)
-            git(t.clone, 'checkout', '-qb', 'unexpected')
-            return result
-
-        monkeypatch.setattr(cli_main, '_sync_with_upstream_if_needed', switch_after_sync)
     local = t.clone / '.gitignore'
     staged = local.read_bytes() + b'# staged local work\n'
     unstaged = staged + b'# unstaged local work\n'
@@ -419,16 +404,9 @@ def test_update_syntax_failure_restores_pre_update_head(update_tree, monkeypatch
     assert error.value.code == 1
     assert not t.requests
     output = capsys.readouterr().out
-    if sync_phase == 'late-other-branch':
-        assert git(t.clone, 'rev-parse', 'unexpected') == unexpected_head
-        assert git(t.clone, 'branch', '--show-current') == 'unexpected'
-        assert (t.clone / 'hermes_cli/config.py').read_bytes() == bad.read_bytes()
-        assert "checkout is on 'unexpected'" in output
-        assert 'Rolling back' not in output
-    else:
-        assert 'Pulled code has a syntax error' in output
-        assert git(t.clone, 'rev-parse', 'HEAD') == t.base
-        assert not (t.clone / 'hermes_cli' / 'config.py').exists()
+    assert 'Pulled code has a syntax error' in output
+    assert git(t.clone, 'rev-parse', 'HEAD') == t.base
+    assert not (t.clone / 'hermes_cli' / 'config.py').exists()
     assert not git(t.clone, 'status', '--porcelain')
     assert bool(git(t.clone, 'stash', 'list')) is dirty
     if dirty:
@@ -439,4 +417,3 @@ def test_update_syntax_failure_restores_pre_update_head(update_tree, monkeypatch
         assert local.read_bytes() == unstaged
         assert git(t.clone, 'show', ':.gitignore') == staged.decode().strip()
         assert (t.clone / 'notes.txt').read_bytes() == b'untracked local work\n'
-

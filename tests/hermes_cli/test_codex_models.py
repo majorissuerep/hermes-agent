@@ -187,7 +187,7 @@ def test_identity_stamped_cache_is_account_discovery_evidence_for_astra(tmp_path
         encoding="utf-8",
     )
     monkeypatch.setenv("CODEX_HOME", str(tmp_path))
-    monkeypatch.setattr(codex_models, "_fetch_models_from_api", lambda _token: [])
+    monkeypatch.setattr(codex_models, "_fetch_models_from_api", lambda _token, **_kwargs: [])
 
     ids = get_codex_model_ids(access_token="stale-token")
     assert "gpt-6-astra" in ids

@@ -165,22 +165,6 @@ def build(root: Path, semantic: Path | None = None, *, force: bool = False) -> d
     return status
 
 
-def configure_parser(parser: argparse.ArgumentParser, *, action_dest: str = "action") -> None:
-    subparsers = parser.add_subparsers(dest=action_dest, required=True)
-    subparsers.add_parser("scan").add_argument("project", type=Path)
-    build_parser = subparsers.add_parser("build")
-    build_parser.add_argument("project", type=Path)
-    build_parser.add_argument("--semantic", type=Path)
-    build_parser.add_argument("--force", action="store_true")
-    for action, fields in {"query": ("question",), "explain": ("concept",), "path": ("start", "end")}.items():
-        query_parser = subparsers.add_parser(action)
-        query_parser.add_argument("project", type=Path)
-        for field in fields:
-            query_parser.add_argument(field)
-        if action == "query":
-            query_parser.add_argument("--budget", type=int, default=2000)
-
-
 def execute(args: argparse.Namespace) -> int:
     root = args.project.resolve()
     try:
@@ -219,6 +203,8 @@ def execute(args: argparse.Namespace) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    from hermes_cli.subcommands.graphify import configure_parser
+
     configure_parser(parser)
     return execute(parser.parse_args(argv))
 
