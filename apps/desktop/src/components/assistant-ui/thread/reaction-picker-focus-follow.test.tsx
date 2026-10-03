@@ -1,5 +1,5 @@
 import { AssistantRuntimeProvider, type ThreadMessage, useExternalStoreRuntime } from '@assistant-ui/react'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { registerFloatingComposer } from '@/app/chat/composer/floating-target'
@@ -39,10 +39,14 @@ beforeEach(() => {
   unregister = registerFloatingComposer('surface-1', { groupId: 'g1', target: 'main' })
 })
 
-afterEach(() => {
+afterEach(async () => {
   unregister?.()
   unregister = undefined
-  cleanup()
+  await act(async () => {
+    cleanup()
+    // Radix restores focus in a timer; finish it before jsdom restores Node's CustomEvent.
+    await new Promise<void>(resolve => setTimeout(resolve, 0))
+  })
   $reactionsEnabled.set(false)
 })
 
