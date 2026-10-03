@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
 from hermes_constants import get_hermes_home
+from hermes_security.errors import VaultError
 from tools.url_safety import _normalize_hostname as _normalize_host
 
 logger = logging.getLogger(__name__)
@@ -74,7 +75,9 @@ def _load_policy_config(config_path: Path) -> Dict[str, Any]:
         logger.debug("ruamel.yaml not installed — website blocklist disabled")
         return dict(_DEFAULT_WEBSITE_BLOCKLIST)
     try:
-        config = yaml.safe_load(config_path.read_text(encoding="utf-8-sig")) or {}
+        from hermes_security.io import read_state_text
+
+        config = yaml.safe_load(read_state_text(config_path, purpose="config")) or {}
     except yaml.YAMLError as exc:
         raise WebsitePolicyError(f"Invalid config YAML at {config_path}: {exc}") from exc
     except OSError as exc:
@@ -152,18 +155,16 @@ def check_website_access(url: str, config_path: Optional[Path] = None) -> Option
     """``None`` if the URL is allowed by the blocklist policy, else block metadata (host/rule/source/message).
 
     Fails open on policy errors (warn + ``None``) so a config typo can't break all web tools — except with
-    an explicit ``config_path`` (tests), where errors propagate.
+    an explicit ``config_path`` (tests), where errors propagate. Vault failures always propagate.
     """
-    # Fast path: cached policy disabled/empty → no YAML read, no host extraction.
-    if config_path is None:
-        with _cache_lock:
-            if _cached_policy is not None and not _cached_policy.get("enabled"):
-                return None
     host = _extract_host_from_urlish(url)
     if not host:
         return None
     try:
         policy = load_website_blocklist(config_path)
+    except VaultError:
+        # An unavailable vault is not an absent policy or a YAML typo.
+        raise
     except WebsitePolicyError as exc:
         if config_path is not None:
             raise
