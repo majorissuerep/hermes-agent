@@ -40,6 +40,7 @@ class FakeClient:
         self._initialized = False
         self._closed = False
         self._notifications: list[dict] = []
+        self._pending_notifications: list[dict] = []  # held until a turn actually starts (wire order)
         self._server_requests: list[dict] = []
         self._request_handler = None  # Optional[Callable[[str, dict], dict]]
 
@@ -52,7 +53,19 @@ class FakeClient:
     def request(self, method: str, params: Optional[dict] = None, timeout: float = 30.0):
         self.requests.append((method, params or {}))
         if self._request_handler is not None:
-            return self._request_handler(method, params or {})
+            result = self._request_handler(method, params or {})
+        else:
+            result = self._default_request_result(method, params or {})
+        if method in {"turn/start", "thread/compact/start"}:
+            # Wire order: a turn's notifications can only start arriving after turn/start
+            # is issued. Tests queue events up front; release them now (FIFO). From here on
+            # new queue_notification calls land directly (the turn is in flight).
+            self._turn_in_flight = True
+            self._notifications.extend(self._pending_notifications)
+            self._pending_notifications.clear()
+        return result
+
+    def _default_request_result(self, method: str, params: dict):
         # Sensible defaults for protocol methods used by the session
         if method == "thread/start":
             return {"thread": {"id": "thread-fake-001"},
@@ -62,7 +75,7 @@ class FakeClient:
         if method == "turn/interrupt":
             return {}
         if method == "turn/steer":
-            return {"turnId": (params or {}).get("expectedTurnId")}
+            return {"turnId": params.get("expectedTurnId")}
         return {}
 
     def notify(self, method: str, params=None):
@@ -100,7 +113,10 @@ class FakeClient:
         return list(getattr(self, "_stderr_tail", []))[-n:]
 
     # Test helpers
-    def queue_notification(self, method: str, **params):
+    def queue_notification(self, method: str, *, pre_turn: bool = False, **params):
+        """Queue a notification. Default: held until the next ``turn/start`` (wire order — a
+        turn's events cannot precede its start). ``pre_turn=True`` leaves it in the queue
+        immediately, modeling the late tail of a PREVIOUS turn still running daemon-side."""
         # Keep legacy fixture shorthand aligned with the IDs returned by the
         # fake thread/start and turn/start responses.
         if params.get("threadId") in {"t", "th"}:
@@ -112,7 +128,9 @@ class FakeClient:
             turn = dict(turn)
             turn["id"] = "turn-fake-001"
             params["turn"] = turn
-        self._notifications.append({"method": method, "params": params})
+        note = {"method": method, "params": params}
+        holding = not pre_turn and not getattr(self, "_turn_in_flight", False)
+        (self._pending_notifications if holding else self._notifications).append(note)
 
     def queue_server_request(self, method: str, request_id: Any = "srv-1", **params):
         self._server_requests.append({"id": request_id, "method": method, "params": params})
@@ -846,7 +864,41 @@ class TestSessionRetirement:
             msg["role"] == "assistant" and msg.get("content") == "done"
             for msg in r.projected_messages
         )
-        assert not any(method == "turn/interrupt" for method, _ in client.requests)
+        # The daemon-side turn may still be alive past the deadline (persistent-mode models):
+        # accepting its text as terminal must also interrupt the daemon turn so the orphan
+        # cannot keep running and bleed late items into the NEXT turn on this thread.
+        assert any(method == "turn/interrupt" for method, _ in client.requests)
+
+    def test_stale_notifications_from_previous_turn_are_drained_before_turn_start(self):
+        """Regression (Oct 2026, gpt-6.1-sol): a deadline-accepted turn keeps running
+        daemon-side and its late ``item/completed`` events (no turn id on the wire) stay in
+        the client queue. The next ``run_turn`` must drain them BEFORE ``turn/start`` so they
+        never project into the new turn's transcript."""
+        client = FakeClient()
+        # Late tail of the PREVIOUS turn, already in the queue before the new turn starts.
+        client.queue_notification(
+            "item/completed",
+            pre_turn=True,
+            item={"type": "agentMessage", "id": "old-1", "text": "stale follow-up from old turn"},
+            threadId="t",
+        )
+        # The new turn's own events.
+        client.queue_notification(
+            "item/completed",
+            item={"type": "agentMessage", "id": "m1", "text": "fresh answer"},
+            threadId="t",
+            turnId="tu1",
+        )
+        client.queue_notification(
+            "turn/completed", threadId="t",
+            turn={"id": "tu1", "status": "completed", "error": None},
+        )
+        s = make_session(client)
+        r = s.run_turn("next question", turn_timeout=5.0, notification_poll_timeout=0.01)
+        assert r.final_text == "fresh answer"
+        texts = [m.get("content") for m in r.projected_messages if m.get("role") == "assistant"]
+        assert texts == ["fresh answer"], "stale previous-turn content must not project into the new turn"
+        assert r.error is None and r.interrupted is False and r.should_retire is False
 
 
     def test_post_tool_silence_warns_but_does_not_retire_a_healthy_turn(self, caplog):
@@ -1151,3 +1203,36 @@ class TestTransportLoss:
         assert steer_session.request_steer("more") is False
         control.fail_on = "turn/interrupt"
         steer_session._issue_interrupt("turn-fake-001")  # must not raise
+
+
+class TestMissingCodexProviderHint:
+    """A named custom provider mapped onto codex's [model_providers.<id>] table that codex's
+    config loader rejects ("Model provider `x` not found", live 2026-10) must surface an
+    actionable fix, not the raw -32600."""
+
+    def test_hint_extraction(self):
+        from agent.transports.codex_app_server_session import _missing_codex_provider_hint
+
+        assert _missing_codex_provider_hint("failed to load configuration: Model provider `vercel` not found") == (
+            "Hermes routes named custom providers through codex's own [model_providers.vercel] table in "
+            "~/.codex/config.toml, which does not define `vercel`. Add the table there "
+            "(name / base_url / env_key / wire_api), or switch this provider to the default runtime with "
+            "`/codex-runtime auto`."
+        )
+        assert _missing_codex_provider_hint("some unrelated error") is None
+        assert _missing_codex_provider_hint("") is None
+
+    def test_turn_error_carries_the_hint(self):
+        client = FakeClient()
+
+        def fail_provider_start(method, params):
+            if method == "turn/start":
+                raise session_mod.CodexAppServerError(
+                    code=-32600, message="failed to load configuration: Model provider `vercel` not found")
+            return client._default_request_result(method, params)
+
+        client._request_handler = fail_provider_start
+        s = make_session(client)
+        r = s.run_turn("hi", turn_timeout=2.0)
+        assert "[model_providers.vercel]" in (r.error or "")
+        assert "codex-runtime" in (r.error or "")

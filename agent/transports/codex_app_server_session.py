@@ -12,6 +12,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import os
+import re
 import threading
 import time
 from dataclasses import dataclass, field
@@ -171,6 +172,23 @@ _OAUTH_REAUTH_HINT = (
     "Codex authentication failed — your ChatGPT/Codex login looks expired or invalid. Run `codex login` to refresh, "
     "then retry. (Fall back to default runtime with `/codex-runtime auto` if the issue persists.)"
 )
+
+# codex fails config load with a raw -32600 naming the missing provider table when Hermes maps a
+# named custom provider onto codex's own [model_providers.<id>] table and ~/.codex/config.toml
+# lacks it (observed: "failed to load configuration: Model provider `vercel` not found").
+_MISSING_CODEX_PROVIDER_RE = re.compile(r"Model provider `([^`]+)` not found")
+_MISSING_CODEX_PROVIDER_HINT = (
+    "Hermes routes named custom providers through codex's own [model_providers.{name}] table in "
+    "~/.codex/config.toml, which does not define `{name}`. Add the table there "
+    "(name / base_url / env_key / wire_api), or switch this provider to the default runtime with "
+    "`/codex-runtime auto`."
+)
+
+
+def _missing_codex_provider_hint(message: str) -> Optional[str]:
+    """Actionable hint when codex's config loader rejects an unknown model_provider id."""
+    match = _MISSING_CODEX_PROVIDER_RE.search(message or "")
+    return _MISSING_CODEX_PROVIDER_HINT.format(name=match.group(1)) if match else None
 
 
 def _classify_oauth_failure(primary: str = "", *, stderr: str = "") -> Optional[str]:
@@ -366,12 +384,17 @@ class CodexAppServerSession:
         result.should_retire = True
 
     def _set_classified_error(self, result: TurnResult, prefix: str, classify_text: str, detail: Any) -> None:
-        """OAuth failures -> re-auth hint AND retire (token store broken though JSON-RPC is fine); else stderr tail."""
+        """OAuth failures -> re-auth hint AND retire (token store broken though JSON-RPC is fine);
+        a missing codex [model_providers.<id>] table -> actionable config hint; else stderr tail."""
         hint = _classify_oauth_failure(classify_text, stderr=self._stderr_blob(40))
         if hint is not None:
             self._retire(result, hint)
-        else:
-            result.error = self._format_error_with_stderr(prefix, detail)
+            return
+        provider_hint = _missing_codex_provider_hint(classify_text)
+        if provider_hint is not None:
+            result.error = provider_hint
+            return
+        result.error = self._format_error_with_stderr(prefix, detail)
 
     def _start_for(self, result: TurnResult) -> bool:
         """ensure_started(); startup failures become a retiring TurnResult.error instead of raw exceptions."""
@@ -443,6 +466,31 @@ class CodexAppServerSession:
                 result.error = result.error or "codex reported turn_aborted"
         return projection, aborted
 
+    def _drain_stale_notifications(self, client: CodexAppServerClient, *, limit: int = 64) -> int:
+        """Discard notifications queued before this turn starts (bounded).
+
+        Anything already in the queue belongs to PREVIOUS turns — typically the tail of a
+        deadline-accepted turn that kept running daemon-side. Without the drain those late
+        items pass the turn-scope filter (most ``item/*`` events carry no turn id) and project
+        into the NEW turn's transcript. Display callbacks are still fired so the tail is not
+        lost from the UI."""
+        drained = 0
+        for _ in range(limit):
+            if self._closed:
+                break
+            note = client.take_notification(timeout=0)
+            if note is None:
+                break
+            drained += 1
+            if self._on_event is not None:
+                try:
+                    self._on_event(note)
+                except Exception:  # pragma: no cover - display callback
+                    logger.debug("on_event callback raised while draining stale notifications", exc_info=True)
+        if drained:
+            logger.debug("drained %d stale notification(s) queued before turn/start", drained)
+        return drained
+
     def run_turn(
         self, user_input: Any, *, turn_timeout: float = 600.0,
         notification_poll_timeout: float = 0.25, post_tool_quiet_timeout: float = 90.0,
@@ -462,14 +510,21 @@ class CodexAppServerSession:
             if self._interrupt_event.is_set():
                 result.interrupted = True
             else:
-                input_items, result.submitted_user_text = _build_turn_input(user_input)
-                ts = self._request_for(
-                    result, "turn/start",
-                    {"threadId": self._thread_id, "input": input_items},
-                    "turn/start",
-                )
-                if ts is not None:
-                    self._run_started_turn(result, ts, turn_timeout, notification_poll_timeout, post_tool_quiet_timeout)
+                live_client = self._client
+                if live_client is not None:
+                    self._drain_stale_notifications(live_client)
+                if self._closed or self._client is None:
+                    result.interrupted = True
+                    self._retire(result, "codex app-server session closed while the turn was in flight")
+                else:
+                    input_items, result.submitted_user_text = _build_turn_input(user_input)
+                    ts = self._request_for(
+                        result, "turn/start",
+                        {"threadId": self._thread_id, "input": input_items},
+                        "turn/start",
+                    )
+                    if ts is not None:
+                        self._run_started_turn(result, ts, turn_timeout, notification_poll_timeout, post_tool_quiet_timeout)
         self._interrupt_event.clear()
         return result
 
@@ -595,6 +650,13 @@ class CodexAppServerSession:
                 "turn/completed; accepting the assistant text as the terminal response"
             )
             turn_complete = True
+            # The daemon-side turn is still alive (it answers RPCs and keeps emitting items long
+            # after the deadline — codex 0.159, persistent-mode models). Best-effort interrupt so
+            # the orphaned turn cannot keep consuming the account or bleed late notifications into
+            # the next turn on this thread; the accepted text remains the terminal response, so
+            # this is NOT an interrupted result and the session is NOT retired.
+            logger.info("interrupting daemon-side codex turn %s after deadline acceptance", result.turn_id)
+            self._issue_interrupt(result.turn_id)
 
         if not turn_complete and not result.interrupted:
             self._issue_interrupt(result.turn_id)

@@ -262,6 +262,9 @@ _OFFICIAL_DOCS_PRICING[("openai", "gpt-6-astra")] = _snap(
 for _slug, _inp, _out, _read, _write, _inp_above, _out_above, _read_above, _write_above in (
     ("gpt-6-sol", "2.00", "10.00", "0.20", "2.50", "4.00", "15.00", "0.40", "5.00"),
     ("gpt-6-luna", "0.10", "0.50", "0.01", "0.125", "0.20", "0.75", "0.02", "0.25"),
+    # gpt-6.1 Sol (2026-10): OpenRouter relists at gpt-6-sol's rates (2/10, cache 0.10x/1.25x);
+    # same 272K whole-request tier shape as the dash tiers.
+    ("gpt-6.1-sol", "2.00", "10.00", "0.20", "2.50", "4.00", "15.00", "0.40", "5.00"),
 ):
     _OFFICIAL_DOCS_PRICING[("openai", _slug)] = _snap(
         _inp, _out, _read, _write,
@@ -295,8 +298,8 @@ del _BEDROCK_URL, _ANTHROPIC_URL, _GOOGLE_URL, _OPUS, _SONNET
 # The direct Gemini provider emits preview IDs for two models; key the snapshot
 # by both the documented stable name and the emitted ID.
 for _provider, _alias, _canonical in (
-    *((("openai", f"{m}-{suffix}", m)
-       for m in ("gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-6-sol", "gpt-6-luna")
+    *(((("openai", f"{m}-{suffix}", m))
+       for m in ("gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-6-sol", "gpt-6-luna", "gpt-6.1-sol")
        for suffix in ("pro", "900k"))),
     ("google", "gemini-3.1-pro-preview", "gemini-3.1-pro"),
     ("google", "gemini-3.1-flash-lite-preview", "gemini-3.1-flash-lite"),

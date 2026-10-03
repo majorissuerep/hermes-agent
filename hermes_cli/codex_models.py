@@ -17,6 +17,10 @@ logger = logging.getLogger(__name__)
 # choices (#52492). If OpenAI re-enables any, live discovery (_fetch_models_from_api) picks them
 # up automatically.
 DEFAULT_CODEX_MODELS: List[str] = [
+    # gpt-6.1 (2026-10): published by the Codex backend ahead of most catalogs; OpenRouter already
+    # relists openai/gpt-6.1-sol. Curated here so an offline first run still offers the current
+    # workhorse; the account catalog remains the authoritative live list.
+    "gpt-6.1-sol",
     "gpt-6-sol",
     "gpt-6-luna",
     "gpt-5.6-sol",
@@ -40,6 +44,7 @@ DEFAULT_CODEX_MODELS: List[str] = [
 # unsupported — that was wrong; restored here. Keep it in the curated fallback so Pro users still see Spark
 # in `/model` when live discovery is unavailable (offline first run, transient API failure).
 _FORWARD_COMPAT_TEMPLATE_MODELS: List[tuple[str, tuple[str, ...]]] = [
+    ("gpt-6.1-sol", ("gpt-6-sol", "gpt-5.6-sol", "gpt-5.5")),
     ("gpt-6-sol", ("gpt-5.6-sol", "gpt-5.5")),
     ("gpt-6-luna", ("gpt-5.6-luna", "gpt-5.5")),
     ("gpt-5.6-sol", ("gpt-5.5", "gpt-5.4")),
@@ -100,6 +105,26 @@ def _drop_undiscovered_astra(model_ids: List[str]) -> List[str]:
     from agent.reasoning_effort import is_astra_model
 
     return [model for model in model_ids if not is_astra_model(model)]
+
+
+def _cache_records_account_discovery(codex_home: Path) -> bool:
+    """Whether ``models_cache.json`` is codex's own ACCOUNT-SCOPED discovery artifact.
+
+    codex (0.15x+) stamps the catalog it fetched under the logged-in principal with a non-empty
+    ``identity`` digest (plus ``fetched_at``); that file is discovery evidence written by the
+    account's own client, the same standing as Hermes' live API probe — a generation behind at
+    worst, entitlement-bearing at best. A hand-written or legacy cache without those fields is a
+    compatibility hint only, and astra from it must still be dropped.
+    """
+    try:
+        raw = json.loads((codex_home / "models_cache.json").read_text(encoding="utf-8"))
+    except Exception:
+        return False
+    if not isinstance(raw, dict):
+        return False
+    identity = raw.get("identity")
+    fetched_at = raw.get("fetched_at")
+    return isinstance(identity, str) and bool(identity.strip()) and isinstance(fetched_at, str) and bool(fetched_at.strip())
 
 
 def codex_catalog_credential_identity() -> str:
@@ -195,13 +220,29 @@ def _read_cache_models(codex_home: Path) -> List[str]:
 
 
 def get_codex_model_ids(access_token: Optional[str] = None) -> List[str]:
-    """Available Codex model IDs: live API (if token) > config.toml default > local cache > defaults."""
+    """Available Codex model IDs: live API (if token) > config.toml default > local cache > defaults.
+
+    Astra stays account-gated everywhere except codex's own identity-stamped ``models_cache.json``
+    (the account's discovery evidence — see :func:`_cache_records_account_discovery`)."""
     codex_home = Path(os.getenv("CODEX_HOME", "").strip() or str(Path.home() / ".codex")).expanduser()
     if access_token:
         api_models = _fetch_models_from_api(access_token)
         if api_models:
             return _finalize_codex_models(api_models)
     default_model = _read_default_model(codex_home)
-    return _finalize_codex_models(_drop_undiscovered_astra(_dedupe([
-        *([default_model] if default_model else []), *_read_cache_models(codex_home),
-        *DEFAULT_CODEX_MODELS])))
+    cache_models = _read_cache_models(codex_home)
+    from agent.reasoning_effort import is_astra_model
+
+    # codex's own identity-stamped cache is account-scoped discovery evidence; a legacy/hand-made
+    # cache without the stamp is a compatibility hint and keeps the astra drop.
+    cache_is_discovery = bool(cache_models) and _cache_records_account_discovery(codex_home)
+    astra_in_cache = any(is_astra_model(m) for m in cache_models)
+    kept_cache = cache_models if cache_is_discovery else _drop_undiscovered_astra(cache_models)
+    # config.toml default: a compatibility hint — astra survives only if discovery evidence has it.
+    kept_default = (
+        [default_model]
+        if default_model and (not is_astra_model(default_model) or (cache_is_discovery and astra_in_cache))
+        else []
+    )
+    return _finalize_codex_models(_dedupe([
+        *kept_cache, *kept_default, *_drop_undiscovered_astra(DEFAULT_CODEX_MODELS)]))
