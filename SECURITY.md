@@ -1,4 +1,6 @@
-# Hermes Agent Security Policy
+# Hermes Agent Security Policy (unofficial fork)
+
+> **Unofficial fork** of [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent), maintained by [@majorissuerep](https://github.com/majorissuerep). Not affiliated with or endorsed by Nous Research.
 
 This document describes Hermes Agent's trust model, names the one
 security boundary the project treats as load-bearing, and defines the
@@ -6,10 +8,25 @@ scope for vulnerability reports.
 
 ## 1. Reporting a Vulnerability
 
-Report privately via [GitHub Security Advisories](https://github.com/NousResearch/hermes-agent/security/advisories/new)
-or **security@nousresearch.com**. Do not open public issues for
-security vulnerabilities. **Hermes Agent does not operate a bug
-bounty program.**
+**Fork vulnerabilities** (anything present in this fork's code, or in
+upstream code as modified by the fork) must be reported to the
+**fork**. GitHub private vulnerability reporting is not currently enabled
+for this repository. Contact [the maintainer](https://github.com/majorissuerep)
+to arrange a private disclosure channel. If needed, [open an issue](https://github.com/majorissuerep/hermes-agent/issues/new)
+requesting that channel **without including vulnerability details**. Do NOT
+send fork vulnerabilities to upstream's security@nousresearch.com —
+the upstream team does not run this code and cannot fix or validate
+fork-specific issues.
+
+Vulnerabilities that reproduce on **unmodified upstream** (fetch the
+original from [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent)
+and confirm there first) should be reported upstream via
+[GitHub Security Advisories](https://github.com/NousResearch/hermes-agent/security/advisories/new)
+or **security@nousresearch.com**.
+
+Do not open public issues for security vulnerabilities. **This fork
+does not operate a bug bounty program.** As a personal fork, response
+times are best-effort.
 
 A useful report includes:
 

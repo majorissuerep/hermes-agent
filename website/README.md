@@ -2,10 +2,10 @@
 
 This website is built using [Docusaurus](https://docusaurus.io/), a modern static website generator.
 
-> **Reading the docs on GitHub?** The Markdown under `docs/` is authored for the rendered site at
-> <https://hermes-agent.nousresearch.com/docs/>. Cross-page links are relative Markdown paths, so they
-> follow through on GitHub's file viewer too. Every page on the site has an **Edit this page** link
-> that opens the source file here.
+> **Reading the fork's docs on GitHub?** Start with [installation](docs/getting-started/installation.md).
+> The fork's Markdown lives under `docs/`; cross-page links work in GitHub's file viewer and local
+> Docusaurus builds. The public site at <https://hermes-agent.nousresearch.com/docs/> belongs to upstream
+> and describes upstream releases.
 
 ## Authoring links in `docs/`
 

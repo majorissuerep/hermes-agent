@@ -6,6 +6,10 @@ description: "在 Linux、macOS、WSL2、原生 Windows 或通过 Termux 在 And
 
 # 安装
 
+:::warning 非官方 fork
+本文档属于由 [@majorissuerep](https://github.com/majorissuerep) 维护的 [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent) 非官方 fork。下方命令安装本 fork 的 `main` 分支；Nous Research 未对本 fork 提供支持或背书。fork 的问题请提交到[本仓库](https://github.com/majorissuerep/hermes-agent/issues)。
+:::
+
 使用一行安装命令，两分钟内即可启动并运行 Hermes Agent。
 
 ## 快速安装
@@ -15,17 +19,17 @@ description: "在 Linux、macOS、WSL2、原生 Windows 或通过 Termux 在 And
 基于 git 的安装方式，跟踪 `main` 分支，可立即获取最新变更：
 
 ```bash
-curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/majorissuerep/hermes-agent/main/scripts/install.sh | bash
 ```
 
 ### Windows（原生，PowerShell）
 
-原生 Windows 无需 WSL 即可运行 Hermes——CLI、gateway、TUI 和工具均可原生运行。（原生安装与 WSL2 安装可干净共存；唯一仅限 WSL2 的功能见下方功能说明。）遇到 bug 请[提交 issue](https://github.com/NousResearch/hermes-agent/issues)。
+原生 Windows 无需 WSL 即可运行 Hermes——CLI、gateway、TUI 和工具均可原生运行。（原生安装与 WSL2 安装可干净共存；唯一仅限 WSL2 的功能见下方功能说明。）遇到 bug 请[提交 issue](https://github.com/majorissuerep/hermes-agent/issues)。
 
 打开 PowerShell 并运行：
 
 ```powershell
-iex (irm https://hermes-agent.nousresearch.com/install.ps1)
+iex (irm https://raw.githubusercontent.com/majorissuerep/hermes-agent/main/scripts/install.ps1)
 ```
 
 安装程序处理**一切**：`uv`、Python 3.11、Node.js 22、`ripgrep`、`ffmpeg`，**以及一个便携式 Git Bash**（PortableGit——一个自包含的 Git-for-Windows 发行版，附带 `bash.exe` 和 Hermes 用于 shell 命令的完整 POSIX 工具链；在 32 位 Windows 上安装程序会回退到 MinGit，后者缺少 bash，终端工具和 agent 浏览器功能将被禁用）。它将仓库克隆到 `%LOCALAPPDATA%\hermes\hermes-agent`，创建虚拟环境，并将 `hermes` 添加到**用户 PATH**。安装完成后请重启终端（或打开新的 PowerShell 窗口）以使 PATH 生效。
@@ -41,14 +45,14 @@ iex (irm https://hermes-agent.nousresearch.com/install.ps1)
 
 如果你偏好 WSL2，上方的 Linux 安装程序可在其中运行；原生安装和 WSL 安装可以共存而不冲突（原生数据位于 `%LOCALAPPDATA%\hermes`，WSL 数据位于 `~/.hermes`）。
 
-**桌面安装程序（替代方案）：** 也提供一个轻量 GUI 安装程序——下载 Hermes Desktop，运行 `.exe`，首次启动时它会在后台调用 `install.ps1` 来配置 Python（通过 `uv`）、Node、PortableGit 及其余依赖。桌面应用和 PowerShell 安装的 CLI 共享相同的安装目录和数据目录，可以单独或同时使用。详见 [Windows（原生）指南](../user-guide/windows-native#desktop-installer-alternative)。
+**Desktop：** 上游网站提供的桌面安装器安装的是上游 Hermes。使用本 fork 时，请先运行上方的 CLI 安装命令、初始化 vault，再运行 `hermes desktop` 从本 fork 的源码构建并启动桌面应用。
 
 ### Android / Termux
 
 Hermes 现在也提供 Termux 感知的安装路径：
 
 ```bash
-curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/majorissuerep/hermes-agent/main/scripts/install.sh | bash
 ```
 
 安装程序会自动检测 Termux 并切换到经过测试的 Android 流程：
@@ -89,6 +93,30 @@ curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash
 | Root 模式（`sudo curl … \| sudo bash`） | `/usr/local/lib/hermes-agent/` | `/usr/local/bin/hermes`                  | `/root/.hermes/`（或 `$HERMES_HOME`） |
 
 Root 模式的 **FHS 布局**（`/usr/local/lib/…`、`/usr/local/bin/hermes`）与其他系统级开发工具在 Linux 上的安装位置一致。适用于共享机器部署场景，一次系统安装可服务所有用户。每个用户的个人配置（认证、技能、会话）仍位于各自的 `~/.hermes/` 或显式指定的 `HERMES_HOME` 下。
+
+### 初始化加密状态 {#initialize-encrypted-state}
+
+安装完成后打开新终端，运行 `hermes secure-vault status`。如果尚无 vault，请在交互式终端中执行：
+
+```bash
+hermes secure-vault migrate
+```
+
+确认迁移计划并设置主密码。迁移会先备份数据，再加密状态文件；验证成功后，请安全删除命令输出的**明文迁移备份**。务必保管好主密码或已授权的私钥，所有解锁凭据丢失后无法恢复数据。
+
+随后运行 `hermes secure-vault status` 和 `hermes setup`。访问状态的命令需要解锁 vault。无人值守服务应通过 `hermes secure-vault keygen` 和 `hermes secure-vault add-key --public-key <file>` 授权私钥，并设置 `HERMES_VAULT_PRIVATE_KEY=/path/to/private-key`。该变量保存的是**私钥文件路径**，绝不能填写主密码；具体选项见各命令的 `--help`。
+
+### 将已有安装迁移到本 fork {#switch-existing-installation}
+
+Linux、macOS 或 WSL2 用户应先保存正在进行的工作、关闭 Hermes Desktop，再从终端运行：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/majorissuerep/hermes-agent/main/scripts/takeover.sh | bash
+```
+
+脚本会停止 Hermes 进程、保留旧源码目录、安装本 fork 的 `main` 分支，并备份、加密和验证当前 home。它使用用户级布局（`$HERMES_HOME/hermes-agent`，默认为 `~/.hermes/hermes-agent`），启动器位于 `~/.local/bin`。其他布局或原生 Windows 应先备份并停止旧进程，为同一数据目录安装 fork，再在尚无 vault 时运行 `hermes secure-vault migrate`。
+
+有终端时脚本会询问主密码；没有终端时会生成仅私钥解锁的 vault 并输出私钥路径。请保管该文件，并通过 `HERMES_VAULT_PRIVATE_KEY` 将路径提供给 Hermes。确认 vault 状态和实际对话正常后，再移除旧源码和明文迁移备份。
 
 ### 安装后
 
@@ -164,13 +192,13 @@ hermes setup --portal
 2. **以非特权服务用户身份**，运行常规安装程序。它会检测到缺少 sudo，跳过 `--with-deps`，并将 Chromium 安装到用户本地的 Playwright 缓存中：
 
    ```bash
-   curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash
+   curl -fsSL https://raw.githubusercontent.com/majorissuerep/hermes-agent/main/scripts/install.sh | bash
    ```
 
    如果想完全跳过 Playwright 步骤——例如在无头环境中运行且不需要浏览器自动化——传入 `--skip-browser`：
 
    ```bash
-   curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- --skip-browser
+   curl -fsSL https://raw.githubusercontent.com/majorissuerep/hermes-agent/main/scripts/install.sh | bash -s -- --skip-browser
    ```
 
 3. **使 `hermes` 对服务用户的 shell 可用。** 安装程序将启动器写入 `~/.local/bin/hermes`。系统服务账户通常具有不包含 `~/.local/bin` 的最小 PATH。可以将其添加到用户环境，或将启动器符号链接到系统位置：

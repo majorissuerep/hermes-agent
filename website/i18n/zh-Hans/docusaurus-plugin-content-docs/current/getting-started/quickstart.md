@@ -6,6 +6,10 @@ description: "与 Hermes Agent 的第一次对话——从安装到开始聊天�
 
 # 快速入门
 
+:::warning 非官方 fork
+本文档属于由 [@majorissuerep](https://github.com/majorissuerep) 维护的 [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent) 非官方 fork。下方命令安装本 fork 的 `main` 分支；Nous Research 未对本 fork 提供支持或背书。fork 的问题请提交到[本仓库](https://github.com/majorissuerep/hermes-agent/issues)。
+:::
+
 本指南带你从零开始搭建一个能够应对实际使用的 Hermes 环境。完成安装、选择 provider（服务提供商）、验证对话正常运行，并了解出现问题时的处理方法。
 
 ## 更喜欢看视频？
@@ -48,17 +52,11 @@ description: "与 Hermes Agent 的第一次对话——从安装到开始聊天�
 
 ## 1. 安装 Hermes Agent
 
-### 在 macOS 或 Windows 上使用 Hermes Desktop 安装器（推荐）
-
-如需同时安装命令行与桌面应用，请从我们的官网[下载 Hermes Desktop 安装器](https://hermes-agent.nousresearch.com/)并运行。
-
-### 不使用 Hermes Desktop：
-
-仅安装命令行版本（跟踪 main 分支）：
+以下命令安装本 fork 的 `main` 分支。上游网站的 Desktop 安装器安装的是上游 Hermes。已有上游安装时，请先阅读[迁移说明](./installation.md#switch-existing-installation)。
 
 ```bash
 # Linux / macOS / WSL2 / Android (Termux)
-curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/majorissuerep/hermes-agent/main/scripts/install.sh | bash
 ```
 
 安装脚本会在 `~/.hermes/hermes-agent` 创建一个受管理的隔离环境（独立的 uv 托管解释器和 venv），这是唯一受支持的安装方式 —— 包括开发用途。请勿使用 `pip install hermes-agent`。
@@ -67,15 +65,21 @@ curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash
 如果你在手机上安装，请参阅专门的 [Termux 指南](./termux.md)，其中包含经过测试的手动安装步骤、支持的扩展功能以及当前 Android 特有的限制。
 :::
 
-:::tip Windows 用户
-请先安装 [WSL2](https://learn.microsoft.com/en-us/windows/wsl/install)，然后在 WSL2 终端中运行上述命令。
-:::
+原生 Windows 用户可以在 PowerShell 中运行：
+
+```powershell
+iex (irm https://raw.githubusercontent.com/majorissuerep/hermes-agent/main/scripts/install.ps1)
+```
+
+也可以在 WSL2 终端中运行上方的 Linux 命令。
 
 安装完成后，重新加载 shell：
 
 ```bash
 source ~/.bashrc   # 或 source ~/.zshrc
 ```
+
+运行 `hermes secure-vault status` 检查 vault。若尚未创建，请在交互式终端中执行 `hermes secure-vault migrate` 并设置主密码。访问状态的命令需要解锁 vault；备份及无人值守服务的设置见[加密状态初始化](./installation.md#initialize-encrypted-state)。完成后可运行 `hermes desktop` 从本 fork 的源码构建并启动桌面应用。
 
 详细的安装选项、前置条件和故障排查，请参阅 [安装指南](./installation.md)。
 
