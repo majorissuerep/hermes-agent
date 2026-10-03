@@ -172,6 +172,7 @@ export async function startRemoteBackend(
         PYTHONPATH: REPO_ROOT,
         HOME: sandbox.home,
         HERMES_HOME: sandbox.hermesHome,
+        HERMES_ALLOW_NO_VAULT: '1',
         HERMES_DASHBOARD_SESSION_TOKEN: token,
         GIT_NO_LAZY_FETCH: '1'
       },

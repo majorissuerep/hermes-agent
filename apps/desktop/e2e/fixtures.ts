@@ -201,6 +201,8 @@ export function buildAppEnv(sandbox: Sandbox, extra: Record<string, string> = {}
   return {
     ...clean,
     HERMES_HOME: sandbox.hermesHome,
+    // These disposable homes use plaintext fixtures; production still requires a vault.
+    HERMES_ALLOW_NO_VAULT: '1',
     HERMES_DESKTOP_USER_DATA_DIR: sandbox.userDataDir,
     HERMES_DESKTOP_IGNORE_EXISTING: '1',
     // One `hermes serve` per host, and profile roots are HOME-anchored

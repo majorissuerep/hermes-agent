@@ -141,6 +141,8 @@ export function coreAppEnv(sandbox: CoreSandbox, extra: Record<string, string> =
     PATH: `${sandbox.bin}${path.delimiter}${env.PATH ?? ''}`,
     HOME: sandbox.home,
     HERMES_HOME: sandbox.hermesHome,
+    // These disposable homes use plaintext fixtures; production still requires a vault.
+    HERMES_ALLOW_NO_VAULT: '1',
     HERMES_DESKTOP_USER_DATA_DIR: sandbox.userDataDir,
     HERMES_DESKTOP_IGNORE_EXISTING: '1',
     HERMES_DESKTOP_HERMES_ROOT: REPO_ROOT,
