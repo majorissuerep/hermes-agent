@@ -1,10 +1,6 @@
-"""Shared-metrics consent JSON-RPC handlers (the Desktop twin of ``hermes setup``'s Shared Metrics
-section). Both opt-ins live in the focused profile's config.yaml exactly where the wizard writes
-them — ``telemetry.shared_metrics.enabled`` (local collection) and ``.send`` (daily upload) — so the
-CLI and the app can never disagree about the answer. ``shared_metrics.set`` enforces the wizard's
-invariant (sending needs collection) and reconciles the consent windows in the local store on every
-change, through the same single writer the wizard uses.
-Bodies are rebound onto server.py's globals (method_ctx.bind_module) and reference them bare.
+"""Shared-metrics RPC compatibility with this fork's disabled telemetry policy.
+
+Bodies are rebound onto server.py's globals by method_ctx.bind_module.
 """
 
 import logging
@@ -18,27 +14,15 @@ _profile_scoped = _registry.profile_scoped
 
 
 def _shared_metrics_consent(cfg) -> dict:
-    """The one ``{enabled, send, decided}`` reading every surface shares (CLI offer included)."""
-    from hermes_cli.observability.shared_metrics_consent import consent_state
-
-    return consent_state(cfg)
-
-
-def _shared_metrics_record_setup_completed(cfg) -> None:
-    """Desktop has no setup-finish RPC; this first-run answer is the one backend call made once,
-    right after onboarding settles. A no-op (inside the events API) unless collection is on."""
-    from hermes_cli.observability.shared_metrics_events import record_setup_completed
-
-    model = cfg.get("model") if isinstance(cfg, dict) else None
-    provider = model.get("provider") if isinstance(model, dict) else None
-    record_setup_completed(surface="desktop", provider=provider if isinstance(provider, str) and provider else None)
+    """Keep clients from offering a feature this fork permanently disables."""
+    return {"enabled": False, "send": False, "decided": True}
 
 
 @method("shared_metrics.status")
 @_profile_scoped
 def _(rid, params: dict) -> dict:
-    """``{enabled, send, decided}`` for the focused profile. A pure read of config.yaml (no defaults
-    merged, so ``decided`` sees only what the user wrote)."""
+    """``{enabled, send, decided}`` for the focused profile. Reports the fork policy even for
+    profiles retaining an upstream opt-in."""
     try:
         return _ok(rid, _shared_metrics_consent(_load_cfg()))
     except Exception as e:
@@ -48,12 +32,7 @@ def _(rid, params: dict) -> dict:
 @method("shared_metrics.set")
 @_profile_scoped
 def _(rid, params: dict) -> dict:
-    """Write both opt-ins at once and reconcile the consent windows. ``send`` is forced off when
-    ``enabled`` is off (the wizard's rule: sending cannot outlive collection, and turning collection
-    off withdraws send consent). ``first_run`` marks the Desktop first-run answer, which also records
-    the setup-completed metric. Answers the stored ``{enabled, send, decided}``."""
-    enabled = params.get("enabled") is True
-    send = enabled and params.get("send") is True
+    """Normalize legacy clients' requests to the fork's disabled telemetry policy."""
     try:
         cfg = _load_cfg_raw()
         telemetry = cfg.get("telemetry")
@@ -62,19 +41,10 @@ def _(rid, params: dict) -> dict:
         section = telemetry.get("shared_metrics")
         if not isinstance(section, dict):
             section = telemetry["shared_metrics"] = {}
-        section["enabled"], section["send"] = enabled, send
+        section["enabled"], section["send"] = False, False
         _save_cfg(cfg)
     except Exception as e:
         return _err(rid, 5096, str(e))
-    from hermes_cli.setup import _record_send_consent_change
-    # Unconditional, like the wizard: a send key already false may still have an open window.
-    _record_send_consent_change(enabled=send)
-    if not enabled:
-        from hermes_cli.observability.shared_metrics_desktop import purge_onboarding_latches
-
-        purge_onboarding_latches()
-    if params.get("first_run") is True:
-        _shared_metrics_record_setup_completed(cfg)
     return _ok(rid, _shared_metrics_consent(cfg))
 
 

@@ -114,7 +114,7 @@ def test_no_answer_survives_the_callers_later_config_save(monkeypatch):
     assert read_raw_config()["telemetry"]["shared_metrics"] == {"enabled": False, "send": False}
 
 
-def test_chat_offer_asks_an_undecided_profile_once(monkeypatch):
+def test_chat_does_not_offer_disabled_collection(monkeypatch):
     from hermes_cli.config import read_raw_config
     from hermes_cli.observability import shared_metrics_consent as consent
 
@@ -130,5 +130,5 @@ def test_chat_offer_asks_an_undecided_profile_once(monkeypatch):
     consent.offer_consent_before_chat(argparse.Namespace())
     consent.offer_consent_before_chat(argparse.Namespace())
 
-    assert len(asked) == 1
-    assert consent.consent_state(read_raw_config()) == {"enabled": True, "send": False, "decided": True}
+    assert asked == []
+    assert consent.consent_state(read_raw_config()) == {"enabled": False, "send": False, "decided": False}

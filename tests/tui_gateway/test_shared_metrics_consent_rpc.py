@@ -1,10 +1,7 @@
-"""shared_metrics.status / shared_metrics.set: the Desktop consent path keeps the CLI wizard's
-invariants (sending needs collection, every change reconciles the consent windows) and lands in the
-profile the request names, never the launch profile."""
+"""Desktop clients respect the fork telemetry policy and the selected profile."""
 
 from __future__ import annotations
 
-import sqlite3
 from pathlib import Path
 
 import hermes_yaml as yaml
@@ -33,50 +30,31 @@ def _shared_metrics(home: Path) -> dict:
     return (cfg.get("telemetry") or {}).get("shared_metrics") or {}
 
 
-def _windows(home: Path) -> list[tuple]:
-    db = home / "telemetry" / "shared_metrics" / "metrics.sqlite3"
-    with sqlite3.connect(db) as conn:
-        return conn.execute("SELECT opened_at, closed_at FROM send_consent_windows ORDER BY rowid").fetchall()
-
-
-def test_send_without_collection_is_normalized_off_and_closes_the_consent_window(tmp_path, monkeypatch):
+def test_telemetry_opt_in_is_disabled_in_the_requested_profile(tmp_path, monkeypatch):
     launch, worker = _bind_homes(monkeypatch, tmp_path)
-
-    assert _call("shared_metrics.set", {"profile": "code", "enabled": True, "send": True}) == {
-        "enabled": True, "send": True, "decided": True}
-    [(opened, closed)] = _windows(worker)
-    assert opened and closed is None
-
-    # send=true alone is refused: collection off withdraws send consent, in config AND in the store.
-    assert _call("shared_metrics.set", {"profile": "code", "enabled": False, "send": True}) == {
-        "enabled": False, "send": False, "decided": True}
-    assert _shared_metrics(worker) == {"enabled": False, "send": False}
-    [(_, closed)] = _windows(worker)
-    assert closed is not None
-
-    assert _shared_metrics(launch) == {}
-    assert not (launch / "telemetry").exists()
-
-
-def test_status_is_undecided_until_a_key_is_written(tmp_path, monkeypatch):
-    _launch, worker = _bind_homes(monkeypatch, tmp_path)
-
-    assert _call("shared_metrics.status", {"profile": "code"}) == {"enabled": False, "send": False, "decided": False}
-
-    # An answer given in `hermes setup` (only `enabled: false` written) counts as decided.
-    (worker / "config.yaml").write_text(
-        yaml.safe_dump({"telemetry": {"shared_metrics": {"enabled": False}}}), encoding="utf-8")
-    assert _call("shared_metrics.status", {"profile": "code"}) == {"enabled": False, "send": False, "decided": True}
-
-
-def test_only_the_first_run_answer_records_desktop_setup_completed(tmp_path, monkeypatch):
-    _launch, _worker = _bind_homes(monkeypatch, tmp_path)
     import hermes_cli.observability.shared_metrics_events as events
 
-    calls: list[dict] = []
+    calls = []
     monkeypatch.setattr(events, "record_setup_completed", lambda **kw: calls.append(kw))
+    assert _call("shared_metrics.set", {
+        "profile": "code", "enabled": True, "send": True, "first_run": True,
+    }) == {"enabled": False, "send": False, "decided": True}
+    assert _shared_metrics(worker) == {"enabled": False, "send": False}
+    assert _shared_metrics(launch) == {}
+    assert calls == []
+    assert not (launch / "telemetry").exists()
+    assert not (worker / "telemetry").exists()
 
-    _call("shared_metrics.set", {"profile": "code", "enabled": True, "send": False, "first_run": True})
-    _call("shared_metrics.set", {"profile": "code", "enabled": True, "send": True})
 
-    assert calls == [{"surface": "desktop", "provider": "nous"}]
+def test_status_reports_fork_policy_across_profiles_with_legacy_opt_ins(tmp_path, monkeypatch):
+    launch, worker = _bind_homes(monkeypatch, tmp_path)
+    (worker / "config.yaml").write_text(
+        yaml.safe_dump({"telemetry": {"shared_metrics": {"enabled": True, "send": True}}}),
+        encoding="utf-8",
+    )
+    before = {home: (home / "config.yaml").read_bytes() for home in (launch, worker)}
+    for params in ({}, {"profile": "code"}, {}):
+        assert _call("shared_metrics.status", params) == {
+            "enabled": False, "send": False, "decided": True,
+        }
+    assert {home: (home / "config.yaml").read_bytes() for home in before} == before

@@ -19,24 +19,6 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# (label, enabled, send): the Desktop strip's three equal answers, in its order.
-OFFER_CHOICES = (
-    ("Collect and send to Nous", True, True),
-    ("Collect locally only", True, False),
-    ("No thanks", False, False),
-)
-_NO_THANKS = len(OFFER_CHOICES) - 1
-DOCS_URL = "https://hermes-agent.nousresearch.com/docs/developer-guide/relay-shared-metrics"
-_OFFER_DESCRIPTION = "\n".join((
-    "Shared metrics are bounded counters: activity, outcomes, error classes, model routes,",
-    "token totals, feature use and coarse machine facts. Never prompts, files, paths,",
-    "setting values or error text. Collection stays on this machine; sending to Nous is",
-    "a separate choice, and data from before you opt in is never sent.",
-    f"Details: {DOCS_URL}",
-    "Change it any time: hermes setup telemetry",
-))
-
-
 def _section(cfg: Any) -> dict:
     telemetry = cfg.get("telemetry") if isinstance(cfg, dict) else None
     section = telemetry.get("shared_metrics") if isinstance(telemetry, dict) else None
@@ -95,23 +77,8 @@ def save_consent(enabled: bool, send: bool, config: dict | None = None) -> None:
 
 
 def offer_consent(config: dict | None = None) -> bool:
-    """Ask once, with the Desktop strip's three answers; "No thanks" is the default so Enter never
-    opts anyone in. Esc leaves the question open (asked again next time). True when answered."""
-    from hermes_cli.cli_output import print_info, print_success
-    from hermes_cli.curses_ui import curses_radiolist
-
-    idx = curses_radiolist(
-        "Help improve Hermes?", [label for label, _, _ in OFFER_CHOICES], selected=_NO_THANKS, cancel_returns=-1,
-        description=_OFFER_DESCRIPTION,
-    )
-    if idx < 0:
-        print_info("Not answered; Hermes will ask again. Decide any time with `hermes setup telemetry`.")
-        return False
-    _, enabled, send = OFFER_CHOICES[idx]
-    save_consent(enabled, send, config)
-    outcome = "collected and sent to Nous" if send else "collected on this machine only" if enabled else "off"
-    print_success(f"Shared metrics {outcome}. Change it any time with `hermes setup telemetry`.")
-    return True
+    """This fork disables collection and sending; there is no consent to request."""
+    return False
 
 
 def offer_consent_if_undecided(config: dict | None = None) -> None:
