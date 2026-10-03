@@ -9,6 +9,10 @@ A source checkout and a packaged app are separate installations. A bundled
 app continues to use its own payload; it does not adopt a nearby checkout.
 Use a source-built desktop when you want the GUI to run modified code.
 
+This guide installs the `majorissuerep/hermes-agent` fork. When moving from
+upstream, follow the [fork migration steps](../getting-started/installation.md#switch-existing-installation)
+to initialize or migrate the encrypted data home before normal use.
+
 User data normally lives outside the application:
 
 | Host | Default data location |
@@ -44,12 +48,13 @@ writing the same home while either version performs migrations.
 ## 2. Clone an independent checkout
 
 ```bash
-git clone https://github.com/NousResearch/hermes-agent.git
+git clone https://github.com/majorissuerep/hermes-agent.git
 cd hermes-agent
 ```
 
-For development, clone your fork instead and add the canonical repository as
-`upstream`. Select the branch or commit before preparing dependencies.
+For development, add `https://github.com/NousResearch/hermes-agent.git` as
+`upstream` to compare changes. This fork updates from its own `origin/main`.
+Select the branch or commit before preparing dependencies.
 Do not clone into a signed app package or overwrite the packaged runtime.
 
 ## 3. Prepare the source runtime
@@ -153,6 +158,10 @@ or execution alias without checking its owner.
 A newer source revision can change data formats. Returning to an older package
 is not the reverse of a schema migration. Preserve current data and restore a
 compatible pre-switch backup if the older package requires it.
+
+Upstream packages cannot read this fork's encrypted home. Give them a separate
+data home or restore a compatible backup taken before vault migration; keep the
+encrypted home and its unlock credentials for the fork.
 
 Deleting the source checkout does not remove the packaged app. It also does
 not automatically collect every PM tool entry or Python generation. Use PM's
