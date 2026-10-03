@@ -125,11 +125,16 @@ jobs:
           key: test-durations-${{ github.run_id }}-${{ matrix.slice }}
 
   e2e:
+    name: e2e (${{ matrix.slice }}/${{ matrix.total }})
     # The core suites spawn real serve / gateway / tui_gateway / MCP / SQLite
     # writer processes per test; a 4-vCPU runner serialises them into timeouts.
     if: inputs.e2e
     runs-on: ${{ github.repository == 'NousResearch/hermes-agent' && 'ubuntu-latest-32-core' || 'ubuntu-latest' }}
     timeout-minutes: ${{ github.repository == 'NousResearch/hermes-agent' && 30 || 120 }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(github.repository == 'NousResearch/hermes-agent' && '[{"slice":1,"total":1}]' || '[{"slice":1,"total":2},{"slice":2,"total":2}]') }}
     steps:
       - name: Checkout code
         uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a # v7.0.1
@@ -194,6 +199,7 @@ jobs:
           # Bound the trees, not the child readiness/turn timeouts. At 4 the
           # PTY turn and serve-SIGTERM deadlines still starved intermittently.
           HERMES_TEST_WORKERS: "3"
+          HERMES_TEST_SLICE: ${{ matrix.slice }}/${{ matrix.total }}
           # Multi-process episodes (torture chamber, compaction kill -9,
           # gateway liveness, delivery exactly-once through a real gateway,
           # the cron virtual-clock soak) legitimately run past the 300 s default.

@@ -34,7 +34,10 @@ TURNS = 7
 WORDS_PER_REPLY = 200  # the replaced span must outweigh the summary template
 TOKEN = r"\bs\dw\d{3}\b"
 SUMMARY = "SUMMARYMARK compressed account of the earlier turns"
-CONFIG = ("compression:\n  enabled: true\n  protect_last_n: 2\n  min_tail_user_messages: 1\n"
+# The startup race needs a fresh private gateway; reconnecting to an already
+# running deck host has no cold-start window in which to type /resume.
+CONFIG = ("sessions:\n  host: false\n"
+          "compression:\n  enabled: true\n  protect_last_n: 2\n  min_tail_user_messages: 1\n"
           "  threshold_tokens: 1000000\n")
 TAIL = [TURNS]  # the protected tail: the last turn survives compression verbatim
 # Fresh TUIs that must each keep a /resume typed during startup. The race loses roughly a third
