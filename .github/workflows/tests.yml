@@ -32,15 +32,15 @@ jobs:
     # 3x the price because files contend for the shared machine. Separate machines
     # scale linearly. run_tests_parallel.py partitions from the checkout alone, so
     # both slices agree on the split without a planning job.
-    # Fork: larger runners are unavailable in personal forks — run both slices on a
-    # standard runner with a raised timeout instead of maintaining a second gate.
-    name: Run tests (${{ matrix.slice }}/2)
+    # Fork: four slices on standard runners keep the complete suite practical
+    # without access to the organization's larger runners.
+    name: Run tests (${{ matrix.slice }}/${{ matrix.total }})
     runs-on: ${{ github.repository == 'NousResearch/hermes-agent' && 'ubuntu-latest-32-core' || 'ubuntu-latest' }}
     timeout-minutes: ${{ github.repository == 'NousResearch/hermes-agent' && 30 || 120 }}
     strategy:
       fail-fast: false
       matrix:
-        slice: [1, 2]
+        include: ${{ fromJSON(github.repository == 'NousResearch/hermes-agent' && '[{"slice":1,"total":2},{"slice":2,"total":2}]' || '[{"slice":1,"total":4},{"slice":2,"total":4},{"slice":3,"total":4},{"slice":4,"total":4}]') }}
     steps:
       - name: Checkout code
         uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a # v7.0.1
@@ -105,7 +105,7 @@ jobs:
         env:
           # Fork: standard runners have 4 cores; scale workers per host instead of
           # upstream's fixed 32 (its 32-core runner count).
-          HERMES_TEST_SLICE: ${{ matrix.slice }}/2
+          HERMES_TEST_SLICE: ${{ matrix.slice }}/${{ matrix.total }}
           HERMES_TEST_WORKERS: ${{ github.repository == 'NousResearch/hermes-agent' && '32' || '4' }}
           HERMES_TEST_FILE_TIMEOUT: 600
           # Ensure tests don't accidentally call real APIs
