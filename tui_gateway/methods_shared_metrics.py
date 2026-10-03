@@ -45,6 +45,9 @@ def _(rid, params: dict) -> dict:
         _save_cfg(cfg)
     except Exception as e:
         return _err(rid, 5096, str(e))
+    from hermes_cli.observability.shared_metrics_desktop import purge_onboarding_latches
+
+    purge_onboarding_latches()
     return _ok(rid, _shared_metrics_consent(cfg))
 
 

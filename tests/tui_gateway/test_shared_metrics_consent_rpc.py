@@ -58,3 +58,22 @@ def test_status_reports_fork_policy_across_profiles_with_legacy_opt_ins(tmp_path
             "enabled": False, "send": False, "decided": True,
         }
     assert {home: (home / "config.yaml").read_bytes() for home in before} == before
+
+
+def test_disabling_legacy_telemetry_purges_only_the_selected_profiles_latches(tmp_path, monkeypatch):
+    launch, worker = _bind_homes(monkeypatch, tmp_path)
+    from hermes_cli.observability.shared_metrics_desktop import ONBOARDING_LATCH_DIRNAME
+
+    latches = {}
+    for home in (launch, worker):
+        directory = home / "telemetry" / "shared_metrics" / ONBOARDING_LATCH_DIRNAME
+        directory.mkdir(parents=True)
+        (directory / "guide.reached").touch()
+        latches[home] = directory
+    _call("shared_metrics.set", {"profile": "code", "enabled": True})
+    assert not latches[worker].exists()
+    assert (latches[launch] / "guide.reached").exists()
+    _call("shared_metrics.set", {"enabled": False})
+    assert not latches[launch].exists()
+    _call("shared_metrics.set", {"profile": "code", "enabled": False})
+    assert not latches[worker].exists()
