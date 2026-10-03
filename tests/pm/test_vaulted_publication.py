@@ -7,12 +7,22 @@ from hermes_security import io, vault
 from pm import receipt
 from pm.plugin_inputs import Selection
 from tests.pm.test_worker import client, isolated_python, _current_environment  # noqa: F401
+from tests.pm._fixtures import worker_toolchain
 
 
 @pytest.fixture
 def vaulted_homes(client, isolated_python, tmp_path, monkeypatch):
     # stage_runtime builds the environment; prepare_runtime normally marks its role.
     (isolated_python.parent.parent / "pm-runtime.json").write_text("{}", encoding="utf-8")
+    worker_toolchain(client, monkeypatch, isolated_python, '''
+class NoCrypto:
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == "cryptography" or fullname.startswith("cryptography."):
+            raise AssertionError("PM worker imported crypto")
+sys.meta_path.insert(0, NoCrypto())
+assert not any(key in os.environ for key in (
+    "HERMES_MASTER_PASSWORD", "HERMES_VAULT_PRIVATE_KEY", "HERMES_VAULT_KEY_FD"))
+''')
     home = tmp_path / "home"
     sibling = home / "profiles" / "work"
     for target in (home, sibling):
@@ -24,7 +34,7 @@ def vaulted_homes(client, isolated_python, tmp_path, monkeypatch):
         plugin = target / "plugins" / "plain"
         plugin.mkdir(parents=True)
         (plugin / "plugin.yaml").write_text("name: plain\n", encoding="utf-8")
-    monkeypatch.delenv("HERMES_VAULT_PRIVATE_KEY", raising=False)
+    monkeypatch.setenv("HERMES_VAULT_PRIVATE_KEY", "must-not-reach-build-workers")
     try:
         yield home, sibling
     finally:
@@ -65,6 +75,7 @@ def test_worker_reads_profile_union_and_publishes_only_ciphertext(client, vaulte
     for path in [home / "config.yaml", *home.glob("logs/update_receipts/*.json")]:
         assert path.read_bytes().startswith(b"HRMVAULT\x00")
         assert b"private-canary" not in path.read_bytes()
+    monkeypatch.delenv("HERMES_VAULT_PRIVATE_KEY")
     vault.lock_now(sibling)
     with pytest.raises(RuntimeError, match="locked"):
         client.venv_is_current()
