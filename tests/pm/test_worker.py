@@ -226,7 +226,8 @@ def test_lazy_disabled_sync_does_not_bootstrap_tools(client, tmp_path, monkeypat
     monkeypatch.setattr(_uv, "_toolchain", toolchain)
     monkeypatch.setattr("pm.runtime_stage.stage_runtime",
                         lambda *a, **kw: pytest.fail("lazy-disabled sync prepared PM runtime"))
-    with receipt.worker_context("lazy-disabled-sync"):
+    with monkeypatch.context() as correlation:
+        correlation.setattr(receipt, "_ambient_update_id", lambda: "lazy-disabled-sync")
         with pytest.raises(InstallError, match="lazy installs are disabled") as caught:
             client.sync_venv([], plugins=Members([]))
         result = receipt.last_for_update("lazy-disabled-sync", consume=True)
@@ -415,12 +416,14 @@ def test_worker_receipt_is_exact_even_if_latest_is_replaced(client, tmp_path, mo
     def accept(data, update_id):
         # Simulate a different process publishing after this worker completes.
         point = tmp_path / "home" / "logs" / "update_receipts" / "latest.json"
+        point.parent.mkdir(parents=True, exist_ok=True)
         point.write_text(json.dumps({"update_id": "unrelated", "outcome": "failed"}))
         received.append(data)
         original_accept(data, update_id)
 
     monkeypatch.setattr(receipt, "accept_worker_receipt", accept)
-    with receipt.worker_context("my-update"):
+    with monkeypatch.context() as correlation:
+        correlation.setattr(receipt, "_ambient_update_id", lambda: "my-update")
         client.sync_venv([], explicit=True, plugins=Members([]))
         result = receipt.last_for_update("my-update", consume=True)
     assert received and result == received[0]
@@ -455,7 +458,8 @@ def test_resolution_conflict_survives_worker_and_receipt(client, tmp_path, monke
                         "print('engine stdout', flush=True)\n"
                         "os.write(1, b'native stdout\\n')\n"
                         "raise ResolutionConflict('venv', 'impossible union', 'change member')")
-    with receipt.worker_context("conflict-update"):
+    with monkeypatch.context() as correlation:
+        correlation.setattr(receipt, "_ambient_update_id", lambda: "conflict-update")
         with pytest.raises(ResolutionConflict) as caught:
             client.sync_venv([], explicit=True, plugins=Members([]))
         result = receipt.last_for_update("conflict-update", consume=True)
