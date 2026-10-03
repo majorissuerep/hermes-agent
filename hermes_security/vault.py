@@ -240,7 +240,7 @@ def vault_exists(home: Path | str) -> bool:
 # installs. They contain no user content (bytes are public), so they neither
 # block vault init nor get encrypted. Everything else IS user state.
 _CODE_ENTRIES = frozenset(
-    {"hermes-agent", "uv", "venv", ".venv"}
+    {"hermes-agent", "uv", "venv", ".venv", "installs", "tools"}
 )
 
 # The deterministic first-run scaffold (ensure_hermes_home): known empty
@@ -690,6 +690,10 @@ def _is_in_skip_dir(rel: Path | str) -> bool:
     sealed one of those into 17k envelopes, making the rollback tree unusable.
     """
     parts = Path(rel).parts
+    from hermes_cli.home_data_layout import PM_RUNTIME_ROOT_DIRS, profile_root_entry
+
+    if profile_root_entry(parts) in PM_RUNTIME_ROOT_DIRS:
+        return True
     if parts and parts[0].startswith("hermes-agent."):
         return True
     return any(part in _SKIP_DIRS for part in parts)

@@ -3,6 +3,10 @@
 import json
 import os
 
+import pytest
+
+from hermes_security import io, vault
+
 
 def _oauth_row(provider, token, *, row_id="shared", priority=0):
     access = f"sk-ant-oat01-{token}" if provider == "anthropic" else f"access-{token}"
@@ -17,14 +21,19 @@ def _oauth_row(provider, token, *, row_id="shared", priority=0):
     }
 
 
+@pytest.mark.parametrize("encrypted", [False, True])
 def test_quick_snapshot_restore_keeps_live_oauth_and_restores_static_auth(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, encrypted, request
 ):
     from hermes_cli.backup import restore_quick_snapshot
 
     home = tmp_path / ".hermes"
     home.mkdir()
     monkeypatch.setenv("HERMES_HOME", str(home))
+    if encrypted:
+        vault.init_vault(home, "snapshot-test-password")
+        vault.unlock(home, "snapshot-test-password")
+        request.addfinalizer(vault.clear_vault_cache)
 
     live = {
         "version": 1,
@@ -43,7 +52,7 @@ def test_quick_snapshot_restore_keeps_live_oauth_and_restores_static_auth(
             ],
         },
     }
-    (home / "auth.json").write_text(json.dumps(live), encoding="utf-8")
+    io.write_state_text(home / "auth.json", json.dumps(live), purpose="auth")
 
     snapshot = {
         "version": 1,
@@ -65,7 +74,10 @@ def test_quick_snapshot_restore_keeps_live_oauth_and_restores_static_auth(
     snap_dir = home / "state-snapshots" / "20260928-before-rotation"
     snap_dir.mkdir(parents=True)
     snap_auth = snap_dir / "auth.json"
-    snap_auth.write_text(json.dumps(snapshot), encoding="utf-8")
+    raw = json.dumps(snapshot).encode("utf-8")
+    if encrypted:
+        raw = vault.get_vault(home).encrypt(raw, purpose="auth", relpath="auth.json")
+    snap_auth.write_bytes(raw)
     (snap_dir / "manifest.json").write_text(
         json.dumps({"files": {"auth.json": snap_auth.stat().st_size}}),
         encoding="utf-8",
@@ -75,7 +87,9 @@ def test_quick_snapshot_restore_keeps_live_oauth_and_restores_static_auth(
         "20260928-before-rotation", hermes_home=home
     ) is True
 
-    restored = json.loads((home / "auth.json").read_text(encoding="utf-8"))
+    restored = io.read_json(home / "auth.json", purpose="auth")
+    if encrypted:
+        assert b"snapshot-static" not in (home / "auth.json").read_bytes()
     codex = restored["credential_pool"]["openai-codex"][0]
     assert codex["refresh_token"] == "refresh-rotated"
     assert (

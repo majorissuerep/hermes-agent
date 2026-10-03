@@ -40,6 +40,7 @@ import contextvars
 from contextlib import contextmanager
 import copy
 import json
+import logging
 import os
 import time
 import uuid
@@ -95,6 +96,12 @@ def accept_worker_receipt(data: Optional[dict[str, Any]], update_id: Optional[st
         return
     if data.get("update_id") != update_id:
         raise ValueError("PM worker receipt correlation mismatch")
+    # The worker deliberately carries no vault keys. Persist in the owning
+    # process after the authenticated protocol returns the result.
+    try:
+        _write_rotated(data)
+    except (OSError, RuntimeError) as exc:
+        logging.getLogger(__name__).warning("PM receipt not written: %s", exc)
     if update_id:
         completed = dict(_completed_by_update.get() or {})
         completed[update_id] = copy.deepcopy(data)
@@ -251,9 +258,12 @@ def finalize(
         completed = dict(_completed_by_update.get() or {})
         completed[update_id] = copy.deepcopy(current)
         _completed_by_update.set(completed)
+    if _worker_update.get() is not None:
+        return None
     try:
         path = _write_rotated(current)
-    except OSError:
+    except (OSError, RuntimeError) as exc:
+        logging.getLogger(__name__).warning("PM receipt not written: %s", exc)
         return None
     return path
 
@@ -282,8 +292,10 @@ def latest() -> Optional[dict[str, Any]]:
     try:
         point = _receipt_dir() / "latest.json"
         if point.is_file():
-            return json.loads(point.read_text(encoding="utf-8-sig"))
-    except (OSError, ValueError):
+            from hermes_security.io import read_state_text
+
+            return json.loads(read_state_text(point, purpose="state"))
+    except (OSError, ValueError, RuntimeError):
         return None
     return None
 
@@ -297,9 +309,9 @@ def _receipt_name(data: dict[str, Any]) -> str:
 
 
 def _write_rotated(data: dict[str, Any]) -> Path:
-    """Use the same stdlib-only atomic writer as PM's installed facts."""
+    """Keep user receipts sealed; installed tool facts remain bootstrap-readable."""
     from pm.filesystem import lock_fd
-    from pm.lock import _write
+    from hermes_security.io import atomic_write_state_json
 
     d = _receipt_dir()
     d.mkdir(parents=True, exist_ok=True)
@@ -307,8 +319,8 @@ def _write_rotated(data: dict[str, Any]) -> Path:
     # Concurrent completions share latest.json; serialize its replacement.
     with (d / ".pm-write.lock").open("a+b") as lock:
         lock_fd(lock.fileno(), wait=True)
-        _write(path, data)
-        _write(d / "latest.json", data)
+        atomic_write_state_json(path, data, purpose="state")
+        atomic_write_state_json(d / "latest.json", data, purpose="state")
         _rotate(d)
     return path
 

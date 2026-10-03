@@ -333,16 +333,15 @@ def finalize_update_receipt(outcome: str, fleet: list | None = None, stop_reason
         # the same process+second — the correlation id makes the name unique
         # per update run. Atomic write for BOTH the stamped receipt and the
         # latest.json pointer (no torn readers).
-        from hermes_cli.runtime_state import _atomic_bytes
+        from hermes_security.io import atomic_write_state_json
 
         path = directory / (
             f"update_{time.strftime('%Y%m%d_%H%M%S')}_{os.getpid()}_"
             f"{receipt.correlation_id}.json"
         )
-        payload = (json.dumps(receipt.data, indent=2, default=str) + "\n").encode("utf-8")
-        _atomic_bytes(path, payload)
+        atomic_write_state_json(path, receipt.data, purpose="state")
         with suppress(Exception):  # stable pointer for the dashboard/desktop
-            _atomic_bytes(directory / "latest.json", payload)
+            atomic_write_state_json(directory / "latest.json", receipt.data, purpose="state")
         _prune_old_receipts(directory)
         _publish_shared_metrics(receipt.data)
         return path
@@ -463,8 +462,10 @@ def settle_latest_receipt_fleet(fleet: list[dict[str, Any]], *, discharges) -> b
     rewritten; the archived per-run file keeps the original outcome. Never raises.
     """
     try:
+        from hermes_security.io import atomic_write_state_json, read_state_text
+
         path = _receipt_dir() / "latest.json"
-        receipt = json.loads(path.read_text(encoding="utf-8-sig"))
+        receipt = json.loads(read_state_text(path, purpose="state"))
         if not isinstance(receipt, dict):
             return False
         receipt["fleet"] = list(fleet)
@@ -476,7 +477,7 @@ def settle_latest_receipt_fleet(fleet: list[dict[str, Any]], *, discharges) -> b
         receipt["gateway_restart"] = gateway_restart
         if not discharges(receipt):
             return False
-        path.write_text(json.dumps(receipt, indent=2, default=str), encoding="utf-8")
+        atomic_write_state_json(path, receipt, purpose="state")
         return True
     except Exception as exc:
         logger.debug("Could not settle latest update receipt from the live fleet: %s", exc)
@@ -486,10 +487,12 @@ def settle_latest_receipt_fleet(fleet: list[dict[str, Any]], *, discharges) -> b
 def read_latest_receipt() -> Optional[dict[str, Any]]:
     """Read the most recent update receipt, or None. Never raises."""
     with suppress(Exception):
+        from hermes_security.io import read_state_text
+
         path = _receipt_dir() / "latest.json"
         if not path.is_file():
             return None
-        payload = json.loads(path.read_text(encoding="utf-8-sig"))
+        payload = json.loads(read_state_text(path, purpose="state"))
         return payload if isinstance(payload, dict) else None
     return None
 

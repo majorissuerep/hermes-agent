@@ -117,6 +117,22 @@ def read_text(path: Path | str, *, purpose: str, encoding: str = "utf-8") -> Opt
     return None if data is None else data.decode(encoding)
 
 
+def atomic_write_state_json(path: Path | str, payload: Any, *, purpose: str) -> Path:
+    """Publish runtime receipts atomically, sealed whenever the home has a vault.
+
+    Bootstrap can record its result before a vault exists. A locked vault never
+    falls back to plaintext; the caller can report that persistence failed.
+    """
+    target = Path(path)
+    data = (json.dumps(payload, ensure_ascii=False, indent=2, default=str) + "\n").encode("utf-8")
+    if _home_for(target) is not None:
+        return write_bytes(target, data, purpose=purpose)
+    from pm.filesystem import durable_write_bytes
+
+    durable_write_bytes(target, data)
+    return target
+
+
 def write_state_text(path: Path | str, text: str, *, purpose: str) -> Path:
     """Envelope-aware state write that stays plaintext in a vault-less home.
 
@@ -140,7 +156,7 @@ def read_state_text(path: Path | str, *, purpose: str) -> Optional[str]:
     if _home_for(target) is not None:
         return read_text(target, purpose=purpose)
     try:
-        return target.read_text(encoding="utf-8")
+        return target.read_text(encoding="utf-8-sig")
     except OSError:
         return None
     except UnicodeDecodeError:

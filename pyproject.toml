@@ -839,6 +839,8 @@ include = [
   "providers.*",
   "hermes_platform",
   "hermes_platform.*",
+  "hermes_security",
+  "hermes_security.*",
   "pm",
   "pm.*",
   "tools",
