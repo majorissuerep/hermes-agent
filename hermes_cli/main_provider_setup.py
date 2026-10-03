@@ -490,13 +490,14 @@ def _save_custom_provider(base_url, api_key="", model="", context_length=None, n
     matching_legacy = [entry for entry in (legacy if isinstance(legacy, list) else [])
                        if isinstance(entry, dict) and entry.get("base_url", "").rstrip("/") == route]
     created = provider_key is None
+    promoted_index = None
     if created:
         if matching_legacy:
             # Moving to a new config path must carry raw templates, not the
             # expanded URLs, headers, and credentials in the runtime view.
             raw_legacy = read_raw_config().get("custom_providers", [])
-            index = legacy.index(matching_legacy[0])
-            source = (raw_legacy[index] if isinstance(raw_legacy, list) and index < len(raw_legacy)
+            promoted_index = legacy.index(matching_legacy[0])
+            source = (raw_legacy[promoted_index] if isinstance(raw_legacy, list) and promoted_index < len(raw_legacy)
                       else matching_legacy[0])
             entry = _custom_provider_entry_to_provider_config(source)
         else:
@@ -525,8 +526,9 @@ def _save_custom_provider(base_url, api_key="", model="", context_length=None, n
         entry.pop("api_key", None)
     elif api_key and created and not matching_legacy:
         entry["api_key"] = api_key
-    if matching_legacy:
-        cfg["custom_providers"] = [item for item in legacy if item not in matching_legacy]
+    if promoted_index is not None:
+        # Distinct named endpoints may intentionally share one URL.
+        cfg["custom_providers"] = [item for i, item in enumerate(legacy) if i != promoted_index]
     save_config(cfg)
     if created:
         print(f'  💾 Saved to custom providers as "{entry["name"]}" (edit in config.yaml)')
