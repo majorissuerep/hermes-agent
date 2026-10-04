@@ -2,6 +2,7 @@ import { GatewayReauthRequiredError } from '@hermes/shared'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { clearNotifications } from '@/store/notifications'
 import { deferred } from '@/test/deferred'
 
 // Collect the component graph before the behavioral test deadline starts.
@@ -62,8 +63,9 @@ beforeEach(() => {
   })
 })
 
-afterEach(() => {
-  cleanup()
+afterEach(async () => {
+  await act(async () => cleanup())
+  clearNotifications()
   vi.clearAllMocks()
 })
 
