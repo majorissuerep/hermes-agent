@@ -560,12 +560,12 @@ describe('DesktopInstallOverlay first-run setup', () => {
     expect(desktop.resetBootstrap).not.toHaveBeenCalled()
   })
 
-  it('dismisses a failed install on Escape', async () => {
+  it('dismisses a failed install on Escape as soon as the failure appears', async () => {
     installDesktopMock(bootstrapState({ error: 'cancelled by user' }))
 
     render(<DesktopInstallOverlay />)
 
-    expect(await screen.findByText('Installation failed')).toBeTruthy()
+    await whenPresent('Installation failed')
 
     fireEvent.keyDown(window, { key: 'Escape' })
 

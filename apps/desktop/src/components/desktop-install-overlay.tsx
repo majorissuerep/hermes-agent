@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
 import { BrandMark } from '@/components/brand-mark'
 import { Button } from '@/components/ui/button'
@@ -370,7 +370,8 @@ export function DesktopInstallOverlay({ enabled = true }: DesktopInstallOverlayP
   // Escape dismisses a failed install the same way the footer's Close button
   // does -- local-only, no resetBootstrap + reload. Scoped to the failed
   // state so a running install is still only cancellable via its own button.
-  useEffect(() => {
+  // Register before paint so the first Escape after the failure appears works.
+  useLayoutEffect(() => {
     if (!state.error) {
       return
     }
