@@ -89,8 +89,9 @@ beforeEach(() => {
   saveHermesConfig.mockResolvedValue({ ok: true })
 })
 
-afterEach(() => {
-  cleanup()
+afterEach(async () => {
+  await act(async () => cleanup())
+  clearNotifications()
   vi.clearAllMocks()
   profileSwitchHandler = null
 })
