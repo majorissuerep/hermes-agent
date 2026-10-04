@@ -26,6 +26,10 @@ def runtime_environment() -> dict[str, str]:
     from pm.environment import _base_environment
 
     env = _base_environment()
+    # Envelope callbacks keep unlock authority in the owner, including when it
+    # was launched with an unattended key file or an inherited key pipe.
+    for name in ("HERMES_MASTER_PASSWORD", "HERMES_VAULT_PRIVATE_KEY", "HERMES_VAULT_KEY_FD"):
+        env.pop(name, None)
     env["HERMES_HOME"] = str(get_hermes_home())
     env["HERMES_RUNTIME_DIR"] = str(store_root())
     return env
@@ -269,6 +273,13 @@ def runtime_command(script: Path, args: tuple[str, ...] | list[str] = (), *,
 
 
 def run_cli(argv: list[str]) -> int:
+    from pm.plugins_state import dependency_homes
+    from pm.state_io import vault_home
+
+    if any(vault_home(home / "config.yaml") is not None for home in dependency_homes()):
+        from pm.client import _request
+
+        return _request("run_cli", {"argv": argv}, callbacks={"output": sys.stdout.write})
     result = subprocess.run(runtime_command(Path(__file__).with_name("launch.py"), argv),
                             env=runtime_environment())
     return result.returncode

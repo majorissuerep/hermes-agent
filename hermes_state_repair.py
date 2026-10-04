@@ -587,9 +587,9 @@ def _connect_repair_durable(db_path: Path, *, timeout: float = 5.0) -> sqlite3.C
     the byte-level probes ``open()``/``close()`` the live file, which cancels every POSIX advisory lock this
     process holds on it (sqlite.org/howtocorrupt §2.2) and lets an external writer commit mid-repair (#63386).
     """
-    from hermes_cli.sqlite_safe_read import connect_tracked
+    from hermes_state_dbfile import _connect_tracked_db
 
-    conn = connect_tracked(db_path, tracking_path=db_path, timeout=timeout, isolation_level=None)
+    conn = _connect_tracked_db(db_path, tracking_path=db_path, timeout=timeout, isolation_level=None)
     _reapply_durability_barriers(conn)
     return conn
 
@@ -735,8 +735,10 @@ def state_db_has_structural_damage(db_path: Path) -> bool:
     reporting (a torn page under the walk) is structural too: no FTS-only fixture does that
     while ``messages``/``sessions`` read cleanly, and the FTS rebuild ladder cannot help.
     Cannot-open / locked stays False so the caller keeps the FTS path."""
+    from hermes_state_dbfile import _connect_tracked_db
+
     try:
-        conn = sqlite3.connect(read_only_db_uri(db_path), uri=True, timeout=1.0)
+        conn = _connect_tracked_db(read_only_db_uri(db_path), tracking_path=db_path, uri=True, timeout=1.0)
     except sqlite3.Error:
         return False
     try:

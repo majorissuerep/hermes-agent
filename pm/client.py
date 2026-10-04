@@ -94,7 +94,9 @@ def _request(operation, arguments, *, callbacks=None, pause_event=None, project_
 
     request_id = uuid.uuid4().hex
     update_id = receipt._ambient_update_id()
-    callbacks = callbacks or {}
+    from pm.state_io import owner_operation
+
+    callbacks = {"state_io": owner_operation, **(callbacks or {})}
     spec = OPERATIONS[operation]
     names = list(spec.packages) if spec.packages is not None else (
         arguments["names"] if "names" in arguments else [arguments["name"]])
@@ -150,8 +152,9 @@ def _request(operation, arguments, *, callbacks=None, pause_event=None, project_
                     break
                 name = response["callback"]
                 try:
-                    callbacks[name](*response.get("args", []))
-                    send({"type": "callback_result", "call": response["call"], "result": None})
+                    result = callbacks[name](*response.get("args", []))
+                    send({"type": "callback_result", "call": response["call"],
+                          "result": result if name == "state_io" else None})
                 except BaseException as exc:
                     if callback_error is None:
                         callback_error = exc

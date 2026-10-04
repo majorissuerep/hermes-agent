@@ -80,6 +80,7 @@ class PluginEviction:
     def __init__(self, entries: list[Entry], reasons: dict[Path, str]):
         from hermes_yaml import roundtrip_yaml
         from pm.publication import selection_snapshot
+        from pm.state_io import decode, encode
 
         self.configs = selection_snapshot()
         by_home: dict[Path, list[str]] = {}
@@ -91,7 +92,7 @@ class PluginEviction:
             path = home / "config.yaml"
             previous = read_bytes_or_none(path)
             yaml = roundtrip_yaml()
-            config = (yaml.load(previous.decode("utf-8-sig")) if previous else None) or {}
+            config = (yaml.load(decode(path, previous, purpose="config")) if previous else None) or {}
             # read_home_selection already proved plugins/memory are mappings and the lists are lists.
             plugins = config.get("plugins")
             if plugins is None:
@@ -108,7 +109,7 @@ class PluginEviction:
                     memory["provider"] = ""
             output = io.StringIO()
             yaml.dump(config, output)
-            self.edits.append((path, previous, output.getvalue().encode("utf-8")))
+            self.edits.append((path, previous, encode(path, output.getvalue(), purpose="config")))
 
     def publish(self, project: Path) -> None:
         from pm.publication import selection_snapshot

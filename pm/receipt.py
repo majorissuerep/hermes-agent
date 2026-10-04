@@ -293,9 +293,9 @@ def latest() -> Optional[dict[str, Any]]:
         point = _receipt_dir() / "latest.json"
         if point.is_file():
             if _vaulted(point):
-                from hermes_security.io import read_state_text
+                from pm.state_io import read_text
 
-                return json.loads(read_state_text(point, purpose="state"))
+                return json.loads(read_text(point, purpose="state"))
             return json.loads(point.read_text(encoding="utf-8-sig"))
     except (OSError, ValueError, RuntimeError):
         return None

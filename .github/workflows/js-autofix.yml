@@ -131,9 +131,11 @@ jobs:
   apply-patch:
     name: Apply patch
     needs: generate-patch
-    # Skip entirely when generate-patch found no fixes — saves a runner,
-    # avoids a redundant checkout/download, and keeps the job graph honest.
-    if: needs.generate-patch.outputs.has-fixes == 'true'
+    # Forks publish the patch for review until their own GitHub App can open PRs.
+    # A fork's default GITHUB_TOKEN may be forbidden from creating pull requests.
+    if: >-
+      needs.generate-patch.outputs.has-fixes == 'true' &&
+      (github.repository == 'NousResearch/hermes-agent' || vars.APP_CLIENT_ID != '')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: trusted-automation

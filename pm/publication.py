@@ -74,7 +74,9 @@ class PluginSelection:
         if expected is not None and expected != actual:
             raise ValueError("Plugin configuration changed since this selection was read; retry.")
         yaml = roundtrip_yaml()
-        config = yaml.load(self.previous.decode("utf-8-sig")) if self.previous else {}
+        from pm.state_io import decode, encode
+
+        config = yaml.load(decode(self.path, self.previous, purpose="config")) if self.previous else {}
         if config is None:
             config = {}
         if not isinstance(config, dict):
@@ -86,7 +88,7 @@ class PluginSelection:
         plugins["disabled"] = sorted(selection["disabled"])
         output = io.StringIO()
         yaml.dump(config, output)
-        self.proposed = output.getvalue().encode("utf-8")
+        self.proposed = encode(self.path, output.getvalue(), purpose="config")
         self.members = candidate_members(selection.get("extra_dirs", ()), proposed_home=self.home,
                                          enabled=selection["enabled"], disabled=selection["disabled"])
 

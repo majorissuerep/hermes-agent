@@ -21,6 +21,7 @@ class Operation:
 
 
 OPERATIONS = {
+    "run_cli": Operation("pm.cli_worker", (), "always"),
     "ensure": Operation("pm.install", None, "state"),
     "stage_only": Operation("pm.install", None, "always"),
     "stage_tools": Operation("pm.build_operations", None, "never"),

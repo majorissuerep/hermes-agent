@@ -26,6 +26,13 @@ Each file has a separate role:
 A lockfile entry does not prove that a package is installed. `hermes pm doctor`
 compares the installed state with the lock and checks the realized bytes.
 Startup uses a cheaper check. It does not query upstream versions on every launch.
+In this fork, plugin selection and PM receipts remain encrypted with the home’s
+vault. State-reading PM commands require the master password or an authorized
+`HERMES_VAULT_PRIVATE_KEY` file. The owning process decrypts and seals state over
+the independent worker’s private pipe; package builds never receive vault keys.
+Plugin changes preserve encrypted config, including during rollback and recovery.
+`hermes secure-vault status` remains available while the vault is locked.
+
 For self-managed source installs, the pre-import launcher compares PM's recorded
 successful dependency stamp with the current inputs. Missing or stale completion
 state triggers a sync, then the same command restarts on the managed Python before
