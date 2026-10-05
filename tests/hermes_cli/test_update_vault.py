@@ -69,6 +69,10 @@ with runtime_lock(Path(sys.argv[1])):
         assert read_text(home / "config.yaml", purpose="config") == f"model: {home.name}-canary\\n"
     update_receipt.begin_update_receipt()
     request = {"home": sys.argv[3], "receipt": {"update_id": update_receipt.current_correlation_id()}}
+    from pm import receipt
+    receipt.accept_worker_receipt({"update_id": request["receipt"]["update_id"], "kind": "sync", "outcome": "failed"},
+                                  request["receipt"]["update_id"])
+    assert receipt.latest()["kind"] == "sync"
     saved = update_receipt.finalize_pending_update_receipt(1, "a preparation failure must leave a sealed receipt")
     assert saved and saved.read_bytes().startswith(b"HRMVAULT\\0")
     assert update_completion._read_terminal_receipt(request)["outcome"] == "failed"
