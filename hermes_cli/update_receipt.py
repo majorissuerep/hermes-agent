@@ -333,15 +333,13 @@ def finalize_update_receipt(outcome: str, fleet: list | None = None, stop_reason
         # the same process+second — the correlation id makes the name unique
         # per update run. Atomic write for BOTH the stamped receipt and the
         # latest.json pointer (no torn readers).
-        from hermes_security.io import atomic_write_state_json
-
         path = directory / (
             f"update_{time.strftime('%Y%m%d_%H%M%S')}_{os.getpid()}_"
             f"{receipt.correlation_id}.json"
         )
-        atomic_write_state_json(path, receipt.data, purpose="state")
+        _write_receipt(path, receipt.data)
         with suppress(Exception):  # stable pointer for the dashboard/desktop
-            atomic_write_state_json(directory / "latest.json", receipt.data, purpose="state")
+            _write_receipt(directory / "latest.json", receipt.data)
         _prune_old_receipts(directory)
         _publish_shared_metrics(receipt.data)
         return path
@@ -484,15 +482,34 @@ def settle_latest_receipt_fleet(fleet: list[dict[str, Any]], *, discharges) -> b
         return False
 
 
+def _write_receipt(path: Path, data: dict) -> None:
+    from hermes_cli.update_vault import has_owner
+
+    if has_owner():
+        from pm.filesystem import durable_write_bytes
+        from pm.state_io import encode
+
+        durable_write_bytes(path, encode(path, json.dumps(data, indent=2, ensure_ascii=False) + "\n", purpose="state"))
+    else:
+        from hermes_security.io import atomic_write_state_json
+
+        atomic_write_state_json(path, data, purpose="state")
+
+
 def read_latest_receipt() -> Optional[dict[str, Any]]:
     """Read the most recent update receipt, or None. Never raises."""
     with suppress(Exception):
-        from hermes_security.io import read_state_text
+        from hermes_cli.update_vault import has_owner
+
+        if has_owner():
+            from pm.state_io import read_text
+        else:
+            from hermes_security.io import read_state_text as read_text
 
         path = _receipt_dir() / "latest.json"
         if not path.is_file():
             return None
-        payload = json.loads(read_state_text(path, purpose="state"))
+        payload = json.loads(read_text(path, purpose="state"))
         return payload if isinstance(payload, dict) else None
     return None
 

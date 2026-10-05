@@ -32,6 +32,18 @@ results). Selected-Python completion owns launcher publication, builders, cache
 invalidation, all-profile configuration/state/skills maintenance, process scans,
 fleet restart, Windows resume, dashboard deduplication and verification.
 
+For encrypted homes, `hermes_cli/update_vault.py` carries the unlock over a private
+inherited pipe. The stdlib preparation process forwards PM config and receipt
+envelope operations to the unlocked parent, without importing cryptography or
+activating the old dependency graph. The selected application process adopts the
+keys after dependency activation. Neither keys nor passwords enter request files,
+environment variables, or PM workers. Interrupted-update completion uses the same
+transport, so a password-only vault works through its bootstrap and completion
+processes. PM unlocks its owner before starting a worker that holds the install lock.
+
+Receipt acknowledgement decrypts the correlated receipt before reading its JSON;
+the receipt on disk remains encrypted, including preparation failures.
+
 The existing per-kind restart and abort-recovery algorithms remain; transient
 supervisor/process failures are real even without mixed-generation imports. Only
 the purge/reload workaround and independent retry/ZIP tail compositions disappear.

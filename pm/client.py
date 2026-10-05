@@ -94,8 +94,9 @@ def _request(operation, arguments, *, callbacks=None, pause_event=None, project_
 
     request_id = uuid.uuid4().hex
     update_id = receipt._ambient_update_id()
-    from pm.state_io import owner_operation
+    from pm.state_io import owner_operation, prepare_owner
 
+    prepare_owner()
     callbacks = {"state_io": owner_operation, **(callbacks or {})}
     spec = OPERATIONS[operation]
     names = list(spec.packages) if spec.packages is not None else (

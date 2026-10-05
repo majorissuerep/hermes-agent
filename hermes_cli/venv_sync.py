@@ -480,13 +480,17 @@ def _finish_source_update(root: Path, *, current: bool, pending: Path) -> None:
     # The tail's progress lines go to stderr: this is an automatic repair in
     # front of whatever command the user ran, and that command may be
     # emitting machine-readable stdout (a JSON probe, a piped query).
-    code = subprocess.call(
-        [sys.executable, "-I", "-B", "-u",
-         str(root / "hermes_cli/source_completion.py"),
-         "--source", str(root), "--finish-update",
-         *(("--desktop",) if desktop else ())],
-        cwd=root, env=activation_environment(root), stdout=sys.__stderr__,
-    )
+    from hermes_cli.update_vault import child_vault
+
+    env = activation_environment(root)
+    with child_vault(env) as vault_kwargs:
+        code = subprocess.call(
+            [sys.executable, "-I", "-B", "-u",
+             str(root / "hermes_cli/source_completion.py"),
+             "--source", str(root), "--finish-update",
+             *(("--desktop",) if desktop else ())],
+            cwd=root, env=env, stdout=sys.__stderr__, **vault_kwargs,
+        )
     if code != 0:
         _record_completion_attempt(root, failed=True)
         raise RuntimeError(

@@ -109,6 +109,8 @@ def _historical_context() -> tuple[dict, list[dict], Any]:
 
 def _run_child(request: dict) -> tuple[int, dict]:
     """One JSON exchange; the old process never imports the updated graph."""
+    from hermes_cli.update_vault import child_vault
+
     root = Path(__file__).resolve().parents[1]
     home = os.environ.get("HERMES_HOME")
     constants = sys.modules.get("hermes_constants")
@@ -126,13 +128,13 @@ def _run_child(request: dict) -> tuple[int, dict]:
     # Everything the user saw so far came from the OLD updater; say so before the
     # new one (package manager) takes over, so logs show where the switch happened.
     print("→ Handing off to the new updater (package manager) for the rest of this update...", flush=True)
-    with tempfile.TemporaryDirectory(prefix="hermes-update-takeover-") as directory:
+    with tempfile.TemporaryDirectory(prefix="hermes-update-takeover-") as directory, child_vault(env) as vault_kwargs:
         context = Path(directory) / "request.json"
         result = Path(directory) / "result.json"
         context.write_text(json.dumps(request), encoding="utf-8")
         child = subprocess.run(
             [sys.executable, "-I", "-S", "-B", "-X", "utf8", str(root / "hermes_cli/_update_takeover.py"),
-             str(context), str(result)], cwd=root, env=env,
+             str(context), str(result)], cwd=root, env=env, **vault_kwargs,
         )
         completed = json.loads(result.read_text(encoding="utf-8-sig")) if result.is_file() else {}
         if not isinstance(completed, dict):

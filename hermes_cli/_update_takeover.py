@@ -21,8 +21,9 @@ def prepare(request: dict) -> tuple[Path, dict[str, str]]:
     from pm.client import ensure_tools_for_sync, sync_venv, venv_is_current
     from pm.environments import activation_environment, install_state_dir, runtime_facts_path
     from hermes_cli._launchers import resolve_store_python
-    from hermes_cli.venv_sync import collect_superseded_generations, publish_launchers
+    from hermes_cli.venv_sync import arm_completion, collect_superseded_generations
 
+    arm_completion(root)
     correlation = request["update_id"]
     with receipt.worker_context(correlation):
         # A pre-PM installation has no required-tool facts. A current Python
@@ -40,7 +41,6 @@ def prepare(request: dict) -> tuple[Path, dict[str, str]]:
                   evict_incompatible_plugins=not repair)
         collect_superseded_generations(root)
         request["pm_receipt"] = receipt.last_for_update(correlation)
-    publish_launchers(root)
     repair_marker.unlink(missing_ok=True)
     for name in (".update-incomplete", ".lazy-refresh-incomplete"):
         (root / name).unlink(missing_ok=True)
@@ -65,6 +65,7 @@ def main() -> int:
     context, result = map(Path, sys.argv[1:3])
     request = json.loads(context.read_text(encoding="utf-8-sig"))
     sys.path.insert(0, request["root"])
+    from hermes_cli.update_vault import child_vault
     if "stopped_serves" in request:
         # Historical atexit cleanup may run after the update's result is fixed.
         # It must reuse that installation, never start a second update/repair.
@@ -76,10 +77,12 @@ def main() -> int:
         if python is None:
             print("Cannot resume stopped backends: no selected Hermes interpreter", file=sys.stderr)
             return 1
-        return subprocess.run(
-            [str(python), "-I", "-B", "-X", "utf8", str(root / "hermes_cli/update_serve_resume.py"),
-             str(context), str(result)], cwd=root, env=activation_environment(root),
-        ).returncode
+        env = activation_environment(root)
+        with child_vault(env) as vault_kwargs:
+            return subprocess.run(
+                [str(python), "-I", "-B", "-X", "utf8", str(root / "hermes_cli/update_serve_resume.py"),
+                 str(context), str(result)], cwd=root, env=env, **vault_kwargs,
+            ).returncode
     from hermes_cli import update_receipt
     from hermes_cli.update_lock import UpdateLock, describe_holder
 
@@ -98,7 +101,8 @@ def main() -> int:
         # update liveness checks while the waiting parent still holds its lock.
         command = [str(python), "-I", "-B", "-X", "utf8", str(Path(request["root"]) / "hermes_cli/update_finish.py"),
                    str(context), str(result)]
-        code = subprocess.run(command, cwd=request["root"], env=env).returncode
+        with child_vault(env) as vault_kwargs:
+            code = subprocess.run(command, cwd=request["root"], env=env, **vault_kwargs).returncode
         if code != 0 and not result.is_file():
             _record_failure(request, result, code, f"completion child exited {code} without acknowledgement")
         return code

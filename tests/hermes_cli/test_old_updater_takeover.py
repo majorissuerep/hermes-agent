@@ -23,6 +23,7 @@ def test_historical_payload_maps_to_takeover_request_schema(tmp_path, desktop, r
     package = root / "hermes_cli"
     package.mkdir(parents=True)
     shutil.copy2(source / "hermes_cli/_old_updater.py", package / "_old_updater.py")
+    shutil.copy2(source / "hermes_cli/update_vault.py", package / "update_vault.py")
     (package / "_update_takeover.py").write_text(
         "import json, os, sys\nfrom pathlib import Path\n"
         "request = json.loads(Path(sys.argv[1]).read_text())\n"
@@ -95,7 +96,7 @@ def test_shipped_post_swap_argv_enters_takeover_before_current_cli(tmp_path):
         "import hermes_bootstrap\nraise AssertionError('current CLI parsed a legacy continuation')\n",
         encoding="utf-8",
     )
-    for relative in ("hermes_bootstrap.py", "hermes_cli/update_handoff.py", "hermes_cli/_old_updater.py"):
+    for relative in ("hermes_bootstrap.py", "hermes_cli/update_handoff.py", "hermes_cli/_old_updater.py", "hermes_cli/update_vault.py"):
         shutil.copy2(source / relative, root / relative)
     (package / "_update_takeover.py").write_text(
         "import json, sys\nfrom pathlib import Path\n"
@@ -140,6 +141,7 @@ def test_takeover_waits_propagates_status_and_never_reenters_old_code(tmp_path, 
     package = root / "hermes_cli"
     package.mkdir(parents=True)
     shutil.copy2(source / "hermes_cli/_old_updater.py", package / "_old_updater.py")
+    shutil.copy2(source / "hermes_cli/update_vault.py", package / "update_vault.py")
     # This is the process seam, not a counterfeit installer. Actual PM and
     # product construction are exercised separately against local packages.
     (package / "_update_takeover.py").write_text(
@@ -199,7 +201,7 @@ def test_only_known_early_updater_restarts_with_original_arguments(tmp_path, pos
     root = tmp_path / "updated checkout"
     package = root / "hermes_cli"
     package.mkdir(parents=True)
-    for name in ("_old_updater.py", "old_updater_deps.py"):
+    for name in ("_old_updater.py", "old_updater_deps.py", "update_vault.py"):
         shutil.copy2(source / "hermes_cli" / name, package / name)
     (package / "_update_takeover.py").write_text(
         "import json, sys\nfrom pathlib import Path\n"
@@ -245,7 +247,7 @@ def test_atexit_recovers_only_stopped_serves_after_cached_update(tmp_path, ackno
     root = tmp_path / "updated checkout"
     package = root / "hermes_cli"
     package.mkdir(parents=True)
-    for name in ("_old_updater.py", "old_updater_deps.py"):
+    for name in ("_old_updater.py", "old_updater_deps.py", "update_vault.py"):
         shutil.copy2(source / "hermes_cli" / name, package / name)
     (package / "_update_takeover.py").write_text(
         "import json, sys\nfrom pathlib import Path\n"
@@ -378,7 +380,7 @@ def test_completed_serve_token_is_acknowledged_without_preparation(tmp_path, enc
     root = tmp_path / "checkout 日本 café"
     package = root / "hermes_cli"
     package.mkdir(parents=True)
-    for name in ("_update_takeover.py", "update_serve_resume.py"):
+    for name in ("_update_takeover.py", "update_serve_resume.py", "update_vault.py"):
         shutil.copy2(source / "hermes_cli" / name, package / name)
     # Only selection is supplied. The two real entrypoints must carry the
     # request without importing PM or launching any completed backend twice.

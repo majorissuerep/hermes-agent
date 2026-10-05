@@ -56,6 +56,10 @@ def _vault(home: Path):
 
 def owner_operation(operation: str, path: str, payload: str, purpose: str) -> str:
     """Only config and receipt envelopes belong to the PM protocol."""
+    from hermes_cli.update_vault import has_owner, envelope_operation
+
+    if has_owner():
+        return envelope_operation(operation, path, payload, purpose)
     from pm.plugins_state import dependency_homes
 
     target = Path(path).resolve()
@@ -75,6 +79,18 @@ def owner_operation(operation: str, path: str, payload: str, purpose: str) -> st
     data = getattr(vault, operation)(base64.b64decode(payload, validate=True), purpose=purpose,
                                     relpath=target.relative_to(home).as_posix())
     return base64.b64encode(data).decode("ascii")
+
+
+def prepare_owner() -> None:
+    """Unlock before a worker takes the install lock, never from its callback."""
+    from hermes_cli.update_vault import has_owner
+
+    if has_owner():
+        return
+    from pm.plugins_state import dependency_homes
+
+    for home in {vault_home(home / "config.yaml") for home in dependency_homes()} - {None}:
+        _vault(home)
 
 
 def _transform(operation: str, path: Path, data: bytes, purpose: str) -> bytes:

@@ -150,6 +150,8 @@ def main(argv: list[str] | None = None) -> int:
         from pm.environments import activate_dependencies
 
         activate_dependencies(root)
+        from hermes_cli.update_vault import adopt_keys
+        adopt_keys()
         if args.finish_update:
             # A source update that never reached its own completion -- a
             # pre-handoff release cannot flip during `hermes update`, so its
@@ -175,7 +177,11 @@ def main(argv: list[str] | None = None) -> int:
     passthrough = (["--desktop"] if args.desktop else []) + \
                   (["--finish-update"] if args.finish_update else [])
     command = _bootstrap_command(root, passthrough)
-    return subprocess.call(command, cwd=root, env=activation_environment(root))
+    from hermes_cli.update_vault import child_vault
+
+    env = activation_environment(root)
+    with child_vault(env) as vault_kwargs:
+        return subprocess.call(command, cwd=root, env=env, **vault_kwargs)
 
 
 if __name__ == "__main__":
