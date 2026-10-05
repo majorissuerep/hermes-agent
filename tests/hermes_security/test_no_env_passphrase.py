@@ -114,7 +114,7 @@ def test_noninteractive_creation_refuses_without_key_only(tmp_path, monkeypatch)
     home.mkdir()
     monkeypatch.setenv("HERMES_HOME", str(home))
     monkeypatch.delenv("HERMES_MASTER_PASSWORD", raising=False)
-    monkeypatch.setattr(vault_cmd, "_tty_available", lambda: False)
+    monkeypatch.setattr("hermes_cli.vault_gate._tty_available", lambda: False)
     args = SimpleNamespace(vault_command="migrate", yes=True, key_only=False,
                            key_out=None, public_key=None, private_key=None, slot=None)
     with pytest.raises(SystemExit) as e:

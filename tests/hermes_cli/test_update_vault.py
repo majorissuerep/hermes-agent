@@ -22,7 +22,7 @@ def homes(tmp_path, monkeypatch):
         target.mkdir(parents=True)
         vault.init_vault(target, "only the parent knows this password")
         vault.unlock(target, "only the parent knows this password")
-        io.write_text(target / "config.yaml", f"model: {target.name}-canary\n", purpose="config")
+        io.write_text(target / "config.yaml", f"model: {target.name}-canary\n", purpose="config", encoding="utf-8")
     yield home, sibling
     vault.clear_vault_cache()
 
@@ -95,7 +95,7 @@ assert result.returncode == 0
     assert "Unlock master password" not in result.stdout + result.stderr
     for path in home.glob("logs/update_receipts/*.json"):
         assert path.read_bytes().startswith(b"HRMVAULT\0")
-        assert json.loads(io.read_text(path, purpose="state"))["outcome"] == "failed"
+        assert json.loads(io.read_text(path, purpose="state", encoding="utf-8"))["outcome"] == "failed"
 
 
 @pytest.mark.platforms("any")
@@ -104,7 +104,7 @@ def test_preparation_cannot_use_vault_channel_for_other_state(homes, tmp_path):
 
     source = Path(__file__).resolve().parents[2]
     home, _ = homes
-    io.write_text(home / ".env", "TOKEN=secret-canary\n", purpose="env")
+    io.write_text(home / ".env", "TOKEN=secret-canary\n", purpose="env", encoding="utf-8")
     before = (home / ".env").read_bytes()
     program = '''
 import base64, sys

@@ -10,6 +10,7 @@ import pytest
 @pytest.mark.platforms("posix")
 def test_detached_completion_can_unlock_using_inherited_terminal(tmp_path):
     import pty
+    import select
 
     source = Path(__file__).resolve().parents[2]
     probe = tmp_path / "terminal.py"
@@ -26,13 +27,25 @@ else:
     os.close(fd)
     raise AssertionError("test child unexpectedly has a controlling terminal")
 assert _tty_available(), "inherited terminal cannot unlock the update"
+from hermes_cli.vault_cmd import _password_from_env_or_prompt
+assert _password_from_env_or_prompt() == "test-terminal-password"
+print("unlocked")
 ''', encoding="utf-8")
     master, slave = pty.openpty()
     try:
-        result = subprocess.run([sys.executable, "-I", str(probe), str(source)],
-                                stdin=slave, start_new_session=True,
-                                capture_output=True, text=True, timeout=15)
+        with subprocess.Popen([sys.executable, "-I", str(probe), str(source)],
+                              stdin=slave, start_new_session=True,
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) as process:
+            try:
+                assert select.select([process.stderr], [], [], 15)[0], "no password prompt"
+                os.write(master, b"test-terminal-password\n")
+                output, error = process.communicate(timeout=20)
+            finally:
+                if process.poll() is None:
+                    process.kill()
+                    process.wait()
     finally:
         os.close(master)
         os.close(slave)
-    assert result.returncode == 0, result.stdout + result.stderr
+    assert process.returncode == 0, output + error
+    assert output == "unlocked\n"

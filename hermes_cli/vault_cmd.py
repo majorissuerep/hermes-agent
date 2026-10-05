@@ -16,6 +16,7 @@ import sys
 from pathlib import Path
 from typing import Any, List, Optional
 
+from hermes_cli import vault_gate
 from hermes_security import errors as vault_errors
 from hermes_security import vault as vault_mod
 
@@ -24,20 +25,6 @@ def _home(args: Any):
     from hermes_constants import get_hermes_home
 
     return get_hermes_home()
-
-
-def _tty_available() -> bool:
-    """True when a real terminal can be reached for a password prompt.
-
-    NOT sys.stdin.isatty(): under `curl ... | bash` stdin is the pipe, but
-    /dev/tty is still the user's terminal and getpass reads /dev/tty
-    directly. Refusing on !isatty() wrongly locked out exactly that flow.
-    """
-
-    try:
-        return os.isatty(os.open("/dev/tty", os.O_RDWR))
-    except OSError:
-        return False
 
 
 def _load_key_file(path: str) -> bytes:
@@ -66,7 +53,7 @@ def _prompt_new_password() -> str:
     # /proc/<pid>/environ, child inheritance and unit EnvironmentFiles — that
     # contradicts the vault's threat model). Interactive creation prompts on the
     # TTY; non-interactive callers create + add a key slot and use the key file.
-    if not _tty_available():
+    if not vault_gate._tty_available():
         print(
             "✗ No terminal available to create a master password.\n"
             "  Interactive: run 'hermes secure-vault migrate' from a terminal.\n"
@@ -90,7 +77,7 @@ def _prompt_new_password() -> str:
 def _password_from_env_or_prompt(*, confirm: str = "Unlock master password: ") -> str:
     # Fork: NO env passphrase, ever. Non-interactive unlock is the key-file path
     # (HERMES_VAULT_PRIVATE_KEY), handled in get_vault; this is the human path.
-    if not _tty_available():
+    if not vault_gate._tty_available():
         print(
             "✗ The vault is locked and no terminal is available.\n"
             "  Unlock with a key file (HERMES_VAULT_PRIVATE_KEY=/path/to/key, 0600, never a\n"
