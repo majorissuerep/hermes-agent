@@ -130,21 +130,28 @@ def test_repair_authenticated_env_failure_restores_backup_or_preserves_damage(tm
 
 
 @pytest.mark.platforms("any")
-def test_repair_cli_uses_key_file_without_terminal_and_keeps_credentials_private(tmp_path, monkeypatch):
+@pytest.mark.parametrize("damage", ["plaintext", "authentication"])
+def test_repair_cli_uses_key_file_without_terminal_and_keeps_credentials_private(tmp_path, monkeypatch, damage):
     from hermes_security import io
 
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("HERMES_HOME", str(home))
-    hv.init_vault(home, PW)
+    expected = "OPENAI_API_KEY=keyfile-repair-private-canary\n"
+    (home / ".env").write_text(expected, encoding="utf-8")
+    assert mig.migrate_home(home, PW).ok
     unlocked = hv.unlock(home, PW)
     private, public = hv.generate_keypair()
     hv.add_key_slot(home, public_key_raw=public, unlocked_vault=unlocked)
     key = tmp_path / "vault.key"
     key.write_bytes(hv._b64e(private).encode("ascii"))
     key.chmod(0o600)
-    expected = "OPENAI_API_KEY=keyfile-repair-private-canary\n"
-    (home / ".env").write_text(expected, encoding="utf-8")
+    if damage == "plaintext":
+        (home / ".env").write_text(expected, encoding="utf-8")
+    else:
+        damaged = bytearray((home / ".env").read_bytes())
+        damaged[-1] ^= 1
+        (home / ".env").write_bytes(damaged)
     source = Path(__file__).resolve().parents[2]
     probe = tmp_path / "repair.py"
     probe.write_text('''

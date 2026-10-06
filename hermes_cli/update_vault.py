@@ -65,6 +65,8 @@ def adopt_keys() -> None:
 
 
 def _serve(connection, keys, vault_module, inherited):
+    from pm.state_io import envelope_home
+
     homes = {Path(entry["home"]).resolve() for entry in keys}
     try:
         _send(connection, keys)
@@ -72,12 +74,8 @@ def _serve(connection, keys, vault_module, inherited):
             operation, path, payload, purpose = _receive(connection)
             try:
                 target = Path(path).resolve()
-                home = next((home for home in homes if (
-                    (purpose == "config" and target == home / "config.yaml")
-                    or (purpose == "state" and target.parent == home / "logs/update_receipts"
-                        and target.suffix == ".json")
-                )), None)
-                if home is None or operation not in {"encrypt", "decrypt"}:
+                home = envelope_home(operation, path, purpose)
+                if home not in homes:
                     raise ValueError("not an authorized update envelope operation")
                 if inherited:
                     value = envelope_operation(operation, path, payload, purpose)

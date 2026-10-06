@@ -10,8 +10,8 @@ import pytest
 from hermes_security import io, vault
 
 
-@pytest.fixture
-def homes(tmp_path, monkeypatch):
+@pytest.fixture(params=["independent", "shared"])
+def homes(tmp_path, monkeypatch, request):
     home = tmp_path / "home"
     sibling = home / "profiles/work"
     monkeypatch.setenv("HERMES_HOME", str(home))
@@ -20,8 +20,9 @@ def homes(tmp_path, monkeypatch):
         monkeypatch.delenv(key, raising=False)
     for target in (home, sibling):
         target.mkdir(parents=True)
-        vault.init_vault(target, "only the parent knows this password")
-        vault.unlock(target, "only the parent knows this password")
+        if target == home or request.param == "independent":
+            vault.init_vault(target, "only the parent knows this password")
+            vault.unlock(target, "only the parent knows this password")
         io.write_text(target / "config.yaml", f"model: {target.name}-canary\n", purpose="config", encoding="utf-8")
     yield home, sibling
     vault.clear_vault_cache()
@@ -58,7 +59,7 @@ class NoCrypto:
         if fullname == "cryptography" or fullname.startswith("cryptography."):
             raise AssertionError("preparation loaded application crypto")
 sys.meta_path.insert(0, NoCrypto())
-from pm.state_io import read_text
+from pm.state_io import encode, read_text
 from pm.runtime import runtime_environment
 from hermes_cli import update_receipt, update_completion
 from hermes_cli.update_vault import child_vault
@@ -76,6 +77,11 @@ with runtime_lock(Path(sys.argv[1])):
     saved = update_receipt.finalize_pending_update_receipt(1, "a preparation failure must leave a sealed receipt")
     assert saved and saved.read_bytes().startswith(b"HRMVAULT\\0")
     assert update_completion._read_terminal_receipt(request)["outcome"] == "failed"
+    profile_receipt = Path(sys.argv[4]) / "logs/update_receipts/probe.json"
+    profile_receipt.parent.mkdir(parents=True, exist_ok=True)
+    profile_receipt.write_bytes(encode(profile_receipt, '{"outcome": "failed"}', purpose="state"))
+    assert profile_receipt.read_bytes().startswith(b"HRMVAULT\\0")
+    assert json.loads(read_text(profile_receipt, purpose="state"))["outcome"] == "failed"
 assert "HERMES_UPDATE_VAULT_CHANNEL" not in runtime_environment()
 env = dict(os.environ)
 with child_vault(env) as kwargs:
@@ -112,12 +118,20 @@ from pathlib import Path
 sys.path.insert(0, sys.argv[1])
 from pm.state_io import owner_operation
 path = Path(sys.argv[2])
-try:
-    owner_operation("decrypt", str(path), base64.b64encode(path.read_bytes()).decode(), "env")
-except RuntimeError as exc:
-    assert "not an authorized update envelope operation" in str(exc)
-else:
-    raise AssertionError("preparation decrypted non-PM state")
+payload = base64.b64encode(path.read_bytes()).decode()
+for operation, target, purpose in (
+    ("decrypt", path, "env"),
+    ("decrypt", path, "config"),
+    ("encrypt", path.parent / "config.yaml", "state"),
+    ("rotate", path.parent / "config.yaml", "config"),
+    ("encrypt", path.parent / "logs/unrelated.json", "state"),
+):
+    try:
+        owner_operation(operation, str(target), payload, purpose)
+    except RuntimeError as exc:
+        assert "not an authorized update envelope operation" in str(exc)
+    else:
+        raise AssertionError("preparation accepted a non-PM operation")
 '''
     script = tmp_path / "restricted.py"
     script.write_text(program, encoding="utf-8")
