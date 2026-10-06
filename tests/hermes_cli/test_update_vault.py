@@ -95,7 +95,7 @@ assert result.returncode == 0
     assert "Unlock master password" not in result.stdout + result.stderr
     for path in home.glob("logs/update_receipts/*.json"):
         assert path.read_bytes().startswith(b"HRMVAULT\0")
-        assert json.loads(io.read_text(path, purpose="state", encoding="utf-8"))["outcome"] == "failed"
+        assert json.loads(io.read_text(path, purpose="state", encoding="utf-8-sig"))["outcome"] == "failed"
 
 
 @pytest.mark.platforms("any")
