@@ -138,7 +138,7 @@ def test_repair_cli_uses_key_file_without_terminal_and_keeps_credentials_private
     home.mkdir()
     monkeypatch.setenv("HERMES_HOME", str(home))
     expected = "OPENAI_API_KEY=keyfile-repair-private-canary\n"
-    (home / ".env").write_text(expected, encoding="utf-8")
+    (home / ".env").write_bytes(expected.encode("utf-8"))
     assert mig.migrate_home(home, PW).ok
     unlocked = hv.unlock(home, PW)
     private, public = hv.generate_keypair()
@@ -147,7 +147,7 @@ def test_repair_cli_uses_key_file_without_terminal_and_keeps_credentials_private
     key.write_bytes(hv._b64e(private).encode("ascii"))
     key.chmod(0o600)
     if damage == "plaintext":
-        (home / ".env").write_text(expected, encoding="utf-8")
+        (home / ".env").write_bytes(expected.encode("utf-8"))
     else:
         damaged = bytearray((home / ".env").read_bytes())
         damaged[-1] ^= 1
