@@ -112,6 +112,9 @@ def transition(tmp_path):
                  package / "update_lock.py")
     shutil.copy2(Path(update_completion.__file__).with_name("_subprocess_compat.py"),
                  package / "_subprocess_compat.py")
+    shutil.copy2(Path(update_completion.__file__).with_name("update_vault.py"),
+                 package / "update_vault.py")
+    shutil.copy2(Path(update_completion.__file__).parents[1] / "pm/state_io.py", pm_package / "state_io.py")
     (package / "main.py").write_text("")
     (package / "update_cmd_config.py").write_text("_LAST_SIBLING_SNAPSHOTS = {}\n")
     (package / "update_inventory.py").write_text(

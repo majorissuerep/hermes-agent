@@ -51,10 +51,6 @@ def test_no_vault_refuses_noninteractive(_arm_gate, monkeypatch, capsys):
 def test_no_vault_offers_migration_on_tty(_arm_gate, monkeypatch):
     home = _arm_gate
     monkeypatch.setattr(vault_gate, "_tty_available", lambda: True)
-    # the migrate flow the gate invokes reads vault_cmd's own tty seam
-    from hermes_cli import vault_cmd as _vc
-
-    monkeypatch.setattr(_vc, "_tty_available", lambda: True)
     import getpass
 
     answers = iter(["y", "pw-tty-offer-99", "pw-tty-offer-99"])
@@ -156,8 +152,5 @@ def test_deck_verbs_that_launch_a_tui_stay_gated(_arm_gate, monkeypatch, verb):
     hv.init_vault(_arm_gate, "gate-pw-deck")
     hv.clear_vault_cache()
     monkeypatch.setattr(vault_gate, "_tty_available", lambda: False)
-    from hermes_cli import vault_cmd as _vc
-
-    monkeypatch.setattr(_vc, "_tty_available", lambda: False)
     with pytest.raises(SystemExit):
         vault_gate.gate_startup(_args("deck", deck_command=verb))

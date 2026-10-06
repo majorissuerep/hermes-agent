@@ -37,11 +37,13 @@ def _failed_result(request: dict, result_path: Path, code: int) -> int:
 
 def run_completion(request: dict) -> dict:
     """Wait for new code; zero exit without a correlated terminal result fails closed."""
+    from hermes_cli.update_vault import child_vault
+
     root = Path(request["source"])
     env = dict(os.environ, HERMES_HOME=request["home"], PYTHONUNBUFFERED="1")
     for key in ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV"):
         env.pop(key, None)
-    with tempfile.TemporaryDirectory(prefix="hermes-completion-") as directory:
+    with tempfile.TemporaryDirectory(prefix="hermes-completion-") as directory, child_vault(env) as vault_kwargs:
         request_path = Path(directory) / "request.json"
         result_path = Path(directory) / "result.json"
         request = {**request, "stdout_isatty": sys.stdout.isatty()}
@@ -52,6 +54,7 @@ def run_completion(request: dict) -> dict:
                    str(request_path), str(result_path)]
         proc = subprocess.Popen(
             command, cwd=root, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            **vault_kwargs,
             **({"start_new_session": True} if os.name == "posix" else
                {"creationflags": subprocess.CREATE_NO_WINDOW}))
         decoder = codecs.getincrementaldecoder("utf-8")("replace")
@@ -123,10 +126,12 @@ def _resume_receipt(data: dict) -> None:
 
 
 def _read_terminal_receipt(request: dict) -> dict | None:
+    from pm.state_io import read_text
+
     directory = Path(request["home"]) / "logs/update_receipts"
     # Never latest.json: another profile/context may have finalized more recently.
     for path in directory.glob(f"update_*_{request['receipt']['update_id']}.json"):
-        data = json.loads(path.read_text(encoding="utf-8-sig"))
+        data = json.loads(read_text(path, purpose="state"))
         if data.get("update_id") == request["receipt"]["update_id"] and data.get("finished_at"):
             return data
     return None
@@ -163,7 +168,11 @@ def _prepare(request: dict, request_path: Path, result_path: Path) -> int:
                str(request_path), str(result_path), "--prepared"]
     # A second interpreter is mandatory: PM may have selected a different Python
     # and dependency graph. No application maintenance runs in this bootstrap.
-    code = _exit_status(subprocess.call(command, cwd=root, env=activation_environment(root)))
+    from hermes_cli.update_vault import child_vault
+
+    env = activation_environment(root)
+    with child_vault(env) as vault_kwargs:
+        code = _exit_status(subprocess.call(command, cwd=root, env=env, **vault_kwargs))
     if not result_path.exists():
         return _failed_result(request, result_path, code)
     return code
@@ -298,6 +307,8 @@ def main() -> int:
         # after PM selection, before importing any application dependencies.
         from pm.environments import activate_dependencies
         activate_dependencies(root)
+        from hermes_cli.update_vault import adopt_keys
+        adopt_keys()
         return _finish(request, result_path)
     try:
         return _prepare(request, request_path, result_path)

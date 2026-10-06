@@ -26,6 +26,8 @@ def finish_update(*, root, assume_yes, gateway_mode, pre_update_snapshot_id,
         from hermes_cli.source_stamp import write_source_stamp
 
         write_source_stamp(Path(root))
+        from hermes_cli.venv_sync import clear_completion
+        clear_completion(Path(root))
     # Restart can kill this process's gateway cgroup; record its result first.
     if gateway_mode:
         _write_gateway_update_exit_code(complete)
@@ -74,6 +76,10 @@ def main(context: Path, result: Path) -> int:
         # its ordinary currency check is now a no-op, not another update.
         sys.argv = list(request["argv"]) if restarting else [str(root / "hermes"), "update"]
         import hermes_bootstrap  # noqa: F401
+        from hermes_cli.update_vault import adopt_keys
+        adopt_keys()
+        from hermes_cli.venv_sync import publish_launchers
+        publish_launchers(root)
         # Import failures are update failures too: keep the original receipt
         # open before importing the application graph from the new checkout.
         from hermes_cli import main as cli

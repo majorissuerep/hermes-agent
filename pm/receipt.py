@@ -322,10 +322,12 @@ def _write_rotated(data: dict[str, Any]) -> Path:
     with (d / ".pm-write.lock").open("a+b") as lock:
         lock_fd(lock.fileno(), wait=True)
         if _vaulted(path):
-            from hermes_security.io import atomic_write_state_json
+            from pm.filesystem import durable_write_bytes
+            from pm.state_io import encode
 
-            atomic_write_state_json(path, data, purpose="state")
-            atomic_write_state_json(d / "latest.json", data, purpose="state")
+            serialized = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
+            for target in (path, d / "latest.json"):
+                durable_write_bytes(target, encode(target, serialized, purpose="state"))
         else:
             # PM also boots independently of the application package. No app
             # or crypto imports before the operator initializes their vault.
