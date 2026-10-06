@@ -329,12 +329,7 @@ def cmd_vault(args: Any) -> int:
         if not vault_mod.vault_exists(home):
             print(f"✗ No vault at {home}; run 'hermes secure-vault migrate' first")
             return 1
-        password = _password_from_env_or_prompt()
-        try:
-            vault_mod.unlock(home, password)
-        except vault_errors.WrongMasterPasswordError:
-            print("✗ Wrong master password")
-            return 1
+        gate_locked_vault(args, home)
         from hermes_security.migrate import repair_clobbered_state
 
         report = repair_clobbered_state(home)

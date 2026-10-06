@@ -54,12 +54,11 @@ def _vault(home: Path):
         return get_vault(home)
 
 
-def owner_operation(operation: str, path: str, payload: str, purpose: str) -> str:
-    """Only config and receipt envelopes belong to the PM protocol."""
-    from hermes_cli.update_vault import has_owner, envelope_operation
+def envelope_home(operation: str, path: str, purpose: str) -> Path:
+    """Authorize live config/receipt paths, then resolve their owning vault.
 
-    if has_owner():
-        return envelope_operation(operation, path, payload, purpose)
+    A named profile can share its parent's vault; state scope is not key scope.
+    """
     from pm.plugins_state import dependency_homes
 
     target = Path(path).resolve()
@@ -68,13 +67,21 @@ def owner_operation(operation: str, path: str, payload: str, purpose: str) -> st
     receipts = {home.resolve() / "logs" / "update_receipts" for home in homes}
     allowed = ((purpose == "config" and target in configs)
                or (purpose == "state" and target.parent in receipts and target.suffix == ".json"))
-    if not allowed:
-        raise ValueError(f"not a PM state path: {target}")
-    if operation not in {"decrypt", "encrypt"}:
-        raise ValueError(f"unknown PM envelope operation: {operation}")
+    if not allowed or operation not in {"decrypt", "encrypt"}:
+        raise ValueError(f"not an authorized update envelope operation: {operation} {purpose} {target}")
     home = vault_home(target)
     if home is None:
         raise ValueError(f"PM state vault disappeared: {target}")
+    return home
+
+
+def owner_operation(operation: str, path: str, payload: str, purpose: str) -> str:
+    from hermes_cli.update_vault import has_owner, envelope_operation
+
+    if has_owner():
+        return envelope_operation(operation, path, payload, purpose)
+    target = Path(path).resolve()
+    home = envelope_home(operation, path, purpose)
     vault = _vault(home)
     data = getattr(vault, operation)(base64.b64decode(payload, validate=True), purpose=purpose,
                                     relpath=target.relative_to(home).as_posix())
