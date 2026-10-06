@@ -261,7 +261,12 @@ def _repair_envelope(vault, home: Path, path: Path, rel: Path, head: bytes, repo
     if head.startswith(_MAGIC):
         if purpose != "env":
             return  # sealed; only .env content is sanity-checked (it gates every command)
-        content = vault.decrypt(path.read_bytes(), purpose=purpose, relpath=rel.as_posix())
+        raw = path.read_bytes()
+        try:
+            content = vault.decrypt(raw, purpose=purpose, relpath=rel.as_posix())
+        except vault_errors.VaultIntegrityError:
+            _restore_env_from_backup(vault, home, path, rel, raw, report)
+            return
     else:
         content = path.read_bytes()
     if purpose == "env" and _is_mangled_text(content):
@@ -293,7 +298,7 @@ def _restore_env_from_backup(vault, home: Path, path: Path, rel: Path, garbage: 
         report["restored"].append(f"{member} (from {tar_path})")
         return
     report["unrecoverable"].append(
-        f"{member}: content is not text (mangled ciphertext) and no pre-migration "
+        f"{member}: damaged ciphertext and no pre-migration "
         f"backup in {home.parent} holds it — re-enter these secrets"
     )
 
