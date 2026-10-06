@@ -58,14 +58,16 @@ hermes setup
 
 State-accessing commands prompt for the master password. For unattended services, authorize a private key with `hermes secure-vault keygen` and `hermes secure-vault add-key --public-key <file>`, then give the service `HERMES_VAULT_PRIVATE_KEY=/path/to/private-key`. This variable contains a **file path**, never the master password. Use `--help` on those commands for their key-file options.
 
-If startup reports that `.env` **holds mangled ciphertext**, run:
+If startup reports that `.env` **holds mangled ciphertext** or fails vault
+authentication, run:
 
 ```bash
 hermes secure-vault repair
 ```
 
-This command remains available when automatic update completion fails. It prompts
-for the master password and attempts to restore the damaged `.env` from a
+This command remains available when automatic update completion fails. It reuses
+an existing unlock or `HERMES_VAULT_PRIVATE_KEY` key file, otherwise prompting for
+the master password, and attempts to restore the damaged `.env` from a
 pre-migration backup, preserving the damaged contents as encrypted `.env.clobbered`.
 If no usable backup exists, repair reports the file as unrecoverable; preserve the
 existing files and recover or re-enter the credentials before resuming setup.
