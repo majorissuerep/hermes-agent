@@ -506,8 +506,7 @@ def _check_required_packages(should_fix: bool, f: Finding) -> None:
 def _check_windows_gateway_autostart(should_fix: bool, f: Finding) -> None:
     """Windows: the gateway must start at logon from ONE mechanism — a Scheduled Task and a
     Startup-folder entry side by side launch it twice (#80569)."""
-    if sys.platform != "win32":
-        return
+    return
     from hermes_cli import gateway_windows
     redundant = gateway_windows.redundant_autostart_entries()
     if not redundant:
@@ -592,8 +591,6 @@ def _check_gateway_supervision(should_fix: bool, f: Finding) -> None:
 def _check_command_installation(should_fix: bool, f: Finding) -> None:
     """Check the install-owned launch contract without replacing custom commands."""
     from hermes_cli.doctor import PROJECT_ROOT
-    if sys.platform == "win32":
-        return
     _section("Command Installation")
     from hermes_cli.config import detect_install_method
 

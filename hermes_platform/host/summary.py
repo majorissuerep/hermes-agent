@@ -124,8 +124,6 @@ def _locale() -> str:
     try:
         if sys.platform == "darwin":
             return _darwin_locale()
-        if sys.platform == "win32":
-            return _windows_locale()
         return _linux_locale()
     except (AttributeError, OSError, TypeError, ValueError):
         return ""

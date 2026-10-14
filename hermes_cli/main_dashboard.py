@@ -49,7 +49,7 @@ def _parse_dashboard_runtime(command: str) -> tuple[str, str, int] | None:
     The mode is the canonical holder subcommand, never an argv substring: this gates the launchd
     backend inventory (a kill + kickstart path) and ``--status`` (#121156).
     """
-    from hermes_cli.update_cmd_windows import _hermes_holder_subcommand
+    from hermes_cli.update_cmd_holders import _hermes_holder_subcommand
     mode = _hermes_holder_subcommand(command)
     if mode not in ("dashboard", "serve"):
         return None
@@ -97,8 +97,6 @@ def _restart_managed_dashboard_service(reason: str, unit: str = _DASHBOARD_SYSTE
     deliberately stops the caller's ``os.kill`` fallback: systemd treats a direct
     SIGTERM as a clean stop, so ``Restart=on-failure`` won't bring it back.
     """
-    if sys.platform == "win32":
-        return False
 
     def _systemctl(*args: str, timeout: int = 10) -> subprocess.CompletedProcess:
         return _run_probe(["systemctl", *args], timeout=timeout)
@@ -353,8 +351,6 @@ def _restart_launchd_job(domain: str, label: str, old_pid: int | None, *, timeou
 def _dashboard_cmdline_for_pid(pid: int) -> list[str] | None:
     """Exact argv of a running process: ``/proc/<pid>/cmdline`` (Linux), ``ps -o command=`` + shlex
     (macOS), None on Windows (no graceful taskkill window; Desktop manages its backend)."""
-    if sys.platform == "win32":
-        return None
     try:
         cmdline_path = f"/proc/{pid}/cmdline"
         if os.path.exists(cmdline_path):
@@ -722,9 +718,6 @@ def _maybe_setup_dashboard_auth_interactively(args) -> None:
 
 def _read_ssh_session_token_file(path: str) -> str:
     """Read and unlink a Desktop SSH token from its private runtime directory."""
-    if sys.platform == "win32":
-        from hermes_cli.windows_ssh_runtime import read_token
-        return read_token(path)
 
     import stat as _stat
 
@@ -1003,11 +996,7 @@ def _route_named_profile_dashboard(
         env.pop("HERMES_HOME", None)  # prior behaviour rather than blocking the reroute
     # On Windows os.execvpe() spawns via CreateProcess then exits, which under
     # Python 3.14+ can crash with STATUS_ACCESS_VIOLATION; use Popen + exit.
-    if sys.platform == "win32":
-        proc = subprocess.Popen(reexec_argv, env=env)
-        sys.exit(proc.wait())
-    else:
-        os.execvpe(sys.executable, reexec_argv, env)
+    os.execvpe(sys.executable, reexec_argv, env)
 
 
 def _resolve_dashboard_web_dist(args, _headless_backend: bool) -> None:

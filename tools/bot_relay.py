@@ -492,10 +492,6 @@ def waiter_command(root: Path | str, envelope: dict) -> str:
     label = f"@{envelope.get('target_handle', '')} on {envelope.get('target_connection', '')}"
     runner = str(Path(__file__).resolve().with_name("bot_mode_dm.py"))
     argv = [sys.executable or "python3", runner, "--wait-reply", reply_path, label, str(REPLY_WAIT_SECONDS)]
-    if sys.platform == "win32":
-        # Same rewrite as the delivery runner: the tracked local backend uses Git Bash on native
-        # Windows, where forward-slash drive paths run and backslash paths parse as command names.
-        argv = [part.replace("\\", "/") for part in argv]
     return shlex.join(argv)
 
 

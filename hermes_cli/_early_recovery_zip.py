@@ -57,15 +57,9 @@ def zip_swap_owner_lock(root: Path, *, wait: float = 0.0):
         deadline = time.monotonic() + wait
         while True:
             try:
-                if sys.platform == "win32":
-                    import msvcrt
+                import fcntl
 
-                    os.lseek(fd, 0, os.SEEK_SET)
-                    msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
-                else:
-                    import fcntl
-
-                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 break
             except OSError as exc:
                 if exc.errno not in _CLAIM_HELD_ERRNOS:

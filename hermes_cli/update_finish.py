@@ -112,7 +112,7 @@ def main(context: Path, result: Path) -> int:
         from hermes_cli import main as cli
         from hermes_cli.source_build import build_update_products
         from hermes_cli.update_lock import UpdateLock, describe_holder
-        from hermes_cli.update_cmd_windows import _resume_windows_gateways_after_update
+        from hermes_cli.update_cmd_holders import _resume_windows_gateways_after_update
         from hermes_cli.venv_sync import arm_completion
 
         cli.PROJECT_ROOT = root

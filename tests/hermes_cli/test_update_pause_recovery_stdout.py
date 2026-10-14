@@ -9,7 +9,7 @@ verdict (a torn checkout), so the deferral notice is what gets printed.
 from __future__ import annotations
 
 from hermes_cli import update_pause_record as pause_record
-from hermes_cli.update_cmd_windows import _resume_windows_gateways_after_update
+from hermes_cli.update_cmd_holders import _resume_windows_gateways_after_update
 
 
 def test_a_recovering_resume_prints_its_notices_to_stderr(monkeypatch, capsys):

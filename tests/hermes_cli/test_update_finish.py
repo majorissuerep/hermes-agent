@@ -229,12 +229,12 @@ def completion(tmp_path, monkeypatch):
                     update._resume_windows_gateways_and_merge_outcome = resume
                     if fault == 'scm':
                         # The Windows service manager refuses the paused gateway's restart.
-                        from hermes_cli import update_cmd_windows
+                        from hermes_cli import update_cmd_holders
                         def scm(token):
                             if token and token.get('resume_needed'):
                                 raise RuntimeError('Could not restart Windows gateway service(s): HermesGatewayProbe')
                         module._resume_windows_gateways_after_update = scm
-                        update_cmd_windows._resume_windows_gateways_after_update = scm
+                        update_cmd_holders._resume_windows_gateways_after_update = scm
                 spec.loader.exec_module = execute
                 return spec
         sys.meta_path.insert(0, CompletionImports())

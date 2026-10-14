@@ -39,7 +39,7 @@ from hermes_cli.update_abort_recovery import (
     _abort_recovery_is_complete, _qualified_serve_skips, _recover_gateway_restart_after_abort,
     _serve_unit_recovery_available, _surviving_pre_update_serve_runtimes,
     _warn_stale_serve_runtimes)
-from hermes_cli.update_cmd_windows import (
+from hermes_cli.update_cmd_holders import (
     _HOLDER_VALUE_FLAGS_FALLBACK,
     _cold_start_windows_gateway_after_update, _desktop_owns_gateway_lifecycle,
     _detect_venv_python_processes, _hermes_holder_subcommand, _holder_value_flags,
@@ -707,8 +707,6 @@ def _cmd_update_check(branch: str = "main", *, branch_explicit: bool = False, ch
 def _base_git_cmd() -> list[str]:
     """``git`` argv; Windows adds ``-c windows.appendAtomically=false`` (git can fail "unable to
     write loose object file: Invalid argument" on non-atomic appends)."""
-    if sys.platform == "win32":
-        return ["git", "-c", "windows.appendAtomically=false"]
     return ["git"]
 
 
@@ -762,10 +760,10 @@ def _settle_windows_resume(request: dict) -> None:
     """
     import atexit
 
-    from hermes_cli import update_cmd_windows
+    from hermes_cli import update_cmd_holders
 
     atexit.unregister(_m()._resume_windows_gateways_after_update)
-    atexit.unregister(update_cmd_windows._resume_windows_gateways_after_update)
+    atexit.unregister(update_cmd_holders._resume_windows_gateways_after_update)
     request["windows_resume_settled"] = True
 
 
@@ -1789,7 +1787,7 @@ def _pause_gateways_for_update(opts):
     try:
         return _m()._pause_windows_gateways_for_update() or _posix_pause.arm_pause(
             no_gateway_restart=opts.no_gateway_restart)
-    except RuntimeError:  # update_cmd_windows._abort_on_error / ServicePauseFailed: nothing moved
+    except RuntimeError:  # update_cmd_holders._abort_on_error / ServicePauseFailed: nothing moved
         _record_stop("gateway_pause_failed")
         raise
 

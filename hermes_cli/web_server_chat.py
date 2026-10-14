@@ -29,10 +29,7 @@ _log = logging.getLogger("hermes_cli.web_server")
 # resize escapes to xterm.js.  POSIX uses pty_bridge (fcntl/termios); native
 # Windows uses win_pty_bridge (pywinpty/ConPTY); same surface, no handler guards.
 try:
-    if sys.platform.startswith("win"):
-        from hermes_cli.win_pty_bridge import WinPtyBridge as PtyBridge, PtyUnavailableError
-    else:
-        from hermes_cli.pty_bridge import PtyBridge, PtyUnavailableError
+    from hermes_cli.pty_bridge import PtyBridge, PtyUnavailableError
     _PTY_BRIDGE_AVAILABLE = True
 except ImportError:  # pragma: no cover - pywinpty / ptyprocess missing
     PtyBridge = None  # type: ignore[assignment]

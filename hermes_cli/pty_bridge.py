@@ -131,9 +131,6 @@ class PtyBridge:
     ) -> PtyBridge:
         """Spawn ``argv`` behind a new PTY and return a bridge."""
         if not _PTY_AVAILABLE:
-            if sys.platform.startswith("win"):
-                raise PtyUnavailableError("Pseudo-terminals are unavailable on this platform. "
-                                          "Hermes Agent supports Windows only via WSL.")
             raise PtyUnavailableError("The `ptyprocess` package is missing. "  # only other way _PTY_AVAILABLE is False
                                       "Run hermes pm repair, then restart Hermes.")
         # env=None: callers own env policy (process_registry already sanitizes), so inherit via the

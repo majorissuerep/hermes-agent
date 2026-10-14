@@ -167,8 +167,7 @@ def _windows_cron_python_invocation(python_exe: str) -> tuple[str, dict[str, str
     """Hidden, output-capable Python invocation for Windows cron scripts. ``pythonw.exe`` loses
     captured output; uv venv launchers can re-exec the base console python and flash a window
     even with CREATE_NO_WINDOW, so run the base python directly with venv paths overlaid in env."""
-    if sys.platform != "win32":
-        return python_exe, {}
+    return python_exe, {}
 
     interpreter = _sched.Path(python_exe)
     venv_dir = interpreter.parent.parent
@@ -216,15 +215,7 @@ def _terminate_cron_script_process(proc: subprocess.Popen) -> None:
     """Best-effort hard stop of a cron script and every child it spawned."""
     if proc.poll() is not None:
         return
-    if sys.platform != "win32":
-        _terminate_process_group(proc)
-    else:
-        try:
-            subprocess.run(
-                ["taskkill", "/PID", str(proc.pid), "/T", "/F"], capture_output=True, timeout=10,
-                creationflags=windows_hide_flags(), check=False)
-        except (OSError, subprocess.TimeoutExpired):
-            proc.kill()
+    _terminate_process_group(proc)
     try:
         proc.wait(timeout=1.0)
     except subprocess.TimeoutExpired:
@@ -420,9 +411,8 @@ def _script_argv(
         # exist to run Hermes' own dependency venv and would shadow the user's packages.
         python_exe, err = _resolve_cron_interpreter(interpreter)
         return ([python_exe, str(path)] if python_exe else None), {}, err
-    if sys.platform != "win32":
-        argv, env_overlay = _posix_cron_script_argv(path)
-        return argv, env_overlay, None
+    argv, env_overlay = _posix_cron_script_argv(path)
+    return argv, env_overlay, None
     python_exe, env_overlay = _windows_cron_python_invocation(sys.executable)
     if env_overlay:
         return _windows_cron_bootstrap_argv(python_exe, env_overlay, str(path)), env_overlay, None
@@ -462,16 +452,6 @@ def _run_job_script(
             "start_new_session": True,
             "errors": "replace",
         }
-        if sys.platform == "win32":
-            popen_kwargs = {
-                "creationflags": windows_hide_flags()
-                | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
-                # Lossy UTF-8 decode — locale-mismatched bytes from the STT command must not raise in the
-                # reader threads on non-UTF-8 Windows (#45099).
-                # Lossy UTF-8 decode — locale-mismatched bytes from the TTS command must not raise in the
-                # reader threads on non-UTF-8 Windows (#45099).
-                "encoding": "utf-8",
-                "errors": "replace"}
         # The process env is the LAUNCH profile's. For a job owned by a routed profile, drop that
         # profile's .env residue from the base first (no-op for the launch profile's own jobs), then
         # overlay the routed profile's own scope (which never enters os.environ under multiplex

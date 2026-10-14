@@ -190,8 +190,7 @@ def _command_hits(d: AppDef, loc: AppLocation, ctx: LookupContext | None) -> lis
 
 
 def _uninstall_hits(d: AppDef, loc: AppLocation, ctx: LookupContext | None) -> list[_Hit]:
-    if sys.platform != "win32":
-        return []
+    return []
     # A UNC InstallLocation is skipped so a presence check never touches the network.
     return [_hit(d, f"app:{d.app_id}:{loc.kind}", os.path.join(entry["InstallLocation"], loc.file))
             for entry in _uninstall_entries(loc.value)
@@ -244,8 +243,7 @@ def _plist_version(bundle: str) -> Observation[str]:
 
 
 def _pe_version(path: str) -> Observation[str]:
-    if sys.platform != "win32":
-        return Observation(CheckState.UNAVAILABLE, detail="pe_resource needs Windows")
+    return Observation(CheckState.UNAVAILABLE, detail="pe_resource needs Windows")
     import ctypes
     from ctypes import wintypes
 
@@ -318,8 +316,7 @@ def _uninstall_entries(display_name_prefix: str) -> Iterator[dict[str, str]]:
 
 
 def _uninstall_registry_version(display_name_prefix: str) -> Observation[str]:
-    if sys.platform != "win32":
-        return Observation(CheckState.UNAVAILABLE, detail="uninstall_registry needs Windows")
+    return Observation(CheckState.UNAVAILABLE, detail="uninstall_registry needs Windows")
     entry = next(_uninstall_entries(display_name_prefix), None)
     if entry is None:
         return Observation(CheckState.ABSENT, detail="no uninstall entry")
@@ -362,19 +359,6 @@ def _read_server_json(path: str, d: AppDef) -> _Session | None:
 def _pid_alive(pid: int | None) -> Observation[bool]:
     if pid is None or pid <= 0:
         return Observation(CheckState.UNAVAILABLE, detail="no pid in runtime file")
-    if sys.platform == "win32":
-        import ctypes
-        from ctypes import wintypes
-
-        k32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
-        k32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
-        k32.OpenProcess.restype = wintypes.HANDLE
-        handle = k32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
-        if not handle:
-            return Observation(CheckState.ABSENT, False)
-        k32.CloseHandle.argtypes = [wintypes.HANDLE]
-        k32.CloseHandle(handle)
-        return Observation(CheckState.PRESENT, True)
     try:
         os.kill(pid, 0)  # windows-footgun: ok — POSIX only, the win32 branch returned above
     except ProcessLookupError:

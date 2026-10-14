@@ -68,8 +68,6 @@ def has_clipboard_image() -> bool:
     """Quick check: does the clipboard currently contain an image?"""
     if sys.platform == "darwin":
         return _macos_has_image()
-    if sys.platform == "win32":
-        return _windows_has_image()
     return any(enabled and has() for enabled, has, _ in _linux_backends())
 
 

@@ -15,9 +15,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from hermes_cli import gateway, update_cmd, update_cmd_windows
+from hermes_cli import gateway, update_cmd, update_cmd_holders
 from hermes_cli import update_pause_record as pause_record
-from hermes_cli.update_cmd_windows import ServicePauseFailed, _pause_windows_gateways_for_update
+from hermes_cli.update_cmd_holders import ServicePauseFailed, _pause_windows_gateways_for_update
 
 
 @pytest.mark.parametrize("restore_fails", [False, True])
@@ -30,8 +30,8 @@ def test_the_pause_record_survives_exactly_when_the_service_rollback_failed(monk
     monkeypatch.setattr(gateway, "find_gateway_pids", lambda all_profiles=False: [])
     monkeypatch.setattr(gateway, "find_profile_gateway_processes", lambda strict=False: [])
     monkeypatch.setattr(gateway, "find_windows_gateway_services", lambda profile_processes=(): [service])
-    monkeypatch.setattr(update_cmd_windows, "_stop_windows_gateways", lambda *a, **k: {})
-    monkeypatch.setattr(update_cmd_windows, "_record_attested_cold_start_profiles", lambda *a: None)
+    monkeypatch.setattr(update_cmd_holders, "_stop_windows_gateways", lambda *a, **k: {})
+    monkeypatch.setattr(update_cmd_holders, "_record_attested_cold_start_profiles", lambda *a: None)
 
     def stop(*_a, **_k):
         raise OSError("access denied")

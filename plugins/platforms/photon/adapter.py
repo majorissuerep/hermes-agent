@@ -956,8 +956,6 @@ class PhotonAdapter(BasePlatformAdapter):
         """Kill an orphaned sidecar squatting our port (a SIGKILLed gateway leaves one whose
         token we don't know, so every respawn dies on EADDRINUSE). Listeners are verified
         by command line before being signalled."""
-        if sys.platform == "win32":  # lsof/ps; orphaning is a POSIX-only path
-            return
         try:
             async with httpx.AsyncClient(timeout=2.0, trust_env=False) as client:
                 await client.post(self._sidecar_url("/healthz"), headers=self._sidecar_headers())
@@ -1130,12 +1128,9 @@ class PhotonAdapter(BasePlatformAdapter):
             try:
                 proc.wait(timeout=3.0)
             except subprocess.TimeoutExpired:
-                if sys.platform != "win32":
-                    try:
-                        os.killpg(os.getpgid(proc.pid), signal.SIGTERM)  # windows-footgun: ok
-                    except (ProcessLookupError, PermissionError):
-                        proc.terminate()
-                else:
+                try:
+                    os.killpg(os.getpgid(proc.pid), signal.SIGTERM)  # windows-footgun: ok
+                except (ProcessLookupError, PermissionError):
                     proc.terminate()
                 try:
                     proc.wait(timeout=2.0)

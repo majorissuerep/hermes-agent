@@ -1,6 +1,6 @@
 """Pre-swap gateway pause for ``hermes update`` on Linux and macOS.
 
-Windows pauses its gateways before the fetch (``update_cmd_windows``) because they lock venv
+Windows pauses its gateways before the fetch (``update_cmd_holders``) because they lock venv
 files. On POSIX nothing is locked, but a gateway that keeps running while git rewrites the tree
 loads new-tree modules into an old process on its next lazy import. So every gateway running
 from this install is stopped at the commit point, immediately before the first checkout move
@@ -355,7 +355,7 @@ def _stop_job(job: dict, *, drained: bool = False) -> None:
     """Boot *job* out of launchd. *drained*: its gateway already exited through the drain; the
     bootout only keeps KeepAlive from serving the update."""
     from hermes_cli.gateway import _locate_launchd_gateway_service
-    from hermes_cli.update_cmd_windows import _write_update_planned_stop_marker
+    from hermes_cli.update_cmd_holders import _write_update_planned_stop_marker
     if not drained and job.get("home"):
         _write_update_planned_stop_marker(Path(job["home"]), job["pid"])
     result = subprocess.run(["launchctl", "bootout", f"{job['domain']}/{job['label']}"],
@@ -422,7 +422,7 @@ def _ask_to_drain(entry: dict) -> bool:
 
 def _stop_at_once(entry: dict) -> None:
     """The stop for a gateway that did not take the drain: its supervisor's, else marker + SIGTERM."""
-    from hermes_cli.update_cmd_windows import _write_update_planned_stop_marker
+    from hermes_cli.update_cmd_holders import _write_update_planned_stop_marker
     if entry.get("kind") == "systemd":
         _stop_unit(entry)
     elif entry.get("kind") == "launchd":
@@ -579,7 +579,7 @@ def _pause(token: dict) -> str | None:
     if not supervised and not bare:
         return None
     from gateway.status import get_process_start_time
-    from hermes_cli.update_cmd_windows import _planned_stop_marker_path
+    from hermes_cli.update_cmd_holders import _planned_stop_marker_path
     before = copy.deepcopy(token)  # what this attempt may add; a failed record puts it back
     for entry in supervised + bare:
         entry["ct"] = get_process_start_time(entry["pid"])  # native birth stamp: what _alive compares

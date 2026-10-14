@@ -7,7 +7,7 @@ from __future__ import annotations
 import pytest
 
 from hermes_cli.dashboard_procs import _is_desktop_local_serve_cmdline
-from hermes_cli.update_cmd_windows import _hermes_holder_subcommand, _is_backend_argv
+from hermes_cli.update_cmd_holders import _hermes_holder_subcommand, _is_backend_argv
 
 LOOPBACK = "--host 127.0.0.1 --port 0"
 

@@ -344,8 +344,6 @@ class LlamaServerSupervisor:
             self._job.close()
             self._job = None
             return
-        if sys.platform == "win32":
-            return  # Unrecorded processes are not ours merely because the binary matches.
         try:
             import psutil
 

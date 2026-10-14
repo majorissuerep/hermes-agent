@@ -168,21 +168,8 @@ def _windows_kernel32():
 
 
 def _windows_create_filetime(pid: int) -> int | None:
-    """GetProcessTimes creation FILETIME (100 ns ticks since 1601) or ``None``."""
-    import ctypes
-    from ctypes import wintypes
-
-    kernel32 = _windows_kernel32()
-    handle = kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
-    if not handle:
-        return None
-    try:
-        times = [wintypes.FILETIME() for _ in range(4)]
-        if not kernel32.GetProcessTimes(handle, *(ctypes.byref(t) for t in times)):
-            return None
-        return (times[0].dwHighDateTime << 32) | times[0].dwLowDateTime
-    finally:
-        kernel32.CloseHandle(handle)
+    """No-op: native Windows locking removed from this fork (WSL is the Windows answer)."""
+    return None
 
 
 def _stdlib_create_time(pid: int) -> float | None:
@@ -193,9 +180,6 @@ def _stdlib_create_time(pid: int) -> float | None:
     ``GetProcessTimes`` creation FILETIME.
     """
     try:
-        if sys.platform == "win32":
-            ticks = _windows_create_filetime(pid)
-            return None if ticks is None else (ticks - _FILETIME_UNIX_EPOCH) / 1e7
         if os.path.isdir("/proc"):
             with open(f"/proc/{pid}/stat", "rb") as fh:
                 stat = fh.read()
@@ -393,11 +377,6 @@ def _stdlib_parent_pid(pid: int) -> int | None:
     Linux; macOS keeps /proc absent, so shell out to ps once per hop; Windows has
     neither, so ask the Toolhelp32 snapshot.
     """
-    if sys.platform == "win32":
-        try:
-            return _windows_parent_pid(pid)
-        except (OSError, AttributeError, ValueError):
-            return None
     try:
         if os.path.isdir("/proc"):
             with open(f"/proc/{pid}/stat", "rb") as fh:
@@ -777,14 +756,6 @@ def _windows_close(handle) -> None:
 
 def _mutex_acquire(path: Path, wait: float):
     deadline = time.monotonic() + wait
-    if sys.platform == "win32":
-        while True:
-            handle = _windows_open_exclusive(path)
-            if handle is not None:
-                return handle
-            if time.monotonic() >= deadline:
-                raise MarkerBusy(f"{path} is held by another update")
-            time.sleep(0.02)
     import fcntl
 
     try:
@@ -827,10 +798,7 @@ def marker_mutex(path: Path, *, wait: float = MUTEX_WAIT_SECONDS):
         yield
     finally:
         held.pop(key, None)
-        if sys.platform == "win32":
-            _windows_close(handle)
-        else:
-            os.close(handle)  # closing the only fd of this open file description drops the flock
+        os.close(handle)  # closing the only fd of this open file description drops the flock
 
 
 def _compare_and_swap(path: Path, expected: bytes, new: bytes) -> bool:
@@ -980,14 +948,6 @@ _JOBS: list = []
 
 
 def _try_lock(fd: int) -> bool:
-    if sys.platform == "win32":
-        if not _lock_bytes(fd, _WINDOWS_LOCK_OFFSET):
-            return False
-        if not _lock_bytes(fd, _WINDOWS_LOCK_OFFSET + 1, _LEASE_SLOTS):  # a dead owner's leased child
-            _unlock(fd)
-            return False
-        _unlock(fd, _WINDOWS_LOCK_OFFSET + 1, _LEASE_SLOTS)
-        return True
     import fcntl
 
     try:
@@ -998,39 +958,22 @@ def _try_lock(fd: int) -> bool:
 
 
 def _lock_bytes(fd: int, offset: int, count: int = 1) -> bool:
-    """Windows: lock ``count`` bytes at ``offset`` without waiting (fails if any is held)."""
-    import msvcrt
-
-    os.lseek(fd, offset, os.SEEK_SET)
-    try:
-        msvcrt.locking(fd, msvcrt.LK_NBLCK, count)
-    except OSError:
-        return False
-    return True
+    """No-op: native Windows locking removed from this fork (WSL is the Windows answer)."""
+    return False
 
 
 def _unlock(fd: int, offset: int = _WINDOWS_LOCK_OFFSET, count: int = 1) -> None:
-    if sys.platform == "win32":
-        import msvcrt
-
-        with suppress(OSError):
-            os.lseek(fd, offset, os.SEEK_SET)
-            msvcrt.locking(fd, msvcrt.LK_UNLCK, count)
+    """No-op: native Windows locking removed from this fork (WSL is the Windows answer)."""
+    return None
 
 
 def _take_lease(fd: int) -> int | None:
-    """Windows: lock a free lease byte (R5b) on ``fd``; its offset, or None when all are held
-    (the tree's other joiners hold them: this one still runs inside their custody)."""
-    for offset in range(_WINDOWS_LOCK_OFFSET + 1, _WINDOWS_LOCK_OFFSET + 1 + _LEASE_SLOTS):
-        if _lock_bytes(fd, offset):
-            return offset
+    """No-op: native Windows locking removed from this fork (WSL is the Windows answer)."""
     return None
 
 
 def _inherited_lock_fd(path: Path) -> int | None:
     """An fd this process inherited that holds the lock on ``path`` (POSIX ``pass_fds``)."""
-    if sys.platform == "win32":
-        return None
     try:
         target = os.stat(path)
         fd_dir = "/proc/self/fd" if os.path.isdir("/proc/self/fd") else "/dev/fd"
@@ -1202,8 +1145,6 @@ def _release_checkout() -> None:
 def checkout_lock_fds(install_root: Path | str | None = None) -> tuple[int, ...]:
     """Fds a child of the update tree must inherit (``subprocess`` ``pass_fds``) so the
     checkout stays locked while it runs, even after its parent is killed. POSIX only."""
-    if sys.platform == "win32":
-        return ()
     if _HELD is not None:
         return () if _HELD["fd"] is None else (_HELD["fd"],)
     fd = _inherited_lock_fd(checkout_lock_path(install_root))

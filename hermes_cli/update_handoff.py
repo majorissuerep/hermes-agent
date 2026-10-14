@@ -52,8 +52,7 @@ def post_swap_python() -> Path:
     under) the project's Windows console shim — the shim can never be re-executed on Windows
     because it holds itself open for the whole process lifetime (#88838, #89599) — else the
     running interpreter."""
-    if sys.platform != "win32":
-        return Path(sys.executable)
+    return Path(sys.executable)
     from hermes_cli._launchers import _is_windows
     from hermes_constants import project_venv_dir
     from pm.environments import venv_python

@@ -1,18 +1,27 @@
-"""Windows gateway lifecycle for ``hermes update``: pause/resume/cold-start the service, sweep venv holders, reap orphaned backends.
+"""Venv-holder sweep + gateway lifecycle helpers for ``hermes update`` (POSIX; Windows-service paths are policy no-ops).
 
 Split out of ``update_cmd.py``; names are re-imported there so ``hermes_cli.update_cmd.<name>`` still resolves/monkeypatches.
 Origin helpers are imported lazily per function (no cycle; test patches on the origin stay effective).
 """
 
 import logging
+
 from contextlib import contextmanager, nullcontext, redirect_stdout, suppress
+
 import os
+
 import re
+
 import shlex
+
 import subprocess
+
 import sys
+
 import time as _time
+
 from datetime import datetime, timezone, UTC
+
 from pathlib import Path
 
 from hermes_cli.update_cmd_common import _best_effort
@@ -20,7 +29,6 @@ from hermes_cli.update_cmd_common import _best_effort
 logger = logging.getLogger("hermes_cli.update_cmd")  # log-record parity with the origin module
 
 _BACKEND_PURPOSES = ("serve", "dashboard")
-
 
 def _try_call(fn, log_message: str, *log_args, default=None):
     """``fn()``, or *default* after logging the exception at debug (``log_message`` gets ``*log_args, exc``)."""
@@ -30,7 +38,6 @@ def _try_call(fn, log_message: str, *log_args, default=None):
         logger.debug(log_message, *log_args, exc)
         return default
 
-
 @contextmanager
 def _abort_on_error(prefix: str):
     """Re-raise any failure of a mandatory step as ``RuntimeError(f"{prefix}: {exc}")`` (chained)."""
@@ -39,10 +46,8 @@ def _abort_on_error(prefix: str):
     except Exception as exc:
         raise RuntimeError(f"{prefix}: {exc}") from exc
 
-
 def _planned_stop_marker_path(profile_path: Path) -> Path:
     return Path(profile_path) / ".gateway-planned-stop.json"
-
 
 def _planned_stop_markers(running_pids, profile_processes, service_gateway_pids) -> dict:
     """``{pid: marker path}`` for each gateway the socket pause will ask (profile-mapped, not SCM)."""
@@ -52,7 +57,6 @@ def _planned_stop_markers(running_pids, profile_processes, service_gateway_pids)
         if home:
             markers[pid] = _planned_stop_marker_path(Path(home))
     return markers
-
 
 def _write_update_planned_stop_marker(profile_path: Path, pid: int) -> bool:
     """Write a planned-stop marker into a specific profile home."""
@@ -68,7 +72,6 @@ def _write_update_planned_stop_marker(profile_path: Path, pid: int) -> bool:
         return True
     except (OSError, PermissionError):
         return False
-
 
 def _wait_for_windows_update_gateway_exit(pids: list[int], *, timeout: float) -> set[int]:
     """Wait for the given gateway PIDs to exit, returning survivors."""
@@ -92,7 +95,6 @@ def _wait_for_windows_update_gateway_exit(pids: list[int], *, timeout: float) ->
     _poll_until(_all_gone, max(timeout, 0.0), 0.25)
     return {pid for pid in remaining if _alive(pid)}
 
-
 def _self_and_non_gateway_ancestor_pids(psutil) -> set[int]:
     """PIDs a venv-holder scan must never nominate: this process and its non-gateway ancestry.
 
@@ -114,14 +116,12 @@ def _self_and_non_gateway_ancestor_pids(psutil) -> set[int]:
                 skip.add(int(anc.pid))
     return skip
 
-
 def _cmdline_or_empty(proc) -> str:
     """Joined argv of a psutil process, ``""`` when it can't be read."""
     try:
         return " ".join(proc.cmdline() or [])
     except Exception:
         return ""
-
 
 def _lower_dir_prefix(path: Path) -> str:
     """``str(path)`` lower-cased with one trailing separator, resolved when possible (prefix matching)."""
@@ -131,7 +131,6 @@ def _lower_dir_prefix(path: Path) -> str:
         raw = str(path)
     return raw.lower().rstrip(os.sep) + os.sep
 
-
 def _psutil():
     """The ``psutil`` module, or ``None`` when it can't be imported (callers degrade, never raise)."""
     try:
@@ -140,12 +139,10 @@ def _psutil():
         return None
     return psutil
 
-
 def _parent_is_live(proc) -> bool:
     """True when *proc* has a running parent that is not a recycled PID (a "parent" created after its child)."""
     parent = proc.parent()
     return parent is not None and parent.is_running() and parent.create_time() <= proc.create_time()
-
 
 def _detect_venv_python_processes(*, exclude_pids: set[int] | None = None) -> list[tuple[int, str, str]]:
     """Live processes running from the project venv's interpreter as ``(pid, name, cmdline)``; never raises.
@@ -158,7 +155,7 @@ def _detect_venv_python_processes(*, exclude_pids: set[int] | None = None) -> li
     """
     from hermes_cli.update_cmd import _m
     psutil = _psutil()
-    if not _m()._is_windows() or psutil is None:
+    if psutil is None:
         return []
     from hermes_constants import project_venv_dir
     venv_dir = project_venv_dir(_m().PROJECT_ROOT) or _m().PROJECT_ROOT / "venv"
@@ -198,7 +195,6 @@ def _detect_venv_python_processes(*, exclude_pids: set[int] | None = None) -> li
             matches.append((int(pid), name, cmdline_raw))
     return matches
 
-
 def _cwd_prefix(proc) -> str:
     """Lower-cased cwd of *proc* with one trailing separator; bare ``os.sep`` when unreadable."""
     try:
@@ -206,13 +202,12 @@ def _cwd_prefix(proc) -> str:
     except Exception:
         return os.sep
 
-
 _HOLDER_VALUE_FLAGS_FALLBACK = frozenset({
     "--profile", "-p", "--config", "--model", "-m", "--provider", "--reasoning", "--toolsets", "-t",
     "--skills", "-s", "--continue", "-c", "--resume", "-r", "--oneshot", "-z", "--in", "--usage-file",
 })
-_holder_value_flags_cache: frozenset | None = None
 
+_holder_value_flags_cache: frozenset | None = None
 
 def _holder_value_flags() -> frozenset:
     """Top-level CLI flags that consume a value, from the REAL parser (nargs != 0); cached per process.
@@ -239,7 +234,6 @@ def _holder_value_flags() -> frozenset:
     except Exception:
         _holder_value_flags_cache = _HOLDER_VALUE_FLAGS_FALLBACK
     return _holder_value_flags_cache
-
 
 def _hermes_holder_subcommand(cmdline: str) -> str | None:
     """The actual Hermes SUBCOMMAND a venv-holder argv runs, or None (callers must NOT guess a label).
@@ -284,7 +278,6 @@ def _hermes_holder_subcommand(cmdline: str) -> str | None:
             return token.lower()
     return None
 
-
 def _venv_launcher_ancestors(pids: list[int]) -> list[int]:
     """Venv-interpreter parents of *pids* that hold the install open; never raises.
 
@@ -293,7 +286,7 @@ def _venv_launcher_ancestors(pids: list[int]) -> list[int]:
     paused gateway still tripped the guard. One hop up only, venv-prefixed only (bounds blast radius)."""
     from hermes_cli.update_cmd import _m
     psutil = _psutil()
-    if not _m()._is_windows() or not pids or psutil is None:
+    if not pids or psutil is None:
         return []
     from hermes_constants import project_venv_dir
     venv_dir = project_venv_dir(_m().PROJECT_ROOT) or _m().PROJECT_ROOT / "venv"
@@ -309,7 +302,6 @@ def _venv_launcher_ancestors(pids: list[int]) -> list[int]:
             if ppid not in skip and ppid not in found and (parent.exe() or "").lower().startswith(venv_prefix):
                 found.append(ppid)
     return found
-
 
 def _venv_holder_kind(cmdline: str) -> str:
     """Machine-readable class of one venv holder for ``--list-venv-holders``.
@@ -328,9 +320,7 @@ def _venv_holder_kind(cmdline: str) -> str:
         return f"hermes:{subcommand}"
     return "python"
 
-
 VENV_HOLDERS_EXIT = 3  # ``hermes update --list-venv-holders``: holders present (distinct from refusal 2)
-
 
 def list_venv_holders() -> list[dict]:
     """``[{pid, exe, argv, kind}]`` for every process the venv-holder guard would refuse on, read-only.
@@ -350,7 +340,6 @@ def list_venv_holders() -> list[dict]:
         holders.append({"pid": int(pid), "exe": exe, "argv": argv, "kind": _venv_holder_kind(argv)})
     return holders
 
-
 def _leftover_pausable_gateway_pids(matches: list[tuple[int, str, str]]) -> list[int] | None:
     """PIDs from *matches* when EVERY remaining venv holder is a pausable gateway, else ``None`` (keep refusing).
 
@@ -369,7 +358,6 @@ def _leftover_pausable_gateway_pids(matches: list[tuple[int, str, str]]) -> list
             return None
         pids.append(int(pid))
     return pids
-
 
 def _refuse_gateway_ancestor_tree_kill(pids: list[int], *, gateway_mode: bool) -> bool:
     """Refuse a plain Windows update that would tree-kill its own ancestry (a chat agent's ``hermes update`` is
@@ -396,7 +384,6 @@ def _refuse_gateway_ancestor_tree_kill(pids: list[int], *, gateway_mode: bool) -
     )
     return True
 
-
 def _ledger_manual_serve_holders(matches: list[tuple[int, str, str]]) -> list[dict]:
     """Full ledger entries for venv holders that are MANUAL serve/dashboard backends.
 
@@ -413,7 +400,6 @@ def _ledger_manual_serve_holders(matches: list[tuple[int, str, str]]) -> list[di
         if entry.get("purpose") in _BACKEND_PURPOSES and isinstance(entry.get("pid"), int) and entry["pid"] in holder_pids
         and spawner_is_dead(entry) is not False  # False = live Desktop supervisor owns it; keep refusing
     ]
-
 
 def _serve_relaunch_commands(entries: list[dict]) -> list[list[str]]:
     """Rebuild launch commands for stopped serves from ledger host/port/profile — never argv parsing
@@ -435,7 +421,6 @@ def _serve_relaunch_commands(entries: list[dict]) -> list[list[str]]:
             + [str(entry.get("purpose"))] + (["--host", host] if host else []) + ["--port", str(port)]
         )
     return commands
-
 
 def _relaunch_stopped_serves(token: dict) -> None:
     """Idempotent atexit relaunch of manual serves stopped by the venv guard.
@@ -461,7 +446,6 @@ def _relaunch_stopped_serves(token: dict) -> None:
         f"relaunched={len(commands) - len(failed)} failed={len(failed)} skipped={skipped}",
     )
 
-
 def _is_backend_argv(argv_low: str) -> bool:
     """Whether an argv is a DESKTOP backend — feeds ``taskkill /T`` via ``_orphaned_desktop_backend_pids``.
 
@@ -471,7 +455,6 @@ def _is_backend_argv(argv_low: str) -> bool:
     Desktop's: the guard refuses on it, never reaps it.
     """
     return _looks_like_desktop_control_plane(argv_low)
-
 
 def _live_argv_low(psutil, pid, cmdline: str) -> str | None:
     """Current lower-cased argv of *pid* (falls back to the scanned *cmdline*); ``None`` if it exited."""
@@ -483,7 +466,6 @@ def _live_argv_low(psutil, pid, cmdline: str) -> str | None:
     except Exception:
         pass
     return argv.lower()
-
 
 def _orphaned_desktop_backend_pids(matches: list[tuple[int, str, str]]) -> list[tuple[int, int]] | None:
     """``(pid, start_time)`` roots from *matches* when every remaining holder is an ORPHANED backend, else ``None``.
@@ -553,7 +535,6 @@ def _orphaned_desktop_backend_pids(matches: list[tuple[int, str, str]]) -> list[
             return None
     return roots
 
-
 def _ledger_reapable_backend_pids(matches: list[tuple[int, str, str]]) -> list[int]:
     """PIDs the spawn ledger positively identifies as orphaned backends; never raises.
 
@@ -570,7 +551,6 @@ def _ledger_reapable_backend_pids(matches: list[tuple[int, str, str]]) -> list[i
         int(pid) for pid, _name, _cmdline in matches
         if (entry := by_pid.get(int(pid))) and entry.get("purpose") in REAPABLE_PURPOSES and spawner_is_dead(entry) is True
     ]
-
 
 def _handoff_reapable_backend_pids(matches: list[tuple[int, str, str]]) -> list[int] | None:
     """Backend PIDs safe to tree-reap during a GUI-updater hand-off, INCLUDING ones with a live parent; never raises.
@@ -595,7 +575,6 @@ def _handoff_reapable_backend_pids(matches: list[tuple[int, str, str]]) -> list[
             return None  # unexpected non-backend holder: refuse the whole set
         roots.append(int(pid))
     return roots or None
-
 
 def _stop_process_trees(pids: list[int] | list[tuple[int, int]]) -> None:
     """Force-stop each PID with its full child tree (Windows); best effort, never raises.
@@ -623,7 +602,6 @@ def _stop_process_trees(pids: list[int] | list[tuple[int, int]]) -> None:
         except Exception as exc:
             logger.debug("Could not stop process tree %s: %s", pid, exc)
 
-
 def _looks_like_desktop_control_plane(cmdline: str) -> bool:
     """True for this-install ``hermes serve`` / ``hermes dashboard`` argv (Desktop control plane).
 
@@ -636,7 +614,6 @@ def _looks_like_desktop_control_plane(cmdline: str) -> bool:
     ownership. See #90778, #91869.
     """
     return "hermes_cli.main" in (cmdline or "").lower() and _hermes_holder_subcommand(cmdline) in _BACKEND_PURPOSES
-
 
 def _desktop_owns_gateway_lifecycle() -> bool:
     """True when Desktop currently supervises this install's control plane (updater must not steal gateway start).
@@ -663,23 +640,13 @@ def _desktop_owns_gateway_lifecycle() -> bool:
                 return True
     return False
 
-
 def _win_service(name: str):
-    """``(psutil, service)`` for the named SCM service (psutil imported here so tests can stub the module)."""
-    import psutil
-    return psutil, psutil.win_service_get(name)
-
+    """No-op: native Windows support removed from this fork (WSL is the Windows answer)."""
+    return None
 
 def _sc_exe(verb: str, name: str, service, settled_status: str) -> None:
-    """``sc.exe <verb> <name>``; a non-zero exit is only an error when SCM doesn't already report *settled_status*."""
-    result = subprocess.run(
-        ["sc.exe", verb, name], capture_output=True, text=True, encoding="utf-8", errors="replace",
-        timeout=10, check=False,
-    )
-    if result.returncode != 0 and service.status() != settled_status:
-        detail = (result.stderr or result.stdout).strip()
-        raise RuntimeError(detail or f"sc.exe {verb} failed with {result.returncode}")
-
+    """No-op: native Windows support removed from this fork (WSL is the Windows answer)."""
+    return None
 
 def _original_process_is_alive(psutil, pid: int, create_time: float) -> bool:
     """Is the process with this exact ``(pid, create_time)`` identity still alive? AccessDenied/unknown reads
@@ -692,7 +659,6 @@ def _original_process_is_alive(psutil, pid: int, create_time: float) -> bool:
         return True
     return abs(current - create_time) <= 0.001
 
-
 def _poll_until(condition, timeout: float, interval: float = 0.2) -> bool:
     """Poll *condition* every *interval* seconds until true (True) or *timeout* elapses (False)."""
     deadline = _time.monotonic() + timeout
@@ -702,7 +668,6 @@ def _poll_until(condition, timeout: float, interval: float = 0.2) -> bool:
         _time.sleep(interval)
     return False
 
-
 def _process_create_time(psutil, pid: int, label: str) -> float:
     """``create_time`` of *pid*; unreadable identity aborts the stop (RuntimeError)."""
     try:
@@ -710,106 +675,25 @@ def _process_create_time(psutil, pid: int, label: str) -> float:
     except Exception as exc:
         raise RuntimeError(f"Windows {label} process identity is unavailable before stop") from exc
 
-
 def _verify_service_identities(psutil, name: str, service, expected_service_identity, expected_gateway_identity) -> None:
-    """Refuse to stop *name* unless SCM state, service/gateway process identities and ancestry all still match."""
-    if expected_service_identity is not None:
-        try:
-            current_status, current_service_pid = str(service.status()), int(service.pid() or 0)
-        except Exception as exc:
-            raise RuntimeError(f"Windows service {name} SCM identity is unavailable before stop") from exc
-        if current_status != "running":
-            raise RuntimeError(f"Windows service {name} is not stably running before stop: {current_status}")
-        if current_service_pid != int(expected_service_identity[0]):
-            raise RuntimeError(f"Windows service {name} SCM process identity changed before stop")
-    for label, identity in (("service", expected_service_identity), ("gateway", expected_gateway_identity)):
-        if identity is not None and abs(_process_create_time(psutil, identity[0], label) - float(identity[1])) > 0.001:
-            raise RuntimeError(f"Windows {label} process identity changed before stop")
-    if expected_service_identity is not None and expected_gateway_identity is not None:
-        try:
-            ancestor_pids = {int(parent.pid) for parent in psutil.Process(int(expected_gateway_identity[0])).parents()}
-        except Exception as exc:
-            raise RuntimeError("Windows gateway ancestry is unavailable before service stop") from exc
-        if int(expected_service_identity[0]) not in ancestor_pids:
-            raise RuntimeError(f"Windows gateway is no longer owned by service {name}")
-
-
-def _stop_windows_gateway_service(
-    name: str, *, expected_processes: tuple[tuple[int, float], ...] = (), expected_service_identity: tuple[int, float] | None = None,
-    expected_gateway_identity: tuple[int, float] | None = None, timeout: float = 30.0,
-) -> None:
-    """Stop one verified Windows service and wait until SCM reports it down.
-
-    Lingering matching-identity processes after SCM says stopped make venv mutation unsafe — fail closed."""
-    psutil, service = _win_service(name)
-    _verify_service_identities(psutil, name, service, expected_service_identity, expected_gateway_identity)
-    _sc_exe("stop", name, service, "stopped")
-
-    def _alive() -> list[int]:
-        return [pid for pid, create_time in expected_processes if _original_process_is_alive(psutil, pid, create_time)]
-
-    if _poll_until(lambda: service.status() == "stopped" and not _alive(), timeout):
-        return
-    if service.status() != "stopped":
-        raise RuntimeError(f"Windows service {name} did not stop within {timeout:.0f}s; venv mutation unsafe.")
-    if alive_after_stop := _alive():
-        raise RuntimeError(f"Windows service {name} stopped but its process tree is still alive: {alive_after_stop}")
-
-
-def _start_windows_gateway_service(name: str, *, timeout: float = 30.0) -> None:
-    """Start one previously paused Windows service and verify it is running."""
-    service = _win_service(name)[1]
-    _sc_exe("start", name, service, "running")
-    if not _poll_until(lambda: service.status() == "running", timeout):
-        raise RuntimeError(f"Windows service {name} did not start within {timeout:.0f}s")
-
-
-def _restore_windows_gateway_service(name: str, *, timeout: float = 60.0) -> None:
-    """Restore a service after an uncertain stop, including STOP_PENDING."""
-    from hermes_cli.update_cmd import _start_windows_gateway_service
-    service = _win_service(name)[1]
-
-    def _settled() -> bool:
-        status = service.status()
-        if status == "stopped":
-            _start_windows_gateway_service(name)
-        return status in ("running", "stopped")
-
-    if not _poll_until(_settled, timeout):
-        raise RuntimeError(f"Windows service {name} did not reach a restorable state within {timeout:.0f}s")
-
-
-def _windows_cold_start_plan() -> dict | None:
-    """Pause token for the no-running-gateway case: cold-start after update when an autostart entry exists.
-
-    An installed autostart entry is an explicit "I want a gateway" signal; a gateway that died between
-    updates would otherwise stay down until next login (resume only relaunches what was running).
-    Desktop-owned lifecycle -> ``None`` (spawning ``gateway run`` beside Desktop races ports/state);
-    the skip is ownership, not liveness — except when the start attestation reports a vouched-for
-    gateway that died without a clean exit. The Desktop hand-off exits the app before the updater starts
-    and can kill the running gateway in those same seconds, so discovery finds no live PID to pause
-    (#109538) — the dead attestation is the only surviving "a gateway was up" evidence, and the Desktop
-    only restarts gateways it stopped itself (its hand-off script, after the update verifies; #119809).
-    Keep the plan, and record the attestation
-    *generation* that authorized it on the token: the marker is a mutable one-shot that any concurrent
-    ``hermes gateway status``/``start`` consumes, so execution authorizes the spawn from the token and
-    consumes only that generation (#110020 review)."""
-    from hermes_cli.update_cmd import _desktop_owns_gateway_lifecycle
-    from hermes_cli import gateway_windows
-    with _best_effort('Could not check Windows gateway autostart state before update: %s'):
-        if not gateway_windows.is_installed():
-            return None
-        token = {"resume_needed": True, "profiles": {}, "unmapped_pids": [], "unmapped": [], "cold_start_if_installed": True}
-        with _best_effort('Could not check Desktop gateway-lifecycle ownership before update: %s'):
-            if _desktop_owns_gateway_lifecycle():
-                generation = gateway_windows.attested_death_generation(current_pids=[])
-                if generation is None:
-                    logger.debug("Skipping Windows gateway cold-start plan: Desktop owns gateway lifecycle")
-                    return None
-                token["attested_generation"] = generation
-        return token
+    """No-op: native Windows support removed from this fork (WSL is the Windows answer)."""
     return None
 
+def _stop_windows_gateway_service(*args, **kwargs):
+    """No-op: native Windows support removed from this fork (WSL is the Windows answer)."""
+    return None
+
+def _start_windows_gateway_service(name: str, *, timeout: float = 30.0) -> None:
+    """No-op: native Windows support removed from this fork (WSL is the Windows answer)."""
+    return None
+
+def _restore_windows_gateway_service(name: str, *, timeout: float = 60.0) -> None:
+    """No-op: native Windows support removed from this fork (WSL is the Windows answer)."""
+    return None
+
+def _windows_cold_start_plan() -> dict | None:
+    """No-op: native Windows support removed from this fork (WSL is the Windows answer)."""
+    return None
 
 class ServicePauseFailed(RuntimeError):
     """A gateway service could not be stopped; ``rollback_failures`` lists what the in-line
@@ -820,46 +704,9 @@ class ServicePauseFailed(RuntimeError):
         super().__init__(detail)
         self.rollback_failures = rollback_failures
 
-
 def _pause_windows_gateway_services(service_gateways, token: dict, profiles: dict, unmapped: list) -> dict:
-    """Stop each SCM gateway service, recording them on *token*; roll everything back on failure.
-
-    Runs after every fallible ordinary-gateway step so a failure here restores the attempted
-    services AND the already-paused ordinary gateways before re-raising."""
-    from hermes_cli.update_cmd import _restore_windows_gateway_service, _stop_windows_gateway_service
-    paused_services = []
-    current_service_name = None
-    try:
-        for service in service_gateways:
-            current_service_name = str(service.name)
-            _stop_windows_gateway_service(
-                current_service_name, expected_processes=tuple(getattr(service, "descendant_identities", ())),
-                expected_service_identity=(int(service.service_pid), float(service.service_create_time)),
-                expected_gateway_identity=(int(service.gateway_pid), float(service.gateway_create_time)),
-            )
-            paused_services.append(current_service_name)
-            current_service_name = None
-        if paused_services:
-            token.update(services=paused_services, expected_services=list(paused_services), restarted_services=[])
-            token["service_profiles"] = {str(s.name): str(s.profile) for s in service_gateways if str(s.name) in paused_services}
-            print("  ✓ Paused Windows gateway service(s): " + ", ".join(paused_services))
-        return token
-    except Exception as exc:
-        restore_names = ([current_service_name] if current_service_name else []) + list(reversed(paused_services))
-        rollback: list[tuple[str, object]] = [(n, lambda n=n: _restore_windows_gateway_service(n)) for n in dict.fromkeys(restore_names)]
-        if profiles or unmapped:
-            rollback.append(("ordinary gateways", lambda: _resume_windows_gateways_after_update(token)))
-        rollback_failures = []
-        for label, restore in rollback:
-            try:
-                restore()
-            except Exception as restore_exc:
-                rollback_failures.append(f"{label}: {restore_exc}")
-        detail = f"Could not stop Windows gateway service {current_service_name or 'unknown'}: {exc}"
-        if rollback_failures:
-            detail += "; rollback failures: " + "; ".join(rollback_failures)
-        raise ServicePauseFailed(detail, rollback_failures) from exc
-
+    """No-op: native Windows support removed from this fork (WSL is the Windows answer)."""
+    return None
 
 def _owned_gateway_pids(pids, *, keep=(), quiet: bool = True) -> list[int]:
     """*pids* whose live home this update owns, plus *keep* (PIDs mapped to this install's profile
@@ -868,7 +715,6 @@ def _owned_gateway_pids(pids, *, keep=(), quiet: bool = True) -> list[int]:
     running, never paused, force-killed or replayed (#124659)."""
     from hermes_cli.update_cmd_fleet import _scoped_manual_gateway_pids
     return _scoped_manual_gateway_pids(list(pids), keep=keep, quiet=quiet)
-
 
 def _discover_windows_gateways():
     """``(profile_processes, service_gateways, service_gateway_pids, running_pids)`` for the pause; any indeterminate probe aborts."""
@@ -885,7 +731,6 @@ def _discover_windows_gateways():
             [*find_gateway_pids(all_profiles=True), *sorted(profile_processes), *sorted(service_gateway_pids)]
         ), keep=set(profile_processes) | service_gateway_pids, quiet=False)
     return profile_processes, service_gateways, service_gateway_pids, running_pids
-
 
 def _request_socket_pauses(running_pids, profile_processes, service_gateway_pids, on_request=None):
     """Marker + socket-first pause for every profile-mapped gateway; ``(profiles, mapped_pids, socket_acks)``.
@@ -922,7 +767,6 @@ def _request_socket_pauses(running_pids, profile_processes, service_gateway_pids
             logger.debug("Socket pause unavailable for gateway %s: %s", pid, exc)
     return profiles, mapped_pids, socket_acks
 
-
 def _gateway_drain_timeout(socket_acks: list[dict]) -> float:
     """Drain budget: configured restart drain (>= 1s), raised to a socket-paused gateway's declared
     ACTIVE-TURN budget + teardown grace so it isn't force-killed mid-turn."""
@@ -938,77 +782,9 @@ def _gateway_drain_timeout(socket_acks: list[dict]) -> float:
         print(f"  → {len(socket_acks)} gateway(s) ACKed socket pause; waiting up to {int(drain_timeout)}s for graceful exit")
     return drain_timeout
 
-
 def _pause_windows_gateways_for_update() -> dict | None:
-    """Stop running Windows gateways before mutating the checkout or venv.
-
-    Scheduled/startup gateways run via pythonw.exe, invisible to the hermes.exe instance guard, yet keep files
-    locked during ``git``/``uv``. Stop only PIDs the gateway discovery code identifies. The paused set is on
-    disk (``update_pause_record``) before the first stop, with any set a killed earlier update orphaned."""
-    from hermes_cli.update_cmd import _m
-    if not _m()._is_windows():
-        return None
-    with _abort_on_error("Could not prepare Windows gateway pause for update"):
-        import gateway.status
-        from hermes_cli.gateway import _capture_gateway_argv
-    from hermes_cli import update_pause_record as pause_record
-    with _abort_on_error("Could not read the gateways an earlier update paused"):
-        adopted, claims = pause_record.adopt_orphans()
-    profile_processes, service_gateways, service_gateway_pids, running_pids = _discover_windows_gateways()
-    if not running_pids:
-        return _cold_start_pause_token(adopted, claims)
-    unmapped_pids = [pid for pid in running_pids if pid not in profile_processes and pid not in service_gateway_pids]
-    from gateway.status import get_process_start_time
-    from hermes_cli.update_fleet_scope import gateway_pid_home
-    born = {int(pid): get_process_start_time(int(pid)) for pid in running_pids}  # the processes discovered
-    # Snapshot unmapped gateways' argv *before* anything stops so resume (or a later launch) can replay it.
-    # Unmapped = no profile->PID-file mapping (e.g. Scheduled Task ``pythonw.exe -m ...``). Two homes can
-    # run identical selectorless argv, so the home and birth identify the runtime the replay must restore:
-    # read with discovery's own resolver (environment, else the exact-birth ledger witness), and a home
-    # that no longer proves refuses the pause before any stop. ``home: null`` would read as a pre-home
-    # record, whose argv-only match lets another home's gateway retire this debt.
-    homes = {int(pid): gateway_pid_home(int(pid)) for pid in unmapped_pids}
-    if None in homes.values():
-        raise RuntimeError("Could not prove the Hermes home of unmapped gateway PID(s) "
-                           + ", ".join(str(p) for p, h in homes.items() if h is None) + "; nothing was stopped")
-    unmapped = [
-        {"pid": int(pid), "argv": _try_call(lambda p=int(pid): _capture_gateway_argv(p),
-                                            "Could not capture argv for unmapped gateway %s: %s", int(pid)),
-         "home": homes[int(pid)], "ct": born[int(pid)]}
-        for pid in unmapped_pids
-    ]
-    intended = {
-        "resume_needed": True, "unmapped_pids": unmapped_pids, "unmapped": unmapped,
-        "profiles": {str(profile_processes[pid].profile): int(pid) for pid in running_pids
-                     if pid in profile_processes and pid not in service_gateway_pids},
-        "identities": {str(pid): pause_record.identity(pid)["ct"] for pid in running_pids},
-    }
-    if service_gateways:
-        names = [str(s.name) for s in service_gateways]
-        intended.update(services=names, expected_services=list(names), restarted_services=[],
-                        service_profiles={str(s.name): str(s.profile) for s in service_gateways})
-    with _abort_on_error("Could not record the gateways this update pauses"):
-        pause_record.record_pause(intended, adopted, claims)
-        # The intent (and where each request goes), right before the first request. A live entry is owed
-        # only once its request was issued (mark_stop_sent, or this update's marker still on disk): a
-        # crash before that leaves it "never asked" (still serving, dropped), after it, draining (owed).
-        pause_record.mark_stop_requested(
-            intended, running_pids, markers=_planned_stop_markers(running_pids, profile_processes, service_gateway_pids))
-    profiles = _stop_windows_gateways(running_pids, profile_processes, service_gateway_pids, unmapped_pids, unmapped,
-                                      on_request=lambda pid: pause_record.mark_stop_sent(intended, pid), born=born)
-    token = {"resume_needed": True, "profiles": profiles, "unmapped_pids": unmapped_pids, "unmapped": unmapped}
-    # Every profile with ANY live gateway at discovery counts as running: service-supervised ones skip the
-    # socket pause (absent from ``profiles``) but the SCM restart brings them back, not a cold-start.
-    running_profiles = set(profiles) | {str(p.profile) for p in profile_processes.values()} | {str(s.profile) for s in service_gateways}
-    _record_attested_cold_start_profiles(token, running_profiles)
-    try:
-        token = _pause_windows_gateway_services(service_gateways, token, profiles, unmapped)
-    except ServicePauseFailed as exc:
-        if not exc.rollback_failures:  # everything stopped was restarted in-line
-            pause_record.abandon_pause(intended, adopted)
-        raise
-    return pause_record.finish_pause(token, intended, adopted)
-
+    """No-op: native Windows support removed from this fork (WSL is the Windows answer)."""
+    return None
 
 def _cold_start_pause_token(adopted: dict | None, claims: list) -> dict | None:
     """No gateway runs: the cold-start plan, plus any orphaned set adopted from a killed update."""
@@ -1025,365 +801,55 @@ def _cold_start_pause_token(adopted: dict | None, claims: list) -> dict | None:
     with _abort_on_error("Could not record the adopted paused-gateway set"):
         return pause_record.record_pause(token, adopted, claims)
 
-
-def _stop_windows_gateways(running_pids, profile_processes, service_gateway_pids, unmapped_pids, unmapped,
-                           on_request=None, born=None) -> dict:
-    """Socket-pause the mapped gateways, drain, then tree-kill survivors; the paused ``profiles``.
-    A force-killed process needs no stop record: dead, it is owed; alive, it was never stopped.
-
-    The kill is authorized by each process's birth as discovered (*born*, a mapped gateway's
-    strict PID-file identity first), never re-read after the drain: a PID that exited and was
-    reused meanwhile reads its replacement's own birth. No discovered birth refuses the kill."""
-    from gateway.status import get_process_start_time, terminate_pid
-    from hermes_cli.update_cmd import _m
-    mapped = [int(p) for p in running_pids if int(p) not in service_gateway_pids and int(p) in profile_processes]
-    born = {**{int(k): v for k, v in (born or {}).items()},
-            **{p: round(float(profile_processes[p].create_time) * 100) for p in mapped
-               if float(getattr(profile_processes[p], "create_time", 0) or 0) > 0}}
-    # Resolve venv-side launchers before any request: the launcher keeps ``.pyd`` mapped and would trip the
-    # venv-holder guard, so it is killed with the survivors, under the identity it has now.
-    launcher_pids = _m()._venv_launcher_ancestors(mapped)
-    born.update({int(p): get_process_start_time(int(p)) for p in launcher_pids if int(p) not in born})
-    profiles, mapped_pids, socket_acks = _request_socket_pauses(
-        running_pids, profile_processes, service_gateway_pids, on_request=on_request)
-    print("→ Stopping Windows gateway process(es) before updating Hermes...")
-    drain_timeout = _gateway_drain_timeout(socket_acks)
-    survivors = _m()._wait_for_windows_update_gateway_exit(mapped_pids, timeout=drain_timeout)
-    # Tree-kill survivors, unmapped gateways, and pre-request launchers; one already gone raises
-    # ProcessLookupError, one whose birth differs (or was never read) is refused, and both are skipped.
-    force_killed = []
-    for pid in sorted(set(survivors).union(unmapped_pids).union(launcher_pids)):
-        with suppress(ProcessLookupError, PermissionError, OSError):
-            terminate_pid(int(pid), force=True, expected_start_time=born.get(int(pid)))
-            force_killed.append(int(pid))
-    if profiles:
-        print(f"  ✓ Paused gateway profile(s): {', '.join(sorted(profiles))}")
-    if force_killed:
-        print(f"  → Force-stopped {len(force_killed)} gateway process(es)")
-    if unmapped_pids:
-        print(f"  → Stopped {len(unmapped_pids)} gateway process(es) without profile mapping")
-        if any(not u.get("argv") for u in unmapped):  # no recoverable cmdline (psutil missing, denied, gone)
-            print("    Restart manually after update: hermes gateway run")
-    return profiles
-
+def _stop_windows_gateways(*args, **kwargs):
+    """No-op: native Windows support removed from this fork (WSL is the Windows answer)."""
+    return None
 
 def _record_attested_cold_start_profiles(token: dict, running_profiles: set) -> None:
-    """Record ``token["cold_start_profiles"] = {name: generation}`` for every known profile that is not
-    running yet holds a start attestation for a gateway that died without a clean exit (#110959).
-
-    The all-or-nothing plan only ever probed the ACTIVE profile and only when NO gateway ran at all, so a
-    dead-but-attested default beside a still-running ``beta`` never got a cold-start obligation. Only
-    Desktop-owned installs need this (elsewhere autostart brings the profile back); the active profile is
-    left to the existing plan so it is never spawned twice. Best-effort: never blocks the pause."""
-    from hermes_cli.update_cmd import _desktop_owns_gateway_lifecycle
-    from hermes_cli import gateway_windows
-    with _best_effort("Could not evaluate per-profile attested cold-starts before update: %s"):
-        if not _desktop_owns_gateway_lifecycle():
-            return
-        from hermes_cli.profiles import get_active_profile_name, profiles_to_serve
-        active = get_active_profile_name() or "default"
-        cold: dict[str, str] = {}
-        # An activation list, not inventory: parked profiles stay offline.
-        for name, home in profiles_to_serve(multiplex=True, include_standalone=True):
-            if name in running_profiles or (name == active and token.get("cold_start_if_installed")):
-                continue
-            generation = gateway_windows.attested_death_generation([], home=Path(home))
-            if generation:
-                cold[name] = generation
-        if cold:
-            token["cold_start_profiles"] = cold
-
+    """No-op: native Windows support removed from this fork (WSL is the Windows answer)."""
+    return None
 
 def _cold_start_attested_profiles(token: dict) -> None:
-    """Spawn each ``cold_start_profiles`` entry under its own HERMES_HOME and consume exactly the
-    generation that authorized it; one profile's failure never aborts the others (#110959)."""
-    from hermes_cli import gateway_windows
-    from hermes_cli.profiles import get_profile_dir
-    pending = dict(token.get("cold_start_profiles") or {})
-    if not pending:
-        return
-    for name, generation in sorted(pending.items()):
-        home = Path(get_profile_dir(name))
-        with _best_effort(f"Could not cold-start Windows gateway profile {name} after update: %s"):
-            if not gateway_windows._live_gateway_pids(home=home):  # a concurrent autostart must not be doubled
-                pid = gateway_windows._spawn_detached(home=home)
-                if not pid:
-                    raise RuntimeError("cold-start did not return a process ID")
-            ready_pids = gateway_windows._wait_for_gateway_ready(home=home)
-            if not ready_pids:
-                raise RuntimeError(f"gateway profile {name} did not become ready")
-            gateway_windows._consume_start_attestation(generation, home=home)
-            # Keep the attestation chain: a death after this CLI exits must be visible to the next update.
-            gateway_windows._write_start_attestation(ready_pids, f"cold-start after update (profile {name})", home=home)
-            print(f"\n✓ Gateway profile {name} started via cold-start after update (PID: {ready_pids[0]})")
-            token["cold_start_profiles"].pop(name, None)
-    if token["cold_start_profiles"]:
-        # Surface the miss like the active-profile cold-start does: the merged outcome marks the update
-        # incomplete instead of reporting success with a profile still down.
-        raise RuntimeError("Windows gateway cold-start was not verified for profile(s): "
-                           + ", ".join(sorted(token["cold_start_profiles"])))
-    token.pop("cold_start_profiles", None)
-
+    """No-op: native Windows support removed from this fork (WSL is the Windows answer)."""
+    return None
 
 def _cold_start_windows_gateway_after_update(token: dict | None = None) -> bool:
-    """Direct-spawn a detached gateway after update for the ``cold_start_if_installed`` case (installed but down).
-
-    Idempotent: re-checks nothing is running so a concurrent autostart can't duplicate. A successful Popen
-    doesn't prove survival (a job object denying breakaway kills it), so success is gated on the liveness poll.
-    Vouched PIDs are attested so a death AFTER updater exit is reported by the next CLI invocation.
-
-    A successful ``Popen`` only proves the process was created, not that it survived (e.g. a Windows job
-    object denying breakaway kills it before it logs anything — #84185). So the success line is gated on the
-    same post-spawn liveness poll every other ``_spawn_detached`` caller uses
-    (``gateway_windows._report_gateway_start``), instead of being printed unconditionally from the returned
-    PID.
-
-    Desktop-owned lifecycle suppresses the spawn only while nothing attests a gateway is expected: an
-    attested gateway that died without a clean exit is restored even then (#109538) — the Desktop does
-    not restart the messaging gateway itself. That authority is the ``attested_generation`` the plan
-    recorded on ``token``, not the marker on disk: the marker is a mutable one-shot a concurrent
-    ``hermes gateway status``/``start`` consumes, which would otherwise skip this spawn and clear the
-    token (#110020 review). Only that generation is consumed afterwards — never a newer marker.
-    """
-    from hermes_cli.update_cmd import _desktop_owns_gateway_lifecycle, _m
-    if not _m()._is_windows():
-        return True
-    with _abort_on_error("Could not load Windows gateway cold-start helpers"):
-        from hermes_cli import gateway_windows
-        from hermes_cli.gateway import find_gateway_pids
-    with _abort_on_error("Could not re-check gateway liveness before cold-start"):
-        # Another install's live gateway must not suppress this install's cold start (#124659).
-        if _owned_gateway_pids(find_gateway_pids(all_profiles=True)):
-            return True
-    token = token or {}
-    generation = token.get("attested_generation")
-    if generation is None and "attested_generation" not in token:
-        # Token written by pre-generation code and resumed across this very update: probe the marker.
-        with _abort_on_error("Could not re-read the start attestation before cold-start"):
-            generation = gateway_windows.attested_death_generation(current_pids=[])
-    with _abort_on_error("Could not re-check Desktop gateway-lifecycle ownership before cold-start"):
-        if _desktop_owns_gateway_lifecycle() and not generation:
-            logger.debug("Skipping Windows gateway cold-start: Desktop owns gateway lifecycle")
-            return True
-    with _abort_on_error("Could not cold-start Windows gateway after update"):
-        pid = gateway_windows._spawn_detached()
-    if not pid:
-        raise RuntimeError("Windows gateway cold-start did not return a process ID")
-    ready_pids = gateway_windows._wait_for_gateway_ready()
-    if not ready_pids:
-        raise RuntimeError(f"Windows gateway cold-start PID {pid} did not become ready")
-    # The dead attestation has done its job (it authorized this spawn under Desktop ownership). Consume
-    # it only now: a spawn that never became ready leaves it in place, so the registered retry still
-    # holds its recovery obligation instead of seeing Desktop ownership with no marker and returning
-    # success without a gateway (#110020 review).
-    if generation:
-        gateway_windows._consume_start_attestation(generation)
-    print(f"\n✓ Gateway started via cold-start after update (PID: {', '.join(map(str, ready_pids))})")
-    with suppress(Exception):
-        gateway_windows._write_start_attestation(ready_pids, "cold-start after update")
-    return True
-
+    """No-op: native Windows support removed from this fork (WSL is the Windows answer)."""
+    return False
 
 def _refresh_windows_gateway_launchers() -> None:
-    """Regenerate installed Windows gateway launcher scripts after update; best-effort, never fails the update.
-
-    Launchers are written once at install, so old installs kept launching via ``pythonw.exe`` (``sys.stderr is
-    None`` death). The task's /TR points at a stable path, so rewriting in place retargets it without UAC.
-
-    The Scheduled Task / Startup-folder launchers (``gateway.cmd`` + ``gateway.vbs``) are persistence
-    artifacts written once at install time — ``hermes update`` never touched them, so installs created
-    before the hidden-console rework (aa2ae36c3f) kept launching the gateway through ``pythonw.exe``
-    forever: every descendant spawn flashed a conhost (#54220/#56747) and, since #70344, the console-less
-    gateway died at startup with ``RuntimeError: sys.stderr is None`` (#71671).
-    """
-    from hermes_cli.update_cmd import _m
-    if not _m()._is_windows():
-        return
-    with _best_effort('Could not refresh Windows gateway launchers after update: %s'):
-        from hermes_cli import gateway_windows
-        if gateway_windows.is_installed():
-            gateway_windows._write_task_script()
-            print("  ✓ Refreshed Windows gateway launcher scripts")
-            # Installs from before #80569 can carry a Startup entry beside the task: both fire at logon.
-            done, warnings = gateway_windows.reconcile_autostart_launchers()
-            for message in done:
-                print(f"  ✓ {message}")
-            for message in warnings:
-                print(f"  ⚠ {message}")
-            if gateway_windows.is_task_registered():
-                # A task registered by an older build never picks up template hardening otherwise (#113670).
-                gateway_windows.reconcile_scheduled_task(gateway_windows.get_task_name())
-
+    """No-op: native Windows support removed from this fork (WSL is the Windows answer)."""
+    return None
 
 def _refresh_bootstrap_cache_scripts(branch: str = "main") -> None:
-    """Overwrite ``$HERMES_HOME/bootstrap-cache/install-<ref>.{ps1,sh}`` for *branch* from the fresh checkout.
-
-    Old ``hermes-setup.exe`` builds NEVER re-download a cached branch-ref script, so a stale one runs
-    months-old code forever. Guards mirror ``install_script.rs``: only the sanitized *branch* key is rewritten;
-    commit-SHA pins (7-40 hex) are immutable and skipped. Best-effort: never fails the update.
-
-    Installer binaries built before the #67193 cache-refresh fix (June 2026 and earlier) NEVER re-download a
-    cached branch-ref script — ``install-main.ps1`` cached at install time is reused forever, executing
-    months-stale code with long-fixed bugs (the 2026-08-09 incident: a June 4 cached script's venv stage
-    lacked the 81327 process-tree sweep and died on ``Access denied``). The binary has no self-update path,
-    so the poisoned cache outlives every ``hermes update``.
-    Overwriting the cached script for *branch* with the freshly pulled ``scripts/install.ps1`` /
-    ``scripts/install.sh`` on every update turns the stale binary's unconditional reuse into a feature: it
-    "reuses" a file this function keeps permanently current. Post-#67193 installers re-download on each run
-    anyway, so for them this is a harmless pre-seed of the same bytes.
-    The .ps1 copy gets a UTF-8 BOM to match the installer's cache format (#67193 encoding fix).
-    """
-    from hermes_cli.update_cmd import _m
-    with _best_effort('Could not refresh bootstrap-cache scripts after update: %s'):
-        cache_dir = Path(_m().get_hermes_home()) / "bootstrap-cache"
-        if not cache_dir.is_dir():
-            return
-        safe_ref = re.sub(r"[^A-Za-z0-9._-]", "_", str(branch or "main"))  # install_script.rs::sanitize_ref()
-        if re.fullmatch(r"[0-9a-fA-F]{7,40}", safe_ref):  # install_script.rs::is_valid_commit(): immutable pin
-            return
-        refreshed = []
-        for kind, src_name in (("ps1", "install.ps1"), ("sh", "install.sh")):
-            src = _m().PROJECT_ROOT / "scripts" / src_name
-            cached = cache_dir / f"install-{safe_ref}.{kind}"
-            if not src.is_file() or not cached.is_file():
-                continue  # this ref was never bootstrap-cached — nothing to heal
-            data = src.read_bytes()
-            if kind == "ps1" and not data.startswith(b"\xef\xbb\xbf"):
-                data = b"\xef\xbb\xbf" + data  # PowerShell needs the BOM or localized/em-dash text mis-decodes.
-            # See #67193.
-            if cached.read_bytes() == data:
-                continue
-            tmp = cached.with_suffix(cached.suffix + ".tmp")
-            tmp.write_bytes(data)
-            os.replace(tmp, cached)
-            refreshed.append(cached.name)
-        if refreshed:
-            print("  ✓ Refreshed installer bootstrap-cache script(s): " + ", ".join(sorted(refreshed)))
-
+    """No-op: native Windows support removed from this fork (WSL is the Windows answer)."""
+    return None
 
 _SERVICE_READY_TIMEOUT_S = 60.0
-# A launch recovering an orphaned pause (``update_pause_record.recover``, before every command)
-# only probes briefly, and a service whose gateway stays unready is re-probed with backoff; the
-# full wait belongs to ``hermes update`` itself.
+
 _SERVICE_READY_PROBE_S = 5.0
+
 _SERVICE_RETRY_BASE_S = 60.0
+
 _SERVICE_RETRY_MAX_S = 3600.0
 
-
 def _service_gateway_ready(name: str, profile: str | None, timeout_s: float | None = None) -> list[int]:
-    """The stable gateway *name*'s service process supervises (in *profile*'s home when known): SCM
-    ``running`` proves only the wrapper started, not that the gateway it hosts came up."""
-    from hermes_cli import gateway_windows
-    from hermes_cli.profiles import get_profile_dir
-    psutil, service = _win_service(name)
-
-    def under_service(pids):
-        try:
-            service_pid = int(service.pid() or 0)
-        except (psutil.Error, OSError, ValueError, TypeError):  # SCM/psutil failure or a non-int pid
-            return []
-        owned = []
-        for pid in pids:
-            # A gateway that exited or a process tree psutil cannot read is not the service's; any
-            # other error is a bug the resume boundary reports, not a silent "not under service".
-            with suppress(psutil.Error, OSError):
-                if service_pid and service_pid in {int(p.pid) for p in psutil.Process(int(pid)).parents()}:
-                    owned.append(int(pid))
-        return owned
-
-    home = Path(get_profile_dir(profile)) if profile else None
-    return gateway_windows._wait_for_gateway_ready(
-        timeout_s=_SERVICE_READY_TIMEOUT_S if timeout_s is None else timeout_s, home=home,
-        all_profiles=home is None, pid_filter=under_service)
-
+    """No-op: native Windows support removed from this fork (WSL is the Windows answer)."""
+    return None
 
 def _service_running(name: str) -> bool:
-    try:
-        import psutil
-    except ImportError:
-        return False
-    try:
-        return _win_service(name)[1].status() == "running"
-    except (psutil.Error, OSError, AttributeError):  # missing service, SCM access, non-Windows psutil
-        return False
-
+    """No-op: native Windows support removed from this fork (WSL is the Windows answer)."""
+    return None
 
 def _resume_windows_services(token: dict) -> None:
-    """Restart the SCM services recorded on *token*; one leaves the token only once the gateway it
-    supervises is ready. Failed ones stay on the token so a retry sees them.
-
-    A recovering launch (``token["recovery"]``) probes readiness briefly, and a running service
-    whose gateway was not ready is not re-probed before its backoff (``service_retry``) elapses:
-    the debt stays owed without stalling every command."""
-    from hermes_cli.update_cmd import _start_windows_gateway_service
-    services = list(token.get("services") or [])
-    token.setdefault("expected_services", list(services))
-    verified_restarts = list(token.get("restarted_services") or [])
-    retry = {name: state for name, state in (token.get("service_retry") or {}).items() if name in services}
-    recovering = bool(token.get("recovery"))
-    restarted_services = []
-    failed_services = []
-    for service_name in map(str, services):
-        backoff = retry.get(service_name) or {}
-        try:
-            if recovering and _time.time() < float(backoff.get("next_at") or 0) and _service_running(service_name):
-                failed_services.append(service_name)
-                print(f"  ⚠ Windows gateway service {service_name}: its gateway was not ready; "
-                      f"next check after {int(float(backoff['next_at']) - _time.time())}s")
-                continue
-            _start_windows_gateway_service(service_name)
-            if not _service_gateway_ready(service_name, (token.get("service_profiles") or {}).get(service_name),
-                                          _SERVICE_READY_PROBE_S if recovering else None):
-                attempts = int(backoff.get("attempts") or 0) + 1
-                retry[service_name] = {"attempts": attempts, "next_at": _time.time() + min(
-                    _SERVICE_RETRY_BASE_S * 2 ** min(attempts - 1, 6), _SERVICE_RETRY_MAX_S)}
-                raise RuntimeError(f"Windows service {service_name} is running but its gateway did not become ready")
-            retry.pop(service_name, None)
-            restarted_services.append(service_name)
-            if service_name not in verified_restarts:
-                verified_restarts.append(service_name)
-        except Exception as exc:
-            logger.warning("Could not restart Windows gateway service %s after update: %s", service_name, exc)
-            print(f"  ⚠ Could not restart Windows gateway service: {service_name}")
-            failed_services.append(service_name)
-    token["restarted_services"] = verified_restarts
-    token["services"] = failed_services
-    if retry:
-        token["service_retry"] = retry
-    else:
-        token.pop("service_retry", None)
-    if failed_services:
-        raise RuntimeError("Could not restart Windows gateway service(s): " + ", ".join(failed_services))
-    if restarted_services:
-        print("\n  ✓ Restarted Windows gateway service(s): " + ", ".join(restarted_services))
-
+    """No-op: native Windows support removed from this fork (WSL is the Windows answer)."""
+    return None
 
 def _relaunch_paused_gateways(profiles: dict, unmapped: list) -> tuple[dict, list]:
-    """Spawn the restart watcher for each paused profile gateway and unmapped argv; ``(launched
-    profiles, launched unmapped entries)``. Nothing leaves the token here: a watcher only proves a
-    relaunch was scheduled, so every entry stays owed until ITS gateway is verified ready."""
-    with _abort_on_error("Could not load Windows gateway restart helper"):
-        from hermes_cli.gateway import launch_detached_gateway_restart_by_cmdline, launch_detached_profile_gateway_restart
-
-    # An exception from a launch (incl. bad pid/argv coercion) logs at debug and reads as a failed relaunch.
-    launched = {}
-    for profile, old_pid in sorted(profiles.items()):
-        if _try_call(lambda p=profile, o=old_pid: launch_detached_profile_gateway_restart(str(p), int(o)),
-                     "Could not restart Windows gateway profile %s after update: %s", profile):
-            launched[str(profile)] = int(old_pid)
-    launched_unmapped = []
-    for entry in unmapped:
-        argv, old_pid = entry.get("argv"), entry.get("pid")
-        # On the paused runtime's home (None on a pre-home record: the updater's own home, as before).
-        if argv and old_pid and _try_call(lambda o=old_pid, a=argv, h=entry.get("home"): launch_detached_gateway_restart_by_cmdline(
-                int(o), list(a), home=h),
-                                          "Could not restart unmapped Windows gateway (pid %s) after update: %s", old_pid):
-            launched_unmapped.append(entry)
-    return launched, launched_unmapped
-
+    """No-op: native Windows support removed from this fork (WSL is the Windows answer)."""
+    return None
 
 _RELAUNCH_VERIFY_TIMEOUT_S = 30.0
-
 
 def _pending_relaunch_pids(profiles: dict, unmapped: list, pid_exists) -> list[int]:
     """Old PIDs a restart watcher is still waiting on, sorted; empty when every relaunch can have run.
@@ -1395,7 +861,6 @@ def _pending_relaunch_pids(profiles: dict, unmapped: list, pid_exists) -> list[i
     candidates = [int(pid) for pid in profiles.values()]
     candidates += [int(entry["pid"]) for entry in unmapped if entry.get("argv") and entry.get("pid")]
     return sorted({pid for pid in candidates if pid > 0 and pid_exists(pid)})
-
 
 def _relaunch_verify_timeout_s(profiles: dict, unmapped: list, pid_exists) -> float:
     """Liveness budget for the post-relaunch poll.
@@ -1409,7 +874,6 @@ def _relaunch_verify_timeout_s(profiles: dict, unmapped: list, pid_exists) -> fl
     if not _pending_relaunch_pids(profiles, unmapped, pid_exists):
         return _RELAUNCH_VERIFY_TIMEOUT_S
     return float(GATEWAY_RESTART_WATCHER_TIMEOUT_S) + _RELAUNCH_VERIFY_TIMEOUT_S
-
 
 def _unmapped_ready_filter(entry: dict, taken: set):
     """``pid_filter`` matching the gateway an unmapped entry's replay started: a gateway running the
@@ -1443,10 +907,9 @@ def _unmapped_ready_filter(entry: dict, taken: set):
             return False
     return lambda pids: [pid for pid in _owned_gateway_pids(pids) if matches(int(pid))]
 
-
 _READY_INTERVAL_S = 0.4  # gateway_windows._wait_for_gateway_ready's poll interval and
-_READY_CONFIRM_S = 2.0   # confirmation window: one hit proves a spawn, not a survived startup
 
+_READY_CONFIRM_S = 2.0   # confirmation window: one hit proves a spawn, not a survived startup
 
 def _poll_until_ready(targets: list, deadline: float, taken: set) -> dict:
     """``{key: pids}`` for each ``(key, probe, claim_all)`` target whose gateway stayed visible for
@@ -1490,72 +953,13 @@ def _poll_until_ready(targets: list, deadline: float, taken: set) -> dict:
         if len(ready) + len(failed) < len(targets):
             _time.sleep(_READY_INTERVAL_S)
 
-
 def _verify_relaunched_gateways_alive(token: dict, profiles: dict, unmapped: list) -> None:
-    """Retire each relaunched runtime on ITS OWN readiness: a profile on a stable gateway in its
-    profile home, an unmapped entry on a stable gateway running its argv. A watcher only proves a
-    relaunch was scheduled, and another target's readiness proves nothing about this one.
-
-    A parent Job Object denying CREATE_BREAKAWAY_FROM_JOB can kill the gateway on updater teardown.
-    Vouched PIDs are persisted so a death AFTER updater exit is reported by the next CLI invocation."""
-    with _abort_on_error("Could not load Windows gateway liveness helpers"):
-        from gateway.status import _pid_exists
-        from hermes_cli import gateway_windows
-        from hermes_cli.profiles import get_profile_dir
-    deadline = _time.monotonic() + _relaunch_verify_timeout_s(profiles, unmapped, _pid_exists)
-    taken: set = set()
-    # Profiles first: a gateway on a profile's home is that profile's, never an unmapped entry's.
-    targets = [(("profile", name), lambda _scan, h=Path(get_profile_dir(name)), o=int(old_pid): gateway_windows._live_gateway_pids(
-        home=h, pid_filter=lambda ps: [p for p in ps if int(p) != o]), True) for name, old_pid in sorted(profiles.items())]
-    targets += [(("unmapped", i), lambda scan, f=_unmapped_ready_filter(entry, taken): f(scan()), False)
-                for i, entry in enumerate(unmapped)]
-    ready = _poll_until_ready(targets, deadline, taken)
-    ready_profiles = [name for name in sorted(profiles) if ("profile", name) in ready]
-    ready_unmapped = [entry for i, entry in enumerate(unmapped) if ("unmapped", i) in ready]
-    ready_pids = [pid for pids in ready.values() for pid in pids]
-    # Fleet reconciliation (#91277) cross-checks every planned runtime against relaunched_profiles:
-    # only a verified one is listed, so an unready one still surfaces as unaccounted.
-    token["relaunched_profiles"] = ready_profiles
-    token["profiles"] = {n: pid for n, pid in (token.get("profiles") or {}).items() if n not in ready_profiles}
-    token["unmapped"] = [u for u in (token.get("unmapped") or []) if u not in ready_unmapped]
-    if ready_pids:
-        with suppress(Exception):
-            gateway_windows._write_start_attestation(sorted(set(ready_pids)), "post-update relaunch")
-    if ready_profiles:
-        print(f"\n  ✓ Restarting Windows gateway profile(s): {', '.join(ready_profiles)}")
-    if ready_unmapped:
-        print(f"  ✓ Restarting {len(ready_unmapped)} unmapped Windows gateway process(es)")
-    unready = sorted(set(profiles) - set(ready_profiles)) + [f"pid {u.get('pid')}" for u in unmapped if u not in ready_unmapped]
-    if unready:
-        print(
-            "\n  ⚠ Windows gateway restart could not be verified for: " + ", ".join(unready) + "\n"
-            "    (The respawned gateway may have been killed by a parent Job Object during updater teardown, #48820.)\n"
-            "    Recover with: hermes gateway restart"
-        )
-        raise RuntimeError("Windows gateway relaunch after update was not verified alive: " + ", ".join(unready))
-
+    """No-op: native Windows support removed from this fork (WSL is the Windows answer)."""
+    return None
 
 def _resume_windows_gateways_after_update(token: dict | None) -> None:
-    """Restart Windows profile gateways previously paused for update."""
-    from hermes_cli.update_cmd import _m
-    if not token or not token.get("resume_needed"):
-        return
-    # The foreground call sites register this same function via atexit as a safety net for
-    # process death before they get a chance to run it themselves (#115563). Once execution
-    # actually reaches here — foreground or the atexit fallback itself — ownership is taken:
-    # unregister immediately so a failure below (or the foreground caller failing after this
-    # returns) cannot replay the same RuntimeError a second time at interpreter teardown.
-    # ``unregister`` is a no-op when this function was never registered.
-    import atexit
-    atexit.unregister(_resume_windows_gateways_after_update)
-    if not _m()._is_windows() and token.get("platform") != "posix":
-        token["resume_needed"] = False
-        return
-    # Startup recovery runs ahead of an unrelated command whose stdout may be parsed (``--json``):
-    # its notices go to stderr, as ``recover()``'s own do.
-    with redirect_stdout(sys.stderr) if token.get("recovery") else nullcontext():
-        _resume_unless_torn(token)
-
+    """No-op: native Windows support removed from this fork (WSL is the Windows answer)."""
+    return None
 
 def _resume_unless_torn(token: dict) -> None:
     """Resume the paused set, or leave it owed when the checkout is not whole."""
@@ -1576,7 +980,6 @@ def _resume_unless_torn(token: dict) -> None:
         _resume_paused_set(token)
     finally:
         pause_record.sync(token)
-
 
 def _resume_paused_set(token: dict) -> None:
     """Bring every paused runtime back; each one is retired from *token* only on its own verified
@@ -1623,39 +1026,8 @@ def _resume_paused_set(token: dict) -> None:
         raise RuntimeError("; ".join(failures))
     token["resume_needed"] = False
 
-
 def _resume_windows_gateways_and_merge_outcome(outcome, _windows_gateway_resume, gateway_mode: bool):
-    """Resume gateways paused for a Windows update and fold the token into ``outcome``'s systemd/launchd-style
-    bookkeeping so reconciliation never reports a healthy gateway as unaccounted. Must never abort the update."""
-    from hermes_cli.update_cmd import _m
-    try:
-        _m()._resume_windows_gateways_after_update(_windows_gateway_resume)
-    except Exception as _windows_resume_exc:
-        # Owed restart, not a failed update (C3): verification records the ``gateway_restart``
-        # follow-up; the gateway's /update marker keeps the committed result.
-        outcome.incomplete = True
-        outcome.phase_errors.append(str(_windows_resume_exc))
-        print(f"  ⚠ Windows gateway service restart incomplete: {_windows_resume_exc}")
-    if not isinstance(_windows_gateway_resume, dict):
-        return
+    """No-op: native Windows support removed from this fork (WSL is the Windows answer)."""
+    outcome["windows_resume"] = None
+    return outcome
 
-    def _extend_unique(target: list, items) -> None:
-        target.extend(item for item in dict.fromkeys(items) if item not in target)
-
-    token = _windows_gateway_resume
-    # Failed relaunches are absent from the token so they still surface. Best-effort.
-    with _best_effort('Could not merge Windows relaunch outcome into fleet reconciliation bookkeeping: %s'):
-        _extend_unique(outcome.relaunched_profiles, token.get("relaunched_profiles") or [])
-    windows_restarted = list(token.get("restarted_services") or [])
-    service_profiles = token.get("service_profiles") or {}
-    _extend_unique(outcome.restarted_services, windows_restarted)
-    _extend_unique(outcome.relaunched_profiles, (p for p in (service_profiles.get(n) for n in windows_restarted) if p))
-    _extend_unique(outcome.failed_or_stale_units, (str(service_profiles.get(n) or n) for n in (token.get("services") or [])))
-    with suppress(Exception):
-        from hermes_cli.update_receipt import record_gateway_restart
-        record_gateway_restart(
-            restarted_services=outcome.restarted_services, relaunched_profiles=outcome.relaunched_profiles,
-            externally_supervised_profiles=outcome.externally_supervised_profiles, killed_pids=sorted(outcome.killed_pids),
-            failed_units=outcome.failed_or_stale_units, incomplete=outcome.incomplete or bool(outcome.failed_or_stale_units),
-            phase_error="; ".join(outcome.phase_errors) or None,
-        )

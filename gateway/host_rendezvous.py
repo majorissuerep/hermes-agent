@@ -168,10 +168,9 @@ def ensure_host_state_dir() -> Path:
     """
     directory = host_state_dir()
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
-    if sys.platform != "win32":
-        with contextlib.suppress(OSError):
-            if stat.S_IMODE(directory.stat().st_mode) & 0o077:
-                os.chmod(directory, 0o700)
+    with contextlib.suppress(OSError):
+        if stat.S_IMODE(directory.stat().st_mode) & 0o077:
+            os.chmod(directory, 0o700)
     return directory
 
 
@@ -184,8 +183,6 @@ def _record_is_own(path: Path) -> bool:
     its contents — is what makes it a record at all. Windows sets no ACLs from mode bits; there
     the dir already lives under the user's own state root.
     """
-    if sys.platform == "win32":
-        return True
     try:
         info = path.stat()
         parent = path.parent.stat()
@@ -379,11 +376,6 @@ def _write_private_text(path: Path, text: str) -> None:
     credential class and is reused here. It also replaces in place, because ``os.replace`` onto a
     token file another process still holds open fails on Windows.
     """
-    if sys.platform == "win32":
-        from hermes_cli.windows_ssh_runtime import write_private_file
-
-        write_private_file(path, text.encode("utf-8"))
-        return
     tmp = path.with_name(path.name + ".tmp")
     fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     try:

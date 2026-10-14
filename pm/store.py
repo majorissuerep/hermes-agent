@@ -56,27 +56,6 @@ def _native_machine() -> str:
                 return "arm64"
         except (AttributeError, OSError):
             pass
-    if sys.platform == "win32":
-        try:
-            import ctypes
-            from ctypes import wintypes
-
-            kernel = ctypes.WinDLL("kernel32", use_last_error=True)
-            kernel.GetCurrentProcess.restype = wintypes.HANDLE
-            kernel.IsWow64Process2.argtypes = [wintypes.HANDLE, ctypes.POINTER(ctypes.c_ushort),
-                                                ctypes.POINTER(ctypes.c_ushort)]
-            kernel.IsWow64Process2.restype = wintypes.BOOL
-            process, native = ctypes.c_ushort(), ctypes.c_ushort()
-            if kernel.IsWow64Process2(kernel.GetCurrentProcess(), ctypes.byref(process), ctypes.byref(native)):
-                if native.value == 0xAA64:
-                    return "arm64"
-                if native.value == 0x8664:
-                    return "x86_64"
-        except (AttributeError, OSError):
-            pass
-        wow = os.environ.get("PROCESSOR_ARCHITEW6432", "").lower()
-        if wow in ("arm64", "amd64"):
-            return wow
     return platform.machine().lower()
 
 
@@ -154,8 +133,6 @@ def current_target() -> str:
         arch = "x64"
     else:
         raise RuntimeError(f"unsupported architecture: {platform.machine()}")
-    if sys.platform.startswith("win"):
-        return f"win32-{arch}"
     if sys.platform == "darwin":
         return f"darwin-{arch}"
     if _is_bionic_libc():

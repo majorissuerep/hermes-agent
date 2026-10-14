@@ -160,14 +160,9 @@ def _desktop_packaged_executable_in(release_dir: Path) -> Optional[Path]:
     """
     if sys.platform == "darwin":
         candidates = list(release_dir.glob("mac*/Hermes.app/Contents/MacOS/Hermes"))
-    elif sys.platform == "win32":
-        candidates = [
-            release_dir / d / "Hermes.exe" for d in ("win-unpacked", "win-ia32-unpacked", "win-arm64-unpacked")
-        ]
-    else:
-        candidates = [
-            release_dir / d / n for d in ("linux-unpacked", "linux-arm64-unpacked") for n in ("hermes", "Hermes")
-        ]
+    candidates = [
+        release_dir / d / n for d in ("linux-unpacked", "linux-arm64-unpacked") for n in ("hermes", "Hermes")
+    ]
 
     existing = [p for p in candidates if p.exists()]
     if not existing:
@@ -350,23 +345,12 @@ def _windows_user_runnable_pe_machines() -> Optional[set]:
 
 def _windows_native_machine() -> str:
     """Return the native Windows machine name in upper-case PE vocabulary."""
-    if sys.platform == "win32":
-        return {"arm64": "ARM64", "amd64": "AMD64", "x86": "X86"}.get(
-            facts.native_arch(), (platform.machine() or "").upper()
-        )
     return (platform.machine() or "").upper()
 
 
 def _expected_windows_pe_machines() -> set:
     """PE machines this Windows host can load: ``GetMachineTypeAttributes``, else by name (AMD64 → x64+x86,
     ARM64 → ARM64+x64, x86 → x86). Unknown hosts get the full set so the gate can never brick launch."""
-    if sys.platform == "win32":
-        try:
-            runnable = _windows_user_runnable_pe_machines()
-        except (OSError, AttributeError, TypeError, ValueError):
-            runnable = None
-        if runnable:
-            return runnable
     machine = _windows_native_machine().upper()
     if machine in ("AMD64", "X86_64", "X64"):
         return {_PE_MACHINE_AMD64, _PE_MACHINE_I386}
@@ -1443,12 +1427,6 @@ def build_prepared_desktop(desktop_dir: Path, *, source_mode: bool, npm: str, en
         return None
     build_label = "source build" if source_mode else "packaged app"
     build_env = dict(env)
-    if sys.platform == "win32":
-        # The installer stages pinned Git in its own PowerShell process. Product
-        # builds run later, often with every system git removed from PATH; the
-        # desktop stamp must still resolve this checkout's real HEAD.
-        import pm
-        build_env = pm.ensure("git", base_env=build_env).env
     if _force_adhoc_macos_signing(build_env, source_mode=source_mode):
         print("  → No Developer ID configured; ad-hoc signing this local rebuild "
               "(CSC_IDENTITY_AUTO_DISCOVERY=false)")

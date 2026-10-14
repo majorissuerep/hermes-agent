@@ -815,112 +815,9 @@ def _scm_service_field(service, field: str):
     return getter() if callable(getter) else service.as_dict().get(field)
 
 
-def find_windows_gateway_services(
-    *, psutil_module=None, profile_processes: list[ProfileGatewayProcess] | None = None
-) -> list[WindowsGatewayService]:
-    """Profile gateways supervised by real, Hermes-owned Windows services. Service-logon processes may
-    hide their command lines, so identity = Hermes's own PID file + a parent chain ending at a running
-    SCM service PID whose name or binary path is Hermes's (``gateway_windows.hermes_owns_windows_service``).
-    The whole service subtree is returned so the Desktop preflight exempts exactly what the updater stops
-    through the SCM; a gateway under any other service (a Scheduled Task's svchost) is a plain process."""
-    if sys.platform != "win32":
-        return []
-    try:
-        if psutil_module is None:
-            import psutil as psutil_module  # type: ignore[no-redef]
-        if profile_processes is None:
-            profile_processes = find_profile_gateway_processes(strict=True)
-        from hermes_cli.gateway_windows import hermes_owns_windows_service, hermes_service_roots
-
-        hermes_roots = hermes_service_roots()
-        service_names_by_pid: dict[int, set[str]] = {}
-        indeterminate_services_by_pid: dict[int, list[tuple[str, object]]] = {}
-        for service in psutil_module.win_service_iter():
-            try:
-                service_name = str(_scm_service_field(service, "name") or "")
-                if not service_name:
-                    raise RuntimeError("SCM service has an empty name")
-                # Ownership before state: an OS service above the gateway (Task Scheduler's svchost for a
-                # task-launched gateway, BITS mid-transition) is never its supervisor, so neither its
-                # PID nor its status may steer the pause. Only Hermes-owned services reach the guards below.
-                # The name alone settles Hermes-named services; binpath (QueryServiceConfig) is asked only
-                # for the rest, and a service that refuses even that to this user is one this user could
-                # not `sc stop` either — never Hermes's, never a reason to abort the enumeration.
-                owned = hermes_owns_windows_service(service_name, "", hermes_roots)
-                if not owned:
-                    try:
-                        service_binpath = str(_scm_service_field(service, "binpath") or "")
-                    except (psutil_module.AccessDenied, OSError):
-                        continue
-                    owned = hermes_owns_windows_service(service_name, service_binpath, hermes_roots)
-                if not owned:
-                    continue
-                service_status = _scm_service_field(service, "status")
-                service_pid = int(_scm_service_field(service, "pid") or 0)
-            except FileNotFoundError:
-                # Deleted between enumeration and inspection.
-                continue
-            except Exception as exc:
-                raise RuntimeError("SCM service inspection failed") from exc
-            if service_status == "stopped":
-                continue
-            if service_status != "running":
-                if service_pid > 0:
-                    indeterminate_services_by_pid.setdefault(service_pid, []).append((service_name, service_status))
-                continue
-            if service_pid <= 0:
-                raise RuntimeError(f"Running SCM service {service_name} has no valid process ID")
-            service_names_by_pid.setdefault(service_pid, set()).add(service_name)
-    except Exception as exc:
-        raise RuntimeError("SCM service enumeration failed") from exc
-
-    found: dict[str, WindowsGatewayService] = {}
-    for profile_process in profile_processes:
-        try:
-            gateway_process = psutil_module.Process(int(profile_process.pid))
-            gateway_create_time = float(gateway_process.create_time())
-            if profile_process.create_time <= 0 or abs(gateway_create_time - profile_process.create_time) > 0.001:
-                raise RuntimeError("Gateway process identity changed during SCM discovery")
-            ancestor_pids = [int(parent.pid) for parent in gateway_process.parents()]
-            for pid in ancestor_pids:
-                indeterminate_services = indeterminate_services_by_pid.get(pid, [])
-                if indeterminate_services:
-                    service_name, service_status = indeterminate_services[0]
-                    raise RuntimeError(f"SCM service {service_name} has indeterminate status: {service_status}")
-            shared_service_pids = [pid for pid in ancestor_pids if len(service_names_by_pid.get(pid, set())) > 1]
-            if shared_service_pids:
-                raise RuntimeError(
-                    "Gateway ownership is ambiguous under shared SCM host PID(s): "
-                    + ", ".join(str(pid) for pid in shared_service_pids)
-                )
-            service_pid = next((pid for pid in ancestor_pids if len(service_names_by_pid.get(pid, set())) == 1), None)
-            if service_pid is None:
-                continue
-            service_name = next(iter(service_names_by_pid[service_pid]))
-            service_process = psutil_module.Process(service_pid)
-            service_create_time = float(service_process.create_time())
-            descendant_processes = service_process.children(recursive=True)
-            descendants = frozenset(int(child.pid) for child in descendant_processes)
-            if int(profile_process.pid) not in descendants:
-                continue
-            descendant_identities = tuple(
-                sorted((int(child.pid), float(child.create_time())) for child in descendant_processes)
-            )
-            found[service_name] = WindowsGatewayService(
-                name=service_name,
-                profile=str(profile_process.profile),
-                service_pid=service_pid,
-                gateway_pid=int(profile_process.pid),
-                descendant_pids=descendants,
-                descendant_identities=descendant_identities,
-                service_create_time=service_create_time,
-                gateway_create_time=gateway_create_time,
-            )
-        except RuntimeError:
-            raise
-        except Exception as exc:
-            raise RuntimeError(f"Could not determine SCM ownership for gateway profile {profile_process.profile}") from exc
-    return [found[name] for name in sorted(found)]
+def find_windows_gateway_services(*args, **kwargs):
+    """No-op: native Windows support removed from this fork (WSL is the Windows answer)."""
+    return []
 
 
 def _gateway_run_args_for_profile(profile: str) -> list[str]:
@@ -1073,15 +970,6 @@ def _spawn_gateway_restart_watcher(old_pid: int, run_argv: list[str], *, host: b
     respawn_cwd = ""
     # See gateway_windows.windowless_gateway_restart_spec. See #54220, #56747.
     respawn_env_overlay: dict[str, str] = {}
-    if sys.platform == "win32":
-        try:
-            from hermes_cli.gateway_windows import windowless_gateway_restart_spec
-            run_argv, respawn_cwd, respawn_env_overlay = windowless_gateway_restart_spec(list(run_argv), home=home)
-        except Exception:
-            # Fall back to the original argv: a visible window beats a failed respawn.
-            respawn_cwd = ""
-            respawn_env_overlay = {}
-
     # cwd/env overlay are embedded as JSON literals in the watcher source (no extra argv plumbing).
     watcher = textwrap.dedent(
         """
@@ -1804,20 +1692,6 @@ def _reap_unsupervised_gateway_orphans(
     if supervised_host:
         return False
 
-    # Task Scheduler is a supervisor too; its state beats a parent-chain walk (broken once the bootstrap exits).
-    # A Scheduled Task gateway whose conhost/VBS bootstrap has already exited is invisible to
-    # `_reaper_candidate_is_supervisor_owned` (the parent chain breaks before services.exe, fail-open), yet
-    # it is alive and supervised. After that launcher exits the task is typically Ready, not Running —
-    # treating only Running as supervised still kills the detached gateway on every desktop serve start
-    # (#86098, #87001).
-    if is_windows():
-        try:
-            from hermes_cli.gateway_windows import get_task_name  # profile-aware task name
-            _task_name = get_task_name()
-        except Exception:
-            _task_name = "Hermes_Gateway"
-        if _windows_scheduled_task_supervises(_task_name):
-            return False
 
     from gateway.status import _pid_exists, get_process_start_time, write_planned_stop_marker
     own = _reaper_exclusion_pids(extra_exclude)
@@ -1994,31 +1868,14 @@ def stop_profile_gateway() -> bool:
     if pid is None:
         return _reap_unsupervised_gateway_orphans()
 
-    if is_windows():
-        # Windows maps SIGTERM to TerminateProcess. The marker watcher is the
-        # gateway's graceful-stop IPC, so wait for it before force-killing a
-        # wedged process.
-        from gateway.status import get_process_start_time
-        from hermes_cli.gateway_windows import (
-            _drain_gateway_pid,
-            _force_terminate_known_gateway_pids,
-            _windows_stop_drain_timeout,
-        )
-
-        # Capture identity BEFORE the drain (as _escalate_wedged_gateway does): if the PID is
-        # recycled during the wait, terminate_pid's start-time mismatch refuses the taskkill.
-        expected_start_time = get_process_start_time(pid)
-        if not _drain_gateway_pid(pid, _windows_stop_drain_timeout()):
-            _force_terminate_known_gateway_pids({pid: expected_start_time})
-    else:
-        _mark_planned_stop(pid)
-        try:
-            os.kill(pid, signal.SIGTERM)
-        except ProcessLookupError:
-            pass  # Already gone
-        except PermissionError:
-            print(f"⚠ Permission denied to kill PID {pid}")
-            return False
+    _mark_planned_stop(pid)
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass  # Already gone
+    except PermissionError:
+        print(f"⚠ Permission denied to kill PID {pid}")
+        return False
 
     # ``_pid_exists``, NOT ``os.kill(pid, 0)`` (TerminateProcess on Windows).
     from gateway.status import _pid_exists
@@ -2082,9 +1939,8 @@ def is_windows() -> bool:
 
 
 def _gw_windows():
-    """Lazily import :mod:`hermes_cli.gateway_windows` (Windows-only service backend)."""
-    from hermes_cli import gateway_windows
-    return gateway_windows
+    """No-op: native Windows support removed from this fork."""
+    raise ModuleNotFoundError("native Windows support removed (fork policy)")
 
 
 # Task Scheduler states meaning "still supervised" (Ready = steady state after the launcher exits).
@@ -2093,47 +1949,9 @@ def _gw_windows():
 _WINDOWS_TASK_SUPERVISOR_STATES = frozenset({"Running", "Ready", "Queued"})
 
 
-def _windows_scheduled_task_state(task_name: str) -> str | None:
-    """Locale-independent Task Scheduler state, or None on failure.
-
-    Query the COM API directly: Get-ScheduledTask auto-loads the CIM module,
-    which can stall desktop backend startup for the entire ten-second timeout.
-    Keep the existing supervisor semantics (Ready and Queued count as owned).
-    """
-    if not is_windows():
-        return None
-    quoted_name = task_name.replace("'", "''")
-    ps_cmd = (
-        "$ErrorActionPreference = 'Stop'; "
-        "$s = [Activator]::CreateInstance([type]::GetTypeFromProgID('Schedule.Service')); "
-        "$s.Connect(); "
-        "try { "
-        f"$t = $s.GetFolder('\\').GetTask('{quoted_name}'); "
-        # TASK_STATE values are stable, unlike localized schtasks.exe output.
-        "@('Unknown', 'Disabled', 'Queued', 'Ready', 'Running')[[int]$t.State] "
-        "} catch { "
-        "$e = $_.Exception; while ($e.InnerException) { $e = $e.InnerException }; "
-        "if ($e.HResult -in @(-2147024894, -2147024893)) { 'MISSING' } else { throw } "
-        "}"
-    )
-    try:
-        powershell = shutil.which("powershell") or shutil.which("pwsh")
-        if powershell is None:
-            return None
-        # pythonw/console-less backend startup reaches this probe; powershell.exe is a
-        # console-subsystem binary and would flash a window per spawn (#117781).
-        from hermes_cli._subprocess_compat import windows_hide_flags
-        result = subprocess.run(
-            [powershell, "-NoProfile", "-NonInteractive", "-Command", ps_cmd],
-            capture_output=True, text=True, encoding="utf-8", errors="ignore", timeout=10,
-            creationflags=windows_hide_flags(),
-            check=False,
-        )
-        if result.returncode != 0:
-            return None
-        return (result.stdout or "").strip() or None
-    except (OSError, subprocess.TimeoutExpired):
-        return None
+def _windows_scheduled_task_state(*args, **kwargs):
+    """No-op: native Windows support removed from this fork (WSL is the Windows answer)."""
+    return None
 
 
 def _windows_scheduled_task_supervises(task_name: str) -> bool:

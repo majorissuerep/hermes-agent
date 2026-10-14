@@ -692,10 +692,8 @@ import {
 import { hiddenWindowsChildOptions, windowsShellCommand } from './windows-child-options'
 import { buildPathExtCandidates, chooseUpdaterArgs, resolveVenvHermesCommand } from './windows-hermes-path'
 import {
-  connectWindowsRemote,
   detectRemotePlatform,
   helper,
-  probeWindowsRemote,
   terminateOwnedWindowsDashboardForUpdate
 } from './windows-remote-lifecycle'
 import {
@@ -3799,77 +3797,6 @@ function createNativePackagedStrategy(
     }
 
     return target ? createChannelMacStrategy(deps, target) : createMacStrategy(deps)
-  }
-
-  if (mechanism === 'app-installer') {
-    const payload: PayloadInfo = requireBundledPayload(mechanism)
-
-    const deps: ConstructorParameters<typeof AppInstallerStrategy>[0] = {
-      python: payload.storePython,
-      // The checker is bundled core code, run with the payload python.
-      module: 'hermes_cli.windows_appinstaller_update',
-      run: (python, module) =>
-        runAppInstallerChecker(python, module, {
-          env: { ...process.env, PYTHONPATH: payloadPythonPath(payload) },
-          onStderr: stderr => console.error(`[app-installer] checker stderr: ${stderr.slice(0, 400)}`)
-        }),
-      channel: resolveUpdaterChannelFromStamp(),
-      light: isLightVariant(),
-      feedBaseUrl: resolveDesktopFeedBaseUrl(),
-      installer: {
-        prepare: url => stageAppInstallerFile(url, path.join(app.getPath('userData'), 'updates')),
-        open: file => shell.openPath(file)
-      },
-      teardownBundledBackend,
-      restoreBundledBackend,
-      emitUpdateProgress,
-      appVersion: INSTALL_STAMP?.channelBuild?.windowsVersion ?? app.getVersion(),
-      quit: () => app.quit(),
-      registerPendingRelaunch: (fromVersion: string): Promise<RelaunchRegistration> =>
-        registerUpdateRelaunch(app, fromVersion, {
-          // The relaunch mechanism: a detached waiter, external to the dying
-          // process. It snapshots the OLD package, signals the handshake,
-          // waits for this process to exit and for the OS to swap the
-          // installed package version, then activates the NEW package.
-          // Electron's app.relaunch would re-execute the OLD package's
-          // binary and can hold the swap open, so it is not used. The
-          // script is staged to a temp dir and resolved absolutely so
-          // nothing inherited from the package holds the swap open.
-          relaunch: () =>
-            startUpdateRelaunchWaiter(PRODUCT_IDENTITY.msixAppIdWithOrg, process.resourcesPath, rememberLog)
-        })
-    }
-
-    return target
-      ? createChannelAppInstallerStrategy(deps, target, verifyPreparedChannelInstaller)
-      : new AppInstallerStrategy(deps)
-  }
-
-  if (mechanism === 'microsoft-store') {
-    const payload: PayloadInfo = requireBundledPayload(mechanism)
-
-    return createStoreStrategy({
-      python: payload.storePython,
-      module: 'hermes_cli.windows_store_update',
-      pythonPath: payloadPythonPath(payload),
-      env: process.env,
-      windowHandle: () => (BrowserWindow.getFocusedWindow() ?? mainWindow)?.getNativeWindowHandle() ?? null,
-      appVersion: app.getVersion(),
-      teardown: teardownBundledBackend,
-      restore: restoreBundledBackend,
-      emitProgress: emitUpdateProgress,
-      quit: () => app.quit(),
-      registerPendingRelaunch: (fromVersion: string): Promise<RelaunchRegistration> =>
-        registerUpdateRelaunch(app, fromVersion, {
-          relaunch: () =>
-            startUpdateRelaunchWaiter(
-              PRODUCT_IDENTITY.storeMsix!.identityName,
-              process.resourcesPath,
-              rememberLog,
-              1860
-            )
-        })
-    })
   }
 
   return new ExternalStrategy(INSTALL_STAMP)
@@ -10216,7 +10143,7 @@ async function bootstrapSshConnectionInner(profile, sshConfig, reuseToken, sourc
     }
 
     const platform = await detectRemotePlatform(ssh, sshConfig.remoteHermesPath || '')
-    const lifecycle = platform.os === 'Windows' ? connectWindowsRemote : remoteLifecycle.connect
+    const lifecycle = remoteLifecycle.connect // fork: native Windows remotes removed (WSL is the answer)
     result = await lifecycle({
       ssh,
       platform,
@@ -10678,17 +10605,9 @@ async function testDesktopConnectionConfig(input: any = {}) {
           let hermesVersion
           let supported
 
-          if (platform.os === 'Windows') {
-            const runtime = platform
-            hermesPath = runtime.hermesPath
-            const inspection = await helper(ssh, runtime, 'inspect', [runtime.hermesPath])
-            hermesVersion = inspection.version
-            supported = inspection.supported
-          } else {
-            hermesPath = await remoteLifecycle.locateHermes(ssh, sshConfig.remoteHermesPath || '')
-            hermesVersion = await remoteLifecycle.probeHermesVersion(ssh, hermesPath)
-            supported = await remoteLifecycle.remoteSupportsSshOwnership(ssh, hermesPath)
-          }
+          hermesPath = await remoteLifecycle.locateHermes(ssh, sshConfig.remoteHermesPath || '')
+          hermesVersion = await remoteLifecycle.probeHermesVersion(ssh, hermesPath)
+          supported = await remoteLifecycle.remoteSupportsSshOwnership(ssh, hermesPath)
 
           if (!supported) {
             return {
@@ -11646,21 +11565,6 @@ async function openManagedSshUpdateTransport(
 
   try {
     const platform: any = await detectRemotePlatform(ssh, config.remoteHermesPath || '')
-
-    if (platform.os === 'Windows') {
-      const runtime = platform.hermesPath ? platform : await probeWindowsRemote(ssh, config.remoteHermesPath || '')
-
-      return {
-        close: () => ssh.close(),
-        target: {
-          ssh,
-          platform: 'Windows',
-          hermesPath: runtime.hermesPath,
-          hermesHome: runtime.hermesHome,
-          pythonPath: runtime.python
-        }
-      }
-    }
 
     const hermesPath = await remoteLifecycle.locateHermes(ssh, config.remoteHermesPath || '')
     const hermesHome = await remoteLifecycle.probeRemoteHermesHome(ssh)

@@ -8,7 +8,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from hermes_cli import main, update_cmd, update_cmd_windows
+from hermes_cli import main, update_cmd, update_cmd_holders
 from tests.compat.old_updater_support import fresh_child as fresh_child, no_external_work as no_external_work  # noqa: PLC0414 -- the self-alias is load-bearing: it suppresses F811 for the pytest fixture parameter shadowing this import
 
 
@@ -37,7 +37,7 @@ def test_historical_holder_hooks_hand_off_without_inspecting_or_killing(
 
     forbidden = Mock(side_effect=AssertionError("retired holder gate performed work"))
     monkeypatch.setattr(gateway, "_is_pid_ancestor_of_current_process", forbidden)
-    monkeypatch.setattr(update_cmd_windows, "_psutil", forbidden)
+    monkeypatch.setattr(update_cmd_holders, "_psutil", forbidden)
     monkeypatch.setattr(process_identity, "ledger_entries", forbidden)
     monkeypatch.setattr(psutil, "process_iter", forbidden)
     monkeypatch.setattr(psutil, "Process", forbidden)
@@ -68,7 +68,7 @@ def test_gateway_ancestor_refusal_never_kills_unknown_ancestry(monkeypatch, gate
     forbidden = Mock(side_effect=AssertionError("refusal probe performed work"))
     monkeypatch.setattr(gateway, "_is_pid_ancestor_of_current_process", lambda pid: False)
     monkeypatch.setattr(psutil, "Process", forbidden)
-    monkeypatch.setattr(update_cmd_windows.subprocess, "run", forbidden)
+    monkeypatch.setattr(update_cmd_holders.subprocess, "run", forbidden)
     monkeypatch.setattr(os, "kill", forbidden)
     assert update_cmd._refuse_gateway_ancestor_tree_kill([123, 456], gateway_mode=gateway_mode) is False
     forbidden.assert_not_called()
@@ -95,7 +95,7 @@ def test_command_reaches_checkout_preparation_without_holder_gates(monkeypatch, 
     # Recreate the former call-site names as tripwires, not host-OS fakes.
     # The scan remains live for lifecycle ownership, but must not gate updates.
     monkeypatch.setattr(main, "_detect_concurrent_hermes_instances", forbidden, raising=False)
-    monkeypatch.setattr(update_cmd_windows, "_detect_venv_python_processes", forbidden)
+    monkeypatch.setattr(update_cmd_holders, "_detect_venv_python_processes", forbidden)
     monkeypatch.setattr(update_cmd, "_refuse_gateway_ancestor_tree_kill", forbidden)
     monkeypatch.setattr(main, "_is_windows", forbidden)
     monkeypatch.setattr(os, "kill", forbidden)

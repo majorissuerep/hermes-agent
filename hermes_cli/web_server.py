@@ -1579,22 +1579,6 @@ def _run_serve(serve, config, host: str, port: int) -> None:
     """
     runner = asyncio.run
     runner_kwargs: dict = {}
-    if sys.platform == "win32":
-        # Resolved FIRST; the serve call is outside this try so genuine
-        # serve-time errors (port in use) propagate instead of double-running.
-        try:
-            from uvicorn._compat import asyncio_run as runner
-
-            runner_kwargs = {"loop_factory": _windows_serve_loop_factory(config)}
-        except Exception:
-            runner = asyncio.run
-            runner_kwargs = {}
-            try:
-                asyncio.set_event_loop_policy(
-                    asyncio.WindowsSelectorEventLoopPolicy()  # type: ignore[attr-defined]
-                )
-            except Exception:
-                pass
 
     # ``capture_signals()`` re-raises the captured signal after graceful
     # shutdown; console Ctrl+C lands as KeyboardInterrupt = clean exit.

@@ -144,8 +144,6 @@ def spawn_async_diagnostic(log_path: Path, signal_name: str, *,
         log_path.parent.mkdir(parents=True, exist_ok=True)
     except OSError:
         return None
-    if sys.platform == "win32":
-        return None
     script = _async_diagnostic_script(signal_name, os.getpid())
     try:  # O_APPEND so concurrent diagnostics from rapid signals don't trample each other
         fd = os.open(str(log_path), os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)

@@ -102,7 +102,6 @@ exit $status
 # unconditional guards CI runs in their own workflows (case-collision-check.yml,
 # lazy-deps-guard.yml, profile-artifact-check.yml, blob-size-check.yml).
 _GUARDS = {
-    "footguns": ["scripts/check-windows-footguns.py", "--all"],
     "shebangs": ["scripts/check_bash_shebangs.py"],
     "no-tmp": ["scripts/check_no_tmp_literals.py"],
     "config-writers": ["scripts/check_config_yaml_writers.py"],

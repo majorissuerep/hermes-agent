@@ -153,8 +153,7 @@ def _enable_vt(stream) -> bool:
     """A Windows console prints ESC as a glyph (`←[2K`) until its handle opts
     in to VT processing, and PowerShell hands children a console with VT off.
     NUL also reports isatty() but is no console, so it fails here too."""
-    if sys.platform != "win32":
-        return True
+    return True
     import ctypes
     import msvcrt
     from ctypes import wintypes

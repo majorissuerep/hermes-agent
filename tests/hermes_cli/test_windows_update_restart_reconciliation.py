@@ -39,7 +39,7 @@ def _stub_post_relaunch_liveness(monkeypatch):
     )
     # The relaunch verifier polls every target in one loop through the same probe.
     monkeypatch.setattr(gateway_windows, "_live_gateway_pids", lambda *_a, **_kw: [4242])
-    monkeypatch.setattr("hermes_cli.update_cmd_windows._READY_CONFIRM_S", 0.0)
+    monkeypatch.setattr("hermes_cli.update_cmd_holders._READY_CONFIRM_S", 0.0)
     monkeypatch.setattr(
         gateway_windows, "_write_start_attestation", lambda *_a, **_kw: None
     )
@@ -89,7 +89,7 @@ def test_resume_unregisters_its_own_atexit_fallback_before_running(monkeypatch):
     the identical error a second time at interpreter teardown (#115563)."""
     import atexit
 
-    from hermes_cli import update_cmd_windows
+    from hermes_cli import update_cmd_holders
 
     calls = []
     monkeypatch.setattr(
@@ -99,9 +99,9 @@ def test_resume_unregisters_its_own_atexit_fallback_before_running(monkeypatch):
     monkeypatch.setattr(hm, "_is_windows", lambda: False)
 
     token = {"resume_needed": True}
-    update_cmd_windows._resume_windows_gateways_after_update(token)
+    update_cmd_holders._resume_windows_gateways_after_update(token)
 
-    assert calls == [update_cmd_windows._resume_windows_gateways_after_update]
+    assert calls == [update_cmd_holders._resume_windows_gateways_after_update]
     assert token["resume_needed"] is False
 
 
@@ -114,17 +114,17 @@ def test_service_readiness_filter_skips_vanished_gateways_but_never_swallows_bug
 
     import psutil
 
-    from hermes_cli import update_cmd_windows
+    from hermes_cli import update_cmd_holders
 
     child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"], stdin=subprocess.DEVNULL)
     gone = subprocess.Popen([sys.executable, "-c", "pass"], stdin=subprocess.DEVNULL)
     gone.wait(timeout=30)
     service = type("Svc", (), {"pid": staticmethod(lambda: os.getpid())})()  # the "service" is this process
-    monkeypatch.setattr(update_cmd_windows, "_win_service", lambda _name: (psutil, service))
+    monkeypatch.setattr(update_cmd_holders, "_win_service", lambda _name: (psutil, service))
     monkeypatch.setattr(gateway_windows, "_wait_for_gateway_ready",
                         lambda **kw: kw["pid_filter"]([child.pid, gone.pid]))
     try:
-        assert update_cmd_windows._service_gateway_ready("svc", None, timeout_s=0) == [child.pid]
+        assert update_cmd_holders._service_gateway_ready("svc", None, timeout_s=0) == [child.pid]
     finally:
         child.kill()
         child.wait(timeout=30)
@@ -136,4 +136,4 @@ def test_service_readiness_filter_skips_vanished_gateways_but_never_swallows_bug
         m.setattr(psutil.Process, "parents", broken)
         m.setattr(gateway_windows, "_wait_for_gateway_ready", lambda **kw: kw["pid_filter"]([os.getpid()]))
         with pytest.raises(RuntimeError, match="parent walk"):
-            update_cmd_windows._service_gateway_ready("svc", None, timeout_s=0)
+            update_cmd_holders._service_gateway_ready("svc", None, timeout_s=0)

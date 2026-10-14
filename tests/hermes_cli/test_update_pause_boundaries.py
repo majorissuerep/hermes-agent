@@ -79,7 +79,7 @@ def test_consumption_checkpoints_debt_before_unlink_and_producer_death(cell, cla
     ''', base / "ready", base / "consume", base / "consumed")
     _wait(base / "ready", consumer)
     owner = launch('''
-        from hermes_cli import update_cmd_windows as w
+        from hermes_cli import update_cmd_holders as w
         from types import SimpleNamespace
         pid = int(sys.argv[2])
         home = Path(os.environ["HERMES_HOME"])
@@ -134,7 +134,7 @@ def test_failed_consumer_checkpoint_keeps_request_and_user_stop_is_not_update_de
     _, _, launch = cell
     result = _result(launch('''
         from gateway import status
-        from hermes_cli.update_cmd_windows import _write_update_planned_stop_marker
+        from hermes_cli.update_cmd_holders import _write_update_planned_stop_marker
         pid = os.getpid()
         home = Path(os.environ["HERMES_HOME"])
         path = home / ".gateway-planned-stop.json"
@@ -178,7 +178,7 @@ def test_a_busy_pause_mutex_never_turns_a_planned_stop_into_an_unplanned_one(cel
     try:
         result = _result(launch('''
             from gateway import status
-            from hermes_cli.update_cmd_windows import _write_update_planned_stop_marker
+            from hermes_cli.update_cmd_holders import _write_update_planned_stop_marker
             pid = os.getpid()
             home = Path(os.environ["HERMES_HOME"])
             assert _write_update_planned_stop_marker(home, pid)

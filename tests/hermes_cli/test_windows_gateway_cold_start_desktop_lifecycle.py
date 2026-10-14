@@ -27,7 +27,7 @@ from hermes_cli import gateway_windows
 from hermes_cli import main as cli_main
 from hermes_cli import process_identity
 from hermes_cli import update_cmd
-from hermes_cli import update_cmd_windows
+from hermes_cli import update_cmd_holders
 
 
 def _live_serve_ledger_entry() -> dict:
@@ -78,7 +78,7 @@ def test_ledger_live_serve_with_live_spawner_owns_lifecycle(monkeypatch):
         process_identity, "ledger_entries", lambda **_k: [_live_serve_ledger_entry()]
     )
     monkeypatch.setattr(process_identity, "spawner_is_dead", lambda _e: False)
-    monkeypatch.setattr("hermes_cli.update_cmd_windows._detect_venv_python_processes", list)
+    monkeypatch.setattr("hermes_cli.update_cmd_holders._detect_venv_python_processes", list)
 
     assert update_cmd._desktop_owns_gateway_lifecycle() is True
 
@@ -87,7 +87,7 @@ def test_orphaned_control_plane_does_not_own_lifecycle(monkeypatch):
         process_identity, "ledger_entries", lambda **_k: [_live_serve_ledger_entry()]
     )
     monkeypatch.setattr(process_identity, "spawner_is_dead", lambda _e: True)
-    monkeypatch.setattr("hermes_cli.update_cmd_windows._detect_venv_python_processes", list)
+    monkeypatch.setattr("hermes_cli.update_cmd_holders._detect_venv_python_processes", list)
 
     assert update_cmd._desktop_owns_gateway_lifecycle() is False
 
@@ -101,10 +101,10 @@ def _running_beta_pause_fixture(monkeypatch, tmp_path):
     homes["beta"].mkdir(parents=True)
     monkeypatch.setattr("hermes_cli.config.get_hermes_home", lambda: str(tmp_path))
     monkeypatch.setattr(update_cmd, "_desktop_owns_gateway_lifecycle", lambda: True)
-    monkeypatch.setattr(update_cmd_windows, "_desktop_owns_gateway_lifecycle", lambda: True)
+    monkeypatch.setattr(update_cmd_holders, "_desktop_owns_gateway_lifecycle", lambda: True)
     beta = SimpleNamespace(pid=777, profile="beta")
-    monkeypatch.setattr(update_cmd_windows, "_discover_windows_gateways", lambda: ({777: beta}, [], set(), [777]))
-    monkeypatch.setattr(update_cmd_windows, "_request_socket_pauses", lambda *a, **k: ({"beta": 777}, [777], []))
+    monkeypatch.setattr(update_cmd_holders, "_discover_windows_gateways", lambda: ({777: beta}, [], set(), [777]))
+    monkeypatch.setattr(update_cmd_holders, "_request_socket_pauses", lambda *a, **k: ({"beta": 777}, [777], []))
     monkeypatch.setattr(cli_main, "_venv_launcher_ancestors", lambda pids: [])
     monkeypatch.setattr(cli_main, "_wait_for_windows_update_gateway_exit", lambda pids, timeout: set())
     monkeypatch.setattr(profiles_mod, "get_active_profile_name", lambda: "default")
@@ -123,7 +123,7 @@ def _running_beta_pause_fixture(monkeypatch, tmp_path):
     monkeypatch.setattr(gateway_windows, "_live_gateway_pids",
                         lambda home=None, pid_filter=None, **_k: (pid_filter or list)(
                             [888] if by_home.get(str(home)) in relaunched else []))
-    monkeypatch.setattr(update_cmd_windows, "_READY_CONFIRM_S", 0.0)
+    monkeypatch.setattr(update_cmd_holders, "_READY_CONFIRM_S", 0.0)
     homes["_ready_probes"] = ready_probes
     return homes
 
@@ -169,8 +169,8 @@ def test_every_dead_attested_profile_is_cold_started_when_nothing_runs(monkeypat
     gets a token and a spawn. And when BOTH owe a spawn, the fleet-wide active cold-start runs FIRST —
     a beta spawned earlier would satisfy its any-live-gateway guard and the active profile would stay down."""
     homes = _running_beta_pause_fixture(monkeypatch, tmp_path)
-    monkeypatch.setattr(update_cmd_windows, "_discover_windows_gateways", lambda: ({}, [], set(), []))
-    monkeypatch.setattr(update_cmd_windows, "_windows_cold_start_plan", lambda: None)
+    monkeypatch.setattr(update_cmd_holders, "_discover_windows_gateways", lambda: ({}, [], set(), []))
+    monkeypatch.setattr(update_cmd_holders, "_windows_cold_start_plan", lambda: None)
     gateway_windows._write_start_attestation([556], "direct spawn (PID 556)", home=homes["beta"])
     beta_marker = homes["beta"] / "state" / "gateway.start-attestation.json"
     beta_generation = json.loads(beta_marker.read_text(encoding="utf-8"))["generation"]
@@ -202,8 +202,8 @@ def test_service_supervised_running_profile_is_not_cold_started(monkeypatch, tmp
     svc_proc = SimpleNamespace(pid=900, profile="beta", path=homes["beta"])
     service = SimpleNamespace(name="HermesGw-beta", profile="beta", service_pid=800, gateway_pid=900,
                               descendant_identities=(), service_create_time=1.0, gateway_create_time=2.0)
-    monkeypatch.setattr(update_cmd_windows, "_discover_windows_gateways", lambda: ({900: svc_proc}, [service], {900}, [900]))
-    monkeypatch.setattr(update_cmd_windows, "_request_socket_pauses", lambda *a, **k: ({}, [], []))
+    monkeypatch.setattr(update_cmd_holders, "_discover_windows_gateways", lambda: ({900: svc_proc}, [service], {900}, [900]))
+    monkeypatch.setattr(update_cmd_holders, "_request_socket_pauses", lambda *a, **k: ({}, [], []))
     monkeypatch.setattr(update_cmd, "_stop_windows_gateway_service", lambda *a, **k: None)
     gateway_windows._write_start_attestation([900], "direct spawn (PID 900)", home=homes["beta"])
 

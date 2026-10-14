@@ -21,9 +21,9 @@ import psutil
 import pytest
 
 from gateway.status import get_process_start_time
-from hermes_cli import dashboard_procs, gateway, process_identity, update_cmd_windows
+from hermes_cli import dashboard_procs, gateway, process_identity, update_cmd_holders
 from hermes_cli import update_pause_record as pause_record
-from hermes_cli.update_cmd_windows import _pause_windows_gateways_for_update, _unmapped_ready_filter
+from hermes_cli.update_cmd_holders import _pause_windows_gateways_for_update, _unmapped_ready_filter
 
 
 @pytest.fixture
@@ -66,8 +66,8 @@ def test_a_ledger_proven_unmapped_gateway_is_recorded_with_its_home(homes_and_sp
     monkeypatch.setattr(gateway, "find_profile_gateway_processes", lambda strict=False: [])
     monkeypatch.setattr(gateway, "find_windows_gateway_services", lambda profile_processes=(): [])
     stopped = []
-    monkeypatch.setattr(update_cmd_windows, "_stop_windows_gateways", lambda *a, **k: stopped.append(a[0]) or {})
-    monkeypatch.setattr(update_cmd_windows, "_record_attested_cold_start_profiles", lambda *a: None)
+    monkeypatch.setattr(update_cmd_holders, "_stop_windows_gateways", lambda *a, **k: stopped.append(a[0]) or {})
+    monkeypatch.setattr(update_cmd_holders, "_record_attested_cold_start_profiles", lambda *a: None)
 
     _pause_windows_gateways_for_update()
     assert stopped == [[a.pid]]

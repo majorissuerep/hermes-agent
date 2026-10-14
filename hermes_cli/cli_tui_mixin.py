@@ -1124,10 +1124,6 @@ class CLITuiMixin:
     def _tui_handle_ctrl_z(self, event):
         """Ctrl+Z suspends the process (Unix only)."""
         from cli import _DIM, _RST, _cprint
-        if sys.platform == 'win32':
-            _cprint(f"\n{_DIM}{t('cli.tui.suspend_unsupported')}{_RST}")
-            event.app.invalidate()
-            return
         import signal as _sig
         from prompt_toolkit.application import run_in_terminal
         from hermes_cli.skin_engine import get_active_skin

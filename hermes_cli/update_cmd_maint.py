@@ -889,12 +889,6 @@ def _refresh_cua_driver_after_update() -> None:
         return
     if pm.installed_package("cua-driver", allow_outdated=True) is None:
         return
-    if sys.platform == "win32":
-        # The scheduled task targets a versioned binary. Selecting a new pin
-        # without re-registering leaves it stale; registration requires UAC.
-        print("\n→ Windows cua-driver refresh deferred (autostart registration requires UAC).")
-        print("  Run `hermes computer-use install --upgrade` in an interactive terminal.")
-        return
     print("\n→ Preparing pinned cua-driver (Computer Use)...")
     if sys.platform == "darwin":
         # PM preserves the signed app; setup validates and registers its new path

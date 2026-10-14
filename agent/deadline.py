@@ -428,22 +428,6 @@ def kill_process_tree(pid: int, *, sig: Optional[int] = None) -> bool:
     parent, then its group when ``pid`` leads one. Stopping is best-effort with a
     bounded wait; unavailable psutil still leaves process-group cleanup. Other
     signals do not suspend recipients. ``sig`` defaults to ``SIGKILL``."""
-    if sys.platform == "win32":
-        try:
-            from hermes_cli._subprocess_compat import windows_hide_flags
-            creationflags = windows_hide_flags()
-        except Exception:
-            creationflags = 0
-        try:
-            proc = subprocess.run(
-                ["taskkill", "/F", "/T", "/PID", str(pid)],
-                stdin=subprocess.DEVNULL, capture_output=True, timeout=15, check=False, creationflags=creationflags,
-            )
-            # taskkill exits non-zero for not-found / access-denied (False = nothing terminated).
-            return proc.returncode == 0
-        except Exception:
-            logger.debug("kill_process_tree: taskkill failed for pid %s", pid, exc_info=True)
-            return False
 
     import signal as _signal
     if sig is None:

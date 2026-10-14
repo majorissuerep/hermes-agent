@@ -18,7 +18,7 @@ from hermes_cli import gateway as gateway_mod
 from hermes_cli import gateway_windows
 from hermes_cli import main as cli_main
 from hermes_cli import update_cmd
-from hermes_cli import update_cmd_windows
+from hermes_cli import update_cmd_holders
 
 
 @pytest.fixture
@@ -52,7 +52,7 @@ def test_update_pause_takes_only_this_installs_gateways(monkeypatch, host_gatewa
     monkeypatch.setattr(gateway_mod, "find_windows_gateway_services", lambda **_kw: [])
     monkeypatch.setattr(gateway_mod, "find_gateway_pids", lambda **_kw: list(host_gateways.values()))
 
-    running_pids = update_cmd_windows._discover_windows_gateways()[3]
+    running_pids = update_cmd_holders._discover_windows_gateways()[3]
 
     assert running_pids == [host_gateways["own"]]
 
@@ -68,5 +68,5 @@ def test_foreign_gateways_do_not_suppress_cold_start(monkeypatch, host_gateways)
     monkeypatch.setattr(gateway_windows, "_wait_for_gateway_ready", lambda *_a, **_kw: [4242])
     monkeypatch.setattr(gateway_windows, "_write_start_attestation", lambda *_a, **_kw: None)
 
-    assert update_cmd_windows._cold_start_windows_gateway_after_update({"attested_generation": None})
+    assert update_cmd_holders._cold_start_windows_gateway_after_update({"attested_generation": None})
     assert spawned == [4242]

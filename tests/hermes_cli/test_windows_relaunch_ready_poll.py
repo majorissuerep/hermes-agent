@@ -15,8 +15,8 @@ import time
 import pytest
 
 from gateway import status
-from hermes_cli import gateway_windows, update_cmd_windows
-from hermes_cli.update_cmd_windows import _READY_CONFIRM_S, _verify_relaunched_gateways_alive
+from hermes_cli import gateway_windows, update_cmd_holders
+from hermes_cli.update_cmd_holders import _READY_CONFIRM_S, _verify_relaunched_gateways_alive
 
 
 @pytest.fixture
@@ -43,7 +43,7 @@ def test_many_ready_targets_cost_one_confirmation_window(running):
 
 
 def test_each_target_is_credited_only_on_its_own_stable_gateway(running, monkeypatch):
-    monkeypatch.setattr(update_cmd_windows, "_RELAUNCH_VERIFY_TIMEOUT_S", 3.0)
+    monkeypatch.setattr(update_cmd_holders, "_RELAUNCH_VERIFY_TIMEOUT_S", 3.0)
     born = time.monotonic()
     running["up"] = lambda: 50001
     running["old"] = lambda: 40002  # only the process the relaunch replaces
@@ -64,7 +64,7 @@ def test_one_gateway_never_retires_two_unmapped_debts(running, monkeypatch, tmp_
     import sys
 
     from hermes_cli import gateway
-    monkeypatch.setattr(update_cmd_windows, "_RELAUNCH_VERIFY_TIMEOUT_S", 3.0)
+    monkeypatch.setattr(update_cmd_holders, "_RELAUNCH_VERIFY_TIMEOUT_S", 3.0)
     entry = tmp_path / "bin" / "hermes"
     entry.parent.mkdir()
     entry.write_text("import time\ntime.sleep(60)\n", encoding="utf-8")

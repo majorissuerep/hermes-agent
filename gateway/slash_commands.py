@@ -132,13 +132,6 @@ def _spawn_detached_update(hermes_cmd, output_path, exit_code_path) -> None:
     update must replace it), redirects both outputs to one file and writes the exit code."""
     import shutil
     import subprocess
-    if sys.platform == "win32":
-        from hermes_cli._subprocess_compat import windows_detach_popen_kwargs
-        subprocess.Popen(
-            [sys.executable, "-c", _WINDOWS_UPDATE_HELPER, str(output_path), str(exit_code_path),
-             sys.executable, "-m", "hermes_cli.main", "update", "--gateway"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **windows_detach_popen_kwargs())
-        return
     hermes_cmd_str = " ".join(shlex.quote(part) for part in hermes_cmd)
     update_cmd = (
         f"PYTHONUNBUFFERED=1 {hermes_cmd_str} update --gateway"

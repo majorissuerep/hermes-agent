@@ -157,12 +157,6 @@ def _anchor(text: str, base, container_paths: bool) -> Path | PurePosixPath:
         if not posixpath.isabs(text):
             text = posixpath.join(str(base()), text)
         return _normalize_without_host_deref(text)
-    if sys.platform == "win32":
-        import ntpath
-
-        if not ntpath.isabs(text):
-            text = ntpath.join(str(base()), text)
-        return Path(ntpath.normpath(text))
     p = Path(text)
     if not p.is_absolute():
         p = Path(base()) / p

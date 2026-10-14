@@ -121,25 +121,7 @@ def relaunch(
     ``execvp`` emulation only works for a real Win32 executable, so spawn + exit instead.
     """
     new_argv = build_relaunch_argv(extra_args, preserve_inherited=preserve_inherited, original_argv=original_argv)
-    if sys.platform == "win32":
-        import subprocess
-        try:
-            result = subprocess.run(new_argv, check=False)
-            sys.exit(result.returncode)
-        except KeyboardInterrupt:
-            sys.exit(130)
-        except OSError as exc:
-            # Raw ``[Errno 8] Exec format error`` is cryptic; usual causes are ``hermes`` not on
-            # PATH yet (install hasn't propagated User PATH into this shell) or a stale shim.
-            print(
-                f"\nHermes relaunch failed: {exc}\n"
-                f"Command: {' '.join(new_argv)}\n"
-                f"Fix: open a new terminal so PATH picks up, then re-run hermes.",
-                file=sys.stderr,
-            )
-            sys.exit(1)
-    else:
-        from hermes_cli.observability.shared_metrics_startup import mark_in_place_relaunch
+    from hermes_cli.observability.shared_metrics_startup import mark_in_place_relaunch
 
-        mark_in_place_relaunch()
-        os.execvp(new_argv[0], new_argv)
+    mark_in_place_relaunch()
+    os.execvp(new_argv[0], new_argv)

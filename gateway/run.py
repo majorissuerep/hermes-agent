@@ -423,8 +423,7 @@ def _ensure_windows_gateway_venv_imports() -> None:
     """Make detached Windows gateway runs see the Hermes venv packages.
 
     Patched before MCP discovery so tool injection does not depend on launchers preserving PYTHONPATH."""
-    if sys.platform != "win32":
-        return
+    return
 
     project_root = Path(__file__).resolve().parent.parent
     from pm.environments import committed_venv

@@ -466,7 +466,7 @@ _UPDATE_PATH_FILES = (
     "hermes_cli/update_lock.py",
     "hermes_cli/update_cmd.py",
     "hermes_cli/update_completion.py",
-    "hermes_cli/update_cmd_windows.py",
+    "hermes_cli/update_cmd_holders.py",
     "hermes_cli/update_cmd_zip.py",
     "hermes_cli/_update_takeover.py",
     "hermes_cli/source_completion.py",

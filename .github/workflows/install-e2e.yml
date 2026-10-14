@@ -252,23 +252,6 @@ jobs:
           npm ci --ignore-scripts --no-audit --no-fund
           node tests/install/e2e-assets/bundle-plan.mjs
 
-  windows-bundled:
-    name: ${{ matrix.name }}
-    if: inputs.windows-bundle-manifest != '' && contains(fromJSON('["all", "bundled", "windows-bundled"]'), inputs.route)
-    needs: bundle-inputs
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJSON(needs.bundle-inputs.outputs.windows) }}
-    uses: ./.github/workflows/install-e2e-windows-run.yml
-    with:
-      commit: ${{ inputs.commit }}
-      install-method: packaged-app
-      update-method: open-app-update
-      install-ref: ${{ matrix.install_ref }}
-      leg-id: ${{ matrix.leg_id }}
-      bundle-manifest-url: ${{ inputs.windows-bundle-manifest }}
-      bundle-arch: ${{ needs.bundle-inputs.outputs.windows-arch }}
-
   macos-bundled:
     name: ${{ matrix.name }}
     if: inputs.macos-bundle-manifest != '' && contains(fromJSON('["all", "bundled", "macos-bundled"]'), inputs.route)
@@ -298,23 +281,6 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.generate-matrix.outputs.linux) }}
     uses: ./.github/workflows/install-e2e-run.yml
-    with:
-      commit: ${{ inputs.commit }}
-      install-method: ${{ matrix.install_method }}
-      update-method: ${{ matrix.update_method }}
-      install-ref: ${{ matrix.install_ref }}
-      update-ref: ${{ matrix.update_ref }}
-      tag-has-desktop: ${{ matrix.tag_has_desktop }}
-      leg-id: ${{ matrix.leg_id }}
-
-  windows:
-    name: ${{ matrix.name }}
-    if: needs.generate-matrix.outputs.windows-legs != '0'
-    needs: generate-matrix
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJSON(needs.generate-matrix.outputs.windows) }}
-    uses: ./.github/workflows/install-e2e-windows-run.yml
     with:
       commit: ${{ inputs.commit }}
       install-method: ${{ matrix.install_method }}

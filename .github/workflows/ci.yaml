@@ -82,12 +82,9 @@ jobs:
       uv_lock: ${{ steps.gate-lanes.outputs.uv_lock }}
       npm_lock: ${{ steps.gate-lanes.outputs.npm_lock }}
       bootstrap: ${{ steps.gate-lanes.outputs.bootstrap }}
-      desktop_updater: ${{ steps.gate-lanes.outputs.desktop_updater }}
       rust: ${{ steps.gate-lanes.outputs.rust }}
       remote_backends: ${{ steps.gate-lanes.outputs.remote_backends }}
       docker_meta: ${{ steps.gate-lanes.outputs.docker_meta }}
-      e2e: ${{ steps.gate-lanes.outputs.e2e }}
-      e2e_upgrade: ${{ steps.gate-lanes.outputs.e2e_upgrade }}
       e2e_desktop_core: ${{ steps.gate-lanes.outputs.e2e_desktop_core }}
       e2e_desktop_update: ${{ steps.gate-lanes.outputs.e2e_desktop_update }}
       event_name: ${{ github.event_name }}
@@ -158,16 +155,10 @@ jobs:
   tests-os:
     name: OS-specific tests
     needs: detect
-    if: needs.detect.outputs.python == 'true' || needs.detect.outputs.desktop_updater == 'true' || needs.detect.outputs.e2e == 'true' || needs.detect.outputs.e2e_upgrade == 'true'
+    if: needs.detect.outputs.python == 'true'
     uses: ./.github/workflows/tests-os.yml
     with:
       commit: ${{ inputs.commit }}
-      # The Windows lane spawns the real desktop-update hand-off script
-      # (tests/test_desktop_update_windows_*.py) only when that surface
-      # changed; unit-level platforms("windows") tests always run.
-      desktop_updater: ${{ needs.detect.outputs.desktop_updater == 'true' }}
-      e2e: ${{ needs.detect.outputs.e2e == 'true' }}
-      e2e_upgrade: ${{ needs.detect.outputs.e2e_upgrade == 'true' }}
       strict_acceptance: ${{ inputs.strict_acceptance || '' }}
 
   lint:

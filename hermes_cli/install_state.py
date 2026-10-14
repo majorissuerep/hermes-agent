@@ -236,8 +236,7 @@ def _shared_auth_dir() -> Iterable[Path]:
 
 def _registry_home() -> Iterable[Path]:
     """The ``HERMES_HOME`` older Windows installers saved for the user (the desktop honours it)."""
-    if sys.platform != "win32":
-        return ()
+    return ()
     import winreg
 
     try:

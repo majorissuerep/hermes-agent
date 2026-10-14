@@ -156,27 +156,6 @@ def _pid_is_running(pid: int) -> bool:
     """
     if pid <= 0:
         return False
-    if sys.platform == "win32":
-        try:
-            import ctypes
-
-            synchronize = 0x00100000
-            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-            kernel32.OpenProcess.argtypes = [ctypes.c_ulong, ctypes.c_int, ctypes.c_ulong]
-            kernel32.OpenProcess.restype = ctypes.c_void_p
-            kernel32.WaitForSingleObject.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
-            kernel32.WaitForSingleObject.restype = ctypes.c_ulong
-            kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
-            kernel32.CloseHandle.restype = ctypes.c_int
-            handle = kernel32.OpenProcess(synchronize, False, pid)
-            if not handle:
-                return ctypes.get_last_error() == 5  # ERROR_ACCESS_DENIED
-            try:
-                return kernel32.WaitForSingleObject(handle, 0) == 258
-            finally:
-                kernel32.CloseHandle(handle)
-        except Exception:
-            return True
     try:
         os.kill(pid, 0)  # windows-footgun: ok — Windows returns above
     except ProcessLookupError:
@@ -499,15 +478,9 @@ def _lock_fd(fd: int, lock: bool) -> bool:
     from ever repairing a checkout the restore handled fine before claims existed.
     """
     try:
-        if sys.platform == "win32":
-            import msvcrt
+        import fcntl
 
-            os.lseek(fd, 0, os.SEEK_SET)  # msvcrt locks from the file position
-            msvcrt.locking(fd, msvcrt.LK_NBLCK if lock else msvcrt.LK_UNLCK, 1)
-        else:
-            import fcntl
-
-            fcntl.flock(fd, (fcntl.LOCK_EX | fcntl.LOCK_NB) if lock else fcntl.LOCK_UN)
+        fcntl.flock(fd, (fcntl.LOCK_EX | fcntl.LOCK_NB) if lock else fcntl.LOCK_UN)
     except OSError as exc:
         return not (lock and exc.errno in _CLAIM_HELD_ERRNOS)
     return True
@@ -1345,9 +1318,6 @@ def relaunch_after_restore() -> None:
     argv = [sys.executable, *sys.orig_argv[1:]]
     sys.stdout.flush()
     sys.stderr.flush()
-    if sys.platform == "win32":
-        # os.execv on Windows spawns and exits, detaching the console's wait on us.
-        sys.exit(subprocess.call(argv))  # windows-footgun: ok — interactive child keeps our console
     os.execv(sys.executable, argv)
 
 

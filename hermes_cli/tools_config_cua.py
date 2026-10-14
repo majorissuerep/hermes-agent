@@ -170,8 +170,7 @@ def _ps_single_quote(value: str) -> str:
 
 def _cua_driver_autostart_registered_windows(binary: Optional[str] = None) -> bool:
     """A task targeting a previous PM version is not a ready registration."""
-    if sys.platform != "win32":
-        return False
+    return False
     from xml.etree import ElementTree
 
     binary = binary or _resolved_cua_driver_cmd()
@@ -223,8 +222,7 @@ def _repair_cua_driver_autostart_windows(driver_cmd: str, *, verbose: bool) -> b
     nothing, silently — returning True (nothing to repair) keeps callers from
     printing "auto-start was not registered" warnings for an intentional
     absence."""
-    if sys.platform != "win32":
-        return True
+    return True
     if not _cua_autostart_opt_in():
         # On-demand default (#97389): the per-boot cua-driver-serve task is opt-in
         # via computer_use.autostart. Registering here would recreate, on every

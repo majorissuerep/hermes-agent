@@ -162,7 +162,7 @@ def _sc(*args: str) -> subprocess.CompletedProcess:
 
 @pytest.mark.parametrize("gateway", ["absent", "ready"])
 def test_a_running_service_owes_its_gateway_until_that_gateway_is_ready(tmp_path, monkeypatch, service_wrapper, gateway):
-    from hermes_cli import update_cmd_windows as w
+    from hermes_cli import update_cmd_holders as w
 
     home = tmp_path / "home"
     home.mkdir()
@@ -260,7 +260,7 @@ def _logs(home: Path) -> str:
 
 @pytest.mark.parametrize("discovered", ["this process", "an earlier process at this pid"])
 def test_a_pause_force_kills_only_the_process_it_discovered(tmp_path, monkeypatch, discovered):
-    from hermes_cli import update_cmd_windows as w
+    from hermes_cli import update_cmd_holders as w
     from hermes_cli.gateway import ProfileGatewayProcess
 
     home = tmp_path / "home"

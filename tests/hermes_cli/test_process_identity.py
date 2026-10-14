@@ -272,7 +272,7 @@ def _holders(*pids):
 
 
 def test_updater_reaps_ledger_proven_orphans():
-    from hermes_cli import update_cmd_windows
+    from hermes_cli import update_cmd_holders
 
     entries = [
         _entry(200, 2.0, spawner_pid=700, spawner_create=7.0),   # spawner dead → reap
@@ -283,16 +283,16 @@ def test_updater_reaps_ledger_proven_orphans():
     with patch.dict(sys.modules, {"psutil": fake}), \
          patch.object(pi, "ledger_entries", return_value=entries), \
          patch.object(pi, "spawner_is_dead", wraps=pi.spawner_is_dead):
-        assert update_cmd_windows._ledger_reapable_backend_pids(_holders(200, 201, 202, 203)) == [200]
+        assert update_cmd_holders._ledger_reapable_backend_pids(_holders(200, 201, 202, 203)) == [200]
 
 
 
 
 def test_updater_ledger_rung_never_raises():
-    from hermes_cli import update_cmd_windows
+    from hermes_cli import update_cmd_holders
 
     with patch.object(pi, "ledger_entries", side_effect=RuntimeError("boom")):
-        assert update_cmd_windows._ledger_reapable_backend_pids(_holders(200)) == []
+        assert update_cmd_holders._ledger_reapable_backend_pids(_holders(200)) == []
 
 
 def test_desktop_ssh_backend_spawn_shape_is_desktop_owned(monkeypatch):

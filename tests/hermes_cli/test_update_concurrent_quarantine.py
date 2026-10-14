@@ -12,7 +12,7 @@ from hermes_cli import main as cli_main
 
 def test_restore_windows_gateway_service_waits_out_stop_pending(monkeypatch):
     from hermes_cli import update_cmd
-    from hermes_cli import update_cmd_windows
+    from hermes_cli import update_cmd_holders
 
     statuses = iter(["stop_pending", "stopped"])
     service = SimpleNamespace(status=lambda: next(statuses))
@@ -26,7 +26,7 @@ def test_restore_windows_gateway_service_waits_out_stop_pending(monkeypatch):
         lambda name: restarted.append(name),
     )
     monkeypatch.setattr(
-        update_cmd_windows,
+        update_cmd_holders,
         "_start_windows_gateway_service",
         lambda name: restarted.append(name),
     )

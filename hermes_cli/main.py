@@ -699,13 +699,6 @@ if sys.argv[1:2] == ["pm"]:
 # resolving in every new terminal (venv\Scripts itself must stay off PATH — it shadows the user's
 # ``python``, #83797). Costs a few stat calls when healthy; gates fail toward inaction so source checkouts
 # are untouched.
-if sys.platform == "win32":
-    try:
-        from hermes_cli import _install_repair as _install_repair_mod
-
-        _install_repair_mod.ensure_windows_bin_launchers(_bootstrap_root)
-    except Exception:
-        pass
 
 # Load .env from ~/.hermes/.env first, then project root as dev fallback.
 # User-managed env files should override stale shell exports on restart.
@@ -2140,7 +2133,7 @@ def select_provider_and_model(args=None):
 
 def _detect_venv_python_processes(*, exclude_pids: set[int] | None = None) -> list[tuple[int, str, str]]:
     # Shim to stop the old updater doing work until relaunch. Do not scan or kill.
-    # Current Windows checks use the real detector in update_cmd_windows instead.
+    # Current Windows checks use the real detector in update_cmd_holders instead.
     return []
 
 
@@ -2369,7 +2362,7 @@ def _update_preflight_handled(args) -> bool:
         # machine-readable, exit 3 when holders remain so automation can stop those PIDs and retry.
         import json
 
-        from hermes_cli.update_cmd_windows import VENV_HOLDERS_EXIT, list_venv_holders
+        from hermes_cli.update_cmd_holders import VENV_HOLDERS_EXIT, list_venv_holders
 
         holders = list_venv_holders()
         print(json.dumps(holders, indent=2))

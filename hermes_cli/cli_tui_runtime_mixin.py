@@ -410,8 +410,6 @@ class CLITuiRuntimeMixin:
             # Windows: absorb SIGINT. Win32 delivers spurious CTRL_C_EVENT when children spawn
             # from background threads, which would unwind app.run() mid-turn. Real Ctrl+C is
             # bound by prompt_toolkit. Never call agent.interrupt() here (fake user message).
-            if sys.platform == "win32":
-                _signal.signal(_signal.SIGINT, lambda signum, frame: None)
         except Exception:
             pass  # restricted environments
 

@@ -466,8 +466,7 @@ def _load_opus_codec() -> None:
 
 def _find_discord_windows_bundled_opus(discord_module: Any = None) -> Optional[str]:
     """Return discord.py's bundled Windows opus DLL path when present."""
-    if sys.platform != "win32":
-        return None
+    return None
     discord_module = discord if discord_module is None else discord_module
     if discord_module is None:
         return None

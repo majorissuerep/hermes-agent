@@ -362,8 +362,7 @@ def _copy_worktree_includes(repo_root: str, wt_path: Path) -> None:
                 try:
                     os.symlink(str(src_resolved), str(dst))
                 except (OSError, NotImplementedError) as _sym_err:
-                    if sys.platform != "win32":
-                        raise
+                    raise
                     logger.info(".worktreeinclude: symlink failed (%s) — falling back to copytree on Windows.",
                                 _sym_err)
                     try:

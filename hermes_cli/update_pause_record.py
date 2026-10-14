@@ -943,7 +943,7 @@ def _resume_fenced(claim_path: Path, body: dict) -> None:
     try:
         if _has_work(token):
             print("→ Restarting gateway(s) paused by an interrupted `hermes update`...", file=sys.stderr)
-            from hermes_cli.update_cmd_windows import _resume_windows_gateways_after_update
+            from hermes_cli.update_cmd_holders import _resume_windows_gateways_after_update
             # Whatever command this launch runs owns stdout (``--json`` output, a Desktop pipe).
             with redirect_stdout(sys.stderr):
                 _resume_windows_gateways_after_update(token)

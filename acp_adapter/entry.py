@@ -198,8 +198,6 @@ def main(argv: list[str] | None = None) -> None:
     # native-extension import (numpy via holographic / mnemosyne / hindsight) racing another
     # thread's import chain deadlocked in create_module and session/new never answered
     # (#58083). After this the off-loop agent build finds the modules in sys.modules.
-    if sys.platform == "win32":
-        _warm_memory_provider_import(logger)
 
     # MCP discovery from config.yaml runs in a background daemon thread so the ACP server is
     # responsive immediately (blocking here cost 2-5 s); per-session MCP servers registered via

@@ -230,52 +230,6 @@ module.exports = {
       }
     ]
   },
-  win: {
-    executableName: windowsExecutableName,
-    legalTrademarks: displayName,
-    target: ['msix'],
-    // The updaters' relaunch waiter is PowerShell run outside the package. The
-    // sealed payload's snapshot omits scripts/, so it ships as a resource
-    // (RELAUNCH_WAITER_SCRIPT in electron/updater/relaunch-waiter.ts).
-    extraResources: [{ from: 'scripts/update-relaunch-waiter.ps1', to: 'update-relaunch-waiter.ps1' }],
-    ...windowsSigning()
-  },
-  msix: {
-    // A store build uses the Partner Center packaging identity (the Store
-    // re-signs + rewrites the publisher on submission); everything else uses
-    // the out-of-store ATS-cert identity.
-    identityName: store ? mustStoreMsix(storeMsixWhenStore).identityName : msixAppIdWithOrg,
-    applicationId: appNamePascal,
-    displayName,
-    publisher: store ? mustStoreMsix(storeMsixWhenStore).publisher : OUT_OF_STORE_PUBLISHER,
-    publisherDisplayName: store ? mustStoreMsix(storeMsixWhenStore).publisherDisplayName : 'Nous Research',
-    // The native quad is the build time (scripts/msix-shared.mjs::nativeQuad),
-    // baked into the manifest template, so the builder's own build-number
-    // override would stamp a second, conflicting version.
-    setBuildNumber: false,
-    // Store versions are baked into a build-time template. App semver and
-    // artifact filenames stay unchanged; the Store reserves revision zero.
-    // Floor Windows 11 22H2. Below build 18307 the manifest schema caps
-    // AppExtension Name at 39 chars and Microsoft's own
-    // "com.microsoft.windows.copilotkeyprovider" is 40 (makeappx
-    // 0x80080204 — A/B-verified against the 26100 kit; 18307 exactly
-    // still failed on it, 22621 passes), and 22621 is the documented
-    // Copilot hardware key floor anyway.
-    minVersion: '10.0.22621.0',
-    maxVersionTested: '10.0.26100.0',
-    // Static path: the file itself is written by scripts/before-build.mjs at
-    // build time (see the comment on the hook) — never at config require
-    // time, so typecheck/test imports don't touch the filesystem.
-    customExtensionsPath: 'build/msix-extensions.xml',
-    customManifestPath: store ? 'build/store-msix-manifest.xml'
-      : releaseBuild || channelRequest || appNamePascal !== artifactNamePascal
-        ? 'build/msix-manifest.xml' : 'assets/msix-manifest.xml',
-    // Hermes state is deliberately shared with unpackaged CLI/gateway
-    // processes. Pair the manifest's disabled virtualization properties with
-    // the restricted capability that permits unvirtualized AppData/HKCU writes.
-    capabilities: ['unvirtualizedResources'],
-    showNameOnTiles: true
-  },
   linux: {
     category: 'Development',
     maintainer: 'Nous Research <support@nousresearch.com>',

@@ -939,9 +939,7 @@ async def open_profile_terminal_endpoint(name: str):
     with _profile_errors("POST /api/profiles/%s/open-terminal failed", name):
         command = _profile_setup_command(name)
 
-        if sys.platform.startswith("win"):
-            subprocess.Popen(["cmd.exe", "/c", "start", "", command])  # noqa: ASYNC220 -- fire-and-forget spawn; Popen returns immediately and callers need the Popen object
-        elif sys.platform == "darwin":
+        if sys.platform == "darwin":
             escaped = command.replace("\\", "\\\\").replace('"', '\\"')
             subprocess.Popen(["osascript", "-e",  # noqa: ASYNC220 -- fire-and-forget spawn; Popen returns immediately and callers need the Popen object
                               f'tell application "Terminal"\nactivate\ndo script "{escaped}"\nend tell'])

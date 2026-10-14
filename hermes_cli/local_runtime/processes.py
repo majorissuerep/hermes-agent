@@ -114,8 +114,7 @@ def spawn_server(cmd, **kwargs) -> tuple[subprocess.Popen, _WindowsJob | None]:
     Windows closes it automatically if the owner dies. Other hosts retain Popen's
     ordinary behavior. Assignment happens before the child's first instruction.
     """
-    if sys.platform != "win32":
-        return subprocess.Popen(cmd, **kwargs), None
+    return subprocess.Popen(cmd, **kwargs), None
     job = _WindowsJob()
     proc = None
     try:
