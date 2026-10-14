@@ -87,42 +87,28 @@ class TestPrintFetchFailure:
         assert out == ["✗ Failed to fetch updates from origin."]
 
 
-def test_update_network_git_calls_never_prompt_for_credentials():
-    """Every `git fetch`/`pull`/`push` in the updater runs with prompts disabled.
-
-    Live incident (Sep 2026): a GitHub-side 401 made `hermes update` sit on
-    ``Username for 'https://github.com':`` instead of failing with a diagnosis.
-    """
-    import inspect
-    import os
-    import re
+def test_update_network_calls_preserve_authentication_without_prompting(monkeypatch, tmp_path):
     import subprocess
-
-    kw = update_cmd._no_prompt_git_kwargs()
-    assert kw["stdin"] is subprocess.DEVNULL
-    assert kw["env"]["GIT_TERMINAL_PROMPT"] == "0"
-    # Only the prompt is disabled — credential helpers / askpass stay
-    # configured so a private-fork origin still authenticates.
-    assert "GIT_CONFIG_COUNT" not in kw["env"] or kw["env"]["GIT_CONFIG_COUNT"] == os.environ.get("GIT_CONFIG_COUNT")
-
     from hermes_cli import update_cmd_git
 
-    # Network git calls live in the origin (``_git_run``) and the split git module.
-    src = inspect.getsource(update_cmd) + inspect.getsource(update_cmd_git)
-    # Every subprocess.run(...) whose argv is a fetch/pull must spread the kwargs.
+    monkeypatch.setenv("GIT_TERMINAL_PROMPT", "1")
+    monkeypatch.setenv("GCM_INTERACTIVE", "Always")
+    monkeypatch.setenv("GIT_ASKPASS", "fixture-askpass")
     calls = []
-    for m in re.finditer(r"subprocess\.run\(", src):
-        depth, i = 1, m.end()
-        while depth:
-            depth += {"(": 1, ")": -1}.get(src[i], 0)
-            i += 1
-        call = src[m.start():i]
-        if re.search(r'git_cmd \+ \["(fetch|pull|push)"', call):
-            calls.append(call)
-    # Fork: network calls route through _git_run(network=True); those are
-    # guarded centrally in _git_run itself. Direct subprocess.run network
-    # calls (if any remain) must still spread the no-prompt kwargs.
-    guarded_wrapper = "_no_prompt_git_kwargs()" in inspect.getsource(update_cmd._git_run)
-    assert calls or guarded_wrapper, "expected network git calls in update_cmd"
-    missing = [c for c in calls if "_no_prompt_git_kwargs()" not in c]
-    assert not missing, missing
+
+    def run(cmd, **kwargs):
+        calls.append((cmd, kwargs))
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    update_cmd._git_run(["git"], ["fetch", "origin", "main"], cwd=tmp_path, network=True, check=True)
+    assert len(calls) == 1
+    command, kwargs = calls[0]
+    assert "origin" in command
+    assert kwargs["stdin"] is subprocess.DEVNULL
+    assert kwargs["env"]["GIT_TERMINAL_PROMPT"] == "0"
+    assert kwargs["env"]["GCM_INTERACTIVE"] == "Never"
+    assert kwargs["env"]["GIT_ASKPASS"] == "fixture-askpass"
+    assert update_cmd_git._sync_with_upstream_if_needed(["git"], tmp_path, assume_yes=True) is False
+    update_cmd_git._push_synced_fork(["git"], tmp_path)
+    assert len(calls) == 1  # no upstream traffic or automatic fork push

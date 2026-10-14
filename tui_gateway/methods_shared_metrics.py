@@ -18,6 +18,13 @@ def _shared_metrics_consent(cfg) -> dict:
     return {"enabled": False, "send": False, "decided": True}
 
 
+def _tui_model_friction(signal, session, turns=1):
+    from hermes_cli.observability.shared_metrics_model import record_model_friction
+    record_model_friction(
+        signal, session_id=session.get("session_key"), agent=session.get("agent"),
+        hermes_home=session.get("profile_home"), turns=turns)
+
+
 @method("shared_metrics.status")
 @_profile_scoped
 def _(rid, params: dict) -> dict:

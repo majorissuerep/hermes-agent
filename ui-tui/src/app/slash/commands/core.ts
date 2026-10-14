@@ -100,6 +100,7 @@ export const coreCommands: SlashCommand[] = [
       sections.push(
         {
           rows: [
+            ['/connectors', t('slashCmd.core.help.connectors')],
             ['/details [hidden|collapsed|expanded|cycle]', t('slashCmd.core.help.detailsGlobal')],
             ['/details <section> [hidden|collapsed|expanded|reset]', t('slashCmd.core.help.detailsSection')],
             ['/fortune [random|daily]', t('slashCmd.core.help.fortune')],
@@ -300,6 +301,27 @@ export const coreCommands: SlashCommand[] = [
             ctx.transcript.sys(t('slashCmd.core.title.set', next, suffix))
           })
         )
+        .catch(ctx.guardedErr)
+    }
+  },
+
+  {
+    help: 'name this session with the LLM, or set its name',
+    name: 'name',
+    aliases: ['rename'],
+    run: (arg, ctx) => {
+      if (!ctx.sid) {
+        return ctx.transcript.sys(t('slashCmd.core.title.noActiveSession'))
+      }
+      ctx.gateway
+        .rpc<SessionTitleResponse>('session.title', {
+          session_id: ctx.sid,
+          ...(arg.trim() ? { title: arg.trim() } : { generate: true })
+        })
+        .then(ctx.guarded<SessionTitleResponse>(r => {
+          patchUiState({ sessionTitle: r.title })
+          ctx.transcript.sys(t('slashCmd.core.title.set', r.title, ''))
+        }))
         .catch(ctx.guardedErr)
     }
   },

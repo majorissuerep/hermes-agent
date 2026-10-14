@@ -27,14 +27,14 @@ hermes update
 运行 `hermes update` 时，将依次执行以下步骤：
 
 1. **更新前快照** — Hermes 在每个 profile 的 `state-snapshots/` 目录中保存指定的状态文件，包括配对数据、cron 任务、`config.yaml`、`.env` 和 `auth.json`。自动快速快照会跳过单个大于 1 GiB 的文件。`updates.pre_update_backup` 可选择 `quick`、`full` 或 `off`。完整归档遵循[备份排除规则](../reference/faq.md#hermes-backup-vs-hermes-profile-export)。恢复方法见[快照与回滚](../user-guide/checkpoints-and-rollback.md)。快速快照恢复的是状态文件，不是应用程序代码。
-2. **Git pull** — 从 `main` 分支拉取最新代码并更新子模块
+2. **代码更新** — 检出所选渠道的目标（默认最新 stable 版本）并更新子模块
 3. **依赖安装** — 运行 `python -m pm.cli install` 以获取新增或变更的依赖项
 4. **配置迁移** — 检测自当前版本以来新增的配置选项并提示设置
 5. **Gateway 自动重启** — 更新完成后刷新正在运行的 gateway，使新代码立即生效。由服务管理的 gateway（Linux 上的 systemd、macOS 上的 launchd）通过服务管理器重启；手动启动的 gateway 在 Hermes 能将运行中的 PID 映射回某个 profile 时会自动重新启动。
 
 ### 仅预览：`hermes update --check`
 
-想在拉取前确认是否有更新？运行 `hermes update --check` — 它会获取并与 `origin/main` 比较提交。不修改任何文件，不重启 gateway。适合在以"是否有更新"为条件的脚本和 cron 任务中使用。
+想在拉取前确认是否有更新？运行 `hermes update --check` — 它会与所选渠道的目标（默认最新 stable 版本，main 渠道为 `origin/main`）比较。不修改任何文件，不重启 gateway。适合在以"是否有更新"为条件的脚本和 cron 任务中使用。
 
 ### 完整更新前备份：`--backup`
 

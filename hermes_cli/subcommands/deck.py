@@ -20,6 +20,13 @@ def build_deck_parser(subparsers) -> None:
     deck.set_defaults(func=cmd_deck, deck_command=None)
     sub = deck.add_subparsers(dest="deck_command")
 
+    restore = sub.add_parser("restore", help="Restore open sessions into standalone terminal windows after reboot")
+    restore.add_argument("--profile", default=None, help="Restore only this profile (default: all)")
+    restore.add_argument("--terminal", default="auto", help="Native terminal name, auto, or tmux")
+    restore.add_argument("--dry-run", action="store_true", help="List what would be restored without opening windows")
+    restore.add_argument("--include-attached", action="store_true", help="Also open sessions already visible in a terminal")
+    restore.add_argument("--wait", type=float, default=30, help="Seconds to verify sessions are attached (default: 30)")
+
     ls = sub.add_parser("ls", aliases=["list"], help="List open sessions")
     ls.add_argument("--profile", default=None, help="Only this profile (default: all)")
     ls.add_argument("--closed", action="store_true", help="Include closed sessions")

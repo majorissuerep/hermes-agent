@@ -151,7 +151,7 @@ def _rpc_server_loop(server_sock: socket.socket, task_id: str, tool_call_log: li
             try:
                 conn, _ = server_sock.accept()
                 break
-            except socket.timeout:
+            except TimeoutError:
                 continue
         if conn is None:
             return
@@ -177,7 +177,7 @@ def _serve_rpc_connection(conn: socket.socket, task_id: str, tool_call_log: list
         while True:
             try:
                 chunk = conn.recv(65536)
-            except socket.timeout:
+            except TimeoutError:
                 break
             if not chunk:
                 break
@@ -199,8 +199,8 @@ def _serve_rpc_connection(conn: socket.socket, task_id: str, tool_call_log: list
                         call_start=call_start, where="sandbox",
                     ) if _rpc_token_ok(request, rpc_token) else tool_error("Unauthorized RPC request")
                 conn.sendall((resp + "\n").encode())
-    except socket.timeout:
-        logger.debug("RPC connection idle timeout")
+    except TimeoutError:
+        logger.debug("RPC listener socket timeout")
     except OSError as e:
         logger.debug("RPC connection error: %s", e, exc_info=True)
     finally:

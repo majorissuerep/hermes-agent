@@ -179,10 +179,12 @@ def cmd_deck_attach(args: argparse.Namespace) -> int:
 
 
 def cmd_deck(args: argparse.Namespace) -> int:
+    from hermes_cli.session_restore import cmd_restore
+
     handler = {
         None: _cmd_deck_open, "ls": cmd_deck_ls, "list": cmd_deck_ls, "send": cmd_deck_send,
         "close": cmd_deck_close, "peek": cmd_deck_peek, "interrupt": cmd_deck_interrupt,
-        "attach": cmd_deck_attach,
+        "attach": cmd_deck_attach, "restore": cmd_restore,
     }[getattr(args, "deck_command", None)]
     from hermes_cli.session_host import HostRpcError, HostUnavailable
 

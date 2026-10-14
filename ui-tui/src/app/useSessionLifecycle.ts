@@ -147,15 +147,23 @@ export function useSessionLifecycle(opts: UseSessionLifecycleOptions) {
     sys
   } = opts
 
-  // Deck mode: moving away from a session DETACHES it — it stays open (and running) in the host.
+  // Plugin on_session_finalize text comes back on the close result and is shown as system lines (never a
+  // model turn). `deferMessages`: the caller resets the transcript next and shows them itself afterwards.
   const closeSession = useCallback(
-    (targetSid?: null | string) =>
-      !targetSid
-        ? Promise.resolve(null)
-        : DECK_MODE
-          ? rpc('deck.detach', { session_id: targetSid })
-          : rpc<SessionCloseResponse>('session.close', { session_id: targetSid }),
-    [rpc]
+    async (targetSid?: null | string, deferMessages = false) => {
+      const closed = targetSid
+        ? DECK_MODE
+          ? await rpc('deck.detach', { session_id: targetSid }).then(() => null)
+          : await rpc<SessionCloseResponse>('session.close', { session_id: targetSid })
+        : null
+
+      if (!deferMessages) {
+        closed?.messages?.forEach(message => sys(message))
+      }
+
+      return closed
+    },
+    [rpc, sys]
   )
 
   const announceDeckSession = useCallback(
@@ -222,10 +230,7 @@ export function useSessionLifecycle(opts: UseSessionLifecycleOptions) {
       }
 
       const previousSid = getUiState().sid
-
-      if (!keepCurrent) {
-        await closeSession(previousSid)
-      }
+      const closed = keepCurrent ? null : await closeSession(previousSid, true)
 
       const r = await rpc<SessionCreateResponse>('session.create', {
         cols: colsRef.current,
@@ -272,6 +277,9 @@ export function useSessionLifecycle(opts: UseSessionLifecycleOptions) {
       if (msg) {
         sys(msg)
       }
+
+      // After the reset above, so the closed session's plugin messages stay visible.
+      closed?.messages?.forEach(message => sys(message))
 
       if (requestedTitle) {
         rpc<SessionTitleResponse>('session.title', {

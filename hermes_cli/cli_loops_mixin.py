@@ -134,6 +134,11 @@ class CLILoopsMixin:
         _cprint(_fresh_start())
         self._print_random_tip()
 
+    def _handle_name_command(self, cmd_original: str):
+        from hermes_cli.session_naming import rename_cli
+
+        rename_cli(self, cmd_original)
+
     def _cmd_title(self, cmd_original: str):
         from cli import _cprint
         from hermes_state import format_session_db_unavailable

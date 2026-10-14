@@ -6,14 +6,15 @@ test patches on ``update_cmd`` stay effective).
 """
 
 import logging
-from contextlib import suppress
+from contextlib import nullcontext, suppress
 import subprocess
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, UTC
 from pathlib import Path
 from typing import Optional
 
-from hermes_cli._subprocess_compat import windows_hide_flags
+from hermes_cli._subprocess_compat import NO_LAZY_FETCH_ENV, noninteractive_git_env, windows_hide_flags
+from hermes_cli.update_cmd_common import _record_stop
 
 logger = logging.getLogger("hermes_cli.update_cmd")  # log-record parity with the origin module
 
@@ -34,20 +35,24 @@ def _git_ok(git_cmd, args, cwd, **kw) -> bool:
     return _git_stdout(git_cmd, args, cwd, **kw) is not None
 
 
-def _git_run(git_cmd, args, cwd=None, *, check=False):
+def _git_run(git_cmd, args, cwd=None, *, check=False, env=None):
     """Run ``git_cmd + args`` and return the CompletedProcess.
 
     The updater's git runner: capture all output and decode as UTF-8 regardless of the
     Windows ANSI code page (#52649). ``check=True`` raises on non-zero exit. The spawn
-    always hides its console window (#117781).
+    always hides its console window (#117781). ``env`` replaces the child's environment.
     """
-    return subprocess.run(
-        git_cmd + list(args),
+    from hermes_cli.update_custody import run_git
+
+    # THE custody policy (R2): stash push / reset --hard keep the update's lock fd, fetch does not.
+    return run_git(
+        git_cmd, list(args),
         cwd=cwd,
         capture_output=True,
         text=True, encoding="utf-8", errors="replace",
         check=check,
         creationflags=windows_hide_flags(),
+        env=env,
     )
 
 
@@ -92,11 +97,11 @@ def _prune_orphan_rescue_refs(
             refs = [line.strip() for line in list_result.stdout.splitlines() if line.strip()]
             stale |= set(refs[:-keep] if keep > 0 else refs)
             if max_age_days > 0:
-                cutoff = datetime.now(timezone.utc) - timedelta(days=max_age_days)
+                cutoff = datetime.now(UTC) - timedelta(days=max_age_days)
                 for ref in refs:
                     with suppress(ValueError):
                         stamp = datetime.strptime(ref[len(prefix):][:15], "%Y%m%d-%H%M%S")
-                        if stamp.replace(tzinfo=timezone.utc) < cutoff:
+                        if stamp.replace(tzinfo=UTC) < cutoff:
                             stale.add(ref)
         for ref in sorted(stale):
             _git_run(git_cmd, ["update-ref", "-d", ref], cwd)
@@ -123,13 +128,14 @@ def _park_detached_head(git_cmd, cwd, branch) -> None:
     holders = [r for r in (contains.stdout or "").split() if r != "refs/stash"]
     if contains.returncode == 0 and holders:
         return  # already reachable from a branch, tag, remote or backup ref
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
     rescue_ref = f"refs/hermes-update-backups/detached-{branch}-{stamp}-{sha[:12]}"
     if _git_run(git_cmd, ["update-ref", rescue_ref, sha], cwd).returncode != 0:
         print(f"✗ HEAD is detached at {sha[:12]}, which no branch or tag contains, and backing it up "
               f"to {rescue_ref} failed.")
         print(f"  Update stopped so those commits are not orphaned. Keep them with: "
               f"git -C {cwd} branch <name> {sha[:12]}")
+        _record_stop("detached_head")
         sys.exit(1)
     count = (_git_run(git_cmd, ["rev-list", "--count", sha, "--not", "--branches", "--tags", "--remotes"],
                       cwd).stdout or "").strip()
@@ -144,12 +150,13 @@ def _branch_head_label(git_cmd=None, cwd=None) -> str | None:
 
     Appended to summary lines so a checkout parked on a stale branch is visible."""
     from hermes_cli.update_cmd import _m
+    from hermes_cli.update_custody import run_git
     try:
         cmd = list(git_cmd) if git_cmd else ["git"]
         root = cwd if cwd is not None else _m().PROJECT_ROOT
 
         def _rev_parse(*args):
-            return subprocess.run(cmd + ["rev-parse", *args], cwd=root, **_GIT_TEXT_KW)
+            return run_git(cmd, ["rev-parse", *args], cwd=root, **_GIT_TEXT_KW)
 
         branch, sha = _rev_parse("--abbrev-ref", "HEAD"), _rev_parse("--short", "HEAD")
         branch_name, sha_text = branch.stdout.strip(), sha.stdout.strip()
@@ -189,9 +196,34 @@ def _assess_parked_branch_switch(git_cmd: list[str], cwd: Path, current_branch: 
         return False, "unverifiable"
     if status.stdout.strip():
         return False, "dirty"
-    cherry = _git_run(git_cmd, ["cherry", f"origin/{target_branch}"], cwd)
-    if cherry.returncode != 0:
+    # Count parked-only commits from the commit graph first: rev-list needs no trees,
+    # so a treeless (tree:0) partial clone answers from local objects. `git cherry`'s
+    # patch-id walk needs upstream-side trees and lazy-fetches them in many promisor
+    # batches; one failed batch failed the whole verification and skipped a clean
+    # checkout (#124767).
+    ahead = _git_run(git_cmd, ["rev-list", "--count", f"origin/{target_branch}..HEAD"], cwd)
+    if ahead.returncode != 0 or not ahead.stdout.strip().isdigit():
         return False, "unverifiable"
+    ahead_count = int(ahead.stdout.strip())
+    if ahead_count == 0:
+        return True, ""
+    # Git before 2.44 ignores GIT_NO_LAZY_FETCH, so on a partial clone cherry still lazy-fetches
+    # without bound (git 2.43 on WSL hung here, #124767). Its patch-ids need blobs a partial clone
+    # keeps on the remote, so it rarely refines anything there: settle for the commit count.
+    promisor = _git_run(git_cmd, ["config", "--get-regexp", r"^(remote\..*\.promisor|extensions\.partialclone)$"], cwd)
+    if any(line.split()[-1].lower() != "false" for line in promisor.stdout.splitlines()):
+        return True, f"unmerged:{ahead_count}"
+    # The patch-id refinement must never fetch: on a tree:0 clone `git cherry` lazy-fetches
+    # a tree batch per commit and, with nothing bounding it, one such walk wrote 332 packs /
+    # 180 GiB over 7 h on Windows (#131444). With lazy fetch off a missing object fails the
+    # command fast and the commit count below stands in.
+    cherry = _git_run(git_cmd, ["cherry", f"origin/{target_branch}"], cwd,
+                      env={**noninteractive_git_env(), **NO_LAZY_FETCH_ENV})
+    if cherry.returncode != 0:
+        # Patch-equivalence only refines the count for rebase/squash-merged branches;
+        # a partial clone whose lazy fetch failed must not block a clean checkout,
+        # so degrade to the conservative commit count instead of "unverifiable".
+        return True, f"unmerged:{ahead_count}"
     unmerged = [line for line in cherry.stdout.splitlines() if line.startswith("+")]
     return True, f"unmerged:{len(unmerged)}" if unmerged else ""
 
@@ -259,7 +291,7 @@ def _is_fork(origin_url: Optional[str]) -> bool:
 
     def _norm(url: str) -> str:
         url = url.rstrip("/")
-        return url[:-4] if url.endswith(".git") else url
+        return url.removesuffix(".git")
 
     return _norm(origin_url) not in {_norm(official) for official in OFFICIAL_REPO_URLS}
 
@@ -333,11 +365,24 @@ def _offer_upstream_remote(git_cmd: list[str], cwd: Path, *, assume_yes: bool, i
     return True
 
 
-def _sync_with_upstream_if_needed(git_cmd: list[str], cwd: Path, *, assume_yes: bool = False, input_fn=None) -> bool:
+class UpstreamTargetBroken(Exception):
+    """The fork sync's upstream target fails the startup syntax check: refused before its move."""
+
+    def __init__(self, sha: str, path: str, error: str) -> None:
+        super().__init__(f"upstream/main ({sha[:10]}) has a syntax error in {path}")
+        self.sha, self.path, self.error = sha, path, error
+
+
+def _sync_with_upstream_if_needed(git_cmd: list[str], cwd: Path, *, assume_yes: bool = False, input_fn=None, checkout_move=None) -> bool:
     """Fork: upstream synchronization removed. This fork updates from its own
     origin only; there is no path back to NousResearch/hermes-agent and the
     updater never offers to add the upstream remote."""
     return False
+
+
+def _push_synced_fork(git_cmd: list[str], cwd: Path) -> None:
+    """Fork updates never publish upstream snapshots over the fork branch."""
+    return None
 
 
 
@@ -389,7 +434,9 @@ def _print_fetch_failure(stderr: str) -> None:
 def _probe_fork_bomb(argv: list) -> Optional[bool]:
     """Run ``<argv> --version``; True/False = guard message seen/absent, None = probe itself failed."""
     try:
-        result = subprocess.run(argv + ["--version"], timeout=15, **_GIT_TEXT_KW)
+        from hermes_cli.update_custody import run_git
+
+        result = run_git(argv, ["--version"], timeout=15, **_GIT_TEXT_KW)
     except Exception:
         return None
     return "fork bomb" in ((result.stdout or "") + (result.stderr or "")).lower()
@@ -480,7 +527,12 @@ def _npm_lockfile_owners(repo_root: Path) -> set[Path]:
     return owners
 
 
-def _discard_lockfile_churn(git_cmd, repo_root):
+def _no_move(*_targets, **_bound):
+    """The ``checkout_move`` of a run with no paused gateways: the step runs unbound."""
+    return nullcontext({})
+
+
+def _discard_lockfile_churn(git_cmd, repo_root, *, checkout_move=None):
     """Restore ``package-lock.json`` files npm rewrote non-deterministically, so the update sees a clean tree
     instead of autostashing every run. A lockfile is kept when a manifest it records is dirty: for the root
     lock that is the root or ANY workspace ``package.json`` (reverting it under a dirty ``apps/desktop``
@@ -506,11 +558,12 @@ def _discard_lockfile_churn(git_cmd, repo_root):
                 dirty.append(path)
         if not dirty:
             return
-        _git_run(git_cmd, ["checkout", "--", *dirty], repo_root)
+        with (checkout_move or _no_move)(paths=dirty):
+            _git_run(git_cmd, ["checkout", "--", *dirty], repo_root)
         print(f"→ Discarded npm lockfile churn ({len(dirty)} file(s))")
 
 
-def _normalize_managed_eol(git_cmd, repo_root):
+def _normalize_managed_eol(git_cmd, repo_root, *, checkout_move=None):
     """Take a managed checkout off ``core.autocrlf=true`` without leaving it dirty.
 
     Git for Windows sets ``autocrlf=true`` system-wide, turning LF files CRLF and breaking ``git checkout``
@@ -525,11 +578,12 @@ def _normalize_managed_eol(git_cmd, repo_root):
     itself, is the only path left that can fix them. See #67730.
     """
     from hermes_cli.update_cmd_git import _git_run
+    from hermes_cli.update_custody import run_git
     # -c, not config: evaluate the tree as it WOULD look pinned, persisting nothing.
     probe = git_cmd + ["-c", "core.autocrlf=false"]
 
     def _probe_run(*args, **kw):
-        return subprocess.run(probe + list(args), cwd=repo_root, **_GIT_TEXT_KW, **kw)
+        return run_git(probe, list(args), cwd=repo_root, **_GIT_TEXT_KW, **kw)
 
     def _eol_only():
         """Dirty paths whose ONLY change is CRLF; None when either probe fails."""
@@ -554,10 +608,11 @@ def _normalize_managed_eol(git_cmd, repo_root):
             return
         if eol_only:
             # Pathspec via stdin: thousands of paths exceed the Windows argv limit.
-            _probe_run("checkout", "--pathspec-from-file=-", "--pathspec-file-nul", "--",
-                       input="\0".join(sorted(eol_only)), check=False)
+            with (checkout_move or _no_move)(paths=sorted(eol_only)):
+                _probe_run("checkout", "--pathspec-from-file=-", "--pathspec-file-nul", "--",
+                           input="\0".join(sorted(eol_only)), check=False)
             if _eol_only():  # still dirty: pinning would only surface churn we failed to clear
                 return
             print(f"→ Normalized line-ending churn ({len(eol_only)} file(s))")
-        subprocess.run(git_cmd + ["config", "core.autocrlf", "false"], cwd=repo_root, capture_output=True, check=False,
-                       creationflags=windows_hide_flags())
+        run_git(git_cmd, ["config", "core.autocrlf", "false"], cwd=repo_root, capture_output=True, check=False,
+                creationflags=windows_hide_flags())

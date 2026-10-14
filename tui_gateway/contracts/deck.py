@@ -29,6 +29,7 @@ class DeckSession(Result):
     owner_surface: str
     owner_pid: int | None = None
     live_session_id: str  # runtime id in THIS host ("" when not live here)
+    attached: bool = False  # a terminal/viewer currently shows this session
     message_count: int
     opened_at: float
     last_active: float
