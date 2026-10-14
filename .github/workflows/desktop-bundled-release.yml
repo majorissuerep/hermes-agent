@@ -11,6 +11,9 @@ name: Desktop Bundled Release
 # publication and Store submission require the accepted cross-platform candidate):
 #
 #   build-win32 (win32-x64 + win32-arm64)   → stage packages + receipts to R2
+#     Stable runs pick which Windows packages these build: `skip-signed` builds
+#     only the unsigned Store variant (no Azure signing), `skip-store` only the
+#     signed bundled one.
 #   build-darwin (darwin-arm64 + darwin-x64) → sign + notarize + stage
 #     dmg/zip/blockmap + per-arch feed inputs to the R2 tag archive
 #   build-linux                              → DISABLED for now (dummy skips)
@@ -103,7 +106,15 @@ on:
         type: string
         default: 'darwin-arm64,darwin-x64,win32-arm64,win32-x64,win32-bundle,linux-x64,linux-arm64,termux'
       skip-tests:
-        description: 'Stable candidates only: build and stage without native smokes or in-build test suites (the claim skipped tests).'
+        description: 'Stable candidates only: build and stage without native smokes or in-build test suites (the claim has no smoke lane).'
+        type: boolean
+        default: false
+      skip-signed:
+        description: 'Stable candidates only: build no signed Windows package (the claim has no windows lane). Needs no Azure signing.'
+        type: boolean
+        default: false
+      skip-store:
+        description: 'Stable only: build no Microsoft Store bundle and submit none (the claim has no windows-store lane).'
         type: boolean
         default: false
     outputs:
@@ -952,7 +963,7 @@ jobs:
     if: >-
       !cancelled() && needs.validate.result == 'success' && needs.validate.outputs.sha != ''
       && needs.build-darwin-arm64.result == 'success' && needs.validate.outputs.darwin-arm64 == 'true'
-      && needs.stage-receipt-darwin-arm64.result == 'success'
+      && (inputs.release-phase != 'candidate' || needs.stage-receipt-darwin-arm64.result == 'success')
       && (inputs.release-phase == '' || inputs.release-phase == 'candidate')
       && (inputs.upload_release == true || inputs.release-phase == 'candidate' || inputs.build_commit != '' || inputs.channel != '')
       && inputs.skip-tests != true
@@ -985,7 +996,7 @@ jobs:
     if: >-
       !cancelled() && needs.validate.result == 'success' && needs.validate.outputs.sha != ''
       && needs.build-darwin-x64.result == 'success' && needs.validate.outputs.darwin-x64 == 'true'
-      && needs.stage-receipt-darwin-x64.result == 'success'
+      && (inputs.release-phase != 'candidate' || needs.stage-receipt-darwin-x64.result == 'success')
       && (inputs.release-phase == '' || inputs.release-phase == 'candidate')
       && (inputs.upload_release == true || inputs.release-phase == 'candidate' || inputs.build_commit != '' || inputs.channel != '')
       && inputs.skip-tests != true
@@ -1387,6 +1398,7 @@ jobs:
           from pathlib import Path
           from scripts.releases.handoff import fetch
           from scripts.releases.semver import is_valid_version
+          from scripts.releases.stable import release_line_contains
           tag = os.environ['PREVIOUS_TAG']
           if not tag.startswith('v') or not is_valid_version(tag[1:]):
               raise ValueError('Invalid previous release tag')
@@ -1396,7 +1408,8 @@ jobs:
           if release['tagName'] != tag or release['isDraft']:
               raise ValueError('Previous package must come from a published release')
           commit = subprocess.check_output(['git', 'rev-parse', '--verify', f'refs/tags/{tag}^{{commit}}'], text=True).strip()
-          subprocess.run(['git', 'merge-base', '--is-ancestor', commit, 'origin/main'], check=True)
+          if not subprocess.check_output(release_line_contains(commit, 'origin'), text=True).strip():
+              raise ValueError('Previous package must come from main or a release/* branch')
           fetch(tag, commit, ['termux'], Path('termux-build/previous'), ['deb/*.deb'])
           PY
 
@@ -1704,7 +1717,7 @@ jobs:
   stable-store:
     name: Submit the verified Store package
     needs: [validate, stable-publish]
-    if: inputs.release-phase == 'publish'
+    if: inputs.release-phase == 'publish' && inputs.skip-store != true
     # The Store is not a release gate: a failed submission leaves the release publishable
     # and the summary names the Store package for a manual Partner Center upload.
     continue-on-error: true
@@ -1784,6 +1797,7 @@ jobs:
           RELEASE_NEEDS: ${{ toJSON(needs) }}
           RELEASE_PHASE: ${{ inputs.release-phase }}
           SKIP_TESTS: ${{ inputs.skip-tests }}
+          SKIP_SIGNED: ${{ inputs.skip-signed }}
         run: |
           python - <<'PY'
           import json, os
@@ -1793,7 +1807,8 @@ jobs:
           outputs = needs['validate'].get('outputs', {})
           selected = {group: outputs.get(group) == 'true' for group in JOB_GROUPS}
           require_success(needs, phase_jobs(selected, os.environ['RELEASE_PHASE'],
-                                            skip_tests=os.environ['SKIP_TESTS'] == 'true'))
+                                            skip_tests=os.environ['SKIP_TESTS'] == 'true',
+                                            skip_signed=os.environ['SKIP_SIGNED'] == 'true'))
           PY
 
   publish-canary:

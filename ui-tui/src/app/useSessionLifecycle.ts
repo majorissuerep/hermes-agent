@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { writeFileSync } from 'node:fs'
 
 import type { ScrollBoxHandle } from '@hermes/ink'
@@ -5,6 +6,7 @@ import { evictInkCaches } from '@hermes/ink'
 import type { InflightTurn, SessionResumeResult, Usage } from '@hermes/shared/gateway-events'
 import { type RefObject, useCallback, useEffect, useMemo, useRef } from 'react'
 
+import { localCreationOptions } from '../canonicalGateway.js'
 import { STARTUP_WORKSPACE_CWD } from '../config/env.js'
 import { buildSetupRequiredSections, setupRequiredTitle } from '../content/setup.js'
 import { introMsg, toTranscriptMessages } from '../domain/messages.js'
@@ -14,10 +16,12 @@ import type {
   SessionActivateResponse,
   SessionCloseResponse,
   SessionCreateResponse,
+  SessionDetachResponse,
   SessionTitleResponse,
   SetupStatusResponse
 } from '../gatewayTypes.js'
 import { t } from '../i18n/runtime.js'
+import { migratePendingInputs } from '../lib/pendingInputs.js'
 import { asRpcResult } from '../lib/rpc.js'
 import type { Msg, PanelSection, SessionInfo } from '../types.js'
 
@@ -26,6 +30,8 @@ import { DECK_MODE, deckCreateParams, deckResumeParams, registerDeckSession } fr
 import type { ComposerActions, GatewayRpc, StateSetter } from './interfaces.js'
 import { patchOverlayState } from './overlayStore.js'
 import { scheduleResumeScrollToBottom } from './sessionResumeView.js'
+import { renameCanonicalSession } from './slash/canonicalSessionCommands.js'
+import { captureDestination } from './submissionDestination.js'
 import { turnController } from './turnController.js'
 import { patchTurnState } from './turnStore.js'
 import { getUiState, patchUiState } from './uiStore.js'
@@ -45,6 +51,21 @@ const statusFromLiveSession = (status?: string, running = false) => {
   }
 
   return running || status === 'working' ? 'running…' : 'ready'
+}
+
+/** Session-start notices, in their original order: credential, config, then the caller's message. */
+const reportNewSessionNotices = (info: null | SessionInfo, msg: string | undefined, sys: (text: string) => void) => {
+  if (info?.credential_warning) {
+    sys(`warning: ${describeCredentialWarning(info.credential_warning)}`)
+  }
+
+  if (info?.config_warning) {
+    sys(`warning: ${info.config_warning}`)
+  }
+
+  if (msg) {
+    sys(msg)
+  }
 }
 
 export const writeActiveSessionFile = (sessionId: null | string, file = process.env.HERMES_TUI_ACTIVE_SESSION_FILE) => {
@@ -112,6 +133,8 @@ const trimTail = (items: Msg[]) => {
   return q
 }
 
+type CanonicalEndReason = 'tui_close' | 'tui_shutdown'
+
 export interface UseSessionLifecycleOptions {
   colsRef: { current: number }
   composerActions: ComposerActions
@@ -149,13 +172,15 @@ export function useSessionLifecycle(opts: UseSessionLifecycleOptions) {
 
   // Plugin on_session_finalize text comes back on the close result and is shown as system lines (never a
   // model turn). `deferMessages`: the caller resets the transcript next and shows them itself afterwards.
+  // A canonical session is the gateway's: the view detaches, it never closes the owner's session.
   const closeSession = useCallback(
     async (targetSid?: null | string, deferMessages = false) => {
-      const closed = targetSid
-        ? DECK_MODE
-          ? await rpc('deck.detach', { session_id: targetSid }).then(() => null)
-          : await rpc<SessionCloseResponse>('session.close', { session_id: targetSid })
-        : null
+      const closed =
+        targetSid && !gw.isCanonical
+          ? DECK_MODE
+            ? await rpc('deck.detach', { session_id: targetSid }).then(() => null)
+            : await rpc<SessionCloseResponse>('session.close', { session_id: targetSid })
+          : null
 
       if (!deferMessages) {
         closed?.messages?.forEach(message => sys(message))
@@ -163,7 +188,7 @@ export function useSessionLifecycle(opts: UseSessionLifecycleOptions) {
 
       return closed
     },
-    [rpc, sys]
+    [gw.isCanonical, rpc, sys]
   )
 
   const announceDeckSession = useCallback(
@@ -176,6 +201,120 @@ export function useSessionLifecycle(opts: UseSessionLifecycleOptions) {
   )
 
   const cancelResumeScrollRef = useRef<null | (() => void)>(null)
+  const attachmentFlight = useRef(0)
+  const pendingAttachments = useRef(new Set<number>())
+  const canonicalSubscriptions = useRef(new Map<string, string>())
+  const canonicalDetachFlights = useRef(new Map<string, Promise<void>>())
+  const staleAttachments = useRef(new Map<string, { session_id: string; subscription_id: string }>())
+
+  // `endReason`: main's `session.close` stamp for a view this TUI closes for good (`tui_close` on /new or
+  // a resume switch, `tui_shutdown` on exit); the owner applies it once no other viewer remains.
+  const detachCanonical = useCallback(
+    (sessionId?: null | string, subscriptionId?: null | string, endReason?: CanonicalEndReason) => {
+      if (!gw.isCanonical || !sessionId || !subscriptionId) {
+        return
+      }
+
+      const detach = () =>
+        rpc<SessionDetachResponse>('session.detach', {
+          session_id: sessionId,
+          subscription_id: subscriptionId,
+          ...(endReason ? { end_reason: endReason } : {})
+        })
+          .then(result => {
+            if (result?.detached && canonicalSubscriptions.current.get(sessionId) === subscriptionId) {
+              canonicalSubscriptions.current.delete(sessionId)
+            }
+          })
+          .catch(() => undefined)
+
+      const previous = canonicalDetachFlights.current.get(sessionId)
+      const pending = previous ? previous.then(detach) : detach()
+
+      canonicalDetachFlights.current.set(sessionId, pending)
+      void pending.then(() => {
+        if (canonicalDetachFlights.current.get(sessionId) === pending) {
+          canonicalDetachFlights.current.delete(sessionId)
+        }
+      })
+
+      return pending
+    },
+    [gw.isCanonical, rpc]
+  )
+
+  // Exit (`/quit`, Ctrl+D): main's sidecar stamped every session it held `tui_shutdown` at shutdown.
+  const closeForExit = useCallback(async () => {
+    const open = [...canonicalSubscriptions.current.entries()]
+
+    await Promise.all(open.map(([sessionId, subscriptionId]) => detachCanonical(sessionId, subscriptionId, 'tui_shutdown')))
+  }, [detachCanonical])
+
+  const disposeStaleAttachments = useCallback(() => {
+    // In-flight attaches can share a token before either result is adopted.
+    // Decide disposal only after their handlers have adopted (or refused) it.
+    if (pendingAttachments.current.size) {
+      return
+    }
+
+    const stale = [...staleAttachments.current.values()]
+    staleAttachments.current.clear()
+
+    for (const result of stale) {
+      if (canonicalSubscriptions.current.get(result.session_id) !== result.subscription_id) {
+        detachCanonical(result.session_id, result.subscription_id)
+      }
+    }
+  }, [detachCanonical])
+
+  const finishAttachment = useCallback(
+    (flight: number) => {
+      pendingAttachments.current.delete(flight)
+      disposeStaleAttachments()
+    },
+    [disposeStaleAttachments]
+  )
+
+  const discardStaleAttachment = useCallback(
+    (result?: null | { session_id: string; subscription_id?: string }) => {
+      if (result?.subscription_id) {
+        staleAttachments.current.set(JSON.stringify([result.session_id, result.subscription_id]), {
+          session_id: result.session_id,
+          subscription_id: result.subscription_id
+        })
+      }
+
+      disposeStaleAttachments()
+    },
+    [disposeStaleAttachments]
+  )
+
+  const adoptAttachment = useCallback(
+    (
+      result: { session_id: string; subscription_id?: string },
+      previousSid?: null | string,
+      previousSubscription?: null | string,
+      closePrevious = false
+    ) => {
+      if (DECK_MODE) {
+        announceDeckSession(result.session_id)
+      }
+      if (!gw.isCanonical || !result.subscription_id) {
+        return
+      }
+
+      canonicalSubscriptions.current.set(result.session_id, result.subscription_id)
+
+      if (
+        previousSid &&
+        previousSubscription &&
+        (previousSid !== result.session_id || previousSubscription !== result.subscription_id)
+      ) {
+        detachCanonical(previousSid, previousSubscription, closePrevious && previousSid !== result.session_id ? 'tui_close' : undefined)
+      }
+    },
+    [announceDeckSession, detachCanonical, gw.isCanonical]
+  )
 
   const resetSession = useCallback(() => {
     cancelResumeScrollRef.current?.()
@@ -195,6 +334,7 @@ export function useSessionLifecycle(opts: UseSessionLifecycleOptions) {
 
   useEffect(
     () => () => {
+      attachmentFlight.current++
       cancelResumeScrollRef.current?.()
       cancelResumeScrollRef.current = null
     },
@@ -220,101 +360,125 @@ export function useSessionLifecycle(opts: UseSessionLifecycleOptions) {
 
   const startNewSession = useCallback(
     async (msg?: string, title?: string, keepCurrent = false) => {
-      const setup = await rpc<SetupStatusResponse>('setup.status', {})
-
-      if (setup?.provider_configured === false) {
-        panel(setupRequiredTitle(), buildSetupRequiredSections())
-        patchUiState({ status: t('session.status.setupRequired') })
-
-        return null
-      }
-
+      const flight = ++attachmentFlight.current
       const previousSid = getUiState().sid
-      const closed = keepCurrent ? null : await closeSession(previousSid, true)
+      const previousSubscription = previousSid ? canonicalSubscriptions.current.get(previousSid) : undefined
+      pendingAttachments.current.add(flight)
 
-      const r = await rpc<SessionCreateResponse>('session.create', {
-        cols: colsRef.current,
-        ...deckCreateParams(),
-        ...(STARTUP_WORKSPACE_CWD ? { cwd: STARTUP_WORKSPACE_CWD } : {})
-      })
+      try {
+        const setup = gw.isCanonical ? null : await rpc<SetupStatusResponse>('setup.status', {})
 
-      if (!r) {
-        patchUiState({ status: 'ready' })
+        if (flight !== attachmentFlight.current) {
+          return null
+        }
 
-        return null
-      }
+        if (setup?.provider_configured === false) {
+          panel(setupRequiredTitle(), buildSetupRequiredSections())
+          patchUiState({ status: t('session.status.setupRequired') })
 
-      // The durable id lives on the create result; the lazy-create `info` does
-      // not carry it, and session.resume / the exit epilogue need the stored id.
-      const storedSid = r.stored_session_id || r.session_id
-      const info = r.info ? { ...r.info, stored_session_id: storedSid } : null
-      const requestedTitle = title?.trim() ?? ''
+          return null
+        }
 
-      resetSession()
-      setSessionStartedAt(Date.now())
+        const closed = keepCurrent ? null : await closeSession(previousSid, true)
 
-      writeActiveSessionFile(storedSid)
-      patchUiState({
-        info,
-        sid: r.session_id,
-        status: info?.version ? 'ready' : t('session.status.startingAgent'),
-        storedSid,
-        usage: usageFrom(info)
-      })
+        if (flight !== attachmentFlight.current) {
+          return null
+        }
 
-      if (info) {
-        setHistoryItems([introMsg(info)])
-      }
+        // HERMES_TUI_CWD is the dashboard-picked workspace: an explicit cwd on
+        // session.create on both transports, so /new stays in that workspace.
+        const workspaceCwd = STARTUP_WORKSPACE_CWD ? { cwd: STARTUP_WORKSPACE_CWD } : {}
 
-      if (info?.credential_warning) {
-        sys(`warning: ${describeCredentialWarning(info.credential_warning)}`)
-      }
+        const r = await rpc<SessionCreateResponse>(
+          'session.create',
+          gw.isCanonical
+            ? { request_id: randomUUID(), ...localCreationOptions(), ...workspaceCwd }
+            : { cols: colsRef.current, ...deckCreateParams(), ...workspaceCwd }
+        )
 
-      if (info?.config_warning) {
-        sys(`warning: ${info.config_warning}`)
-      }
+        if (flight !== attachmentFlight.current) {
+          discardStaleAttachment(r)
 
-      if (msg) {
-        sys(msg)
-      }
+          return null
+        }
 
-      // After the reset above, so the closed session's plugin messages stay visible.
-      closed?.messages?.forEach(message => sys(message))
+        if (!r) {
+          patchUiState({ status: 'ready' })
 
-      if (requestedTitle) {
-        rpc<SessionTitleResponse>('session.title', {
-          session_id: r.session_id,
-          title: requestedTitle
+          return null
+        }
+
+        // The durable id lives on the create result; the lazy-create `info` does
+        // not carry it, and session.resume / the exit epilogue need the stored id.
+        const storedSid = r.stored_session_id || r.info?.stored_session_id || r.session_id
+        const info = r.info ? { ...r.info, stored_session_id: storedSid } : null
+        const requestedTitle = title?.trim() ?? ''
+
+        resetSession()
+        setSessionStartedAt(Date.now())
+
+        writeActiveSessionFile(storedSid)
+        patchUiState({
+          gatewayConnected: true,
+          info,
+          sid: r.session_id,
+          status: gw.isCanonical || info?.version ? 'ready' : t('session.status.startingAgent'),
+          storedSid,
+          usage: usageFrom(info)
         })
-          .then(result => {
-            if (!result || getUiState().sid !== r.session_id) {
-              return
-            }
 
-            const nextTitle = (result.title ?? requestedTitle).trim()
-            const suffix = result.pending ? t('session.lifecycle.titleQueuedSuffix') : ''
-            patchUiState({ sessionTitle: nextTitle })
-            sys(`${t('session.lifecycle.sessionTitleSet', nextTitle)}${suffix}`)
-          })
-          .catch((err: unknown) => {
-            if (getUiState().sid !== r.session_id) {
-              return
-            }
+        if (info) {
+          setHistoryItems([introMsg(info)])
+        }
 
-            const message = err instanceof Error ? err.message : String(err)
-            sys(`warning: ${t('session.lifecycle.failedToSetTitle', message)}`)
-          })
+        reportNewSessionNotices(info, msg, sys)
+
+        // After the reset above, so the closed session's plugin messages stay visible.
+        closed?.messages?.forEach(message => sys(message))
+
+        if (requestedTitle) {
+          ;(gw.isCanonical
+            ? renameCanonicalSession(gw, r.session_id, requestedTitle).then(title =>
+                title === undefined ? null : ({ title } as SessionTitleResponse)
+              )
+            : rpc<SessionTitleResponse>('session.title', { session_id: r.session_id, title: requestedTitle })
+          )
+            .then(result => {
+              if (!result || getUiState().sid !== r.session_id) {
+                return
+              }
+
+              const nextTitle = (result.title ?? requestedTitle).trim()
+              const suffix = result.pending ? t('session.lifecycle.titleQueuedSuffix') : ''
+              patchUiState({ sessionTitle: nextTitle })
+              sys(`${t('session.lifecycle.sessionTitleSet', nextTitle)}${suffix}`)
+            })
+            .catch((err: unknown) => {
+              if (getUiState().sid !== r.session_id) {
+                return
+              }
+
+              const message = err instanceof Error ? err.message : String(err)
+              sys(`warning: ${t('session.lifecycle.failedToSetTitle', message)}`)
+            })
+        }
+
+        signalFreshSessionBoundary(previousSid, r.session_id, onFreshSessionStarted)
+        // Main closed the previous session here (`closeSession` → `tui_close`) unless kept live.
+        adoptAttachment(r, previousSid, previousSubscription, !keepCurrent)
+
+        return r.session_id
+      } finally {
+        finishAttachment(flight)
       }
-
-      signalFreshSessionBoundary(previousSid, r.session_id, onFreshSessionStarted)
-      announceDeckSession(r.session_id)
-
-      return r.session_id
     },
     [
-      announceDeckSession,
+      adoptAttachment,
       closeSession,
       colsRef,
+      discardStaleAttachment,
+      finishAttachment,
+      gw,
       onFreshSessionStarted,
       panel,
       resetSession,
@@ -340,15 +504,36 @@ export function useSessionLifecycle(opts: UseSessionLifecycleOptions) {
   )
 
   const activateLiveSession = useCallback(
-    (id: string) => {
+    (id: string, profile?: string) => {
+      const flight = ++attachmentFlight.current
+      pendingAttachments.current.add(flight)
+      const previousSid = getUiState().sid
+      const previousSubscription = previousSid ? canonicalSubscriptions.current.get(previousSid) : undefined
       patchOverlayState({ sessions: false })
       patchUiState({ status: t('session.status.switchingSession') })
       // The card belongs to the session being left; the activated one answers with its own.
       clearConnectionOperation()
 
-      gw.request<SessionActivateResponse>('session.activate', { session_id: id })
+      const pendingDetach = canonicalDetachFlights.current.get(id)
+      const hold = gw.holdAttach?.(id) ?? null
+
+      const request = pendingDetach
+        ? pendingDetach.then(() =>
+            flight === attachmentFlight.current
+              ? gw.request<SessionActivateResponse>('session.activate', { session_id: id })
+              : null
+          )
+        : gw.request<SessionActivateResponse>('session.activate', { session_id: id })
+
+      request
         .then(raw => {
           const r = asRpcResult<SessionActivateResponse>(raw)
+
+          if (flight !== attachmentFlight.current) {
+            discardStaleAttachment(r)
+
+            return
+          }
 
           if (!r) {
             sys(`error: ${t('session.common.invalidResponse', 'session.activate')}`)
@@ -356,10 +541,11 @@ export function useSessionLifecycle(opts: UseSessionLifecycleOptions) {
             return patchUiState({ status: 'ready' })
           }
 
-          const info = r.info ?? null
           // Agent-less (lazy) activations answer with `_fallback_session_info`, which
-          // has no stored_session_id; the durable id is the response's session_key.
-          const storedSid = r.session_key || r.session_id
+          // has no stored_session_id; the durable id is the response's session_key
+          // (canonical snapshots carry it as stored_session_id).
+          const storedSid = r.session_key || r.stored_session_id || r.info?.stored_session_id || r.session_id
+          const info = r.info ? { ...r.info, stored_session_id: storedSid } : null
           const running = Boolean(r.running || r.status === 'working' || r.status === 'waiting')
 
           resetSession()
@@ -369,14 +555,18 @@ export function useSessionLifecycle(opts: UseSessionLifecycleOptions) {
           writeActiveSessionFile(storedSid)
           patchUiState({
             busy: running,
+            gatewayConnected: true,
             info,
             sid: r.session_id,
             status: statusFromLiveSession(r.status, running),
             storedSid,
             usage: usageFrom(info)
           })
+          // resetSession dropped the previous session's controls; the snapshot's
+          // still-pending approval/clarify prompts are the only way they come back.
+          gw.hydrateSharedPrompts?.(r)
           hydrateLiveSessionInflight(r.inflight)
-          announceDeckSession(r.session_id)
+          gw.settleAttach?.(hold, r)
 
           if (r.pending_connection) {
             applyConnectionRequest(r.pending_connection)
@@ -384,92 +574,151 @@ export function useSessionLifecycle(opts: UseSessionLifecycleOptions) {
 
           cancelResumeScrollRef.current?.()
           cancelResumeScrollRef.current = scheduleResumeScrollToBottom(scrollRef)
+          adoptAttachment(r, previousSid, previousSubscription)
         })
         .catch((e: Error) => {
+          if (flight !== attachmentFlight.current) {
+            return
+          }
+
           sys(`error: ${e.message}`)
           patchUiState({ status: 'ready' })
         })
+        .finally(() => {
+          // A failed or superseded attach releases what it held (no-op after a settled snapshot).
+          gw.settleAttach?.(hold)
+          finishAttachment(flight)
+        })
     },
-    [announceDeckSession, gw, resetSession, scrollRef, setHistoryItems, setSessionStartedAt, sys]
+    [
+      adoptAttachment,
+      discardStaleAttachment,
+      finishAttachment,
+      gw,
+      resetSession,
+      scrollRef,
+      setHistoryItems,
+      setSessionStartedAt,
+      sys
+    ]
   )
 
   // ``profile`` (deck mode): the deck spans profiles, so a row carries the profile its session lives in.
   const resumeById = useCallback(
     (id: string, profile?: string) => {
+      const flight = ++attachmentFlight.current
+      pendingAttachments.current.add(flight)
+      const current = captureDestination()
+      const previousSid = current.sid
+      const previousSubscription = previousSid ? canonicalSubscriptions.current.get(previousSid) : undefined
+
+      const destination =
+        current.sid === id || current.storedSid === id ? current : { ...current, sid: id, storedSid: id }
+
       patchOverlayState({ sessions: false })
       patchUiState({ status: t('session.status.resuming') })
 
-      return rpc<SetupStatusResponse>('setup.status', {}).then(setup => {
-        if (setup?.provider_configured === false) {
-          panel(setupRequiredTitle(), buildSetupRequiredSections())
-          patchUiState({ status: t('session.status.setupRequired') })
+      return (gw.isCanonical ? Promise.resolve(null) : rpc<SetupStatusResponse>('setup.status', {}))
+        .then(setup => {
+          if (flight !== attachmentFlight.current) {
+            return
+          }
 
-          return
-        }
+          if (setup?.provider_configured === false) {
+            panel(setupRequiredTitle(), buildSetupRequiredSections())
+            patchUiState({ status: t('session.status.setupRequired') })
 
-        const previousSid = getUiState().sid
+            return
+          }
 
-        return gw
-          .request<SessionResumeResult>('session.resume', {
-            cols: colsRef.current,
-            session_id: id,
-            ...deckResumeParams(profile)
-          })
-          .then(raw => {
-            const r = asRpcResult<SessionResumeResult>(raw)
+          const pendingDetach = canonicalDetachFlights.current.get(id)
+          const hold = gw.holdAttach?.(id) ?? null
 
-            if (!r) {
-              sys(`error: ${t('session.common.invalidResponse', 'session.resume')}`)
+          const request = pendingDetach
+            ? pendingDetach.then(() =>
+                flight === attachmentFlight.current
+                  ? gw.request<SessionResumeResult>('session.resume', { cols: colsRef.current, session_id: id, ...deckResumeParams(profile) })
+                  : null
+              )
+            : gw.request<SessionResumeResult>('session.resume', { cols: colsRef.current, session_id: id, ...deckResumeParams(profile) })
 
-              return patchUiState({ status: 'ready' })
-            }
+          return request
+            .then(raw => {
+              const r = asRpcResult<SessionResumeResult>(raw)
 
-            const storedSid = r.info?.stored_session_id || r.stored_session_id || r.resumed || id
-            const info = r.info ? { ...r.info, stored_session_id: storedSid } : null
+              if (flight !== attachmentFlight.current) {
+                discardStaleAttachment(r)
 
-            const running = Boolean(r.running || r.status === 'working' || r.status === 'waiting')
+                return
+              }
 
-            resetSession()
-            setSessionStartedAt(r.started_at ? r.started_at * 1000 : Date.now())
+              if (!r) {
+                sys(`error: ${t('session.common.invalidResponse', 'session.resume')}`)
 
-            const resumed = [...toTranscriptMessages(r.messages), ...liveSessionInflightMessages(r.inflight)]
+                return patchUiState({ status: 'ready' })
+              }
 
-            setHistoryItems(info ? [introMsg(info), ...resumed] : resumed)
-            writeActiveSessionFile(storedSid)
-            patchUiState({
-              busy: running,
-              info,
-              sid: r.session_id,
-              status: statusFromLiveSession(r.status ?? undefined, running),
-              storedSid,
-              usage: usageFrom(info)
+              const storedSid = r.session_key || r.info?.stored_session_id || r.stored_session_id || r.resumed || id
+              const info = r.info ? { ...r.info, stored_session_id: storedSid } : null
+
+              const running = Boolean(r.running || r.status === 'working' || r.status === 'waiting')
+
+              // A successful resume authorizes the requested source → canonical
+              // successor mapping; ordinary focus changes never migrate input.
+              migratePendingInputs(destination, r.session_id, info?.stored_session_id)
+              resetSession()
+              setSessionStartedAt(r.started_at ? r.started_at * 1000 : Date.now())
+
+              const resumed = [...toTranscriptMessages(r.messages), ...liveSessionInflightMessages(r.inflight)]
+
+              setHistoryItems(info ? [introMsg(info), ...resumed] : resumed)
+              writeActiveSessionFile(storedSid)
+              patchUiState({
+                busy: running,
+                info,
+                sid: r.session_id,
+                gatewayConnected: true,
+                status: statusFromLiveSession(r.status ?? undefined, running),
+                storedSid,
+                usage: usageFrom(info)
+              })
+              gw.hydrateSharedPrompts?.(r)
+              hydrateLiveSessionInflight(r.inflight)
+              gw.settleAttach?.(hold, r)
+
+              if (r.pending_connection) {
+                applyConnectionRequest(r.pending_connection)
+              } else {
+                clearConnectionOperation()
+              }
+
+              cancelResumeScrollRef.current?.()
+              cancelResumeScrollRef.current = scheduleResumeScrollToBottom(scrollRef)
+
+              if (previousSid && previousSid !== r.session_id) {
+                void closeSession(previousSid)
+              }
+
+              adoptAttachment(r, previousSid, previousSubscription, true)
             })
-            hydrateLiveSessionInflight(r.inflight)
-            announceDeckSession(r.session_id)
+            .catch((e: Error) => {
+              if (flight !== attachmentFlight.current) {
+                return
+              }
 
-            if (r.pending_connection) {
-              applyConnectionRequest(r.pending_connection)
-            } else {
-              clearConnectionOperation()
-            }
-
-            cancelResumeScrollRef.current?.()
-            cancelResumeScrollRef.current = scheduleResumeScrollToBottom(scrollRef)
-
-            if (previousSid && previousSid !== r.session_id) {
-              void closeSession(previousSid)
-            }
-          })
-          .catch((e: Error) => {
-            sys(`error: ${e.message}`)
-            patchUiState({ status: 'ready' })
-          })
-      })
+              sys(`error: ${e.message}`)
+              patchUiState({ status: 'ready' })
+            })
+            .finally(() => gw.settleAttach?.(hold))
+        })
+        .finally(() => finishAttachment(flight))
     },
     [
-      announceDeckSession,
+      adoptAttachment,
       closeSession,
       colsRef,
+      discardStaleAttachment,
+      finishAttachment,
       gw,
       panel,
       resetSession,
@@ -497,6 +746,7 @@ export function useSessionLifecycle(opts: UseSessionLifecycleOptions) {
   return useMemo(
     () => ({
       activateLiveSession,
+      closeForExit,
       closeSession,
       guardBusySessionSwitch,
       newLiveSession,
@@ -508,14 +758,14 @@ export function useSessionLifecycle(opts: UseSessionLifecycleOptions) {
     }),
     [
       activateLiveSession,
+      closeForExit,
       closeSession,
       guardBusySessionSwitch,
       newLiveSession,
       newSession,
       resetSession,
       resetVisibleHistory,
-      resumeById,
-      trimTail
+      resumeById
     ]
   )
 }
