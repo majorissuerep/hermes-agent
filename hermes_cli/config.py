@@ -39,6 +39,7 @@ from hermes_cli.colors import Colors, color
 from hermes_cli import managed_scope
 from hermes_cli.default_soul import DEFAULT_SOUL_MD, is_legacy_template_soul
 from hermes_cli.secret_prompt import masked_secret_prompt
+from hermes_cli.config_env_sanitize import sanitize_env_file
 # Managed-mode, container and HERMES_UID/GID policy live in hermes_constants (import-safe);
 # re-exported here so existing callers/patch targets keep working.
 from hermes_constants import (
@@ -2588,24 +2589,6 @@ def _sanitize_env_lines(lines: list) -> list:
         # Blank lines and comments are preserved verbatim.
         sanitized.append((raw if not stripped or stripped.startswith("#") else stripped) + "\n")
     return sanitized
-
-
-def sanitize_env_file() -> int:
-    """Rewrite ~/.hermes/.env with normalized line formatting; returns the number of changed lines."""
-    env_path = get_env_path()
-    if not env_path.exists():
-        return 0
-    with _env_write_lock(env_path):
-        with open(env_path, encoding="utf-8-sig", errors="replace") as f:
-            original_lines = f.readlines()
-        sanitized = _sanitize_env_lines(original_lines)
-        if sanitized == original_lines:
-            return 0
-        fixes = abs(len(sanitized) - len(original_lines)) or sum(
-            1 for a, b in zip(original_lines, sanitized) if a != b)
-        _write_env_lines(env_path, sanitized, preserve_mode=False)
-    invalidate_env_cache()
-    return fixes
 
 
 def _read_env_lines(env_path: Path) -> list:
