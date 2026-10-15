@@ -25,7 +25,7 @@ For ad-hoc, one-off MCP tool calls from the terminal without configuring anythin
 Install the MCP SDK:
 
 ```bash
-python -c "import pm; pm.sync_venv(['mcp'], explicit=True)"
+hermes pm install --extra mcp
 ```
 ## Quick Start
 
@@ -39,9 +39,13 @@ hermes mcp test time --via-host
 
 `--via-host` attaches to the existing authenticated session host. That process
 already holds the vault key and writes the encrypted configuration for the
-caller's profile. A `terminal` child does not inherit the logged-in vault key.
+caller's profile. Native local `terminal` calls and delegated children can also
+run ordinary Hermes CLI commands using temporary session authority, without
+another vault prompt. The passphrase and raw key are never put in the child
+environment. This authority does not extend to another profile, an SSH target,
+or a container; see `references/encrypted-self-management.md` for the scope.
 Never read, patch, replace or temporarily decrypt `config.yaml`, `.env`, or token
-files. Never ask for the vault password in chat or pass vault keys to the terminal.
+files. Never ask for the vault password in chat or manually forward vault keys.
 
 `add` saves without prompting or contacting the server; `test` separately connects,
 discovers tools and disconnects. Read the JSON result and exit status. Exit 0 is
@@ -75,8 +79,9 @@ in shell arguments, generated scripts or chat.
 
 For OAuth, add `--auth oauth` and have the user authorize in the logged-in MCP
 settings UI. `test` reports missing OAuth tokens; a saved entry is not proof that
-authorization completed. `hermes mcp login NAME` remains a human-operated CLI flow
-and needs its own unlocked vault.
+authorization completed. `hermes mcp login NAME` remains a human-operated OAuth
+flow. It reuses the vault unlock when launched from the authorized local session;
+the provider's separate browser authorization still requires the human.
 
 ### Profile selection and failures
 
@@ -244,11 +249,11 @@ If an MCP tool call fails, any credential-like patterns in the error message are
 
 ### "MCP SDK not available -- skipping MCP tool discovery"
 
-The `mcp` Python package is not installed. Install it through PM (fork: from an
-unlocked human-operated CLI; `hermes doctor` there can diagnose the install):
+The `mcp` Python package is not installed. Install it through PM from the unlocked
+local session; `hermes doctor` can diagnose the install:
 
 ```bash
-python -c "import pm; pm.sync_venv(['mcp'], explicit=True)"
+hermes pm install --extra mcp
 ```
 
 
@@ -271,7 +276,9 @@ If the MCP dependencies are damaged, rebuild the recorded environment through PM
 ```bash
 hermes pm repair
 ```
-(Fork: run from an unlocked human-operated CLI; an agent's terminal child carries no vault key.)
+Local commands and delegated agents reuse the owning session's unlock. An
+independent CLI outside that session must unlock normally; never supply the
+passphrase through chat, arguments or environment variables.
 
 ### Tools not appearing
 
