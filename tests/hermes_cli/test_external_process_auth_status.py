@@ -28,6 +28,16 @@ from hermes_cli.auth import (
 def _clean_copilot_env(tmp_path, monkeypatch):
     """Neutralize host state so tests pin behaviour, not this machine."""
     from pathlib import Path
+    import providers
+    from providers.base import ProviderProfile
+    from hermes_cli import auth
+    monkeypatch.setitem(providers._REGISTRY, "copilot-acp", ProviderProfile(
+        name="copilot-acp", auth_type="external_process", base_url="acp://copilot",
+        process_command="copilot", process_args=("--acp", "--stdio"),
+        process_command_env_vars=("HERMES_COPILOT_ACP_COMMAND", "COPILOT_CLI_PATH"),
+        process_args_env_var="HERMES_COPILOT_ACP_ARGS"))
+    monkeypatch.setitem(auth.PROVIDER_REGISTRY, "copilot-acp", auth.ProviderConfig(
+        "copilot-acp", "Optional ACP provider", "external_process", inference_base_url="acp://copilot"))
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
     for var in (

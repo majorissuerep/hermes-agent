@@ -13,17 +13,28 @@ def _zen_free_default_home(monkeypatch, tmp_path):
     home = tmp_path / "hermes"
     home.mkdir()
     (home / "config.yaml").write_text(
-        "model:\n  default: mimo-v2.5-free\n  provider: opencode\n  base_url: https://opencode.ai/zen/v1\n")
+        "model:\n  default: claude-sonnet-4\n  provider: anthropic\n  base_url: https://api.anthropic.com\n")
     monkeypatch.setenv("HERMES_HOME", str(home))
-    monkeypatch.setenv("OPENCODE_GO_API_KEY", "sk-test-go")
+    monkeypatch.setenv("ZAI_API_KEY", "sk-test-go")
 
 
-def test_provider_override_runtime_uses_the_override_model(_zen_free_default_home):
+def test_provider_override_runtime_uses_the_override_model(_zen_free_default_home, monkeypatch):
     from gateway.run import _resolve_runtime_agent_kwargs_for_provider
+    import hermes_cli.runtime_provider as rp
 
-    runtime = _resolve_runtime_agent_kwargs_for_provider("opencode-go", target_model="mimo-v2.5")
-    assert runtime["provider"] == "opencode-go"
-    assert runtime["base_url"] == "https://opencode.ai/zen/go/v1"
+    real_resolve = rp.resolve_runtime_provider
+    seen = []
+
+    def resolve(**kwargs):
+        seen.append(kwargs)
+        return real_resolve(**kwargs)
+
+    monkeypatch.setattr(rp, "resolve_runtime_provider", resolve)
+
+    runtime = _resolve_runtime_agent_kwargs_for_provider("zai", target_model="glm-5")
+    assert runtime["provider"] == "zai"
+    assert runtime["base_url"] == "https://api.z.ai/api/paas/v4"
+    assert seen[-1]["target_model"] == "glm-5"
 
 
 def test_fallback_chain_runtime_uses_the_entry_model(_zen_free_default_home, monkeypatch):
@@ -38,12 +49,13 @@ def test_fallback_chain_runtime_uses_the_entry_model(_zen_free_default_home, mon
     def primary_auth_fails(**kw):
         if kw.get("requested") is None:  # the primary, resolved from config.yaml
             raise AuthError("primary quota exhausted (429)")
+        assert kw["target_model"] == "glm-5"
         return real_resolve(**kw)
 
     monkeypatch.setattr(rp, "resolve_runtime_provider", primary_auth_fails)
     monkeypatch.setattr(gateway_run, "_load_gateway_config",
-                        lambda: {"fallback_model": [{"provider": "opencode-go", "model": "mimo-v2.5"}]})
+                        lambda: {"fallback_model": [{"provider": "zai", "model": "glm-5"}]})
     fb = gateway_run._resolve_runtime_agent_kwargs()
-    assert fb["model"] == "mimo-v2.5"
-    assert fb["provider"] == "opencode-go"
-    assert fb["base_url"] == "https://opencode.ai/zen/go/v1"
+    assert fb["model"] == "glm-5"
+    assert fb["provider"] == "zai"
+    assert fb["base_url"] == "https://api.z.ai/api/paas/v4"

@@ -73,14 +73,14 @@ def test_fresh_profile_retains_resolvable_custom_endpoint(
 @pytest.mark.parametrize(
     "schema,provider,copied",
     [
-        ("providers", "openrouter", False),
-        ("custom_providers", "custom:openrouter", True),
+        ("providers", "ai-gateway", False),
+        ("custom_providers", "custom:ai-gateway", True),
     ],
 )
 def test_builtin_name_collision_only_copies_explicit_custom_selection(
     create_from_launch, schema, provider, copied
 ):
-    endpoint = {"name": "OpenRouter", "base_url": "http://127.0.0.1:11434/v1"}
+    endpoint = {"name": "ai-gateway", "base_url": "http://127.0.0.1:11434/v1"}
     catalog = {"other-endpoint": endpoint} if schema == "providers" else [endpoint]
 
     created = create_from_launch(
@@ -93,7 +93,7 @@ def test_builtin_name_collision_only_copies_explicit_custom_selection(
 @pytest.mark.parametrize(
     "model",
     [
-        {"provider": "openrouter", "default": "synthetic-model"},
+        {"provider": "ai-gateway", "default": "synthetic-model"},
         {
             "provider": "custom",
             "default": "synthetic-model",

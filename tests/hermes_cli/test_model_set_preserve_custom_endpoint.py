@@ -76,7 +76,8 @@ def test_new_endpoint_model_set_still_registers_named_provider(isolated_home):
         "main", "custom", "other-model", "", "http://192.168.1.50:11434/v1", "")
 
     cfg = yaml.safe_load((isolated_home / "config.yaml").read_text(encoding="utf-8")) or {}
-    entries = [e for e in (cfg.get("custom_providers") or []) if isinstance(e, dict)]
+    from hermes_cli.config_providers import get_compatible_custom_providers
+    entries = get_compatible_custom_providers(cfg)
     assert any(e.get("base_url") == "http://192.168.1.50:11434/v1" for e in entries)
     # The model block now points at the new endpoint, not the old one.
     assert _model_cfg(isolated_home).get("base_url") == "http://192.168.1.50:11434/v1"
