@@ -69,6 +69,7 @@ class _Ask:
 
 # Cheapest first; the last one reads the disk. Each is a reason the trial cannot be claimed.
 _CLAIM_BLOCKERS: tuple[tuple[str, Callable[[_Ask], bool]], ...] = (
+    ("the welcome provider is not installed", lambda _ask: not anon_auth.welcome_provider_available()),
     ("not the desktop's local backend", lambda _ask: not anon_auth.on_local_desktop_backend()),
     ("guests are switched off", lambda _ask: not anon_auth.guest_allowed()),
     ("a Nous identity exists", lambda _ask: _has_nous_identity()),

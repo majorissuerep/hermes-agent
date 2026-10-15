@@ -173,8 +173,9 @@ def _build_record(*, other: bool) -> SetupRecord:
 
     state: Optional[dict[str, Any]] = anon_auth.current_nous_state()
     failure: dict[str, Any] = {} if state else (anon_auth.last_mint_failure() or {})
-    # Legacy account data remains readable for tools and recovery, not inference.
-    free_tier_account = False
+    # The bundled fork has no welcome inference provider. An explicitly
+    # installed provider plugin may opt back into the legacy account flow.
+    free_tier_account = anon_auth.free_inference_active(state)
     return SetupRecord(
         provider_configured=other,
         inference_provider=_resolve_inference(),

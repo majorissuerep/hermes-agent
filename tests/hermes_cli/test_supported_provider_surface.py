@@ -29,6 +29,10 @@ def test_removed_bundled_providers_cannot_return_through_metadata_or_runtime(tmp
     assert resolve_provider("grok") == "xai"
     assert resolve_provider("vercel") == "ai-gateway"
     assert resolve_provider("openai") == "openai-api"
+    from hermes_cli import anon_auth, welcome_trial
+    assert not anon_auth.welcome_provider_available()
+    assert not anon_auth.free_inference_active()
+    assert welcome_trial.claim_blocker(assume_fresh=True) is not None
 
 
 def test_encrypted_gateway_and_custom_protocol_config_survive_a_b_a(tmp_path, monkeypatch):

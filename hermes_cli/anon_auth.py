@@ -207,9 +207,17 @@ def on_local_desktop_backend() -> bool:
     return client_surface() == "desktop" and is_local_desktop_backend()
 
 
+def welcome_provider_available() -> bool:
+    """A retired welcome provider is reachable only through an installed plugin."""
+    from providers import get_provider_profile
+    return get_provider_profile("nous") is not None
+
+
 def free_inference_active(state: Any = None) -> bool:
     """The welcome trial carries inference here: a guest that claimed it (or was grandfathered),
     guests still allowed, and this is the desktop's local backend. *state* defaults to the profile's."""
+    if not welcome_provider_available():
+        return False
     state = current_nous_state() if state is None else state
     return (is_guest_state(state) and state.get(WELCOME_CLAIM_FLAG) is True and guest_allowed()
             and on_local_desktop_backend())

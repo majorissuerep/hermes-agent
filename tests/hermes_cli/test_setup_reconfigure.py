@@ -177,20 +177,18 @@ class TestFreshInstall:
             m = _enter_fresh_install_patches(
                 stack,
                 prompt=("hermes_cli.setup.prompt_choice", {"return_value": 0}),
-                first="hermes_cli.setup_quick._run_first_time_quick_setup",
+                first="hermes_cli.setup._run_full_setup",
             )
             from hermes_cli.setup import run_setup_wizard
             from hermes_cli import setup as setup_mod
 
             section_indexes = []
-            m["first"].side_effect = lambda *_args: section_indexes.append(
-                setup_mod._SETUP_NAVIGATION.get().section_index
-            )
+            m["first"].side_effect = lambda *_args, **_kw: section_indexes.append("provider setup")
             run_setup_wizard(args)
 
         m["prompt"].assert_called_once()
         m["first"].assert_called_once()
-        assert section_indexes == [0]
+        assert section_indexes == ["provider setup"]
 
     def test_blank_slate_runs_inside_navigation_step(self, fresh_install):
         args = _make_setup_args()
@@ -198,7 +196,7 @@ class TestFreshInstall:
         with ExitStack() as stack:
             m = _enter_fresh_install_patches(
                 stack,
-                prompt=("hermes_cli.setup.prompt_choice", {"return_value": 2}),
+                prompt=("hermes_cli.setup.prompt_choice", {"return_value": 1}),
                 blank="hermes_cli.setup_quick._run_blank_slate_setup",
             )
             from hermes_cli import setup as setup_mod

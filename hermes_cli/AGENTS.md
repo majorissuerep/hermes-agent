@@ -226,7 +226,12 @@ change to install/restart/status regenerates and diffs every kind; both user and
 recorded when both exist. Process liveness is `(pid, start_time)` or the canonical matchers
 (`gateway.status.live_gateway_pid_for_home`), never bare PID existence.
 
-## Nous free tier (`hermes_cli/anon_auth.py`)
+## Legacy Nous accounts (`hermes_cli/anon_auth.py`)
+
+Nous is not bundled as an inference provider. First-run setup selects from the
+supported provider catalog; welcome claims require an explicitly installed
+provider plugin. Existing account records remain readable for managed tools
+and recovery. `hermes portal` defaults to account information, not model setup.
 
 `anon_auth.run_sign_in()` is the one sign-in composition: it yields `SignInState`s that carry their
 own `.copy` / `.copy_terminal`, persists only after a completed promotion AND a token grant, and runs
