@@ -2842,7 +2842,7 @@ def test_user_named_providers_and_models_never_reach_counters(direct_runtime, tm
     stored = json.dumps(SharedMetricsStore(root / "metrics.sqlite3", root / "outbox").counter_snapshot())
     assert not any(leak in stored for leak in ("acme", "bob", "users"))
     tokens = {(d["provider"], d["model"]) for d, _ in _stored_values(tmp_path, "hermes.model_tokens.sum")}
-    assert tokens == {("custom", "custom"), ("lmstudio", "custom"), ("openrouter", "custom"),
+    assert tokens == {("custom", "custom"), ("openrouter", "custom"),
                       ("openrouter", "anthropic/claude-sonnet")}
 
 

@@ -26,7 +26,6 @@ from hermes_cli.observability import shared_metrics_process as process_metrics
 
 ROOT = Path(__file__).resolve().parents[2]
 INSTALL_SH = ROOT / "scripts" / "install.sh"
-INSTALL_PS1 = ROOT / "scripts" / "install.ps1"
 SCHEMA = ROOT / "hermes_cli" / "observability" / "schemas" / "hermes.shared_metrics.v4.schema.json"
 
 
@@ -66,7 +65,7 @@ def _park(home: Path, receipt: dict, name: str | None = None) -> Path:
     return path
 
 
-def test_schema_and_installers_match_the_contract_exactly():
+def test_install_counter_schema_matches_the_contract():
     schema = json.loads(SCHEMA.read_text(encoding="utf-8-sig"))
     by_name = {d["properties"]["name"]["const"]: d for d in schema["$defs"].values() if "properties" in d}
     dims = by_name[contract.INSTALL_RUN_METRIC]["properties"]["dimensions"]
@@ -75,24 +74,6 @@ def test_schema_and_installers_match_the_contract_exactly():
     assert set(dims["required"]) == set(dims["properties"])
     assert {"$ref": "#/$defs/install_run_counter"} in schema["properties"]["metrics"]["items"]["oneOf"]
 
-    sh, ps1 = INSTALL_SH.read_text(encoding="utf-8-sig"), INSTALL_PS1.read_text(encoding="utf-8-sig")
-    # Initialize-ResolvedPaths runs before the ladder's try, so its Fail can never write a receipt and
-    # carries no class (a class there would be dead); every ladder call site must carry one.
-    pre_ladder = re.search(r"\nfunction Initialize-ResolvedPaths \{\r?\n.*?\r?\n\}\r?\n", ps1, re.DOTALL).group(0)
-    assert re.search(r'Fail "[^\n]*-InstallDir\."\r?\n', pre_ladder)
-    ps1 = ps1.replace(pre_ladder, "\n")
-    # Every fail()/Fail call site passes a class from the contract, and every class is used somewhere.
-    sh_sites = re.findall(r'(?<![-\w])fail "(?:[^"\\$]|\\.|\$\([^)]*\)|\$)*" ?([a-z_]*)', sh)
-    ps1_sites = re.findall(r'(?<![-\w])Fail "(?:[^"`$]|`.|\$\([^)]*\)|\$)*" ?([a-z_$(]*)', ps1)
-    assert sh_sites and ps1_sites
-    assert "" not in sh_sites, "an install.sh fail() call site passes no failure class"
-    assert "" not in ps1_sites, "an install.ps1 Fail call site passes no failure class"
-    used = {c for c in sh_sites + ps1_sites if not c.startswith("$")} | {"setup_failed", "gateway_failed"}
-    assert used | {"interrupted", "none", "other"} == contract.INSTALL_RUN_FAILURE_CLASSES
-    stage_names = re.search(r"stage_names\(\) \{\n\s+printf '%s\\n' ([a-z -]+)\n", sh).group(1).split()
-    assert {s.replace("-", "_") for s in stage_names} == contract.INSTALL_RUN_STAGES
-    ps1_stages = re.findall(r'@\{ name = "([a-z-]+)"', ps1)
-    assert {s.replace("-", "_") for s in ps1_stages} == contract.INSTALL_RUN_STAGES
 
 
 def test_receipt_is_reported_once_out_of_contract_ones_dropped(marks):

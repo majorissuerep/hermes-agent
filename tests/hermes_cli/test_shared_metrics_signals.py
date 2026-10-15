@@ -220,10 +220,10 @@ def test_cli_flow_classifies_landed_backed_out_failed_and_raised(marks, monkeypa
             setup_metrics.note_provider_setup_saved()
         with setup_metrics.cli_provider_setup("anthropic"):
             pass  # returned without saving: backed out
-        with setup_metrics.cli_provider_setup("nous"):
+        with setup_metrics.cli_provider_setup("openai-codex"):
             setup_metrics.note_provider_setup_failure("no_models")
-        with setup_metrics.cli_provider_setup("gemini"):
-            route["v"] = ("gemini", "g", None)  # route changed without the save helper
+        with setup_metrics.cli_provider_setup("zai"):
+            route["v"] = ("zai", "g", None)  # route changed without the save helper
         with pytest.raises(KeyboardInterrupt):
             with setup_metrics.cli_provider_setup("xai"):
                 raise KeyboardInterrupt
@@ -235,7 +235,7 @@ def test_cli_flow_classifies_landed_backed_out_failed_and_raised(marks, monkeypa
     ends = [r for r in _setup_rows(marks.rows) if r[2] != "started"]
     assert ends == [
         ("cli_setup", "anthropic", "completed", "none"), ("cli_setup", "anthropic", "abandoned", "none"),
-        ("cli_setup", "nous", "failed", "no_models"), ("cli_setup", "gemini", "completed", "none"),
+        ("cli_setup", "openai-codex", "failed", "no_models"), ("cli_setup", "zai", "completed", "none"),
         ("cli_setup", "xai", "abandoned", "none"), ("cli_setup", "xai", "failed", "network"),
     ]
     setup_metrics.note_provider_setup_saved()  # outside a flow: inert
@@ -259,8 +259,8 @@ def test_cli_setup_navigation_esc_cancels_and_back_resumes_one_flow(marks, monke
             attempt("anthropic", _SetupGoBack(1))  # Back to the provider menu, then the same provider
         attempt("anthropic")
         with pytest.raises(_SetupGoBack):
-            attempt("nous", _SetupGoBack(1))  # Back, then another provider
-        attempt("gemini")
+            attempt("openai-codex", _SetupGoBack(1))  # Back, then another provider
+        attempt("zai")
     with pytest.raises(_SetupGoBack):  # a wizard section replay keeps the flow open across the surface
         with setup_metrics.provider_setup_surface("cli_setup"):
             attempt("xai", _SetupGoBack(0))
@@ -269,8 +269,8 @@ def test_cli_setup_navigation_esc_cancels_and_back_resumes_one_flow(marks, monke
     assert _setup_rows(marks.rows) == [
         ("cli_model", "xai", "started", "none"), ("cli_model", "xai", "abandoned", "none"),
         ("cli_model", "anthropic", "started", "none"), ("cli_model", "anthropic", "completed", "none"),
-        ("cli_model", "nous", "started", "none"), ("cli_model", "nous", "abandoned", "none"),
-        ("cli_model", "gemini", "started", "none"), ("cli_model", "gemini", "completed", "none"),
+        ("cli_model", "openai-codex", "started", "none"), ("cli_model", "openai-codex", "abandoned", "none"),
+        ("cli_model", "zai", "started", "none"), ("cli_model", "zai", "completed", "none"),
         ("cli_setup", "xai", "started", "none"), ("cli_setup", "xai", "abandoned", "none"),
     ]
 
@@ -305,7 +305,7 @@ def test_cancel_or_lapsed_code_is_never_a_failure_and_poller_errors_keep_their_c
 
     monkeypatch.setattr(setup_metrics, "web_setup_surface", lambda: "desktop")
     with setup_metrics.provider_setup_surface("cli_model"):  # CLI: Ctrl-C mid sign-in
-        with pytest.raises(KeyboardInterrupt), setup_metrics.cli_provider_setup("nous"):
+        with pytest.raises(KeyboardInterrupt), setup_metrics.cli_provider_setup("openai-codex"):
             raise KeyboardInterrupt
     flow = setup_metrics.begin_oauth_setup("openai-codex", None)  # web start route: cancelled pre-response
     setup_metrics.finish_provider_setup(flow, "failed", setup_metrics.setup_failure_class(KeyboardInterrupt()))
@@ -321,10 +321,10 @@ def test_cancel_or_lapsed_code_is_never_a_failure_and_poller_errors_keep_their_c
     dropped = _xai_err("xAI OIDC discovery failed", "xai_discovery_failed")
     dropped.__cause__ = httpx.ConnectError("down")
     for provider, exc in [
-        ("nous", lapsed.value), ("xai-oauth", _xai_err("Timed out", "device_code_timeout")),
+        ("openai-codex", lapsed.value), ("xai-oauth", _xai_err("Timed out", "device_code_timeout")),
         ("openai-codex", _codex_err("Login timed out after 15 minutes.", "device_code_timeout")),
-        ("nous", device_flow_error("access_denied", "declined")), ("xai-oauth", dropped),
-        ("nous", device_flow_error("invalid_client", "nope")),
+        ("openai-codex", device_flow_error("access_denied", "declined")), ("xai-oauth", dropped),
+        ("openai-codex", device_flow_error("invalid_client", "nope")),
     ]:
         sess = {"status": "pending", "profile": None}
         _oauth_sessions["probe"] = sess
@@ -338,10 +338,10 @@ def test_cancel_or_lapsed_code_is_never_a_failure_and_poller_errors_keep_their_c
         setup_metrics.settle_oauth_setup(sess)
     _oauth_sessions.pop("probe", None)
     assert [r for r in _setup_rows(marks.rows) if r[2] != "started"] == [
-        ("cli_model", "nous", "abandoned", "none"), ("desktop", "openai-codex", "abandoned", "none"),
-        ("desktop", "nous", "abandoned", "none"), ("desktop", "xai-oauth", "abandoned", "none"),
-        ("desktop", "openai-codex", "abandoned", "none"), ("desktop", "nous", "abandoned", "none"),
-        ("desktop", "xai-oauth", "failed", "network"), ("desktop", "nous", "failed", "auth"),
+        ("cli_model", "openai-codex", "abandoned", "none"), ("desktop", "openai-codex", "abandoned", "none"),
+        ("desktop", "openai-codex", "abandoned", "none"), ("desktop", "xai-oauth", "abandoned", "none"),
+        ("desktop", "openai-codex", "abandoned", "none"), ("desktop", "openai-codex", "abandoned", "none"),
+        ("desktop", "xai-oauth", "failed", "network"), ("desktop", "openai-codex", "failed", "auth"),
     ]
 
 
@@ -380,6 +380,8 @@ def _guest_sign_in(token_status, token_body):
         import httpx
 
         from hermes_cli import anon_auth, auth_device_flow
+        from tests.hermes_cli.anon_portal import install_optional_portal_provider
+        install_optional_portal_provider(monkeypatch)
         from hermes_cli.web_server_oauth import _record_sign_in_state
 
         clock = [0.0]
@@ -479,11 +481,11 @@ def test_web_forms_count_only_a_new_provider_key_or_endpoint(marks, monkeypatch)
                        ("GITHUB_TOKEN", "ghp_" + "b" * 36)):
         config_env._save_env_credential(key, value)
     config_env._save_env_credential("GEMINI_API_KEY", "gm-a")  # Keys page: could be the TTS tool's key
-    config_env._save_env_credential("GEMINI_API_KEY", "gm-b", provider_setup=True)  # a provider-connection form
+    config_env._save_env_credential("GLM_API_KEY", "glm-b", provider_setup=True)  # a provider-connection form
     body = {"name": "Acme LLM", "base_url": "http://10.0.0.5:8080/v1", "model": "acme-70b"}
     endpoint = config_env.upsert_custom_endpoint(CustomEndpointUpdate(**body))["id"]
     config_env.upsert_custom_endpoint(CustomEndpointUpdate(id=endpoint, **{**body, "model": "acme-70b-v2"}))
-    assert done == ["openrouter", "openrouter", "gemini", "custom"]
+    assert done == ["openrouter", "openrouter", "zai", "custom"]
 
 
 # ---- feature disabled ----
