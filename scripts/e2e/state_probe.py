@@ -129,11 +129,34 @@ def main() -> None:
             calls = db._conn.execute("SELECT COUNT(*) FROM messages WHERE tool_name='delegate_task' "
                                      "OR (role='assistant' AND tool_calls LIKE '%delegate_task%')").fetchone()[0]
             children = db._conn.execute("SELECT COUNT(*) FROM sessions WHERE parent_session_id IS NOT NULL").fetchone()[0]
+            child_ids = {row[0] for row in db._conn.execute(
+                "SELECT id FROM sessions WHERE parent_session_id IS NOT NULL")}
+            replies = {row[0]: row[1] for row in db._conn.execute(
+                "SELECT tool_call_id, content FROM messages WHERE role='tool'")}
+            executed = {}
+            for session_id, raw in db._conn.execute(
+                    "SELECT session_id, tool_calls FROM messages WHERE role='assistant' AND tool_calls IS NOT NULL"):
+                for call in json.loads(raw):
+                    function = call["function"]
+                    if function["name"] != "terminal" or call["id"] not in replies:
+                        continue
+                    args = json.loads(function["arguments"])
+                    command = args.get("command", "").strip()
+                    if command not in {"hermes config get agent.max_turns", "hermes update --check",
+                                       "hermes config set agent.max_turns 17"}:
+                        continue
+                    result = json.loads(replies[call["id"]])
+                    if result.get("exit_code") == 0:
+                        executed[command] = session_id in child_ids
         finally:
             db.close()
         if not calls or not children:
             raise RuntimeError("live task did not actually invoke delegation and persist a child conversation")
-        return {"delegation_calls": calls, "child_sessions": children}
+        if (executed.get("hermes config get agent.max_turns") is not True
+                or executed.get("hermes update --check") is not False
+                or executed.get("hermes config set agent.max_turns 17") is not False):
+            raise RuntimeError("live task did not successfully execute the required child/parent Hermes calls")
+        return {"delegation_calls": calls, "child_sessions": children, "verified_hermes_calls": len(executed)}
 
     handlers = {"seed": seed, "manifest": manifest, "snapshot": snapshot, "restore": restore,
                 "update-status": update_status, "live-proof": live_proof}

@@ -41,6 +41,13 @@ published and no production home is reused. The passphrase is generated in drive
 memory and entered only through a PTY. One update prompt is required; extra prompts
 fail immediately. Local commands inside the live session must not prompt again.
 
+Update/broken-file baselines require their old runtime's system prerequisites
+(Ubuntu: `libatomic1`). The workflow prepares those explicitly; the cold fresh
+case must provision itself. For repeated disposable-VM debugging only,
+`--tool-cache /path/to/pm-tools` can reuse hash-verified PM tools on update/dirty
+legs, never fresh acceptance. Evidence records that reuse. No config, credentials
+or session state belongs in that cache. Use an empty evidence directory per attempt.
+
 ## Evidence and interpretation
 
 Each leg writes sanitized logs plus `receipt.json`: exact baseline/candidate,

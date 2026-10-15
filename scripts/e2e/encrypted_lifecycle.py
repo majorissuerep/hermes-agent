@@ -26,7 +26,7 @@ import termios
 import time
 
 SCENARIOS = ("fresh", "update", "broken-files", "dirty-install")
-_PROMPT = re.compile(rb"(?:Create master password|Repeat master password|Master password):\s*")
+_PROMPT = re.compile(rb"(?:Create master password|Repeat master password|Master password):\s*", re.IGNORECASE)
 
 
 class Rehearsal:
@@ -38,6 +38,9 @@ class Rehearsal:
         self.workspace.mkdir()
         self.evidence = args.evidence.resolve()
         self.evidence.mkdir(parents=True, exist_ok=True)
+        if any(self.evidence.iterdir()):
+            raise FileExistsError("choose an empty evidence directory for each attempt")
+        print(f"[{args.scenario}] evidence: {self.evidence}", flush=True)
         self.password = secrets.token_urlsafe(32)
         self.redactions = [self.password, *self._credential_strings(credential)]
         self.env = {key: value for key, value in os.environ.items()
@@ -90,7 +93,7 @@ class Rehearsal:
         try:
             while True:
                 if time.monotonic() - started > timeout:
-                    raise TimeoutError(f"{name} exceeded {timeout}s")
+                    raise TimeoutError(f"{name} exceeded {timeout}s; passphrase prompts={count}, expected={prompts}")
                 if time.monotonic() - last_progress >= 30:
                     print(f"[{self.args.scenario}] {name}: still running", flush=True)
                     last_progress = time.monotonic()
@@ -166,6 +169,8 @@ class Rehearsal:
             f"containing exactly {nonce}. The subagent must verify its contents. "
             "Then YOU run `hermes update --check` and `hermes config set agent.max_turns 17` through terminal. "
             "Use the existing unlocked session, never ask for or pass a passphrase/key. "
+            "Run each of those three hermes commands as its own foreground terminal tool call "
+            "with timeout=120; do not combine them with other commands or use execute_code. "
             "Do not simulate these actions; perform them, verify the file, and stop."
         )
         self.run("live-" + phase, [str(self.launcher), "chat", "--yolo", "--accept-hooks",
