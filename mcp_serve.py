@@ -78,8 +78,8 @@ def _close_quietly(db, what: str) -> None:
 def _get_session_db():
     """SessionDB instance for reading message transcripts, or None."""
     try:
-        from hermes_state.registry import acquire
-        return acquire()
+        from hermes_state import SessionDB
+        return SessionDB(db_path=_hermes_home() / "state.db", read_only=True)
     except Exception as e:
         logger.debug("SessionDB unavailable: %s", e)
         return None
