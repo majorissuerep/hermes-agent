@@ -840,8 +840,6 @@ class CLIInfoMixin:
         cache** (the next message re-sends the full input prefix, expensive on long-context / high-reasoning
         models). See #1474.
         """
-        import hermes_yaml as _yaml
-
         now = time.monotonic()
         if now - self._last_config_check < CONFIG_WATCH_INTERVAL:
             return
@@ -860,8 +858,8 @@ class CLIInfoMixin:
 
         self._config_sig = sig
         try:
-            with open(cfg_path, encoding="utf-8-sig") as f:
-                new_cfg = _yaml.safe_load(f) or {}
+            from hermes_cli.config import read_user_config_raw
+            new_cfg = read_user_config_raw(cfg_path)
         except Exception:
             return
 

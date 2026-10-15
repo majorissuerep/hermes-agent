@@ -1,5 +1,6 @@
 """Tests for automatic MCP reload when config.yaml mcp_servers section changes."""
 from unittest.mock import MagicMock, patch
+from threading import Event
 
 from utils import file_signature
 
@@ -17,10 +18,12 @@ def _make_cli(tmp_path, mcp_servers=None, extra_config=None):
     obj._config_mcp_servers = mcp_servers or {}
 
     cfg_file = tmp_path / "config.yaml"
-    cfg_file.write_text("mcp_servers: {}\n")
+    from hermes_cli.config import atomic_config_write
+    atomic_config_write(cfg_file, {"mcp_servers": {}})
     obj._config_sig = file_signature(cfg_file.stat())
 
-    obj._reload_mcp = MagicMock()
+    obj._reload_event = Event()
+    obj._reload_mcp = MagicMock(side_effect=obj._reload_event.set)
     obj._busy_command = MagicMock()
     obj._busy_command.return_value.__enter__ = MagicMock(return_value=None)
     obj._busy_command.return_value.__exit__ = MagicMock(return_value=False)
@@ -217,18 +220,46 @@ def test_tui_init_run_state_seeds_config_sig_when_config_exists(monkeypatch):
 def test_pinned_mtime_same_size_replacement_triggers_reload(tmp_path):
     """#111105: cp -p / rsync -t style replacement (same mtime, same size) must still reload."""
     import os
-    import shutil
 
     obj, cfg_file = _make_cli(tmp_path, mcp_servers={"bb": {"command": "b"}})
     cfg_file.write_text("mcp_servers:\n  bb: {command: b}\n")
     obj._config_sig = file_signature(cfg_file.stat())
     other = tmp_path / "other.yaml"
     other.write_text("mcp_servers:\n  aa: {command: a}\n")
-    shutil.copy2(other, cfg_file)
+    other.replace(cfg_file)
     os.utime(cfg_file, ns=(obj._config_sig[0], obj._config_sig[0]))
 
     with patch("hermes_cli.config.get_config_path", return_value=cfg_file):
         obj._check_config_mcp_changes()
 
+    assert obj._reload_event.wait(5), "the config change never reached the reload callback"
     obj._reload_mcp.assert_called_once()
     assert obj._config_mcp_servers == {"aa": {"command": "a"}}
+
+
+def test_encrypted_profile_config_changes_reach_the_scoped_watcher(tmp_path, monkeypatch):
+    from hermes_cli.config import save_config
+    from hermes_security import vault
+
+    homes = [tmp_path / name for name in ("a", "b")]
+    watchers = {}
+    try:
+        for home in homes:
+            home.mkdir()
+            monkeypatch.setenv("HERMES_HOME", str(home))
+            vault.init_vault(home, "watcher-fixture-password")
+            vault.unlock(home, "watcher-fixture-password")
+            watchers[home], _ = _make_cli(home)
+        for ordinal, home in enumerate((homes[0], homes[1], homes[0])):
+            monkeypatch.setenv("HERMES_HOME", str(home))
+            servers = {home.name: {"url": f"https://{home.name}.invalid/mcp-{ordinal}"}}
+            save_config({"mcp_servers": servers}, merge_existing=True)
+            obj = watchers[home]
+            obj._last_config_check = 0.0
+            obj._reload_event.clear()
+            obj._check_config_mcp_changes()
+            assert obj._reload_event.wait(5), "encrypted config was not read by its owning watcher"
+            assert obj._config_mcp_servers == servers
+            assert (home / "config.yaml").read_bytes().startswith(b"HRMVAULT")
+    finally:
+        vault.clear_vault_cache()
