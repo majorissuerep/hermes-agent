@@ -1,6 +1,7 @@
 """Inference provider selection policy, separate from auth storage and login protocols."""
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Optional
 
 
@@ -86,4 +87,26 @@ def _available_key_pool_provider() -> str | None:
             if load_pool(provider).has_available():
                 return provider
     return None
+
+
+
+def reset_config_provider() -> Path:
+    """Reset config.yaml provider back to auto after logout."""
+    from hermes_cli.auth import (get_config_path, require_readable_config_before_write,
+                                 read_raw_config, atomic_config_replace, OPENROUTER_BASE_URL)
+
+    config_path = get_config_path()
+    if not config_path.exists():
+        return config_path
+    require_readable_config_before_write(config_path)
+    config = read_raw_config()
+    if not config:
+        return config_path
+    model = config.get("model")
+    if isinstance(model, dict):
+        model["provider"] = "auto"
+        if "base_url" in model:
+            model["base_url"] = OPENROUTER_BASE_URL
+    atomic_config_replace(config_path, config)
+    return config_path
 

@@ -2278,22 +2278,6 @@ def _logout_default_provider_from_config() -> Optional[str]:
     return provider if flow and flow.logout_from_config else None
 
 
-def _reset_config_provider() -> Path:
-    """Reset config.yaml provider back to auto after logout."""
-    config_path = get_config_path()
-    if not config_path.exists():
-        return config_path
-    require_readable_config_before_write(config_path)
-    config = read_raw_config()
-    if not config:
-        return config_path
-    model = config.get("model")
-    if isinstance(model, dict):
-        model["provider"] = "auto"
-        if "base_url" in model:
-            model["base_url"] = OPENROUTER_BASE_URL
-    atomic_config_replace(config_path, config)
-    return config_path
 
 
 def login_command(args) -> None:
@@ -2343,7 +2327,8 @@ def logout_command(args) -> None:
         from hermes_cli.auth_nous import _clear_shared_nous_state
         _clear_shared_nous_state("logout")
     if should_reset_config:
-        _reset_config_provider()
+        from hermes_cli.auth_resolve import reset_config_provider
+        reset_config_provider()
     print(f"Logged out of {provider_name}.")
     if not should_reset_config:
         print("Model provider configuration was unchanged.")
