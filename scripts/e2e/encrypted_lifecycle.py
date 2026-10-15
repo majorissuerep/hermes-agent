@@ -230,6 +230,11 @@ class Rehearsal:
             self.receipt["update_status"] = self.probe("update-status")
             if self.args.scenario == "broken-files" and "AIAgent" not in (self.code / "cli.py").read_text():
                 raise RuntimeError("damaged source file was not repaired")
+            if self.args.scenario == "broken-files":
+                retained = self.run("verify-local-work", ["git", "-C", str(self.code), "show",
+                    "refs/stash^3:rehearsal-untracked.txt"]).strip()
+                if retained != "retain local work":
+                    raise RuntimeError("repair did not preserve unrelated local work in the requested stash")
         after = self.probe("manifest")
         if after != before:
             raise RuntimeError("update changed retained state: " + ", ".join(k for k in before if before[k] != after.get(k)))
@@ -290,6 +295,11 @@ def main():
     except BaseException as exc:
         rehearsal.receipt.update(status="cancelled" if isinstance(exc, KeyboardInterrupt) else "failed",
                                  error=rehearsal.clean(str(exc)))
+        if hasattr(rehearsal, "python") and (rehearsal.home / ".hermes-vault").is_file():
+            try:
+                rehearsal.probe("diagnostics")
+            except Exception as diagnostic_error:
+                rehearsal.receipt["diagnostic_error"] = rehearsal.clean(str(diagnostic_error))
         raise
     finally:
         rehearsal.close()

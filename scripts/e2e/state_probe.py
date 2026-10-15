@@ -23,7 +23,7 @@ def main() -> None:
     home = get_hermes_home()
     vault.unlock(home, request["password"])
     # Do not cache a degraded config parse by importing readers while locked.
-    from hermes_cli.config import read_raw_config, save_config, save_env_value, load_env
+    from hermes_cli.config import read_raw_config, load_config, save_config, save_env_value, load_env
     from hermes_cli.config_defaults import DEFAULT_CONFIG
     from hermes_state import SessionDB
     from cron.jobs import create_job, pause_job, load_jobs
@@ -49,6 +49,11 @@ def main() -> None:
                 "api_mode": credential.get("api_mode", "chat_completions"),
             }}
         save_env_value("E2E_RETAINED_SECRET", "synthetic-retained-secret")
+        from hermes_cli.auth import write_credential_pool
+
+        write_credential_pool("retired-e2e-provider", [{"id": "retained-legacy", "source": "manual",
+            "auth_type": "api_key", "access_token": "synthetic-retained-legacy-key",
+            "base_url": "https://retired.example.invalid/v1"}])
         save_config(config, merge_existing=True)
         db = SessionDB()
         try:
@@ -107,9 +112,28 @@ def main() -> None:
                 raise RuntimeError(f"state was not sealed: {path.name}")
         if (home / "state.db").read_bytes().startswith(b"SQLite format 3"):
             raise RuntimeError("plaintext session database")
-        manifest = {**files, "messages": messages, "jobs": load_jobs(),
-                    "config": {key: config[key] for key in ("model", "delegation", "terminal")},
+        # New default keys are allowed during migration; explicitly seeded values
+        # and job identity/semantics must survive, not an old DEFAULT_CONFIG snapshot.
+        effective = load_config()
+        settings = {section: {key: effective[section][key] for key in keys} for section, keys in {
+            "model": ("provider", "default"), "delegation": ("max_concurrent_children", "max_iterations"),
+            "terminal": ("backend", "cwd"),
+        }.items()}
+        from hermes_cli.auth import _load_auth_store, read_credential_pool
+
+        provider = settings["model"]["provider"]
+        if provider == "openai-codex":
+            credentials = _load_auth_store()["providers"][provider]["tokens"]
+        else:
+            credentials = {"key": load_env()["E2E_GATEWAY_API_KEY"],
+                           "endpoint": config["providers"][provider]}
+        jobs = [{key: job.get(key) for key in ("id", "name", "prompt", "schedule", "enabled", "state")}
+                for job in load_jobs() if job.get("name") == "e2e-retained"]
+        if len(jobs) != 1 or jobs[0]["enabled"] is not False:
+            raise RuntimeError("retained paused job is missing or became runnable")
+        manifest = {**files, "messages": messages, "jobs": jobs, "config": settings,
                     "max_turns": config["agent"]["max_turns"],
+                    "credentials": credentials, "legacy_credentials": read_credential_pool("retired-e2e-provider"),
                     "retained_secret": load_env()["E2E_RETAINED_SECRET"]}
         return {key: digest(value) for key, value in manifest.items()}
 
@@ -158,8 +182,16 @@ def main() -> None:
             raise RuntimeError("live task did not successfully execute the required child/parent Hermes calls")
         return {"delegation_calls": calls, "child_sessions": children, "verified_hermes_calls": len(executed)}
 
+    def diagnostics():
+        from hermes_cli.logs import _read_tail
+        from agent.redact import redact_sensitive_text
+
+        return {name: [redact_sensitive_text(line, force=True) for line in
+                       _read_tail(home / "logs" / (name + ".log"), 60, has_filters=False)]
+                for name in ("gateway", "errors") if (home / "logs" / (name + ".log")).is_file()}
+
     handlers = {"seed": seed, "manifest": manifest, "snapshot": snapshot, "restore": restore,
-                "update-status": update_status, "live-proof": live_proof}
+                "update-status": update_status, "live-proof": live_proof, "diagnostics": diagnostics}
     print(json.dumps(handlers[request["action"]](), sort_keys=True))
 
 
