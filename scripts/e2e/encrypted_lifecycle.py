@@ -177,7 +177,7 @@ class Rehearsal:
         )
         self.run("live-" + phase, [str(self.launcher), "chat", "--yolo", "--accept-hooks",
                                    "--toolsets", "terminal,file,delegation", "--max-turns", "10",
-                                   "--run-budget", "240", "-q", prompt], prompts=1, timeout=300)
+                                   "-q", prompt], prompts=1, timeout=480)
         if not marker.is_file() or marker.read_text().strip() != nonce:
             raise RuntimeError("live LLM/delegation did not produce the independent file oracle")
         self.receipt["checks"]["live-" + phase].update(self.probe("live-proof"))

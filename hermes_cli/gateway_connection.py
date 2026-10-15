@@ -106,7 +106,10 @@ class GatewayConnection:
         return state
 
     # -- lifecycle ---------------------------------------------------------------------------
-    def start(self, timeout=90):
+    def start(self, timeout=None):
+        if timeout is None:
+            from hermes_cli.gateway_runtime import DEFAULT_ENSURE_TIMEOUT
+            timeout = DEFAULT_ENSURE_TIMEOUT + DEFAULT_RPC_TIMEOUT
         with self._start_lock:
             if self._thread is not None:
                 if self._error is not None:

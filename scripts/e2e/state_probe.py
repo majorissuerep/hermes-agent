@@ -33,7 +33,7 @@ def main() -> None:
         provider = credential["provider"]
         config = {
             "model": {"provider": provider, "default": credential["model"]},
-            "agent": {"max_turns": 17},
+            "agent": {"max_turns": 17, "run_budget_seconds": 240},
             "delegation": {"max_concurrent_children": 2, "max_iterations": 8},
             "terminal": {"backend": "local", "cwd": str(request["workspace"])},
             "curator": {"enabled": False},

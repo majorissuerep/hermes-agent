@@ -14,10 +14,10 @@ if TYPE_CHECKING:
     from gateway.runtime_contract import RuntimeState
 
 # Total startup deadline a client waits for a cold daemon. A cold boot imports the whole
-# runtime, seeds the skill library and warms the turn machinery: ~10-20 s on a loaded
-# 32-core CI runner with dozens of sibling boots, where 30 s tipped every attaching client
-# of a parallel e2e shard into `starting: deadline`. A minute is still a verdict, not a hang.
-DEFAULT_ENSURE_TIMEOUT = 60.0
+# runtime, encrypted stores, native transport and turn machinery. Cold software-
+# emulated VMs can take over a minute even while making steady progress. Keep
+# this bounded and below the gateway's 300s startup watchdog.
+DEFAULT_ENSURE_TIMEOUT = 120.0
 
 
 @dataclass(frozen=True)
