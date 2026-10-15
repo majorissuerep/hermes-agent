@@ -1902,16 +1902,10 @@ def cmd_model(args):
 # ``custom:*``, remove-custom and the generic API-key set are the fallthrough
 # branches in select_provider_and_model.
 _PROVIDER_MODEL_FLOWS = {
-    "openrouter": lambda c, m, a: _model_flow_openrouter(c, m),
     "moa": lambda c, m, a: _model_flow_moa(c, m),
     "ai-gateway": lambda c, m, a: _model_flow_ai_gateway(c, m),
-    "nous": lambda c, m, a: _model_flow_nous(c, m, args=a),
     "openai-codex": lambda c, m, a: _model_flow_openai_codex(c, m),
     "xai-oauth": lambda c, m, a: _model_flow_xai_oauth(c, m, args=a),
-    "qwen-oauth": lambda c, m, a: _model_flow_qwen_oauth(c, m),
-    "minimax-oauth": lambda c, m, a: _model_flow_minimax_oauth(c, m, args=a),
-    "copilot-acp": lambda c, m, a: _model_flow_copilot_acp(c, m),
-    "copilot": lambda c, m, a: _model_flow_copilot(c, m),
     "custom": lambda c, m, a: _model_flow_custom(c),
     "llamacpp": lambda c, m, a: _model_flow_local(c, m),
     "anthropic": lambda c, m, a: _model_flow_anthropic(c, m),

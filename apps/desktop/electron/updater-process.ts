@@ -21,7 +21,7 @@ export function resolveVenvDir(updateRoot: string): string {
 }
 
 import { platformDefaultHermesHome } from './data-paths'
-import { hiddenWindowsChildOptions } from './windows-child-options'
+import { hiddenWindowsChildOptions } from './child-process-options'
 
 /** Exact installation identity; PATH may refer to another checkout. */
 export function resolveInstallationLauncher(

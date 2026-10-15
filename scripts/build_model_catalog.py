@@ -34,8 +34,6 @@ sys.path.insert(0, REPO_ROOT)
 os.environ.setdefault("HERMES_HOME", os.path.join(os.path.expanduser("~"), ".hermes"))
 
 from hermes_cli.models import (
-    OPENROUTER_MODELS,
-    PREFERRED_SILENT_DEFAULT_MODEL,
     _PROVIDER_MODELS,
 )
 
@@ -43,58 +41,18 @@ OUTPUT_PATH = os.path.join(REPO_ROOT, "website", "static", "api", "model-catalog
 CATALOG_VERSION = 1
 
 
-def _openrouter_entry(mid: str, desc: str) -> dict:
-    entry: dict = {"id": mid, "description": desc}
-    if mid == PREFERRED_SILENT_DEFAULT_MODEL:
-        entry["description"] = desc or "default"
-        entry["default"] = True
-    return entry
-
-
-def _nous_entry(mid: str) -> dict:
-    entry: dict = {"id": mid}
-    if mid == PREFERRED_SILENT_DEFAULT_MODEL:
-        entry["default"] = True
-    return entry
-
-
 def build_catalog() -> dict:
+    from hermes_cli.models_catalog_static import CANONICAL_PROVIDERS
     return {
         "version": CATALOG_VERSION,
         "updated_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "metadata": {
-            "source": "hermes-agent repo",
-            "docs": "https://hermes-agent.nousresearch.com/docs/reference/model-catalog",
-        },
+        "metadata": {"source": "hermes-agent repo"},
         "providers": {
-            "openrouter": {
-                "metadata": {
-                    "display_name": "OpenRouter",
-                    "note": (
-                        "Descriptions drive picker badges. Live /api/v1/models "
-                        "filters curated ids by tool-calling support and free pricing. "
-                        'The entry labeled "default": true is the model Hermes '
-                        "silently lands on when the user never picked one."
-                    ),
-                },
-                "models": [
-                    _openrouter_entry(mid, desc)
-                    for mid, desc in OPENROUTER_MODELS
-                ],
-            },
-            "nous": {
-                "metadata": {
-                    "display_name": "Nous Portal",
-                    "note": (
-                        'The entry labeled "default": true is the model Hermes '
-                        "silently lands on when the user never picked one."
-                    ),
-                },
-                "models": [
-                    _nous_entry(mid)
-                    for mid in _PROVIDER_MODELS.get("nous", [])
-                ],
-            },
+            provider.slug: {
+                "metadata": {"display_name": provider.label},
+                "models": [{"id": model} for model in _PROVIDER_MODELS.get(provider.slug, [])],
+            }
+            for provider in CANONICAL_PROVIDERS
         },
     }
 

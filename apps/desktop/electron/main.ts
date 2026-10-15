@@ -682,11 +682,7 @@ import {
   readSandboxMarker,
   writeSandboxMarker
 } from './sandbox-fallback'
-import {
-  detectRemotePlatform,
-  helper,
-  terminateOwnedWindowsDashboardForUpdate
-} from './windows-remote-lifecycle'
+
 import { isPackagedInstallPath as isPackagedInstallPathUnderRoots } from './workspace-cwd'
 import { readWslWindowsClipboardImage } from './wsl-clipboard-image'
 import { resolvePickerDefaultPath, setActiveGatewayProfile, setWslBridgeProfileState } from './wsl-path-bridge'
@@ -9793,11 +9789,7 @@ async function rollbackSshBootstrapResult(ssh, result, profile, sshConfig, bound
     }
 
     if (result.platform?.os === 'Windows') {
-      await terminateOwnedWindowsDashboardForUpdate(
-        ssh,
-        { hermesPath: result.hermesPath, hermesHome: result.hermesHome, python: result.pythonPath },
-        expected
-      )
+      throw new Error('Native Windows remote installations are not supported by this fork.')
     } else if (result.platform?.os === 'Linux' || result.platform?.os === 'Darwin') {
       await remoteLifecycle.terminateOwnedDashboardForUpdate(ssh, expected)
     } else {
@@ -9885,7 +9877,7 @@ async function bootstrapSshConnectionInner(profile, sshConfig, reuseToken, sourc
       managedConnectionUpdateGate.assertCanDial(metadata.registryConnectionId, metadata.managedUpdateCorrelation || '')
     }
 
-    const platform = await detectRemotePlatform(ssh, sshConfig.remoteHermesPath || '')
+    const platform = await remoteLifecycle.probeRemotePlatform(ssh)
     const lifecycle = remoteLifecycle.connect // fork: native Windows remotes removed (WSL is the answer)
     result = await lifecycle({
       ssh,
@@ -10343,7 +10335,7 @@ async function testDesktopConnectionConfig(input: any = {}) {
       for (;;) {
         try {
           await ssh.open()
-          const platform: any = await detectRemotePlatform(ssh, sshConfig.remoteHermesPath || '')
+          const platform: any = await remoteLifecycle.probeRemotePlatform(ssh)
           let hermesPath
           let hermesVersion
           let supported
@@ -11232,7 +11224,7 @@ async function openManagedSshUpdateTransport(
   await ssh.open()
 
   try {
-    const platform: any = await detectRemotePlatform(ssh, config.remoteHermesPath || '')
+    const platform: any = await remoteLifecycle.probeRemotePlatform(ssh)
 
     const hermesPath = await remoteLifecycle.locateHermes(ssh, config.remoteHermesPath || '')
     const hermesHome = await remoteLifecycle.probeRemoteHermesHome(ssh)
@@ -11276,11 +11268,7 @@ async function drainManagedSshScope(scope) {
     }
 
     if (state.remotePlatform === 'Windows') {
-      await terminateOwnedWindowsDashboardForUpdate(
-        state.ssh,
-        { hermesPath: state.hermesPath, hermesHome: state.hermesHome, python: state.pythonPath },
-        expected
-      )
+      throw new Error('Native Windows remote installations are not supported by this fork.')
     } else if (state.remotePlatform === 'Linux' || state.remotePlatform === 'Darwin') {
       await remoteLifecycle.terminateOwnedDashboardForUpdate(state.ssh, expected)
     } else {

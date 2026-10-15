@@ -550,7 +550,7 @@ from hermes_cli.runtime_provider_custom import (
 )
 from hermes_cli.runtime_provider_backends import (
     _is_external_process_provider, _resolve_azure_foundry_runtime, _resolve_bedrock_runtime,
-    _resolve_external_process_runtime, _resolve_openrouter_runtime,
+    _resolve_external_process_runtime, _resolve_bare_custom_runtime,
 )
 
 
@@ -1008,7 +1008,7 @@ def _local_endpoint_bypass(requested_provider: str, explicit_api_key, explicit_b
     if (not cfg_base_url or _cfg_provider(model_cfg) not in ("auto", "")
             or any(base_url_host_matches(cfg_base_url, host) for host in _LOCAL_BYPASS_CLOUD_HOSTS)):
         return None
-    return _openrouter_fallback(requested_provider, explicit_api_key, explicit_base_url)
+    return _configured_custom_runtime(requested_provider, explicit_api_key, explicit_base_url)
 
 
 def _tag(runtime: Optional[dict[str, Any]], requested_provider: str) -> Optional[dict[str, Any]]:
@@ -1030,10 +1030,11 @@ def _named_custom_rung(requested_provider, explicit_api_key, explicit_base_url, 
     return runtime
 
 
-def _openrouter_fallback(requested_provider, explicit_api_key, explicit_base_url) -> dict[str, Any]:
-    raise AuthError(
-        f"Provider '{requested_provider}' has no configured endpoint or usable credentials. Run `hermes model`.",
-        provider=requested_provider, code="no_provider_configured")
+def _configured_custom_runtime(requested_provider, explicit_api_key, explicit_base_url) -> dict[str, Any]:
+    return _tag(_resolve_bare_custom_runtime(requested_provider=requested_provider,
+                                            explicit_api_key=explicit_api_key, explicit_base_url=explicit_base_url),
+                requested_provider)
+
 
 
 def resolve_runtime_provider(*, requested: Optional[str] = None, explicit_api_key: Optional[str] = None,
@@ -1139,7 +1140,7 @@ def _ladder_rungs(requested_provider, explicit_api_key, explicit_base_url, targe
     pconfig = PROVIDER_REGISTRY.get(provider)
     if pconfig and pconfig.auth_type == "api_key":
         yield _api_key_provider_runtime(provider, pconfig, requested_provider, model_cfg, target_model)
-    fallback = _openrouter_fallback(requested_provider, explicit_api_key, explicit_base_url)
+    fallback = _configured_custom_runtime(requested_provider, explicit_api_key, explicit_base_url)
     if swallowed_auth_error is not None and not fallback.get("api_key"):
         fallback["auth_error"] = swallowed_auth_error
     yield fallback

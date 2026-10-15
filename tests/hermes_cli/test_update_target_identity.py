@@ -410,18 +410,6 @@ def test_update_syntax_failure_restores_pre_update_head(update_tree, monkeypatch
     git(remote, 'add', 'hermes_cli/config.py')
     git(remote, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
         '-c', 'commit.gpgsign=false', 'commit', '-qm', 'invalid syntax')
-    unexpected_head = git(remote, 'rev-parse', 'HEAD')
-    if sync_phase == 'late-other-branch':
-        def switch_after_sync(*args, **kwargs):
-            try:  # the broken upstream target is now refused (raised) before its move (review G1)
-                return _sync_with_upstream_if_needed(*args, **kwargs)
-            finally:
-                git(t.clone, 'checkout', '-qb', 'unexpected')
-                switched.append(git(t.clone, 'rev-parse', 'HEAD'))
-
-        switched = []
-
-        monkeypatch.setattr(cli_main, '_sync_with_upstream_if_needed', switch_after_sync)
     local = t.clone / '.gitignore'
     staged = local.read_bytes() + b'# staged local work\n'
     unstaged = staged + b'# unstaged local work\n'
@@ -435,21 +423,10 @@ def test_update_syntax_failure_restores_pre_update_head(update_tree, monkeypatch
     assert error.value.code == 1
     assert not t.requests
     output = capsys.readouterr().out
-    if sync_phase == 'late-other-branch':
-        # The broken upstream commit never landed; the unexpected branch keeps the HEAD it was cut at.
-        assert git(t.clone, 'rev-parse', 'unexpected') == switched[0] != unexpected_head
-        assert git(t.clone, 'branch', '--show-current') == 'unexpected'
-        assert not (t.clone / 'hermes_cli/config.py').exists()
-        assert "checkout is on 'unexpected'" in output
-        assert 'Rolling back' not in output
-    else:
-        # Origin's own target is refused before HEAD moves (the commit point's preflight); an
-        # upstream sync's target is refused before ITS move, and the update rolls back (review G1).
-        assert ('The update target has a syntax error' if sync_phase == 'origin'
-                else 'has a syntax error in a critical file; it was not merged') in output
-        assert git(t.clone, 'rev-parse', 'HEAD') == t.base
-        assert not (t.clone / 'hermes_cli' / 'config.py').exists()
-    if sync_phase == 'origin' and dirty:
+    assert 'The update target has a syntax error' in output
+    assert git(t.clone, 'rev-parse', 'HEAD') == t.base
+    assert not (t.clone / 'hermes_cli' / 'config.py').exists()
+    if dirty:
         # Refused before the autostash too: the local work never left the tree, index included.
         assert not git(t.clone, 'stash', 'list')
         assert local.read_bytes() == unstaged

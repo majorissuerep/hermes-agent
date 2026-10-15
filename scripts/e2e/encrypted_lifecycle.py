@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import errno
 import fcntl
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -50,6 +51,8 @@ class Rehearsal:
         self.receipt = {"scenario": args.scenario, "baseline": args.baseline,
                         "candidate": args.candidate, "live_provider": credential["provider"],
                         "model": credential["model"], "checks": {}, "status": "running"}
+        self.receipt["harness_sha256"] = hashlib.sha256(
+            Path(__file__).read_bytes() + Path(__file__).with_name("state_probe.py").read_bytes()).hexdigest()
 
     @staticmethod
     def _credential_strings(value):
@@ -101,6 +104,8 @@ class Rehearsal:
                     if not chunk:
                         break
                     output.extend(chunk)
+                    if name == "install":
+                        log.write_text(self.clean(output.decode(errors="replace")))
                     for match in _PROMPT.finditer(output, consumed):
                         count += 1
                         consumed = match.end()
@@ -132,7 +137,7 @@ class Rehearsal:
     def install(self, sha):
         self.run("install", ["bash", str(self.args.source / "scripts" / "install.sh"),
                              "--dir", str(self.code), "--hermes-home", str(self.home),
-                             "--branch", "main", "--commit", sha, "--stage", "config",
+                             "--branch", "main", "--commit", sha,
                              "--non-interactive", "--skip-browser", "--skip-computer-use"], timeout=2400)
         self.launcher = Path(self.env["HOME"]) / ".local" / "bin" / "hermes"
         if not self.launcher.is_file():
@@ -155,7 +160,7 @@ class Rehearsal:
             f"This is an install acceptance task. Use delegate_task to ask ONE subagent to run "
             f"`hermes config get agent.max_turns` through terminal, then create the file {marker} "
             f"containing exactly {nonce}. The subagent must verify its contents. "
-            "Then YOU run `hermes config set agent.max_turns 17` through terminal. "
+            "Then YOU run `hermes update --check` and `hermes config set agent.max_turns 17` through terminal. "
             "Use the existing unlocked session, never ask for or pass a passphrase/key. "
             "Do not simulate these actions; perform them, verify the file, and stop."
         )
@@ -164,20 +169,30 @@ class Rehearsal:
                                    "--run-budget", "240", "-q", prompt], prompts=1, timeout=300)
         if not marker.is_file() or marker.read_text().strip() != nonce:
             raise RuntimeError("live LLM/delegation did not produce the independent file oracle")
+        self.receipt["checks"]["live-" + phase].update(self.probe("live-proof"))
         self.receipt["checks"]["live-" + phase]["artifact_verified"] = True
 
     def execute(self):
         remote = self.root / "remote.git"
-        self.run("prepare-transport", ["git", "clone", "--bare", "--no-hardlinks", str(self.args.source), str(remote)])
         initial = self.args.candidate if self.args.scenario in {"fresh", "dirty-install"} else self.args.baseline
-        self.run("pin-baseline", ["git", "--git-dir", str(remote), "update-ref", "refs/heads/main", initial])
-        url = remote.as_uri()
+        if self.args.transport_url:
+            url = self.args.transport_url
+        else:
+            self.run("prepare-transport", ["git", "clone", "--bare", "--shared", str(self.args.source), str(remote)])
+            self.run("enable-filtered-clone", ["git", "--git-dir", str(remote), "config", "uploadpack.allowFilter", "true"])
+            self.run("pin-candidate", ["git", "--git-dir", str(remote), "update-ref", "refs/heads/main", self.args.candidate])
+            url = remote.as_uri()
         config = (f'[url "{url}"]\n\tinsteadOf = https://github.com/majorissuerep/hermes-agent.git\n'
                   f'\tinsteadOf = https://github.com/majorissuerep/hermes-agent\n')
         Path(self.env["GIT_CONFIG_GLOBAL"]).write_text(config)
         if self.args.scenario == "dirty-install":
             self.home.mkdir(parents=True)
-            (self.home / "config.yaml").write_text("# preserved legacy install\ndisplay:\n  skin: default\n")
+            defaults = (self.args.source / "hermes_cli" / "config_defaults.py").read_text()
+            version = re.search(r'["\']_config_version["\']:\s*(\d+)', defaults)
+            if version is None:
+                raise RuntimeError("candidate config schema is missing")
+            (self.home / "config.yaml").write_text(
+                f"# preserved legacy install\n_config_version: {version[1]}\ndisplay:\n  skin: default\n")
             (self.home / "memories").mkdir()
             (self.home / "memories" / "legacy.md").write_text("preserve previous install")
             old = Path(self.env["HOME"]) / ".local" / "bin" / "hermes"
@@ -185,6 +200,7 @@ class Rehearsal:
             old.write_text("#!/bin/sh\nexec /removed/old/hermes/venv/bin/python \"$@\"\n")
             old.chmod(0o755)
         self.install(initial)
+        self.run("baseline-branch", ["git", "-C", str(self.code), "checkout", "-B", "main", initial])
         self.run("initialize-vault", [str(self.launcher), "secure-vault", "migrate", "--yes"], prompts=2)
         self.probe("seed", credential=self.credential, workspace=str(self.workspace))
         # OLD may lack session self-management; the live delegation contract is NEW's gate.
@@ -195,12 +211,12 @@ class Rehearsal:
             if self.args.scenario == "broken-files":
                 (self.code / "cli.py").write_text("# deliberately damaged tracked source\n")
                 (self.code / "rehearsal-untracked.txt").write_text("retain local work")
-            self.run("pin-candidate", ["git", "--git-dir", str(remote), "update-ref", "refs/heads/main", self.args.candidate])
             self.run("update", [str(self.launcher), "update", "--yes", "--keep-stash", "--backup"], prompts=1, timeout=2400)
             actual = self.run("verify-sha", ["git", "-C", str(self.code), "rev-parse", "HEAD"]).strip()
             if actual != self.args.candidate:
                 raise RuntimeError("updater did not reach the exact candidate commit")
             self.resolve_python()
+            self.receipt["update_status"] = self.probe("update-status")
             if self.args.scenario == "broken-files" and "AIAgent" not in (self.code / "cli.py").read_text():
                 raise RuntimeError("damaged source file was not repaired")
         after = self.probe("manifest")
@@ -231,6 +247,7 @@ def main():
     parser.add_argument("--evidence", type=Path, required=True)
     parser.add_argument("--work-dir", type=Path)
     parser.add_argument("--keep-work", action="store_true")
+    parser.add_argument("--transport-url", help="Optional read-only test Git server whose main is the candidate")
     parser.add_argument("--credentials-stdin", action="store_true")
     args = parser.parse_args()
     if args.credentials_stdin:
@@ -246,8 +263,9 @@ def main():
     try:
         rehearsal.execute()
         print(json.dumps({"scenario": args.scenario, "status": "passed", "candidate": args.candidate}))
-    except Exception as exc:
-        rehearsal.receipt.update(status="failed", error=rehearsal.clean(str(exc)))
+    except BaseException as exc:
+        rehearsal.receipt.update(status="cancelled" if isinstance(exc, KeyboardInterrupt) else "failed",
+                                 error=rehearsal.clean(str(exc)))
         raise
     finally:
         rehearsal.close()

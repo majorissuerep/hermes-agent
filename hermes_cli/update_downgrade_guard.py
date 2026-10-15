@@ -40,15 +40,16 @@ def target_predates_runtime(git_cmd, root: Path, target_ref: str) -> bool:
     if git("cat-file", "-e", f"{target_ref}^{{commit}}") != 0:
         return False
     # Exit 1 = no match (the target lacks the ledger); 0 = found; anything else is a git error.
-    return git("grep", "-q", "-F", _RUNTIME_SCHEMA_MARKER, target_ref, "--", "hermes_state/*.py") == 1
+    return git("grep", "-q", "-F", _RUNTIME_SCHEMA_MARKER, target_ref, "--", "hermes_state/*.py", "hermes_state_*.py") == 1
 
 
 def _has_ledger_rows(db_path: Path) -> bool:
+    from hermes_security.sqlite import maybe_connect
     if not db_path.is_file():
         return False
     from hermes_state.holders import read_only_db_uri
     try:
-        with closing(sqlite3.connect(read_only_db_uri(db_path), uri=True, timeout=5.0)) as conn:
+        with closing(maybe_connect(read_only_db_uri(db_path), uri=True, timeout=5.0)) as conn:
             return bool(conn.execute(_LEDGER_PROBE).fetchone()[0])
     except sqlite3.Error:
         return False  # no ledger tables yet, or unreadable: nothing an older release would trip on
@@ -56,17 +57,18 @@ def _has_ledger_rows(db_path: Path) -> bool:
 
 def _pre_runtime_snapshot(home: Path) -> str | None:
     """Newest quick snapshot of ``home`` holding a state.db from before the runtime ledger."""
-    from hermes_cli.backup import _quick_snapshot_root
-    from hermes_state.holders import read_only_db_uri
+    from hermes_cli.backup import _quick_snapshot_root, _query_ro_sqlite
     root = _quick_snapshot_root(home)
     for snap in sorted(root.iterdir(), reverse=True) if root.is_dir() else ():
         db = snap / "state.db"
         if snap.name.startswith(".") or not db.is_file():
             continue
         try:
-            with closing(sqlite3.connect(read_only_db_uri(db), uri=True)) as conn:
-                if conn.execute("SELECT 1 FROM sqlite_master WHERE name='session_admissions'").fetchone() is None:
-                    return snap.name
+            predates, error = _query_ro_sqlite(db, lambda conn: conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE name='session_admissions'").fetchone() is None,
+                key_path=home / "state.db")
+            if error is None and predates:
+                return snap.name
         except sqlite3.Error:
             continue
     return None

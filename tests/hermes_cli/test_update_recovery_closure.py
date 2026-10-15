@@ -49,7 +49,7 @@ def _killed_mid_write(tmp_path: Path, rel: str, committed: dict[str, str] | None
         (root / f).write_text(text, encoding="utf-8")
     (root / "hermes_cli/main.py").write_text("def main():\n    print('APP_REACHED')\n    return 0\n", encoding="utf-8")
     env = {"HOME": str(home), "HERMES_HOME": str(home / ".hermes"), "PATH": os.environ.get("PATH", ""),
-           "LANG": "C.UTF-8", "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull}
+           "LANG": "C.UTF-8", "HERMES_ALLOW_NO_VAULT": "1", "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull}
     git_exe = shutil.which("git") or "git"
 
     def git(*args):

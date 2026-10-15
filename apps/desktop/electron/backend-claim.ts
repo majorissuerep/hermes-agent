@@ -22,7 +22,7 @@ import fs from 'node:fs'
 
 import { electronProcessStartMarker } from './parent-process-identity'
 import { isPidAlive } from './update-marker'
-import { hiddenWindowsChildOptions } from './windows-child-options'
+import { hiddenWindowsChildOptions } from './child-process-options'
 
 export function execText(command: string, args: string[], { timeout = 3000 } = {}): Promise<string> {
   return new Promise<string>((resolve, reject) => {

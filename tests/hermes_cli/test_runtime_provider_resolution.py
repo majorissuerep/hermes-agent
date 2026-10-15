@@ -688,7 +688,7 @@ def test_real_openai_key_is_never_routed_or_sent_to_openrouter(monkeypatch):
     """A non-OpenRouter OPENAI_API_KEY with OPENAI_BASE_URL unset neither auto-selects OpenRouter
     nor becomes the bearer for openrouter.ai; auto-detection lands on openai-api as documented."""
     from hermes_cli.auth import resolve_provider
-    from hermes_cli.runtime_provider_backends import _resolve_openrouter_runtime
+    from hermes_cli.runtime_provider_backends import _resolve_bare_custom_runtime
     monkeypatch.setattr(rp, "_get_model_config", dict)
     monkeypatch.setattr("hermes_cli.config.load_config", lambda: {"model": {}})
     monkeypatch.setattr("agent.bedrock_adapter.has_aws_credentials", lambda *_a, **_kw: False)
@@ -697,7 +697,7 @@ def test_real_openai_key_is_never_routed_or_sent_to_openrouter(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "sk-proj-real-openai-key")
 
     assert resolve_provider("auto") == "openai-api"
-    resolved = _resolve_openrouter_runtime(requested_provider="openrouter")
+    resolved = _resolve_bare_custom_runtime(requested_provider="openrouter")
     assert resolved["base_url"] == "https://openrouter.ai/api/v1"
     assert resolved["api_key"] == ""
 
@@ -713,14 +713,14 @@ def test_real_openai_key_is_never_routed_or_sent_to_openrouter(monkeypatch):
 def test_openai_key_bound_to_another_host_never_reaches_openrouter(monkeypatch, openai_base_url, expected_key):
     """OPENAI_API_KEY is an OpenRouter fallback only while OPENAI_BASE_URL doesn't bind it elsewhere:
     a bound key follows its exact origin, so the same hostname over http:// or on another port is elsewhere."""
-    from hermes_cli.runtime_provider_backends import _resolve_openrouter_runtime
+    from hermes_cli.runtime_provider_backends import _resolve_bare_custom_runtime
     monkeypatch.setattr(rp, "_get_model_config", dict)
     monkeypatch.setenv("OPENAI_BASE_URL", openai_base_url)
     monkeypatch.delenv("OPENROUTER_BASE_URL", raising=False)
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-fallback")
 
-    resolved = _resolve_openrouter_runtime(requested_provider="openrouter")
+    resolved = _resolve_bare_custom_runtime(requested_provider="openrouter")
 
     assert resolved["base_url"] == "https://openrouter.ai/api/v1"
     assert resolved["api_key"] == expected_key
@@ -1491,7 +1491,7 @@ def test_auto_detected_nous_auth_failure_falls_through_to_openrouter(monkeypatch
 # GHSA-76xc-57q6-vm5m — Ollama URL substring leak
 #
 # Same bug class as the previously-fixed GHSA-xf8p-v2cg-h7h5 (OpenRouter).
-# _resolve_openrouter_runtime's custom-endpoint branch selects OLLAMA_API_KEY
+# _resolve_bare_custom_runtime's custom-endpoint branch selects OLLAMA_API_KEY
 # when the base_url "looks like" ollama.com. Previous implementation used
 # raw substring match; a custom base_url whose PATH or look-alike host
 # merely contained "ollama.com" leaked OLLAMA_API_KEY to that endpoint.
@@ -1499,7 +1499,7 @@ def test_auto_detected_nous_auth_failure_falls_through_to_openrouter(monkeypatch
 # ---------------------------------------------------------------------------
 
 class TestOllamaUrlSubstringLeak:
-    """Call-site regression tests for the fix in _resolve_openrouter_runtime."""
+    """Call-site regression tests for the fix in _resolve_bare_custom_runtime."""
 
     def _make_cfg(self, base_url):
         return {"base_url": base_url, "api_key": "", "provider": "custom"}

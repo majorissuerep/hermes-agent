@@ -244,7 +244,7 @@ def test_receipt_store_failure_after_commit_keeps_exit_zero_and_a_correlated_rec
 
 
 @pytest.mark.platforms("posix")
-@pytest.mark.parametrize("branch", ["failed-unit", "abort", "windows"])
+@pytest.mark.parametrize("branch", ["failed-unit", "abort"])
 def test_restart_failure_is_owed_and_never_reported_as_a_failed_update(tmp_path, branch):
     """The gateway /update reader hears the committed success; the restart is a follow-up."""
     summary = _run_completion(tmp_path, f"ipc-{branch}")

@@ -42,7 +42,7 @@ import path from 'node:path'
 import { stripAnsi } from '../../shared/src/ansi'
 
 import { pathEnvKey, storeFirstPath } from './backend-env'
-import { hiddenWindowsChildOptions } from './windows-child-options'
+import { hiddenWindowsChildOptions } from './child-process-options'
 
 const IS_WINDOWS = process.platform === 'win32'
 

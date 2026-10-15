@@ -7,7 +7,7 @@
 > [!IMPORTANT]
 > **This is an unofficial fork** of [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent), maintained by [@majorissuerep](https://github.com/majorissuerep) for personal infrastructure.
 > It is **not** built, supported, or endorsed by Nous Research. It diverges from upstream — encrypted state at rest (vault), different security defaults, fork-only integrations — and its behavior is only tested on the maintainer's machines.
-> **Be cautious:** review the [differences vs upstream](https://github.com/NousResearch/hermes-agent/compare/main...majorissuerep:hermes-agent:main) before installing, inspect the installer before piping it to a shell, and report fork issues [here](https://github.com/majorissuerep/hermes-agent/issues) — never upstream. If you are looking for the original project, use [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent).
+> **Be cautious:** review the [differences vs upstream](https://github.com/NousResearch/hermes-agent/compare/main...majorissuerep:hermes-agent:main) before installing, inspect the installer before piping it to a shell, and report fork problems to [the fork maintainer](https://github.com/majorissuerep) — never upstream. If you are looking for the original project, use [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent).
 
 <p align="center">
   Upstream: <a href="https://github.com/NousResearch/hermes-agent">NousResearch/hermes-agent</a>
@@ -24,7 +24,7 @@
 
 **A fork of the self-improving AI agent built by [Nous Research](https://nousresearch.com) (upstream).** Same learning loop — skills from experience, agent-curated memory, cross-session recall — plus fork-only hardening: encrypted state at rest under a master-password/key-file vault, a configurable switch to disable all external messaging adapters, and profile-scoped secrets. It runs on a $5 VPS, a GPU cluster, or serverless infrastructure. Not tied to your laptop — talk to it from a messaging platform while it works on a cloud VM.
 
-Use any model you want — OpenRouter, OpenAI, your own endpoint, and [many others](website/docs/integrations/providers.md). Switch with `hermes model` — no code changes, no lock-in.
+Supported connections: ChatGPT/Codex, Anthropic, LiteLLM, custom OpenAI/Anthropic endpoints, Z.AI, Grok, and Vercel AI Gateway. Direct OpenAI API access is also available. Choose with `hermes model`; see the [provider guide](website/docs/integrations/providers.md).
 
 <table>
 <tr><td><b>A real terminal interface</b></td><td>Full TUI with multiline editing, slash-command autocomplete, conversation history, interrupt-and-redirect, and streaming tool output.</td></tr>
@@ -72,22 +72,22 @@ hermes doctor       # Diagnose any issues
 
 ---
 
-## Skip the API-key collection — Nous Portal
+## Encrypted self-management
 
-Hermes works with whatever provider you want — that's not changing. But if you'd rather not collect five separate API keys for the model, web search, image generation, TTS, and a cloud browser, **[Nous Portal](https://portal.nousresearch.com)** covers all of them under one subscription:
+Unlock once when starting a session. Local CLI calls and delegated agents reuse
+that session's temporary authority for config changes and self-management, without
+another passphrase. A standalone update asks once and preserves encrypted state.
+The passphrase is never exported or saved.
 
-- **300+ models** — pick any of them with `/model <name>`
-- **Tool Gateway** — web search, image generation (FAL), text-to-speech (OpenAI), cloud browser (Browser Use), all routed through your sub. No extra accounts.
-
-One command from a fresh install:
-
-```bash
-hermes setup --portal
+```sh
+hermes config set delegation.max_concurrent_children 4
+hermes update
+hermes secure-vault status
 ```
 
-That logs you in via OAuth, sets Nous as your provider, and turns on the Tool Gateway. Check what's wired up any time with `hermes portal info`. Full details on the [Tool Gateway docs page](website/docs/user-guide/features/tool-gateway.md).
-
-You can still bring your own keys per-tool whenever you want — the gateway is per-backend, not all-or-nothing.
+Use the CLI writers; never overwrite encrypted config, auth or databases as plaintext.
+The supported desktop/CLI platforms are Linux and macOS. See the [encrypted lifecycle
+VM suite](scripts/e2e/README.md) for the install, update, repair and restore contracts.
 
 ---
 

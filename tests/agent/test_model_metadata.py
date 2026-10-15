@@ -998,7 +998,7 @@ class TestNousPortalContextResolution:
 
     @patch("agent.model_metadata.fetch_endpoint_model_metadata")
     @patch("agent.model_metadata.fetch_model_metadata")
-    def test_openrouter_fallback_is_not_persisted(
+    def test_configured_custom_runtime_is_not_persisted(
         self, mock_or, mock_portal, tmp_path, monkeypatch
     ):
         """When the portal can't resolve a model (network blip, auth glitch,

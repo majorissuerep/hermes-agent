@@ -24,6 +24,7 @@ def _git(root, *args):
 def repo(tmp_path):
     root = tmp_path / "checkout"
     root.mkdir()
+    (root / "hermes_state").mkdir()
     _git(root, "init", "-b", "main")
     _git(root, "config", "user.email", "t@example.invalid")
     _git(root, "config", "user.name", "T")

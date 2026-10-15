@@ -444,6 +444,9 @@ def _launcher_script(name: str, repo_root: Path, dependencies: Path | None) -> s
         "os.environ.pop('PYTHONPATH', None)\n"
         f"sys.path.insert(0, {root!r})\n"
         + closure_repair +
+        # A missing module may resolve through another editable install without
+        # raising ImportError. Repair the selected checkout before any import.
+        "_hermes_closure_repair()\n"
         "if sys.argv[1:2] == ['--print-runtime-command']:\n"
         "    sys.dont_write_bytecode = True\n"
         "    from pathlib import Path\n"

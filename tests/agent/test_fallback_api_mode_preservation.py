@@ -203,7 +203,7 @@ class TestNamedProviderDeclaredWire:
 
 
 class TestPlainFallbackUnchanged:
-    def test_plain_openrouter_fallback_stays_chat_completions(self):
+    def test_plain_configured_custom_runtime_stays_chat_completions(self):
         fbs = [{
             "provider": "openrouter",
             "model": "z-ai/glm-5",

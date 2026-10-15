@@ -62,30 +62,6 @@ def _fleet_restart_pending_marker_path() -> Path:
 
 
 def _write_fleet_restart_pending_marker(*, expected_sha: str = "", runtimes: list[dict] | None = None, owner: str = "") -> bool:
-    """Arm the HOST pull→restart obligation. Never raises; False when no store every profile reads took it.
-
-    Fallback only: ``$HERMES_HOME`` is writable by construction (the updater already writes its
-    receipts there), so it still carries the obligation when the host state dir cannot.
-    """
-    path = _fleet_restart_pending_marker_path()
-    try:
-        lines = [f"started={_time.time()}", f"pid={os.getpid()}"]
-        if expected_sha:
-            lines.append(f"expected_sha={expected_sha}")
-        if runtimes is not None:
-            lines.append("inventory=" + json.dumps({"version": 1, "runtimes": runtimes}))
-        # Fork: envelope-aware — the marker lives in the vaulted home root; a plaintext
-        # write there both leaks update state at rest and trips secure-vault repair.
-        from hermes_security import io as vault_io
-
-        vault_io.write_state_text(path, "\n".join(lines) + "\n", purpose="fleet_restart_marker")
-        return True
-    except Exception as exc:
-        logger.debug("Could not write legacy fleet-restart-pending marker: %s", exc)
-        return False
-
-
-def _write_fleet_restart_pending_marker(*, expected_sha: str = "", runtimes: list[dict] | None = None) -> None:
     """Arm the HOST pull→restart obligation. Never raises.
 
     An unwritable host state dir (``HERMES_GATEWAY_LOCK_DIR`` on a read-only mount, a container
@@ -1453,22 +1429,6 @@ def _restart_systemd_gateway_units(
             restarted_scoped_units.update(f"{scope}/{name}" for name in restarted_services[_scope_mark:])
 
 
-def _unit_main_pid(scope_cmd: list, svc_name: str) -> int:
-    """Live ``MainPID`` of a unit; ``0`` when inactive, unprivileged or unreadable.
-
-    Property reads need no manage-units privileges, and an unreadable PID is never collapsed:
-    identity that cannot be proved keeps its own restart.
-    """
-    try:
-        result = _systemctl(list(scope_cmd) + ["show", svc_name, "--property=MainPID", "--value"], timeout=10)
-    except (OSError, subprocess.TimeoutExpired):
-        return 0
-    if getattr(result, "returncode", 1) != 0:
-        return 0
-    try:
-        return int((getattr(result, "stdout", "") or "").strip() or 0)
-    except ValueError:
-        return 0
 
 
 @dataclass

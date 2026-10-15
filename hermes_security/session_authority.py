@@ -41,8 +41,10 @@ class _Handler(socketserver.StreamRequestHandler):
         except (ValueError, UnicodeError):
             return
         authority = self.server.authority
+        with _lock:
+            registered = _sessions.get((str(authority.home), authority.session_id)) is authority
         token = request.get("token") if isinstance(request, dict) else None
-        if (not isinstance(token, str) or not secrets.compare_digest(token, authority.token)
+        if (not registered or not isinstance(token, str) or not secrets.compare_digest(token, authority.token)
                 or request.get("home") != str(authority.home)
                 or request.get("session_id") != authority.session_id):
             response = {"error": "session unlock does not authorize this home"}

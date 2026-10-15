@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process'
 import crypto from 'node:crypto'
 
-import { hiddenWindowsChildOptions, windowsShellCommand } from './windows-child-options'
+import { hiddenWindowsChildOptions, windowsShellCommand } from './child-process-options'
 
 // `hermes gateway ensure` answers with a protocol verdict (ready, or `starting: deadline`) within
 // its own startup deadline: `--timeout` defaults to 60 s (hermes_cli/gateway_runtime.py

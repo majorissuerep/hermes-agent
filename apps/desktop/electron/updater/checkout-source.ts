@@ -5,7 +5,7 @@ import { promisify } from 'node:util'
 
 import { buildDesktopBackendEnv } from '../backend-env'
 import { resolveInstallationLauncher } from '../updater-process'
-import { hiddenWindowsChildOptions } from '../windows-child-options'
+import { hiddenWindowsChildOptions } from '../child-process-options'
 
 import type { UpdaterStatusWire } from './index'
 

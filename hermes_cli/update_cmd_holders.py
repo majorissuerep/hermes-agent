@@ -822,8 +822,24 @@ def _refresh_windows_gateway_launchers() -> None:
     return None
 
 def _refresh_bootstrap_cache_scripts(branch: str = "main") -> None:
-    """No-op: native Windows support removed from this fork (WSL is the Windows answer)."""
-    return None
+    """Heal mutable POSIX installer-cache entries; leave immutable commit pins alone."""
+    from hermes_cli.update_cmd import _m
+    safe_ref = re.sub(r"[^A-Za-z0-9._-]", "_", str(branch or "main"))
+    if re.fullmatch(r"[0-9a-fA-F]{7,40}", safe_ref):
+        return
+    cached = Path(_m().get_hermes_home()) / "bootstrap-cache" / f"install-{safe_ref}.sh"
+    source = _m().PROJECT_ROOT / "scripts" / "install.sh"
+    if not cached.is_file() or not source.is_file():
+        return
+    try:
+        data = source.read_bytes()
+        if cached.read_bytes() != data:
+            staged = cached.with_suffix(".sh.tmp")
+            staged.write_bytes(data)
+            os.replace(staged, cached)
+            print(f"  ✓ Refreshed installer bootstrap-cache script: {cached.name}")
+    except OSError as exc:
+        logger.debug("Installer cache refresh failed: %s", exc)
 
 _SERVICE_READY_TIMEOUT_S = 60.0
 
@@ -1028,6 +1044,6 @@ def _resume_paused_set(token: dict) -> None:
 
 def _resume_windows_gateways_and_merge_outcome(outcome, _windows_gateway_resume, gateway_mode: bool):
     """No-op: native Windows support removed from this fork (WSL is the Windows answer)."""
-    outcome["windows_resume"] = None
+    return None
     return outcome
 

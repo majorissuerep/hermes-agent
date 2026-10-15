@@ -173,9 +173,10 @@ def _build_record(*, other: bool) -> SetupRecord:
 
     state: Optional[dict[str, Any]] = anon_auth.current_nous_state()
     failure: dict[str, Any] = {} if state else (anon_auth.last_mint_failure() or {})
-    free_tier_account = anon_auth.free_inference_active(state) if state else False
+    # Legacy account data remains readable for tools and recovery, not inference.
+    free_tier_account = False
     return SetupRecord(
-        provider_configured=other or free_tier_account or (bool(state) and not anon_auth.is_guest_state(state)),
+        provider_configured=other,
         inference_provider=_resolve_inference(),
         free_tier_account=free_tier_account,
         has_identity=bool(state),
@@ -206,12 +207,6 @@ def run_bootstrap(*, announce: bool = True) -> SetupRecord:
             latch_first_install()
     except Exception:  # the next boot tries again; onboarding.state still answers live
         logger.warning("onboarding: could not record the first-install decision", exc_info=True)
-    try:
-        from hermes_cli.welcome_trial import grandfather_existing_guest, settle_interrupted_claim
-        settle_interrupted_claim()
-        grandfather_existing_guest()
-    except Exception:  # the record still says who carries inference without it
-        logger.warning("free tier: could not check for an existing free-model guest", exc_info=True)
     record = _build_record(other=_inventory_other_providers())
     with _lock:
         _record = record

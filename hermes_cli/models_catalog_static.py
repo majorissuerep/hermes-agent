@@ -170,10 +170,6 @@ _XAI_MODELS = _xai_curated_models()
 
 # Curated per-provider lists. ``-cn`` twins share the international catalog on a domestic endpoint.
 _PROVIDER_MODELS: dict[str, list[str]] = {
-    "moa": ["default"],
-    "nous": [mid for mid, _ in OPENROUTER_MODELS if mid not in _OPENROUTER_ONLY and not mid.endswith(":free")],
-    # Used by /model counts and provider_model_ids fallback when /v1/models is unavailable.
-    "openai": list(_OPENAI_CHAT_MODELS),
     "openai-api": [
         "gpt-6.1-sol", "gpt-6.1-sol-pro", "gpt-6-sol", "gpt-6-sol-pro", "gpt-6-luna", "gpt-6-luna-pro",
         "gpt-5.6-sol", "gpt-5.6-sol-pro", "gpt-5.6-terra", "gpt-5.6-terra-pro", "gpt-5.6-luna",
@@ -182,132 +178,17 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
     ],
     "openai-codex": _codex_curated_models(),
     "xai-oauth": list(_XAI_MODELS),
-    "copilot-acp": ["copilot-acp"],
-    "copilot": _OPENAI_CHAT_MODELS + [
-        "claude-sonnet-4.6", "claude-sonnet-5", "claude-sonnet-4", "claude-sonnet-4.5", "claude-haiku-4.5",
-        "gemini-3.1-pro-preview", "gemini-3-pro-preview", "gemini-3-flash-preview", "gemini-2.5-pro",
-    ],
-    "gemini": [
-        # Argon second: [0] is the silent default when no model is configured, and a flagship never is.
-        "gemini-3.8-flash", "gemini-4-argon", "gemini-3.7-flash",
-        "gemini-3.1-pro-preview", "gemini-3-pro-preview", "gemini-3.6-flash", "gemini-3.1-flash-lite-preview",
-    ],
     "zai": [
         "glm-5.3", "glm-5.3-flash", "glm-5.2", "glm-5.1", "glm-5", "glm-5v-turbo", "glm-5-turbo",
         "glm-4.7", "glm-4.5", "glm-4.5-flash",
     ],
     "xai": list(_XAI_MODELS),
-    # Nemotron flagships, then third-party agentic models hosted on build.nvidia.com.
-    "nvidia": [
-        "nvidia/nemotron-3.5-super-vl-120b-a12b", "nvidia/nemotron-3-ultra-550b-a55b", "nvidia/nemotron-3-super-120b-a12b",
-        "nvidia/nemotron-3.5-lightning-30b-a3b", "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
-        "z-ai/glm-5.3", "z-ai/glm-5.2", "moonshotai/kimi-k2.6", "minimaxai/minimax-m3",
-    ],
-    "kimi-coding": [
-        "kimi-k3", "kimi-k2.7-code", "kimi-k2.6", "kimi-k2.5", "kimi-for-coding", "kimi-for-coding-highspeed",
-        "kimi-k2-thinking", "kimi-k2-thinking-turbo", "kimi-k2-turbo-preview", "kimi-k2-0905-preview",
-    ],
-    "kimi-coding-cn": [
-        "kimi-k3", "kimi-k2.7-code", "kimi-k2.7-code-highspeed", "kimi-k2.6", "kimi-k2.5",
-        "kimi-k2-thinking", "kimi-k2-turbo-preview", "kimi-k2-0905-preview",
-    ],
-    "stepfun": ["step-3.7-flash", "step-3.5-flash", "step-3.5-flash-2603"],
-    "moonshot": [
-        "kimi-k3", "kimi-k2.6", "kimi-k2.5", "kimi-k2-thinking", "kimi-k2-turbo-preview", "kimi-k2-0905-preview",
-    ],
-    "minimax": list(_MINIMAX_MODELS),
-    "minimax-oauth": ["MiniMax-M3", "MiniMax-M2.7", "MiniMax-M2.7-highspeed"],
-    "minimax-cn": list(_MINIMAX_MODELS),
     "anthropic": [
         "claude-fable-5.1", "claude-fable-5", "claude-opus-5-5", "claude-opus-5", "claude-sonnet-5",
         "claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6",
         "claude-sonnet-4-6", "claude-opus-4-5-20251101", "claude-sonnet-4-5-20250929",
         "claude-opus-4-20250514", "claude-sonnet-4-20250514", "claude-haiku-4-5-20251001",
     ],
-    "deepseek": ["deepseek-flash", "deepseek-v4-pro"],
-    "xiaomi": [
-        "mimo-v2.6-pro", "mimo-v2.6-flash", "mimo-v2.6-pro-ultraspeed",
-        "mimo-v2.5-pro", "mimo-v2.5", "mimo-v2-pro", "mimo-v2-omni", "mimo-v2-flash",
-    ],
-    "tencent-tokenhub": list(_TENCENT_MODELS),
-    "tencent-tokenplan": list(_TENCENT_MODELS),
-    "arcee": ["trinity-large-thinking", "trinity-large-preview", "trinity-mini"],
-    "gmi": [
-        "zai-org/GLM-5.1-FP8", "deepseek-ai/DeepSeek-V3.2", "moonshotai/Kimi-K2.5",
-        "google/gemini-3.1-flash-lite-preview", "anthropic/claude-sonnet-5",
-        "anthropic/claude-sonnet-4.6", "openai/gpt-5.4",
-    ],
-    # Synced against opencode.ai/docs/zen + live GET /zen/v1/models. Zen/Go are
-    # _LIVE_FIRST_PICKER_PROVIDERS, so this is a discovery floor: live entries lead in the picker
-    # and stale curated names never pollute the top. "x-preview-f-free" = "Ox Alpha" stealth model.
-    "opencode-zen": [
-        "x-preview-f-free", "kimi-k3", "kimi-k2.5", "kimi-k2.6", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna",
-        "gpt-5.5", "gpt-5.5-pro", "gpt-5.4-pro", "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano", "gpt-5.3-codex",
-        "gpt-5.3-codex-spark", "gpt-5.2", "gpt-5.2-codex", "gpt-5.1", "gpt-5.1-codex", "gpt-5.1-codex-max",
-        "gpt-5.1-codex-mini", "gpt-5", "gpt-5-codex", "gpt-5-nano", "claude-fable-5", "claude-opus-5",
-        "claude-sonnet-5", "claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6", "claude-opus-4-5",
-        "claude-sonnet-4-6", "claude-sonnet-4-5", "claude-sonnet-4", "claude-haiku-4-5", "gemini-3.8-flash",
-        "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.1-pro", "gemini-3-flash",
-        "grok-4.6", "grok-4.5", "grok-build-0.1", "muse-spark-1.2", "minimax-m3", "minimax-m2.7", "minimax-m2.5",
-        "glm-5.3", "glm-5.3-flash", "glm-5.2", "glm-5.1", "glm-5", "kimi-k2.7-code", "deepseek-v4-pro",
-        "deepseek-v4-flash", "qwen3.6-plus", "qwen3.5-plus", "big-pickle", "mimo-v2.5-free",
-        "nemotron-3-ultra-free", "nemotron-3.5-lightning-free",
-        "muse-spark-1.2-contributor-free", "muse-spark-1.3-contributor-free",
-    ],
-    # Synced against opencode.ai/docs/go + live GET /zen/go/v1/models. Known-delisted models are
-    # REMOVED (the live-first merge would otherwise keep offering a model that 401s): "ox-alpha-free"
-    # — the Go-subscription twin of Zen's Ox Alpha — was delisted 2026-09-09.
-    "opencode-go": [
-        "kimi-k3", "kimi-k2.7-code", "kimi-k2.6", "kimi-k2.5", "gpt-5.6-luna", "grok-4.5", "glm-5.3",
-        "glm-5.3-flash", "glm-5.2", "glm-5.1", "glm-5", "mimo-v2.5-pro", "mimo-v2.5", "mimo-v2-pro",
-        "mimo-v2-omni", "minimax-m3", "minimax-m2.7", "minimax-m2.5", "deepseek-v4-pro",
-        "deepseek-v4-flash", "qwen3.8-max", "qwen3.7-max", "qwen3.7-plus", "qwen3.6-plus",
-        "qwen3.5-plus", "hy3", "hy3-preview", "muse-spark-1.2-contributor", "muse-spark-1.3-contributor",
-    ],
-    "kilocode": [
-        "anthropic/claude-opus-4.6", "anthropic/claude-sonnet-4.6", "openai/gpt-5.4",
-        "google/gemini-3-pro-preview", "google/gemini-3-flash-preview",
-    ],
-    "alibaba": list(_ALIBABA_MODELS),
-    "alibaba-cn": list(_ALIBABA_MODELS),
-    "alibaba-coding-plan": list(_ALIBABA_CODING_PLAN_MODELS),
-    "alibaba-coding-plan-cn": list(_ALIBABA_CODING_PLAN_MODELS),
-    "alibaba-token-plan": list(_ALIBABA_TOKEN_PLAN_MODELS),
-    "alibaba-token-plan-cn": list(_ALIBABA_TOKEN_PLAN_MODELS),
-    # Only agentic HF models that map to OpenRouter defaults.
-    "huggingface": [
-        "moonshotai/Kimi-K2.5", "Qwen/Qwen3.5-397B-A17B", "Qwen/Qwen3.5-35B-A3B",
-        "deepseek-ai/DeepSeek-V3.2", "MiniMaxAI/MiniMax-M2.5", "zai-org/GLM-5",
-        "XiaomiMiMo/MiMo-V2-Flash", "moonshotai/Kimi-K2-Thinking", "moonshotai/Kimi-K2.6",
-    ],
-    # Static fallback when live discovery (ListFoundationModels + ListInferenceProfiles) is
-    # unavailable. Inference-profile IDs (us.*) because most models require them.
-    "bedrock": [
-        # [0] is the provider default (get_default_model_for_provider) — keep the cheaper Sonnet there.
-        "us.anthropic.claude-sonnet-5", "us.anthropic.claude-opus-5-5", "us.anthropic.claude-sonnet-4-6",
-        "us.anthropic.claude-opus-4-6-v1",
-        "us.anthropic.claude-haiku-4-5-20251001-v1:0", "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
-        "openai.gpt-6-astra", "openai.gpt-6.1-sol", "openai.gpt-6-sol", "openai.gpt-6-luna",
-        "openai.gpt-5.5", "openai.gpt-5.6-sol", "openai.gpt-5.6-terra", "openai.gpt-5.6-luna",
-        "us.amazon.nova-pro-v1:0", "us.amazon.nova-lite-v1:0", "us.amazon.nova-micro-v1:0", "deepseek.v3.2",
-        "us.meta.llama4-maverick-17b-instruct-v1:0", "us.meta.llama4-scout-17b-instruct-v1:0",
-    ],
-    # Azure Foundry models depend on the user's endpoint configuration.
-    "azure-foundry": [],
-    # Vertex's OpenAI-compatible endpoint has no /models route, so without this the /model picker
-    # only shows the configured model. IDs carry the "google/" publisher prefix Vertex expects
-    # (see hermes_cli/model_setup_flows.py); validated live against a GCP project (global region).
-    "vertex": [
-        "google/gemini-3.8-flash", "google/gemini-4-argon", "google/gemini-3.7-flash",  # [0] = silent default
-        "google/gemini-3.1-pro-preview", "google/gemini-3-pro-preview", "google/gemini-3.6-flash",
-        "google/gemini-3.5-flash", "google/gemini-3.5-flash-lite", "google/gemini-3-flash-preview",
-        "google/gemini-3.1-flash-lite-preview", "google/gemini-3.1-flash-lite",
-    ],
-    "novita": [
-        "moonshotai/kimi-k2.5", "minimax/minimax-m2.7", "zai-org/glm-5", "deepseek/deepseek-v3-0324",
-        "deepseek/deepseek-r1-0528", "qwen/qwen3-235b-a22b-fp8",
-    ],
-    # Bare ids derived from the picker snapshot so both stay in sync.
     "ai-gateway": [mid for mid, _ in VERCEL_AI_GATEWAY_MODELS],
 }
 

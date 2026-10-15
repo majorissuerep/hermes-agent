@@ -789,7 +789,7 @@ def ai_gateway_model_ids(*, force_refresh: bool = False) -> list[str]:
 # ---------------------------------------------------------------------------
 
 # All provider IDs and aliases valid on the left of the ``provider:model`` syntax.
-_KNOWN_PROVIDER_NAMES: set[str] = set(_PROVIDER_LABELS) | set(_PROVIDER_ALIASES) | {"openrouter", "custom"}
+_KNOWN_PROVIDER_NAMES: set[str] = set(_PROVIDER_LABELS) | set(_PROVIDER_ALIASES) | {"custom"}
 
 
 _CONFIG_ERRORS = (ImportError, OSError, RuntimeError, TypeError, ValueError, AttributeError)
