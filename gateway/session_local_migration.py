@@ -12,7 +12,7 @@ from pathlib import Path
 from gateway.config import Platform
 from gateway.session import SessionEntry, SessionSource
 from gateway.session_contract import SessionRef
-from hermes_state_runtime import RuntimeStoreError
+from hermes_state.runtime import RuntimeStoreError
 
 
 def bind_native_transport(authority, actor, identity):
@@ -32,7 +32,7 @@ def unbind_native_transport(authority, actor):
 
 def require_history_claim(authority, conn, actor, sid):
     """Import receipts confer ownership; merely knowing an old ID does not."""
-    from hermes_state_mutation_binding import BINDING_PREFIX
+    from hermes_state.mutation_binding import BINDING_PREFIX
     row = conn.execute('SELECT session_key,chat_id,origin_json FROM sessions WHERE id=?', (sid,)).fetchone()
     if row is None or any(row):
         return
@@ -48,9 +48,9 @@ def resolve_local_target(authority, actor, sid):
     row = db.get_session(sid)
     if row is None:
         raise RuntimeStoreError('not_found')
-    from hermes_state_local import POLICY_PREFIX
+    from hermes_state.local import POLICY_PREFIX
     with db._read_ctx() as conn:
-        from hermes_state_local_migration import LEGACY_PREFIX
+        from hermes_state.local_migration import LEGACY_PREFIX
         bound = conn.execute('SELECT 1 FROM state_meta WHERE key IN (?,?)',
             (POLICY_PREFIX + (row.get('chat_id') or sid), LEGACY_PREFIX + (row.get('chat_id') or sid))).fetchone()
     if bound or str(row.get('chat_id') or '').startswith('local-'):
@@ -67,13 +67,13 @@ def adopt_legacy_session(authority, actor, row):
     if (getattr(authority, '_native_legacy_transports', {}).get(actor.transport_id) != actor
             or not {'session:read', 'session:create'} <= actor.capabilities):
         raise RuntimeStoreError('not_found')
-    from hermes_state_local_migration import LEGACY_CREATION_SOURCES, validate_legacy_row
+    from hermes_state.local_migration import LEGACY_CREATION_SOURCES, validate_legacy_row
     validate_legacy_row(authority.db, row)
     authority._require_admission_open()
     from gateway.run import _load_gateway_config, _resolve_gateway_model
     from gateway.session_policy import build_policy, bind_launch_key
     from gateway.session_local_recovery import restore_local_session
-    from hermes_state_local import commit_local_session
+    from hermes_state.local import commit_local_session
     from hermes_cli.active_sessions import active_session_liveness_guard, ActiveSessionRegistryError
 
     request_id = 'legacy:' + row['id']

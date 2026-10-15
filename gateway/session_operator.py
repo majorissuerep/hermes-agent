@@ -5,7 +5,7 @@ It never claims unowned legacy history: that still requires the native migration
 path. Only SessionAuthority.submit writes this envelope after authorization;
 public submission parameters cannot supply it.
 """
-from hermes_state_runtime import RuntimeStoreError
+from hermes_state.runtime import RuntimeStoreError
 
 
 def check_local_input(authority, ref, row, *, source=None):

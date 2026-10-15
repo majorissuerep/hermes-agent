@@ -131,7 +131,7 @@ def test_oneshot_wires_session_db_for_recall(monkeypatch):
 
     monkeypatch.setitem(sys.modules, "run_agent", mod("run_agent", AIAgent=FakeAgent))
     # Oneshot borrows the process-shared registry handle (one writer per state.db path).
-    monkeypatch.setitem(sys.modules, "hermes_state_registry", mod("hermes_state_registry", acquire=fake_acquire))
+    monkeypatch.setitem(sys.modules, "hermes_state.registry", mod("hermes_state.registry", acquire=fake_acquire))
     monkeypatch.setitem(
         sys.modules,
         "hermes_cli.config",
@@ -208,7 +208,7 @@ def test_oneshot_closes_its_relay_root_before_agent_teardown(monkeypatch, run_fa
         return module
 
     monkeypatch.setitem(sys.modules, "run_agent", mod("run_agent", AIAgent=FakeAgent))
-    monkeypatch.setitem(sys.modules, "hermes_state_registry", mod("hermes_state_registry", acquire=lambda db_path=None: None))
+    monkeypatch.setitem(sys.modules, "hermes_state.registry", mod("hermes_state.registry", acquire=lambda db_path=None: None))
     monkeypatch.setitem(sys.modules, "hermes_cli.config", mod("hermes_cli.config", load_config=lambda: {"model": {"default": "m"}}))
     monkeypatch.setitem(sys.modules, "hermes_cli.models",
                         mod("hermes_cli.models", detect_provider_for_model=lambda *_a, **_k: None))

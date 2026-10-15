@@ -4,7 +4,7 @@ import hashlib
 import json
 import uuid
 
-from hermes_state_runtime import RuntimeStoreError
+from hermes_state.runtime import RuntimeStoreError
 
 
 def request_binding(adapter, request, durable_key):
@@ -16,7 +16,7 @@ def request_binding(adapter, request, durable_key):
 
 def _request_admission_rows(db, request_id):
     """A lost derivative pointer cannot erase accepted identity on retirement."""
-    from hermes_state_terminal import ADMISSION_PREFIX
+    from hermes_state.terminal import ADMISSION_PREFIX
     with db._read_ctx() as conn:
         rows = [dict(row) for row in conn.execute(
             "SELECT * FROM session_admissions WHERE principal_id='api' AND request_id=?", (request_id,))]
@@ -36,7 +36,7 @@ def find_admission(adapter, durable_key, request_id):
     """
     from gateway.session_authorities import active_authority
     from gateway.session_contract import SessionRef
-    from hermes_state_runtime import get_session_admission, _row
+    from hermes_state.runtime import get_session_admission, _row
     authority = active_authority(adapter.gateway_runner)
     if authority is None or adapter._ensure_session_db() is not authority.db:
         raise RuntimeStoreError('profile_mismatch')

@@ -19,7 +19,7 @@ from gateway.hosted_room_driver import TaskIdentity
 from gateway.session_contract import Principal
 from gateway.session_authorities import owner_scope
 from gateway.session_hosted_rpc import HostedRoomAuthorityRPC
-from hermes_state_runtime import RuntimeStoreError, _epoch
+from hermes_state.runtime import RuntimeStoreError, _epoch
 
 _BINDING = 'gateway.hosted.transport.v1:'
 _OPERATIONS = frozenset({'resolve_exact', 'create', 'resume', 'submit', 'history', 'results',

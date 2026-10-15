@@ -83,7 +83,7 @@ async def probe(peer, target, kind):
             os.environ.pop('GATEWAY_ALLOW_ALL_USERS')
         from gateway.session_local import create_local_session
         from gateway.session_contract import Principal
-        from hermes_state_runtime import RuntimeStoreError
+        from hermes_state.runtime import RuntimeStoreError
         for actor, reason in ((Principal('read-only', 'fixture', frozenset({'session:read'}), 'readonly'),
                                'permission_denied'),
                               (Principal('creator', 'foreign', frozenset({'session:create'}), 'foreign'),

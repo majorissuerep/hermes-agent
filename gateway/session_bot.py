@@ -13,7 +13,7 @@ from agent.turn_author import parse_turn_author
 from gateway.session_contract import Principal, SessionRef
 from gateway.config import Platform
 from gateway.platforms.event import MessageEvent
-from hermes_state_runtime import RuntimeStoreError, get_session_admission
+from hermes_state.runtime import RuntimeStoreError, get_session_admission
 from tools.bot_live_delivery import _delivery_id, _read
 from gateway.session_bot_mailbox import (mailbox_lock, read_receipt, write_receipt,
     scan_receipts, remember_receipt, track_receipt_task, withdraw_pin)
@@ -118,7 +118,7 @@ async def _create_bot_chat(authority, actor):
     from gateway.session_local_recovery import restore_local_session
     from gateway.session_local_title import title_new_session
     from gateway.session_runtime_workers import tracked_write
-    from hermes_state_local import commit_local_session
+    from hermes_state.local import commit_local_session
     lock = getattr(authority, '_titled_create_lock', None)
     if lock is None:
         lock = authority._titled_create_lock = asyncio.Lock()
@@ -142,7 +142,7 @@ def _bot_chat_creation_id(authority, actor):
     concurrent deliveries (serialized by the titled-create lock) pick the same identity. An
     existing UNtitled session is the same creation interrupted before its title: it is reused."""
     from gateway.session_local_recovery import local_identity
-    from hermes_state_mutation_retirement import retired_session
+    from hermes_state.mutation_retirement import retired_session
     base, generation = 'bot-chat:' + authority.profile_id, 0
     while True:
         request_id = base if generation == 0 else f'{base}:{generation}'
@@ -437,7 +437,7 @@ async def recover_bot_deliveries(authority):
         target = authority.db.get_session(authority.db.get_compression_tip(row['id']))
         if target is None:
             return
-        from hermes_state_local import POLICY_PREFIX
+        from hermes_state.local import POLICY_PREFIX
         with authority.db._read_ctx() as conn:
             bound = conn.execute('SELECT 1 FROM state_meta WHERE key=?',
                 (POLICY_PREFIX + (target.get('chat_id') or target['id']),)).fetchone()

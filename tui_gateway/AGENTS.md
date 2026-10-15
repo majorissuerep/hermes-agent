@@ -101,7 +101,7 @@ discovers or spawns it via the host rendezvous record) instead of spawning a pri
 is a client and losing it detaches the session. A session is a *deck session* once a client calls
 `deck.register` (or the snapshot loop adopts a live session whose conversation has an open deck row):
 `_schedule_ws_orphan_reap` never arms for it, and automatic reclaim (`idle_timeout`, `lru_evict`,
-`tui_shutdown`) leaves its state.db row open like Desktop's — the deck row (`hermes_state_deck.py`) is the
+`tui_shutdown`) leaves its state.db row open like Desktop's — the deck row (`hermes_state/deck.py`) is the
 authority on "open", ended only by `deck.close` / `/close`. Clients in deck mode `deck.detach` instead of
 `session.close` when they move away. Cross-session messages go through the owner-pinned mailbox
 (`tools/bot_live_delivery.py`); `_poll_bot_live_delivery_once` claims only envelopes pinned to the session's

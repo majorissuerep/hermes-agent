@@ -13,8 +13,8 @@ async def test_legacy_history_adoption_is_native_owned_atomic_and_retryable(tmp_
     from gateway.session_authority import initialize_session_authority
     from gateway.session_contract import Principal
     from gateway.session_local_title import resolve_titled_session
-    from hermes_state_local import local_receipt
-    from hermes_state_runtime import RuntimeStoreError
+    from hermes_state.local import local_receipt
+    from hermes_state.runtime import RuntimeStoreError
 
     monkeypatch.setenv('HERMES_HOME', str(tmp_path))
     config = {'platform_toolsets': {'cli': []}}
@@ -96,7 +96,7 @@ async def test_legacy_adoption_refuses_live_owner_and_foreign_profile_without_wr
     from gateway.session_contract import Principal
     from gateway.session_local_title import resolve_titled_session
     from hermes_cli.active_sessions import try_acquire_active_session, release_active_session
-    from hermes_state_runtime import RuntimeStoreError
+    from hermes_state.runtime import RuntimeStoreError
 
     monkeypatch.setenv('HERMES_HOME', str(tmp_path))
     monkeypatch.setattr(run, '_load_gateway_config', lambda: {'platform_toolsets': {'cli': []}})
@@ -124,8 +124,8 @@ async def test_legacy_adoption_refuses_live_owner_and_foreign_profile_without_wr
         release_active_session(lease)
     ref = resolve_titled_session(authority, native, 'old-live')
     db.set_session_title(ref.session_id, 'Bot Chat')
-    from hermes_state_local_lineage import reset_local_target
-    from hermes_state_local import local_receipt
+    from hermes_state.local_lineage import reset_local_target
+    from hermes_state.local import local_receipt
     receipt = local_receipt(db, ref.session_id)
     entry = dict(receipt['entry'], session_id='reset-tip')
     reset_local_target(db, epoch=authority.epoch, parent_session_id=ref.session_id, entry=entry)

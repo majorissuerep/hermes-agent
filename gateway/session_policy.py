@@ -5,7 +5,7 @@ from dataclasses import dataclass
 import json
 from pathlib import Path
 
-from hermes_state_runtime import RuntimeStoreError
+from hermes_state.runtime import RuntimeStoreError
 
 CREATE_FIELDS = frozenset({'request_id', 'source', 'cwd', 'model', 'toolsets',
                            'provider', 'base_url', 'reasoning', 'max_turns', 'ignore_rules', 'api_key', 'editor',
@@ -545,7 +545,7 @@ def rebind_launch_key(authority, session, api_key):
     source = authority.sessions[session.session_id].source
     if source is None or source.platform != Platform.LOCAL:
         raise RuntimeStoreError('admission_conflict')
-    from hermes_state_local import local_receipt
+    from hermes_state.local import local_receipt
     ref = restore_policy(local_receipt(authority.db, session.session_id)['policy']).credential_ref
     if ref is None:
         raise RuntimeStoreError('admission_conflict')

@@ -209,7 +209,7 @@ def stop_authority_turns(authority, *, in_process=False):
     managed worker (acknowledged, or terminated within STOP_ACK_SECONDS, and the admission settles
     through its own fenced path). ``in_process`` also hard-interrupts the running agent of each
     executing in-process turn, or latches the generation ``adopt_agent`` consumes before it exists."""
-    from hermes_state_runtime import RuntimeStoreError
+    from hermes_state.runtime import RuntimeStoreError
     signalled = 0
     workers = getattr(authority, '_managed_workers', {})
     for worker in list(workers.values()):
@@ -289,7 +289,7 @@ async def _retire_profile_authority(authority, timeout=None):
     authority.retired = True
     # No drain is left to answer an observer (a session_busy pause keeps API/webhook/Bot ones
     # waiting): release them all. Their rows stay queued for the next owner, so nothing is resent.
-    from hermes_state_runtime import RuntimeStoreError
+    from hermes_state.runtime import RuntimeStoreError
     authority.native_waiters.clear()
     for waiter in authority.waiters.values():
         if not waiter.done():

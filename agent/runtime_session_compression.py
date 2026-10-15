@@ -9,7 +9,7 @@ def _handoff_rows(messages):
     that SessionDB's insert simply never reads. The owner's boundary stays closed; sending those keys
     would fail the receipt and leave the journal stuck pending, refusing every later write.
     """
-    from hermes_state_runtime import HANDOFF_MESSAGE_FIELDS
+    from hermes_state.runtime import HANDOFF_MESSAGE_FIELDS
     return [{k: v for k, v in m.items() if k in HANDOFF_MESSAGE_FIELDS} if isinstance(m, dict) else m
             for m in messages]
 

@@ -13,7 +13,7 @@ import json
 
 from gateway.hosted_room_driver import TaskIdentity
 from gateway.session_contract import SessionRef, Submission
-from hermes_state_runtime import RuntimeStoreError, list_session_admissions
+from hermes_state.runtime import RuntimeStoreError, list_session_admissions
 
 _RESULTLESS_OUTCOMES = frozenset({'interrupted', 'cancelled'})
 # Encoded receipts per ``results`` read; under the 512 KiB private-socket response line.
@@ -81,7 +81,7 @@ class HostedRoomAuthorityRPC:
         from gateway.session_local import stage_local_session
         from gateway.session_local_recovery import restore_local_session
         from gateway.session_runtime_workers import tracked_write
-        from hermes_state_local import commit_local_session
+        from hermes_state.local import commit_local_session
         from agent.skill_utils import parse_config_string_list
         private = {}
         config = _load_gateway_config()
@@ -102,7 +102,7 @@ class HostedRoomAuthorityRPC:
             await tracked_write(self.authority, partial(
                 commit_local_session, self.authority.db, epoch=self.authority.epoch, receipt=staged))
             restore_local_session(self.authority, staged['session_id'])
-        from hermes_state_runtime import _epoch
+        from hermes_state.runtime import _epoch
         def label(conn):
             _epoch(conn, self.authority.epoch)
             conn.execute('UPDATE sessions SET title=?, hidden=1 WHERE id=?',

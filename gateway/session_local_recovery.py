@@ -5,9 +5,9 @@ from pathlib import Path
 from gateway.config import Platform
 from gateway.session import SessionEntry, SessionSource
 from gateway.session_contract import SessionRef
-from hermes_state_keys import local_identity
-from hermes_state_local import POLICY_PREFIX, local_receipt
-from hermes_state_runtime import RuntimeStoreError, list_session_admissions
+from hermes_state.keys import local_identity
+from hermes_state.local import POLICY_PREFIX, local_receipt
+from hermes_state.runtime import RuntimeStoreError, list_session_admissions
 
 
 def local_adapter_map(authority):
@@ -63,7 +63,7 @@ def restore_local_session(authority, sid):
         row = authority.db.get_session(target)
         if row is None or (row['session_key'], row['chat_id'], row['user_id']) != (route, chat_id, source.user_id):
             raise ValueError('stored identity mismatch')
-        from hermes_state_local_lineage import validate_local_lineage
+        from hermes_state.local_lineage import validate_local_lineage
         with authority.db._read_ctx() as conn:
             validate_local_lineage(conn, receipt)
     except (KeyError, TypeError, ValueError, AttributeError) as exc:
@@ -150,7 +150,7 @@ def reopen_local_session(authority, ref):
 
 
 def reset_local_session(store, old_entry, session_id, now, display_name):
-    from hermes_state_local_lineage import reset_local_target
+    from hermes_state.local_lineage import reset_local_target
     entry = SessionEntry(old_entry.session_key, session_id, now, now,
         origin=old_entry.origin, platform=old_entry.platform, chat_type=old_entry.chat_type,
         display_name=display_name if display_name is not None else old_entry.display_name,

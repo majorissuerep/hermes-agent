@@ -6,8 +6,8 @@ and ``oneshot``/``tool`` CLI runs, but ``authorize_history`` (pin/archive/hide/r
 """
 from gateway.session_contract import Principal
 from hermes_state import SessionDB
-from hermes_state_local_migration import validate_legacy_row
-from hermes_state_mutation_binding import authorize_history, same_history_owner
+from hermes_state.local_migration import validate_legacy_row
+from hermes_state.mutation_binding import authorize_history, same_history_owner
 
 
 def test_rows_the_resume_adopts_take_sidebar_edits(tmp_path):

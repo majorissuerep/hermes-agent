@@ -13,9 +13,9 @@ from threading import Event, Thread
 import pytest
 
 from hermes_cli import config
-from hermes_state_wal import apply_wal_with_fallback
+from hermes_state.wal import apply_wal_with_fallback
 from utils import atomic_yaml_write
-import hermes_state_wal as wal
+import hermes_state.wal as wal
 
 
 def test_partial_config_import_cannot_invert_config_and_module_locks(tmp_path):
@@ -26,7 +26,7 @@ def test_partial_config_import_cannot_invert_config_and_module_locks(tmp_path):
         import os, sqlite3, sys
 
         import providers
-        import hermes_state_wal as wal
+        import hermes_state.wal as wal
 
         partial_ready = Event()
         opener_inside_resolve = Event()

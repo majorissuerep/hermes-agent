@@ -374,7 +374,7 @@ _SHARED_HUBS = frozenset({
     "hermes_cli/profiles.py",
     "hermes_cli/version_info.py",
     "utils.py",
-    "hermes_state.py",
+    "hermes_state/__init__.py",
     "agent/__init__.py",
     "cron/jobs.py",
     "tools/environments/local.py",
@@ -412,7 +412,7 @@ _E2E_LANES: dict[str, tuple[str, ...]] = {
         "hermes_cli/_update_",
         "hermes_cli/old_updater",
         # The downgrade refusal (hermes_cli/update_downgrade_guard.py) reads state.db through it.
-        "hermes_state_holders.py",
+        "hermes_state/holders.py",
         "hermes_cli/_old_updater",
         "hermes_cli/post_update",
         "hermes_cli/config_migrations",

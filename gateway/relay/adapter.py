@@ -27,7 +27,7 @@ from gateway.platforms.event import ProcessingOutcome
 from agent.i18n import t
 from gateway.relay.adapter_discord_interaction import RelayDiscordInteractionMixin
 from gateway.relay.descriptor import CapabilityDescriptor
-from hermes_state_runtime import RuntimeStoreError
+from hermes_state.runtime import RuntimeStoreError
 from gateway.relay.egress import (
     EGRESS_DECLINE_CODE,
     decline_error,

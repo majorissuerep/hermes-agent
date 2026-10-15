@@ -14,7 +14,7 @@ from types import SimpleNamespace
 import uuid
 
 from gateway.session_contract import Principal
-from hermes_state_runtime import RuntimeStoreError
+from hermes_state.runtime import RuntimeStoreError
 
 _PENDING = ('queued', 'claimed')
 

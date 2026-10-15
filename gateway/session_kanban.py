@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 import sqlite3
 
-from hermes_state_runtime import RuntimeStoreError
+from hermes_state.runtime import RuntimeStoreError
 
 
 def build_kanban_policy(connection, params, config):
@@ -76,7 +76,7 @@ async def run_task(connection, params):
     from gateway.session_local import create_local_session
     from gateway.session_contract import Submission
     from gateway.session_local_recovery import local_identity
-    from hermes_state_local import local_receipt
+    from hermes_state.local import local_receipt
     from gateway.session_policy import restore_policy
     authority = connection.authority
     # Resolved off-loop up front: no await separates the saved-claim check from session

@@ -182,7 +182,7 @@ CASES = {
     # The Windows desktop-update hand-off is a PowerShell integration surface:
     # its tests spawn the real script and poll its loopback server. They run
     # when the script, the Electron side that launches it, or their own test
-    # files change — not on every hermes_state.py PR. The script runs a real
+    # files change — not on every hermes_state/__init__.py PR. The script runs a real
     # `hermes update`, and the Windows crash cells that kill it mid-run live in
     # the install + update journey, so it starts e2e_upgrade as well.
     "windows.ps1 → desktop_updater": (
@@ -349,7 +349,7 @@ CASES = {
         ["tests/e2e/core/sqlite/test_torture.py"],
         _lanes(python=True, python_prod=False, scan=True, e2e=True),
     ),
-    "state db → e2e": (["hermes_state_wal.py"], _lanes(python=True, scan=True, e2e=True)),
+    "state db → e2e": (["hermes_state/wal.py"], _lanes(python=True, scan=True, e2e=True)),
     "upgrade suite → e2e_upgrade, not e2e": (
         ["tests/e2e/core/upgrade/pm/test_pm_lifecycle.py"],
         _lanes(python=True, python_prod=False, scan=True, e2e_upgrade=True),

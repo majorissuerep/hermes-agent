@@ -1,7 +1,7 @@
 """Receipt-only adapter ingress: the authority, not an HTTP/WS task, owns execution."""
 from contextlib import asynccontextmanager
 
-from hermes_state_runtime import RuntimeStoreError
+from hermes_state.runtime import RuntimeStoreError
 
 
 @asynccontextmanager
@@ -81,7 +81,7 @@ async def _committed(authority, event):
 async def _webhook_retry(authority, event):
     # One-shot finalization ends the route. Resolve an existing provider receipt
     # before SessionStore would rotate it into a new physical session.
-    from hermes_state_runtime import get_session_admission
+    from hermes_state.runtime import get_session_admission
     payload, rows = await _committed(authority, event)
     if not rows:
         return None
@@ -126,7 +126,7 @@ async def recover_webhook_finalizations(authority):
     """Close settled original webhooks only after current route authorization succeeds."""
     from gateway.session_envelope import check_native_route
     from gateway.session_contract import SessionRef
-    from hermes_state_runtime import RuntimeStoreError, get_session_admission
+    from hermes_state.runtime import RuntimeStoreError, get_session_admission
 
     rows = authority.db._read_all("""
         SELECT a.admission_id FROM sessions AS s

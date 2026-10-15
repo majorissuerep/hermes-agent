@@ -9,7 +9,7 @@ from functools import partial
 import sys
 
 from gateway.session_busy_controls import authorize
-from hermes_state_runtime import RuntimeStoreError
+from hermes_state.runtime import RuntimeStoreError
 
 
 _SUBAGENT_FIELDS = (
@@ -326,7 +326,7 @@ def _owner_objects(authority, ref):
 def physical_target(authority, ref):
     from gateway.config import Platform
     if authority.sessions[ref.session_id].source.platform == Platform.LOCAL:
-        from hermes_state_local import local_receipt
+        from hermes_state.local import local_receipt
         return local_receipt(authority.db, ref.session_id)['entry']['session_id']
     return ref.session_id
 

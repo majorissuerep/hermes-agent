@@ -811,6 +811,8 @@ youtube-transcript-api = false
 
 [tool.setuptools.packages.find]
 include = [
+  "hermes_state",
+  "hermes_state.*",
   "agent",
   "agent.*",
   "tools",

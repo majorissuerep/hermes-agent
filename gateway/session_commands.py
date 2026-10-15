@@ -8,7 +8,7 @@ from contextlib import contextmanager
 from pathlib import Path
 import shlex
 
-from hermes_state_runtime import RuntimeStoreError
+from hermes_state.runtime import RuntimeStoreError
 
 
 # Reviewed gateway handlers only: listing a command is not permission to run it. Each read was

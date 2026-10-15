@@ -244,7 +244,7 @@ def mutation_owner(monkeypatch, _isolate_hermes_home):
     from hermes_constants import get_hermes_home
     from hermes_cli.web_server import app
     from hermes_state import SessionDB
-    from hermes_state_runtime import begin_runtime_epoch
+    from hermes_state.runtime import begin_runtime_epoch
 
     home = get_hermes_home()
     db = SessionDB(db_path=home / 'state.db')
@@ -532,7 +532,7 @@ class TestWebServerEndpoints:
             stale.close()
 
         # Owner path: the gateway's writable acquisition reconciles the schema at startup.
-        from hermes_state_registry import acquire, release_or_close
+        from hermes_state.registry import acquire, release_or_close
         owner = acquire(db_path)
         try:
             pass
@@ -4500,7 +4500,7 @@ class TestDeleteSessionEndpoint:
         from hermes_cli import profiles as profiles_mod
         from hermes_cli.web_server import app
         from hermes_state import SessionDB
-        from hermes_state_runtime import begin_runtime_epoch
+        from hermes_state.runtime import begin_runtime_epoch
 
         profile_home = profiles_mod.get_profile_dir("worker")
         profile_home.mkdir(parents=True)

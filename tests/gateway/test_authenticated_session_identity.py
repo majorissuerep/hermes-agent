@@ -75,7 +75,7 @@ async def test_bundled_provider_issuer_subject_owns_durable_receipts(tmp_path, m
     from gateway.session_local import create_local_session
     from gateway.session_contract import Principal
     from hermes_cli.web_server_sessions import _session_mutation_context
-    from hermes_state_runtime import RuntimeStoreError
+    from hermes_state.runtime import RuntimeStoreError
     from plugins.dashboard_auth.basic import BasicAuthProvider, hash_password
 
     monkeypatch.setattr(run, '_load_gateway_config', lambda: {'platform_toolsets': {'cli': []}})
@@ -142,7 +142,7 @@ async def test_private_native_subject_preserves_existing_creation_and_mutation_r
     from gateway.session_contract import Principal
     from gateway.session_local import create_local_session
     from gateway.session_mutations import mutate_session
-    from hermes_state_runtime import RuntimeStoreError
+    from hermes_state.runtime import RuntimeStoreError
 
     monkeypatch.setattr(run, '_load_gateway_config', lambda: {'platform_toolsets': {'cli': []}})
     store = SessionStore(tmp_path / 'sessions', GatewayConfig())

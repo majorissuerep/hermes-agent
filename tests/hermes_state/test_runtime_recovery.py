@@ -4,7 +4,7 @@ import sqlite3
 import pytest
 
 from hermes_state import SessionDB
-import hermes_state_runtime as rt
+import hermes_state.runtime as rt
 
 
 def legacy(path, rows):

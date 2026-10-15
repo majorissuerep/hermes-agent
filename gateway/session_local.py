@@ -10,7 +10,7 @@ from gateway.config import Platform, PlatformConfig
 from gateway.platforms.base import BasePlatformAdapter, SendResult
 from gateway.session import SessionSource
 from gateway.session_contract import CANONICAL_GATEWAY_PROTOCOL
-from hermes_state_runtime import RuntimeStoreError
+from hermes_state.runtime import RuntimeStoreError
 
 
 class LocalSessionAdapter(BasePlatformAdapter):
@@ -101,7 +101,7 @@ class LocalSessionAdapter(BasePlatformAdapter):
         with live.event_stream.lock:
             if any('session:respond' in member.capabilities for member in live.subscribers.values()):
                 return None
-        from hermes_state_runtime import list_session_admissions
+        from hermes_state.runtime import list_session_admissions
         started = next((row for row in list_session_admissions(self.authority.db, session_id=chat_id)
                         if row['status'] == 'started'), None)
         if started is not None and 'local_automation_v1' in started['payload']:
@@ -147,7 +147,7 @@ def _bypass_policy(params, *, private_secrets):
 def create_local_session(authority, actor, params, *, trusted_policy=None, trusted_secrets=None, skills_prompt=None):
     """Stage, commit and publish a local session inline (synchronous callers)."""
     from gateway.session_local_recovery import restore_local_session
-    from hermes_state_local import commit_local_session
+    from hermes_state.local import commit_local_session
     staged = stage_local_session(authority, actor, params, trusted_policy=trusted_policy,
                                  trusted_secrets=trusted_secrets, skills_prompt=skills_prompt)
     if isinstance(staged, dict):
@@ -196,7 +196,7 @@ def stage_local_session(authority, actor, params, *, trusted_policy=None, truste
     sid = local_identity(authority.profile_id, actor.subject, request_id)
     from gateway.session_policy import bind_launch_key, restore_policy, launch_key
     if authority.db.get_session(sid) is not None:
-        from hermes_state_local import local_receipt
+        from hermes_state.local import local_receipt
         saved = local_receipt(authority.db, sid)
         original = restore_policy(saved['policy'])
         if original.request_json != policy.request_json:
@@ -226,7 +226,7 @@ def stage_local_session(authority, actor, params, *, trusted_policy=None, truste
 
 
 def publish_local_policy(authority, session_id):
-    from hermes_state_local import local_receipt
+    from hermes_state.local import local_receipt
     from gateway.session_policy import restore_policy
     live = authority.sessions[session_id]
     from gateway.session_local_recovery import local_adapter_map
@@ -319,7 +319,7 @@ def _classic_cli_fields(authority, ref, live, agent, policy):
     import contextlib
     stored_id = ref.session_id
     with contextlib.suppress(Exception):
-        from hermes_state_local import local_receipt
+        from hermes_state.local import local_receipt
         stored_id = local_receipt(authority.db, ref.session_id)['entry']['session_id'] or stored_id
     row = {}
     with contextlib.suppress(Exception):

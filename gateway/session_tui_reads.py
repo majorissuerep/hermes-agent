@@ -42,7 +42,7 @@ def tui_read(policy, name: str, arg: str):
 
 def _stored_id(authority, ref) -> str:
     with contextlib.suppress(Exception):
-        from hermes_state_local import local_receipt
+        from hermes_state.local import local_receipt
         return local_receipt(authority.db, ref.session_id)['entry']['session_id'] or ref.session_id
     return ref.session_id
 
@@ -136,7 +136,7 @@ async def context_breakdown(connection, ref, params) -> dict:
     transcript, built in the session's workspace. Before the agent exists: empty categories plus the
     session's stored usage (the contract's pre-build shape)."""
     from gateway.session_busy_controls import authorize
-    from hermes_state_runtime import RuntimeStoreError
+    from hermes_state.runtime import RuntimeStoreError
     if set(params) - {'session_id', 'profile'} or not isinstance(ref.session_id, str) or not ref.session_id:
         raise RuntimeStoreError('invalid_params')
     authorize(connection, ref, params, 'session:read')

@@ -15,7 +15,7 @@ import threading
 import uuid
 
 from gateway.session_busy_controls import authorize
-from hermes_state_runtime import RuntimeStoreError
+from hermes_state.runtime import RuntimeStoreError
 
 logger = logging.getLogger(__name__)
 

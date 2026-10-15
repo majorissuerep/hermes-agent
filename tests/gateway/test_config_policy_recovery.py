@@ -8,7 +8,7 @@ import pytest
 
 def test_config_credentials_recover_only_exact_source(tmp_path, monkeypatch):
     from gateway.session_policy import build_policy, bind_launch_key
-    from hermes_state_runtime import RuntimeStoreError
+    from hermes_state.runtime import RuntimeStoreError
     home = tmp_path / 'profile'
     home.mkdir()
     monkeypatch.setenv('HERMES_HOME', str(home))

@@ -5,8 +5,8 @@ session row it owned; pickers then listed it as resumable. The stamp itself is t
 ``session.detach {end_reason}`` (``session_acp_lifecycle.end_idle_viewer_session``); this module only
 decides which live rows read as closed.
 """
-from hermes_state_local import local_receipt
-from hermes_state_runtime import RuntimeStoreError
+from hermes_state.local import local_receipt
+from hermes_state.runtime import RuntimeStoreError
 
 
 def _local_target(authority, session_id):

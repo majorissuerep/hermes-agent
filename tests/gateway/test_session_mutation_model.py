@@ -124,7 +124,7 @@ async def test_input_queued_while_a_model_receipt_commits_still_runs(tmp_path, m
     from gateway.session_controls import AuthorityConnection
     from gateway.session_local import create_local_session
     from hermes_cli import model_switch
-    import hermes_state_runtime as rt
+    import hermes_state.runtime as rt
     monkeypatch.setattr(run, '_load_gateway_config', lambda *a: {})
     monkeypatch.setattr(model_switch, 'switch_model', lambda **k: model_switch.ModelSwitchResult(
         success=True, new_model='switched', target_provider='custom', base_url='http://127.0.0.1:9/v1'))
@@ -260,7 +260,7 @@ async def test_guarded_model_target_commits_only_with_its_confirmation_token(tmp
     from gateway.session_controls import AuthorityConnection
     from gateway.session_local import create_local_session
     from hermes_cli import model_cost_guard, model_switch
-    import hermes_state_runtime as rt
+    import hermes_state.runtime as rt
     monkeypatch.setattr(run, '_load_gateway_config', lambda *a: {})
     monkeypatch.setattr(model_switch, 'switch_model', lambda **k: model_switch.ModelSwitchResult(
         success=True, new_model=k['raw_input'], target_provider='custom', base_url='http://127.0.0.1:9/v1'))
@@ -328,7 +328,7 @@ async def test_large_context_guard_reads_the_persisted_anchor_with_no_resident_a
     from gateway.session_controls import AuthorityConnection
     from gateway.session_local import create_local_session
     from hermes_cli import model_selection_guards, model_switch
-    import hermes_state_runtime as rt
+    import hermes_state.runtime as rt
     monkeypatch.setattr(run, '_load_gateway_config', lambda *a: {})
     monkeypatch.setattr(model_selection_guards, '_context_cache_threshold', lambda: 1000)
     monkeypatch.setattr(model_switch, 'switch_model', lambda **k: model_switch.ModelSwitchResult(

@@ -14,7 +14,7 @@ from gateway import run_runtime
 from gateway.session_authority import LiveSession, SessionAuthority
 from gateway.session_contract import Principal, SessionRef, Submission
 from hermes_state import SessionDB
-from hermes_state_runtime import begin_runtime_epoch, list_session_admissions
+from hermes_state.runtime import begin_runtime_epoch, list_session_admissions
 from tests.waiting import async_wait_until
 
 ACTOR = Principal('human', 'owned', frozenset({'session:submit', 'session:control'}), 'cli')

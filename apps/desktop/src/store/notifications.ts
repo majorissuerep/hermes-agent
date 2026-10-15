@@ -125,7 +125,7 @@ export const RECOVERY_ACTIONS = {
 }
 
 /** Structured storage failure codes the backend puts in RPC/HTTP error data
- *  (`hermes_state_errors.classify_persistence_error`). */
+ *  (`hermes_state.errors.classify_persistence_error`). */
 const STORAGE_CODE_RE = /['"]code['"]\s*:\s*['"](storage_[a-z_]+|disk_full)['"]/i
 
 interface ErrorSummaryRule {

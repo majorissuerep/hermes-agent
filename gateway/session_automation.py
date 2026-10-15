@@ -10,7 +10,7 @@ import json
 from gateway.config import Platform
 from gateway.platforms.event import MessageEvent, MessageType
 from gateway.session_contract import SessionRef
-from hermes_state_runtime import RuntimeStoreError, admit_session_input
+from hermes_state.runtime import RuntimeStoreError, admit_session_input
 
 
 def producer_identity(runner, event):
@@ -28,7 +28,7 @@ def completion_admission(runner, event):
     entry = runner.session_store.lookup_by_session_key(str(event.get('session_key') or ''))
     if entry is None:
         return None
-    from hermes_state_runtime import list_session_admissions
+    from hermes_state.runtime import list_session_admissions
     identity = producer_identity(runner, event)
     # Compression moves the route's transcript to a child; admissions stay on the logical root.
     sid = (entry.origin.chat_id if entry.origin.platform == Platform.LOCAL
@@ -118,7 +118,7 @@ def snapshot_automation(authority, adapter, event, identity):
     if event.source.platform == Platform.LOCAL:
         return snapshot_local_automation(authority, adapter, event, identity, entry)
     from gateway.session_envelope import restore_native
-    from hermes_state_runtime import list_session_admissions
+    from hermes_state.runtime import list_session_admissions
     # Admissions belong to the logical root; ``entry.session_id`` is only the transcript tip.
     owner = authority.logical_owner(entry.session_id)
     prior = list_session_admissions(authority.db, session_id=owner, pending_only=False)
@@ -259,7 +259,7 @@ async def move_route_wakes(runner, session_key, old_session_id):
     from gateway.session_authority import LiveSession
     from gateway.session_contract import Principal
     from gateway.session_runtime_workers import tracked_write
-    from hermes_state_runtime import list_session_admissions
+    from hermes_state.runtime import list_session_admissions
     old = SessionRef(authority.profile_id, authority.logical_owner(old_session_id))
     new = SessionRef(authority.profile_id, authority.logical_owner(entry.session_id))
     if old.session_id not in authority.sessions or old == new:
@@ -315,7 +315,7 @@ async def admit_route_wake(runner, adapter, source, text, producer, metadata=Non
         await authority.admit_automation(adapter, event, identity)
         return True
     from gateway.session_envelope import restore_native
-    from hermes_state_runtime import list_session_admissions
+    from hermes_state.runtime import list_session_admissions
     prior = list_session_admissions(authority.db, session_id=authority.logical_owner(entry.session_id),
                                     pending_only=False)
     envelope = next((r['payload']['native_text_v1'] for r in reversed(prior)

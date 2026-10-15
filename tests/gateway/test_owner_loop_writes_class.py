@@ -18,7 +18,7 @@ def _owner(tmp_path, monkeypatch, handle):
     from gateway.session import SessionStore
     from gateway.session_authority import SessionAuthority
     from gateway.session_controls import AuthorityConnection
-    import hermes_state_runtime as rt
+    import hermes_state.runtime as rt
     monkeypatch.setattr(run, '_load_gateway_config', lambda *a: {})
     store = SessionStore(tmp_path / 'sessions', GatewayConfig())
     db = store._db
@@ -39,7 +39,7 @@ def _local(authority, owner, tmp_path, source='cli', request_id='m'):
 
 
 async def _terminal(db, receipt):
-    import hermes_state_runtime as rt
+    import hermes_state.runtime as rt
     await async_wait_until(lambda: rt.get_session_admission(db, admission_id=receipt.admission_id)['status'] == 'terminal',
                            timeout=10, interval=0.02, what='the admission to settle')
 

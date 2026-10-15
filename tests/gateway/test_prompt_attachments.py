@@ -28,7 +28,7 @@ async def _authority(tmp_path, monkeypatch, answer):
 @pytest.mark.asyncio
 async def test_submit_rejects_attachment_outside_profile_staging_dir(tmp_path, monkeypatch):
     from gateway.session_contract import Principal, SessionRef, Submission
-    from hermes_state_runtime import RuntimeStoreError, list_session_admissions
+    from hermes_state.runtime import RuntimeStoreError, list_session_admissions
 
     seen = []
     async def answer(event):
@@ -79,7 +79,7 @@ async def test_lost_ack_retry_reconciles_a_queued_image_after_staging_is_gone(tm
     from gateway.platforms.base import cache_image_from_bytes
     from gateway.session_contract import Principal, SessionRef, Submission
     from gateway.session_authority import SessionAuthority
-    from hermes_state_runtime import RuntimeStoreError, list_session_admissions
+    from hermes_state.runtime import RuntimeStoreError, list_session_admissions
 
     async def answer(event):
         return 'ok'
@@ -109,7 +109,7 @@ async def test_retry_with_the_same_image_restaged_under_a_new_name_replays(tmp_p
     from gateway.platforms.base import cache_image_from_bytes
     from gateway.session_contract import Principal, SessionRef, Submission
     from gateway.session_authority import SessionAuthority
-    from hermes_state_runtime import RuntimeStoreError, list_session_admissions
+    from hermes_state.runtime import RuntimeStoreError, list_session_admissions
 
     async def answer(event):
         return 'ok'
@@ -135,7 +135,7 @@ async def test_discarding_a_lost_image_turn_releases_its_committed_bytes(tmp_pat
     from gateway.platforms.base import cache_image_from_bytes
     from gateway.session_contract import Principal, SessionRef, Submission
     from gateway.session_authority import SessionAuthority
-    import hermes_state_runtime as rt
+    import hermes_state.runtime as rt
 
     async def answer(event):
         return 'ok'
@@ -166,7 +166,7 @@ async def test_refused_image_capture_is_released_without_masking_the_refusal(tmp
     from gateway.platforms.base import cache_image_from_bytes
     from gateway.session_authority import SessionAuthority
     from gateway.session_contract import Principal, SessionRef, Submission
-    from hermes_state_runtime import RuntimeStoreError, list_session_admissions
+    from hermes_state.runtime import RuntimeStoreError, list_session_admissions
 
     async def answer(event):
         return 'ok'
@@ -193,6 +193,6 @@ async def test_refused_image_capture_is_released_without_masking_the_refusal(tmp
     assert len(list_session_admissions(authority.db, session_id='s')) == 1
     # The failed collection stays a durable obligation the next retirement sweep honours.
     monkeypatch.setattr(session_ingress_media, 'release_unheld_media', release)
-    from hermes_state_media import collect_retired_media
+    from hermes_state.media import collect_retired_media
     collect_retired_media(authority.db)
     assert retained() == accepted

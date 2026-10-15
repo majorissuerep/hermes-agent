@@ -48,7 +48,7 @@ def private_db_probe_cleanup(tmp_path):
     owns the inode cancels its POSIX locks. Opt-in tests must first register normal
     runner/store cleanup and use only databases underneath their private tmp_path.
     """
-    import hermes_state_dbfile as dbfile
+    import hermes_state.dbfile as dbfile
 
     with dbfile._HEADER_PROBE_LOCK:
         existing = set(dbfile._HEADER_PROBE_FDS)
@@ -652,7 +652,7 @@ def owner(tmp_path):
     from gateway.session import SessionStore
     from gateway.session_authority import SessionAuthority
     from hermes_state import SessionDB
-    from hermes_state_runtime import begin_runtime_epoch
+    from hermes_state.runtime import begin_runtime_epoch
 
     db = SessionDB(tmp_path / 'state.db')
     store = SessionStore(config=GatewayConfig(), sessions_dir=tmp_path / 'sessions')

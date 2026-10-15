@@ -60,7 +60,7 @@ class SessionPersistenceMixin:
         that the multiplexed inbound path already performs actually reach session storage.
         """
         from hermes_state import _default_db_path
-        from hermes_state_registry import acquire
+        from hermes_state.registry import acquire
 
         path = Path(db_path) if db_path is not None else Path(_default_db_path())
 
@@ -213,7 +213,7 @@ class SessionPersistenceMixin:
         would strand secondary profiles' handles with their WAL lock held ('database is locked' on
         restart). Drained under the lock, closed outside it; a pinned handle is the pinner's."""
         def _close(db) -> None:
-            from hermes_state_registry import release_or_close  # shared instances no-op on close()
+            from hermes_state.registry import release_or_close  # shared instances no-op on close()
             try:
                 release_or_close(db)
             except Exception as exc:
@@ -325,7 +325,7 @@ class SessionPersistenceMixin:
                         type(entry_data).__name__)
                     continue
                 try:
-                    from hermes_state_mutation_retirement import retired_session
+                    from hermes_state.mutation_retirement import retired_session
                     db = self._routing_db
                     if db is not None and retired_session(db, entry_data['session_id']):
                         continue

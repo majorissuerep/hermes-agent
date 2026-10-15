@@ -18,7 +18,7 @@ from gateway.session_contract import (
 )
 from gateway.session_events import SessionEvents
 from gateway.session_pending_controls import PendingControls
-from hermes_state_runtime import (
+from hermes_state.runtime import (
     RuntimeStoreError, admit_session_input, begin_runtime_epoch,
     cancel_session_input, claim_session_input, get_session_admission,
     list_session_admissions, recover_session_inputs, resolve_unknown_session_input,
@@ -118,9 +118,9 @@ class SessionAuthority:
             row = self.db.get_session(ref.session_id)
             if row is None:
                 raise RuntimeStoreError('not_found')
-            from hermes_state_local import POLICY_PREFIX
+            from hermes_state.local import POLICY_PREFIX
             with self.db._read_ctx() as conn:
-                from hermes_state_local_migration import LEGACY_PREFIX
+                from hermes_state.local_migration import LEGACY_PREFIX
                 local = conn.execute('SELECT 1 FROM state_meta WHERE key IN (?,?)',
                     (POLICY_PREFIX + ref.session_id, LEGACY_PREFIX + ref.session_id)).fetchone()
             if local or str(row.get('chat_id') or '').startswith('local-'):
@@ -445,7 +445,7 @@ class SessionAuthority:
                 row = conn.execute('SELECT * FROM session_admissions WHERE principal_id=? AND '
                                    'target_session_id=? AND request_id=?', (actor.subject,
                                    request.ref.session_id, request.request_id)).fetchone()
-            from hermes_state_runtime import _row
+            from hermes_state.runtime import _row
             return _row(row) if row is not None else None
         payload = {'text': request.payload['text'], **finite, **admit_surface(request.payload),
                    **admit_display(request.payload), **admit_cli_turn(request.payload),
@@ -482,7 +482,7 @@ class SessionAuthority:
             return
         from gateway.session_ingress_media import drop_capture_lease
         drop_capture_lease()  # its own lease must not keep the refused bytes from collection
-        from hermes_state_media import collect_retired_media, retire_media
+        from hermes_state.media import collect_retired_media, retire_media
         try:
             self.db._execute_write(lambda conn: retire_media(conn, {'attachments_v1': {'media': media}}))
             collect_retired_media(self.db)

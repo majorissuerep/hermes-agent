@@ -103,7 +103,7 @@ async def deliver_wake(adapter: Any, *, text: str, session_id: str = "", source:
         runner = getattr(adapter, "gateway_runner", None)
         if runner is not None:
             from gateway.session_automation import admit_route_wake
-            from hermes_state_runtime import RuntimeStoreError
+            from hermes_state.runtime import RuntimeStoreError
             category = {"notification_category": notification_category} if notification_category != "result" else {}
             try:
                 if await admit_route_wake(runner, adapter, source, text, "kanban-wake", category):

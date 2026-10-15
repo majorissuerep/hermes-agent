@@ -2,7 +2,7 @@
 import asyncio
 import json
 
-from hermes_state_runtime import RuntimeStoreError
+from hermes_state.runtime import RuntimeStoreError
 
 
 def compress_request(payload):

@@ -2,7 +2,7 @@
 import asyncio
 from pathlib import Path
 
-from hermes_state_runtime import RuntimeStoreError
+from hermes_state.runtime import RuntimeStoreError
 
 
 GROUP_METHODS = {
@@ -305,7 +305,7 @@ def _profiles(authority, actor, home, params):
         else:
             owner_filter, owner_params = 'user_id=? AND ', (actor.subject,)
         with authority.db._lock:
-            from hermes_state_sessions import INTERNAL_LISTING_SOURCES
+            from hermes_state.sessions import INTERNAL_LISTING_SOURCES
             hidden_sources = ','.join('?' * len(INTERNAL_LISTING_SOURCES))
             latest = authority.db._conn.execute(
                 f"SELECT id FROM sessions WHERE {owner_filter}chat_id LIKE 'local-%' AND archived=0 "

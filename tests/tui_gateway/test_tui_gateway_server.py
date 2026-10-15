@@ -4037,7 +4037,7 @@ def test_session_resume_profile_uses_profile_db_cwd(monkeypatch, tmp_path):
 
     monkeypatch.setenv("TERMINAL_CWD", str(launch_cwd))
     monkeypatch.setattr(server, "_profile_home", lambda _profile: profile_home)
-    monkeypatch.setattr("hermes_state_registry.acquire", lambda db_path=None: profile_db)
+    monkeypatch.setattr("hermes_state.registry.acquire", lambda db_path=None: profile_db)
     monkeypatch.setattr(server, "_get_db", lambda: launch_db)
     monkeypatch.setattr(server, "_enable_gateway_prompts", lambda: None)
     monkeypatch.setattr(
@@ -4107,7 +4107,7 @@ def test_session_cwd_set_profile_session_updates_profile_db(monkeypatch, tmp_pat
 
     from tools import terminal_tool_lifecycle
 
-    monkeypatch.setattr("hermes_state_registry.acquire", lambda db_path=None: profile_db)
+    monkeypatch.setattr("hermes_state.registry.acquire", lambda db_path=None: profile_db)
     monkeypatch.setattr(server, "_get_db", lambda: LaunchDB())
     monkeypatch.setattr(terminal_tool_lifecycle, "cleanup_vm", lambda _key: None)
     monkeypatch.setattr(server, "_register_session_cwd", lambda _session: None)
@@ -8398,7 +8398,7 @@ def test_ensure_session_db_row_stamps_profile_name(monkeypatch, tmp_path):
         def close(self):
             pass
 
-    monkeypatch.setattr("hermes_state_registry.acquire", _ProfileDB)
+    monkeypatch.setattr("hermes_state.registry.acquire", _ProfileDB)
     monkeypatch.setattr(server, "_resolve_model", lambda: "test-model")
 
     server._ensure_session_db_row(
@@ -10421,7 +10421,7 @@ def test_config_set_model_recovers_failed_profile_resume_after_build_completes(
         "hermes_cli.model_selection_guards.combined_selection_warning",
         lambda *args, **kwargs: None,
     )
-    monkeypatch.setattr("hermes_state_registry.acquire", FakeDb)
+    monkeypatch.setattr("hermes_state.registry.acquire", FakeDb)
     monkeypatch.setattr(server, "_make_agent", fake_make_agent)
     monkeypatch.setattr(server, "_transfer_db_to_agent", barrier_transfer)
     monkeypatch.setattr(
@@ -15635,9 +15635,9 @@ def test_get_db_degrades_cleanly_when_sessiondb_init_fails(monkeypatch):
         raise RuntimeError("locking protocol")
 
     monkeypatch.setitem(sys.modules, "hermes_state", fake_mod)
-    fake_registry = types.ModuleType("hermes_state_registry")
+    fake_registry = types.ModuleType("hermes_state.registry")
     fake_registry.acquire = _broken_shared
-    monkeypatch.setitem(sys.modules, "hermes_state_registry", fake_registry)
+    monkeypatch.setitem(sys.modules, "hermes_state.registry", fake_registry)
     monkeypatch.setattr(server, "_db", None)
     monkeypatch.setattr(server, "_db_error", None)
 
@@ -15660,9 +15660,9 @@ def test_ensure_session_db_row_false_when_store_unavailable(monkeypatch):
         raise RuntimeError("utf-8 boom")
 
     monkeypatch.setitem(sys.modules, "hermes_state", fake_mod)
-    fake_registry = types.ModuleType("hermes_state_registry")
+    fake_registry = types.ModuleType("hermes_state.registry")
     fake_registry.acquire = _broken_shared
-    monkeypatch.setitem(sys.modules, "hermes_state_registry", fake_registry)
+    monkeypatch.setitem(sys.modules, "hermes_state.registry", fake_registry)
     monkeypatch.setattr(server, "_db", None)
     monkeypatch.setattr(server, "_db_error", None)
 
@@ -16072,7 +16072,7 @@ def test_session_title_uses_session_profile_db_not_launch(monkeypatch, tmp_path)
         "last_active": 1.0,
     }
     monkeypatch.setattr(server, "_get_db", lambda: LaunchDB())
-    monkeypatch.setattr("hermes_state_registry.acquire", ProfileDB)
+    monkeypatch.setattr("hermes_state.registry.acquire", ProfileDB)
     try:
         set_resp = server.handle_request(
             {
@@ -16129,7 +16129,7 @@ def test_session_history_uses_session_profile_db(monkeypatch, tmp_path):
         "last_active": 1.0,
     }
     monkeypatch.setattr(server, "_get_db", lambda: LaunchDB())
-    monkeypatch.setattr("hermes_state_registry.acquire", ProfileDB)
+    monkeypatch.setattr("hermes_state.registry.acquire", ProfileDB)
     try:
         resp = server.handle_request(
             {"id": "1", "method": "session.history", "params": {"session_id": "sid"}}
@@ -16212,7 +16212,7 @@ def test_session_status_uses_session_profile_db(monkeypatch, tmp_path):
         "last_active": 1.0,
     }
     monkeypatch.setattr(server, "_get_db", lambda: LaunchDB())
-    monkeypatch.setattr("hermes_state_registry.acquire", ProfileDB)
+    monkeypatch.setattr("hermes_state.registry.acquire", ProfileDB)
     try:
         resp = server.handle_request(
             {"id": "1", "method": "session.status", "params": {"session_id": "sid"}}
@@ -16254,7 +16254,7 @@ def test_teardown_ends_session_in_profile_db(monkeypatch, tmp_path):
             seen["closed"] = True
 
     monkeypatch.setattr(server, "_get_db", lambda: LaunchDB())
-    monkeypatch.setattr("hermes_state_registry.acquire", ProfileDB)
+    monkeypatch.setattr("hermes_state.registry.acquire", ProfileDB)
     session = {
         "session_key": "ml-sess",
         "profile_home": str(profile_home),
@@ -16348,7 +16348,7 @@ def test_session_branch_writes_to_parent_profile_db(monkeypatch, tmp_path):
     }
     server._sessions["parent"] = parent
     monkeypatch.setattr(server, "_get_db", lambda: LaunchDB())
-    monkeypatch.setattr("hermes_state_registry.acquire", ProfileDB)
+    monkeypatch.setattr("hermes_state.registry.acquire", ProfileDB)
     monkeypatch.setattr(server, "_claim_active_session_slot", lambda *a, **k: (None, None))
 
     def _fake_make_agent(*a, **k):
@@ -16832,7 +16832,7 @@ def test_session_branch_installs_parent_profile_secret_scope(monkeypatch, tmp_pa
     }
     server._sessions["parent"] = parent
     monkeypatch.setattr(server, "_get_db", lambda: ProfileDB())
-    monkeypatch.setattr("hermes_state_registry.acquire", ProfileDB)
+    monkeypatch.setattr("hermes_state.registry.acquire", ProfileDB)
     monkeypatch.setattr(server, "_claim_active_session_slot", lambda *a, **k: (None, None))
 
     def _fake_make_agent(*a, **k):
@@ -16954,7 +16954,7 @@ def test_session_branch_uses_persisted_display_history_after_compaction(monkeypa
     }
     server._sessions["parent"] = parent
     monkeypatch.setattr(server, "_get_db", lambda: LaunchDB())
-    monkeypatch.setattr("hermes_state_registry.acquire", ProfileDB)
+    monkeypatch.setattr("hermes_state.registry.acquire", ProfileDB)
     monkeypatch.setattr(server, "_claim_active_session_slot", lambda *args, **kwargs: (None, None))
     monkeypatch.setattr(server, "_make_agent", lambda *args, **kwargs: FakeAgent())
     monkeypatch.setattr(server, "_set_session_context", lambda *args, **kwargs: {})

@@ -7,7 +7,7 @@ from dataclasses import replace
 
 from gateway.platforms.event import MessageEvent
 from gateway.session_envelope import restore_native
-from hermes_state_runtime import RuntimeStoreError
+from hermes_state.runtime import RuntimeStoreError
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +39,7 @@ async def admit_message(authority, event):
         adopters[receipt.admission_id] = event
     # A drain already running can claim, run and settle the row before this caller resumes; one
     # that settled it already sent (or owes) the reply itself and resolves no waiter registered now.
-    from hermes_state_runtime import get_session_admission
+    from hermes_state.runtime import get_session_admission
     row = get_session_admission(authority.db, admission_id=receipt.admission_id)
     status = 'terminal' if row is None else row['status']  # None: deleted with its chat, nothing owed
     if status in ('terminal', 'unknown'):

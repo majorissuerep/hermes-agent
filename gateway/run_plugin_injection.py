@@ -275,7 +275,7 @@ class GatewayPluginInjectionMixin:
             return None
         import json
         import uuid
-        from hermes_state_runtime import RuntimeStoreError
+        from hermes_state.runtime import RuntimeStoreError
         identity = json.dumps(["plugin", plugin_id, session_key, uuid.uuid4().hex], separators=(",", ":"))
         event = MessageEvent(
             text=content, message_type=MessageType.TEXT, source=source, internal=True,

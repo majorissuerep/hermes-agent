@@ -1,7 +1,7 @@
 """Deletion cannot erase an admitted input or an adopted worker."""
 import pytest
 from hermes_state import SessionDB
-import hermes_state_runtime as rt
+import hermes_state.runtime as rt
 
 
 @pytest.mark.parametrize('obligation', ['queued', 'started', 'unknown', 'worker'])

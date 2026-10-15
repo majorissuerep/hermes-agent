@@ -3,7 +3,7 @@ import asyncio
 import json
 from dataclasses import asdict, replace
 
-from hermes_state_runtime import RuntimeStoreError
+from hermes_state.runtime import RuntimeStoreError
 
 
 async def prepare_model(authority, live, payload, prepared):

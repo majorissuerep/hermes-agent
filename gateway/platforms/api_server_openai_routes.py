@@ -1024,7 +1024,7 @@ class OpenAICompatRoutesMixin:
         route), folded into the key because the store keeps the fingerprint only as the slot's value.
         """
         from gateway.platforms.api_server import _error_response, _idem_cache, _make_request_fingerprint
-        from hermes_state_runtime import RuntimeStoreError
+        from hermes_state.runtime import RuntimeStoreError
         idempotency_key = request.headers.get("Idempotency-Key")
         try:
             # Durable /v1/runs admissions own idempotency under session authority; the in-memory
@@ -1300,7 +1300,7 @@ class OpenAICompatRoutesMixin:
         if replayed is not None:
             return replayed
         from gateway.platforms.api_server_response_admissions import prepare_context
-        from hermes_state_runtime import RuntimeStoreError
+        from hermes_state.runtime import RuntimeStoreError
         try:
             context, error = await prepare_context(
                 self, request, body, gateway_session_key, durable_key, idempotency_scope, idempotency_key)

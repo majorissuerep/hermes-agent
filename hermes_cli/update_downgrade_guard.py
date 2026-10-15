@@ -22,7 +22,7 @@ _DOCS = "https://hermes-agent.nousresearch.com/docs/getting-started/updating#rol
 
 
 def target_predates_runtime(git_cmd, root: Path, target_ref: str) -> bool:
-    """True when ``target_ref`` does not descend from HEAD and none of its ``hermes_state*.py`` files
+    """True when ``target_ref`` does not descend from HEAD and none of its ``hermes_state/*.py`` files
     defines the runtime ledger. The pathspec keeps a blobless partial clone from fetching the whole
     tree. Any git failure proves nothing (False)."""
     import subprocess
@@ -40,13 +40,13 @@ def target_predates_runtime(git_cmd, root: Path, target_ref: str) -> bool:
     if git("cat-file", "-e", f"{target_ref}^{{commit}}") != 0:
         return False
     # Exit 1 = no match (the target lacks the ledger); 0 = found; anything else is a git error.
-    return git("grep", "-q", "-F", _RUNTIME_SCHEMA_MARKER, target_ref, "--", "hermes_state*.py") == 1
+    return git("grep", "-q", "-F", _RUNTIME_SCHEMA_MARKER, target_ref, "--", "hermes_state/*.py") == 1
 
 
 def _has_ledger_rows(db_path: Path) -> bool:
     if not db_path.is_file():
         return False
-    from hermes_state_holders import read_only_db_uri
+    from hermes_state.holders import read_only_db_uri
     try:
         with closing(sqlite3.connect(read_only_db_uri(db_path), uri=True, timeout=5.0)) as conn:
             return bool(conn.execute(_LEDGER_PROBE).fetchone()[0])
@@ -57,7 +57,7 @@ def _has_ledger_rows(db_path: Path) -> bool:
 def _pre_runtime_snapshot(home: Path) -> str | None:
     """Newest quick snapshot of ``home`` holding a state.db from before the runtime ledger."""
     from hermes_cli.backup import _quick_snapshot_root
-    from hermes_state_holders import read_only_db_uri
+    from hermes_state.holders import read_only_db_uri
     root = _quick_snapshot_root(home)
     for snap in sorted(root.iterdir(), reverse=True) if root.is_dir() else ():
         db = snap / "state.db"

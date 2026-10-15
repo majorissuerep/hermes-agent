@@ -78,7 +78,7 @@ def test_state_db_is_sqlcipher_via_sessiondb(vaulted_home):
 
     db = SessionDB.__new__(SessionDB)
     db_path = vaulted_home / "state.db"
-    from hermes_state_dbfile import _connect_tracked_db
+    from hermes_state.dbfile import _connect_tracked_db
 
     conn = _connect_tracked_db(str(db_path), check_same_thread=False, timeout=1.0, isolation_level=None)
     try:
@@ -102,7 +102,7 @@ def test_whole_home_canary_scan(vaulted_home):
     from agent import secret_scope
     from hermes_cli import auth as ha
     from hermes_cli import config as hc
-    from hermes_state_dbfile import _connect_tracked_db
+    from hermes_state.dbfile import _connect_tracked_db
 
     hc.save_config({"model": "canary-model-xyz"}, merge_existing=True)
     hc.save_env_value("ANTHROPIC_API_KEY", "sk-ant-canary-999")

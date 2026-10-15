@@ -12,7 +12,7 @@ from pathlib import Path
 import threading
 
 from gateway.session_contract import Principal, SessionRef
-from hermes_state_runtime import RuntimeStoreError, admit_session_input, get_session_admission
+from hermes_state.runtime import RuntimeStoreError, admit_session_input, get_session_admission
 
 _execution: ContextVar[tuple | None] = ContextVar('cron_owner_execution', default=None)
 _owners = {}
@@ -117,7 +117,7 @@ async def operation(authority, name, params, actor=None):
             raise RuntimeStoreError('invalid_params')
         request_id = 'cron:' + params['job_id'] + ':' + params['request_id']
         sid = local_identity(authority.profile_id, actor.subject, request_id)
-        from hermes_state_runtime import list_session_admissions
+        from hermes_state.runtime import list_session_admissions
         rows = list_session_admissions(authority.db, session_id=sid, pending_only=False)
         row = next((r for r in rows if r['request_id'] == request_id and r['principal_id'] == actor.subject), None)
         if row is None:
@@ -146,7 +146,7 @@ async def operation(authority, name, params, actor=None):
         if isinstance(ref, dict):
             # The creation commit waits on the writer off the owner loop, like session.create (N50).
             from gateway.session_local_recovery import restore_local_session
-            from hermes_state_local import commit_local_session
+            from hermes_state.local import commit_local_session
             await tracked_write(authority, partial(commit_local_session, authority.db, epoch=authority.epoch, receipt=ref))
             ref = restore_local_session(authority, ref['session_id'])
         receipt = await tracked_write(authority, partial(

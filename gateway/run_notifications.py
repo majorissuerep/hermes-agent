@@ -590,7 +590,7 @@ class GatewayNotificationsMixin(GatewayUpdateNotificationsMixin, GatewayNotifica
             # restore advice above would be destructive on a healthy file (#97794).
             message = t("gateway.startup.db_fts_corrupt", profile_arg=profile_arg)
         else:
-            from hermes_state_user_copy import describe_storage_failure
+            from hermes_state.user_copy import describe_storage_failure
             failure = describe_storage_failure(error)
             # The cause table owns the remedy: for a held retired-WAL generation a bare `doctor --fix`
             # is the second-writer trap this notice used to send users into (#110054). Its copy is
@@ -870,7 +870,7 @@ class GatewayNotificationsMixin(GatewayUpdateNotificationsMixin, GatewayNotifica
             authority = active_authority(self)
             if authority is not None:
                 from gateway.session_automation import producer_identity
-                from hermes_state_runtime import RuntimeStoreError
+                from hermes_state.runtime import RuntimeStoreError
                 try:
                     identity = producer_identity(self, evt)
                     await authority.admit_automation(adapter, synth_event, identity)

@@ -2,7 +2,7 @@
 
 A session is open from creation until an explicit close (``/close``, ``hermes deck close``, or
 another session closing it); terminal death, host restarts and idle eviction only move it between
-runtime states. The registry lives in each profile's ``state.db`` (``hermes_state_deck.py``, SQLCipher
+runtime states. The registry lives in each profile's ``state.db`` (``hermes_state/deck.py``, SQLCipher
 at rest); liveness comes from the active-session lease registry, never from the snapshot alone, so a
 crashed owner reads as ``dormant`` instead of a ghost ``running``.
 

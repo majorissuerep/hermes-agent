@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 from gateway.session_controls import AuthorityConnection
 from hermes_state import SessionDB
-from hermes_state_runtime import RuntimeStoreError
+from hermes_state.runtime import RuntimeStoreError
 
 
 class RoomService:

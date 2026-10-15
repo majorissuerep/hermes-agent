@@ -10,7 +10,7 @@ import hashlib
 import hmac
 import json
 
-from hermes_state_runtime import RuntimeStoreError
+from hermes_state.runtime import RuntimeStoreError
 
 PRIVATE_KEY = ('editor_mcp',)
 

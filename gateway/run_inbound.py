@@ -599,7 +599,7 @@ class GatewayInboundMixin(GatewayInboundHooksMixin, GatewayPluginInjectionMixin)
         if not sid or sid not in authority.sessions:
             return
         from gateway.session_contract import Principal, SessionRef
-        from hermes_state_runtime import RuntimeStoreError, list_session_admissions
+        from hermes_state.runtime import RuntimeStoreError, list_session_admissions
         ref = SessionRef(authority.profile_id, sid)
         actor = Principal('messaging-control', authority.profile_id,
                           frozenset({'session:submit', 'session:control'}), 'busy-command')
@@ -1189,7 +1189,7 @@ class GatewayInboundMixin(GatewayInboundHooksMixin, GatewayPluginInjectionMixin)
         if (authority is None and not is_internal and not event.get_command()
                 and getattr(self, 'session_authority', None) is not None):
             # Scoped to a home this process does not serve: never fall back to the launch ledger.
-            from hermes_state_runtime import RuntimeStoreError
+            from hermes_state.runtime import RuntimeStoreError
             raise RuntimeStoreError('profile_mismatch')
         return False, None
 

@@ -1184,7 +1184,7 @@ class TurnRunner(GatewayTurnProgressMixin, GatewaySessionAgentMixin):
             # a FAILED turn: a one-shot client exits non-zero, transcript persistence closes the
             # turn, and an API receipt reports failure, never a completed turn with an apology.
             logger.warning("Model resolution failed for session %s: %s", ctx.session_key or "", exc, exc_info=True)
-            from hermes_state_runtime import RuntimeStoreError
+            from hermes_state.runtime import RuntimeStoreError
             from agent.turn_failure_copy import stamp_failure
             resolution_error = str(exc)
 

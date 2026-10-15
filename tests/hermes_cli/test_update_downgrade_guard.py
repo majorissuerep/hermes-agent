@@ -10,7 +10,7 @@ from contextlib import closing
 
 import pytest
 
-import hermes_state_runtime as rt
+import hermes_state.runtime as rt
 from hermes_cli import update_downgrade_guard as guard
 from hermes_state import SessionDB
 
@@ -27,11 +27,11 @@ def repo(tmp_path):
     _git(root, "init", "-b", "main")
     _git(root, "config", "user.email", "t@example.invalid")
     _git(root, "config", "user.name", "T")
-    (root / "hermes_state_common.py").write_text("SCHEMA_SQL = 'CREATE TABLE IF NOT EXISTS sessions (id TEXT)'\n")
+    (root / "hermes_state/common.py").write_text("SCHEMA_SQL = 'CREATE TABLE IF NOT EXISTS sessions (id TEXT)'\n")
     _git(root, "add", ".")
     _git(root, "commit", "-m", "release before the cutover")
     _git(root, "tag", "old-release")
-    (root / "hermes_state_common.py").write_text(
+    (root / "hermes_state/common.py").write_text(
         "SCHEMA_SQL = '''CREATE TABLE IF NOT EXISTS session_admissions (seq INTEGER)'''\n")
     _git(root, "commit", "-am", "gateway runtime")
     return root

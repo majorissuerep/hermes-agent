@@ -6,7 +6,7 @@ import pytest
 
 from gateway.session_contract import Principal, Submission
 from gateway.session_controls import AuthorityConnection
-from hermes_state_runtime import RuntimeStoreError, list_session_admissions
+from hermes_state.runtime import RuntimeStoreError, list_session_admissions
 
 
 @pytest.mark.asyncio

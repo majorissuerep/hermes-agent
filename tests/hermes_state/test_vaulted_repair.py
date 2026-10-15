@@ -45,7 +45,7 @@ def test_doctor_does_not_report_encryption_as_corruption(database, held):
 
 
 def test_encrypted_fts_repair_preserves_messages_and_encrypted_scratch(database):
-    from hermes_state_repair import _db_opens_cleanly, repair_state_db_schema, state_db_has_structural_damage
+    from hermes_state.repair import _db_opens_cleanly, repair_state_db_schema, state_db_has_structural_damage
 
     with contextlib.closing(sqlite.connect(database)) as conn:
         conn.execute("UPDATE messages_fts_data SET block = X'DEADBEEFDEADBEEFDEADBEEFDEADBEEF'")
