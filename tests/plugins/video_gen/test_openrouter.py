@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from types import SimpleNamespace
 
 from agent import video_gen_registry
 from plugins.video_gen.openrouter import OpenRouterVideoGenProvider, _build_payload
@@ -139,12 +138,15 @@ def _generate_capturing(monkeypatch, tmp_path, provider):
 
 
 def _add_pooled_key(key, label):
-    from hermes_cli.auth_commands import auth_add_command
-    auth_add_command(SimpleNamespace(provider="openrouter", auth_type="api-key", api_key=key, label=label))
+    from hermes_cli.auth import write_credential_pool
+    # A retained legacy pool must remain usable by tools, not revive chat setup.
+    write_credential_pool("openrouter", [{"id": label, "source": "manual",
+        "auth_type": "api_key", "access_token": key, "label": label,
+        "base_url": "https://openrouter.ai/api/v1"}])
 
 
 def test_pooled_credential_enables_the_backend(monkeypatch, tmp_path):
-    """A key added only with ``hermes auth add openrouter`` serves chat and image_gen; video must use it too."""
+    """A retained encrypted tool-service pool enables the video backend."""
     _add_pooled_key("sk-or-pool", "pool")
     provider = _provider(monkeypatch, [_VEO])
     assert provider.is_available() is True
@@ -173,25 +175,27 @@ def test_multiplexed_profile_spends_its_own_key_not_the_launch_profiles(monkeypa
 
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-launch-profile")
     monkeypatch.setenv("OPENROUTER_BASE_URL", "https://launch.example/api/v1")
-    profile_home = tmp_path / "profile-b"
-    profile_home.mkdir()
-    (profile_home / ".env").write_text("OPENROUTER_API_KEY=sk-or-profile-b\n"
-                                       "OPENROUTER_BASE_URL=https://profile-b.example/api/v1\n")
     provider = _provider(monkeypatch, [_VEO])
-
+    homes = [tmp_path / f"profile-{name}" for name in ("a", "b")]
+    for home in homes:
+        home.mkdir()
+        (home / ".env").write_text(f"OPENROUTER_API_KEY=sk-or-{home.name}\n"
+                                   f"OPENROUTER_BASE_URL=https://{home.name}.example/api/v1\n")
     set_multiplex_active(True)
-    home_token = set_hermes_home_override(str(profile_home))
-    secret_token = set_secret_scope(build_profile_secret_scope(profile_home))
     try:
-        result, session, bearers = _generate_capturing(monkeypatch, tmp_path, provider)
+        for home in (homes[0], homes[1], homes[0]):
+            home_token = set_hermes_home_override(str(home))
+            secret_token = set_secret_scope(build_profile_secret_scope(home))
+            try:
+                result, session, bearers = _generate_capturing(monkeypatch, tmp_path, provider)
+                assert result["success"], result
+                assert bearers == [f"Bearer sk-or-{home.name}"] * 4
+                assert session.posts[0][0] == f"https://{home.name}.example/api/v1/videos"
+            finally:
+                reset_secret_scope(secret_token)
+                reset_hermes_home_override(home_token)
     finally:
-        reset_secret_scope(secret_token)
-        reset_hermes_home_override(home_token)
         set_multiplex_active(False)
-
-    assert result["success"], result
-    assert bearers == ["Bearer sk-or-profile-b"] * 4
-    assert session.posts[0][0] == "https://profile-b.example/api/v1/videos"
 
 
 def test_multiplexed_profile_without_a_key_is_refused_not_served_on_the_launch_key(monkeypatch, tmp_path):

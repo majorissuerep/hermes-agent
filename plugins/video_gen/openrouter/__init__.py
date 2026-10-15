@@ -162,13 +162,10 @@ class OpenRouterVideoGenProvider(VideoGenProvider):
 
     # ---- credentials / transport -------------------------------------------------------------
     def _credentials(self) -> tuple[str, str]:
-        """``(api_key, base_url)`` from the runtime resolver chat uses, so a pooled or OAuth credential counts
-        and a multiplexed profile never spends the launch profile's ``os.environ`` key; raises on failure."""
-        from hermes_cli.runtime_provider import resolve_runtime_provider
+        """Tool credentials remain available without a bundled chat provider."""
+        from tools.openrouter_client import resolve_credentials
 
-        runtime = resolve_runtime_provider(requested="openrouter")
-        return (str(runtime.get("api_key") or "").strip(),
-                (str(runtime.get("base_url") or "").strip() or DEFAULT_BASE_URL).rstrip("/"))
+        return resolve_credentials()
 
     def _headers(self, api_key: str) -> dict[str, str]:
         return {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json",
@@ -298,7 +295,7 @@ class OpenRouterVideoGenProvider(VideoGenProvider):
         except Exception as exc:
             return fail(f"Could not resolve OpenRouter credentials: {exc}", "missing_credentials")
         if not api_key:
-            return fail("No OpenRouter credential: set OPENROUTER_API_KEY or run `hermes auth add openrouter`",
+            return fail("No OpenRouter video credential: configure OPENROUTER_API_KEY with `hermes tools`",
                         "missing_credentials")
         # Resolved once: a rotating pool must not submit under one key and poll or download under another.
         headers = self._headers(api_key)

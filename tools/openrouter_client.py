@@ -3,6 +3,20 @@
 import os
 
 
+def resolve_credentials() -> tuple[str, str]:
+    """Resolve tool-service credentials without enabling an inference provider.
+
+    Keep existing encrypted pools usable for media jobs. Select once per job so
+    its submit, poll and download use the same account and scoped endpoint.
+    """
+    from agent.credential_pool import get_env_prefer_dotenv, load_pool
+
+    entry = load_pool("openrouter").select()
+    endpoint = get_env_prefer_dotenv("OPENROUTER_BASE_URL")
+    return ((entry.access_token or "").strip() if entry else "",
+            (endpoint or (entry.base_url if entry else "") or "https://openrouter.ai/api/v1").rstrip("/"))
+
+
 def check_api_key() -> bool:
     """Return True if OPENROUTER_API_KEY is present.
 
