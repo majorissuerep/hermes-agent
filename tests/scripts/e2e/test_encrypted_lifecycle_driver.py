@@ -1,5 +1,6 @@
 """The VM driver counts actual getpass prompts and never records their answers."""
 from argparse import Namespace
+import json
 from pathlib import Path
 import sys
 import shlex
@@ -8,6 +9,29 @@ import subprocess
 import pytest
 
 from scripts.e2e.encrypted_lifecycle import Rehearsal
+
+
+def test_failed_runtime_cleanup_cannot_publish_green_or_delete_its_work(tmp_path, monkeypatch):
+    rehearsal = Rehearsal(Namespace(
+        work_dir=tmp_path, evidence=tmp_path / "evidence", keep_work=False,
+        baseline="old", candidate="new", scenario="update", tool_cache=None,
+    ), {"provider": "litellm", "model": "fixture", "api_key": "synthetic-provider-secret"})
+    rehearsal.python = Path(sys.executable)
+    rehearsal.home.mkdir()
+    (rehearsal.home / ".hermes-vault").touch()
+    rehearsal.receipt["status"] = "passed"
+
+    def failed_stop(action):
+        assert action == "stop-runtime"
+        raise RuntimeError("gateway survived; " + rehearsal.password)
+
+    monkeypatch.setattr(rehearsal, "probe", failed_stop)
+    with pytest.raises(RuntimeError, match="work retained"):
+        rehearsal.close()
+    receipt = (rehearsal.evidence / "receipt.json").read_text()
+    assert json.loads(receipt)["status"] == "failed"
+    assert rehearsal.password not in receipt
+    assert rehearsal.root.is_dir()
 
 
 @pytest.mark.platforms("linux")

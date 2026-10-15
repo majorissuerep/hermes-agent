@@ -212,8 +212,17 @@ def main() -> None:
                        _read_tail(home / "logs" / (name + ".log"), 60, has_filters=False)]
                 for name in ("gateway", "errors") if (home / "logs" / (name + ".log")).is_file()}
 
+    def stop_runtime():
+        from hermes_cli.gateway import stop_profile_gateway, find_gateway_pids
+
+        stop_profile_gateway()
+        if find_gateway_pids():
+            raise RuntimeError("the rehearsal's gateway survived cleanup")
+        return {"stopped": True}
+
     handlers = {"seed": seed, "manifest": manifest, "snapshot": snapshot, "restore": restore,
-                "update-status": update_status, "live-proof": live_proof, "diagnostics": diagnostics}
+                "update-status": update_status, "live-proof": live_proof, "diagnostics": diagnostics,
+                "stop-runtime": stop_runtime}
     print(json.dumps(handlers[request["action"]](), sort_keys=True))
 
 

@@ -56,7 +56,9 @@ or session state belongs in that cache. Use an empty evidence directory per atte
 
 Each leg writes sanitized logs plus `receipt.json`: exact baseline/candidate,
 harness digest, provider/model, prompt counts, semantic state hashes and restore
-verdict. Failed, missing, cancelled or skipped legs do not pass acceptance. Missing
+verdict. The driver also stops its own profile's gateway and verifies cleanup before
+publishing success, even with `--keep-work`; cleanup failure retains work and fails
+acceptance. Failed, missing, cancelled or skipped legs do not pass acceptance. Missing
 credentials fail before installation and never become evidence of live coverage.
 Upload **only** the evidence directory, not work homes, OAuth stores, SSH keys or
 runtime caches. The driver cleans work by default; `--keep-work` is for disposable

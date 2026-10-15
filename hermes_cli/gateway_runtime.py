@@ -15,9 +15,9 @@ if TYPE_CHECKING:
 
 # Total startup deadline a client waits for a cold daemon. A cold boot imports the whole
 # runtime, encrypted stores, native transport and turn machinery. Cold software-
-# emulated VMs can take over a minute even while making steady progress. Keep
+# emulated VMs can exceed two minutes even while making steady progress. Keep
 # this bounded and below the gateway's 300s startup watchdog.
-DEFAULT_ENSURE_TIMEOUT = 120.0
+DEFAULT_ENSURE_TIMEOUT = 240.0
 
 
 @dataclass(frozen=True)

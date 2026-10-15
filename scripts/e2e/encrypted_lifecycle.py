@@ -199,7 +199,7 @@ class Rehearsal:
 
         self.run("live-" + phase, [str(self.launcher), "chat", "--cli", "--yolo", "--accept-hooks",
                                    "--toolsets", "terminal,file,delegation", "--max-turns", "10",
-                                   "-q", prompt], prompts=1, timeout=480, completion=completed)
+                                   "-q", prompt], prompts=1, timeout=660, completion=completed)
         if not marker.is_file() or marker.read_text().strip() != nonce:
             raise RuntimeError("live LLM/delegation did not produce the independent file oracle")
         self.receipt["checks"]["live-" + phase].update(self.probe("live-proof"))
@@ -272,7 +272,22 @@ class Rehearsal:
         self.receipt.update(status="passed", state_hashes=after, restore_verified=True)
 
     def close(self):
+        passed = self.receipt.get("status") == "passed"
+        cleanup_error = None
+        try:
+            if hasattr(self, "python") and (self.home / ".hermes-vault").is_file():
+                self.probe("stop-runtime")
+                self.receipt["cleanup_verified"] = True
+        except Exception as exc:  # health: allow BLE001 -- cleanup failure is recorded and fails an otherwise successful acceptance run
+            cleanup_error = exc
+            self.receipt["cleanup_error"] = self.clean(str(exc))
+            if passed:
+                self.receipt.update(status="failed", error="owned gateway cleanup failed")
         (self.evidence / "receipt.json").write_text(json.dumps(self.receipt, indent=2) + "\n")
+        if cleanup_error is not None:
+            if passed:
+                raise RuntimeError("owned gateway cleanup failed; work retained for diagnosis") from cleanup_error
+            return
         if not self.args.keep_work:
             shutil.rmtree(self.root)
 
@@ -314,7 +329,6 @@ def main():
     rehearsal = Rehearsal(args, credential)
     try:
         rehearsal.execute()
-        print(json.dumps({"scenario": args.scenario, "status": "passed", "candidate": args.candidate}))
     except BaseException as exc:
         rehearsal.receipt.update(status="cancelled" if isinstance(exc, KeyboardInterrupt) else "failed",
                                  error=rehearsal.clean(str(exc)))
@@ -326,6 +340,7 @@ def main():
         raise
     finally:
         rehearsal.close()
+    print(json.dumps({"scenario": args.scenario, "status": "passed", "candidate": args.candidate}))
 
 
 if __name__ == "__main__":
