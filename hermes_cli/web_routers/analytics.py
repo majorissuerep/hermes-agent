@@ -19,6 +19,7 @@ from hermes_cli.web_server_profiles import (
     _approval_mode_of, _aux_task_summary, _aux_usage_rows, _broadcast_gateway_session_info, _is_other_profile, _merge_aux_into_by_model,
 )
 from hermes_cli.web_models import RawConfigUpdate
+from hermes_security import io as state_io
 
 router = APIRouter()
 
@@ -43,9 +44,8 @@ async def get_config_raw(profile: Optional[str] = None):
     def _run():
         with _profile_scope(profile):
             path = get_config_path()
-        if not path.exists():
-            return {"yaml": "", "path": str(path)}
-        return {"yaml": path.read_text(encoding="utf-8-sig"), "path": str(path)}
+            text = state_io.read_text(path, purpose="config", encoding="utf-8-sig")
+            return {"yaml": text or "", "path": str(path)}
 
     return await asyncio.to_thread(_run)
 
