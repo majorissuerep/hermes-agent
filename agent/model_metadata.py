@@ -26,38 +26,13 @@ from agent.message_metadata import PERSISTENCE_ONLY_MESSAGE_FIELDS, UNPRICED_REP
 
 logger = logging.getLogger(__name__)
 
-# Snapshot for callers inspecting this constant; prefix routing queries the registry live.
-try:
-    from providers import list_providers as _list_providers
-except Exception:
-    def _list_providers():
-        return []
+from agent.model_metadata_identity import _strip_provider_prefix
 
-_PROVIDER_PREFIXES: frozenset[str] = frozenset(
-    value.lower()
-    for profile in _list_providers()
-    for value in (profile.name, *profile.aliases)
-)
-_OLLAMA_TAG_PATTERN = re.compile(r"^(\d+\.?\d*b|latest|stable|q\d|fp?\d|instruct|chat|coder|vision|text)", re.IGNORECASE)
 # Tailscale CGNAT (RFC 6598): `ipaddress.is_private` excludes it, yet Ollama
 # reached over Tailscale must count as local (timeout auto-bumps).
 _TAILSCALE_CGNAT = ipaddress.IPv4Network("100.64.0.0/10")
 
 
-def _strip_provider_prefix(model: str) -> str:
-    """Strip a registry-known provider prefix: ``"local:m"`` -> ``"m"``. Ollama ``model:tag``
-    ids are preserved even when the model half is a provider name (``qwen:0.5b``)."""
-    if ":" not in model or model.startswith("http"):
-        return model
-    prefix, suffix = model.split(":", 1)
-    try:
-        from providers import get_provider_profile
-        is_provider = get_provider_profile(prefix.strip().lower()) is not None
-    except Exception:
-        is_provider = False
-    if is_provider and not _OLLAMA_TAG_PATTERN.match(suffix.strip()):
-        return suffix
-    return model
 
 
 _model_metadata_cache: dict[str, dict[str, Any]] = {}
