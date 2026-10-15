@@ -84,7 +84,7 @@ jobs:
     timeout-minutes: 30
     # Also constrains the recording action's nested cache to read-only.
     cache-mode: read
-    env: &smoke-env
+    env:
       RELEASE_COMMIT: ${{ inputs.sha }}
       RELEASE_TAG: ${{ inputs.tag }}
       ARCHIVE_TAG: ${{ inputs.archive-tag }}
@@ -97,7 +97,7 @@ jobs:
       PLATFORM: ${{ inputs.platform }}
       ARCH: ${{ inputs.arch }}
       FORMAT: ${{ inputs.format }}
-    steps: &smoke-steps
+    steps:
       - name: Isolate smoke paths
         shell: bash
         run: printf 'SMOKE_ROOT=%s/bundle-smoke\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"

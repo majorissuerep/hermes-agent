@@ -195,6 +195,7 @@ it('each selection gate joins exactly one target\'s two trust branches after adm
   const gates = Object.values(desktop.jobs).filter(job => job.env?.SELECTED_BUILD_SUCCEEDED)
   expect(gates).toHaveLength(new Set(desktopLegs.flatMap(([, job]) => targetOf(job))).size)
   for (const gate of gates) {
+    expect(gate.steps?.some(step => step.run?.includes('$SELECTED_BUILD_SUCCEEDED'))).toBe(true)
     const [admission, ...branches] = gate.needs
     expect(admission).toBe('validate')
     expect(branches.map(id => legs[id]?.['cache-mode']).sort()).toEqual(['read', 'write'])

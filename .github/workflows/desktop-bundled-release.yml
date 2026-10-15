@@ -792,15 +792,14 @@ jobs:
       SELECTED_BUILD_SUCCEEDED: >-
         ${{ (inputs.build_commit == '' && inputs.channel == '' && needs.build-darwin-arm64-release.result == 'success' && needs.build-darwin-arm64-commit.result == 'skipped')
           || ((inputs.build_commit != '' || inputs.channel != '') && needs.build-darwin-arm64-commit.result == 'success' && needs.build-darwin-arm64-release.result == 'skipped') }}
-        steps: &native-build-result-steps
-          - name: Require exactly the selected native build to succeed
-            shell: bash
-            run: |
-              if [ "$SELECTED_BUILD_SUCCEEDED" != "true" ]; then
-                echo "::error::selected native build did not succeed, or the other trust branch was not skipped"
-                exit 1
-              fi
-    
+    steps: &native-build-result-steps
+      - name: Require exactly the selected native build to succeed
+        shell: bash
+        run: |
+          if [ "$SELECTED_BUILD_SUCCEEDED" != "true" ]; then
+            echo "::error::selected native build did not succeed, or the other trust branch was not skipped"
+            exit 1
+          fi
 
   build-darwin-x64:
     name: bundled darwin-x64 result
@@ -820,15 +819,7 @@ jobs:
       SELECTED_BUILD_SUCCEEDED: >-
         ${{ (inputs.build_commit == '' && inputs.channel == '' && needs.build-darwin-x64-release.result == 'success' && needs.build-darwin-x64-commit.result == 'skipped')
           || ((inputs.build_commit != '' || inputs.channel != '') && needs.build-darwin-x64-commit.result == 'success' && needs.build-darwin-x64-release.result == 'skipped') }}
-        steps: &native-build-result-steps
-          - name: Require exactly the selected native build to succeed
-            shell: bash
-            run: |
-              if [ "$SELECTED_BUILD_SUCCEEDED" != "true" ]; then
-                echo "::error::selected native build did not succeed, or the other trust branch was not skipped"
-                exit 1
-              fi
-    
+    steps: *native-build-result-steps
 
   # ── Linux builders (DISABLED for now) ─────────────────────────────────────
   build-linux-x64:
