@@ -127,7 +127,7 @@ def _run_child(request: dict) -> tuple[int, dict]:
     env.setdefault("HERMES_UPDATE_HANDOFF_PID", str(os.getpid()))
     # Everything the user saw so far came from the OLD updater; say so before the
     # new one (package manager) takes over, so logs show where the switch happened.
-    print("→ Handing off to the new updater (package manager) for the rest of this update...", flush=True)
+    print("Handing off to the new updater (package manager) for the rest of this update...", flush=True)
     with tempfile.TemporaryDirectory(prefix="hermes-update-takeover-") as directory, child_vault(env) as vault_kwargs:
         context = Path(directory) / "request.json"
         result = Path(directory) / "result.json"
