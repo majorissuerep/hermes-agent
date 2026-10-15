@@ -3508,6 +3508,8 @@ def _default_to_chat(args) -> None:
 
 def main():
     """Main entry point for hermes CLI."""
+    from hermes_platform.support import require_supported_host
+    require_supported_host()
     _set_process_title()
     _warn_if_unsupervised_pid1()
     _advertise_agent_env()
