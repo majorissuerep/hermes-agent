@@ -130,6 +130,7 @@ async def test_adopted_result_during_unknown_projection_is_not_lost(bot, monkeyp
 @pytest.mark.asyncio
 async def test_drain_defers_retry_without_publishing_interim_failure(bot, monkeypatch):
     from gateway.session_bot import deliver, recover_bot_deliveries
+    from tests.gateway.test_session_bot_retry import _settle_quietly
     from tools.bot_live_delivery import read_delivery_result
     import gateway.session_finite as finite
     execute = finite.execute_finite_admission
@@ -141,8 +142,9 @@ async def test_drain_defers_retry_without_publishing_interim_failure(bot, monkey
     bot.errors[:] = ['Error code: 429 - rate limit exceeded']
     key = 'e' * 32
     await deliver(bot.connection, dict(id=key, profile='default', message='retry after restart'))
-    tasks = list(getattr(bot.authority, '_bot_receipt_tasks', ()))
-    if tasks: await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True), 10)
+    # A drain can publish another receipt refresh after a task snapshot has completed.
+    # Reopening admissions before that drain is idle lets the refresh consume the retry.
+    await _settle_quietly(bot)
     assert (await asyncio.to_thread(read_delivery_result, bot.home, key))['status'] == 'claimed'
     from gateway import session_bot
     read = session_bot.read_receipt
