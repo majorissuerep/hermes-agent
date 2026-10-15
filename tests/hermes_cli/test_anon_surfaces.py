@@ -69,6 +69,8 @@ def _account_state() -> dict:
 
 @pytest.fixture
 def isolated_store(monkeypatch, tmp_path):
+    from tests.hermes_cli.anon_portal import install_optional_portal_provider
+    install_optional_portal_provider(monkeypatch)
     monkeypatch.setenv("HERMES_SHARED_AUTH_DIR", str(tmp_path / "shared-store"))
     # The welcome trial carries inference only on the desktop's local backend.
     as_local_desktop_backend(monkeypatch)

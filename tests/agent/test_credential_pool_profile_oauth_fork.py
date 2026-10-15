@@ -468,7 +468,7 @@ def test_auth_add_never_reports_added_for_a_row_the_store_did_not_keep(fleet, mo
     monkeypatch.setattr(credential_pool, "write_credential_pool", lambda *a, **kw: [])
     with pytest.raises(SystemExit, match="not saved"):
         auth_add_command(Namespace(
-            provider="openrouter", auth_type="api-key", api_key="sk-or-v1-new", label="new", priority=None,
+            provider="ai-gateway", auth_type="api-key", api_key="synthetic-new-key", label="new", priority=None,
         ))
     assert "Added" not in capsys.readouterr().out
 

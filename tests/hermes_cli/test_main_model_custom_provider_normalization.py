@@ -34,14 +34,14 @@ def test_custom_provider_name_canonicalizes_to_durable_slug():
 
 
 def test_unknown_vendor_still_uses_aggregator_fallback():
-    with patch("hermes_cli.models_detect.provider_has_credentials", lambda p: p == "openrouter"):
+    with patch("hermes_cli.models_detect.provider_has_credentials", lambda p: p == "ai-gateway"):
         assert _normalize({}, "unconfigured-vendor") == (
-            "openrouter",
+            "ai-gateway",
             "vendor/model-a",
         )
 
 
-def test_unknown_vendor_without_openrouter_key_is_not_reassigned():
+def test_unknown_vendor_without_connected_aggregator_is_not_reassigned():
     """No key for the guessed aggregator → keep the pair as sent instead of persisting a provider
     the user never selected."""
     with patch("hermes_cli.models_detect.provider_has_credentials", lambda p: False):

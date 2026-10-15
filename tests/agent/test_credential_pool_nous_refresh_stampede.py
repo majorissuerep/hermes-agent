@@ -16,38 +16,48 @@ Two invariants pinned here:
    untouched instead of marking it exhausted.
 """
 
-import json
-import logging
+import time
+
+import pytest
 
 import hermes_cli.auth as auth_mod
 from hermes_cli import auth_nous
 from agent.credential_pool import CredentialPool, PooledCredential
 
-from tests.hermes_cli.test_auth_nous_provider import _invoke_jwt, _setup_nous_auth
+from tests.hermes_cli.anon_portal import make_jwt, install_optional_portal_provider
+
+
+@pytest.fixture(autouse=True)
+def optional_account_provider(monkeypatch):
+    monkeypatch.setenv("HERMES_ALLOW_NO_VAULT", "1")
+    install_optional_portal_provider(monkeypatch)
+
+
+def access_token(seconds):
+    return make_jwt(sub="test-user", client_id="hermes-cli", account_tier="standard",
+                    exp=int(time.time() + seconds))
 
 
 def test_forced_refresh_adopts_peer_rotation_instead_of_reposting(tmp_path, monkeypatch):
     hermes_home = tmp_path / "hermes"
-    peer_token = _invoke_jwt(seconds=3600)
-    failed_token = _invoke_jwt(seconds=3000)  # what THIS process still holds
-    _setup_nous_auth(
-        hermes_home,
-        access_token=peer_token,
-        refresh_token="rt-after-peer-rotation",
-        scope=auth_mod.DEFAULT_NOUS_SCOPE,
-        expires_at=auth_mod.datetime.fromtimestamp(
-            auth_mod.time.time() + 3600, tz=auth_mod.timezone.utc
-        ).isoformat(),
-        expires_in=3600,
-    )
+    peer_token = access_token(3600)
+    failed_token = access_token(3000)  # what THIS process still holds
     monkeypatch.setenv("HERMES_HOME", str(hermes_home))
+    auth_mod._save_auth_store({"version": 1, "active_provider": "nous", "providers": {"nous": {
+        "portal_base_url": "https://portal.example.test",
+        "inference_base_url": "https://inference.example.test/v1",
+        "client_id": "hermes-cli", "token_type": "Bearer", "scope": auth_mod.DEFAULT_NOUS_SCOPE,
+        "access_token": peer_token, "refresh_token": "rt-after-peer-rotation",
+        "expires_at": auth_mod.datetime.fromtimestamp(
+            time.time() + 3600, tz=auth_mod.timezone.utc).isoformat(), "expires_in": 3600,
+    }}})
 
     posts = []
 
     def _fake_refresh_access_token(*, client, portal_base_url, client_id, refresh_token):
         posts.append(refresh_token)
         return {
-            "access_token": _invoke_jwt(seconds=7200),
+            "access_token": access_token(7200),
             "refresh_token": "rt-should-not-happen",
             "expires_in": 7200,
             "token_type": "Bearer",
@@ -74,7 +84,7 @@ def test_lock_timeout_during_nous_refresh_does_not_bench_entry(monkeypatch, capl
         id="267aed",
         provider="nous",
         auth_type="oauth",
-        access_token=_invoke_jwt(seconds=3600),
+        access_token=access_token(3600),
         refresh_token="rt",
         label="test@nous",
         source="device_code",

@@ -487,6 +487,7 @@ class TestGatewaySelfTargetingGuard:
 
         monkeypatch.setattr(gw, "_dispatch_via_service_manager_if_s6", _sentinel)
         monkeypatch.setattr(gw, "_dispatch_all_via_service_manager_if_s6", _sentinel)
+        monkeypatch.setattr(gw, "find_gateway_pids", lambda **kwargs: [])
         args = Namespace(gateway_command="stop", all=False, system=False)
         with pytest.raises(_Reached):
             gw.gateway_command(args)

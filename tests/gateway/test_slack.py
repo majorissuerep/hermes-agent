@@ -1017,6 +1017,7 @@ class TestSlackProxyBehavior:
         app_client = _slack_mod.AsyncWebClient(token="xoxb-fake")
         _slack_mod._apply_slack_proxy(app_client, None)
         app = async_app_mod.AsyncApp(
+            name="hermes-proxy-contract",
             token="xoxb-fake",
             client=app_client,
             signing_secret="secret",

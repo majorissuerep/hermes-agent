@@ -216,7 +216,7 @@ class TestSetupWizardSkipsConfiguredSections:
         migration_done = {"value": False}
 
         def env_side(key):
-            if migration_done["value"] and key == "OPENROUTER_API_KEY":
+            if migration_done["value"] and key == "OPENAI_API_KEY":
                 return "sk-xxx"
             return ""
 
@@ -245,7 +245,7 @@ class TestSetupWizardSkipsConfiguredSections:
             patch.object(setup_mod, "is_interactive_stdin", return_value=True),
             patch("hermes_cli.auth.get_active_provider", return_value=None),
             patch("builtins.input", return_value=""),
-            patch.object(setup_mod, "prompt_choice", return_value=1),
+            patch.object(setup_mod, "prompt_choice", return_value=0),
             # Migration succeeds and flips the env_side flag
             patch.object(
                 setup_mod, "_offer_openclaw_migration",

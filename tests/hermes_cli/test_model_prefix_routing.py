@@ -66,6 +66,9 @@ class TestVendorPrefixRouting:
         """Aggregator-native slugs keep their existing OpenRouter routing (when OpenRouter is
         authenticated — an unkeyed aggregator is never auto-selected)."""
         from hermes_cli import models_detect
+        from tests.hermes_cli.provider_fixtures import install_optional_aggregator
+
+        install_optional_aggregator(monkeypatch)
         monkeypatch.setattr(models_detect, "provider_has_credentials", lambda p: p == "openrouter")
         monkeypatch.setattr(
             models, "_find_openrouter_slug", lambda _name: "zai/deepseek-chat"

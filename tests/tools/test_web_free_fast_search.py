@@ -74,10 +74,12 @@ def gateway_server(monkeypatch):
 
 
 def _write_home(home, monkeypatch, *, nous_state=None, config=None):
+    from tests.hermes_cli.anon_portal import install_optional_portal_provider
     from hermes_cli.config import atomic_config_write
     from hermes_cli.nous_account import reset_nous_portal_account_info_cache
 
     home.mkdir(parents=True)
+    install_optional_portal_provider(monkeypatch)
     monkeypatch.setenv("HERMES_HOME", str(home))
     as_local_desktop_backend(monkeypatch)
     monkeypatch.delenv("PERPLEXITY_API_KEY", raising=False)
