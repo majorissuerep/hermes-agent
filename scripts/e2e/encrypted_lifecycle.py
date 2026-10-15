@@ -43,8 +43,10 @@ class Rehearsal:
         print(f"[{args.scenario}] evidence: {self.evidence}", flush=True)
         self.password = secrets.token_urlsafe(32)
         self.redactions = [self.password, *self._credential_strings(credential)]
+        inherited = {"PATH", "USER", "LOGNAME", "SHELL", "SSL_CERT_FILE", "SSL_CERT_DIR",
+                     "REQUESTS_CA_BUNDLE", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY"}
         self.env = {key: value for key, value in os.environ.items()
-                    if not key.startswith(("HERMES_", "__HERMES_", "E2E_LLM_"))}
+                    if key in inherited or key.startswith("LC_")}
         self.env.update(HOME=str(self.root / "user"), HERMES_HOME=str(self.home),
                         HERMES_RUNTIME_DIR=str(args.tool_cache.resolve() if args.tool_cache else self.root / "runtime"),
                         GIT_CONFIG_GLOBAL=str(self.root / "gitconfig"), GIT_CONFIG_NOSYSTEM="1",
@@ -133,10 +135,10 @@ class Rehearsal:
 
     def probe(self, action, **extra):
         # The probe is from the candidate harness, against each install's REAL imports.
-        script = Path(__file__).with_name("state_probe.py").read_text()
+        script = Path(__file__).with_name("state_probe.py").resolve()
         # A late application import may select/re-exec the PM generation. Finish
         # that boot BEFORE consuming stdin, just as the public launcher does.
-        boot = "import hermes_bootstrap; exec(" + repr(script) + ")"
+        boot = "import hermes_bootstrap, runpy; runpy.run_path(" + repr(str(script)) + ", run_name='__main__')"
         text = self.run(action, [str(self.python), "-c", boot], cwd=self.code,
                         data={"action": action, "password": self.password, **extra})
         return json.loads(text.strip().splitlines()[-1])
@@ -271,6 +273,16 @@ def main():
     if not credential.get("model") or not (credential.get("tokens") or
             (credential.get("base_url") and credential.get("api_key"))):
         parser.error("a real model credential is required; missing credentials never count as passed")
+    # The CLI accepts tags/abbreviations; evidence and the post-update check use
+    # full object identities, including when a local operator passed a short SHA.
+    ref_env = {key: value for key, value in os.environ.items() if key in {"PATH", "HOME", "LANG"}}
+    for field in ("baseline", "candidate"):
+        resolved = subprocess.run(["git", "-C", str(args.source), "rev-parse", "--verify", "--end-of-options",
+                                   getattr(args, field) + "^{commit}"],
+                                  capture_output=True, text=True, env=ref_env)
+        if resolved.returncode:
+            parser.error(f"{field} is unavailable in the source checkout; fetch that ref first")
+        setattr(args, field, resolved.stdout.strip())
     rehearsal = Rehearsal(args, credential)
     try:
         rehearsal.execute()

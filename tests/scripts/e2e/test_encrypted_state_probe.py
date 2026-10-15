@@ -14,11 +14,14 @@ def test_real_state_oracle_survives_snapshot_mutation_and_restore(tmp_path, monk
     vault.init_vault(home, password)
     vault.clear_vault_cache()
     root = Path(__file__).resolve().parents[3]
-    script = (root / "scripts/e2e/state_probe.py").read_text()
+    script = tmp_path / "state_probe.py"
+    script.write_text((root / "scripts/e2e/state_probe.py").read_text())
+    boot = ("import runpy, sys; sys.path.insert(0, " + repr(str(root)) + "); "
+            "runpy.run_path(" + repr(str(script)) + ", run_name='__main__')")
 
     def probe(action, **extra):
         result = subprocess.run(
-            [sys.executable, "-c", script], cwd=root, text=True, capture_output=True,
+            [sys.executable, "-c", boot], cwd=root, text=True, capture_output=True,
             input=json.dumps({"action": action, "password": password, **extra}), timeout=60,
         )
         assert result.returncode == 0, result.stderr
