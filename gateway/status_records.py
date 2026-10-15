@@ -59,12 +59,26 @@ def write_json_file(path: Path, payload: dict[str, Any]) -> None:
 
 def write_json_excl(path: Path, record: dict[str, Any]) -> None:
     """Create ``path`` with O_CREAT|O_EXCL and dump ``record``; unlinks on a failed write."""
-    fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    data = encode_record(path, record)
+    fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            json.dump(record, handle)
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data)
     except Exception:
         with contextlib.suppress(OSError):
             path.unlink(missing_ok=True)
         raise
+
+
+def encode_record(path: Path, record: dict[str, Any]) -> bytes:
+    """Serialize before touching an exclusive/locked inode; never replace a held lock."""
+    from hermes_security.io import _home_for, _rel
+
+    data = json.dumps(record).encode("utf-8")
+    home = _home_for(path)
+    if home is not None:
+        from hermes_security.vault import get_vault
+
+        data = get_vault(home).encrypt(data, purpose="runtime-status", relpath=_rel(path, home))
+    return data
 

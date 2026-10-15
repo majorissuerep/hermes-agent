@@ -8,7 +8,6 @@ still names the inode it locked.
 from __future__ import annotations
 
 from contextlib import contextmanager
-import json
 import os
 from pathlib import Path
 import stat
@@ -150,6 +149,7 @@ class ProfileOwnership:
 
     def reserve(self, homes) -> None:
         from gateway.status import _try_acquire_file_lock, _build_pid_record
+        from gateway.status_records import encode_record
         with self._mutex:
             added = []
             try:
@@ -159,14 +159,15 @@ class ProfileOwnership:
                     home.mkdir(mode=0o700, parents=True, exist_ok=True)
                     path = home / 'gateway.lock'
                     fd = _open_lock(path)
-                    handle = os.fdopen(fd, 'r+', encoding='utf-8')  # windows-footgun: ok — write-only
+                    handle = os.fdopen(fd, 'r+b')
                     try:
                         if not _try_acquire_file_lock(handle) or not _still_names(path, handle.fileno()):
                             raise OwnershipConflict(f'Gateway runtime already owns profile {home}')
                         record = {**_build_pid_record(), 'hermes_home': str(home)}
+                        data = encode_record(path, record)
                         handle.seek(0)
                         handle.truncate()
-                        json.dump(record, handle)
+                        handle.write(data)
                         handle.flush()
                         os.fsync(handle.fileno())
                     except BaseException:
