@@ -185,13 +185,13 @@ jobs:
     name: code health ratchet (blocking)
     if: inputs.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - name: Checkout code
         uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a # v7.0.1
         with:
           ref: ${{ inputs.commit }}
-          fetch-depth: 2 # the merge commit and its first parent (the base branch tip)
+          fetch-depth: 0 # first parent plus ancestry of the pinned full-history upstream input
 
       - uses: ./.github/actions/setup-pm
         with:

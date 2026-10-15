@@ -29,7 +29,8 @@ _GUARD_SCRIPTS = (
     "scripts/ci/check_lazy_deps_imports.py", "scripts/ci/check_profile_archive_boundary.py",
     "scripts/ci/check_agents_md_size.py", "scripts/ci/check_blob_size.py",
 )
-_SUPPORT = ("scripts/ci/profile_scope_patterns.json", "agent/subdirectory_hints.py", *_GUARD_SCRIPTS)
+_SUPPORT = ("scripts/ci/profile_scope_patterns.json", "scripts/ci/upstream_sync_base.py",
+            "agent/subdirectory_hints.py", *_GUARD_SCRIPTS)
 _LEGACY = "def legacy(x):\n" + "".join(f"    if x == {i}:\n        return {i}\n" for i in range(21))
 _GROWN = _LEGACY + "    if x == 99:\n        return 99\n"
 _ENV_COPY = "import os\n\n\ndef child_env():\n    env = os.environ.copy()\n    return env\n"

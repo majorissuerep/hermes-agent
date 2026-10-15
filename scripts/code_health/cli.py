@@ -15,6 +15,7 @@ from scripts.code_health import gitio
 from scripts.code_health.compare import compare
 from scripts.code_health.config import in_scope
 from scripts.code_health.measure import Measurer
+from scripts.code_health.imports import exclude_inherited
 from scripts.code_health.report import (
     apply_allows,
     format_findings,
@@ -109,6 +110,7 @@ def run(repo: Path, base: str, head: str | None, as_json: bool = False,
     base_m = measurer.measure(base, base_paths)
     head_m = measurer.measure(head, head_paths)
     findings = compare(base_m, head_m, changes)
+    findings = exclude_inherited(repo, base, head, measurer, head_m, findings)
     apply_allows(findings, head_m)
     blocking, advisory = verdict(findings)
     failed = bool(blocking) and mode == "blocking"
