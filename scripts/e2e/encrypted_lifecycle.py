@@ -93,6 +93,7 @@ class Rehearsal:
         consumed = count = 0
         last_progress = started
         last_check = started
+        last_flush = started
         detached = False
         try:
             while True:
@@ -112,7 +113,12 @@ class Rehearsal:
                     if not chunk:
                         break
                     output.extend(chunk)
-                    log.write_text(self.clean(output.decode(errors="replace")))
+                    # Ink / PTY redraws can arrive a few bytes at a time. A
+                    # full redacted snapshot per read turns logging quadratic;
+                    # keep progress visible without saturating a slow VM disk.
+                    if time.monotonic() - last_flush >= 1:
+                        log.write_text(self.clean(output.decode(errors="replace")))
+                        last_flush = time.monotonic()
                     for match in _PROMPT.finditer(output, consumed):
                         count += 1
                         consumed = match.end()
@@ -189,7 +195,7 @@ class Rehearsal:
                 return False
             return self.probe("live-proof", allow_pending=True)["complete"]
 
-        self.run("live-" + phase, [str(self.launcher), "chat", "--yolo", "--accept-hooks",
+        self.run("live-" + phase, [str(self.launcher), "chat", "--cli", "--yolo", "--accept-hooks",
                                    "--toolsets", "terminal,file,delegation", "--max-turns", "10",
                                    "-q", prompt], prompts=1, timeout=480, completion=completed)
         if not marker.is_file() or marker.read_text().strip() != nonce:

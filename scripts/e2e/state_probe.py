@@ -182,7 +182,7 @@ def main() -> None:
         if not complete and not request.get("allow_pending"):
             raise RuntimeError("live task did not successfully execute the required child/parent Hermes calls")
         return {"complete": complete, "delegation_calls": calls, "child_sessions": children,
-                "verified_hermes_calls": len(executed)}
+                "verified_hermes_calls": len(executed), "executed_in_child": executed}
 
     def diagnostics():
         from hermes_cli.logs import _read_tail
