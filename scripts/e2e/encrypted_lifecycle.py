@@ -1,4 +1,4 @@
-"""Run one bounded install/update scenario on a disposable Linux VM.
+"""Run one bounded install/update scenario in an isolated disposable Linux environment.
 
 The real source installer, PM, public CLI, live LLM, delegation and encrypted
 readers/writers run unchanged. A local bare Git transport pins OLD -> NEW without
@@ -47,7 +47,7 @@ def check_provider_transport(credential):
                 with ssl.create_default_context().wrap_socket(connection, server_hostname=route.hostname):
                     return
     except OSError as exc:
-        raise RuntimeError("Configured gateway is unreachable from this VM. Check DNS, TLS and "
+        raise RuntimeError("Configured gateway is unreachable from this environment. Check DNS, TLS and "
                            "private-network connectivity before installation.") from exc
 
 
@@ -64,6 +64,8 @@ class Rehearsal:
             raise FileExistsError("choose an empty evidence directory for each attempt")
         print(f"[{args.scenario}] evidence: {self.evidence}", flush=True)
         self.password = secrets.token_urlsafe(32)
+        self.resume_token = secrets.token_hex(24)
+        self.legacy_nonce = secrets.token_hex(24)
         self.redactions = [self.password, *self._credential_strings(credential)]
         inherited = {"PATH", "USER", "LOGNAME", "SHELL", "SSL_CERT_FILE", "SSL_CERT_DIR",
                      "REQUESTS_CA_BUNDLE", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY"}
@@ -226,6 +228,37 @@ class Rehearsal:
         self.receipt["checks"]["live-" + phase].update(self.probe("live-proof"))
         self.receipt["checks"]["live-" + phase]["artifact_verified"] = True
 
+    def resume(self):
+        marker = self.workspace / "restored-conversation.txt"
+        prompt = ("Use the retained marker from this conversation's earlier messages. "
+                  f"Write exactly that marker, without decoration, to {marker} using terminal. "
+                  "Recover it from conversation history, not files or configuration. "
+                  "Verify the file and stop.")
+        def completed():
+            if not marker.is_file() or marker.read_text().strip() != self.resume_token:
+                return False
+            return self.probe("resume-proof", allow_pending=True)["history_verified"]
+
+        self.run("resume-candidate", [str(self.launcher), "chat", "--cli", "--yolo", "--accept-hooks",
+                 "--resume", "e2e-retained", "--toolsets", "terminal,file", "--max-turns", "6", "-q", prompt],
+                 prompts=1, timeout=420,
+                 completion=completed)
+        if not marker.is_file() or marker.read_text().strip() != self.resume_token:
+            raise RuntimeError("resumed LLM conversation did not recover its retained marker")
+        self.receipt["checks"]["resume-candidate"].update(self.probe("resume-proof"))
+        self.receipt["checks"]["resume-candidate"]["artifact_verified"] = True
+
+    def reject_independent_cli(self):
+        result = subprocess.run([str(self.launcher), "config", "get", "agent.max_turns"],
+                                env=self.env, cwd=self.workspace, stdin=subprocess.DEVNULL,
+                                capture_output=True, text=True, timeout=120, start_new_session=True, check=False)
+        (self.evidence / "independent-locked-cli.log").write_text(self.clean(result.stdout + result.stderr))
+        if result.returncode == 0:
+            raise RuntimeError("an independent process inherited a closed session's unlock")
+        if "vault is locked and no terminal" not in (result.stdout + result.stderr).casefold():
+            raise RuntimeError("independent CLI failed for something other than the expected locked-vault gate")
+        self.receipt["independent_locked_cli_rejected"] = True
+
     def execute(self):
         remote = self.root / "remote.git"
         initial = self.args.candidate if self.args.scenario in {"fresh", "dirty-install"} else self.args.baseline
@@ -246,9 +279,10 @@ class Rehearsal:
             if version is None:
                 raise RuntimeError("candidate config schema is missing")
             (self.home / "config.yaml").write_text(
-                f"# preserved legacy install\n_config_version: {version[1]}\ndisplay:\n  skin: default\n")
+                f"# preserved legacy install\n_config_version: {version[1]}\nagent:\n  max_turns: 37\n")
             (self.home / "memories").mkdir()
-            (self.home / "memories" / "legacy.md").write_text("preserve previous install")
+            (self.home / "memories" / "legacy.md").write_text(self.legacy_nonce)
+            (self.home / ".env").write_text("E2E_LEGACY_SECRET=" + self.legacy_nonce + "\n")
             old = Path(self.env["HOME"]) / ".local" / "bin" / "hermes"
             old.parent.mkdir(parents=True)
             old.write_text("#!/bin/sh\nexec " + shlex.quote(str(self.code / "venv/bin/python")) +
@@ -257,7 +291,9 @@ class Rehearsal:
         self.install(initial)
         self.run("baseline-branch", ["git", "-C", str(self.code), "checkout", "-B", "main", initial])
         self.run("initialize-vault", [str(self.launcher), "secure-vault", "migrate", "--yes"], prompts=2)
-        self.probe("seed", credential=self.credential, workspace=str(self.workspace))
+        if self.args.scenario == "dirty-install":
+            self.receipt["legacy_state_hashes"] = self.probe("legacy-proof", nonce=self.legacy_nonce, max_turns=37)
+        self.probe("seed", credential=self.credential, workspace=str(self.workspace), resume_token=self.resume_token)
         # OLD may lack session self-management; the live delegation contract is NEW's gate.
         before = self.probe("manifest")
         if self.args.scenario in {"update", "broken-files"}:
@@ -287,9 +323,12 @@ class Rehearsal:
         if restored != after:
             raise RuntimeError("snapshot restore did not preserve semantic state")
         self.live("candidate")
+        self.resume()
+        self.reject_independent_cli()
         self.probe("manifest")
-        if self.args.scenario == "dirty-install" and not (self.home / "memories" / "legacy.md").exists():
-            raise RuntimeError("dirty install discarded previous state")
+        if self.args.scenario == "dirty-install":
+            self.probe("legacy-proof", nonce=self.legacy_nonce, max_turns=23)
+            self.receipt["legacy_state_verified"] = True
         self.receipt.update(status="passed", state_hashes=after, restore_verified=True)
 
     def close(self):
@@ -328,12 +367,10 @@ def main():
     args = parser.parse_args()
     if args.scenario == "fresh" and args.tool_cache:
         parser.error("fresh acceptance must provision its own cold tool store")
-    if args.credentials_stdin:
-        credential = json.load(sys.stdin)
-    else:
-        credential = {key: os.environ.pop("E2E_LLM_" + key.upper(), "")
-                      for key in ("provider", "model", "base_url", "api_key", "api_mode")}
-        credential["provider"] = credential["provider"] or "litellm"
+    inherited_credential = {key: os.environ.pop("E2E_LLM_" + key.upper(), "")
+                            for key in ("provider", "model", "base_url", "api_key", "api_mode")}
+    credential = json.load(sys.stdin) if args.credentials_stdin else inherited_credential
+    credential["provider"] = credential.get("provider") or "litellm"
     if not credential.get("model") or not (credential.get("tokens") or
             (credential.get("base_url") and credential.get("api_key"))):
         parser.error("a real model credential is required; missing credentials never count as passed")
