@@ -1,6 +1,7 @@
 name: Encrypted lifecycle VM acceptance
 
-# Deliberate, bounded runs: every matrix leg gets a fresh hosted Ubuntu VM.
+# Deliberate, bounded runs: every matrix leg gets a fresh Ubuntu VM.
+# LAN gateways use one-job private VM runners, never a shared workstation.
 # No schedules, historical upstream tag sampling, mocks, or green credential skips.
 on:
   push:
@@ -15,6 +16,10 @@ on:
         description: 'Exact candidate commit (empty uses the dispatch ref)'
         type: string
         default: ''
+      private_runner:
+        description: 'Use disposable private Ubuntu VMs labelled hermes-encrypted-vm'
+        type: boolean
+        default: false
   workflow_call:
     inputs:
       baseline:
@@ -23,6 +28,9 @@ on:
       commit:
         type: string
         required: true
+      private_runner:
+        type: boolean
+        default: false
     secrets:
       E2E_LLM_API_KEY:
         required: true
@@ -37,7 +45,7 @@ concurrency:
 jobs:
   lifecycle:
     name: Encrypted ${{ matrix.scenario }} (live LLM)
-    runs-on: ubuntu-24.04
+    runs-on: ${{ fromJSON((inputs.private_runner || startsWith(github.ref, 'refs/heads/e2e/encrypted/private/')) && '["self-hosted","linux","hermes-encrypted-vm"]' || '["ubuntu-24.04"]') }}
     timeout-minutes: 60
     strategy:
       fail-fast: false

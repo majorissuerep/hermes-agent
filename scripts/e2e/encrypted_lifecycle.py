@@ -20,14 +20,35 @@ import shlex
 import select
 import shutil
 import signal
+import socket
+import ssl
 import subprocess
 import sys
 import tempfile
 import termios
 import time
+from urllib.parse import urlsplit
 
 SCENARIOS = ("fresh", "update", "broken-files", "dirty-install")
 _PROMPT = re.compile(rb"(?:Create master password|Repeat master password|Master password):\s*", re.IGNORECASE)
+
+
+def check_provider_transport(credential):
+    """Reject unreachable gateway routes before provisioning a disposable installation."""
+    if not credential.get("base_url"):
+        return
+    route = urlsplit(credential["base_url"])
+    if route.scheme not in {"http", "https"} or not route.hostname:
+        raise ValueError("the gateway base URL must have an HTTP(S) host")
+    try:
+        with socket.create_connection((route.hostname, route.port or (443 if route.scheme == "https" else 80)),
+                                      timeout=15) as connection:
+            if route.scheme == "https":
+                with ssl.create_default_context().wrap_socket(connection, server_hostname=route.hostname):
+                    return
+    except OSError as exc:
+        raise RuntimeError("Configured gateway is unreachable from this VM. Check DNS, TLS and "
+                           "private-network connectivity before installation.") from exc
 
 
 class Rehearsal:
@@ -316,6 +337,7 @@ def main():
     if not credential.get("model") or not (credential.get("tokens") or
             (credential.get("base_url") and credential.get("api_key"))):
         parser.error("a real model credential is required; missing credentials never count as passed")
+    check_provider_transport(credential)
     # The CLI accepts tags/abbreviations; evidence and the post-update check use
     # full object identities, including when a local operator passed a short SHA.
     ref_env = {key: value for key, value in os.environ.items() if key in {"PATH", "HOME", "LANG"}}

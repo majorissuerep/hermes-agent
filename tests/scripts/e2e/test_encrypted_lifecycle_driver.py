@@ -11,6 +11,36 @@ import pytest
 from scripts.e2e.encrypted_lifecycle import Rehearsal
 
 
+def test_unreachable_gateway_stops_before_installation_or_work_creation(tmp_path, monkeypatch):
+    import socket
+
+    from scripts.e2e import encrypted_lifecycle as driver
+
+    source = Path(__file__).resolve().parents[3]
+    work = tmp_path / "disposable-work"
+    work.mkdir()
+    evidence = tmp_path / "evidence"
+    with socket.socket() as unavailable:
+        # Keep the port reserved but not listening: no external DNS, service or race.
+        unavailable.bind(("127.0.0.1", 0))
+        monkeypatch.setenv("E2E_LLM_PROVIDER", "litellm")
+        monkeypatch.setenv("E2E_LLM_MODEL", "fixture")
+        monkeypatch.setenv("E2E_LLM_API_KEY", "synthetic-provider-secret")
+        monkeypatch.setenv("E2E_LLM_BASE_URL", f"http://127.0.0.1:{unavailable.getsockname()[1]}/v1")
+        monkeypatch.setattr(sys, "argv", ["encrypted_lifecycle.py", "--scenario", "fresh",
+            "--source", str(source), "--baseline", "HEAD", "--candidate", "HEAD",
+            "--work-dir", str(work), "--evidence", str(evidence)])
+
+        def must_not_install(_rehearsal):
+            pytest.fail("installation started before provider transport preflight")
+
+        monkeypatch.setattr(Rehearsal, "execute", must_not_install)
+        with pytest.raises(RuntimeError, match="gateway is unreachable from this VM"):
+            driver.main()
+    assert list(work.iterdir()) == []
+    assert not evidence.exists()
+
+
 def test_failed_runtime_cleanup_cannot_publish_green_or_delete_its_work(tmp_path, monkeypatch):
     rehearsal = Rehearsal(Namespace(
         work_dir=tmp_path, evidence=tmp_path / "evidence", keep_work=False,

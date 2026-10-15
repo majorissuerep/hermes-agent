@@ -1,7 +1,7 @@
 # Encrypted lifecycle VM acceptance
 
 `.github/workflows/encrypted-lifecycle.yml` assigns each scenario a **fresh Ubuntu
-24.04 hosted VM**. It has no schedule and no skipped-green credential path.
+24.04 VM**. It has no schedule and no skipped-green credential path.
 
 | Scenario | Contract |
 |---|---|
@@ -23,6 +23,22 @@ spend-capped OpenAI-compatible gateway key for the run:
 - Actions secret: `E2E_LLM_API_KEY`.
 - Actions variables: `E2E_LLM_BASE_URL`, `E2E_LLM_MODEL`.
 - Dispatch with the candidate commit and an OLD fork baseline. They must differ.
+
+The gateway must be reachable **from the VM**: a GitHub-hosted runner cannot resolve
+LAN-only DNS or reach private addresses without an explicitly configured private-network
+route. The driver checks gateway DNS/TCP/TLS before creating work or installing Hermes;
+an unreachable route fails immediately, not after a full installation and chat timeout.
+This transport check does not replace the subsequent real LLM/delegation acceptance.
+
+For a LAN gateway, provision one-job **ephemeral** Ubuntu 24.04 VM runners on that
+network with the labels `self-hosted`, `linux`, `hermes-encrypted-vm`. Supply at least
+two VMs, then replace each consumed VM until all four jobs finish. Select
+`private_runner: true` for dispatch/reuse, or push the candidate to
+`e2e/encrypted/private/**`. The default remains GitHub-hosted Ubuntu for public
+gateways. Never assign this label to a shared workstation or a reused runner:
+each scenario needs its own disposable VM and must have no access to personal state.
+Private runner selection grants no network access by itself; verify its DNS/TLS
+route first. Keep the gateway authenticated; do not expose it publicly for a test.
 
 Locally, the same names prefixed `E2E_LLM_` configure the runner. Its process removes
 those variables before starting installers/build workers and passes credentials to
