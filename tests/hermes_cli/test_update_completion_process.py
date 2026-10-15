@@ -351,7 +351,7 @@ def test_desktop_build_that_never_ran_is_named_for_the_handoff(transition, capsy
     stale. The builder prints it only when the build fails; a run whose build never ran (dependency
     sync failed, the tail refused by the update lock, the prepared child died) must print it too."""
     scripts = Path(update_completion.__file__).parents[1] / "scripts/desktop-update"
-    for script in ("posix.sh", "windows.ps1"):  # the exact prefix the hand-off scripts match
+    for script in ("posix.sh",):  # the exact prefix the supported hand-off script matches
         assert "Desktop app build owed: " in (scripts / script).read_text(encoding="utf-8-sig")
     assert update_completion.DESKTOP_BUILD_OWED == "Desktop app build owed:"
     root, _git, _old, _new, request = transition

@@ -158,7 +158,6 @@ export function runElectronBuilder(args, { spawn = spawnSync } = {}) {
   const env = { ...process.env, NODE_OPTIONS: builderNodeOptions(), HERMES_PREPARED_PACKAGING: manifest,
     HERMES_PREPARED_NATIVE_DEPS: nativeDeps, HERMES_PREPARED_TARGET: inputs.target }
   if (inputs.dmgbuild) env.CUSTOM_DMGBUILD_PATH = inputs.dmgbuild
-  if (inputs.windows?.dotnetRoot) env.DOTNET_ROOT = inputs.windows.dotnetRoot
   const result = spawn(process.execPath, [...preloads, path.join(builder, bin), ...args,
     '--config', 'electron-builder.config.cjs', '--publish', 'never', `-c.electronDist=${inputs.electron}`,
     ...toolsetArguments(inputs)], { cwd: app, stdio: 'inherit', env })

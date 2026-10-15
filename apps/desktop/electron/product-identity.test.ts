@@ -213,7 +213,6 @@ test('packaging isolates boot metadata and executable names without renaming rel
 
   process.env.HERMES_PAYLOAD_TAG = 'v0.28.0'
   process.env.HERMES_BUILD_COMMIT = ''
-  assert.equal(load().msix.customManifestPath, 'build/msix-manifest.xml')
 
   for (const build of ['canary', 'abcdef1234567890abcdef1234567890abcdef12']) {
     process.env.HERMES_PAYLOAD_TAG = build === 'canary' ? 'v0.28.0+canary.20260818T000000Z' : ''
@@ -225,7 +224,7 @@ test('packaging isolates boot metadata and executable names without renaming rel
     assert.equal(config.extraMetadata.productName, identity.displayName)
     assert.equal(config.extraMetadata.name, identity.appNamePascal)
     assert.notEqual(config.extraMetadata.name, stableIdentity.appNamePascal)
-    assert.equal(config.win.executableName, identity.windowsExecutableName)
+    assert.equal(config.executableName, identity.displayName)
 
     const {
       AppInfo
@@ -234,26 +233,12 @@ test('packaging isolates boot metadata and executable names without renaming rel
     const appInfo: BuilderAppInfo = new AppInfo(
       { config, metadata: { ...pkg, ...config.extraMetadata } } as Packager,
       null,
-      config.win
+      config.mac
     )
 
-    // Windows packaging, afterPack, rollback preservation and final signing
-    // all consume this resolved name, not the display name.
-    assert.equal(appInfo.productFilename, identity.windowsExecutableName)
+    assert.equal(appInfo.productFilename, identity.displayName)
     assert.equal(config.mac.extendInfo.CFBundleExecutable, config.executableName)
     assert.equal(config.artifactName, stable.artifactName)
-    assert.equal(config.msix.customManifestPath, 'build/msix-manifest.xml')
-
-    const {
-      appIdentity
-    }: {
-      appIdentity: (desktopDir: string) => { name: string; identity: ProductIdentity }
-    } = require('../../../scripts/msix-shared.mjs')
-
-    process.env.HERMES_PAYLOAD_VERSION = '0.28.0'
-    const artifact: ReturnType<typeof appIdentity> = appIdentity(fileURLToPath(new URL('../', import.meta.url)))
-    assert.equal(artifact.name, identity.artifactNamePascal)
-    assert.equal(artifact.identity.msixAppIdWithOrg, config.msix.identityName)
     assert.deepEqual(config.protocols[0].schemes, ['hermes'])
 
     if (build !== 'canary') {

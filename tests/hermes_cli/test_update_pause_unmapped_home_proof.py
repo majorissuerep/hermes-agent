@@ -49,39 +49,6 @@ def homes_and_spawn(tmp_path):
         proc.wait(timeout=10)
 
 
-@pytest.mark.platforms("linux")
-@pytest.mark.spawns_gateway_lookalike  # stub children that sleep; the fixture reaps them
-def test_a_ledger_proven_unmapped_gateway_is_recorded_with_its_home(homes_and_spawn, monkeypatch):
-    home_a, home_b, spawn = homes_and_spawn
-    a = spawn(home_a)
-    time.sleep(0.05)
-    ct = process_identity._process_create_time(a.pid)
-    assert process_identity._append_entry(process_identity.LedgerEntry(
-        a.pid, ct, "gateway", process_identity.install_id(), None, None, time.time(), "", hermes_home=home_a))
-    real_environ = dashboard_procs._pid_environ
-    monkeypatch.setattr(dashboard_procs, "_pid_environ", lambda pid: None if pid == a.pid else real_environ(pid))
-    from hermes_cli import main
-    monkeypatch.setattr(main, "_is_windows", lambda: True)
-    monkeypatch.setattr(gateway, "find_gateway_pids", lambda all_profiles=False: [a.pid])
-    monkeypatch.setattr(gateway, "find_profile_gateway_processes", lambda strict=False: [])
-    monkeypatch.setattr(gateway, "find_windows_gateway_services", lambda profile_processes=(): [])
-    stopped = []
-    monkeypatch.setattr(update_cmd_holders, "_stop_windows_gateways", lambda *a, **k: stopped.append(a[0]) or {})
-    monkeypatch.setattr(update_cmd_holders, "_record_attested_cold_start_profiles", lambda *a: None)
-
-    _pause_windows_gateways_for_update()
-    assert stopped == [[a.pid]]
-    entry = pause_record.read(pause_record.record_path())["token"]["unmapped"][0]
-    assert entry["home"] == home_a, "the pause dropped the home discovery proved"
-
-    a.kill()
-    a.wait(timeout=10)
-    time.sleep(0.05)  # a later clock tick: a replacement is born after the process it replaces
-    sibling = spawn(home_b)
-    assert _unmapped_ready_filter(entry, set())([sibling.pid]) == [], \
-        "home B's gateway with A's argv retired A's restart debt"
-    replacement = spawn(home_a)
-    assert _unmapped_ready_filter(entry, set())([sibling.pid, replacement.pid]) == [replacement.pid]
 
 
 @pytest.mark.platforms("linux")

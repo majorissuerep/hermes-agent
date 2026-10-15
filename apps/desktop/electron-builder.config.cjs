@@ -258,14 +258,6 @@ if (channelRequest) {
 // NOT here at require time, so importing this config for typecheck/tests
 // never writes to the filesystem.
 
-// Azure Trusted Signing. The hook signs the .msix package itself and the
-// product exe (after electron-builder's rcedit — the batch in afterPack runs
-// too early for the exe); every other payload binary is batch-signed in
-// afterPack via scripts/batch-sign-binaries.mjs, which this hook acknowledges
-// with `true` so electron-builder never re-signs one-by-one. The package
-// signature is all Windows install validation checks; inner Authenticode
-// covers SmartScreen/WDAC tree scans. See batch-sign-binaries.mjs for the
-// ordering contract.
 const MACHO_MAGICS = new Set([
   0xfeedface,
   0xcefaedfe,
@@ -287,18 +279,4 @@ function isMachO(file) {
     fs.closeSync(fd)
   }
   return MACHO_MAGICS.has(buf.readUInt32BE(0))
-}
-
-function windowsSigning() {
-  if (!process.env.AZURE_SIGN_ENDPOINT || !process.env.AZURE_CLIENT_ID) {
-    return {}
-  }
-  return {
-    sign: {
-      type: 'signtool',
-      sign: './scripts/batch-sign-binaries.mjs',
-      signingHashAlgorithms: ['sha256'],
-      publisherName: process.env.AZURE_SIGN_PUBLISHER
-    }
-  }
 }

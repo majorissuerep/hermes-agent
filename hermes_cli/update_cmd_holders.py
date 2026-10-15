@@ -974,8 +974,16 @@ def _verify_relaunched_gateways_alive(token: dict, profiles: dict, unmapped: lis
     return None
 
 def _resume_windows_gateways_after_update(token: dict | None) -> None:
-    """No-op: native Windows support removed from this fork (WSL is the Windows answer)."""
-    return None
+    """Settle the shared pause token, including Linux/macOS pre-swap pauses."""
+    if not token or not token.get("resume_needed"):
+        return
+    import atexit
+    atexit.unregister(_resume_windows_gateways_after_update)
+    if token.get("platform") != "posix":
+        token["resume_needed"] = False
+        return
+    with redirect_stdout(sys.stderr) if token.get("recovery") else nullcontext():
+        _resume_unless_torn(token)
 
 def _resume_unless_torn(token: dict) -> None:
     """Resume the paused set, or leave it owed when the checkout is not whole."""
@@ -1043,7 +1051,12 @@ def _resume_paused_set(token: dict) -> None:
     token["resume_needed"] = False
 
 def _resume_windows_gateways_and_merge_outcome(outcome, _windows_gateway_resume, gateway_mode: bool):
-    """No-op: native Windows support removed from this fork (WSL is the Windows answer)."""
-    return None
-    return outcome
+    """Resume the pre-swap paused set; a restart debt cannot fail committed code."""
+    from hermes_cli.update_cmd import _m
+    try:
+        _m()._resume_windows_gateways_after_update(_windows_gateway_resume)
+    except Exception as exc:
+        outcome.incomplete = True
+        outcome.phase_errors.append(str(exc))
+        print(f"  ⚠ Gateway restart incomplete: {exc}")
 

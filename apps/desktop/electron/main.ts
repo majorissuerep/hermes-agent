@@ -634,7 +634,6 @@ import {
   registerUpdateRelaunch,
   type RelaunchRegistration
 } from './updater/relaunch'
-import { startUpdateRelaunchWaiter } from './updater/relaunch-waiter'
 import { preflightStateDb } from './updater/state-db-preflight'
 import { isExternalVenvHolder, isHermesOwnedVenvDaemon } from './venv-holder-select'
 import { fetchMarketplaceThemes, searchMarketplaceThemes } from './vscode-marketplace'

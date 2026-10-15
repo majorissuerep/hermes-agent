@@ -116,7 +116,6 @@ def record(platform: str, arch: str, root: Path, tag: str, commit: str, out: Pat
 
 
 ALL_HANDOFFS = ("darwin-x64", "darwin-arm64", "termux")  # fork: win32 handoffs removed
-OPTIONAL_HANDOFFS = optional_platforms.HANDOFFS  # opt-in handoff -> manifest target
 
 
 def assemble(root: Path, tag: str, commit: str, public_base: str, out: Path,

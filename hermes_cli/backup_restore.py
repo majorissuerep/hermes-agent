@@ -182,7 +182,7 @@ def _safe_restore_db(src: Path, dst: Path) -> bool:
     # backup() copies pages without validating their contents; its fallback
     # copies bytes even when SQLite rejected the source. Neither may touch the
     # destination until the snapshot passes the existing bounded integrity policy.
-    source_check = verify_sqlite_integrity(src)
+    source_check = verify_sqlite_integrity(src, key_path=dst)
     if not source_check["valid"]:
         logger.error("Refusing SQLite restore from %s: %s", src, source_check["message"])
         return False
@@ -195,10 +195,14 @@ def _safe_restore_db(src: Path, dst: Path) -> bool:
         return False
 
 
-def _restore_epoch(path: Path) -> int:
+def _restore_epoch(path: Path, *, key_path: Path | None = None) -> int:
     if not path.exists():
         return 0
-    with closing(sqlite3.connect(read_only_db_uri(path), uri=True)) as conn:
+    from hermes_security import sqlite as vault_sqlite
+    conn = (vault_sqlite.connect(read_only_db_uri(path), key_path=key_path, uri=True)
+            if vault_sqlite.is_vaulted(key_path or path)
+            else sqlite3.connect(read_only_db_uri(path), uri=True))
+    with closing(conn):
         if not conn.execute("SELECT 1 FROM sqlite_master WHERE name='runtime_epoch'").fetchone():
             return 0
         row = conn.execute("SELECT epoch FROM runtime_epoch WHERE singleton=1").fetchone()
@@ -231,14 +235,20 @@ def _restore_epoch_source(src: Path, dst: Path):
         yield src
         return
     floor = _restore_destination_epoch(dst)
-    if floor <= _restore_epoch(src):
+    if floor <= _restore_epoch(src, key_path=dst):
         yield src
         return
     with tempfile.TemporaryDirectory(prefix='.restore-epoch-', dir=dst.parent) as work:
         prepared = Path(work) / 'state.db'
-        if not _safe_copy_db(src, prepared):
+        from hermes_security import sqlite as vault_sqlite
+        encrypted = vault_sqlite.is_vaulted(dst)
+        copied = (_safe_copy_db(src, prepared, key_path=dst) if encrypted
+                  else _safe_copy_db(src, prepared))
+        if not copied:
             raise OSError('Unable to stage a restore with a safe runtime epoch')
-        with closing(sqlite3.connect(prepared)) as conn:
+        conn = (vault_sqlite.connect(prepared, key_path=dst) if encrypted
+                else sqlite3.connect(prepared))
+        with closing(conn):
             conn.execute("""CREATE TABLE IF NOT EXISTS runtime_epoch (
                 singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
                 epoch INTEGER NOT NULL CHECK (epoch > 0), instance_id TEXT NOT NULL)""")
@@ -575,7 +585,8 @@ def _count_session_rows(path: Path) -> Optional[tuple[int, int]]:
     if not path.is_file():
         return None
     try:
-        conn = sqlite3.connect(read_only_db_uri(path), uri=True)
+        from hermes_security.sqlite import maybe_connect
+        conn = maybe_connect(read_only_db_uri(path), uri=True)
     except sqlite3.Error:
         return None
     try:

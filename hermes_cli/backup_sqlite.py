@@ -33,7 +33,8 @@ def _close_quietly(conn: Optional[sqlite3.Connection]) -> None:
             conn.close()
 
 
-def _safe_copy_db(src: Path, dst: Path, *, timeout_seconds: float = 10.0) -> bool:
+def _safe_copy_db(src: Path, dst: Path, *, timeout_seconds: float = 10.0,
+                  key_path: Path | None = None) -> bool:
     """Copy a SQLite database with the backup() API (WAL-safe consistent snapshot).
 
     Fails closed when no consistent snapshot can be made: copying only the main file loses WAL data.
@@ -57,11 +58,11 @@ def _safe_copy_db(src: Path, dst: Path, *, timeout_seconds: float = 10.0) -> boo
                 os.close(secure_fd)
         # timeout=0.0 disables sqlite3's implicit busy wait so the progress callback owns the
         # full locked-source deadline instead of adding the default timeout before each callback.
-        if _vaulted(src):
+        if _vaulted(key_path or src):
             from hermes_security import sqlite as vault_sqlite
 
-            conn = vault_sqlite.connect(f"{src.resolve().as_uri()}?mode=ro", uri=True, timeout=0.0)
-            backup_conn = vault_sqlite.connect(dst, key_path=src)
+            conn = vault_sqlite.connect(f"{src.resolve().as_uri()}?mode=ro", key_path=key_path, uri=True, timeout=0.0)
+            backup_conn = vault_sqlite.connect(dst, key_path=key_path or src)
         else:
             conn = sqlite3.connect(f"{src.resolve().as_uri()}?mode=ro", uri=True, timeout=0.0)
             backup_conn = sqlite3.connect(str(dst))

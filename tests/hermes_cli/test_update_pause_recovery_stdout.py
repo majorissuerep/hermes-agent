@@ -13,10 +13,8 @@ from hermes_cli.update_cmd_holders import _resume_windows_gateways_after_update
 
 
 def test_a_recovering_resume_prints_its_notices_to_stderr(monkeypatch, capsys):
-    from hermes_cli import main
-    monkeypatch.setattr(main, "_is_windows", lambda: True)
     monkeypatch.setattr(pause_record, "tree_is_whole", lambda token: (False, "the checkout is mid-pull"))
-    token = {"resume_needed": True, "pause_id": "p", "recovery": True, "profiles": {"default": 4242}}
+    token = {"platform": "posix", "resume_needed": True, "pause_id": "p", "recovery": True, "profiles": {"default": 4242}}
 
     _resume_windows_gateways_after_update(token)
     out, err = capsys.readouterr()

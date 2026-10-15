@@ -2,8 +2,7 @@
  * after-pack.mjs — electron-builder afterPack hook.
  *
  * Per-platform post-pack work on the unpacked app: payload relocation, nested
- * Chromium + wheel signing on macOS, PE signature sanitizing and batch signing
- * on Windows. The exe identity stamp lives in after-extract.mjs (#105629).
+ * Chromium + wheel signing on macOS.
  *
  * electron-builder passes a context with:
  *   - electronPlatformName: 'win32' | 'darwin' | 'linux'
@@ -17,11 +16,9 @@ import { copyFile, mkdir, readdir } from 'node:fs/promises'
 import { runPython } from '../../../scripts/build/python.mjs'
 
 import { assertPackagedBackendReadyArtifact, resolvePackagedAsarPath } from './backend-ready-artifact.mjs'
-import { batchSignAppTree } from './batch-sign-binaries.mjs'
 import { rehashPayloadDigests } from './payload-digests.mjs'
 import { resolveSigningIdentity, signNestedChromium } from './sign-nested-chromium.mjs'
 import { signWheelZipMembers } from './sign-wheel-zips.mjs'
-import { sanitizeTree } from './sanitize-pe-signatures.mjs'
 
 /**
  * Put our full-resolution `assets/icon.icns` back as the bundle's legacy icon.
@@ -73,7 +70,7 @@ export default async function afterPack(context) {
     ? path.join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`, 'Contents', 'Resources')
     : path.join(context.appOutDir, 'resources')
   const payload = path.join(resources, 'agent-payload')
-  if (platform !== 'win32' && fs.existsSync(path.join(payload, 'manifest.json'))) {
+  if (fs.existsSync(path.join(payload, 'manifest.json'))) {
     runPython([
       path.resolve(import.meta.dirname, '../../../scripts/bundles/payload.py'), 'relocate', payload], { stdio: 'inherit' })
   }
@@ -102,42 +99,4 @@ export default async function afterPack(context) {
     }
     return
   }
-  if (platform === 'linux') {
-    return
-  }
-  if (platform !== 'win32') {
-    return
-  }
-
-  const productName = context.packager?.appInfo?.productFilename || 'Hermes'
-  const exe = path.join(context.appOutDir, `${productName}.exe`)
-
-  // Repair dangling PE certificate tables BEFORE electron-builder signs the
-  // tree. A stripped-but-still-declared signature makes signtool reject the
-  // file with 0x800700C1, and AppxSIP inspects every PE inside the MSIX, so
-  // one bad payload DLL fails the whole package. Unlike the stamp below this
-  // is NOT best-effort: shipping past it means shipping an unsignable bundle.
-  // this is a hack until https://github.com/astral-sh/python-build-standalone/pull/1217 is merged.
-  console.log(`[after-pack] scanning PE certificate headers in ${context.appOutDir}`)
-  const { scanned, repaired } = sanitizeTree(context.appOutDir)
-  console.log(`[after-pack] ${scanned} PEs scanned, ${repaired.length} dangling certificate tables cleared`)
-  for (const file of repaired) {
-    console.log(`  ${file}`)
-  }
-
-  // The identity stamp already ran from afterExtract on the pristine exe
-  // (scripts/after-extract.mjs, #105629); rcedit cannot commit to the
-  // ASAR-integrity-rewritten PE we hold here.
-
-  // Batch-sign every payload binary AFTER sanitize (above) and the rcedit
-  // stamp: a dangling certificate table or a subsequent resource edit would
-  // invalidate the signature. The product exe is excluded here and signed
-  // per-file by the customSign hook (scripts/batch-sign-binaries.mjs) after
-  // electron-builder's own rcedit + fuses pass. No-op with a loud warning when
-  // the AZURE_SIGN_* environment is absent (unsigned/fork/canary lanes).
-  await batchSignAppTree(context.appOutDir, exe, {
-    config: context.packager.config,
-    resourcesDir: context.packager.buildResourcesDir,
-  })
-  rehashPayloadDigests(payload)
 }

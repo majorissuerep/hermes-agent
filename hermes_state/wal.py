@@ -292,7 +292,7 @@ def apply_wal_with_fallback(conn: sqlite3.Connection, *, db_label: str = "state.
                 return "wal"
             if current_mode == "delete" and not require_wal and _database_has_content(conn):
                 if is_sqlite_wal_reset_vulnerable(version_info=connection_version_info(conn)):
-                    _log_wal_reset_bug_once(db_label, kept_wal=False)
+                    _log_wal_reset_bug_once(db_label, kept_wal=False, version_info=connection_version_info(conn))
                 return "delete"
         configured = resolve_journal_mode()
     finally:
@@ -457,7 +457,7 @@ def _apply_delete_for_wal_reset_bug(conn: sqlite3.Connection, *, db_label: str, 
     waiting out openers and warn; an explicit operator request additionally verifies SQLite accepted DELETE."""
     current = _on_disk_journal_mode(conn)
     if current == "wal":
-        _log_wal_reset_bug_once(db_label, kept_wal=True)
+        _log_wal_reset_bug_once(db_label, kept_wal=True, version_info=connection_version_info(conn))
         if require_delete:
             # Upgrading SQLite doesn't help here; emit the actionable message last.
             _log_configured_delete_overridden_once(db_label)
@@ -467,7 +467,7 @@ def _apply_delete_for_wal_reset_bug(conn: sqlite3.Connection, *, db_label: str, 
     if current is None:
         if require_delete:
             raise sqlite3.OperationalError(_CANNOT_VERIFY_DELETE_MSG)
-        _log_wal_reset_bug_once(db_label, kept_wal=True, indeterminate=True)
+        _log_wal_reset_bug_once(db_label, kept_wal=True, indeterminate=True, version_info=connection_version_info(conn))
         return "wal"
     actual = ""
     try:
@@ -477,12 +477,12 @@ def _apply_delete_for_wal_reset_bug(conn: sqlite3.Connection, *, db_label: str, 
             raise
         if is_sqlite_lock_error(exc):
             # A concurrent opener appeared between probe and flip: leave the mode as is.
-            _log_wal_reset_bug_once(db_label, kept_wal=True, indeterminate=True)
+            _log_wal_reset_bug_once(db_label, kept_wal=True, indeterminate=True, version_info=connection_version_info(conn))
             return current or "delete"
         # Best-effort otherwise: DELETE is already the default for new file-backed DBs.
     if require_delete:
         _verify_configured_delete(actual)
-    _log_wal_reset_bug_once(db_label, kept_wal=False)
+    _log_wal_reset_bug_once(db_label, kept_wal=False, version_info=connection_version_info(conn))
     return "delete"
 
 
@@ -583,10 +583,12 @@ def _log_once(kind: str, db_label: str, *args: Any) -> None:
     logger.log(level, message, db_label, *(a() if callable(a) else a for a in args))
 
 
-def _log_wal_reset_bug_once(db_label: str, *, kept_wal: bool, indeterminate: bool = False) -> None:
+def _log_wal_reset_bug_once(db_label: str, *, kept_wal: bool, indeterminate: bool = False,
+                            version_info: tuple[int, ...] | None = None) -> None:
     """Log once per (process, db_label) about the WAL-reset vulnerability path."""
     action = _WAL_RESET_BUG_ACTIONS["indeterminate" if indeterminate else "kept_wal" if kept_wal else "delete"]
-    _log_once("wal_reset_bug", db_label, sqlite3.sqlite_version, sys.executable, action, _wal_reset_repair_hint)
+    _log_once("wal_reset_bug", db_label, ".".join(map(str, version_info or sqlite3.sqlite_version_info)),
+              sys.executable, action, _wal_reset_repair_hint)
 
 
 def _log_journal_mode_upgrade_once(db_label: str, previous_mode: str) -> None:

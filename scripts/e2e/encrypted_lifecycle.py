@@ -130,7 +130,10 @@ class Rehearsal:
     def probe(self, action, **extra):
         # The probe is from the candidate harness, against each install's REAL imports.
         script = Path(__file__).with_name("state_probe.py").read_text()
-        text = self.run(action, [str(self.python), "-c", script], cwd=self.code,
+        # A late application import may select/re-exec the PM generation. Finish
+        # that boot BEFORE consuming stdin, just as the public launcher does.
+        boot = "import hermes_bootstrap; exec(" + repr(script) + ")"
+        text = self.run(action, [str(self.python), "-c", boot], cwd=self.code,
                         data={"action": action, "password": self.password, **extra})
         return json.loads(text.strip().splitlines()[-1])
 

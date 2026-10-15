@@ -215,9 +215,6 @@ def test_followup_line_is_the_one_both_desktop_handoffs_parse(tmp_path, monkeypa
     steps = subprocess.run(["bash", "-c", f"{function}\nowed_followup_steps"], env={**os.environ, "OUT": out},
                            capture_output=True, text=True, encoding="utf-8", check=True).stdout.strip()
     assert steps == "gateway_restart windows_resume"
-    pattern = re.search(r"\[regex\]::Matches\(\(\$res\.Output -join \"`n\"\), \"([^\"]+)\"\)",
-                        (scripts / "windows.ps1").read_text(encoding="utf-8")).group(1)
-    assert [m.group(1) for m in re.finditer(pattern, out)] == ["gateway_restart", "windows_resume"]
 
 
 def test_interrupt_after_the_run_closed_as_success_never_tells_the_gateway_1(tmp_path, monkeypatch):

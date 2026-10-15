@@ -13,7 +13,7 @@ import {
   type RelaunchRegistration,
   writePendingRelaunch
 } from './relaunch'
-import type { RelaunchWaiterHandle } from './relaunch-waiter'
+import type { RelaunchWaiterHandle } from './relaunch'
 
 let root: string
 let hermesHome: string
