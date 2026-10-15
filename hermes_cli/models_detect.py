@@ -75,17 +75,16 @@ def provider_has_credentials(provider: str) -> bool:
     """Whether *provider* can be switched to without the user typing a key: env/.env key, auth
     store login, or a usable credential-pool entry. ``custom``/``custom:*`` targets only come out
     of the ladder when the user declared them in config, so they count as authenticated."""
-    from hermes_cli.auth import get_auth_status, has_usable_secret
-    from hermes_cli.config import get_env_value_prefer_dotenv
+    from hermes_cli.auth import get_auth_status, _registry_lookup
 
     pid = (provider or "").strip().lower()
     if not pid:
         return False
     if pid == "custom" or pid.startswith("custom:"):
         return True
+    if _registry_lookup(pid) is None:
+        return False
     try:
-        if pid == "openrouter" and has_usable_secret(get_env_value_prefer_dotenv("OPENROUTER_API_KEY")):
-            return True
         status = get_auth_status(pid) or {}
         if status.get("logged_in") or status.get("configured"):
             return True
@@ -95,3 +94,11 @@ def provider_has_credentials(provider: str) -> bool:
         return bool(pool.has_credentials() and pool.has_available())
     except Exception:
         return False
+
+
+def connected_routing_aggregator() -> Optional[str]:
+    """Only an unambiguous, connected inference route may receive an unqualified vendor slug."""
+    from hermes_cli.models import _AGGREGATOR_PROVIDERS
+
+    connected = [pid for pid in sorted(_AGGREGATOR_PROVIDERS) if provider_has_credentials(pid)]
+    return connected[0] if len(connected) == 1 else None

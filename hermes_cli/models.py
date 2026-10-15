@@ -1175,7 +1175,8 @@ def _detection_candidates(name: str, current_provider: str):
         return
 
     # OpenRouter catalog (exact slug, then bare model part).
-    or_slug = _find_openrouter_slug(name)
+    from hermes_cli.auth import _registry_lookup
+    or_slug = _find_openrouter_slug(name) if _registry_lookup("openrouter") is not None else None
     if or_slug:
         if current_provider == "openrouter" and or_slug == name:
             yield None  # already on openrouter with matching name

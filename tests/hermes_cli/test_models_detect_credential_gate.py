@@ -15,6 +15,8 @@ from hermes_cli import models
 
 @pytest.fixture
 def no_live_catalog(monkeypatch):
+    from tests.hermes_cli.provider_fixtures import install_optional_aggregator
+    install_optional_aggregator(monkeypatch)
     monkeypatch.setattr(models, "cached_provider_model_ids", lambda provider, **_: [])
     monkeypatch.setattr(models, "_find_openrouter_slug", lambda name: f"vendor/{name}")
 

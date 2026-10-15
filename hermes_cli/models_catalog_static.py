@@ -395,7 +395,7 @@ _PROVIDER_RETIRED_ALIASES: dict[str, tuple[str, ...]] = {
 }
 
 
-_AGGREGATOR_PROVIDERS = frozenset({"nous", "openrouter", "ai-gateway", "copilot", "kilocode"})
+_AGGREGATOR_PROVIDERS = frozenset({"ai-gateway", "litellm"})
 
 
 # Subscription/OAuth providers whose catalogs RE-EXPOSE other vendors' models; tried only as a last

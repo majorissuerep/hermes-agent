@@ -414,7 +414,7 @@ def _normalize_main_model_assignment(provider: str, model: str) -> tuple[str, st
 
     1. Vendor-name → Hermes-provider: when the provider is not a known provider/alias but the
        model is a vendor-prefixed slug, keep the user's CURRENT aggregator if on one, else
-       openrouter. User-declared ``providers:``/``custom_providers:`` entries resolve first,
+       a uniquely connected supported aggregator. User-declared ``providers:``/``custom_providers:`` entries resolve first,
        and durable named-custom slugs (``custom`` / ``custom:<name>``) are excluded —
        ``_KNOWN_PROVIDER_NAMES`` lists only the bare ``custom`` bucket, so without this a
        LiteLLM proxy serving ``ollama/glm-5.2`` would be silently reassigned to openrouter.
@@ -459,12 +459,10 @@ def _normalize_main_model_assignment(provider: str, model: str) -> tuple[str, st
             canonical = normalize_provider(cur_provider)
             prov_in = cur_provider
         else:
-            from hermes_cli.models_detect import provider_has_credentials
+            from hermes_cli.models_detect import connected_routing_aggregator
 
-            # Only guess OpenRouter when the user actually holds a key for it; otherwise keep the
-            # pair as sent rather than persisting a provider they never selected.
-            if provider_has_credentials("openrouter"):
-                canonical = prov_in = "openrouter"
+            if connected := connected_routing_aggregator():
+                canonical = prov_in = connected
 
     if canonical in _KNOWN_PROVIDER_NAMES and not canonical.startswith("custom"):
         try:
@@ -909,8 +907,7 @@ def _infer_provider_on_model_change(model_val: str, prev_provider: str) -> tuple
     Returns ``(provider, model)``; ``provider`` is empty when no switch is warranted. Signals,
     in order: curated-catalog detection (``detect_provider_for_model``), then the vendor-slug
     heuristic — a ``vendor/model`` slug cannot belong to a non-aggregator provider (e.g.
-    ``ollama-local``), so return the sentinel ``"openrouter"``; the caller's
-    ``_normalize_main_model_assignment`` resolves the real aggregator (keeps the current one).
+    ``ollama-local``), but may switch only to a uniquely connected routing aggregator.
     """
     name = (model_val or "").strip()
     if not name:
@@ -929,13 +926,13 @@ def _infer_provider_on_model_change(model_val: str, prev_provider: str) -> tuple
 
     if "/" in name:
         try:
-            from hermes_cli.models_detect import provider_has_credentials
+            from hermes_cli.models_detect import connected_routing_aggregator
 
             cur_is_aggregator = normalize_provider(prev_provider) in _AGGREGATOR_PROVIDERS
             # A vendor slug on a native provider is a guess at an aggregator; never guess one the
             # user has no key for — that silently writes a metered provider into config.yaml.
-            if not cur_is_aggregator and provider_has_credentials("openrouter"):
-                return "openrouter", name
+            if not cur_is_aggregator and (connected := connected_routing_aggregator()):
+                return connected, name
         except Exception:
             pass
     return "", name

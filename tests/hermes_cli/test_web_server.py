@@ -1448,13 +1448,14 @@ CONFIG_SCHEMA = ProviderConfigSchema(
         """A bare vendor name from analytics rows (no billing_provider) is not
         a Hermes provider — keep the user's aggregator instead of writing a
         provider that can never resolve credentials."""
+        monkeypatch.setenv("AI_GATEWAY_API_KEY", "dashboard-route-fixture")
         monkeypatch.setattr(
             "hermes_cli.model_cost_guard.expensive_model_warning",
             lambda *_args, **_kwargs: None,
         )
         from hermes_cli.config import load_config, save_config
         cfg = load_config()
-        cfg["model"] = {"provider": "openrouter", "default": "openai/gpt-5.5"}
+        cfg["model"] = {"provider": "ai-gateway", "default": "openai/gpt-5.5"}
         save_config(cfg)
 
         resp = self.client.post(
@@ -1465,10 +1466,10 @@ CONFIG_SCHEMA = ProviderConfigSchema(
                 "model": "moonshotai/kimi-k2.6",
             },
         )
-        assert resp.status_code == 200
+        assert resp.status_code == 200, resp.text
         data = resp.json()
         assert data["ok"] is True
-        assert data["provider"] == "openrouter"
+        assert data["provider"] == "ai-gateway"
         assert data["model"] == "moonshotai/kimi-k2.6"
 
 
@@ -3757,12 +3758,14 @@ class TestDenormalizeProviderSwitch:
     model string changes to one served by a different provider, the saved
     provider must follow it (issue #14058)."""
 
-    def test_vendor_slug_switches_off_non_aggregator_provider(self):
-        """ollama-local + a vendor/model slug → switch to openrouter and drop
+    def test_vendor_slug_switches_off_non_aggregator_provider(self, monkeypatch):
+        """ollama-local + a vendor/model slug → switch to ai-gateway and drop
         the stale local base_url (the issue's exact repro)."""
         from hermes_cli.web_server_config import _denormalize_config_from_web
         from unittest.mock import patch as _patch
         from hermes_cli.config import save_config
+
+        monkeypatch.setenv("AI_GATEWAY_API_KEY", "dashboard-route-fixture")
 
         save_config({
             "model": {
@@ -3773,32 +3776,34 @@ class TestDenormalizeProviderSwitch:
             }
         })
 
-        with _patch("hermes_cli.models_detect.provider_has_credentials", lambda p: p == "openrouter"):
+        with _patch("hermes_cli.models_detect.provider_has_credentials", lambda p: p == "ai-gateway"):
             result = _denormalize_config_from_web({"model": "google/gemini-2.5-flash"})
         model = result["model"]
-        assert model["provider"] == "openrouter"
+        assert model["provider"] == "ai-gateway"
         assert model["default"] == "google/gemini-2.5-flash"
-        # The old ollama-local endpoint must not carry over to openrouter (the switch resolves
+        # The old ollama-local endpoint must not carry over to ai-gateway (the switch resolves
         # the aggregator's own endpoint instead of leaving the field blank or stale).
         assert model.get("base_url") != "http://localhost:11434/v1"
 
 
-    def test_context_length_override_survives_provider_switch(self):
+    def test_context_length_override_survives_provider_switch(self, monkeypatch):
         """An explicit context-length override must persist alongside a
         provider switch."""
         from hermes_cli.web_server_config import _denormalize_config_from_web
         from unittest.mock import patch as _patch
         from hermes_cli.config import save_config
 
+        monkeypatch.setenv("AI_GATEWAY_API_KEY", "dashboard-route-fixture")
+
         save_config({"model": {"default": "llama3.2", "provider": "ollama-local"}})
 
-        with _patch("hermes_cli.models_detect.provider_has_credentials", lambda p: p == "openrouter"):
+        with _patch("hermes_cli.models_detect.provider_has_credentials", lambda p: p == "ai-gateway"):
             result = _denormalize_config_from_web({
                 "model": "google/gemini-2.5-flash",
                 "model_context_length": 128000,
             })
         model = result["model"]
-        assert model["provider"] == "openrouter"
+        assert model["provider"] == "ai-gateway"
         assert model["context_length"] == 128000
 
     def test_rejected_switch_is_400_and_leaves_the_model_block_byte_identical(self, monkeypatch):
@@ -3822,7 +3827,7 @@ class TestDenormalizeProviderSwitch:
             "    fast: qwen3\n",
             encoding="utf-8")
         before = cfg_path.read_bytes()
-        monkeypatch.setattr("hermes_cli.models_detect.provider_has_credentials", lambda p: p == "openrouter")
+        monkeypatch.setattr("hermes_cli.models_detect.provider_has_credentials", lambda p: p == "ai-gateway")
         monkeypatch.setattr("hermes_cli.model_switch.switch_model",
                             lambda **_kw: ModelSwitchResult(success=False, error_message="models.dev offline"))
 

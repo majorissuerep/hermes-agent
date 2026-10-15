@@ -10,6 +10,7 @@ def test_removed_bundled_providers_cannot_return_through_metadata_or_runtime(tmp
     from hermes_cli.models_catalog_static import listed_canonical_providers
     from hermes_cli.runtime_provider import resolve_runtime_provider
     from hermes_cli.auth_commands import auth_add_command
+    from hermes_cli.models_detect import provider_has_credentials
     from types import SimpleNamespace
 
     supported = {"openai-codex", "openai-api", "anthropic", "litellm", "custom",
@@ -29,6 +30,8 @@ def test_removed_bundled_providers_cannot_return_through_metadata_or_runtime(tmp
     assert resolve_provider("grok") == "xai"
     assert resolve_provider("vercel") == "ai-gateway"
     assert resolve_provider("openai") == "openai-api"
+    monkeypatch.setenv("OPENROUTER_API_KEY", "media-tool-only-fixture")
+    assert not provider_has_credentials("openrouter")
     from hermes_cli import anon_auth, welcome_trial
     assert not anon_auth.welcome_provider_available()
     assert not anon_auth.free_inference_active()
