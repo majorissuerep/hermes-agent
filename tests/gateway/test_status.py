@@ -1407,7 +1407,8 @@ class TestCorruptStatusFiles:
     def test_read_json_file_returns_none_on_binary_garbage(self, tmp_path):
         p = tmp_path / "runtime.json"
         p.write_bytes(b"\xff\xfe\x00\x80not utf-8\x81")
-        assert status._read_json_file(p) is None
+        from gateway.status_records import read_json_file
+        assert read_json_file(p) is None
 
 
 class TestParseActiveAgents:

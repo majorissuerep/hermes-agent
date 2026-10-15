@@ -28,7 +28,7 @@ from gateway.status_inline_source import (
 )
 from hermes_constants import _get_platform_default_hermes_home, get_hermes_home, get_process_hermes_home
 from hermes_cli._subprocess_compat import pid_exists_stdlib
-from utils import atomic_json_write
+from gateway import status_records as _records
 
 import fcntl
 
@@ -125,7 +125,7 @@ class _RuntimeStatusWriter:
                 self._writing_generation = generation
             error: Optional[BaseException] = None
             try:
-                (self._write_fn or _write_json_file)(path, _merge_over_on_disk(path, payload))
+                (self._write_fn or _records.write_json_file)(path, _merge_over_on_disk(path, payload))
             except BaseException as exc:
                 error = exc
             with self._condition:
@@ -158,7 +158,7 @@ def _merge_over_on_disk(path: Path, payload: dict[str, Any]) -> dict[str, Any]:
     """Lay the canonical snapshot over whatever is on disk right before writing. Out-of-process
     writers (the migration's compensator clearing multiplex-owned status, container_boot
     seeding ``desired_state``) stamp this file directly; the gateway's fields win, theirs survive."""
-    existing = _read_json_file(path)
+    existing = _records.read_json_file(path)
     return {**existing, **payload} if isinstance(existing, dict) else payload
 
 
@@ -827,64 +827,17 @@ def _build_runtime_status_record() -> dict[str, Any]:
     }
 
 
-def _read_json_file(path: Path, *, bare_pid_ok: bool = False) -> Optional[dict[str, Any]]:
-    """JSON object at ``path``, or None when absent/empty/unreadable/invalid. ``bare_pid_ok`` also
-    accepts legacy bare-integer PID files as ``{"pid": N}``."""
-    try:
-        # Fork: envelope-aware read inside a vaulted home.
-        _text = None
-        _home_for = None
-        _seal_read = None
-        try:
-            from hermes_security.io import _home_for, read_text as _seal_read
-        except ImportError:
-            pass
-        if _seal_read is not None and _home_for is not None and _home_for(path) is not None:
-            _text = _seal_read(path, purpose="runtime-status")
-        if _text is None:
-            _text = path.read_text(encoding="utf-8-sig").strip() if path.exists() else ""
-        raw = _text.strip()
-    except (OSError, UnicodeDecodeError):  # vanished, EACCES, non-UTF-8 garbage
-        return None
-    if not raw:
-        return None
-    try:
-        payload = json.loads(raw)
-    except json.JSONDecodeError:
-        payload = None
-        if bare_pid_ok:
-            with contextlib.suppress(ValueError):
-                payload = int(raw)
-    if bare_pid_ok and isinstance(payload, int):
-        return {"pid": payload}
-    return payload if isinstance(payload, dict) else None
-
-
-def _write_json_file(path: Path, payload: dict[str, Any]) -> None:
-    # Fork: envelope-aware write inside a vaulted home.
-    _home_for = None
-    _seal_write = None
-    try:
-        from hermes_security.io import _home_for, write_json as _seal_write
-    except ImportError:
-        pass
-    if _seal_write is not None and _home_for is not None and _home_for(path) is not None:
-        _seal_write(path, payload, purpose="runtime-status")
-        return
-    atomic_json_write(path, payload, indent=None, separators=(",", ":"))
-
-
 def _unlink_quietly(path: Path) -> None:
     with contextlib.suppress(OSError):
         path.unlink(missing_ok=True)
 
 
 def _read_pid_record(pid_path: Optional[Path] = None) -> Optional[dict]:
-    return _read_json_file(pid_path or _get_pid_path(), bare_pid_ok=True)
+    return _records.read_json_file(pid_path or _get_pid_path(), bare_pid_ok=True)
 
 
 def _read_gateway_lock_record(lock_path: Optional[Path] = None) -> Optional[dict[str, Any]]:
-    return _read_json_file(lock_path or _get_gateway_lock_path(), bare_pid_ok=True)
+    return _records.read_json_file(lock_path or _get_gateway_lock_path(), bare_pid_ok=True)
 
 
 def _pid_from_record(record: Optional[dict[str, Any]], key: str = "pid") -> Optional[int]:
@@ -1073,19 +1026,8 @@ def write_pid_file() -> None:
     propagates for the caller to decide."""
     path = _get_pid_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    _write_json_excl(path, _build_pid_record())
+    _records.write_json_excl(path, _build_pid_record())
     _clear_running_pid_cache()
-
-
-def _write_json_excl(path: Path, record: dict[str, Any]) -> None:
-    """Create ``path`` with O_CREAT|O_EXCL and dump ``record``; unlinks on a failed write."""
-    fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            json.dump(record, handle)
-    except Exception:
-        _unlink_quietly(path)
-        raise
 
 
 def _apply_set_fields(target: dict[str, Any], fields) -> None:
@@ -1118,7 +1060,7 @@ def _prepare_runtime_status_update(
         if reload_existing or _runtime_status_state_path != path or _runtime_status_state is None:
             _runtime_status_state_path = path
             _runtime_status_state = (
-                (_read_json_file(path) if load_existing else None) or _build_runtime_status_record())
+                (_records.read_json_file(path) if load_existing else None) or _build_runtime_status_record())
         # The module snapshot is only ever reassigned (never mutated in place) and
         # submit() copies again, so the previous snapshot can be handed out as-is.
         previous_payload = _runtime_status_state
@@ -1214,7 +1156,7 @@ def publish_runtime_status(**fields: Any) -> int:
 
 def read_runtime_status(path: Optional[Path] = None) -> Optional[dict[str, Any]]:
     """Read ``gateway_state.json``; ``path`` lets callers inspect another profile's file."""
-    return _read_json_file(path or _get_runtime_status_path())
+    return _records.read_json_file(path or _get_runtime_status_path())
 
 
 # Max age of a ``gateway_state.json`` snapshot before its liveness claim is suspect: an older record
@@ -1520,7 +1462,7 @@ def remove_pid_file() -> None:
     atexit can fire AFTER the new process wrote its own record."""
     with contextlib.suppress(Exception):
         path = _get_pid_path()
-        file_pid = _pid_from_record(_read_json_file(path))
+        file_pid = _pid_from_record(_records.read_json_file(path))
         if file_pid is not None and file_pid != os.getpid():
             return  # Belongs to a different process — leave it alone.
         path.unlink(missing_ok=True)
@@ -1572,7 +1514,7 @@ def acquire_scoped_lock(
     profile = _profile_label_for_home(_get_process_hermes_home())
     if profile:
         record["profile"] = profile
-    existing = _read_json_file(lock_path)
+    existing = _records.read_json_file(lock_path)
     if existing is None and lock_path.exists():
         # Empty/invalid JSON: previous process died between O_EXCL create and json.dump().
         _unlink_quietly(lock_path)
@@ -1587,7 +1529,7 @@ def acquire_scoped_lock(
         # freshly built record has a real value — the gateway then reports itself as the foreign squatter of
         # its own token (#81468).
         if existing_pid == os.getpid():
-            _write_json_file(lock_path, record)
+            _records.write_json_file(lock_path, record)
             return True, existing
         if not _scoped_lock_record_is_stale(existing, existing_pid):
             return False, existing
@@ -1599,9 +1541,9 @@ def acquire_scoped_lock(
             os.replace(lock_path, tombstone)
             _unlink_quietly(tombstone)
     try:
-        _write_json_excl(lock_path, record)
+        _records.write_json_excl(lock_path, record)
     except FileExistsError:
-        return False, _read_json_file(lock_path)
+        return False, _records.read_json_file(lock_path)
     return True, None
 
 
@@ -1609,7 +1551,7 @@ def release_scoped_lock(scope: str, identity: str) -> None:
     """Release a scope lock owned by this PID. No start_time equality check: on-disk null vs a live
     fingerprint would wedge reconnects."""
     lock_path = _get_scope_lock_path(scope, identity)
-    if (_read_json_file(lock_path) or {}).get("pid") == os.getpid():
+    if (_records.read_json_file(lock_path) or {}).get("pid") == os.getpid():
         _unlink_quietly(lock_path)
 
 
@@ -1624,7 +1566,7 @@ def release_all_scoped_locks(
     removed = 0
     for lock_file in lock_dir.glob("*.lock"):
         if owner_pid is not None:
-            record = _read_json_file(lock_file) or {}
+            record = _records.read_json_file(lock_file) or {}
             if _pid_from_record(record) != owner_pid or (
                 owner_start_time is not None and record.get("start_time") != owner_start_time
             ):
@@ -1674,7 +1616,7 @@ def _read_live_pid_marker(path: Path, ttl_s: int) -> Optional[tuple[dict[str, An
     except a request stamped ``accepted`` (``update_pause_record.mark_stop_accepted``): expired, it
     matches nobody, but it can be the only trace that a still-draining gateway accepted an update's
     stop, so it stays until that pause is settled."""
-    record = _read_json_file(path)
+    record = _records.read_json_file(path)
     if not record:
         return None
     target_pid = _pid_from_record(record, "target_pid")
@@ -1747,7 +1689,7 @@ def write_takeover_marker(
 def _write_marker(path: Path, record: dict[str, Any]) -> bool:
     """Atomically write a marker record; False (never raise) on OS failure."""
     try:
-        _write_json_file(path, record)
+        _records.write_json_file(path, record)
         return True
     except OSError:
         return False
@@ -1786,7 +1728,7 @@ def _validated_scoped_lock_gateway_owner(record: dict[str, Any]) -> Optional[tup
     if live_cmdline is not None and not looks_like_gateway_runtime_command_line(live_cmdline):
         return None
     # The target home's own PID record must corroborate the claim.
-    pid_record = _read_json_file(target_home / "gateway.pid") or {}
+    pid_record = _records.read_json_file(target_home / "gateway.pid") or {}
     pid_record_home = pid_record.get("hermes_home")
     if (
         not _record_looks_like_gateway(pid_record)
