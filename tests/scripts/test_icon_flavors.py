@@ -122,7 +122,7 @@ def assert_same_geometry(original, flavored):
 
 
 def assert_unbranded_outputs(stable, flavored):
-    for directory in ("assets", "website", "web", "apps/bootstrap-installer"):
+    for directory in ("assets", "website", "web"):
         for path in (stable / directory).rglob("*"):
             if path.is_file():
                 assert path.read_bytes() == (flavored / path.relative_to(stable)).read_bytes(), path

@@ -13,7 +13,11 @@ from __future__ import annotations
 import filecmp
 import importlib.util
 import shutil
+import subprocess
+import tempfile
 from pathlib import Path
+
+import pytest
 
 REPO = Path(__file__).resolve().parents[2]
 _spec = importlib.util.spec_from_file_location("prompt_surface", REPO / "scripts" / "ci" / "prompt_surface.py")
@@ -32,7 +36,12 @@ def _tree_differences(left: Path, right: Path) -> list[str]:
     return out
 
 
-def test_committed_prompt_surface_is_current(tmp_path):
+@pytest.mark.parametrize("ancestor_repo", [False, True])
+def test_committed_prompt_surface_is_current(tmp_path, monkeypatch, ancestor_repo):
+    if ancestor_repo:
+        subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+        (tmp_path / "unrelated.py").write_text("# Another job's workspace, not our fixture.\n")
+        monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
     rendered = tmp_path / "prompt_surface"
     assert prompt_surface.render(rendered) == 0
     differences = _tree_differences(prompt_surface.SNAPSHOT, rendered)
@@ -41,6 +50,7 @@ def test_committed_prompt_surface_is_current(tmp_path):
         "change (merging it needs a hermes-agent-core approval):\n"
         "    scripts/run-in-hermes-env python scripts/ci/prompt_surface.py render\n"
         + "\n".join(differences[:20])
+        + "\n" + prompt_surface.summarize(prompt_surface.SNAPSHOT, rendered)[:12000]
     )
 
 

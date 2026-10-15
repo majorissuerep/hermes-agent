@@ -2,12 +2,8 @@
 /**
  * Generate the icon assets on demand for the pipeline that needs them.
  *
- * Generated icons are NOT committed (see scripts/generate_icons.py) — every
- * consuming pipeline regenerates them before building:
- *   - website:  website/scripts/prebuild.mjs (docusaurus prebuild)
- *   - desktop:  apps/desktop/package.json prebuild + predev
- *   - installer: apps/bootstrap-installer/package.json prebuild
- *   - web:       web/package.json prebuild
+ * Default icons are committed. Release pipelines regenerate flavored desktop
+ * assets; CI regenerates and verifies every supported product's default set.
  *
  * The renderer runs on the Hermes runtime interpreter (HERMES_PYTHON, else
  * `python` on PATH): Pillow and resvg-py are core dependencies, so every

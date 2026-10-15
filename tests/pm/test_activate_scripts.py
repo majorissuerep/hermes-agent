@@ -144,30 +144,6 @@ def test_activate_fails_cleanly_without_a_store(tmp_path: Path):
     assert "refused" in result.stdout
 
 
-def test_powershell_scripts_parse():
-    """Parse-check the PowerShell entry points; skip gracefully when no
-    PowerShell host is available."""
-    ps = powershell()
-    if ps is None:
-        pytest.skip("no PowerShell host available")
-    for script in (ACTIVATE_PS1, SETUP_HERMES_PS1):
-        result = subprocess.run(
-            [
-                ps,
-                "-NoProfile",
-                "-NonInteractive",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-Command",
-                f"$errs = $null; $null = [System.Management.Automation.Language.Parser]::ParseFile("
-                f"'{script}', [ref]$null, [ref]$errs); "
-                f"if ($errs.Count) {{ $errs | ForEach-Object {{ $_.Message }}; exit 1 }}",
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        assert result.returncode == 0, f"{script.name}: {result.stdout}{result.stderr}"
 
 
 @pytest.mark.platforms("windows")

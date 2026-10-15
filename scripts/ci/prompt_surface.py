@@ -92,6 +92,10 @@ def _pin_environment() -> None:
     # The toolchain probe line reports the host's python/node/pip; it is environment, not code.
     from tools import env_probe
     env_probe.get_environment_probe_line = lambda **_k: ""  # type: ignore[assignment]
+    # Neither fixture workspace is a Git checkout. A shared runner's ancestor
+    # repository must not turn every plain surface into a coding conversation.
+    from agent import coding_context
+    coding_context._git_root = lambda _cwd: None
 
 
 class _ImportFailures(logging.Handler):

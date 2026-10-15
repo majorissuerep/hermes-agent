@@ -160,9 +160,10 @@ def _desktop_packaged_executable_in(release_dir: Path) -> Optional[Path]:
     """
     if sys.platform == "darwin":
         candidates = list(release_dir.glob("mac*/Hermes.app/Contents/MacOS/Hermes"))
-    candidates = [
-        release_dir / d / n for d in ("linux-unpacked", "linux-arm64-unpacked") for n in ("hermes", "Hermes")
-    ]
+    else:
+        candidates = [
+            release_dir / d / n for d in ("linux-unpacked", "linux-arm64-unpacked") for n in ("hermes", "Hermes")
+        ]
 
     existing = [p for p in candidates if p.exists()]
     if not existing:

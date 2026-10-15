@@ -30,6 +30,10 @@ sign in, claim a welcome offer, or replace the selected inference provider.
 Legacy inference/authentication instructions from upstream require an appropriate
 provider plugin and are not the default product flow here.
 
+For retained account sessions, `nous.keepalive_interval_seconds` caps the credential
+keepalive interval (900 seconds by default; `0` disables the thread). It does not
+enable Nous inference or select a provider.
+
 ## Mixing the gateway with your own backends
 
 Managed web, image, speech, or browser services are separate from the inference

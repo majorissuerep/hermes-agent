@@ -129,3 +129,10 @@ Use `hermes fallback add`, `hermes fallback list` and `hermes fallback remove` t
 manage deliberate fallback routes. Only supported or explicitly configured custom
 routes may be selected. A missing credential, invalid config or unavailable primary
 must not silently send a request to an unrelated provider.
+
+## Legacy plugin configuration
+
+Updates preserve legacy settings without enabling retired providers. For an
+explicitly installed OpenRouter provider plugin, `openrouter.min_coding_score`
+controls its Pareto-code router threshold (0–1; default 0.65). It has no effect on
+the bundled providers or on OpenRouter media-tool credentials.

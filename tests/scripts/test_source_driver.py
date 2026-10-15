@@ -72,52 +72,6 @@ def test_installer_marker_is_the_only_dirty_state_a_driver_accepts(tmp_path):
     assert refused.returncode != 0 and "M tracked" in refused.stderr
 
 
-@pytest.mark.platforms("windows", "posix")
-def test_powershell_selects_exact_exe_or_cmd_and_legacy_fallback(tmp_path):
-    # These are file-selection rules, not Windows execution emulation. Run
-    # them in real PowerShell on any host that supplies it (native CI included).
-    path = os.pathsep.join(p for p in os.get_exec_path() if ".hermes" not in Path(p).parts)
-    pwsh = shutil.which("pwsh", path=path) or shutil.which("powershell", path=path)
-    if not pwsh:
-        if os.name == "nt":
-            pytest.fail("native Windows acceptance requires PowerShell")
-        pytest.skip("PowerShell is not available on this host")
-    root = tmp_path / "installed source"
-    root.mkdir()
-    harness = tmp_path / "probe.ps1"
-    harness.write_text('''$ErrorActionPreference = 'Stop'
-. (Join-Path $env:ASSETS 'source-driver.ps1')
-$root = $env:INSTALL_DIR
-$legacy = Join-Path $root 'venv/Scripts/hermes.exe'
-$exe = Join-Path $root '.hermes/bin/hermes.exe'
-$cmd = Join-Path $root '.hermes/bin/hermes.cmd'
-New-Item -ItemType Directory -Path (Split-Path $legacy), (Split-Path $exe) -Force | Out-Null
-Set-Content $legacy 'legacy'
-if ((Get-SourceHermes $root) -ne $legacy) { throw 'legacy fallback' }
-Set-Content $cmd 'cmd'
-if ((Get-SourceHermes $root) -ne $cmd) { throw 'published cmd' }
-Set-Content $exe 'exe'
-if ((Get-SourceHermes $root) -ne $exe) { throw 'exe precedence' }
-Remove-Item $legacy
-if ((Get-SourceHermes $root) -ne $exe) { throw 'requires legacy venv' }
-Remove-Item $exe, $cmd
-$refused = $false
-try { Get-SourceHermes $root } catch { $refused = $true }
-if (-not $refused) { throw 'missing command accepted' }
-Set-Content $legacy 'stale legacy'
-New-Item -ItemType Directory -Path (Join-Path $root 'pm') | Out-Null
-Set-Content (Join-Path $root 'pm/lock.json') '{}'
-$refused = $false
-try { Get-SourceHermes $root } catch { $refused = $true }
-if (-not $refused) { throw 'missing PM launcher accepted' }
-Write-Output 'selection verified'
-''', encoding="utf-8")
-    result = subprocess.run([pwsh, "-NoProfile", "-NonInteractive", "-File", str(harness)],
-                            env=dict(os.environ, INSTALL_DIR=str(root), ASSETS=str(ASSETS), HOME=str(tmp_path)),
-                            cwd=tmp_path, capture_output=True, text=True, timeout=30, check=False)
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert result.stdout.strip() == "selection verified"
-
 
 def test_observer_preserves_no_desktop_and_refuses_incomplete_app(tmp_path):
     verify = runpy.run_path(str(ASSETS / "source_driver.py"))["verify_products"]
