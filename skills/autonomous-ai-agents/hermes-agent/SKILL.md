@@ -1,7 +1,7 @@
 ---
 name: hermes-agent
 description: "Use, configure, theme, extend, and orchestrate Hermes Agent."
-version: 3.4.0
+version: 3.4.1
 author: Teknium + Hermes Agent
 license: MIT
 platforms: [linux, macos]
@@ -219,4 +219,4 @@ terminal(command="tmux new-session -d -s resumed 'hermes --resume 20260225_14305
 - **Message role alternation** — never two assistant or two user messages in a row; only `tool` results can repeat.
 - **Secrets in `.env`, settings in `config.yaml`** — never tell a user to put a non-credential setting in `.env`.
 - **Profile-safe paths** — `get_hermes_home()` in code, `$HERMES_HOME` when resolving paths in a session.
-- **Never hand-edit Hermes state** — use the capability's operational interface. MCP changes from a logged-in session use `hermes mcp ... --via-host`; ordinary `hermes config set` needs its own unlocked vault. Saving an MCP entry takes effect next session; do not automatically run `/reload-mcp`.
+- **Never hand-edit Hermes state** — use the capability's operational interface. Local `hermes config set`, updates and delegated children reuse the active session's unlock; do not request another passphrase. MCP changes can also use `hermes mcp ... --via-host` through the authenticated session host. Saving an MCP entry takes effect next session; do not automatically run `/reload-mcp`.

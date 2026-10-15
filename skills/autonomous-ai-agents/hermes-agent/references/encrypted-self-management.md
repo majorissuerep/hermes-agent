@@ -65,3 +65,21 @@ the authorized home's unlock while maintaining their own conversations and tool
 state. A child can run the same config commands and create encrypted state without
 another prompt. Closing a child must not revoke the parent's access. New independent
 sessions started after the owner closes must unlock normally.
+
+## Unexpected unlock prompts
+
+If a local command or subagent requests another passphrase, stop that operation
+and check the active installation and home. Run `hermes --version` and
+`hermes secure-vault status` through the native `terminal` tool, and inspect the
+launcher's source checkout with `read_file`. An older or upstream installation
+does not gain this fork's session authority just because the development checkout
+was updated. Do not work around the mismatch by exporting credentials, changing
+the home, or replacing the launcher by hand.
+
+Update the intended encrypted-fork installation through its normal update flow,
+then open a new session so it loads the new runtime and bundled guides. Updating
+files does not replace code or cached instructions in an already-running session.
+If a bundled guide was locally edited, preserve those edits: inspect
+`hermes skills diff hermes-agent` before considering
+`hermes skills reset hermes-agent --restore`. Restoring the bundled copy replaces
+the local copy; do not do that automatically.
