@@ -12,6 +12,10 @@ def test_real_state_oracle_survives_snapshot_mutation_and_restore(tmp_path, monk
     monkeypatch.setenv("HERMES_HOME", str(home))
     password = "synthetic-rehearsal-password"
     vault.init_vault(home, password)
+    vault.unlock(home, password)
+    from hermes_cli.config import save_config
+    save_config({"model": {"provider": "custom", "base_url": "https://old.example.invalid/v1",
+                           "api_key": "synthetic-old-route-key"}}, merge_existing=True)
     vault.clear_vault_cache()
     root = Path(__file__).resolve().parents[3]
     script = tmp_path / "state_probe.py"

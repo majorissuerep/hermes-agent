@@ -6,6 +6,7 @@ process. No application dependency is mocked or replaced.
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 from pathlib import Path
 import sys
@@ -22,6 +23,9 @@ def main() -> None:
 
     home = get_hermes_home()
     vault.unlock(home, request["password"])
+    from agent.secret_scope import build_profile_secret_scope, set_secret_scope, set_multiplex_context
+    set_secret_scope(build_profile_secret_scope(home), profile_home=str(home))
+    set_multiplex_context(True)
     # Do not cache a degraded config parse by importing readers while locked.
     from hermes_cli.config import read_raw_config, load_config, save_config, save_env_value, load_env
     from hermes_cli.config_defaults import DEFAULT_CONFIG
@@ -54,7 +58,11 @@ def main() -> None:
         write_credential_pool("retired-e2e-provider", [{"id": "retained-legacy", "source": "manual",
             "auth_type": "api_key", "access_token": "synthetic-retained-legacy-key",
             "base_url": "https://retired.example.invalid/v1"}])
-        save_config(config, merge_existing=True)
+        # Installation may have seeded another provider's endpoint or inline
+        # key. Choose a complete route, not a merge that keeps those fields.
+        seeded = read_raw_config()
+        seeded.update(config)
+        save_config(seeded, merge_existing=False)
         db = SessionDB()
         try:
             db.create_session("e2e-retained", "cli")
@@ -127,6 +135,18 @@ def main() -> None:
         else:
             credentials = {"key": load_env()["E2E_GATEWAY_API_KEY"],
                            "endpoint": config["providers"][provider]}
+        from hermes_cli.runtime_provider import resolve_runtime_provider
+
+        runtime = resolve_runtime_provider(requested=provider, target_model=settings["model"]["default"])
+        selected_key = runtime["api_key"]
+        selected_key = selected_key() if callable(selected_key) else selected_key
+        expected_key = credentials["access_token"] if provider == "openai-codex" else credentials["key"]
+        if not hmac.compare_digest(str(selected_key), str(expected_key)):
+            raise RuntimeError("runtime credential differs from the retained credential")
+        expected_endpoint = ("https://chatgpt.com/backend-api/codex" if provider == "openai-codex"
+                             else credentials["endpoint"]["base_url"])
+        if runtime["base_url"].rstrip("/") != expected_endpoint.rstrip("/"):
+            raise RuntimeError("runtime endpoint differs from the selected acceptance route")
         jobs = [{key: job.get(key) for key in ("id", "name", "prompt", "schedule", "enabled", "state")}
                 for job in load_jobs() if job.get("name") == "e2e-retained"]
         if len(jobs) != 1 or jobs[0]["enabled"] is not False:
