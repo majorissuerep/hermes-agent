@@ -289,6 +289,17 @@ Each profile gets its own service name. They run independently.
 Per-profile gateways are supervised by [s6-overlay](https://github.com/just-containers/s6-overlay) (PID 1 in the container), so `hermes profile create <name>` automatically registers an s6 service slot at `/run/service/gateway-<name>/`. `hermes -p <name> gateway start/stop/restart` dispatches to `s6-svc` instead of spawning a bare process — crashes are auto-restarted and `docker restart` preserves the previously-running set of gateways. See [Per-profile gateway supervision](./docker.md#per-profile-gateway-supervision) for details.
 :::
 
+## Every profile owns its credentials
+
+Provider credentials and MCP secrets resolve from the active profile. A missing
+credential does not authorize borrowing another profile's account. Configure the
+selected profile with `hermes -p <name> model`.
+
+In this encrypted fork, a session's local children reuse that profile's temporary
+unlock authority. Switching profiles requires the target profile's authorization.
+Use CLI configuration writers and the dashboard identity editor; never overwrite
+encrypted settings, tokens, or `SOUL.md` as plaintext.
+
 ## Configuring profiles
 
 Each profile has its own:
@@ -298,8 +309,7 @@ Each profile has its own:
 - **`SOUL.md`** — personality and instructions
 
 ```bash
-coder config set model.default anthropic/claude-sonnet-4
-echo "You are a focused coding assistant." > ~/.hermes/profiles/coder/SOUL.md
+coder config set model.default claude-sonnet-4.6
 ```
 
 If you want this profile to work in a specific project by default, also set its own `terminal.cwd`:
