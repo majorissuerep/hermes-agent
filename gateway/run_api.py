@@ -152,6 +152,11 @@ async def start_gateway_api(runner, *, host: str = "127.0.0.1", port: int = 0) -
         trusted_public_hosts=trusted, gateway_runner=runner,
         session_authority=getattr(runner, "session_authority", None))
     mount = GatewayDashboardMount(runner, state)
+    # The ticketed transport is part of readiness, not the optional dashboard.
+    # A cold synchronous import during upgrade can outlast the client's handshake
+    # deadline and block identify/pings on slow hosts. Load it off-loop before READY.
+    import importlib
+    await asyncio.to_thread(importlib.import_module, "tui_gateway.ws")
     # Lifespan off: the dashboard's own lifespan runs when it is mounted (GatewayDashboardMount).
     config, server = build_listener_server(mount, host, port, auth_required=state.auth_required,
                                            timeout_graceful_shutdown=5, lifespan="off")

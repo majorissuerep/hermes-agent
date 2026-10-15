@@ -13,6 +13,8 @@ import sys
 import textwrap
 from pathlib import Path
 
+import pytest
+
 REPO = Path(__file__).resolve().parents[2]
 
 _PROBE = textwrap.dedent("""
@@ -93,3 +95,34 @@ def test_session_listener_serves_native_ws_before_importing_the_dashboard(tmp_pa
     # Dashboard routes still answer on the same origin, behind the same Host guard.
     assert out["status"] == 200 and out["rebind_http"] == 400
     assert out["after_http"] and out["runner_bound"] and out["token_withheld"] and out["unbound"]
+
+
+@pytest.mark.asyncio
+async def test_listener_waits_for_transport_dependencies_without_blocking_the_loop(tmp_path, monkeypatch):
+    import asyncio
+    import importlib
+    import threading
+    from types import SimpleNamespace
+    from gateway.run_api import start_gateway_api, stop_gateway_api
+    from tests.waiting import async_wait_until
+
+    entered, release = threading.Event(), threading.Event()
+    original = importlib.import_module
+
+    def importing(name, *args, **kwargs):
+        if name == "tui_gateway.ws":
+            entered.set()
+            assert release.wait(10)
+        return original(name, *args, **kwargs)
+
+    monkeypatch.setattr(importlib, "import_module", importing)
+    runner = SimpleNamespace(_draining=False, session_runtime_descriptor={"state": "starting"})
+    pending = asyncio.create_task(start_gateway_api(runner))
+    try:
+        await async_wait_until(lambda: entered.is_set() or pending.done(), timeout=5,
+                               what="transport dependency load or premature listener publication")
+        assert entered.is_set() and not pending.done(), "listener published before its transport was loadable"
+    finally:
+        release.set()
+        handle = await pending
+        await stop_gateway_api(handle)
