@@ -84,9 +84,10 @@ itself through the deck.
 
 ## Classic CLI
 
-The prompt_toolkit REPL (`hermes` without `--tui`) keeps its agent in-process, so it still ends with
-its terminal. Its conversation stays open in the deck (dormant) and `hermes deck attach` resumes it in
-the host. While it runs, it receives deck messages at idle and exits when the deck closes it.
+The prompt_toolkit REPL (`hermes --cli`) is also a gateway client. The gateway owns its agent and
+all database writes, including deck registration and `/close`; the terminal only reads state and
+renders the conversation. Its conversation stays open after `/quit`. While attached, it receives
+deck messages at idle and exits when the deck closes it.
 
 ## Configuration
 
@@ -98,6 +99,7 @@ sessions:
 Launches with per-run overrides the shared host cannot apply (`-m/--model`, `--provider`, `--toolsets`,
 `--skills`, `--worktree`, `--checkpoints`, `--max-turns`, `-v/-Q`) use a private backend as before.
 
-With the secure vault, the launcher hands its unlocked key to the detached host over an inherited pipe;
-no password is placed in the environment or on disk. On Windows the host needs
-`HERMES_MASTER_PASSWORD` or a key file instead.
+With the secure vault, the launcher hands its unlocked key to the detached host over an inherited
+pipe. Local terminal commands and sub-agents reuse a home-scoped, revocable session grant. No
+passphrase or vault key is placed in the environment or on disk, and an unrelated session cannot
+reuse the grant.

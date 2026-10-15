@@ -17,7 +17,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 
-from hermes_security import vault as hv  # noqa: E402
+from hermes_security import vault as hv
 
 PASSWORD = "status-test-master-pw"
 
@@ -180,7 +180,7 @@ def test_count_skips_vault_meta(vaulted_home):
     v = hv.get_vault(vaulted_home)
     v.write_bytes("config.yaml", b"a: 1\n", purpose="config")
 
-    env, dbs, frames_count = hv.count_encrypted_files(vaulted_home)
+    env, _dbs, _frames_count = hv.count_encrypted_files(vaulted_home)
     assert env == 1  # only config.yaml, NOT .hermes-vault
 
 

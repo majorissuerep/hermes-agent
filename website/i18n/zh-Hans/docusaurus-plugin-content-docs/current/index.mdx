@@ -53,23 +53,9 @@ import Link from "@docusaurus/Link";
   </a>
 </div>
 
-## 安装
-
-**Linux / macOS / WSL2**
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/majorissuerep/hermes-agent/main/scripts/install.sh | bash
-```
-
-**Windows（原生，PowerShell）** — _早期测试版，[详情 →](./user-guide/windows-native.md)_
-
-```powershell
-iex (irm https://raw.githubusercontent.com/majorissuerep/hermes-agent/main/scripts/install.ps1)
-```
-
 安装后运行 `hermes secure-vault status`。若尚无 vault，请先在终端中执行 `hermes secure-vault migrate`，再进行设置或聊天。详情见[加密状态初始化](./getting-started/installation.md#initialize-encrypted-state)。已有上游安装请阅读[迁移说明](./getting-started/installation.md#switch-existing-installation)。上游 Desktop 下载提供的是上游版本；本 fork 完成 CLI 和 vault 设置后可运行 `hermes desktop`。
 
-请参阅完整的 **[安装指南](./getting-started/installation.md)**，了解安装程序的具体操作、按用户与 root 的目录布局以及 Windows 相关说明。
+请参阅完整的 **[安装指南](./getting-started/installation.md)**，了解安装程序的具体操作与按用户、root 的目录布局。本 fork 仅支持 Linux、macOS 和 WSL 相关说明。
 
 ## Hermes Agent 是什么？
 
@@ -79,7 +65,7 @@ iex (irm https://raw.githubusercontent.com/majorissuerep/hermes-agent/main/scrip
 
 |                                                                       |                                                                    |
 | --------------------------------------------------------------------- | ------------------------------------------------------------------ |
-| 🚀 **[安装](./getting-started/installation.md)**                          | 在 Linux、macOS、WSL2 或原生 Windows（早期测试版）上 60 秒完成安装 |
+| 🚀 **[安装](./getting-started/installation.md)**                          | 在 Linux、macOS 或 WSL2 上 60 秒完成安装 |
 | 📖 **[快速入门教程](./getting-started/quickstart.md)**                    | 第一次对话及值得尝试的核心功能                                     |
 | 🗺️ **[学习路径](./getting-started/learning-path.md)**                     | 根据你的经验水平找到合适的文档                                     |
 | ⚙️ **[配置](./user-guide/configuration.md)**                              | 配置文件、提供商、模型及选项                                       |

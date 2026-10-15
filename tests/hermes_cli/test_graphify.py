@@ -28,7 +28,7 @@ def test_project_graph_cli_uses_bundled_runtime_without_unlocking_hermes(tmp_pat
 
     def cli(*args, expected=0):
         result = subprocess.run(
-            [sys.executable, "-m", "hermes_cli.main", *args],
+            [sys.executable, "-m", "hermes_cli.main", *args], check=False,
             env=env, cwd=Path(__file__).resolve().parents[2], input="",
             capture_output=True, text=True, timeout=60)
         assert result.returncode == expected, result.stdout + result.stderr

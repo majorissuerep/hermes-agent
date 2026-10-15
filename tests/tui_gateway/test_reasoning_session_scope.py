@@ -23,7 +23,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import patch
 
-import tui_gateway.server as server
+from tui_gateway import server
 from tui_gateway.server import _session_info
 
 
@@ -117,3 +117,42 @@ class TestLoadReasoningConfigYamlBoolean:
         ):
             assert server._load_reasoning_config() == {"enabled": False}
 
+
+class TestSessionNoneReachesZaiWire:
+    """Desktop ``config.set value=none`` must disable thinking on GLM-5.
+    """
+
+    def test_session_info_effort_none_without_enabled_reports_none(self) -> None:
+        info = _session_info(_agent({"effort": "none"}))
+        assert info["reasoning_effort"] == "none"
+
+    def test_config_set_none_on_lazy_session_pins_disabled_override(self) -> None:
+        session = {"session_key": "k-lazy", "agent": None}
+        with patch.dict(server._sessions, {"s-lazy": session}, clear=False), \
+                patch.object(server, "_write_config_key") as write_key:
+            resp = server._methods["config.set"](
+                "rid-1", {"key": "reasoning", "session_id": "s-lazy", "value": "none"}
+            )
+        assert resp["result"]["value"] == "none"
+        assert session["create_reasoning_override"] == {"enabled": False}
+        write_key.assert_not_called()
+        kw = server._deferred_build_agent_kwargs(session, session_db=None)
+        assert kw["reasoning_config_override"] == {"enabled": False}
+
+    def test_effort_none_override_emits_thinking_disabled(self) -> None:
+        import model_tools
+        import providers
+        from agent.transports.chat_completions import ChatCompletionsTransport
+
+        profile = providers.get_provider_profile('zai')
+        kwargs = ChatCompletionsTransport().build_kwargs(
+            model='glm-5',
+            messages=[{"role": "user", "content": "ping"}],
+            tools=None,
+            provider_profile=profile,
+            reasoning_config={"enabled": False},
+            base_url="https://api.z.ai/api/paas/v4",
+            provider_name='zai',
+        )
+        assert kwargs["extra_body"] == {"thinking": {"type": "disabled"}}
+        assert "reasoning_effort" not in kwargs

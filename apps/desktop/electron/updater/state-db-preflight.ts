@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process'
 
-import { hiddenWindowsChildOptions } from '../windows-child-options'
+import { hiddenWindowsChildOptions } from '../child-process-options'
 
 interface StateDbPreflight {
   python: string | null

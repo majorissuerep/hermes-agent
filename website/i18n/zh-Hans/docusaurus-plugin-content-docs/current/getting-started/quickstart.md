@@ -65,7 +65,6 @@ curl -fsSL https://raw.githubusercontent.com/majorissuerep/hermes-agent/main/scr
 源码脚本通过 PM 准备运行时。桌面软件包、Docker、Nix 和 Termux APT 是独立的安装方式。
 请勿使用 `pip install hermes-agent` 替代受管理的安装。
 
-Windows 原生安装可在 PowerShell 中运行 `iex (irm https://raw.githubusercontent.com/majorissuerep/hermes-agent/main/scripts/install.ps1)`，无需 WSL。
 aarch64 Android 设备请使用 [Termux APT 指南](./termux.md)，而非上述脚本。
 
 安装完成后，重新加载 shell：
@@ -235,7 +234,7 @@ Agent 会代你执行终端命令并显示结果。
 hermes gateway setup    # 交互式平台配置
 ```
 
-接入 [Telegram](../user-guide/messaging/telegram.md)、[Discord](../user-guide/messaging/discord.md)、[Slack](../user-guide/messaging/slack.md)、[WhatsApp](../user-guide/messaging/whatsapp.md)、[Signal](../user-guide/messaging/signal.md)、[Email](../user-guide/messaging/email.md)、[Home Assistant](../user-guide/messaging/homeassistant.md) 或 [Microsoft Teams](../user-guide/messaging/teams.md)。
+接入 [Telegram](../user-guide/messaging/telegram.md)、[Discord](../user-guide/messaging/discord.md)、[Slack](../user-guide/messaging/slack.md)、[WhatsApp](../user-guide/messaging/whatsapp.md)、[Signal](../user-guide/messaging/signal.md)、[Email](../user-guide/messaging/email.md)、[Home Assistant](../user-guide/messaging/homeassistant.md)（插件）或 [Microsoft Teams](../user-guide/messaging/teams.md)。
 
 ### 自动化与工具
 

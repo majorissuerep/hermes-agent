@@ -6,7 +6,7 @@ sidebar_position: 16
 # Computer Use
 
 Hermes Agent can drive your desktop — clicking, typing, scrolling,
-dragging — in the **background** on **macOS, Windows, and Linux**. Your
+dragging — in the **background** on **macOS and Linux**. Your
 cursor doesn't move, keyboard focus doesn't change, and your virtual
 desktops / Spaces don't switch on you. You and the agent co-work on the
 same machine.
@@ -27,7 +27,6 @@ input stack under the hood:
 | Platform | Accessibility tree | Input dispatch |
 |---|---|---|
 | macOS | AX (private SkyLight SPIs) | `SLPSPostEventRecordTo` — pid-scoped, no cursor warp |
-| Windows | UIAutomation | `SendInput` + `PostMessage` — no focus steal |
 | Linux | AT-SPI (X11 + Wayland) | XTest (X11) / virtual-keyboard (Wayland) |
 
 The result is the same on every platform: the agent can read the
@@ -56,10 +55,10 @@ runs](./bot-screen.md#where-the-screen-runs).
 
 **The driver ships with Hermes.** `cua-driver` is pinned in `pm/lock.json`
 and is a default PM package: the installers, a bare `hermes pm install`, and
-`hermes update` install it on every macOS, Windows, and glibc Linux target
+`hermes update` install it on every macOS and glibc Linux target
 (cua-driver publishes no musl or Android build). The desktop app's bundle
 carries it too. To leave it out, pass `--skip-computer-use` on POSIX or
-`-SkipComputerUse` on Windows (or run `hermes pm install --without cua-driver`);
+(or run `hermes pm install --without cua-driver`);
 Hermes remembers the choice, and `hermes pm install cua-driver` undoes it.
 
 If the download failed or you opted out earlier, any of these installs it:
@@ -103,7 +102,6 @@ platform-appropriate prereqs:
 | Platform | Prereqs |
 |---|---|
 | **macOS** | System Settings → Privacy & Security → **Accessibility** + **Screen Recording**. Grant the identity named by `hermes computer-use doctor` (CuaDriver, `com.trycua.driver`, in every permission mode — the driver daemon always launches through `CuaDriver.app`). |
-| **Windows** | None at install time. If you're driving over SSH (not RDP / console), you need the autostart pattern — see [cua.ai/docs/how-to-guides/driver/windows-ssh](https://cua.ai/docs/how-to-guides/driver/windows-ssh) for the Session 0 ↔ Session 1+ proxy. |
 | **Linux** | A reachable display server: `DISPLAY` set for X11, or `XDG_SESSION_TYPE=wayland`. Wayland sessions need an XWayland bridge for capture. AT-SPI must be on (default on GNOME/KDE/Xfce). |
 
 Then start a session with the toolset enabled:
@@ -453,7 +451,6 @@ of screenshot context, not ~600K.
   - **macOS** uses private SkyLight SPIs. Apple can change them in any
     OS update. Hermes warns when the installed cua-driver is older than
     the version it was tested against.
-  - **Windows** SSH sessions run in **Session 0**, which has no
     interactive desktop. Drive Hermes from inside the RDP / console
     session, or set up cua-driver's autostart Scheduled Task —
     [windows-ssh](https://cua.ai/docs/how-to-guides/driver/windows-ssh)
@@ -524,11 +521,10 @@ recipe). If the task exists but you want it gone, remove it with
 from an elevated shell — Hermes does not re-register it once
 `computer_use.autostart` is false.
 
-Swap the backend entirely (for testing):
-
-```
-HERMES_COMPUTER_USE_BACKEND=noop   # records calls, no side effects
-```
+Swap the driver entirely: `computer_use.backend` in `config.yaml` names the one
+active provider (`cua`, the default, or an installed provider plugin; see
+[computer-use backend plugins](../../developer-guide/plugins/index.md#computer-use-backend-plugins)).
+`hermes tools` → Computer Use lists every installed provider.
 
 ### Telemetry
 

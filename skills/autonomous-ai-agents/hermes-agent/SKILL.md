@@ -1,10 +1,10 @@
 ---
 name: hermes-agent
 description: "Use, configure, theme, extend, and orchestrate Hermes Agent."
-version: 3.3.0
+version: 3.4.0
 author: Teknium + Hermes Agent
 license: MIT
-platforms: [linux, macos, windows]
+platforms: [linux, macos]
 metadata:
   hermes:
     tags: [hermes, setup, configuration, multi-agent, spawning, cli, gateway, bots, bot-mode, features, themes, skins, desktop-plugins, tui-widgets, petdex, development]
@@ -14,7 +14,7 @@ metadata:
 
 # Hermes Agent
 
-Hermes Agent is an open-source AI agent framework by Nous Research that runs in your terminal, a native desktop app, messaging platforms, and IDEs. It's in the same category as Claude Code (Anthropic), Codex (OpenAI), and OpenClaw — autonomous coding and task-execution agents that use tool calling to interact with your system. Hermes works with any LLM provider (OpenRouter, Anthropic, OpenAI, Google, DeepSeek, xAI, local models, and 20+ others) and runs on Linux, macOS, Windows, and WSL.
+Hermes Agent is an open-source AI agent framework by Nous Research that runs in your terminal, a native desktop app, messaging platforms, and IDEs. This encrypted fork supports Linux and macOS, with ChatGPT/Codex, Anthropic, LiteLLM, custom OpenAI/Anthropic endpoints, Z.AI, Grok, and Vercel AI Gateway.
 
 What makes Hermes different:
 
@@ -84,14 +84,15 @@ $HERMES_HOME/skills/        Installed skills
 
 Profiles use `~/.hermes/profiles/<name>/` with the same layout. When a profile is active, resolve the real home from `$HERMES_HOME` — never hardcode `~/.hermes`.
 
-In this encrypted fork, these state files are vault envelopes on disk. A logged-in
-session holds its unlocked key in the Hermes process; a `terminal` child does not.
-Use the existing host operations for self-configuration. For MCP setup, load
-`references/native-mcp.md` and run `hermes mcp add NAME --via-host ...`, followed by
-`hermes mcp test NAME --via-host`. The host performs the encrypted writes and the
-command returns JSON. Never decrypt state into temporary files, request a master
-password in chat, or give a terminal child vault keys. If a setting has no host
-operation, use the logged-in settings UI or a human-operated CLI that can unlock.
+In this encrypted fork, state files are encrypted on disk. Unlock once when opening
+the session: local `terminal` commands, `delegate_task` children and nested Hermes
+commands reuse that session's unlock without another passphrase. Use normal Hermes
+CLI commands for settings; do not edit encrypted config/state as plaintext. The
+passphrase is never retained, exported, or requested in chat. Session authority is
+temporary, home-scoped and revoked when its owner closes; it does not unlock a
+different profile or a remote terminal. Load `references/encrypted-self-management.md`
+for config changes, updates, repair and delegation. MCP's `--via-host` management
+commands remain available (see `references/native-mcp.md`).
 
 ## Routing Table — load the reference for the task
 
@@ -103,6 +104,7 @@ operation, use the logged-in settings UI or a human-operated CLI that can unlock
 | In-session slash commands | `references/slash-commands.md` |
 | Provider setup, API keys, OAuth | `references/providers-and-models.md` |
 | config.yaml sections, toolsets, voice/STT/TTS | `references/configuration.md` |
+| Encrypted config edits, self-updates, repair, no-prompt subagents | `references/encrypted-self-management.md` |
 | AGENTS.md / .hermes.md / CLAUDE.md project rules | `references/project-context-files.md` |
 | Secret redaction, PII, approval modes, "reset permissions" | `references/security-privacy.md` |
 | Delegation, cron, curator, kanban | `references/background-systems.md` |
@@ -112,11 +114,9 @@ operation, use the logged-in settings UI or a human-operated CLI that can unlock
 | A desktop app UI element (pane, widget, ⌘K command, page) | `references/desktop-plugins.md` + `templates/plugin.js` |
 | A live TUI panel or modal widget (ticker, clock, dashboard) | `references/tui-widgets.md` + `templates/clock.mjs` |
 | Pet mascots — install, select, scale, diagnose | `references/petdex.md` |
-| Windows-specific issues (keybinds, WinError 10106, BOM) | `references/windows-quirks.md` |
 | Debugging: voice, tools missing, gateway, aux models | `references/troubleshooting.md` |
 | Contributing code: adding tools, slash commands, tests | `references/contributor-guide.md` |
 | delegate_task "capped at N" reports | `references/delegate-task-concurrency-diagnosis.md` |
-| "Can app X use my Nous Portal subscription/OAuth?" | `references/portal-auth-for-third-party-apps.md` |
 | Connecting a messaging platform (Telegram, Discord, Slack, WhatsApp, …) | docs: `/user-guide/messaging` |
 
 The reference list above is not the feature list — it is the set of topics that

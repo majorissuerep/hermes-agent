@@ -5,7 +5,7 @@ role is a separate OS process running ``_roles.py`` against it (see that module 
 protocol). This module owns:
 
 * journal-mode selection through the PRODUCTION decision path: the ``delete`` arm pins the version the
-  children's ``hermes_state_wal.is_sqlite_wal_reset_vulnerable()`` probe sees to a WAL-reset-vulnerable
+  children's ``hermes_state.wal.is_sqlite_wal_reset_vulnerable()`` probe sees to a WAL-reset-vulnerable
   SQLite (the one CI's uv CPython 3.11.14 bundles), so ``apply_wal_with_fallback`` itself picks DELETE
   exactly as it does for every user on such a build — the same DELETE store its network/FUSE fallbacks end
   in; nothing in the harness issues a journal-mode pragma;
@@ -123,7 +123,7 @@ class Chamber:
             args.setdefault("pace", self.writer_pace)
         payload = {"workdir": str(self.work), "name": name, "db": str(self.db),
                    "stop": str(self.work / f"{name}.stop"), "busy_ok": self.mode == "delete", **args}
-        stderr = open(self.work / f"{name}.stderr", "wb")  # noqa: SIM115 - closed in reap()
+        stderr = open(self.work / f"{name}.stderr", "wb")
         proc = subprocess.Popen(
             [sys.executable, str(ROLES), role, json.dumps(payload)],
             cwd=str(REPO_ROOT), env={**self.env, **(env or {})}, stdin=subprocess.DEVNULL,
@@ -139,11 +139,11 @@ class Chamber:
     def spawn_cli(self, name: str, *argv: str) -> subprocess.Popen:
         """A real `hermes …` CLI subprocess against this HERMES_HOME (``hermes_cli.main`` run as ``__main__``
         by ``_roles.py cli`` so the journal-mode seam applies to it too)."""
-        stderr = open(self.work / f"{name}.stderr", "wb")  # noqa: SIM115 - closed in reap()
+        stderr = open(self.work / f"{name}.stderr", "wb")
         payload = {"workdir": str(self.work), "name": name, "argv": list(argv)}
         proc = subprocess.Popen(
             [sys.executable, str(ROLES), "cli", json.dumps(payload)], cwd=str(REPO_ROOT), env=self.env,
-            stdin=subprocess.DEVNULL, stdout=open(self.work / f"{name}.stdout", "wb"), stderr=stderr,  # noqa: SIM115
+            stdin=subprocess.DEVNULL, stdout=open(self.work / f"{name}.stdout", "wb"), stderr=stderr,
         )
         proc._stderr_file = stderr  # type: ignore[attr-defined]
         with self._lock:

@@ -205,7 +205,7 @@ class TestModelPickerBaseUrlIntegration:
                   return_value={"api_key": "sk-test", "base_url": "https://custom.proxy.com"}),
         ):
             from hermes_cli.models import provider_model_ids
-            result = provider_model_ids("test-provider")
+            provider_model_ids("test-provider")
             # Verify fetch_models was called with base_url
             mock_profile.fetch_models.assert_called_once()
             call_kwargs = mock_profile.fetch_models.call_args
@@ -218,7 +218,8 @@ def test_profiles_without_model_listing_never_hit_the_network():
     from providers import list_providers
 
     flagged = [p for p in list_providers() if not p.supports_model_listing]
-    assert {p.name for p in flagged} >= {"bedrock", "vertex"}
+    flagged.append(ProviderProfile(name="explicit-sdk", base_url="https://sdk.example.invalid",
+                                   supports_model_listing=False))
     with patch("hermes_cli.urllib_security.open_credentialed_url") as opener:
         for profile in flagged:
             assert profile.fetch_models(api_key="k", base_url=profile.base_url) is None, profile.name

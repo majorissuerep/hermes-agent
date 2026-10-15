@@ -64,7 +64,7 @@ The driver first prepares the complete dependency set: managed tools, the locked
 Node workspace union, icon environment, Electron-native bindings, packaging
 utilities, and (except for light) the application and independent PM environments.
 Only then does it compile products, assemble the payload, and package Electron.
-MSIX metadata, signing, notarization, and package formats remain adapter work.
+Signing, notarization, and package formats remain adapter work.
 
 ### Split desktop preparation and consumption
 

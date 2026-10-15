@@ -287,14 +287,6 @@ class GatewayStatusCommandsMixin:
             lines.append(t("gateway.status.model_provider", model=fields["model"], provider=fields["provider"]))
         elif fields["model"]:
             lines.append(t("gateway.status.model", model=fields["model"]))
-        try:
-            from hermes_cli.anon_auth import free_tier_route
-
-            free_tier_active = await self._run_in_executor_with_context(free_tier_route)
-            if free_tier_active:
-                lines.append(t("gateway.status.free_tier"))
-        except Exception:
-            pass
         from agent.context_breakdown import context_display_source
         mark = "~" if context_display_source(getattr(status_agent, "context_compressor", None)) != "provider_usage" else ""
         if context_total:
@@ -370,7 +362,7 @@ class GatewayStatusCommandsMixin:
         # Gauge path: preserve the provenance of the selected occupancy figure.
         if used > 0 and context_length > 0:
             pct = _pct(used, context_length)
-            filled = int(round(pct / 100 * 24))
+            filled = round(pct / 100 * 24)
             lines = [
                 t("gateway.context.header"), "",
                 t("gateway.context.model", model=model_name or "?"),
@@ -679,7 +671,7 @@ class GatewayStatusCommandsMixin:
                 days = int(flag) if flag.isdigit() else days
                 i += 1
         try:
-            from hermes_state_registry import acquire
+            from hermes_state.registry import acquire
             from agent.insights import InsightsEngine
 
             def _run_insights():
@@ -688,7 +680,7 @@ class GatewayStatusCommandsMixin:
                     engine = InsightsEngine(db)
                     return engine.format_gateway(engine.generate(days=days, source=source))
                 finally:
-                    from hermes_state_registry import release_or_close
+                    from hermes_state.registry import release_or_close
                     release_or_close(db)
 
             # Not a bare hop: ``SessionDB()`` resolves ``get_hermes_home()`` at call time, a

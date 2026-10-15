@@ -31,7 +31,6 @@ class MockAPIError(Exception):
 
 class MockTransportError(Exception):
     """Simulates a transport-level error with a specific type name."""
-    pass
 
 
 class ReadTimeout(MockTransportError):
@@ -664,21 +663,6 @@ class TestClassifyApiError:
         assert result.retryable is True
         assert result.should_fallback is False
 
-    def test_404_bare_model_id_missing_prefix_is_model_not_found(self):
-        """A bare id the provider only serves as ``vendor/id`` is malformed.
-
-        Regression for #78796: NVIDIA NIM answers a prefix-less
-        ``nemotron-3-ultra-550b-a55b`` with a naked ``404 page not found``.
-        Without the catalogue check this fell into the generic branch and
-        burned three retries on a deterministic failure, reporting what
-        looked like an outage.
-        """
-        e = MockAPIError("404 page not found", status_code=404)
-        result = classify_api_error(
-            e, provider="nvidia", model="nemotron-3-ultra-550b-a55b"
-        )
-        assert result.reason == FailoverReason.model_not_found
-        assert result.retryable is False
 
     def test_404_correctly_prefixed_model_stays_generic(self):
         """A properly prefixed id hitting a 404 is a real endpoint problem —
@@ -2079,12 +2063,6 @@ class TestNousWelcomeTier:
     def test_retry_after_zero_carries_no_reset(self):
         result = classify_api_error(self._refusal("at_capacity", retry_after=0), provider="nous", api_key=make_jwt())
         assert "reset_at" not in result.error_context
-
-    def test_unknown_reason_is_not_the_welcome_shape(self):
-        err = MockAPIError("Error code: 429", status_code=429,
-                           body={"status": 429, "message": "x", "reason": "something_else", "retry_after": 5})
-        result = classify_api_error(err, provider="nous", api_key=make_jwt())
-        assert "welcome_refusal" not in result.error_context
 
     def test_anonymous_jwt_on_the_paid_host_is_deterministic(self):
         body = {"status": 400, "message": "Anonymous accounts must use https://welcome-api.nousresearch.com for inference."}

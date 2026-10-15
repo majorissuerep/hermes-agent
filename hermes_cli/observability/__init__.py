@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 def observe_lifecycle(hook_name: str, **kwargs: Any) -> None:
     """Dispatch a Hermes lifecycle event to built-in observability features.
     Fork: telemetry removed — no-op."""
-    return None
+    return
 
 
 def handles_hook(hook_name: str) -> bool:

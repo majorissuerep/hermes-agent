@@ -52,18 +52,18 @@ def test_failed_legs_from_release_needs(needs, expected):
     ('skipped', 'Not run'), (None, 'Not run (no result)'),
 ])
 def test_download_survives_smoke_failure_without_claiming_acceptance(state, status):
-    receipt = {'schema': 2, 'commit': SHA, 'name': 'win32-x64',
-               'files': [{'path': PACKAGE, 'size': 1, 'sha256': '0' * 64}]}
-    needs = {} if state is None else {'smoke-win32-x64': {'result': state}}
-    inputs = ([PREFIX + PACKAGE], 'https://cdn.example', SHA, {'win32-x64': receipt})
+    package = "HermesBundled-1.2.3-mac-x64.zip"
+    receipt = {'schema': 2, 'commit': SHA, 'name': 'darwin-x64',
+               'files': [{'path': package, 'size': 1, 'sha256': '0' * 64}]}
+    needs = {} if state is None else {'smoke-darwin-x64': {'result': state}}
+    inputs = ([PREFIX + package], 'https://cdn.example', SHA, {'darwin-x64': receipt})
     summary = rbt.render_commit_summary(*inputs, smoke_results=needs)
     page = rbt.render_commit_page(SHA, inputs[0], inputs[1], inputs[3], smoke_results=needs)
-    assert f'| Windows MSIX (x64) | {status} |' in summary
-    assert '| Windows MSIX (arm64) | Not run (no result) |' in summary
-    assert f'<td>Windows MSIX (x64)</td><td>{status}</td>' in page
+    assert f'| macOS DMG + ZIP (x64) | {status} |' in summary
+    assert '| macOS DMG + ZIP (arm64) | Not run (no result) |' in summary
+    assert f'<td>macOS DMG + ZIP (x64)</td><td>{status}</td>' in page
     for output in (summary, page):
-        assert '✅ Built' in output and 'https://cdn.example/' + PREFIX + PACKAGE in output
-        assert 'unsigned Store envelopes are not install-smoked' in output
+        assert '✅ Built' in output and 'https://cdn.example/' + PREFIX + package in output
     missing = rbt.render_commit_summary([], 'https://cdn.example', SHA, {},
-                                       failed_legs=['assemble-win32-bundle'])
-    assert 'failed: assemble-win32-bundle' in missing
+                                       failed_legs=['build-darwin-x64'])
+    assert 'failed: build-darwin-x64' in missing

@@ -103,7 +103,7 @@ def append(path: Path | str, payload: bytes, *, purpose: str) -> None:
     target = Path(path).expanduser()
     target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     nonce = secrets.token_bytes(_NONCE_BYTES)
-    aad = f"hermes-frames|1|{purpose}".encode("utf-8")
+    aad = f"hermes-frames|1|{purpose}".encode()
     ciphertext = AESGCM(_frame_key(vault, purpose)).encrypt(nonce, payload, aad)
     frame = _LENGTH.pack(len(nonce) + len(ciphertext)) + nonce + ciphertext
 
@@ -151,7 +151,7 @@ def read_frames(path: Path | str, *, purpose: str) -> Iterator[bytes]:
         # length prefix reads as a "truncated tail" and silently yields nothing.
         raise VaultIntegrityError(f"{target} is an envelope, not a frame stream")
     key = _frame_key(vault, purpose)
-    aad = f"hermes-frames|1|{purpose}".encode("utf-8")
+    aad = f"hermes-frames|1|{purpose}".encode()
     offset = 0
     total = len(blob)
     while offset < total:
@@ -191,7 +191,7 @@ def decode_frame_at(blob: bytes, offset: int, *, vault, purpose: str,
         return None
     if end > len(blob):
         return None
-    aad = f"hermes-frames|1|{purpose}".encode("utf-8")
+    aad = f"hermes-frames|1|{purpose}".encode()
     try:
         payload = AESGCM(_frame_key(vault, purpose)).decrypt(
             blob[start : start + _NONCE_BYTES], blob[start + _NONCE_BYTES : end], aad)
@@ -219,7 +219,7 @@ def encode_frames(payloads: list[bytes], *, vault, purpose: str) -> bytes:
     """Serialize *payloads* as a complete frame stream (same format as ``append``)."""
 
     key = _frame_key(vault, purpose)
-    aad = f"hermes-frames|1|{purpose}".encode("utf-8")
+    aad = f"hermes-frames|1|{purpose}".encode()
     out = bytearray()
     for payload in payloads:
         nonce = secrets.token_bytes(_NONCE_BYTES)

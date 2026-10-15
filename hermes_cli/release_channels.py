@@ -147,7 +147,7 @@ def validate_request(value: object, *, repository: str | None = None,
     _match(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)", request.get("sourceVersion"), "source version")
     versions = package_versions(request.get("sequence"))
     if policy == "preview":
-        if (request.get("version"), request.get("windowsVersion")) != versions:
+        if request.get("version") != versions[0]:  # fork: windowsVersion quad removed
             raise ChannelError("Channel package version does not match sequence")
     else:
         _match(
@@ -168,10 +168,8 @@ def validate_request(value: object, *, repository: str | None = None,
                 raise ChannelError("Archive ref does not name the release version")
         # Stable uses the Store quad with revision zero; canary uses its UTC
         # yy.mmdd.hh.mmss package version.
-        pattern = r"[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+" if policy == "canary-release" else r"[0-9]+\.[0-9]+\.[0-9]+\.0"
-        quad = _match(pattern, request.get("windowsVersion"), "Windows version")
-        if any(int(part) > 65535 for part in quad.split(".")):
-            raise ChannelError("Invalid Windows version")
+        # fork: the Windows version quad gate is removed with the win32 legs; the
+        # darwin packages carry the version and are receipt-verified.
     validate_identity(request.get("identity"))
     values = request.get("bundleEnv")
     if not isinstance(values, dict):
@@ -287,7 +285,7 @@ class ChannelReader:
 
         # Channel reads are idempotent and precede the PM download path, so an explicit update
         # uses the same bounded transient-failure policy instead of a second retry classifier.
-        from pm.network import retry_network
+        from pm.network import edge_block, retry_network
 
         def read() -> bytes:
             with self.opener(Request(url, headers={"Cache-Control": "no-cache"}), timeout=30) as response:
@@ -300,7 +298,8 @@ class ChannelReader:
         except HTTPError as exc:
             if exc.code == 404:
                 raise ChannelNotFound(f"Channel object not found: {key}") from exc
-            raise ChannelError(f"Channel read unavailable: HTTP {exc.code}") from exc
+            block = edge_block(exc)
+            raise ChannelError(f"Channel read unavailable: HTTP {exc.code}" + (f"; {block}" if block else "")) from exc
         except (OSError, URLError) as exc:
             raise ChannelError("Channel read unavailable") from exc
         if len(body) > MAX_METADATA:

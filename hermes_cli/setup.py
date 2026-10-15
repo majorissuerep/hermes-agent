@@ -94,7 +94,7 @@ def print_noninteractive_setup_guidance(reason: str | None = None) -> None:
           "  hermes config set model.provider custom",
           "  hermes config set model.base_url http://localhost:8080/v1",
           "  hermes config set model.default your-model-name", None,
-          "Or set OPENROUTER_API_KEY (OpenRouter) / OPENAI_API_KEY (OpenAI) in your environment.",
+          "Use 'hermes model' to enter an OpenAI, Anthropic, or another supported credential.",
           "Run 'hermes setup' in an interactive terminal to use the full wizard.", None)
 
 
@@ -103,7 +103,7 @@ def _sanitize_pasted_input(value: str) -> str:
     return _BRACKETED_PASTE_PATTERN.sub("", value) if isinstance(value, str) and value else value
 
 
-def prompt(question: str, default: str = None, password: bool = False) -> str:
+def prompt(question: str, default: str | None = None, password: bool = False) -> str:
     """Prompt for input with optional default."""
     display = color(f"{question} [{default}]: " if default else f"{question}: ", Colors.YELLOW)
     try:
@@ -311,7 +311,7 @@ def prompt_yes_no(question: str, default: bool = True) -> bool:
         print_error("Please enter 'y' or 'n'")
 
 
-def prompt_checklist(title: str, items: list, pre_selected: list = None) -> list:
+def prompt_checklist(title: str, items: list, pre_selected: list | None = None) -> list:
     """Multi-select checklist; returns the sorted indices of selected items. ``pre_selected``
     start checked; Space toggles, Enter confirms, cancel keeps the pre-selection."""
     from hermes_cli.curses_ui import curses_checklist
@@ -517,31 +517,33 @@ _SEND_CONSENT_EXPLAINER = (
     "(it contains no personal information and is reset by deleting",
     "the shared-metrics directory). Only packages whose entire",
     "collection period falls inside a recorded consent window are",
-    "ever sent — data from before you opt in, or from any gap",
-    "while sending was off, stays on this machine. Sending can be", "turned off again at any time.",
+    "ever sent. Apart from the fresh-install note (noted on this",
+    "machine and counted only once you opt in), data from before",
+    "you opt in, or from any gap while sending was off, stays on",
+    "this machine. Sending can be turned off again at any time.",
 )
 
 
 def setup_telemetry(config: dict):
     """Fork: telemetry removed. This section no longer exists; kept as a no-op
     shim so old call sites (tools_config) stay functional without prompting."""
-    return None
+    return
 
 
 def _record_send_consent_change(*, enabled: bool) -> None:
     """Fork: telemetry removed — nothing to record."""
-    return None
+    return
 
 
 # Extracted sections, re-exported so callers and test patches keep resolving through
 # hermes_cli.setup. They import this module lazily inside bodies, so this is cycle-free.
 
-from hermes_cli.setup_tts import setup_tts  # noqa: E402
-from hermes_cli.setup_terminal import setup_terminal_backend  # noqa: E402
-from hermes_cli.setup_platforms import setup_gateway  # noqa: E402
-from hermes_cli.setup_summary import _print_setup_summary  # noqa: E402,F401
-from hermes_cli.setup_migration import _offer_openclaw_migration, _skip_configured_section  # noqa: E402
-from hermes_cli.setup_quick import _run_portal_one_shot, _run_quick_setup  # noqa: E402
+from hermes_cli.setup_tts import setup_tts
+from hermes_cli.setup_terminal import setup_terminal_backend
+from hermes_cli.setup_platforms import setup_gateway
+from hermes_cli.setup_summary import _print_setup_summary
+from hermes_cli.setup_migration import _offer_openclaw_migration, _skip_configured_section
+from hermes_cli.setup_quick import _run_portal_one_shot, _run_quick_setup
 
 
 # ── Main Wizard Orchestrator ──
@@ -603,10 +605,9 @@ def _run_full_setup(config: dict, hermes_home, *, is_existing: bool, migration_r
         if not _skip("gateway", "Messaging Platforms"):
             setup_gateway(config)
             return
-        # A skipped (migrated) gateway section still needs its service so imported platforms
-        # and cron jobs become active.
-        from hermes_cli.gateway import ensure_gateway_service
-        ensure_gateway_service(context="setup")
+        # Migration does not imply consent to install a persistent service.
+        from hermes_cli.gateway_setup_service import ensure_gateway_service
+        ensure_gateway_service(context="setup", interactive=True, config=config)
 
     def _step(key: str, label: str, run) -> tuple:
         return label, lambda: None if _skip(key, label) else run()
@@ -620,9 +621,7 @@ def _run_full_setup(config: dict, hermes_home, *, is_existing: bool, migration_r
 
 # First-time mode picker: (menu label, setup_quick runner name) — None falls through to Full Setup.
 _FIRST_TIME_MODES = (
-    ("Quick Setup (Nous Portal) — free OAuth login, no API keys, model + tools (recommended)",
-     "_run_first_time_quick_setup"),
-    ("Full setup — configure every provider, tool & option yourself (bring your own keys)", None),
+    ("Setup — choose your provider and configure tools (recommended)", None),
     ("Blank Slate — everything off except the bare minimum; opt in to each capability", "_run_blank_slate_setup"),
 )
 
@@ -662,9 +661,8 @@ def _run_setup_wizard_impl(args):
         return
 
     # Existing installation == a provider is configured
-    from hermes_cli.auth import get_active_provider
-    is_existing = bool(get_env_value("OPENROUTER_API_KEY") or get_env_value("OPENAI_BASE_URL")
-                       or get_active_provider() is not None)
+    from hermes_cli.setup_migration import _model_section_has_credentials
+    is_existing = bool(_model_section_has_credentials(config) or get_env_value("OPENAI_BASE_URL"))
     _print_banner("│             ☤ Hermes Agent Setup Wizard                │",
                   "├─────────────────────────────────────────────────────────┤",
                   "│  Let's configure your Hermes Agent installation.       │",

@@ -29,7 +29,7 @@ PINS_PATH = REPO_ROOT / "pm" / "lock.json"
 
 # Standalone installers cannot read the shared mirror layout before checkout.
 sys.path.insert(0, str(REPO_ROOT))
-from pm.artifact_mirror import mirror_url  # noqa: E402
+from pm.artifact_mirror import mirror_url
 
 BEGIN_MARK = "# --- BEGIN GENERATED: bootstrap pins (scripts/gen-bootstrap-pins.py) ---"
 END_MARK = "# --- END GENERATED: bootstrap pins ---"
@@ -49,15 +49,6 @@ def _load_uv_pin() -> dict:
     return entry
 
 
-def _load_git_pin() -> dict:
-    # Windows targets only. install.ps1 bootstraps the pinned git-for-windows
-    # artifact because Windows needs it to clone. macOS and Linux use the
-    # machine's git, so the pin table declares those targets as reasoned gaps
-    # and there is nothing for the sh installers to stage.
-    entry = _load_lock()["packages"]["git"]
-    for target in _WINDOWS_TARGETS:
-        _validate_artifact("git", entry, target)
-    return entry
 
 
 def _validate_artifact(tool: str, entry: dict, target: str) -> None:
@@ -109,43 +100,6 @@ def _sh_fragment(uv: dict) -> str:
     return "\n".join(lines)
 
 
-def _ps1_fragment(uv: dict, git: dict) -> str:
-    lines = [
-        BEGIN_MARK,
-        "# Derived from pm/lock.json. DO NOT EDIT BY HAND:",
-        "# run scripts/gen-bootstrap-pins.py after a pin bump.",
-        f'$script:UvPinVersion = "{uv["version"]}"',
-        "$script:UvPinFiles = @{",
-    ]
-    for target in _WINDOWS_TARGETS:
-        entry = uv["artifacts"][target]
-        lines += [
-            f'    "{target}" = @{{',
-            f'        Url    = "{entry["url"]}"',
-            f'        MirrorUrl = "{mirror_url(entry["sha256"])}"',
-            f'        Sha256 = "{entry["sha256"]}"',
-            "    }",
-        ]
-    lines += [
-        "}",
-        "",
-        f'$script:GitPinVersion = "{git["version"]}"',
-        "$script:GitPinFiles = @{",
-    ]
-    for target in _WINDOWS_TARGETS:
-        entry = git["artifacts"][target]
-        lines += [
-            f'    "{target}" = @{{',
-            f'        Url    = "{entry["url"]}"',
-            f'        MirrorUrl = "{mirror_url(entry["sha256"])}"',
-            f'        Sha256 = "{entry["sha256"]}"',
-            "    }",
-        ]
-    lines += [
-        "}",
-        END_MARK,
-    ]
-    return "\n".join(lines)
 
 
 def _splice(path: Path, fragment: str, check: bool) -> bool:
@@ -177,13 +131,9 @@ def main() -> int:
     args = parser.parse_args()
 
     uv = _load_uv_pin()
-    git = _load_git_pin()
     results = {
         "scripts/install.sh": _splice(
             REPO_ROOT / "scripts" / "install.sh", _sh_fragment(uv), args.check
-        ),
-        "scripts/install.ps1": _splice(
-            REPO_ROOT / "scripts" / "install.ps1", _ps1_fragment(uv, git), args.check
         ),
         # setup-hermes.sh deliberately holds NO fragment: it runs after a
         # checkout exists, so it reads the pin straight from pm/lock.json

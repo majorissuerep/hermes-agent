@@ -2,21 +2,25 @@ name: Bootstrap installer
 
 # Exercises the bootstrap-installer path on PRs that can affect it: the
 # POSIX shell installer (scripts/install.sh), its generated pin fragments,
-# and the version stamp the `complete` stage ships. The PowerShell installer's
-# native tests run in the tests-os Windows lanes; this lane runs the
+# and the version stamp the `complete` stage ships. This lane runs the
 # protocol/stamp cross-checks plus a whole current installer against a tiny
 # application graph. The latter runs real PM/uv and generated launchers, not
 # every production extra. Tool download/hash tests remain separate.
 
 on:
   workflow_call:
+    inputs:
+      commit:
+        description: Commit to test and build. Empty keeps the triggering commit.
+        type: string
+        default: ''
 
 permissions:
   contents: read
 
 concurrency:
-  group: bootstrap-installer-${{ github.ref_type == 'tag' && github.run_id || github.ref }}
-  cancel-in-progress: ${{ github.ref_type != 'tag' }}
+  group: bootstrap-installer-${{ (github.ref_type == 'tag' || inputs.commit != '') && github.run_id || github.ref }}
+  cancel-in-progress: ${{ github.ref_type != 'tag' && inputs.commit == '' }}
 
 jobs:
   posix:
@@ -29,6 +33,7 @@ jobs:
     steps:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a # v7.0.1
         with:
+          ref: ${{ inputs.commit }}
           # The mirror step pushes HEAD to a fresh bare repo — a shallow
           # checkout can't (git: "shallow update not allowed").
           fetch-depth: 0
@@ -36,6 +41,8 @@ jobs:
       - name: Stage manifest is well-formed protocol v1 (piped, as `curl | bash` runs it)
         shell: bash
         run: |
+          # A pipe is load-bearing: reproduce curl | bash, not regular-file stdin.
+          # shellcheck disable=SC2002
           cat scripts/install.sh | bash -s -- --manifest | python3 -c '
           import json, sys
           m = json.load(sys.stdin)
@@ -118,39 +125,11 @@ jobs:
 
       - name: Prepare isolated acceptance-test dependencies
         shell: bash
-        run: python -m scripts.ci.python_packages pytest==9.1.1 pytest-asyncio==1.3.0 ruamel.yaml==0.18.17 packaging==26.0
+        # The shared state-home guard imports the encrypted SQLite facade.
+        run: python -m scripts.ci.python_packages pytest==9.1.1 pytest-asyncio==1.3.0 ruamel.yaml==0.18.17 packaging==26.0 cryptography==50.0.1
 
       - name: Current installer to PM worker to published command
         shell: bash
         env:
           HERMES_TEST_FILE_RETRIES: '0'
         run: bash scripts/run_tests.sh tests/scripts/test_fresh_source_install.py -q -j 1
-
-  windows:
-    name: install.ps1 protocol surface
-    runs-on: windows-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a # v7.0.1
-
-      # Windows PowerShell 5.1 is what ships with Windows and what `irm | iex`
-      # lands in for most users — the protocol surface must parse there.
-      - name: Protocol version + stage manifest (Windows PowerShell 5.1)
-        shell: powershell
-        run: |
-          $pv = powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install.ps1 -ProtocolVersion
-          if ("$pv" -ne "1") { Write-Error "protocol version '$pv' != 1"; exit 1 }
-          $json = powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install.ps1 -Manifest | ConvertFrom-Json
-          if ($json.protocol_version -ne 1) { Write-Error "manifest protocol_version != 1"; exit 1 }
-          $names = @($json.stages | ForEach-Object { $_.name })
-          if ($names -notcontains "complete") { Write-Error "manifest missing complete stage"; exit 1 }
-          Write-Host "stage manifest ok: $($names -join ' -> ')"
-
-      - name: Protocol version + stage manifest (pwsh 7)
-        shell: pwsh
-        run: |
-          $pv = pwsh -NoProfile -File scripts/install.ps1 -ProtocolVersion
-          if ("$pv" -ne "1") { Write-Error "protocol version '$pv' != 1"; exit 1 }
-          $json = pwsh -NoProfile -File scripts/install.ps1 -Manifest | ConvertFrom-Json
-          if ($json.protocol_version -ne 1) { Write-Error "manifest protocol_version != 1"; exit 1 }
-          Write-Host "stage manifest ok (pwsh 7)"

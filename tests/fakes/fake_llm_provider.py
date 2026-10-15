@@ -32,6 +32,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Callable, Union
 
+
 MODEL_ID = "fake-model"
 
 
@@ -110,7 +111,7 @@ class Raw:
     content_type: str = "application/json"
 
 
-Response = Union[Text, ToolCall, Error, Hang, DropMidStream, StallMidStream, Raw]
+Response = Text | ToolCall | Error | Hang | DropMidStream | StallMidStream | Raw
 Responder = Callable[[dict[str, Any]], Response]
 
 
@@ -151,7 +152,7 @@ class FakeLLMServer:
         self._tool_seq = 0
 
     # lifecycle
-    def __enter__(self) -> "FakeLLMServer":
+    def __enter__(self) -> FakeLLMServer:
         self.start()
         return self
 
@@ -184,6 +185,13 @@ class FakeLLMServer:
     def push(self, *responses: Response) -> None:
         with self._lock:
             self._script.extend(responses)
+
+    def drop_unconsumed(self) -> int:
+        """Discard scripted responses no request consumed; returns how many."""
+        with self._lock:
+            dropped = len(self._script)
+            self._script.clear()
+        return dropped
 
     def _next_main(self, record: dict[str, Any]) -> Response:
         if self._responder is not None:
@@ -231,7 +239,7 @@ def _handler_for(server: FakeLLMServer) -> type[BaseHTTPRequestHandler]:
             self.end_headers()
             self.wfile.write(body)
 
-        def do_GET(self) -> None:  # noqa: N802
+        def do_GET(self) -> None:
             if server.record_get:
                 with server._lock:
                     server.requests.append({
@@ -245,7 +253,7 @@ def _handler_for(server: FakeLLMServer) -> type[BaseHTTPRequestHandler]:
                 return
             self._send_json(404, {"error": {"message": "not found"}})
 
-        def do_POST(self) -> None:  # noqa: N802
+        def do_POST(self) -> None:
             raw = self.rfile.read(int(self.headers.get("Content-Length", 0) or 0))
             try:
                 body = json.loads(raw or b"{}")
@@ -421,8 +429,11 @@ def write_hermes_home(
     provider), retries are capped so fault tests finish quickly, and no real
     provider credential is ever present.
     """
+    from hermes_cli.config_defaults import DEFAULT_CONFIG
+
     home.mkdir(parents=True, exist_ok=True)
     (home / "config.yaml").write_text(
+        f"_config_version: {DEFAULT_CONFIG['_config_version']}\n"
         "model:\n"
         "  provider: custom\n"
         f"  base_url: {base_url}\n"
@@ -430,10 +441,11 @@ def write_hermes_home(
         "  context_length: 128000\n"
         "agent:\n"
         "  api_max_retries: 1\n"
-        # Answered, so an interactive chat never stops on the one-time shared-metrics offer.
+        # Explicit local opt-out keeps every surface non-interactive.
         "telemetry:\n"
         "  shared_metrics:\n"
         "    enabled: false\n"
+        "    send: false\n"
         + extra_config,
         encoding="utf-8",
     )

@@ -13,7 +13,7 @@ import time
 import hermes_cli.models as models_mod
 from hermes_cli.inventory import build_model_options_payload, load_picker_context
 
-_DEAD_PROVIDER = "deepseek"
+_DEAD_PROVIDER = "zai"
 
 
 def _picker_env(monkeypatch, tmp_path, *, hung=None):
@@ -23,7 +23,7 @@ def _picker_env(monkeypatch, tmp_path, *, hung=None):
     provider. Returns ``(live_calls, release_event)``; ``live_calls`` records every live probe.
     """
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
-    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+    monkeypatch.setenv("GLM_API_KEY", "test-key")
     release = threading.Event()
     live_calls: list[str] = []
 
@@ -36,7 +36,7 @@ def _picker_env(monkeypatch, tmp_path, *, hung=None):
     monkeypatch.setattr(models_mod, "provider_model_ids", fake_provider_model_ids)
     monkeypatch.setattr(
         "agent.models_dev.fetch_models_dev",
-        lambda *a, **k: {_DEAD_PROVIDER: {"env": ["DEEPSEEK_API_KEY"], "name": "DeepSeek"}},
+        lambda *a, **k: {_DEAD_PROVIDER: {"env": ["GLM_API_KEY"], "name": "Z.AI"}},
     )
     monkeypatch.setattr("agent.models_dev.PROVIDER_TO_MODELS_DEV", {_DEAD_PROVIDER: _DEAD_PROVIDER})
     monkeypatch.setattr("hermes_cli.providers.HERMES_OVERLAYS", {})

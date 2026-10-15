@@ -132,7 +132,7 @@ class Vault:
     # -- envelopes ----------------------------------------------------------
 
     def _aad(self, purpose: str, relpath: str) -> bytes:
-        return f"hermes-vault|{_VERSION}|{purpose}|{relpath}".encode("utf-8")
+        return f"hermes-vault|{_VERSION}|{purpose}|{relpath}".encode()
 
     def encrypt(self, plaintext: bytes, *, purpose: str, relpath: str) -> bytes:
         nonce = secrets.token_bytes(_NONCE_BYTES)
@@ -434,7 +434,7 @@ def add_key_slot(
     home: Path | str,
     *,
     public_key_raw: bytes | None = None,
-    unlocked_vault: "Vault | None" = None,
+    unlocked_vault: Vault | None = None,
     password: str | bytes | None = None,
 ) -> None:
     """Add an X25519 public-key slot to an existing vault.

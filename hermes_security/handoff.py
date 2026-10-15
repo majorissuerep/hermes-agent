@@ -42,7 +42,8 @@ def adopt_inherited_key() -> bool:
     the first call). True when a vault was unlocked from it."""
     raw_fd = os.environ.pop(KEY_FD_ENV, "")
     if not raw_fd.isdigit():
-        return False
+        from hermes_security.session_authority import adopt_session_authority
+        return adopt_session_authority()
     fd = int(raw_fd)
     try:
         chunks = []

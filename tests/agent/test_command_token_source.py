@@ -25,6 +25,7 @@ from agent.command_token_source import (
     _mint,
     build_command_token_provider,
 )
+from datetime import UTC
 
 
 class TestMinting:
@@ -246,7 +247,7 @@ class TestAbsoluteExpiry:
         from datetime import datetime, timedelta, timezone
 
         return (
-            datetime.now(timezone.utc) + timedelta(seconds=seconds_from_now)
+            datetime.now(UTC) + timedelta(seconds=seconds_from_now)
         ).isoformat()
 
     def test_iso_expiry_yields_a_ttl(self):
@@ -397,7 +398,7 @@ class TestExplicitCallableSurvivesCustomResolution:
             ac.resolve_provider_client("dbx", explicit_api_key=key)
         elif shape == "api_key_branch":
             monkeypatch.setattr(hauth, "resolve_api_key_provider_credentials", lambda provider: {})
-            ac.resolve_provider_client("deepseek", explicit_base_url=self.BASE, explicit_api_key=key)
+            ac.resolve_provider_client("openai-api", explicit_base_url=self.BASE, explicit_api_key=key)
         else:  # pragma: no cover
             raise AssertionError(shape)
         return seen

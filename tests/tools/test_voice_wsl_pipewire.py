@@ -14,7 +14,7 @@ pytestmark = pytest.mark.platforms("linux")
 
 
 def _force_wsl(monkeypatch):
-    import tools.voice_mode as voice_mode
+    from tools import voice_mode
 
     monkeypatch.setattr(voice_mode, "is_wsl", lambda: True)
 
@@ -25,6 +25,7 @@ def _base(monkeypatch):
     monkeypatch.delenv("PIPEWIRE_REMOTE", raising=False)
     monkeypatch.setattr("hermes_constants.is_container", lambda: False)
     monkeypatch.setattr("tools.voice_mode._pulse_socket_reachable", lambda: False)
+    monkeypatch.setattr("tools.voice_mode._wsl_powershell_tts_available", lambda: False)
     sd = MagicMock(); sd.query_devices.return_value = [{"name": "dev"}]
     monkeypatch.setattr("tools.voice_mode._import_audio", lambda: (sd, MagicMock()))
 

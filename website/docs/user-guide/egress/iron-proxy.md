@@ -47,7 +47,7 @@ Once running, the Docker terminal backend automatically:
 - Mounts `~/.hermes/proxy/ca.crt` into the sandbox at `/etc/ssl/certs/hermes-egress-ca.crt`
 - Sets `HTTPS_PROXY`, `HTTP_PROXY`, `REQUESTS_CA_BUNDLE`, `SSL_CERT_FILE`, `CURL_CA_BUNDLE`, `NODE_EXTRA_CA_CERTS` to make every common HTTP runtime route through the proxy and trust the CA
 - Sets `NODE_OPTIONS=--use-openssl-ca` (appended to whatever you already have in `docker_env.NODE_OPTIONS`) so Node.js routes through the OpenSSL store the other CA-bundle vars control — see [Node.js asymmetric CA caveat](#nodejs-asymmetric-ca-caveat) below for the residual gap
-- Adds `--add-host=host.docker.internal:host-gateway` so the sandbox can reach the host-side proxy on Linux (Docker Desktop handles this automatically on macOS/Windows)
+- Adds `--add-host=host.docker.internal:host-gateway` so the sandbox can reach the host-side proxy on Linux (Docker Desktop handles this automatically on macOS)
 - Exports the proxy token under the standard provider env name (for example `OPENROUTER_API_KEY`) plus one `HERMES_PROXY_TOKEN_<ENV_NAME>` diagnostic alias per minted mapping
 
 ## Configuration

@@ -24,9 +24,9 @@ class _FakePool:
 
 
 def _patch_opencode_pool(monkeypatch, *, available: bool):
-    """Make the opencode-go aggregator look configured but with a pool whose
+    """Make the ai-gateway aggregator look configured but with a pool whose
     only credential is (un)available, depending on ``available``."""
-    import hermes_cli.auth as auth
+    from hermes_cli import auth
     import agent.credential_pool as cp
 
     monkeypatch.setattr(
@@ -36,13 +36,13 @@ def _patch_opencode_pool(monkeypatch, *, available: bool):
             "version": 1,
             "providers": {},
             "active_provider": None,
-            "credential_pool": {"opencode-go": {"entries": [{"id": "x"}]}},
+            "credential_pool": {"ai-gateway": {"entries": [{"id": "x"}]}},
         },
     )
     monkeypatch.setattr(
         cp,
         "load_pool",
-        lambda provider: _FakePool(available if provider == "opencode-go" else True),
+        lambda provider: _FakePool(available if provider == "ai-gateway" else True),
     )
 
 
@@ -64,7 +64,7 @@ def test_exhausted_pool_provider_is_not_authenticated(monkeypatch):
 
     _patch_opencode_pool(monkeypatch, available=False)
     slugs = get_authenticated_provider_slugs(current_provider="alibaba")
-    assert "opencode-go" not in slugs
+    assert "ai-gateway" not in slugs
 
 
 def test_opaque_legacy_pool_value_stays_visible(monkeypatch):
@@ -83,7 +83,7 @@ def test_opaque_legacy_pool_value_stays_visible(monkeypatch):
         )(),
     )
 
-    assert _credential_pool_is_usable("opencode-go", raw_pool_present=True)
+    assert _credential_pool_is_usable("ai-gateway", raw_pool_present=True)
 
 
 def test_picker_shows_exhausted_pool_provider(monkeypatch):
@@ -99,7 +99,7 @@ def test_picker_shows_exhausted_pool_provider(monkeypatch):
         custom_providers=[],
     )
     slugs = [p["slug"] for p in providers]
-    assert "opencode-go" in slugs, (
+    assert "ai-gateway" in slugs, (
         "Picker must show exhausted-pool providers so the user can select "
         "a different model under the same provider"
     )

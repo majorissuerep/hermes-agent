@@ -269,6 +269,8 @@ def _session_compression_in_flight(session: dict) -> bool:
     ``_session_has_compression_in_flight``, #56391); this is the local-RPC twin. Both
     blocking reads run off the event loop so a large state.db never freezes the dispatcher.
     """
+    if session.get("_manual_compress_active"):  # held before/after the DB lock row exists (#133504)
+        return True
     agent = session.get("agent")
     sid = str(getattr(agent, "session_id", "") or "") or str(session.get("session_key") or "")
     if not sid:
@@ -335,7 +337,7 @@ def _persist_queued_user_row(session: dict, envelope: dict, display_kind: str | 
         return
     # ``display_metadata`` marker: ``reopen_session`` retires still-marked rows after a restart
     # discarded the in-memory queue (#125577); the drain's replacement row is unmarked.
-    from hermes_state_common import QUEUED_PROMPT_METADATA_KEY
+    from hermes_state.common import QUEUED_PROMPT_METADATA_KEY
     staged = _write_submit_user_row(
         session, envelope.get("text"), display_kind,
         accept_metadata={QUEUED_PROMPT_METADATA_KEY: True})
@@ -367,7 +369,7 @@ def _replace_queued_user_row_for_turn(session: dict, queued: dict, is_dispatchin
     if is_dispatching:
         _persist_submit_user_row(session, queued.get("text"), queued.get("_queued_display_kind"))
     else:
-        from hermes_state_common import QUEUED_PROMPT_METADATA_KEY
+        from hermes_state.common import QUEUED_PROMPT_METADATA_KEY
         _persist_submit_user_row(session, queued.get("text"), queued.get("_queued_display_kind"),
                                  accept_metadata={QUEUED_PROMPT_METADATA_KEY: True})
     fresh = session.get("_submit_user_row")
@@ -411,6 +413,8 @@ def _handle_busy_submit(rid, sid: str, session: dict, text: Any, transport: Any,
     with session["history_lock"]:
         if not session.get("running"):
             return None  # turn ended since prompt.submit's busy check; caller retries on the idle session
+        # Typed while the turn ran, in any busy mode: the running turn no longer counts as unattended.
+        session["_turn_user_input"] = True
         image_paths = list(session.get("attached_images", []))
         if image_paths:
             session["attached_images"] = []  # claim now so a later paste isn't consumed when the turn yields

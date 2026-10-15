@@ -22,7 +22,7 @@ from hermes_cli._subprocess_compat import noninteractive_git_env
 
 def _git(cwd, *args, check=True):
     result = subprocess.run(
-        ["git", *args], cwd=str(cwd), capture_output=True, encoding="utf-8",
+        ["git", *args], check=False, cwd=str(cwd), capture_output=True, encoding="utf-8",
         stdin=subprocess.DEVNULL, env=noninteractive_git_env(),
     )
     if check:
@@ -109,7 +109,7 @@ class TestMaintainPackHealth:
             (repo / f"p{i}.txt").write_text(f"{i}\n", encoding="utf-8")
             _git(repo, "add", "-A")
             _git(repo, "commit", "-qm", f"c{i}")
-            sha = _git(repo, "rev-parse", f"HEAD^{{commit}}").stdout.strip()
+            sha = _git(repo, "rev-parse", "HEAD^{commit}").stdout.strip()
             # One pack per commit object: pipe the sha into pack-objects.
             subprocess.run(
                 ["git", "pack-objects", "-q", str(pack_dir / f"tpack{i}")],

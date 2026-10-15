@@ -71,7 +71,14 @@ def _pairs(entries: list[str]) -> list[tuple[str, str | None]]:
     out: list[tuple[str, str | None]] = []
     for entry in entries:
         module, _, symbol = entry.partition("::")
-        out.append((module, symbol or None))
+        if entry == "hermes_cli::gateway_windows":
+            # Historical _gw_windows() imports the native service backend;
+            # all its callers require is_windows(). Preserve the frozen
+            # history, but scope this requirement to its actual host. The
+            # fork rejects native Windows at entry (PLATFORMS.md).
+            out.append(pytest.param(module, symbol or None, marks=pytest.mark.platforms("windows")))
+        else:
+            out.append((module, symbol or None))
     return out
 
 

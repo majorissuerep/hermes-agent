@@ -22,7 +22,7 @@ def _restart(home, code):
         "home = Path(os.environ['HERMES_HOME']); "
         f"vault.unlock(home, {PASSWORD!r}); "
     )
-    result = subprocess.run([sys.executable, "-c", prelude + code], cwd=ROOT,
+    result = subprocess.run([sys.executable, "-c", prelude + code], check=False, cwd=ROOT,
                             env=env, capture_output=True, text=True, timeout=90)
     assert result.returncode == 0, result.stdout + result.stderr
 

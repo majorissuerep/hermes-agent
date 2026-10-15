@@ -1,4 +1,6 @@
 """Imported turns retain their receipt and cannot bypass the local FIFO."""
+import contextlib
+import queue
 import threading
 from types import SimpleNamespace
 
@@ -18,9 +20,11 @@ def test_refused_input_commits_failed_mailbox_receipt(tmp_path):
     from tools import bot_live_delivery as mailbox
 
     owner = dict(profile_home=str(tmp_path.resolve()), session_id="chat",
-                 lease_id="lease", live_session_id="live")
-    queued = mailbox.deliver_to_live_owner(tmp_path, owner, "refused input")
-    mailbox.claim_pending_delivery(tmp_path, owner)
+                 lease_id="lease", live_session_id="live", deck=True)
+    queued = dict(id='a' * 32, delivery_id='a' * 32, owner=owner, **owner,
+                  status='claimed', message='refused input', created_at=1)
+    with mailbox._locked(tmp_path) as root:
+        mailbox._write(root / (queued['id'] + '.json'), queued)
     agent = SimpleNamespace(session_id="chat")
     session = dict(agent=agent, session_key="chat", history_lock=threading.RLock(), running=True)
     retired = []
@@ -68,12 +72,14 @@ def test_imported_crash_marker_never_autocontinues(tmp_path):
     assert schedule("live", {}, "chat") is None
 
 
-def test_local_work_blocks_mailbox_claim_without_consuming_envelope(monkeypatch, tmp_path):
+def test_viewer_poller_never_discovers_or_claims_bot_execution(monkeypatch, tmp_path):
+    import queue
+    import time
     import tools.bot_live_delivery as mailbox
     author = {"id": "bot:coder", "name": "coder", "is_bot": True}
     pending = [{"id": "receipt", "message": "imported", "author": author}]
     # The envelope is pinned to the live runtime "live"; the poller claims with ITS OWN lease pin.
-    monkeypatch.setattr(mailbox, "claim_pending_delivery", lambda home, pinned: (
+    monkeypatch.setattr(mailbox, "claim_pending_deck_delivery", lambda home, pinned: (
         pending.pop(0) if pinned["live_session_id"] == "live" and pinned["lease_id"] == "lease" else None))
     receipts = []
     monkeypatch.setattr(mailbox, "complete_delivery", lambda *args, **kwargs: receipts.append((args, kwargs)))
@@ -108,7 +114,7 @@ def test_mailbox_poll_skips_owner_lookup_without_a_mailbox(monkeypatch, tmp_path
     """No mailbox directory → no mailbox lock per pass; the claim runs once one exists, pinned to own lease."""
     import tools.bot_live_delivery as mailbox
     lookups = []
-    monkeypatch.setattr(mailbox, "claim_pending_delivery", lambda home, pinned: lookups.append(home) or None)
+    monkeypatch.setattr(mailbox, "claim_pending_deck_delivery", lambda home, pinned: lookups.append(home) or None)
     poll = rebind(session_notifications._poll_bot_live_delivery_once, {
         "_session_home": lambda session: tmp_path, "_session_turn_admission": _session_turn_admission})
     session = {"history_lock": threading.RLock(), "agent": object(), "session_key": "chat",
@@ -152,7 +158,7 @@ def test_failing_mailbox_poll_warns_once_per_window():
 def test_mailbox_poll_delivers_past_a_schema_damaged_ticket(monkeypatch, tmp_path):
     """A `{}` ticket beside a healthy envelope must not wedge the live poller's claim (real mailbox on disk)."""
     import tools.bot_live_delivery as mailbox
-    owner = dict(profile_home=str(tmp_path.resolve()), session_id="chat", lease_id="lease", live_session_id="live")
+    owner = dict(profile_home=str(tmp_path.resolve()), session_id="chat", lease_id="lease", live_session_id="live", deck=True)
     queued = mailbox.deliver_to_live_owner(tmp_path, owner, "healthy", delivery_id="d" * 32)
     (mailbox._root(tmp_path) / f"{'a' * 32}.json").write_text("{}", encoding="utf-8")
     submitted = []
@@ -171,3 +177,30 @@ def test_mailbox_poll_delivers_past_a_schema_damaged_ticket(monkeypatch, tmp_pat
     assert poll("live", session) is True
     assert submitted == ["healthy"]
     assert mailbox.read_delivery_result(tmp_path, queued["delivery_id"])["status"] == "settled"
+
+
+def test_canonical_poller_does_not_claim_legacy_bot_mailbox(monkeypatch, tmp_path):
+    import time
+    import tools.bot_live_delivery as mailbox
+    from tools.process_registry import process_registry
+    calls = []
+    monkeypatch.setattr(mailbox, 'find_canonical_live_owner', lambda home: calls.append(home))
+    stop = threading.Event()
+    events = queue.Queue()
+    events.put({'type': 'owned-completion'})
+    monkeypatch.setattr(process_registry, 'completion_queue', events)
+    delivered = []
+    poll = rebind(session_notifications._notification_poller_scoped_loop, {
+        'time': time, '_LOOP_POLL_SECONDS': 0, '_KANBAN_POLL_SECONDS': 0,
+        '_poll_bot_live_delivery_once': lambda *a: calls.append('legacy-claim'),
+        '_maybe_fire_tui_loop_tick': lambda *a: None,
+        '_maybe_fire_tui_heartbeat_tick': lambda *a: None,
+        '_notif_poll_kanban': lambda *a: None,
+        '_session_profile_runtime_scope': lambda session: contextlib.nullcontext(),
+        '_session_home': lambda session: tmp_path,
+        '_notif_handle_ready': lambda sid, session, ready, *a, **kw: (delivered.extend(ready), stop.set()),
+    })
+    poll(stop, 'live', {'agent': object(), 'history_lock': threading.RLock(), 'session_key': 'chat',
+                      'active_session_lease': SimpleNamespace(lease_id='lease', released=False)})
+    assert delivered == [{'type': 'owned-completion'}]
+    assert calls == []

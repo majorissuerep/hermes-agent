@@ -14,10 +14,10 @@ from __future__ import annotations
 import pytest
 
 from agent.agent_init import _resolve_compression_threshold
+from agent.auxiliary_compaction import _is_codex_gpt54_or_gpt55
 from agent.auxiliary_client import (
     _compression_threshold_for_model,
     _is_arcee_trinity_thinking,
-    _is_codex_gpt54_or_gpt55,
     _is_codex_spark,
 )
 

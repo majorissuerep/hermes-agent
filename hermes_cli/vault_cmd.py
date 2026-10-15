@@ -159,7 +159,7 @@ def cmd_vault(args: Any) -> int:
         print("→ Backing up and migrating (this can take a minute)...")
         report = mig.migrate_home(home, password)
         if not report.ok:
-            print(f"✗ Migration finished WITH FAILURES (backup kept):")
+            print("✗ Migration finished WITH FAILURES (backup kept):")
             for failure in report.failures:
                 print(f"    {failure}")
             if report.backup_path:
@@ -230,7 +230,7 @@ def cmd_vault(args: Any) -> int:
         envelopes, dbs, frames = status["encrypted_files"]
         print(f"  Encrypted files  : {envelopes} envelope(s), {dbs} database(s), {frames} frame stream(s)")
         if not status["unlocked"]:
-            print(f"  (use 'hermes secure-vault unlock', or HERMES_VAULT_PRIVATE_KEY=<key-file path>, to unlock)")
+            print("  (use 'hermes secure-vault unlock', or HERMES_VAULT_PRIVATE_KEY=<key-file path>, to unlock)")
         return 0
 
     if command == "unlock":
@@ -329,12 +329,7 @@ def cmd_vault(args: Any) -> int:
         if not vault_mod.vault_exists(home):
             print(f"✗ No vault at {home}; run 'hermes secure-vault migrate' first")
             return 1
-        password = _password_from_env_or_prompt()
-        try:
-            vault_mod.unlock(home, password)
-        except vault_errors.WrongMasterPasswordError:
-            print("✗ Wrong master password")
-            return 1
+        gate_locked_vault(args, home)
         from hermes_security.migrate import repair_clobbered_state
 
         report = repair_clobbered_state(home)
@@ -387,6 +382,7 @@ def gate_locked_vault(args: Any, home) -> None:
     if vault_mod.is_unlocked(home):
         return
     from hermes_security.handoff import adopt_inherited_key
+    from hermes_security.session_authority import SessionAuthorityError
 
     try:
         # A detached child (the session host) inherits its launcher's unlocked key over a pipe fd.
@@ -419,12 +415,15 @@ def gate_locked_vault(args: Any, home) -> None:
 
         try:
             load_hermes_dotenv()
-        except Exception as exc:  # noqa: BLE001 - a bad .env must not block 'secure-vault repair' advice
+        except Exception as exc:
             print(
                 f"⚠ hermes: sealed .env not loaded ({type(exc).__name__}); "
                 "run 'hermes secure-vault repair'",
                 file=sys.stderr,
             )
+    except SessionAuthorityError as exc:
+        print(f"✗ {exc}", file=sys.stderr)
+        raise SystemExit(2) from None
     except vault_errors.WrongMasterPasswordError:
         print("✗ Wrong master password")
         raise SystemExit(2)

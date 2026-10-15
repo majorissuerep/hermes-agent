@@ -14,6 +14,20 @@ import json
 from io import BytesIO
 from unittest.mock import patch
 
+import pytest
+
+
+@pytest.fixture
+def vision_veto(monkeypatch):
+    import providers
+    from providers.base import ProviderProfile
+
+    providers.list_providers()
+    monkeypatch.setattr(providers, "_REGISTRY", dict(providers._REGISTRY))
+    monkeypatch.setattr(providers, "_SOURCES", dict(providers._SOURCES))
+    providers.register_provider(ProviderProfile(name="fixture-vision-veto", supports_vision=True,
+                                               supports_vision_tool_messages=False))
+    return "fixture-vision-veto"
 
 from tools.vision_tools import (
     _build_native_vision_tool_result,
@@ -90,20 +104,20 @@ class TestSupportsMediaInToolResults:
         assert _supports_media_in_tool_results("", "anything") is False
         assert _supports_media_in_tool_results(None, "anything") is False  # type: ignore[arg-type]
 
-    def test_profile_tool_message_veto_overrides_supports_vision(self):
+    def test_profile_tool_message_veto_overrides_supports_vision(self, vision_veto):
         """supports_vision_tool_messages=False is a hard veto even when the
-        profile declares supports_vision=True (xiaomi/MiMo 400s on list-type
-        tool-result content, #89981)."""
-        assert _supports_media_in_tool_results("xiaomi", "mimo-v2.5") is False
+        profile declares supports_vision=True (list-type tool-result content
+        is a separate transport capability)."""
+        assert _supports_media_in_tool_results(vision_veto, "fixture-model") is False
 
-    def test_profile_veto_applies_even_when_vision_capable_lookup_agrees(self):
+    def test_profile_veto_applies_even_when_vision_capable_lookup_agrees(self, vision_veto):
         """A capability source marking the model vision-capable must not
         re-open the native fast path for a provider that rejects it."""
         from tools.vision_tools import _should_use_native_vision_fast_path
         from agent.auxiliary_client import set_runtime_main, clear_runtime_main
         from agent import image_routing
 
-        set_runtime_main("xiaomi", "mimo-v2.5")
+        set_runtime_main(vision_veto, "fixture-model")
         try:
             with patch.object(
                 image_routing, "decide_image_input_mode", return_value="native"
@@ -114,13 +128,13 @@ class TestSupportsMediaInToolResults:
         finally:
             clear_runtime_main()
 
-    def test_openrouter_xiaomi_route_vetoes_native_fast_path(self):
-        """A vision-capable catalog entry cannot override a routed Xiaomi veto."""
+    def test_routed_profile_vetoes_native_fast_path(self, vision_veto):
+        """A vision-capable catalog entry cannot override a routed profile's veto."""
         from tools.vision_tools import _should_use_native_vision_fast_path
         from agent.auxiliary_client import set_runtime_main, clear_runtime_main
         from agent import image_routing
 
-        set_runtime_main("openrouter", "xiaomi/mimo-v2.5")
+        set_runtime_main("ai-gateway", f"{vision_veto}/fixture-model")
         try:
             with patch.object(
                 image_routing, "decide_image_input_mode", return_value="native"

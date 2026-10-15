@@ -7,7 +7,6 @@ commands package the current desktop build; they do not stage a fresh runtime.
 
 | Target | Artifact | Update owner |
 |---|---|---|
-| Windows x64 / ARM64, sideload | Signed per-architecture MSIX packages, combined into a universal `.msixbundle`; `.appinstaller` descriptor | Windows App Installer |
 | Windows x64 / ARM64, Store | Store-identity MSIX packages and a separate Store bundle | Microsoft Store |
 | macOS ARM64 / x64 | Signed, notarized `Hermes.app` in DMG and ZIP artifacts | `electron-updater` with Squirrel.Mac |
 | Linux x64 / ARM64 | Local builder can produce AppImage | External replacement; Linux desktop release legs are disabled |
@@ -67,6 +66,42 @@ The macOS custom signer retains the builder's entitlements and file selection.
 It refreshes digests after child signatures and before the outer app signature.
 Unsigned macOS builds refresh them at the end of `afterPack`.
 Do not refresh facts in `afterSign`: that changes resources covered by the signature.
+
+## Local test build
+
+To build the commit you have checked out, without a tag and without pushing:
+
+```sh
+scripts/build-bundle.sh            # macOS DMG/ZIP, Linux AppImage
+```
+
+```powershell
+scripts\build-bundle.ps1           # Windows sideload MSIX
+scripts\build-bundle.ps1 -Store    # Windows Store MSIX
+```
+
+The checkout must be clean, because the build packages `HEAD`. Both scripts pass
+`--clean` to the driver. The driver removes the previous outputs only after it holds
+the checkout lock, so a second run cannot delete a build that is still going. Output
+goes to `apps/desktop/release/`.
+
+The scripts do not sign or notarize. They remove `AZURE_SIGN_*` (Windows) and the
+`CSC_*`/`APPLE_*` signing variables (macOS, Linux) from the build, and restore your
+Windows shell afterward. macOS can still sign nested binaries when it finds a
+Developer ID in your keychain.
+
+`-Store` allocates a local claim tag `rc.<N>-vX.Y.Z` (N starts at 900) for the
+next patch after the newest published stable tag, and deletes it when the
+build ends. The tag is never pushed. Each architecture builds on its own host.
+`-Store` prints the claim timestamp as `HERMES_RELEASE_EPOCH=<n>`. To combine the
+```powershell
+$env:HERMES_RELEASE_EPOCH = '<n from the build>'
+node scripts/bundle-store-msixbundle.mjs --tag vX.Y.Z
+```
+
+Use the epoch from ONE claim for both architectures. The tag is already deleted, so
+without the epoch the bundle step finds no release timestamp. On Windows, use a
+short checkout path such as `C:\hsb`.
 
 ## Complete native build
 
@@ -164,7 +199,7 @@ defaults into the desktop app, for example:
 
 ```sh
 python scripts/release.py --build-commit REV --remote fork --publish \
-  --bundle-env HERMES_GUEST_ONBOARDING=1 \
+  --bundle-env HERMES_PREVIEW_FULL_CONNECTORS=1 \
   --bundle-env HERMES_DATA_DIR_SUFFIX=magic-test \
   --bundle-unset HERMES_HOME
 ```
@@ -187,8 +222,7 @@ For local commit builds, `HERMES_BUNDLE_ENV_JSON` accepts a JSON object whose
 string values are defaults and whose `null` values are explicit clears. For example,
 `{"HERMES_HOME":null,"HERMES_DATA_DIR_SUFFIX":"magic-test"}`. Only
 `HERMES_HOME`, `HERMES_DATA_DIR_SUFFIX`, `HERMES_DESKTOP_USER_DATA_DIR`,
-`HERMES_SHARED_AUTH_DIR`, `HERMES_GUEST_ONBOARDING`, and `HERMES_SKIP_INTRO`
-are accepted. Process-control variables such as `NODE_OPTIONS` and `PATH`
+`HERMES_SHARED_AUTH_DIR`, and `HERMES_PREVIEW_FULL_CONNECTORS` are accepted. Process-control variables such as `NODE_OPTIONS` and `PATH`
 are rejected. These settings are not applied to the build runner itself.
 Commit archive keys still use the SHA, so use a fresh commit for different
 defaults: an existing artifact is never overwritten with different bytes.
@@ -239,7 +273,7 @@ arguments. Local unsigned builds are not release-acceptance artifacts.
 
 The packaging hooks sanitize invalid PE certificate tables, then sign and
 timestamp payload EXEs/DLLs. The product EXE receives its signature after
-resource edits. `scripts/sign-msix.mjs` signs the sideload package envelope.
+resource edits.
 Store package envelopes remain unsigned for Partner Center to sign.
 
 Unchanged payload files reuse verified signatures from
@@ -280,11 +314,17 @@ relaunch waiter is registered before the install request. Unknown checks,
 cancellation and request failures do not count as successful updates. Native
 acceptance requires a Store-acquired package or flight, not a sideloaded MSIX.
 
-On Windows bundles, PM copies the verified pinned base Python to its writable
-store for uv builds. The app and execution aliases retain their signed bundled
-launchers and bundled Python, which load the selected dependency generation.
-The new venv's generated console scripts must not replace those launchers:
-out-of-package Python cannot launch the packaged tools.
+On Windows bundles, PM builds dependency generations on a verified writable
+copy of the bundled Python in its user store. A venv's `Scripts\python.exe` is a
+redirector outside the package. Windows refuses it (WinError 5) when it starts the
+packaged interpreter, and uv runs that redirector during every lock, sync and
+`pip check`. Hermes never runs a venv's own executables. The app and execution
+aliases keep their signed bundled launchers, and children that need a
+generation's packages start through `pm.environments.venv_command`: the bundled
+Python with `-S` plus `pm/_venv_entry.py`, which attaches the generation's
+site-packages. Processes started from the bundled Python keep package access to
+the bundled git, rg and the PM worker. The new venv's generated console scripts
+must not replace the launchers, and are kept off `PATH`.
 
 Sideload stable versions are `X.Y.Z.0`. Canary revisions derive from elapsed
 minutes after the stable baseline. The release script rejects ambiguous or

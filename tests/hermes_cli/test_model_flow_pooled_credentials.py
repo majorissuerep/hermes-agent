@@ -29,14 +29,10 @@ class _ExhaustedPool:
         return None
 
 
-
-
-
-
 def test_generic_api_key_flow_passes_pool_key_to_existing_key_prompt(monkeypatch):
     from hermes_cli.model_setup_flows import _model_flow_api_key_provider
 
-    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    monkeypatch.delenv("GLM_API_KEY", raising=False)
     captured: dict[str, str] = {}
 
     def capture_prompt(_pconfig, existing_key, **_kwargs):
@@ -48,11 +44,9 @@ def test_generic_api_key_flow_passes_pool_key_to_existing_key_prompt(monkeypatch
         patch("agent.credential_pool.load_pool", return_value=_AvailablePool()),
         patch("hermes_cli.main_provider_setup._prompt_api_key", side_effect=capture_prompt),
     ):
-        _model_flow_api_key_provider({}, "deepseek")
+        _model_flow_api_key_provider({}, "zai")
 
     assert captured["existing_key"] == "pool-secret"
-
-
 
 
 def test_bedrock_flow_sees_pool_key_when_no_env(monkeypatch, capsys):

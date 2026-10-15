@@ -56,10 +56,6 @@ curl -fsSL https://raw.githubusercontent.com/majorissuerep/hermes-agent/main/scr
 
 On Windows, run
 
-```powershell
-iex (irm https://raw.githubusercontent.com/majorissuerep/hermes-agent/main/scripts/install.ps1)
-```
-
 Prefer to review first? Download [`install.sh`](https://raw.githubusercontent.com/majorissuerep/hermes-agent/main/scripts/install.sh), inspect it, then run it.
 
 After it finishes, reload your shell:

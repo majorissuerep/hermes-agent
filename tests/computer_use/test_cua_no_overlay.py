@@ -79,7 +79,7 @@ class TestNoOverlayFlag:
             assert cua_backend._cua_no_overlay() is True
 
     @pytest.mark.platforms("linux")
-    def test_linux_wayland_keeps_overlay(self, monkeypatch):
+    def test_linux_wayland_respects_wsl_policy(self, monkeypatch):
         """Wayland desktop keeps the overlay: the compositor owns the
         overlay surface lifecycle, so it cannot get stuck above every
         workspace the way an X11 window can."""
@@ -87,7 +87,8 @@ class TestNoOverlayFlag:
         monkeypatch.setenv("WAYLAND_DISPLAY", "wayland-0")
         monkeypatch.setenv("XDG_SESSION_TYPE", "wayland")
         with patch("hermes_cli.config.load_config", return_value={}):
-            assert cua_backend._cua_no_overlay() is False
+            from hermes_platform.host.runtime import is_wsl
+            assert cua_backend._cua_no_overlay() is is_wsl()
 
     @pytest.mark.platforms("linux")
     def test_linux_x11_explicit_false_overrides_auto_detect(self, monkeypatch):
@@ -174,7 +175,7 @@ class TestMcpInvocationUsesResolvedCommand:
                  return_value=True,
              ) as mock_probe:
             cua_backend_driver._cua_driver_supports_no_overlay.cache_clear()
-            cmd, args = _resolve_mcp_invocation("/usr/bin/cua-driver")
+            cmd, _args = _resolve_mcp_invocation("/usr/bin/cua-driver")
         assert cmd == "/opt/relocated/cua-driver"
         # The support probe must be called with the manifest-resolved
         # command, not the input driver_cmd argument.

@@ -28,7 +28,7 @@ class TestContextRouteMismatchNamedCustomProvider:
                 None,
                 "http://127.0.0.1:8080/v1",
                 "custom-local-agentw",
-                "openrouter",
+                "openai-api",
             )
             is True
         )
@@ -49,8 +49,8 @@ class TestContextRouteMismatchNamedCustomProvider:
             _context_route_mismatch(
                 None,
                 "http://127.0.0.1:8080/v1",
-                "openrouter",
-                "openrouter",
+                "openai-api",
+                "openai-api",
             )
             is True
         )

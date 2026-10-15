@@ -33,7 +33,7 @@ Sources of truth — two axes, composed per target:
 Desktop build identity comes from HERMES_PAYLOAD_TAG / HERMES_BUILD_COMMIT:
 Canary uses yellow/dark-yellow backgrounds. Commit builds use red/dark-red
 and a seven-character SHA badge. The girl and tile geometry do not change.
-Only apps/desktop outputs use this identity. Website, bootstrap, dashboard,
+Only apps/desktop outputs use this identity. Website, dashboard,
 and the shared master SVGs retain the default brand.
 
 The girl's position and uniform scale are registered to the reference artwork.
@@ -52,7 +52,7 @@ Dependencies:
     Pillow and resvg-py are core runtime dependencies; run this file with a
     Hermes runtime interpreter (scripts/generate-icons.mjs uses HERMES_PYTHON).
 
-Outputs (99 files):
+Outputs:
   assets/icon-master.svg                              generated light master
   assets/icon-master-dark.svg                         generated dark master
   apps/desktop/assets/icon.png                        1024x1024 squircle (light)
@@ -65,19 +65,12 @@ Outputs (99 files):
   apps/desktop/assets/icon.icon/icon.json             Icon Composer manifest (macOS 26)
   apps/desktop/assets/icon.icon/Assets/art-*.png      1024 girl (+ commit badge), light/dark
   apps/desktop/assets/icon.icon/Assets/mono.png       1024 Clear/Tinted material (grayscale + opacity)
-  apps/bootstrap-installer/src-tauri/icons/icon.icon/**  same package, unbranded (Tauri bundle.icon)
   apps/desktop/assets/appx/<Logo>[.scale-N].png       MSIX logos at 100/125/150/200/400% (wide: squircle centered)
   apps/desktop/assets/appx/Square44x44Logo.targetsize-N[_altform-(light)unplated].png
                                                       taskbar/Start bitmaps 16..256; unplated = dark tile
   apps/desktop/public/apple-touch-icon.png            1024x1024 squircle
   apps/desktop/public/nous-girl.png                   256x256 squircle, black girl (light mark)
   apps/desktop/public/nous-girl-dark.png              256x256 squircle, white girl (dark mark)
-  apps/bootstrap-installer/src-tauri/icons/32x32.png       32x32
-  apps/bootstrap-installer/src-tauri/icons/128x128.png     128x128
-  apps/bootstrap-installer/src-tauri/icons/128x128@2x.png  256x256
-  apps/bootstrap-installer/src-tauri/icons/icon.ico        16,32,64,128,256
-  apps/bootstrap-installer/src-tauri/icons/icon.icns       16..1024
-  apps/bootstrap-installer/public/nous-girl.png   256x256 squircle mark (light)
   website/static/img/logo.png                     1772x1799 girl alone, transparent (light)
   website/static/img/logo-dark.png                1772x1799 girl alone, transparent (dark)
   website/static/img/nous-logo.png                150x150 on white (opaque)
@@ -221,18 +214,11 @@ CHECK_SIZES: dict[str, tuple[str, tuple[int, int]]] = {
     **({"apps/desktop/assets/icon.icon/Assets/border-light.png": ("PNG", (1024, 1024)),
         "apps/desktop/assets/icon.icon/Assets/border-dark.png": ("PNG", (1024, 1024))} if BORDER_ENABLED else {}),
     "apps/desktop/assets/icon.icon/Assets/mono.png": ("PNG", (1024, 1024)),
-    "apps/bootstrap-installer/src-tauri/icons/icon.icon/Assets/art-light.png": ("PNG", (1024, 1024)),
-    "apps/bootstrap-installer/src-tauri/icons/icon.icon/Assets/art-dark.png": ("PNG", (1024, 1024)),
-    "apps/bootstrap-installer/src-tauri/icons/icon.icon/Assets/mono.png": ("PNG", (1024, 1024)),
     "apps/desktop/assets/icon.icon/Assets/art-light.png": ("PNG", (1024, 1024)),
     "apps/desktop/assets/icon.icon/Assets/art-dark.png": ("PNG", (1024, 1024)),
     "apps/desktop/public/apple-touch-icon.png": ("PNG", (1024, 1024)),
     "apps/desktop/public/nous-girl.png": ("PNG", (256, 256)),
     "apps/desktop/public/nous-girl-dark.png": ("PNG", (256, 256)),
-    "apps/bootstrap-installer/src-tauri/icons/32x32.png": ("PNG", (32, 32)),
-    "apps/bootstrap-installer/src-tauri/icons/128x128.png": ("PNG", (128, 128)),
-    "apps/bootstrap-installer/src-tauri/icons/128x128@2x.png": ("PNG", (256, 256)),
-    "apps/bootstrap-installer/public/nous-girl.png": ("PNG", (256, 256)),
     "website/static/img/logo.png": ("PNG", (1772, 1799)),
     "website/static/img/logo-dark.png": ("PNG", (1772, 1799)),
     "website/static/img/nous-logo.png": ("PNG", (150, 150)),
@@ -267,18 +253,6 @@ TARGETS: list[tuple[str, str, object]] = [
     ("apps/desktop/assets/icon-mac.png", "png_mac", 1024),
     ("apps/desktop/public/nous-girl.png", "girl_light", 256),
     ("apps/desktop/public/nous-girl-dark.png", "girl_dark", 256),
-    ("apps/bootstrap-installer/src-tauri/icons/32x32.png", "png", 32),
-    ("apps/bootstrap-installer/src-tauri/icons/128x128.png", "png", 128),
-    ("apps/bootstrap-installer/src-tauri/icons/128x128@2x.png", "png", 256),
-    ("apps/bootstrap-installer/src-tauri/icons/icon.ico", "ico", [16, 32, 64, 128, 256]),
-    ("apps/bootstrap-installer/src-tauri/icons/icon.icns", "icns", None),
-    # Tauri's bundler compiles an Icon Composer package from `bundle.icon`
-    # (actool >= 26) into Assets.car; the unbranded twin of the desktop package.
-    ("apps/bootstrap-installer/src-tauri/icons/icon.icon/icon.json", "icon_manifest", None),
-    ("apps/bootstrap-installer/src-tauri/icons/icon.icon/Assets/art-light.png", "icon_art", "black"),
-    ("apps/bootstrap-installer/src-tauri/icons/icon.icon/Assets/art-dark.png", "icon_art", "white"),
-    ("apps/bootstrap-installer/src-tauri/icons/icon.icon/Assets/mono.png", "icon_mono", None),
-    ("apps/bootstrap-installer/public/nous-girl.png", "girl_light", 256),
     ("website/static/img/logo.png", "logo", None),
     ("website/static/img/logo-dark.png", "logo_dark", None),
     ("website/static/img/nous-logo.png", "png_white", 150),
@@ -321,7 +295,7 @@ def girl_path(art: IconArt, girl: str) -> str:
     undeclared inkscape/sodipodi prefixes)."""
     if girl not in art.paths:
         src = art.girls[girl].read_text(encoding="utf-8-sig")
-        m = re.search(r"<path\b.*?/>", src, re.S)
+        m = re.search(r"<path\b.*?/>", src, re.DOTALL)
         assert m, f"no <path> found in {art.girls[girl].name}"
         path = re.sub(r'\s+(inkscape|sodipodi):[a-zA-Z-]+="[^"]*"', "", m.group(0))
         art.paths[girl] = path
@@ -881,7 +855,7 @@ def cmd_write(source: Path, out: Path) -> int:
             selected = desktop_art if rel.startswith("apps/desktop/") else art
             path.write_bytes(target_bytes(selected, kind, arg))
             written += 1
-        except Exception as exc:  # noqa: BLE001 - report all, then fail
+        except Exception as exc:
             failures += 1
             print(f"  !! {rel}: FAILED ({exc})")
     print(f"[write] wrote {written}/{len(TARGETS)} files")
@@ -926,7 +900,7 @@ def cmd_check(source: Path, out: Path) -> int:
         try:
             selected = desktop_art if rel.startswith("apps/desktop/") else art
             target_bytes(selected, kind, arg)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             problems.append(f"{rel}: REGENERATE FAILED ({exc})")
 
     # PNG targets must have the expected format + size
@@ -939,7 +913,7 @@ def cmd_check(source: Path, out: Path) -> int:
             im = Image.open(path)
             if im.format != fmt or im.size != size:
                 problems.append(f"{rel}: got {im.format} {im.size}, expected {fmt} {size}")
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             problems.append(f"{rel}: UNREADABLE ({exc})")
 
     # squircles must keep transparent corners (alpha extrema include 0)
@@ -967,14 +941,12 @@ def cmd_check(source: Path, out: Path) -> int:
         for i in range(count):
             entry = data[6 + i * 16 : 6 + (i + 1) * 16]
             w = entry[0] or 256
-            h = entry[1] or 256
             sizes.append(w)
         return sorted(set(sizes))
 
     for rel, sizes in (
         ("apps/desktop/assets/icon.ico", [16, 24, 32, 48, 64, 128, 256]),
         ("apps/desktop/assets/icon-dark.ico", [16, 24, 32, 48, 64, 128, 256]),
-        ("apps/bootstrap-installer/src-tauri/icons/icon.ico", [16, 32, 64, 128, 256]),
     ):
         path = out / rel
         if not path.exists():
@@ -984,7 +956,7 @@ def cmd_check(source: Path, out: Path) -> int:
             got = ico_sizes(path)
             if got != sizes:
                 problems.append(f"{rel}: ICO frames {got}, expected {sizes}")
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             problems.append(f"{rel}: UNREADABLE ({exc})")
 
     if not problems:

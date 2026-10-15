@@ -39,7 +39,7 @@ class ConsoleCommand:
     path: tuple[str, ...]
     usage: str
     summary: str
-    handler: Callable[["HermesConsoleEngine", list[str]], str]
+    handler: Callable[[HermesConsoleEngine, list[str]], str]
     mutating: bool = False
     confirmation: str = ""
 
@@ -225,7 +225,7 @@ class _CliSurface:
 
 # Memoized: the surface is process-static, but the dashboard opens a fresh engine per
 # /api/console connection and would otherwise re-import + re-parse it on every reconnect.
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def _surface_summaries(surface: _CliSurface, root: str) -> dict[tuple[str, ...], str]:
     try:
         return _summaries_from_parser(surface.build(root, live=False))
@@ -292,8 +292,7 @@ _CLI_FAMILIES: dict[str, tuple[_CliSurface, str]] = {
     "memory": (_sub("memory", "build_memory_parser", "cmd_memory"), "status, *off, *reset"),
     "auth": (
         _sub("auth", "build_auth_parser", "cmd_auth"),
-        "list, status, *reset, *priority, *refresh, *add, *remove, *logout, spotify status, *spotify login, "
-        "*spotify logout"),
+        "list, status, *reset, *priority, *refresh, *add, *remove, *logout"),
     "pairing": (
         _sub("pairing", "build_pairing_parser", "cmd_pairing"),
         "list, *approve, *revoke, *clear-pending"),
@@ -335,7 +334,7 @@ _SEND_SURFACE = _CliSurface("adder", "hermes_cli.send_cmd", "register_send_subpa
 
 
 def _register_command_family(
-    engine: "HermesConsoleEngine", root: str, surface: _CliSurface, paths: str) -> None:
+    engine: HermesConsoleEngine, root: str, surface: _CliSurface, paths: str) -> None:
     summaries = _surface_summaries(surface, root)
     namespace_update = _apply_confirmed_defaults if surface.kind in _CONFIRMED_KINDS else None
     for child_path, mutating in _paths(paths):
@@ -441,7 +440,7 @@ class HermesConsoleEngine:
 
     def register(
         self, path: Iterable[str], usage: str, summary: str,
-        handler: Callable[["HermesConsoleEngine", list[str]], str], *,
+        handler: Callable[[HermesConsoleEngine, list[str]], str], *,
         mutating: bool = False, confirmation: str = "") -> None:
         key = tuple(path)
         self.commands[key] = ConsoleCommand(key, usage, summary, handler, mutating, confirmation)
@@ -562,7 +561,7 @@ def _status(_engine: HermesConsoleEngine, args: list[str]) -> str:
 
 _doctor = _simple_command(
     "doctor", "hermes_cli.doctor", "run_doctor", lambda: (SimpleNamespace(fix=False, ack=None),))
-_config_show = _simple_command("config show", "hermes_cli.config", "show_config")
+_config_show = _simple_command("config show", "hermes_cli.config_show", "show_config")
 _cron_status = _simple_command("cron status", "hermes_cli.cron", "cron_status")
 
 
@@ -599,7 +598,7 @@ def _sessions_list(_engine: HermesConsoleEngine, args: list[str]) -> str:
     ns = _parse("sessions list", args, (("--limit",), dict(type=int, default=20)))
     if ns.limit < 1 or ns.limit > 200:
         raise ConsoleCommandError("sessions list --limit must be between 1 and 200")
-    from hermes_state_sessions import INTERNAL_LISTING_SOURCES
+    from hermes_state.sessions import INTERNAL_LISTING_SOURCES
     with _session_db() as db:
         sessions = db.list_sessions_rich(
             exclude_sources=list(INTERNAL_LISTING_SOURCES), limit=ns.limit, order_by_last_active=True)
@@ -608,7 +607,7 @@ def _sessions_list(_engine: HermesConsoleEngine, args: list[str]) -> str:
 
 def _sessions_stats(_engine: HermesConsoleEngine, args: list[str]) -> str:
     _expect_no_args(args, "sessions stats")
-    from hermes_state_sessions import INTERNAL_LISTING_SOURCES
+    from hermes_state.sessions import INTERNAL_LISTING_SOURCES
     with _session_db() as db:
         total = db.session_count()
         listable = db.session_count(exclude_children=True, exclude_sources=list(INTERNAL_LISTING_SOURCES))
@@ -703,7 +702,7 @@ def _sessions_optimize(_engine: HermesConsoleEngine, args: list[str]) -> None:
     # accept would make this command refuse forever whenever a gateway is running.
     ns = _parse("sessions optimize", args, (("--force",), dict(action="store_true")))
     with _session_db(read_only=False) as db:
-        from hermes_state_holders import held_store_refusal
+        from hermes_state.holders import held_store_refusal
         refusal = None if ns.force else held_store_refusal(
             db.db_path, command="optimize", force_hint="`sessions optimize --force`")
         if refusal:
@@ -717,7 +716,7 @@ def _sessions_repair(_engine: HermesConsoleEngine, args: list[str]) -> int | Non
         "sessions repair", args, (("--check-only",), dict(action="store_true")),
         (("--no-backup",), dict(action="store_true")))
     from hermes_state import DEFAULT_DB_PATH
-    from hermes_state_repair import _db_opens_cleanly, repair_state_db_schema
+    from hermes_state.repair import _db_opens_cleanly, repair_state_db_schema
     db_path = DEFAULT_DB_PATH
     if not db_path.exists():
         print(f"No session database at {db_path} (nothing to repair).")

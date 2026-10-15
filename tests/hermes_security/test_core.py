@@ -55,7 +55,7 @@ def test_wrong_password_rejected(fresh_home):
 
 def test_envelope_roundtrip_and_restart(fresh_home):
     v = hv.get_vault(fresh_home)
-    secret = "api_key=sk-live-12345\n".encode()
+    secret = b"api_key=sk-live-12345\n"
     v.write_bytes(".env", secret, purpose="env")
     on_disk = (fresh_home / ".env").read_bytes()
     assert b"sk-live" not in on_disk

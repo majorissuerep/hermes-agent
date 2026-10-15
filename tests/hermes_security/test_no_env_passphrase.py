@@ -56,7 +56,7 @@ def test_env_passphrase_does_not_unlock_the_gate(vaulted_home, monkeypatch):
 
     from hermes_cli import vault_gate
 
-    home, _ = vaulted_home
+    _home, _ = vaulted_home
     monkeypatch.setenv("HERMES_MASTER_PASSWORD", PW)
     monkeypatch.setattr(vault_gate, "_tty_available", lambda: False)
     with pytest.raises(SystemExit) as e:

@@ -11,8 +11,8 @@ from types import SimpleNamespace
 import pytest
 
 from tests.compat.old_updater_support import (
-    fresh_child as fresh_child,
-    no_external_work as no_external_work,
+    fresh_child as fresh_child,  # noqa: PLC0414 -- the self-alias is load-bearing: it suppresses F811 for the pytest fixture parameter shadowing this import
+    no_external_work as no_external_work,  # noqa: PLC0414 -- the self-alias is load-bearing: it suppresses F811 for the pytest fixture parameter shadowing this import
 )
 
 
@@ -177,11 +177,11 @@ def test_ensure_uv_stops_both_historical_return_contracts(unpack, status, fresh_
     fresh_child.returncode = status
     with fresh_child.exits():
         if unpack:
-            uv, fresh_bootstrap = ensure_uv()
+            uv, _fresh_bootstrap = ensure_uv()
         else:
             uv = ensure_uv()
         # A falsy result is NOT inert: old callers install through pip instead.
-        subprocess.run([uv, "pip", "install"] if uv else [sys.executable, "-m", "pip", "install"])
+        subprocess.run([uv, "pip", "install"] if uv else [sys.executable, "-m", "pip", "install"], check=False)
 
 
 def test_retired_probes_and_refreshes_do_no_work(no_external_work, tmp_path):
@@ -260,14 +260,14 @@ def test_old_updater_retains_its_code_but_loads_new_managed_uv(old_updater, fres
 
 
 def test_live_windows_scan_does_not_use_the_retired_main_alias(monkeypatch, no_external_work):
-    from hermes_cli import main, process_identity, update_cmd_windows
+    from hermes_cli import main, process_identity, update_cmd_holders
 
     # Routing, not OS emulation: lifecycle fallback accepts rows on any host.
     monkeypatch.setattr(main, "_detect_venv_python_processes", no_external_work)
-    monkeypatch.setattr(process_identity, "ledger_entries", lambda: [])
-    monkeypatch.setattr(update_cmd_windows, "_psutil", lambda: None)
+    monkeypatch.setattr(process_identity, "ledger_entries", list)
+    monkeypatch.setattr(update_cmd_holders, "_psutil", lambda: None)
     monkeypatch.setattr(
-        update_cmd_windows, "_detect_venv_python_processes",
+        update_cmd_holders, "_detect_venv_python_processes",
         lambda: [(123, "python", "python -m hermes_cli.main serve")],
     )
-    assert update_cmd_windows._desktop_owns_gateway_lifecycle() is True
+    assert update_cmd_holders._desktop_owns_gateway_lifecycle() is True

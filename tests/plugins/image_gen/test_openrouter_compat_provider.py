@@ -8,7 +8,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-_RUNTIME = "hermes_cli.runtime_provider.resolve_runtime_provider"
+_RUNTIME = "tools.openrouter_client.resolve_credentials"
+_PORTAL_RUNTIME = "hermes_cli.runtime_provider.resolve_runtime_provider"
 _PNG_DATA_URI = "data:image/png;base64,dGVzdC1pbWFnZS1kYXRh"  # "test-image-data"
 
 
@@ -21,7 +22,9 @@ def _runtime_ok(**over):
         "source": "env",
     }
     base.update(over)
-    return base
+    if base["provider"] == "nous":
+        return base
+    return base["api_key"], base["base_url"]
 
 
 def _mock_chat_response(images):
@@ -366,7 +369,7 @@ class TestGenerate:
         nous_runtime = _runtime_ok(
             provider="nous", base_url="https://inference.nousresearch.com/v1", api_key="nous-tok"
         )
-        with patch(_RUNTIME, return_value=nous_runtime), \
+        with patch(_PORTAL_RUNTIME, return_value=nous_runtime), \
              patch("requests.post", return_value=_mock_chat_response([_PNG_DATA_URI])) as mock_post, \
              patch("plugins.image_gen.openrouter.save_b64_image", return_value=Path("/tmp/x.png")):
             from plugins.image_gen.openrouter import _build_providers
@@ -442,7 +445,7 @@ class TestImageApiSurface:
         import plugins.image_gen.openrouter as mod
 
         mod._CATALOG_CACHE.clear()
-        monkeypatch.setattr(mod, "_load_image_gen_config", lambda: {})
+        monkeypatch.setattr(mod, "_load_image_gen_config", dict)
         for knob in ("QUALITY", "BACKGROUND", "RESOLUTION", "SEED", "N",
                      "ASPECT_RATIO", "TIMEOUT", "SURFACE"):
             monkeypatch.delenv(f"OPENROUTER_IMAGE_API_{knob}", raising=False)
@@ -559,7 +562,7 @@ class TestImageApiSurface:
         nous_runtime = _runtime_ok(
             provider="nous", base_url="https://inference.nousresearch.com/v1", api_key="nous-tok"
         )
-        with patch(_RUNTIME, return_value=nous_runtime), \
+        with patch(_PORTAL_RUNTIME, return_value=nous_runtime), \
              patch("requests.post", return_value=_mock_chat_response([_PNG_DATA_URI])) as mock_post, \
              patch("plugins.image_gen.openrouter.save_b64_image", return_value=Path("/tmp/x.png")):
             nous = {p.name: p for p in _build_providers()}["nous"]

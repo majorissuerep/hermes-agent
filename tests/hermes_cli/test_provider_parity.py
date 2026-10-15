@@ -64,17 +64,23 @@ def _accounts_tab_providers() -> set[str]:
 
 
 def test_every_hermes_model_provider_is_configurable_in_desktop():
-    """PARITY CONTRACT: GUI (keys ∪ accounts) ⊇ `hermes model` universe."""
+    """PARITY CONTRACT: GUI (keys ∪ accounts) == the `hermes model` universe (listed providers):
+    every listed provider is configurable, and an unlisted pre-release one is on neither tab."""
+    from hermes_cli.models_catalog_static import listed_canonical_providers
+
     gui = _keys_tab_providers() | _accounts_tab_providers()
+    listed = {e.slug for e in listed_canonical_providers()}
     missing = [
-        e.slug
-        for e in CANONICAL_PROVIDERS
-        if e.slug not in _EXEMPT and e.slug not in gui
+        slug
+        for slug in sorted(listed)
+        if slug not in _EXEMPT and slug not in gui
     ]
     assert not missing, (
         "providers shown in `hermes model` but not configurable in the desktop "
         f"Providers tabs: {missing}"
     )
+    leaked = sorted(gui & ({e.slug for e in CANONICAL_PROVIDERS} - listed))
+    assert not leaked, f"unlisted pre-release providers on the desktop Providers tabs: {leaked}"
 
 
 def test_each_provider_lands_on_the_tab_its_auth_type_dictates():
@@ -93,12 +99,24 @@ def test_each_provider_lands_on_the_tab_its_auth_type_dictates():
             assert d.slug in accounts, f"{d.slug} (accounts tab) missing from /api/providers/oauth"
 
 
-def test_shared_api_key_preserves_each_provider_profile():
-    """One env var must not collapse distinct built-in provider routes."""
+def test_shared_api_key_preserves_each_provider_profile(tmp_path, monkeypatch):
+    """One env var must not collapse independently installed provider routes."""
+    from providers import get_provider_profile
+
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    for name in ("shared-key-east", "shared-key-west"):
+        plugin = tmp_path / "plugins" / "model-providers" / name
+        plugin.mkdir(parents=True)
+        (plugin / "plugin.yaml").write_text(f"name: {name}\nkind: model-provider\n")
+        (plugin / "__init__.py").write_text(
+            "from providers import register_provider\nfrom providers.base import ProviderProfile\n"
+            f"register_provider(ProviderProfile(name={name!r}, env_vars=('TEST_SHARED_API_KEY',), "
+            f"base_url='https://{name}.invalid/v1'))\n")
+    assert get_provider_profile("shared-key-east") is not None
+    assert get_provider_profile("shared-key-west") is not None
     data = client.get("/api/env", headers=HEADERS).json()
-    profiles = data["DASHSCOPE_API_KEY"]["provider_profiles"]
+    profiles = data["TEST_SHARED_API_KEY"]["provider_profiles"]
     by_provider = {profile["provider"]: profile for profile in profiles}
 
-    assert {"alibaba", "alibaba-cn"} <= by_provider.keys()
-    assert by_provider["alibaba"]["primary"] is True
-    assert by_provider["alibaba-cn"]["primary"] is True
+    assert {"shared-key-east", "shared-key-west"} <= by_provider.keys()
+    assert all(by_provider[name]["primary"] is True for name in ("shared-key-east", "shared-key-west"))

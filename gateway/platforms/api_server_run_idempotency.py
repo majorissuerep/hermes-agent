@@ -35,7 +35,7 @@ _MIGRATIONS = {
     "acknowledged_at": "REAL"}
 
 
-def _encode_status(status: Dict[str, Any]) -> str:
+def _encode_status(status: dict[str, Any]) -> str:
     return json.dumps(status, sort_keys=True, separators=(",", ":"))
 
 
@@ -62,7 +62,7 @@ class RunIdempotencyStore:
     def durable(self) -> bool:
         """Whether reservations survive this process."""
         return self._db_path is not None
-    def __init__(self, db_path: str = None):
+    def __init__(self, db_path: str | None = None):
         if db_path is None:
             try:
                 from hermes_cli.config import get_hermes_home
@@ -82,7 +82,7 @@ class RunIdempotencyStore:
                 "process memory, so replay will not survive a restart: %s", exc)
             self._conn = sqlite3.connect(":memory:", check_same_thread=False)
             self._db_path = None
-        from hermes_state_wal import apply_wal_with_fallback
+        from hermes_state.wal import apply_wal_with_fallback
         apply_wal_with_fallback(self._conn, db_label="runs_idempotency.db")
         self._conn.execute(
             """CREATE TABLE IF NOT EXISTS run_idempotency (
@@ -130,7 +130,7 @@ class RunIdempotencyStore:
                 self._conn.rollback()
                 raise
 
-    def reserve(self, scope: str, key: str, fingerprint: str, run_id: str, status: Dict[str, Any], *,
+    def reserve(self, scope: str, key: str, fingerprint: str, run_id: str, status: dict[str, Any], *,
                 owner_pid: int = 0, owner_started: int = 0, retention_until: float = 0):
         """Atomically reserve a key; return ``(outcome, stored_record)``."""
         now = time.time()
@@ -217,11 +217,17 @@ class RunIdempotencyStore:
                 "SELECT 1 FROM run_idempotency WHERE scope=? AND run_id=?", (scope, run_id)).fetchone()
         return row is not None
 
-    def update_status(self, run_id: str, status: Dict[str, Any]) -> None:
+    def update_status(self, run_id: str, status: dict[str, Any]) -> None:
         with self._lock:
             self._conn.execute(
                 "UPDATE run_idempotency SET status_json=?, updated_at=? WHERE run_id=?",
                 (_encode_status(status), time.time(), run_id))
+            self._conn.commit()
+
+    def forget(self, scope: str, key: str) -> None:
+        """Release a reservation whose run was refused before it existed."""
+        with self._lock:
+            self._conn.execute("DELETE FROM run_idempotency WHERE scope=? AND idempotency_key=?", (scope, key))
             self._conn.commit()
 
     def close(self) -> None:

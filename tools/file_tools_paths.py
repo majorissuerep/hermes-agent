@@ -157,12 +157,6 @@ def _anchor(text: str, base, container_paths: bool) -> Path | PurePosixPath:
         if not posixpath.isabs(text):
             text = posixpath.join(str(base()), text)
         return _normalize_without_host_deref(text)
-    if sys.platform == "win32":
-        import ntpath
-
-        if not ntpath.isabs(text):
-            text = ntpath.join(str(base()), text)
-        return Path(ntpath.normpath(text))
     p = Path(text)
     if not p.is_absolute():
         p = Path(base()) / p
@@ -210,7 +204,7 @@ def _ssh_remote_home(task_id: str) -> str | None:
             return None
         try:
             env = _get_file_ops(task_id).env
-        except Exception:  # noqa: BLE001 — connect failure
+        except Exception:
             _ssh_home_failed_at[key] = time.monotonic()
             return None
     _ssh_home_failed_at.pop(key, None)

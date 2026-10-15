@@ -1,4 +1,4 @@
-"""Session deck registry (``hermes_state_deck.py``): one open row per CONVERSATION, stable human handles,
+"""Session deck registry (``hermes_state/deck.py``): one open row per CONVERSATION, stable human handles,
 and an open conversation is never garbage-collected behind the user's back."""
 
 from hermes_state import SessionDB

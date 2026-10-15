@@ -12,7 +12,7 @@ import pytest
 from agent.portal_tags import reset_conversation_context, set_conversation_context
 from hermes_cli import lifecycle
 from hermes_cli.observability import relay_shared_metrics
-from tests.hermes_cli.test_relay_shared_metrics_runtime import (  # noqa: F401 - fixture
+from tests.hermes_cli.test_relay_shared_metrics_runtime import (
     _stored_values,
     direct_runtime,
 )
@@ -114,7 +114,7 @@ def test_shipped_provider_and_public_model_are_reported_as_is(direct_runtime, tm
 def test_user_provider_plugin_name_and_model_never_leave(direct_runtime, tmp_path, monkeypatch):
     """A ``$HERMES_HOME/plugins/model-providers`` profile joins PROVIDER_REGISTRY under a name (and
     aliases) the user chose: every metric, the provider-setup marker and the snapshot read
-    ``custom``/``custom``. An in-tree provider plugin (``deepinfra``) keeps its public name."""
+    ``custom``/``custom``. An in-tree provider plugin (``zai``) keeps its public name."""
     from hermes_cli import auth, auth_plugin_providers, models_catalog_static as mcs
     from hermes_cli.observability import shared_metrics_catalog as catalog, shared_metrics_setup as setup
     from providers import get_provider_profile
@@ -152,7 +152,7 @@ def test_user_provider_plugin_name_and_model_never_leave(direct_runtime, tmp_pat
                 assert dims[key] == "custom", (name, dims)
         if "model" in dims:
             assert dims["model"] == "custom", (name, dims)
-    assert catalog.provider_metric_name("deepinfra") == "deepinfra"
+    assert catalog.provider_metric_name("zai") == "zai"
 
 
 def test_network_address_model_ids_and_raw_injected_marks_never_reach_counters(direct_runtime, tmp_path):
@@ -168,13 +168,13 @@ def test_network_address_model_ids_and_raw_injected_marks_never_reach_counters(d
     for provider, model in (("bedrock", "arn:aws:bedrock:us-east-1:123456789012:inference-profile/x"),
                             ("lm-studio", "my-model-x"), ("lm_studio", "my-model-x")):
         assert model_route(provider, model)["model"] == "custom", (provider, model)
-    # Azure deployment names are chosen by their owner: only a public model id passes.
+    # Retired providers cannot authorize publishing any model id, including public-looking ids.
     for provider in ("azure-foundry", "azure"):
         assert model_route(provider, "acme-legal-prod-eastus")["model"] == "custom"
-        assert model_route(provider, "GPT-4o")["model"] == "gpt-4o"
+        assert model_route(provider, "GPT-4o")["model"] == "custom"
     for provider, model in (("bedrock", "anthropic.claude-3-5-sonnet-20241022-v2:0"),
                             ("openrouter", "openai/gpt-4o:free"), ("ollama-cloud", "gpt-oss:120b")):
-        assert model_route(provider, model)["model"] == model
+        assert model_route(provider, model)["model"] == (model if provider == "openrouter" else "custom")
 
     runtime = relay_shared_metrics._get_runtime(retry_failed=True)
     for provider, model in (("openrouter", "127.0.0.1:8080/x"), ("openrouter", "http://127.0.0.1:8080/v1"),
@@ -202,7 +202,7 @@ def test_tui_switch_before_first_prompt_blames_the_configured_route(
     home.mkdir(parents=True, exist_ok=True)
     (home / "config.yaml").write_text(
         f"model:\n  provider: {provider}\n  default: {model}\n" + (f"  base_url: {base_url}\n" if base_url else ""))
-    import tui_gateway.server as server
+    from tui_gateway import server
 
     monkeypatch.setattr(server, "_hermes_home", home)  # captured at first import
     result = SimpleNamespace(

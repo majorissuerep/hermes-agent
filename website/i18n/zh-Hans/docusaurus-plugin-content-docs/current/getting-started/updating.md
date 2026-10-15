@@ -27,14 +27,14 @@ hermes update
 运行 `hermes update` 时，将依次执行以下步骤：
 
 1. **更新前快照** — Hermes 在每个 profile 的 `state-snapshots/` 目录中保存指定的状态文件，包括配对数据、cron 任务、`config.yaml`、`.env` 和 `auth.json`。自动快速快照会跳过单个大于 1 GiB 的文件。`updates.pre_update_backup` 可选择 `quick`、`full` 或 `off`。完整归档遵循[备份排除规则](../reference/faq.md#hermes-backup-vs-hermes-profile-export)。恢复方法见[快照与回滚](../user-guide/checkpoints-and-rollback.md)。快速快照恢复的是状态文件，不是应用程序代码。
-2. **Git pull** — 从 `main` 分支拉取最新代码并更新子模块
+2. **代码更新** — 检出所选渠道的目标（默认最新 stable 版本）并更新子模块
 3. **依赖安装** — 运行 `python -m pm.cli install` 以获取新增或变更的依赖项
 4. **配置迁移** — 检测自当前版本以来新增的配置选项并提示设置
 5. **Gateway 自动重启** — 更新完成后刷新正在运行的 gateway，使新代码立即生效。由服务管理的 gateway（Linux 上的 systemd、macOS 上的 launchd）通过服务管理器重启；手动启动的 gateway 在 Hermes 能将运行中的 PID 映射回某个 profile 时会自动重新启动。
 
 ### 仅预览：`hermes update --check`
 
-想在拉取前确认是否有更新？运行 `hermes update --check` — 它会获取并与 `origin/main` 比较提交。不修改任何文件，不重启 gateway。适合在以"是否有更新"为条件的脚本和 cron 任务中使用。
+想在拉取前确认是否有更新？运行 `hermes update --check` — 它会与所选渠道的目标（默认最新 stable 版本，main 渠道为 `origin/main`）比较。不修改任何文件，不重启 gateway。适合在以"是否有更新"为条件的脚本和 cron 任务中使用。
 
 ### 完整更新前备份：`--backup`
 
@@ -59,42 +59,6 @@ updates:
 - `off` 禁用更新前备份。`--no-backup` 为单次运行选择此模式。
 
 旧版布尔值仍然有效：`true` 等同于 `full`，`false` 等同于 `off`。
-
-### Windows：另一个 `hermes.exe` 正在运行
-
-在 Windows 上，如果 `hermes update` 检测到另一个 `hermes.exe` 进程持有 venv 入口点可执行文件的句柄，它将拒绝运行 — 最常见的情况是 Hermes Desktop 应用启动的后端进程、另一个终端中打开的 `hermes` REPL，或正在运行的 gateway：
-
-```
-$ hermes update
-✗ Another hermes.exe is running:
-    PID 12345  hermes.exe
-
-  Updating now would fail to overwrite ...\venv\Scripts\hermes.exe because
-  Windows blocks REPLACE on a running executable.
-
-  Close Hermes Desktop, exit any open `hermes` REPLs, and
-  stop the gateway (`hermes gateway stop`) before retrying.
-  Override with `hermes update --force` if you've already
-  confirmed those processes will not write to the venv.
-```
-
-关闭列出的进程后重试。如果你确定并发进程不会造成干扰（极少见 — 通常仅在杀毒软件 shim 被误判时有用），可传入 `--force` 跳过检查。此时更新程序仍会以指数退避方式重试 `.exe` 重命名操作，对于顽固的文件锁，会通过 `MoveFileEx(MOVEFILE_DELAY_UNTIL_REBOOT)` 将替换操作安排在下次重启时执行，以确保更新能够完成。
-
-预期输出如下：
-
-```
-$ hermes update
-Updating Hermes Agent...
-📥 Pulling latest code...
-Already up to date.  (or: Updating abc1234..def5678)
-📦 Updating dependencies...
-✅ Dependencies updated
-🔍 Checking for new config options...
-✅ Config is up to date  (or: Found 2 new options — running migration...)
-🔄 Restarting gateways...
-✅ Gateway restarted
-✅ Hermes Agent updated successfully!
-```
 
 ### 更新后建议的验证步骤
 

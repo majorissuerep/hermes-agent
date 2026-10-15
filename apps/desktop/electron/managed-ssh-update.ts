@@ -15,7 +15,7 @@
  */
 
 import { expandRemotePath, shq } from './remote-lifecycle'
-import { encodedPowerShell, powerShellCommand, psLiteral } from './windows-remote-lifecycle'
+import { REMOTE_MARKER_JUDGE_PY } from './remote-update-marker-programs'
 
 const UPDATE_EXIT_INDEPENDENT_HANDOFF = 75
 const DEFAULT_REMOTE_UPDATE_TIMEOUT_MS = 60 * 60 * 1000
@@ -29,6 +29,11 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-
 
 type ManagedUpdateOutcome = 'updated' | 'update-failed' | 'restore-failed' | 'update-and-restore-failed' | 'refused'
 
+interface ManagedUpdateOwedStep {
+  step: string
+  reason: string
+}
+
 interface ManagedUpdateReceiptSummary {
   correlationId: string
   outcome: string
@@ -39,6 +44,9 @@ interface ManagedUpdateReceiptSummary {
   preVersion?: string
   postVersion?: string
   stopReason?: string
+  // Post-commit steps a successful update still owes (contract C3).
+  followups?: ManagedUpdateOwedStep[]
+  userAction?: ManagedUpdateOwedStep | null
 }
 
 interface ManagedUpdateScopeResult {
@@ -57,6 +65,8 @@ interface ManagedConnectionUpdateResult {
   exitCode: null | number
   receipt: ManagedUpdateReceiptSummary | null
   scopes: ManagedUpdateScopeResult[]
+  // Every step a committed update still owes; set only when non-empty.
+  owed?: ManagedUpdateOwedStep[]
   error?: string
   message?: string
   // Set when the connection was deliberately not attempted (a known safety
@@ -261,72 +271,18 @@ function buildPosixManagedUpdateLaunch(target: RemoteUpdateTarget, correlationId
 }
 
 /** Windows equivalent of buildPosixManagedUpdateLaunch. */
-function buildWindowsManagedUpdateLaunch(target: RemoteUpdateTarget, correlationId: string): string {
-  const correlation = validateCorrelationId(correlationId)
-  const home = validateRemoteValue(target.hermesHome, 'Hermes home')
-  const hermesPath = validateRemoteValue(target.hermesPath, 'launcher path')
-  const statusPath = windowsChildPath(home, `.update_exit_code.${correlation}`)
-  const readyPath = windowsChildPath(home, `.update_coordinator_ready.${correlation}`)
-  const intentPath = windowsChildPath(home, `.update_launch_intent.${correlation}`)
-  const outputPath = windowsChildPath(home, `logs\\desktop-update-${correlation}.log`)
-
-  const wrapper = [
-    '$ErrorActionPreference="Continue"',
-    `$env:HERMES_HOME=${psLiteral(home)}`,
-    `$env:HERMES_UPDATE_CORRELATION_ID=${psLiteral(correlation)}`,
-    '$env:HERMES_UPDATE_ORIGIN_PROFILE="default"',
-    `$env:HERMES_UPDATE_ORIGIN_HOME=${psLiteral(home)}`,
-    `$env:HERMES_UPDATE_OUTPUT_PATH=${psLiteral(outputPath)}`,
-    // The copied Windows coordinator verifies this correlation AND its actual
-    // breakaway state before accepting it; the string alone grants nothing.
-    `$env:HERMES_UPDATE_WINDOWS_DETACHED=${psLiteral(correlation)}`,
-    `$env:HERMES_UPDATE_TAURI_OUTCOME_PATH=${psLiteral(statusPath)}`,
-    `$env:HERMES_UPDATE_TAURI_READY_PATH=${psLiteral(readyPath)}`,
-    `$intentTmp=${psLiteral(intentPath)}+"."+$PID+".tmp"`,
-    '$intentCreation="windows:"+[string]([Diagnostics.Process]::GetCurrentProcess().StartTime.ToUniversalTime().ToFileTimeUtc())',
-    `$intentPayload=[ordered]@{correlation=${psLiteral(correlation)};pid=$PID;creation=$intentCreation}|ConvertTo-Json -Compress`,
-    '[IO.File]::WriteAllText($intentTmp,$intentPayload,[Text.UTF8Encoding]::new($false))',
-    `Move-Item -LiteralPath $intentTmp -Destination ${psLiteral(intentPath)} -Force`,
-    `& ${psLiteral(hermesPath)} update --yes *>> ${psLiteral(outputPath)}`,
-    '$rc=$LASTEXITCODE',
-    // A non-gateway Windows coordinator parent returns 0 once its copied
-    // child owns the marker. That is acceptance, not completion: suppress the
-    // wrapper status when the correlated readiness proof exists and let the
-    // durable child receipt + released marker provide terminal truth.
-    `$handoffAccepted=($rc -eq 0 -and (Test-Path -LiteralPath ${psLiteral(readyPath)}))`,
-    `if($rc -ne ${UPDATE_EXIT_INDEPENDENT_HANDOFF} -and -not $handoffAccepted -and -not (Test-Path -LiteralPath ${psLiteral(statusPath)})){`,
-    `  $tmp=${psLiteral(statusPath)}+"."+$PID+".tmp"`,
-    '  [IO.File]::WriteAllText($tmp,[string]$rc,[Text.UTF8Encoding]::new($false))',
-    `  Move-Item -LiteralPath $tmp -Destination ${psLiteral(statusPath)} -Force`,
-    '}',
-    'exit $rc'
-  ].join(';')
-
-  const outer = [
-    '$ErrorActionPreference="Stop"',
-    `$output=${psLiteral(outputPath)}`,
-    'New-Item -ItemType Directory -Force -Path (Split-Path -Parent $output)|Out-Null',
-    `Remove-Item -LiteralPath ${psLiteral(statusPath)},${psLiteral(readyPath)},${psLiteral(intentPath)} -Force -ErrorAction SilentlyContinue`,
-    `$args=@("-NoProfile","-NonInteractive","-ExecutionPolicy","Bypass","-EncodedCommand",${psLiteral(encodedPowerShell(wrapper))})`,
-    '$child=Start-Process -FilePath "powershell.exe" -ArgumentList $args -WindowStyle Hidden -PassThru',
-    'if(-not $child){throw "managed update launcher did not start"}',
-    '$deadline=[DateTime]::UtcNow.AddSeconds(10)',
-    `while(-not [IO.File]::Exists(${psLiteral(intentPath)})){if($child.HasExited){throw "managed update launcher exited before intent proof"};if([DateTime]::UtcNow -ge $deadline){throw "managed update launcher intent timed out"};Start-Sleep -Milliseconds 50}`,
-    '[ordered]@{started=$true;pid=$child.Id}|ConvertTo-Json -Compress'
-  ].join(';')
-
-  return powerShellCommand(outer)
-}
 
 const OBSERVATION_SCRIPT = String.raw`
 import ctypes,json,os,re,sys
 from pathlib import Path
+${REMOTE_MARKER_JUDGE_PY}
 
 home=Path(os.path.expanduser(sys.argv[1]))
 correlation=sys.argv[2]
-# The update marker is install-wide even when the launcher was invoked with a
-# named profile home (<root>/profiles/<name>). Correlated status/intent/receipt
-# remain under the launch home, matching the CLI writer.
+# The update marker and the receipt store are install-wide even when the launcher
+# was invoked with a named profile home (<root>/profiles/<name>): the CLI writes
+# receipts under the root home. Correlated status/ready/intent stay under the
+# launch home, matching their writers.
 profile_parent=home.parent.name
 is_profile_home=(profile_parent.lower()=='profiles') if os.name=='nt' else (profile_parent=='profiles')
 install_root=home.parent.parent if is_profile_home else home
@@ -334,7 +290,6 @@ marker_path=install_root/'.hermes-update-in-progress'
 status_path=home/('.update_exit_code.'+correlation)
 ready_path=home/('.update_coordinator_ready.'+correlation)
 intent_path=home/('.update_launch_intent.'+correlation)
-marker_re=re.compile(rb'([1-9][0-9]*)\r?\n([0-9]+)(?:\r?\n)?\Z')
 
 def pid_alive(pid):
     if os.name!='nt':
@@ -397,15 +352,10 @@ def marker_state():
     try:raw=marker_path.read_bytes()
     except FileNotFoundError:return {'state':'absent'}
     except OSError:return {'state':'unavailable'}
-    match=marker_re.fullmatch(raw)
-    if not match:return {'state':'malformed'}
-    try:
-        pid=int(match.group(1));lease=int(match.group(2))
-        if pid<1 or pid>4294967295 or lease>9007199254740991:raise ValueError()
-    except ValueError:return {'state':'malformed'}
-    live=pid_alive(pid)
-    if live is None:return {'state':'unavailable','pid':pid}
-    return {'state':'live' if live else 'dead','pid':pid}
+    verdict=marker_verdict(raw)
+    if verdict=='UNCERTAIN':return {'state':'malformed'}
+    if verdict=='CLEAR':return {'state':'dead'}
+    return {'state':'live','pid':int(verdict[5:])}
 
 def terminal_code():
     try:raw=status_path.read_bytes()
@@ -416,7 +366,7 @@ def terminal_code():
     except ValueError:return 'malformed'
 
 def receipt():
-    directory=home/'logs'/'update_receipts'
+    directory=install_root/'logs'/'update_receipts'
     try:paths=sorted(directory.glob('update_*.json'),key=lambda p:p.stat().st_mtime_ns,reverse=True)
     except OSError:return None
     for path in paths:
@@ -426,12 +376,15 @@ def receipt():
         if payload.get('outcome')=='running' or not payload.get('finished_at'):continue
         pre=payload.get('pre_update') if isinstance(payload.get('pre_update'),dict) else {}
         post=payload.get('post_update') if isinstance(payload.get('post_update'),dict) else {}
+        action=payload.get('user_action')
         return {
             'correlationId':correlation,'outcome':str(payload.get('outcome') or 'unknown'),
             'startedAt':payload.get('started_at'),'finishedAt':payload.get('finished_at'),
             'preSha':pre.get('sha'),'postSha':post.get('sha'),
             'preVersion':pre.get('version'),'postVersion':post.get('version'),
             'stopReason':payload.get('stop_reason'),
+            'followups':[{'step':str(f.get('step')),'reason':str(f.get('reason') or '')} for f in payload.get('followups') or [] if isinstance(f,dict)],
+            'userAction':{'step':str(action.get('step')),'reason':str(action.get('reason') or '')} if isinstance(action,dict) else None,
         }
     return None
 
@@ -465,19 +418,60 @@ function buildRemoteUpdateObservationCommand(target: RemoteUpdateTarget, correla
   const correlation = validateCorrelationId(correlationId)
   const home = validateRemoteValue(target.hermesHome, 'Hermes home')
 
-  if (target.platform === 'Windows') {
-    const python = validateRemoteValue(target.pythonPath || '', 'Python path')
+  return `python3 -c ${shq(OBSERVATION_SCRIPT)} ${shq(home)} ${shq(correlation)}` // fork: Windows arm removed
+}
 
-    const script = [
-      '$ErrorActionPreference="Stop"',
-      `& ${psLiteral(python)} -c ${psLiteral(OBSERVATION_SCRIPT)} ${psLiteral(home)} ${psLiteral(correlation)}`,
-      'if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}'
-    ].join(';')
+function owedStep(value: any): ManagedUpdateOwedStep | null {
+  return value && typeof value === 'object' ? { step: String(value.step), reason: String(value.reason ?? '') } : null
+}
 
-    return powerShellCommand(script)
+// An older remote observer omits the debt fields: read them as none.
+function withReceiptDebt(receipt: any): ManagedUpdateReceiptSummary {
+  const followups = Array.isArray(receipt.followups) ? receipt.followups.map(owedStep).filter(Boolean) : []
+
+  return { ...receipt, followups, userAction: owedStep(receipt.userAction) }
+}
+
+// C3: a committed update is a success even when post-commit steps are owed;
+// name each one and its remedy instead of claiming everything is ready. The
+// debt rides on every terminal receipt, so it is composed with the update and
+// restoration verdicts, never only on success: a committed run whose profile
+// restore failed, and a partial run that parked local changes, still owe it.
+function managedUpdateMessage(
+  outcome: ManagedUpdateOutcome,
+  restoreOk: boolean,
+  receipt: ManagedUpdateReceiptSummary | undefined
+): { owed?: ManagedUpdateOwedStep[]; message: string } {
+  const followups = receipt?.followups ?? []
+  const userAction = receipt?.userAction
+  const owed = [...followups, ...(userAction ? [userAction] : [])]
+
+  const status =
+    outcome === 'updated'
+      ? 'Remote Hermes updated'
+      : restoreOk
+        ? 'The remote update failed, but every managed SSH profile was restored.'
+        : 'The remote update transaction could not restore every managed SSH profile.'
+
+  if (!owed.length) {
+    return { message: outcome === 'updated' ? `${status} and every managed SSH profile is ready.` : status }
   }
 
-  return `python3 -c ${shq(OBSERVATION_SCRIPT)} ${shq(home)} ${shq(correlation)}`
+  const message =
+    (outcome === 'updated' ? `${status}, but these steps are still owed: ` : `${status} These steps are still owed: `) +
+    [
+      ...followups.map(step => (step.reason ? `${step.step} (${step.reason})` : step.step)),
+      ...(userAction ? [userAction.step] : [])
+    ].join('; ') +
+    '.' +
+    // Only follow-ups are finished by a rerun; a user action (e.g. a parked
+    // stash) is the producer's exact manual instruction, shown verbatim.
+    (followups.length
+      ? ` Re-run \`hermes update\` on the remote to finish ${followups.map(step => step.step).join(', ')}.`
+      : '') +
+    (userAction?.reason ? ` ${userAction.reason}` : '')
+
+  return { owed, message }
 }
 
 function parseRemoteUpdateObservation(raw: string, correlationId: string): RemoteUpdateObservation {
@@ -525,7 +519,7 @@ function parseRemoteUpdateObservation(raw: string, correlationId: string): Remot
       throw new Error('Remote update receipt did not match this transaction.')
     }
 
-    receipt = parsed.receipt as ManagedUpdateReceiptSummary
+    receipt = withReceiptDebt(parsed.receipt)
   }
 
   let coordinatorReady: RemoteUpdateObservation['coordinatorReady'] = null
@@ -585,10 +579,7 @@ async function assertManagedUpdatePreflightClear(target: RemoteUpdateTarget, cor
 }
 
 async function launchManagedRemoteUpdate(target: RemoteUpdateTarget, correlationId: string): Promise<void> {
-  const command =
-    target.platform === 'Windows'
-      ? buildWindowsManagedUpdateLaunch(target, correlationId)
-      : buildPosixManagedUpdateLaunch(target, correlationId)
+  const command = buildPosixManagedUpdateLaunch(target, correlationId) // fork: Windows remotes removed
 
   const output = await target.ssh.exec(command, { timeoutMs: 30_000 })
 
@@ -937,12 +928,7 @@ async function runManagedSshUpdate<TScope extends ManagedSshScope>(
     receipt: proof?.receipt ?? null,
     scopes: restoreResults,
     ...(error ? { error } : {}),
-    message:
-      outcome === 'updated'
-        ? 'Remote Hermes updated and every managed SSH profile is ready.'
-        : restoreOk
-          ? 'The remote update failed, but every managed SSH profile was restored.'
-          : 'The remote update transaction could not restore every managed SSH profile.'
+    ...managedUpdateMessage(outcome, restoreOk, proof?.receipt)
   }
 }
 
@@ -1007,18 +993,72 @@ function managedSshUpdateAllRow<TBase extends object>(base: TBase, result: Manag
   }
 }
 
+/** How long a local update apply waits on managed SSH updates before refusing (review H3). */
+const MANAGED_UPDATE_APPLY_JOIN_MS = 120_000
+
 // before-quit uses this to join remote update transactions before it starts
 // tearing down their SSH transports. Re-read after every batch so an operation
-// registered while the first batch settles is joined too.
-async function waitForManagedUpdateOperations(getOperations: () => Iterable<Promise<unknown>>): Promise<void> {
+// registered while the first batch settles is joined too. With `timeoutMs`
+// the join is bounded: false = operations were still pending at the deadline
+// (they keep running and keep their registration; nothing is abandoned).
+async function waitForManagedUpdateOperations(
+  getOperations: () => Iterable<Promise<unknown>>,
+  { timeoutMs = Infinity }: { timeoutMs?: number } = {}
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs
+
   for (;;) {
     const pending = [...getOperations()]
 
     if (pending.length === 0) {
-      return
+      return true
     }
 
-    await Promise.allSettled(pending)
+    const remaining = deadline - Date.now()
+
+    if (remaining <= 0) {
+      return false
+    }
+
+    let timer: ReturnType<typeof setTimeout> | undefined
+
+    const settled = await Promise.race([
+      Promise.allSettled(pending).then(() => true),
+      ...(Number.isFinite(remaining)
+        ? [new Promise<boolean>(resolve => (timer = setTimeout(resolve, remaining, false)))]
+        : [])
+    ])
+
+    clearTimeout(timer)
+
+    if (!settled) {
+      return false
+    }
+  }
+}
+
+/**
+ * A local update apply's join (review H3): wait for managed SSH updates and
+ * recoveries, but only up to MANAGED_UPDATE_APPLY_JOIN_MS. Still pending, the
+ * apply is refused (no hand-off is spawned, so no local mutation overlaps a
+ * live remote writer) and the operations keep running under their own
+ * registration. Null = joined; go ahead.
+ */
+async function joinManagedUpdatesForApply(
+  getOperations: () => Iterable<Promise<unknown>>,
+  log: (line: string) => void,
+  timeoutMs = MANAGED_UPDATE_APPLY_JOIN_MS
+): Promise<{ ok: false; error: string; message: string } | null> {
+  if (await waitForManagedUpdateOperations(getOperations, { timeoutMs })) {
+    return null
+  }
+
+  log('[updates] a managed SSH update is still running; local update hand-off refused until it finishes')
+
+  return {
+    ok: false,
+    error: 'managed-update-running',
+    message: 'A remote update is still running. Try again when it finishes.'
   }
 }
 
@@ -1160,12 +1200,12 @@ export {
   assertManagedUpdatePreflightClear,
   buildPosixManagedUpdateLaunch,
   buildRemoteUpdateObservationCommand,
-  buildWindowsManagedUpdateLaunch,
   DEFAULT_REMOTE_CLEARANCE_TIMEOUT_MS,
   DEFAULT_REMOTE_UPDATE_POLL_MS,
   DEFAULT_REMOTE_UPDATE_TIMEOUT_MS,
   executeManagedRemoteUpdate,
   fenceManagedSshBootstrapPublication,
+  joinManagedUpdatesForApply,
   launchManagedRemoteUpdate,
   ManagedConnectionUpdateGate,
   type ManagedConnectionUpdateResult,
@@ -1179,6 +1219,7 @@ export {
   managedSshUpdateAllRow,
   type ManagedUpdateDeps,
   type ManagedUpdateOutcome,
+  type ManagedUpdateOwedStep,
   type ManagedUpdateReceiptSummary,
   type ManagedUpdateScopeResult,
   markerIsClear,

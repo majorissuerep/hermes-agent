@@ -49,7 +49,7 @@ def _parse_dashboard_runtime(command: str) -> tuple[str, str, int] | None:
     The mode is the canonical holder subcommand, never an argv substring: this gates the launchd
     backend inventory (a kill + kickstart path) and ``--status`` (#121156).
     """
-    from hermes_cli.update_cmd_windows import _hermes_holder_subcommand
+    from hermes_cli.update_cmd_holders import _hermes_holder_subcommand
     mode = _hermes_holder_subcommand(command)
     if mode not in ("dashboard", "serve"):
         return None
@@ -87,7 +87,7 @@ _SYSTEMCTL_ERRORS = (FileNotFoundError, subprocess.TimeoutExpired, OSError)
 def _run_probe(cmd: list[str], *, timeout: int) -> subprocess.CompletedProcess:
     """Captured, text-decoded ``subprocess.run`` for short local probes (systemctl, ps)."""
     return subprocess.run(
-        cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
+        cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout, check=False)
 
 
 def _restart_managed_dashboard_service(reason: str, unit: str = _DASHBOARD_SYSTEMD_UNIT) -> bool:
@@ -97,8 +97,6 @@ def _restart_managed_dashboard_service(reason: str, unit: str = _DASHBOARD_SYSTE
     deliberately stops the caller's ``os.kill`` fallback: systemd treats a direct
     SIGTERM as a clean stop, so ``Restart=on-failure`` won't bring it back.
     """
-    if sys.platform == "win32":
-        return False
 
     def _systemctl(*args: str, timeout: int = 10) -> subprocess.CompletedProcess:
         return _run_probe(["systemctl", *args], timeout=timeout)
@@ -315,7 +313,7 @@ def _loaded_launchd_backend_jobs(
 
 def _launchd_job_owning_backend(
     pid: int, cmdline: list[str] | None, jobs: list[tuple[str, str, list[str], int | None]],
-    ancestors: "list[int] | tuple[int, ...]" = (),
+    ancestors: list[int] | tuple[int, ...] = (),
 ) -> tuple[str, str, int | None] | None:
     """``(domain, label, live_pid)`` of the loaded launchd job that owns *pid*: launchd reports *pid*
     (or one of its *ancestors* — a plist may wrap the backend in ``/bin/sh -c …`` without ``exec``)
@@ -353,8 +351,6 @@ def _restart_launchd_job(domain: str, label: str, old_pid: int | None, *, timeou
 def _dashboard_cmdline_for_pid(pid: int) -> list[str] | None:
     """Exact argv of a running process: ``/proc/<pid>/cmdline`` (Linux), ``ps -o command=`` + shlex
     (macOS), None on Windows (no graceful taskkill window; Desktop manages its backend)."""
-    if sys.platform == "win32":
-        return None
     try:
         cmdline_path = f"/proc/{pid}/cmdline"
         if os.path.exists(cmdline_path):
@@ -406,7 +402,7 @@ def _respawn_dashboard_processes(commands: list[list[str]]) -> list[list[str]]:
     """
     from hermes_constants import get_hermes_home
     respawned: list[list[str]] = []
-    spawned: list[tuple[list[str], list[str], "subprocess.Popen"]] = []
+    spawned: list[tuple[list[str], list[str], subprocess.Popen]] = []
     failed: list[tuple[list[str], list[str], str]] = []
     log_path = get_hermes_home() / "logs" / "dashboard-restart.log"
     with contextlib.suppress(OSError):
@@ -515,10 +511,11 @@ def _install_hangup_protection(gateway_mode: bool = False):
 
     # Any failure here is non-fatal; we just skip the wrap.
     try:
-        # Late-bound import so tests can monkeypatch
-        # hermes_cli.config.get_hermes_home to simulate setup failure.
-        from hermes_cli.config import get_hermes_home as _get_hermes_home
-        logs_dir = _get_hermes_home() / "logs"
+        # Late-bound import so tests can monkeypatch it to simulate setup failure. The ROOT
+        # home, never a sticky profile's: the update mutates the shared checkout, and the
+        # Desktop and the hand-off scripts read <root>/logs/update.log.
+        from hermes_constants import get_default_hermes_root as _get_root_home
+        logs_dir = _get_root_home() / "logs"
         logs_dir.mkdir(parents=True, exist_ok=True)
         log_file = open(logs_dir / "update.log", "a", buffering=1, encoding="utf-8")
 
@@ -721,9 +718,6 @@ def _maybe_setup_dashboard_auth_interactively(args) -> None:
 
 def _read_ssh_session_token_file(path: str) -> str:
     """Read and unlink a Desktop SSH token from its private runtime directory."""
-    if sys.platform == "win32":
-        from hermes_cli.windows_ssh_runtime import read_token
-        return read_token(path)
 
     import stat as _stat
 
@@ -926,7 +920,9 @@ def _attach_to_host_backend(args, headless_backend: bool) -> None:
     except Exception:
         profile = "default"
     wanted = getattr(args, "open_profile", "") or profile
-    url = f"http://{hr.dial_host(record)}:{record.port}/?profile={wanted}"
+    from hermes_cli.url_utils import format_url_host
+
+    url = f"http://{format_url_host(hr.dial_host(record))}:{record.port}/?profile={wanted}"
 
     kind = "backend" if headless_backend else "dashboard"
     print(f"Hermes {kind} already running on this host: PID {record.pid}, port {record.port}.")
@@ -1000,11 +996,7 @@ def _route_named_profile_dashboard(
         env.pop("HERMES_HOME", None)  # prior behaviour rather than blocking the reroute
     # On Windows os.execvpe() spawns via CreateProcess then exits, which under
     # Python 3.14+ can crash with STATUS_ACCESS_VIOLATION; use Popen + exit.
-    if sys.platform == "win32":
-        proc = subprocess.Popen(reexec_argv, env=env)
-        sys.exit(proc.wait())
-    else:
-        os.execvpe(sys.executable, reexec_argv, env)
+    os.execvpe(sys.executable, reexec_argv, env)
 
 
 def _resolve_dashboard_web_dist(args, _headless_backend: bool) -> None:

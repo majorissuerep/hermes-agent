@@ -38,18 +38,24 @@ def test_snapshot_roundtrip_keeps_ciphertext_and_live_inode_across_profiles(home
         path, live = _database(home, value)
         staged, published = tmp_path / "staging.db", tmp_path / "published.db"
         try:
+            live.execute("CREATE TABLE IF NOT EXISTS runtime_epoch (singleton INTEGER PRIMARY KEY, epoch INTEGER, instance_id TEXT)")
+            live.execute("INSERT OR REPLACE INTO runtime_epoch VALUES (1, 1, 'before-snapshot')")
             assert _safe_copy_db(path, staged)
             staged.replace(published)
+            snapshot_bytes = published.read_bytes()
             assert value.encode() not in published.read_bytes()
             with sqlite3.connect(published) as plain:
                 with pytest.raises(sqlite3.DatabaseError):
                     plain.execute("SELECT * FROM messages").fetchall()
             assert verify_sqlite_integrity(published, key_path=path)["valid"]
             live.execute("UPDATE messages SET body = 'after-snapshot'")
+            live.execute("UPDATE runtime_epoch SET epoch = ?", (index + 2,))
             inode = path.stat().st_ino
             assert _safe_restore_db(published, path)
             assert path.stat().st_ino == inode
             assert live.execute("SELECT body FROM messages").fetchall() == [(value,)]
+            assert live.execute("SELECT epoch FROM runtime_epoch").fetchone()[0] == index + 2
+            assert published.read_bytes() == snapshot_bytes
         finally:
             live.close()
             published.unlink(missing_ok=True)

@@ -79,7 +79,7 @@ def _spawn_host() -> subprocess.Popen:
     argv = [sys.executable, "-m", "hermes_cli.main", "-p", "default", "serve", "--port", "0"]
     env = build_subprocess_env(scrub_secrets=False, inherit_profile_home=False)
     env["HERMES_HOME"] = str(root)
-    kwargs: Dict[str, Any] = dict(stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+    kwargs: dict[str, Any] = dict(stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                                   stderr=subprocess.DEVNULL, cwd=str(root), env=env, close_fds=True)
     handoff = None
     if os.name == "nt":
@@ -94,7 +94,7 @@ def _spawn_host() -> subprocess.Popen:
             env.update(handoff[1])
             kwargs["pass_fds"] = (handoff[0],)
     try:
-        return subprocess.Popen(argv, **kwargs)  # noqa: S603 — our own interpreter + module
+        return subprocess.Popen(argv, **kwargs)
     finally:
         if handoff is not None:
             os.close(handoff[0])
@@ -137,7 +137,7 @@ class HostClient:
         self._ws = connect(url, open_timeout=open_timeout, max_size=None, proxy=None)
         self._ids = itertools.count(1)
 
-    def call(self, method: str, params: Optional[Dict[str, Any]] = None, *, timeout: float = 60.0) -> Dict[str, Any]:
+    def call(self, method: str, params: Optional[dict[str, Any]] = None, *, timeout: float = 60.0) -> dict[str, Any]:
         rid = f"deck-{next(self._ids)}"
         self._ws.send(json.dumps({"jsonrpc": "2.0", "id": rid, "method": method, "params": params or {}}))
         deadline = time.monotonic() + timeout
@@ -157,7 +157,7 @@ class HostClient:
         with contextlib.suppress(Exception):
             self._ws.close()
 
-    def __enter__(self) -> "HostClient":
+    def __enter__(self) -> HostClient:
         return self
 
     def __exit__(self, *exc) -> None:

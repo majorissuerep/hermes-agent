@@ -53,7 +53,7 @@ Si tu habilidad es especializada, contribuida por la comunidad o de nicho, es me
 
 ## Proveedores de Memoria: Publicar como Plugin Independiente
 
-**Ya no aceptamos nuevos proveedores de memoria en este repositorio.** El conjunto de proveedores integrados en `plugins/memory/` (mem0, byterover, holographic, openviking, retaindb) está cerrado, y los antiguos proveedores integrados hindsight, honcho y supermemory ahora se distribuyen desde el catálogo de plugins. Si quieres añadir un nuevo backend de memoria, publícalo como un **repositorio de plugin independiente** que los usuarios instalen en `~/.hermes/plugins/` (o a través de un entry point de pip).
+**Ya no aceptamos nuevos proveedores de memoria en este repositorio.** El conjunto de proveedores integrados en `plugins/memory/` (byterover, retaindb) está cerrado, y los antiguos proveedores integrados hindsight, honcho, supermemory, mem0, openviking y holographic ahora se distribuyen desde el catálogo de plugins. Si quieres añadir un nuevo backend de memoria, publícalo como un **repositorio de plugin independiente** que los usuarios instalen en `~/.hermes/plugins/` (o a través de un entry point de pip).
 
 Los plugins de memoria independientes:
 
@@ -126,7 +126,7 @@ hermes-agent/
 ├── cli.py                    # Clase HermesCLI — TUI interactiva, integración prompt_toolkit
 ├── model_tools.py            # Orquestación de herramientas (capa delgada sobre tools/registry.py)
 ├── toolsets.py               # Agrupaciones y presets de herramientas (hermes-cli, hermes-telegram, etc.)
-├── hermes_state.py           # Base de datos de sesiones SQLite con búsqueda de texto completo FTS5, títulos de sesión
+├── hermes_state/__init__.py           # Base de datos de sesiones SQLite con búsqueda de texto completo FTS5, títulos de sesión
 ├── batch_runner.py           # Procesamiento en lote paralelo para generación de trayectorias
 │
 ├── agent/                    # Internos del agente (módulos extraídos)
@@ -226,7 +226,7 @@ Mensaje del usuario → AIAgent._run_agent_loop()
 
 - **Herramientas auto-registradas**: Cada archivo de herramienta llama a `registry.register()` en el momento de importación. `model_tools.py` activa el descubrimiento importando todos los módulos de herramientas.
 - **Agrupación en toolsets**: Las herramientas se agrupan en toolsets (`web`, `terminal`, `file`, `browser`, etc.) que pueden habilitarse/deshabilitarse por plataforma.
-- **Persistencia de sesión**: Todas las conversaciones se almacenan en SQLite (`hermes_state.py`) con búsqueda de texto completo y títulos de sesión únicos.
+- **Persistencia de sesión**: Todas las conversaciones se almacenan en SQLite (`hermes_state/__init__.py`) con búsqueda de texto completo y títulos de sesión únicos.
 - **Inyección efímera**: Los prompts del sistema y los mensajes de relleno se inyectan en el momento de la llamada API, nunca se persisten en la base de datos ni en los logs.
 - **Abstracción de proveedor**: El agente funciona con cualquier API compatible con OpenAI. La resolución del proveedor ocurre en el momento de la inicialización.
 - **Enrutamiento de proveedor**: Al usar OpenRouter, `provider_routing` en config.yaml controla la selección del proveedor.

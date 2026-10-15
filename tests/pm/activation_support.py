@@ -99,6 +99,7 @@ def can_spawn(python: Path) -> bool:
             text=True,
             timeout=30,
             env=child_env(),
+            check=False,
         )
         return r.returncode == 0
     except Exception:
@@ -131,7 +132,7 @@ def fake_store(tmp_path: Path) -> tuple[Path, Path]:
     interpreter = entry / ("python.exe" if sys.platform.startswith("win") else "bin/python3")
     interpreter.parent.mkdir(parents=True, exist_ok=True)
     real = spawnable_python()
-    wrapper = "#!/bin/sh\nexec '%s' \"$@\"\n" % posix(real)
+    wrapper = f"#!/bin/sh\nexec '{posix(real)}' \"$@\"\n"
     interpreter.write_text(wrapper, encoding="utf-8")
     interpreter.chmod(0o755)
 
@@ -161,7 +162,7 @@ def isolated_checkout(tmp_path: Path) -> Path:
     shutil.copytree(REPO_ROOT / "pm", root / "pm", ignore=shutil.ignore_patterns("__pycache__"))
     (root / "hermes_cli").mkdir()
     (root / "scripts").mkdir()
-    for relative in ("activate", "activate.fish", "activate.ps1", "scripts/_activation.sh",
+    for relative in ("activate", "activate.fish", "scripts/_activation.sh",
                      "hermes_constants.py", "hermes_cli/__init__.py",
                      "pm/environments.py", "hermes_cli/runtime_state.py"):
         shutil.copy2(REPO_ROOT / relative, root / relative)

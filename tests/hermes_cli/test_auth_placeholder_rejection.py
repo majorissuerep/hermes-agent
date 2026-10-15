@@ -47,7 +47,7 @@ def test_placeholder_keys_resolve_as_unconfigured(tmp_path, monkeypatch):
 
     monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes"))
     (tmp_path / "hermes").mkdir(parents=True, exist_ok=True)
-    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.delenv("AI_GATEWAY_API_KEY", raising=False)
     monkeypatch.setenv("XAI_API_KEY", "your_key_here")
 
     from agent.credential_pool import AUTH_TYPE_API_KEY, SOURCE_MANUAL, PooledCredential, load_pool
@@ -56,11 +56,11 @@ def test_placeholder_keys_resolve_as_unconfigured(tmp_path, monkeypatch):
     with pytest.raises(AuthError, match="No usable credentials found for provider 'xai'"):
         resolve_runtime_provider(requested="xai")
 
-    pool = load_pool("openrouter")
+    pool = load_pool("ai-gateway")
     pool.add_entry(PooledCredential(
-        provider="openrouter", id=uuid.uuid4().hex[:6], label="pasted-example",
+        provider="ai-gateway", id=uuid.uuid4().hex[:6], label="pasted-example",
         auth_type=AUTH_TYPE_API_KEY, priority=0, source=SOURCE_MANUAL,
-        access_token="your_key_here", base_url="https://openrouter.ai/api/v1",
+        access_token="your_key_here", base_url="https://ai-gateway.vercel.sh/v1",
     ))
-    runtime = resolve_runtime_provider(requested="openrouter")
-    assert runtime.get("api_key") == "", "a pooled .env.example placeholder was used as a key"
+    with pytest.raises(AuthError, match="No usable credentials"):
+        resolve_runtime_provider(requested="ai-gateway")

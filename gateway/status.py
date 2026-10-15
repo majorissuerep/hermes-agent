@@ -17,13 +17,18 @@ import sys
 import threading
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 from pathlib import Path
 from typing import Any, Callable, NamedTuple, Optional
 
+from gateway.status_inline_source import (
+    command_line_runs_inline_source,
+    inline_bootstrap_argv,
+    inline_source_flag_index,
+)
 from hermes_constants import _get_platform_default_hermes_home, get_hermes_home, get_process_hermes_home
 from hermes_cli._subprocess_compat import pid_exists_stdlib
-from utils import atomic_json_write
+from gateway import status_records as _records
 
 if sys.platform == "win32":
     import msvcrt
@@ -123,7 +128,7 @@ class _RuntimeStatusWriter:
                 self._writing_generation = generation
             error: Optional[BaseException] = None
             try:
-                (self._write_fn or _write_json_file)(path, _merge_over_on_disk(path, payload))
+                (self._write_fn or _records.write_json_file)(path, _merge_over_on_disk(path, payload))
             except BaseException as exc:
                 error = exc
             with self._condition:
@@ -156,7 +161,7 @@ def _merge_over_on_disk(path: Path, payload: dict[str, Any]) -> dict[str, Any]:
     """Lay the canonical snapshot over whatever is on disk right before writing. Out-of-process
     writers (the migration's compensator clearing multiplex-owned status, container_boot
     seeding ``desired_state``) stamp this file directly; the gateway's fields win, theirs survive."""
-    existing = _read_json_file(path)
+    existing = _records.read_json_file(path)
     return {**existing, **payload} if isinstance(existing, dict) else payload
 
 
@@ -203,7 +208,7 @@ def record_start_and_check_storm(
     try:
         path = get_hermes_home() / "gateway-starts.log"
         path.parent.mkdir(parents=True, exist_ok=True)
-        now = datetime.now(timezone.utc).timestamp()
+        now = datetime.now(UTC).timestamp()
         existing: list[float] = []
         if path.exists():
             for line in path.read_text(encoding="utf-8-sig").splitlines():
@@ -331,7 +336,7 @@ def _get_lock_dir() -> Path:
 
 
 def _utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 # Epochs before 2000-01-01 are corrupt/hand-edited state (e.g. an accidental 0).
@@ -352,14 +357,14 @@ def normalize_updated_at(value: Any) -> Optional[str]:
             parsed = datetime.fromisoformat(raw)
         except ValueError:
             return None
-        return (parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)).isoformat()
+        return (parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)).isoformat()
     if isinstance(value, (int, float)) and not isinstance(value, bool):
         seconds = float(value)
-        now = datetime.now(timezone.utc).timestamp()
+        now = datetime.now(UTC).timestamp()
         if not math.isfinite(seconds) or seconds < _EPOCH_MIN_PLAUSIBLE or seconds > now + 86400:
             return None
         try:
-            return datetime.fromtimestamp(seconds, tz=timezone.utc).isoformat()
+            return datetime.fromtimestamp(seconds, tz=UTC).isoformat()
         except (OverflowError, OSError, ValueError):
             return None
     return None
@@ -424,6 +429,7 @@ def terminate_pid(
         result = subprocess.run(
             ["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True, text=True,
             encoding="utf-8", errors="replace", timeout=10, creationflags=windows_hide_flags(),
+            check=False,
         )
     except FileNotFoundError:
         os.kill(pid, signal.SIGTERM)
@@ -491,7 +497,7 @@ def _get_process_start_time(pid: int) -> Optional[int]:
     # of the same process compare equal without float-precision fragility.
     try:
         import psutil  # type: ignore
-        return int(round(psutil.Process(pid).create_time() * 100))
+        return round(psutil.Process(pid).create_time() * 100)
     except Exception:
         return None
 
@@ -523,132 +529,10 @@ def _read_process_cmdline(pid: int) -> Optional[str]:
             result = subprocess.run(
                 ["ps", "-p", str(pid), "-o", "command="],
                 capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=5,
+                check=False,
             )
             if result.returncode == 0 and result.stdout.strip():
                 return result.stdout.strip()
-    return None
-
-
-
-def inline_source_flag_index(tokens: list[str]) -> int | None:
-    """Index of the ``-c`` token when *tokens* is an interpreter running INLINE SOURCE, else None.
-
-    Everything after ``-c`` is data the inline program receives, not this process's own identity.
-    The detached gateway restart watcher (``gateway._spawn_gateway_restart_watcher``) is spawned as
-    ``python -c <watcher source> <old_pid> <python> -m hermes_cli.main gateway run``: its trailing
-    argv is the command the watcher will LATER spawn, so every argv matcher used to read it as a
-    live gateway. See #107002 and the "never infer process identity from argv substrings" rule.
-
-    Only interpreter options may precede ``-c``; the first non-option token ends the option block
-    (``python -m hermes_cli.main …`` therefore never matches).
-
-    The walk is VALUE-AWARE: ``-X``/``-W``/``-Q`` and ``--check-hash-based-pycs``/``--jit`` take a
-    SEPARATE operand, so a naive "first non-option token ends the block" walk mistakes that operand
-    for the end of the block and never reaches the ``-c`` behind it (``python -X utf8 -c <src> …``
-    was still read as a live gateway). The operand sets are the canonical ones in
-    ``hermes_state_holders``, not a second hand-rolled copy.
-
-    *tokens* must be CASE-PRESERVING: the operand-taking ``-Q``/``-W``/``-X`` differ from the
-    operand-less ``-q``/``-b``, so a lowercased argv would skip the token after a plain ``-q``.
-    """
-    from hermes_state_holders import (
-        _PYTHON_LONG_OPTIONS_WITH_OPERANDS,
-        _PYTHON_SHORT_OPTIONS_WITH_OPERANDS,
-    )
-
-    index = 1
-    while index < len(tokens):
-        token = tokens[index]
-        if token == "--":
-            return None
-        if token in _PYTHON_LONG_OPTIONS_WITH_OPERANDS:
-            index += 2  # the next token is this option's operand, not the end of the option block
-            continue
-        if token.startswith("--"):
-            index += 1  # ``--opt=value`` and operand-less long options
-            continue
-        if not token.startswith("-") or token == "-":
-            return None
-        # Clustered short options (``-uc``, ``-IsB``). An operand-taking letter consumes the rest of
-        # the cluster as its attached value, or the following token when the cluster ends there --
-        # so ``-Xc`` is ``-X c``, NOT an inline-source ``-c``.
-        cluster = token[1:]
-        for position, letter in enumerate(cluster):
-            if letter == "c":
-                return index
-            if letter in _PYTHON_SHORT_OPTIONS_WITH_OPERANDS:
-                index += 1 if cluster[position + 1 :] else 2
-                break
-        else:
-            index += 1
-    return None
-
-
-def command_line_runs_inline_source(tokens: list[str]) -> bool:
-    """True when *tokens* is an interpreter running INLINE SOURCE (``python -c <src> [args]``)."""
-    return inline_source_flag_index(tokens) is not None
-
-
-# Hermes' own inline bootstraps hand control to a Hermes entry point IN this process, so the argv
-# they run with is this process's own identity; every other ``-c`` program keeps its trailing argv
-# as data (#107002). Each pattern is one emitted source shape, anchored at both ends so a program
-# merely CARRYING a bootstrap command line (the restart watcher's respawn argv) never matches.
-_Q = r"""['"]?"""
-_MAIN = rf"{_Q}__main__{_Q}"
-_RUN_MODULE = rf"runpy\.run_module\(\s*{_Q}(?P<target>[\w.]+){_Q}\s*,\s*run_name\s*=\s*{_MAIN}\s*,\s*alter_sys\s*=\s*True\s*\)"
-_BOOTSTRAPS = (
-    # hermes_cli._launchers.runtime_command (store launcher, the Windows updater's relaunch)
-    ("module", re.compile(rf"import os, sys, runpy;.*\b{_RUN_MODULE}", re.S)),
-    # hermes_cli.venv_sync.relaunch_command: argv is assigned inside the source
-    ("module", re.compile(rf"import sys, runpy; sys\.path\.insert\(.*\b{_RUN_MODULE}", re.S)),
-    ("path", re.compile(
-        rf"import sys, runpy; sys\.path\.insert\(.*\brunpy\.run_path\(\s*{_Q}(?P<target>[^'\"]+?){_Q}\s*,\s*run_name\s*=\s*{_MAIN}\s*\)",
-        re.S)),
-    # hermes_cli._launchers._launcher_script (the published POSIX shell / Windows .cmd launcher)
-    ("entry", re.compile(r"import os, re, sys\s.*\bfrom\s+(?P<target>[\w.]+)\s+import\s+(?P<func>\w+)\b.*\bsys\.exit\(\s*(?P=func)\(\)\s*\)", re.S)),
-    # hermes_cli._launchers._write_cmd_launcher: the launcher script, base64-encoded
-    ("base64", re.compile(rf"import base64; exec\(base64\.b64decode\({_Q}(?P<target>[A-Za-z0-9+/=]+){_Q}\)\)")),
-)
-_ASSIGNED_ARGV = re.compile(r"\bsys\.argv\s*=\s*\[(.*?)\]\s*;")
-
-
-def _bootstrap_entry(source: str, argv: list[str]) -> list[str] | None:
-    """``[-m, <module>, *argv]`` (or ``[<path>, *argv]``) the inline *source* runs in-process, else None."""
-    source = source.strip()
-    kind, match = next(((k, m) for k, p in _BOOTSTRAPS if (m := p.fullmatch(source))), (None, None))
-    if match is None:
-        return None
-    target = match["target"]
-    if kind == "base64":
-        import base64
-        import binascii
-        try:
-            return _bootstrap_entry(base64.b64decode(target, validate=True).decode("utf-8"), argv)
-        except (binascii.Error, UnicodeDecodeError):
-            return None
-    if kind == "entry":  # the launcher script's own ``--run-module <module>`` switch
-        return ["-m", argv[1], *argv[2:]] if argv[:1] == ["--run-module"] and len(argv) > 1 else ["-m", target, *argv]
-    if assigned := _ASSIGNED_ARGV.search(source):
-        argv = [item.strip().strip("'\"") for item in assigned.group(1).split(",")][1:]
-    return [target, *argv] if kind == "path" else ["-m", target, *argv]
-
-
-def inline_bootstrap_argv(tokens: list[str]) -> list[str] | None:
-    """*tokens* as the equivalent ``python -m <module> <argv…>`` when this interpreter's ``-c`` source
-    is a Hermes bootstrap running an entry point in-process; None for any other inline source.
-
-    Command lines usually arrive space-joined (``/proc``, psutil, ``ps``), which splits the source
-    across tokens; the shortest token run that ends in a recognised tail is the source, whatever
-    joined it, and the tokens after it are the entry point's argv.
-    """
-    index = inline_source_flag_index(tokens)
-    if index is None:
-        return None
-    for end in range(index + 1, len(tokens)):
-        if tokens[end].rstrip().endswith(")"):
-            entry = _bootstrap_entry(" ".join(tokens[index + 1 : end + 1]), tokens[end + 1 :])
-            if entry is not None:
-                return [tokens[0], *entry]
     return None
 
 
@@ -685,8 +569,13 @@ def _gateway_command_subcommand(command: str | None) -> str | None:
     # inside one JXA script string; the gateway itself is its child and is matched on its own command line.
     if basenames[0] == "osascript":
         return None
-    # Gateway-dedicated entrypoints carry no subcommand to inspect.
+    # Gateway-dedicated entrypoints carry no subcommand to inspect (``python -m gateway.run`` is the
+    # module spelling of the same script: its PID record renders argv as ``gateway/run.py``, and a
+    # liveness probe that read the live ``-m`` cmdline as "not a gateway" made every fixture-launched
+    # standalone owner invisible to the multiplex preflight).
     if any(t == "gateway/run.py" or t.endswith("/gateway/run.py") for t in tokens):
+        return "run"
+    if any(tokens[i] == "-m" and tokens[i + 1] == "gateway.run" for i in range(len(tokens) - 1)):
         return "run"
     # Atomic Hermes' bundled desktop runner shares HERMES_HOME with the CLI; without this,
     # `gateway run --replace` does not recognise it as a running gateway, skips the
@@ -941,64 +830,17 @@ def _build_runtime_status_record() -> dict[str, Any]:
     }
 
 
-def _read_json_file(path: Path, *, bare_pid_ok: bool = False) -> Optional[dict[str, Any]]:
-    """JSON object at ``path``, or None when absent/empty/unreadable/invalid. ``bare_pid_ok`` also
-    accepts legacy bare-integer PID files as ``{"pid": N}``."""
-    try:
-        # Fork: envelope-aware read inside a vaulted home.
-        _text = None
-        _home_for = None
-        _seal_read = None
-        try:
-            from hermes_security.io import _home_for, read_text as _seal_read
-        except ImportError:
-            pass
-        if _seal_read is not None and _home_for is not None and _home_for(path) is not None:
-            _text = _seal_read(path, purpose="runtime-status")
-        if _text is None:
-            _text = path.read_text(encoding="utf-8-sig").strip() if path.exists() else ""
-        raw = _text.strip()
-    except (OSError, UnicodeDecodeError):  # vanished, EACCES, non-UTF-8 garbage
-        return None
-    if not raw:
-        return None
-    try:
-        payload = json.loads(raw)
-    except json.JSONDecodeError:
-        payload = None
-        if bare_pid_ok:
-            with contextlib.suppress(ValueError):
-                payload = int(raw)
-    if bare_pid_ok and isinstance(payload, int):
-        return {"pid": payload}
-    return payload if isinstance(payload, dict) else None
-
-
-def _write_json_file(path: Path, payload: dict[str, Any]) -> None:
-    # Fork: envelope-aware write inside a vaulted home.
-    _home_for = None
-    _seal_write = None
-    try:
-        from hermes_security.io import _home_for, write_json as _seal_write
-    except ImportError:
-        pass
-    if _seal_write is not None and _home_for is not None and _home_for(path) is not None:
-        _seal_write(path, payload, purpose="runtime-status")
-        return
-    atomic_json_write(path, payload, indent=None, separators=(",", ":"))
-
-
 def _unlink_quietly(path: Path) -> None:
     with contextlib.suppress(OSError):
         path.unlink(missing_ok=True)
 
 
 def _read_pid_record(pid_path: Optional[Path] = None) -> Optional[dict]:
-    return _read_json_file(pid_path or _get_pid_path(), bare_pid_ok=True)
+    return _records.read_json_file(pid_path or _get_pid_path(), bare_pid_ok=True)
 
 
 def _read_gateway_lock_record(lock_path: Optional[Path] = None) -> Optional[dict[str, Any]]:
-    return _read_json_file(lock_path or _get_gateway_lock_path(), bare_pid_ok=True)
+    return _records.read_json_file(lock_path or _get_gateway_lock_path(), bare_pid_ok=True)
 
 
 def _pid_from_record(record: Optional[dict[str, Any]], key: str = "pid") -> Optional[int]:
@@ -1039,12 +881,14 @@ def _file_cache_signature(path: Path) -> tuple[bool, Optional[int], Optional[int
 def _cleanup_invalid_pid_path(
     pid_path: Path, *, cleanup_stale: bool, unlink_lock: bool = True
 ) -> None:
-    """Force-unlink a stale PID file + sibling lock (lock confirmed inactive, so no pid check).
-    ``unlink_lock=False`` drops only the PID file: the caller saw the lock HELD."""
+    """Force-unlink a stale PID file (lock confirmed inactive, so no pid check). The sibling lock
+    file is never unlinked, held or not (``unlink_lock`` is therefore moot): another contender may
+    already have opened that inode, and a fresh one would let two processes each hold "the" lock."""
     if not cleanup_stale:
         return
     _clear_running_pid_cache()
-    for path in (pid_path, _get_gateway_lock_path(pid_path)) if unlink_lock else (pid_path,):
+    # Keep the inode even when stale: another contender may already have opened it.
+    for path in (pid_path,):
         with contextlib.suppress(Exception):
             path.unlink(missing_ok=True)
 
@@ -1109,53 +953,24 @@ def _release_file_lock(handle) -> None:
 
 
 def acquire_gateway_runtime_lock() -> bool:
-    """Claim the cross-process runtime lock; the OS releases it if the process dies."""
-    global _gateway_lock_handle
-    if _gateway_lock_handle is not None:
-        return True
-    path = _get_gateway_lock_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
+    """Reserve the launch profile without unlinking inaccessible lock inodes."""
+    from gateway.runtime_ownership import process_ownership, OwnershipConflict
     try:
-        handle = open(path, "a+", encoding="utf-8")
-    except PermissionError:
-        # Stale root-owned lock (launchd session that ran as root): the directory owner can
-        # unlink it; retry once with a fresh file.
-        try:
-            path.unlink()
-            handle = open(path, "a+", encoding="utf-8")
-        except OSError:
-            return False
-    if not _try_acquire_file_lock(handle):
-        handle.close()
+        process_ownership.reserve([_get_process_hermes_home()])
+    except (OwnershipConflict, OSError):
         return False
-    handle.seek(0)
-    handle.truncate()
-    json.dump(_build_pid_record(), handle)
-    handle.flush()
-    with contextlib.suppress(OSError):
-        os.fsync(handle.fileno())
-    _gateway_lock_handle = handle
     _clear_running_pid_cache()
     return True
 
-
 def release_gateway_runtime_lock() -> None:
-    """Release the gateway runtime lock when owned by this process."""
-    global _gateway_lock_handle
-    handle, _gateway_lock_handle = _gateway_lock_handle, None
-    if handle is None:
-        return
-    _release_file_lock(handle)
-    with contextlib.suppress(OSError):
-        handle.close()
+    """Release only this process's profile reservations, never their lock files."""
+    from gateway.runtime_ownership import process_ownership
+    process_ownership.close()
     _clear_running_pid_cache()
 
-
 def owns_gateway_runtime_lock() -> bool:
-    """True when THIS process holds the runtime lock. ``is_gateway_runtime_lock_active`` answers
-    "does anyone?"; re-probing our own flock succeeds on POSIX, so only the handle discriminates."""
-    return _gateway_lock_handle is not None
-
+    from gateway.runtime_ownership import process_ownership
+    return process_ownership.owns(_get_process_hermes_home())
 
 def _probe_lock_file(handle) -> bool:
     """True when another process holds the lock (a won probe is released); closes ``handle``."""
@@ -1172,16 +987,15 @@ def _probe_lock_file(handle) -> bool:
 def is_gateway_runtime_lock_active(lock_path: Optional[Path] = None) -> bool:
     """True when some process currently owns the gateway runtime lock."""
     resolved_lock_path = lock_path or _get_gateway_lock_path()
-    if _gateway_lock_handle is not None and resolved_lock_path == _get_gateway_lock_path():
+    if owns_gateway_runtime_lock() and resolved_lock_path == _get_gateway_lock_path():
         return True
     if not resolved_lock_path.exists():
         return False
     try:
         handle = open(resolved_lock_path, "a+", encoding="utf-8")
     except PermissionError:
-        # Stale root-owned lock (see acquire_gateway_runtime_lock): report inactive.
-        _unlink_quietly(resolved_lock_path)
-        return False
+        # Unknown ownership is not permission to delete a potentially held inode.
+        return True
     return _probe_lock_file(handle)
 
 
@@ -1215,19 +1029,8 @@ def write_pid_file() -> None:
     propagates for the caller to decide."""
     path = _get_pid_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    _write_json_excl(path, _build_pid_record())
+    _records.write_json_excl(path, _build_pid_record())
     _clear_running_pid_cache()
-
-
-def _write_json_excl(path: Path, record: dict[str, Any]) -> None:
-    """Create ``path`` with O_CREAT|O_EXCL and dump ``record``; unlinks on a failed write."""
-    fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            json.dump(record, handle)
-    except Exception:
-        _unlink_quietly(path)
-        raise
 
 
 def _apply_set_fields(target: dict[str, Any], fields) -> None:
@@ -1247,7 +1050,7 @@ def _prepare_runtime_status_update(
     active_agents: Any = _UNSET, active_work: Any = _UNSET, platform: Any = _UNSET, platform_state: Any = _UNSET,
     error_code: Any = _UNSET, error_message: Any = _UNSET, needs_attention: Any = _UNSET,
     retrying_since: Any = _UNSET, served_profiles: Any = _UNSET, session_store: Any = _UNSET,
-    multiplex_standalone_reason: Any = _UNSET,
+    parked_profiles: Any = _UNSET, multiplex_standalone_reason: Any = _UNSET,
     platform_metrics: Any = _UNSET,
     ingress_url: Any = _UNSET, listener_base: Any = _UNSET, clear_profile_platforms: bool = False,
     drop_profile_platforms: Optional[str] = None,
@@ -1260,7 +1063,7 @@ def _prepare_runtime_status_update(
         if reload_existing or _runtime_status_state_path != path or _runtime_status_state is None:
             _runtime_status_state_path = path
             _runtime_status_state = (
-                (_read_json_file(path) if load_existing else None) or _build_runtime_status_record())
+                (_records.read_json_file(path) if load_existing else None) or _build_runtime_status_record())
         # The module snapshot is only ever reassigned (never mutated in place) and
         # submit() copies again, so the previous snapshot can be handed out as-is.
         previous_payload = _runtime_status_state
@@ -1285,6 +1088,8 @@ def _prepare_runtime_status_update(
             ("active_agents", active_agents, parse_active_agents),
             ("active_work", active_work, lambda v: list(v) if v else None),
             ("served_profiles", served_profiles, lambda v: list(v or [])),
+            # Profiles the multiplexer could not serve, name -> reason; clients fail fast on them.
+            ("parked_profiles", parked_profiles, lambda v: {str(k): str(r) for k, r in dict(v or {}).items()}),
             ("multiplex_standalone_reason", multiplex_standalone_reason, lambda v: str(v) if v else None),
             ("session_store", session_store, _coerce_session_store),
         ))
@@ -1354,7 +1159,7 @@ def publish_runtime_status(**fields: Any) -> int:
 
 def read_runtime_status(path: Optional[Path] = None) -> Optional[dict[str, Any]]:
     """Read ``gateway_state.json``; ``path`` lets callers inspect another profile's file."""
-    return _read_json_file(path or _get_runtime_status_path())
+    return _records.read_json_file(path or _get_runtime_status_path())
 
 
 # Max age of a ``gateway_state.json`` snapshot before its liveness claim is suspect: an older record
@@ -1377,7 +1182,7 @@ def runtime_status_heartbeat_age_s(record: Optional[dict[str, Any]]) -> Optional
     updated_at = normalize_updated_at(record.get("updated_at")) if isinstance(record, dict) else None
     if not updated_at:
         return None
-    return max(0, int((datetime.now(timezone.utc) - datetime.fromisoformat(updated_at)).total_seconds()))
+    return max(0, int((datetime.now(UTC) - datetime.fromisoformat(updated_at)).total_seconds()))
 
 
 def runtime_status_pid_is_live(record: Optional[dict[str, Any]]) -> bool:
@@ -1660,7 +1465,7 @@ def remove_pid_file() -> None:
     atexit can fire AFTER the new process wrote its own record."""
     with contextlib.suppress(Exception):
         path = _get_pid_path()
-        file_pid = _pid_from_record(_read_json_file(path))
+        file_pid = _pid_from_record(_records.read_json_file(path))
         if file_pid is not None and file_pid != os.getpid():
             return  # Belongs to a different process — leave it alone.
         path.unlink(missing_ok=True)
@@ -1712,7 +1517,7 @@ def acquire_scoped_lock(
     profile = _profile_label_for_home(_get_process_hermes_home())
     if profile:
         record["profile"] = profile
-    existing = _read_json_file(lock_path)
+    existing = _records.read_json_file(lock_path)
     if existing is None and lock_path.exists():
         # Empty/invalid JSON: previous process died between O_EXCL create and json.dump().
         _unlink_quietly(lock_path)
@@ -1727,7 +1532,7 @@ def acquire_scoped_lock(
         # freshly built record has a real value — the gateway then reports itself as the foreign squatter of
         # its own token (#81468).
         if existing_pid == os.getpid():
-            _write_json_file(lock_path, record)
+            _records.write_json_file(lock_path, record)
             return True, existing
         if not _scoped_lock_record_is_stale(existing, existing_pid):
             return False, existing
@@ -1739,9 +1544,9 @@ def acquire_scoped_lock(
             os.replace(lock_path, tombstone)
             _unlink_quietly(tombstone)
     try:
-        _write_json_excl(lock_path, record)
+        _records.write_json_excl(lock_path, record)
     except FileExistsError:
-        return False, _read_json_file(lock_path)
+        return False, _records.read_json_file(lock_path)
     return True, None
 
 
@@ -1749,7 +1554,7 @@ def release_scoped_lock(scope: str, identity: str) -> None:
     """Release a scope lock owned by this PID. No start_time equality check: on-disk null vs a live
     fingerprint would wedge reconnects."""
     lock_path = _get_scope_lock_path(scope, identity)
-    if (_read_json_file(lock_path) or {}).get("pid") == os.getpid():
+    if (_records.read_json_file(lock_path) or {}).get("pid") == os.getpid():
         _unlink_quietly(lock_path)
 
 
@@ -1764,7 +1569,7 @@ def release_all_scoped_locks(
     removed = 0
     for lock_file in lock_dir.glob("*.lock"):
         if owner_pid is not None:
-            record = _read_json_file(lock_file) or {}
+            record = _records.read_json_file(lock_file) or {}
             if _pid_from_record(record) != owner_pid or (
                 owner_start_time is not None and record.get("start_time") != owner_start_time
             ):
@@ -1802,7 +1607,7 @@ def _get_planned_stop_marker_path() -> Path:
 
 def _marker_is_stale(written_at: str, ttl_s: int) -> bool:
     try:
-        age = datetime.now(timezone.utc) - datetime.fromisoformat(written_at)
+        age = datetime.now(UTC) - datetime.fromisoformat(written_at)
         return age.total_seconds() > ttl_s
     except (TypeError, ValueError):
         return True
@@ -1810,13 +1615,17 @@ def _marker_is_stale(written_at: str, ttl_s: int) -> bool:
 
 def _read_live_pid_marker(path: Path, ttl_s: int) -> Optional[tuple[dict[str, Any], int, Any]]:
     """``(record, target_pid, target_start_time)`` for a usable marker, else None. Malformed/expired
-    markers can never match anyone, so they are unlinked here (must not wedge a new instance)."""
-    record = _read_json_file(path)
+    markers can never match anyone, so they are unlinked here (must not wedge a new instance) --
+    except a request stamped ``accepted`` (``update_pause_record.mark_stop_accepted``): expired, it
+    matches nobody, but it can be the only trace that a still-draining gateway accepted an update's
+    stop, so it stays until that pause is settled."""
+    record = _records.read_json_file(path)
     if not record:
         return None
     target_pid = _pid_from_record(record, "target_pid")
     if target_pid is None or _marker_is_stale(record.get("written_at") or "", ttl_s):
-        _unlink_quietly(path)
+        if record.get("accepted") is not True or not _update_pause_on_disk():
+            _unlink_quietly(path)
         return None
     return record, target_pid, record.get("target_start_time")
 
@@ -1833,7 +1642,7 @@ def _pid_marker_names_self(target_pid: int, target_start_time: Any) -> bool:
     return None in (target_start_time, our_start_time) or target_start_time == our_start_time
 
 
-def _consume_pid_marker_for_self(path: Path, *, ttl_s: int) -> bool:
+def _consume_pid_marker_for_self(path: Path, *, ttl_s: int, on_consume=None, keep: bool = False) -> bool:
     parsed = _read_live_pid_marker(path, ttl_s)
     if parsed is None:
         return False
@@ -1852,7 +1661,10 @@ def _consume_pid_marker_for_self(path: Path, *, ttl_s: int) -> bool:
         if replacer_home is not None and not _same_hermes_home(replacer_home, our_home):
             return False
     matches = _pid_marker_names_self(target_pid, target_start_time)
-    _unlink_quietly(path)
+    if matches and on_consume is not None:
+        on_consume(path, record)
+    if not keep:
+        _unlink_quietly(path)
     return matches
 
 
@@ -1880,7 +1692,7 @@ def write_takeover_marker(
 def _write_marker(path: Path, record: dict[str, Any]) -> bool:
     """Atomically write a marker record; False (never raise) on OS failure."""
     try:
-        _write_json_file(path, record)
+        _records.write_json_file(path, record)
         return True
     except OSError:
         return False
@@ -1919,7 +1731,7 @@ def _validated_scoped_lock_gateway_owner(record: dict[str, Any]) -> Optional[tup
     if live_cmdline is not None and not looks_like_gateway_runtime_command_line(live_cmdline):
         return None
     # The target home's own PID record must corroborate the claim.
-    pid_record = _read_json_file(target_home / "gateway.pid") or {}
+    pid_record = _records.read_json_file(target_home / "gateway.pid") or {}
     pid_record_home = pid_record.get("hermes_home")
     if (
         not _record_looks_like_gateway(pid_record)
@@ -2088,11 +1900,55 @@ def write_planned_stop_marker(target_pid: int) -> bool:
     })
 
 
+_PLANNED_STOP_MUTEX_WAIT_S = 2.0
+
+
+def _update_pause_on_disk() -> bool:
+    """A Windows update pause of this checkout is on disk (its record or a recovery's claim), or the
+    record directory cannot be listed. Only then does a consume need the pause lock and a checkpoint,
+    and only then can accepted-stop evidence beside a request still be owed: with none, every pause
+    was settled by recovery or the updater (or never made: every non-Windows host)."""
+    from hermes_cli import update_pause_record
+    record = update_pause_record.record_path()
+    try:
+        with os.scandir(record.parent) as entries:
+            return any(e.name == record.name or (e.name.startswith(record.name + ".") and e.name.endswith(".claim"))
+                       for e in entries)
+    except FileNotFoundError:
+        return False
+    except OSError:
+        return True
+
+
+def _checkpoint_planned_stop(path: Path, record: dict[str, Any]) -> None:
+    """``on_consume``, decided after the request was read: an update writes its record before its
+    request, so a pause that appeared since the consumer first looked is checkpointed too."""
+    from hermes_cli import update_pause_record
+    if _update_pause_on_disk():
+        with update_pause_record._mutex(_PLANNED_STOP_MUTEX_WAIT_S):
+            update_pause_record.mark_stop_consumed(path, record)
+
+
 def consume_planned_stop_marker_for_self() -> bool:
     """Return True when the current process is being intentionally stopped."""
-    return _consume_pid_marker_for_self(
-        _get_planned_stop_marker_path(), ttl_s=_PLANNED_STOP_MARKER_TTL_S
-    )
+    from hermes_cli import update_pause_record
+    path = _get_planned_stop_marker_path()
+    try:
+        paused = _update_pause_on_disk()
+        if not paused:  # an earlier drain's receipt: its debt is settled
+            _unlink_quietly(update_pause_record._accepted_path(path))
+        # With a pause on disk, recovery must see either the request or its checkpoint, never the
+        # gap between validating/consuming the marker and scheduling asynchronous stop.
+        with update_pause_record._mutex(_PLANNED_STOP_MUTEX_WAIT_S) if paused else contextlib.nullcontext():
+            return _consume_pid_marker_for_self(path, ttl_s=_PLANNED_STOP_MARKER_TTL_S,
+                                                on_consume=_checkpoint_planned_stop)
+    except OSError as exc:
+        # The pause bookkeeping (a busy mutex, a checkpoint that cannot be written) never decides
+        # whether this stop was planned: classify without consuming, and leave a receipt beside the
+        # request so recovery keeps this drain owed after the request's TTL (mark_stop_accepted).
+        logger.warning("Planned-stop checkpoint skipped (%s); the stop request stays on disk", exc)
+        return _consume_pid_marker_for_self(_get_planned_stop_marker_path(), ttl_s=_PLANNED_STOP_MARKER_TTL_S,
+                                            keep=True, on_consume=update_pause_record.mark_stop_accepted)
 
 
 def planned_stop_marker_targets_self() -> bool:
@@ -2149,9 +2005,12 @@ def get_running_pid(
                 resolved_pid_path, cleanup_stale=cleanup_stale, unlink_lock=not foreign_live_pid
             )
         return get_runtime_status_running_pid() if pid_path is None else None
-    # Lock inactive: the runtime-status fallback runs BEFORE cleanup here.
+    # Lock inactive: the runtime-status fallback runs BEFORE cleanup here. A record naming THIS
+    # process is one we wrote earlier in our own boot (the multiplex verdict is persisted before
+    # the PID claim), not a rival: treating it as live skipped the stale gateway.pid cleanup after
+    # a SIGKILLed owner and the O_EXCL claim then lost the "PID file race" to itself.
     runtime_pid = get_runtime_status_running_pid() if pid_path is None else None
-    if runtime_pid is None:
+    if runtime_pid is None or runtime_pid == os.getpid():
         _cleanup_invalid_pid_path(resolved_pid_path, cleanup_stale=cleanup_stale)
     return runtime_pid
 
@@ -2202,7 +2061,7 @@ def get_running_pid_identity_strict(pid_path: Path) -> Optional[tuple[int, float
         exact_create_time = float(psutil.Process(pid).create_time())
     except Exception as exc:
         raise RuntimeError("exact gateway creation time is unavailable") from exc
-    if int(round(exact_create_time * 100)) != int(current):
+    if round(exact_create_time * 100) != int(current):
         raise RuntimeError("gateway process identity changed")
     return pid, exact_create_time
 

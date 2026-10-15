@@ -112,7 +112,7 @@ def repair_clobbered_state(home: Path | str) -> dict:
                 _repair_frames(vault, path, rel, report)
             else:
                 _repair_envelope(vault, home_path, path, rel, head, report)
-        except Exception as exc:  # noqa: BLE001 - one file must not stop the sweep
+        except Exception as exc:
             report["unrecoverable"].append(f"{rel.as_posix()}: {type(exc).__name__}: {exc}")
     report["code_files"] = _restore_code_trees(vault, home_path, report)
     return report
@@ -261,7 +261,12 @@ def _repair_envelope(vault, home: Path, path: Path, rel: Path, head: bytes, repo
     if head.startswith(_MAGIC):
         if purpose != "env":
             return  # sealed; only .env content is sanity-checked (it gates every command)
-        content = vault.decrypt(path.read_bytes(), purpose=purpose, relpath=rel.as_posix())
+        raw = path.read_bytes()
+        try:
+            content = vault.decrypt(raw, purpose=purpose, relpath=rel.as_posix())
+        except vault_errors.VaultIntegrityError:
+            _restore_env_from_backup(vault, home, path, rel, raw, report)
+            return
     else:
         content = path.read_bytes()
     if purpose == "env" and _is_mangled_text(content):
@@ -293,7 +298,7 @@ def _restore_env_from_backup(vault, home: Path, path: Path, rel: Path, garbage: 
         report["restored"].append(f"{member} (from {tar_path})")
         return
     report["unrecoverable"].append(
-        f"{member}: content is not text (mangled ciphertext) and no pre-migration "
+        f"{member}: damaged ciphertext and no pre-migration "
         f"backup in {home.parent} holds it — re-enter these secrets"
     )
 
@@ -324,7 +329,7 @@ def _restore_code_trees(vault, home: Path, report: dict) -> int:
                     if data != raw:
                         vault_mod._atomic_write(path, data, mode=path.stat().st_mode & 0o777)
                         restored += 1
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:
                     report["unrecoverable"].append(f"{rel.as_posix()}: {type(exc).__name__}: {exc}")
     return restored
 
@@ -620,7 +625,7 @@ def migrate_home(home: Path | str, password: str | bytes, *, dry_run: bool = Fal
             # vanished mid-migration (e.g. a sidecar consumed by its parent
             # DB conversion) — nothing to convert
             report.skipped.append(rel.as_posix() + " (vanished)")
-        except Exception as exc:  # noqa: BLE001 - one file must not kill the run
+        except Exception as exc:
             report.failures.append(f"{rel.as_posix()}: {exc}")
 
     return report

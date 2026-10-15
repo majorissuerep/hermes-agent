@@ -24,10 +24,6 @@ def _clean_anthropic_env(monkeypatch):
         monkeypatch.delenv(key, raising=False)
 
 
-
-
-
-
 def test_ambient_pool_source_does_not_count_as_explicit(tmp_path, monkeypatch):
     """gh_cli-seeded Copilot pool entries are ambient, not explicit config (#56974)."""
     monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes"))
@@ -50,98 +46,6 @@ def test_ambient_pool_source_does_not_count_as_explicit(tmp_path, monkeypatch):
 
     from hermes_cli.auth import is_provider_explicitly_configured
     assert is_provider_explicitly_configured("copilot") is False
-
-
-def test_vertex_adc_counts_as_explicit_when_config_present(tmp_path, monkeypatch):
-    """A keyless Vertex provider is explicitly configured when the user pointed
-    Hermes at it (VERTEX_PROJECT_ID / vertex.project_id / VERTEX_CREDENTIALS_PATH),
-    even when it is NOT the current provider — otherwise it silently vanishes
-    from explicit-only pickers (desktop chat model menu) unless already selected."""
-    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes"))
-    for var in ("VERTEX_PROJECT_ID", "VERTEX_CREDENTIALS_PATH", "GOOGLE_APPLICATION_CREDENTIALS"):
-        monkeypatch.delenv(var, raising=False)
-    _write_auth_store(tmp_path, {"version": 1, "providers": {}, "active_provider": None})
-
-    from hermes_cli.auth import is_provider_explicitly_configured
-
-    # vertex.project_id in config.yaml is a deliberate, Hermes-scoped signal.
-    _write_config(tmp_path, {
-        "model": {"provider": "anthropic", "default": "claude-opus-4-8"},
-        "vertex": {"project_id": "my-gcp-project"},
-    })
-    assert is_provider_explicitly_configured("vertex") is True
-
-    # No Hermes-scoped Vertex config at all → stays hidden.
-    _write_config(tmp_path, {"model": {"provider": "anthropic", "default": "claude-opus-4-8"}})
-    assert is_provider_explicitly_configured("vertex") is False
-
-
-def test_vertex_ambient_google_creds_env_does_not_count_as_explicit(tmp_path, monkeypatch):
-    """An ambient GOOGLE_APPLICATION_CREDENTIALS path (commonly set globally for
-    unrelated GCP work) must NOT mark Vertex explicit — only Hermes-scoped
-    signals do. Regression guard for the picker gate (PR review feedback)."""
-    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes"))
-    monkeypatch.delenv("VERTEX_PROJECT_ID", raising=False)
-    monkeypatch.delenv("VERTEX_CREDENTIALS_PATH", raising=False)
-    _write_config(tmp_path, {"model": {"provider": "anthropic", "default": "claude-opus-4-8"}})
-    _write_auth_store(tmp_path, {"version": 1, "providers": {}, "active_provider": None})
-
-    # A real, existing SA file pointed to ONLY by the ambient Google var.
-    sa = tmp_path / "adc.json"
-    sa.write_text("{}")
-    monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", str(sa))
-
-    from hermes_cli.auth import is_provider_explicitly_configured
-    assert is_provider_explicitly_configured("vertex") is False
-
-
-def test_vertex_credentials_path_must_be_readable_file(tmp_path, monkeypatch):
-    """VERTEX_CREDENTIALS_PATH must point to an actual readable file, not a directory
-    or non-existent path."""
-    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes"))
-    monkeypatch.delenv("VERTEX_PROJECT_ID", raising=False)
-    monkeypatch.delenv("GOOGLE_APPLICATION_CREDENTIALS", raising=False)
-    _write_config(tmp_path, {"model": {"provider": "anthropic", "default": "claude-opus-4-8"}})
-    _write_auth_store(tmp_path, {"version": 1, "providers": {}, "active_provider": None})
-
-    from hermes_cli.auth import is_provider_explicitly_configured
-
-    # Valid readable file -> True
-    sa_file = tmp_path / "vertex_sa.json"
-    sa_file.write_text("{}")
-    monkeypatch.setenv("VERTEX_CREDENTIALS_PATH", str(sa_file))
-    assert is_provider_explicitly_configured("vertex") is True
-
-    # Directory -> False
-    sa_dir = tmp_path / "vertex_dir"
-    sa_dir.mkdir()
-    monkeypatch.setenv("VERTEX_CREDENTIALS_PATH", str(sa_dir))
-    assert is_provider_explicitly_configured("vertex") is False
-
-    # Non-existent file -> False
-    monkeypatch.setenv("VERTEX_CREDENTIALS_PATH", str(tmp_path / "nonexistent.json"))
-    assert is_provider_explicitly_configured("vertex") is False
-
-
-def test_bedrock_region_counts_as_explicit(tmp_path, monkeypatch):
-    """Bedrock (AWS SDK auth, no API key) is explicitly configured once the
-    user pins a region in config.yaml, mirroring the Vertex keyless case."""
-    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes"))
-    _write_auth_store(tmp_path, {"version": 1, "providers": {}, "active_provider": None})
-
-    from hermes_cli.auth import is_provider_explicitly_configured
-
-    _write_config(tmp_path, {
-        "model": {"provider": "anthropic", "default": "claude-opus-4-8"},
-        "bedrock": {"region": "us-east-1"},
-    })
-    assert is_provider_explicitly_configured("bedrock") is True
-
-    _write_config(tmp_path, {
-        "model": {"provider": "anthropic", "default": "claude-opus-4-8"},
-        "bedrock": {"region": ""},
-    })
-    assert is_provider_explicitly_configured("bedrock") is False
 
 
 def test_returns_true_when_moa_reference_slot_uses_provider(tmp_path, monkeypatch):
@@ -172,27 +76,27 @@ def test_stale_env_pool_entry_does_not_count_when_var_unset(tmp_path, monkeypatc
     must not mark the provider configured (#55790): the picker showed removed
     providers forever because the record existed even though no secret resolves."""
     monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes"))
-    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    monkeypatch.delenv("GLM_API_KEY", raising=False)
     _write_auth_store(tmp_path, {
         "version": 1,
         "providers": {},
         "active_provider": None,
         "credential_pool": {
-            "deepseek": [{
+            "zai": [{
                 "id": "aaa111",
-                "source": "env:DEEPSEEK_API_KEY",
+                "source": "env:GLM_API_KEY",
                 "auth_type": "api_key",
             }],
         },
     })
 
     from hermes_cli.auth import is_provider_explicitly_configured
-    assert is_provider_explicitly_configured("deepseek") is False
+    assert is_provider_explicitly_configured("zai") is False
 
 
 def test_profile_dotenv_key_counts_as_explicit_when_process_env_lacks_it(tmp_path, monkeypatch):
-    """A DeepSeek key in a named profile's .env must count under that profile's
-    secret scope even when os.environ (the launch profile) has no DeepSeek var.
+    """A Z.AI key in a named profile's .env must count under that profile's
+    secret scope even when os.environ (the launch profile) has no Z.AI var.
 
     Desktop Settings → Model uses explicit_only, which filters through
     is_provider_explicitly_configured. os.getenv hid the keyed provider until
@@ -203,9 +107,9 @@ def test_profile_dotenv_key_counts_as_explicit_when_process_env_lacks_it(tmp_pat
     studio.mkdir(parents=True)
     (root / "config.yaml").write_text("model: {}\n")
     (studio / "config.yaml").write_text("model: {}\n")
-    (studio / ".env").write_text("DEEPSEEK_API_KEY=sk-studio-deepseek-key\n")
+    (studio / ".env").write_text("GLM_API_KEY=sk-studio-zai-key\n")
     monkeypatch.setenv("HERMES_HOME", str(root))
-    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    monkeypatch.delenv("GLM_API_KEY", raising=False)
 
     from agent import secret_scope
     from tui_gateway import launch_profile_policy as lpp
@@ -215,27 +119,27 @@ def test_profile_dotenv_key_counts_as_explicit_when_process_env_lacks_it(tmp_pat
     from hermes_cli.auth import is_provider_explicitly_configured
     from hermes_cli.web_server_profiles import _config_profile_scope
 
-    assert is_provider_explicitly_configured("deepseek") is False
+    assert is_provider_explicitly_configured("zai") is False
     with _config_profile_scope("content-studio"):
-        assert is_provider_explicitly_configured("deepseek") is True
+        assert is_provider_explicitly_configured("zai") is True
     with _config_profile_scope(None):
-        assert is_provider_explicitly_configured("deepseek") is False
+        assert is_provider_explicitly_configured("zai") is False
 
 
 def test_dotenv_key_counts_when_shell_exports_the_var_empty(tmp_path, monkeypatch):
     """The gate resolves through the same reader as the credential resolver
     (get_env_value_prefer_dotenv), so it agrees with the key that authenticates:
-    an empty ``DEEPSEEK_API_KEY=`` inherited from the parent shell must not hide
+    an empty ``GLM_API_KEY=`` inherited from the parent shell must not hide
     a real key in .env (#77007) — the resolver would use that key, so the picker
     must list the provider."""
     monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes"))
-    monkeypatch.setenv("DEEPSEEK_API_KEY", "")
+    monkeypatch.setenv("GLM_API_KEY", "")
     _write_config(tmp_path, {"model": {}})
-    (tmp_path / "hermes" / ".env").write_text("DEEPSEEK_API_KEY=sk-dotenv-only-secret\n")
+    (tmp_path / "hermes" / ".env").write_text("GLM_API_KEY=sk-dotenv-only-secret\n")
 
     from hermes_cli.auth import is_provider_explicitly_configured, resolve_api_key_provider_credentials
-    assert resolve_api_key_provider_credentials("deepseek").get("api_key") == "sk-dotenv-only-secret"
-    assert is_provider_explicitly_configured("deepseek") is True
+    assert resolve_api_key_provider_credentials("zai").get("api_key") == "sk-dotenv-only-secret"
+    assert is_provider_explicitly_configured("zai") is True
 
 
 # ─── aws_sdk providers (Bedrock) ─────────────────────────────────────────
@@ -265,57 +169,6 @@ def _clean_aws_env(monkeypatch):
         "AWS_WEB_IDENTITY_TOKEN_FILE",
     ):
         monkeypatch.delenv(key, raising=False)
-
-
-def test_bedrock_not_explicit_without_aws_env(tmp_path, monkeypatch, _clean_aws_env):
-    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes"))
-    (tmp_path / "hermes").mkdir(parents=True, exist_ok=True)
-
-    from hermes_cli.auth import is_provider_explicitly_configured
-    assert is_provider_explicitly_configured("bedrock") is False
-
-
-def test_bedrock_bearer_token_counts_as_explicit(tmp_path, monkeypatch, _clean_aws_env):
-    """AWS_BEARER_TOKEN_BEDROCK is Bedrock-specific — the user set it for
-    exactly this provider, so it gates like a provider API key."""
-    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes"))
-    (tmp_path / "hermes").mkdir(parents=True, exist_ok=True)
-    monkeypatch.setenv("AWS_BEARER_TOKEN_BEDROCK", "ABSKexample-bearer-token-value")
-
-    from hermes_cli.auth import is_provider_explicitly_configured
-    assert is_provider_explicitly_configured("bedrock") is True
-
-
-def test_bedrock_access_key_pair_counts_as_explicit(tmp_path, monkeypatch, _clean_aws_env):
-    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes"))
-    (tmp_path / "hermes").mkdir(parents=True, exist_ok=True)
-    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "AKIAEXAMPLE1234567890")
-    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "examplesecretexamplesecretexample0000000")
-
-    from hermes_cli.auth import is_provider_explicitly_configured
-    assert is_provider_explicitly_configured("bedrock") is True
-
-
-def test_bedrock_access_key_without_secret_is_not_explicit(tmp_path, monkeypatch, _clean_aws_env):
-    """A lone AWS_ACCESS_KEY_ID can't authenticate anything — require the pair."""
-    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes"))
-    (tmp_path / "hermes").mkdir(parents=True, exist_ok=True)
-    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "AKIAEXAMPLE1234567890")
-
-    from hermes_cli.auth import is_provider_explicitly_configured
-    assert is_provider_explicitly_configured("bedrock") is False
-
-
-def test_bedrock_ambient_aws_profile_is_not_explicit(tmp_path, monkeypatch, _clean_aws_env):
-    """AWS_PROFILE is ambient machine state (SSO / shared credentials file),
-    not an explicit Hermes provider choice — same principle as gh_cli-seeded
-    Copilot pool entries (#56974)."""
-    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes"))
-    (tmp_path / "hermes").mkdir(parents=True, exist_ok=True)
-    monkeypatch.setenv("AWS_PROFILE", "default")
-
-    from hermes_cli.auth import is_provider_explicitly_configured
-    assert is_provider_explicitly_configured("bedrock") is False
 
 
 def test_aws_env_does_not_leak_into_other_providers(tmp_path, monkeypatch, _clean_aws_env):

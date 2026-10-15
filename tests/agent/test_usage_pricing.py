@@ -48,7 +48,7 @@ _USAGE = CanonicalUsage(input_tokens=1_000_000, output_tokens=1_000_000, cache_r
 @pytest.fixture
 def models_dev_registry(monkeypatch):
     """A models.dev cache holding the vendors' rate cards; the providers' own /models carry no prices."""
-    import agent.models_dev as models_dev
+    from agent import models_dev
 
     monkeypatch.setattr(models_dev, "_models_dev_cache", _MODELS_DEV_REGISTRY)
     monkeypatch.setattr("agent.usage_pricing.fetch_endpoint_model_metadata", lambda *_a, **_k: {})
@@ -179,8 +179,8 @@ def test_unknown_model_falls_back_to_endpoint_metadata(monkeypatch):
 
     assert entry is not None
     assert entry.source == "provider_models_api"
-    assert entry.input_cost_per_million == Decimal("1")
-    assert entry.output_cost_per_million == Decimal("2")
+    assert entry.input_cost_per_million == Decimal(1)
+    assert entry.output_cost_per_million == Decimal(2)
 
 
 
@@ -283,7 +283,19 @@ def test_bedrock_claude_cached_session_estimates_cost_not_unknown():
     assert result.amount_usd is not None
 
 
-
+@pytest.mark.parametrize("bare", ["claude-opus-5", "claude-opus-5-5"])
+@pytest.mark.parametrize("scope", ["", "us.", "global."])
+def test_bedrock_claude_opus_5_prices_like_direct_anthropic(bare, scope):
+    """Regression for #100848: Bedrock bills Claude at Anthropic's per-token
+    rates, so a Bedrock Opus 5 / 5.5 session must price from the snapshot at
+    the direct-Anthropic rates instead of falling through to ``unknown``."""
+    direct = get_pricing_entry(bare, provider="anthropic")
+    scoped = get_pricing_entry(f"{scope}anthropic.{bare}", provider="bedrock")
+    assert direct is not None and scoped is not None
+    assert scoped.source == "official_docs_snapshot"
+    for field in ("input", "output", "cache_read", "cache_write"):
+        attr = f"{field}_cost_per_million"
+        assert getattr(scoped, attr) == getattr(direct, attr), attr
 
 
 
@@ -335,55 +347,8 @@ def test_google_and_vertex_routes_share_official_pricing_snapshot():
     assert all(route.billing_mode == "official_docs_snapshot" for route in routes)
 
 
-def test_vertex_default_model_estimates_cached_usage(monkeypatch):
-    """The bundled Vertex profile's default auxiliary model must fall back to
-    Google snapshot pricing when the OpenAI-compatible endpoint has no model
-    metadata, including for cache-read accounting.
-    """
-    from providers import get_provider_profile
-
-    monkeypatch.setattr(
-        "agent.usage_pricing.fetch_endpoint_model_metadata",
-        lambda *_args, **_kwargs: {},
-    )
-    vertex = get_provider_profile("vertex")
-    result = estimate_usage_cost(
-        vertex.default_aux_model,
-        CanonicalUsage(input_tokens=100, output_tokens=100, cache_read_tokens=100),
-        provider=vertex.name,
-        base_url=vertex.base_url,
-    )
-
-    assert result.status == "estimated"
-    assert result.amount_usd is not None and result.amount_usd > 0
 
 
-def test_curated_google_flash_models_resolve_official_snapshot_pricing(monkeypatch):
-    """Every ``google/gemini-*-flash`` model curated for the OpenRouter and Nous
-    pickers must also bill through the Google official-docs snapshot on the
-    direct Gemini and Vertex routes — a model pickable via the aggregators but
-    ``unknown`` to Google-route accounting is a catalog/pricing drift.
-    """
-    from hermes_cli.models_catalog_static import OPENROUTER_MODELS, _PROVIDER_MODELS
-
-    monkeypatch.setattr(
-        "agent.usage_pricing.fetch_endpoint_model_metadata",
-        lambda *_args, **_kwargs: {},
-    )
-    curated = {m for m, _desc in OPENROUTER_MODELS} | set(_PROVIDER_MODELS["nous"])
-    flash = sorted(m for m in curated if m.startswith("google/gemini-") and m.endswith("-flash"))
-    assert flash, "expected curated google/gemini-*-flash picker entries"
-    usage = CanonicalUsage(input_tokens=1_000_000, output_tokens=1_000_000, cache_read_tokens=1_000_000)
-    for model in flash:
-        bare = model.split("/", 1)[1]
-        gemini = estimate_usage_cost(bare, usage, provider="gemini")
-        vertex = estimate_usage_cost(model, usage, provider="vertex")
-        assert gemini.status == "estimated", (model, gemini.status)
-        assert gemini.source == "official_docs_snapshot", model
-        assert vertex.amount_usd == gemini.amount_usd, model
-        # Direct-route models the picker offers must also be pickable directly.
-        assert bare in _PROVIDER_MODELS["gemini"], model
-        assert model in _PROVIDER_MODELS["vertex"], model
 
 
 
@@ -399,7 +364,7 @@ class TestFormatCostLabel:
     """Tests for magnitude-scaled cost label formatting."""
 
     def test_zero_renders_as_dollar_zero(self):
-        assert format_cost_label(Decimal("0")) == "$0.00"
+        assert format_cost_label(Decimal(0)) == "$0.00"
 
     def test_sub_cent_renders_4dp(self):
         """Costs below $0.01 render at 4 decimal places (#79220)."""
@@ -455,7 +420,7 @@ class TestSubscriptionIncludedNotes:
             provider="openai-codex",
         )
         assert result.status == "included"
-        assert result.amount_usd == Decimal("0")
+        assert result.amount_usd == Decimal(0)
         assert len(result.notes) > 0
 
 

@@ -398,7 +398,7 @@ class TestCodexTurnTimeoutConfig:
     the runtime passes as ``turn_timeout`` (never the legacy default)."""
 
     def test_reader_default_and_config_override(self, monkeypatch, tmp_path):
-        import agent.codex_runtime as codex_runtime
+        from agent import codex_runtime
 
         monkeypatch.setattr(
             "hermes_cli.config.load_config_readonly",
@@ -422,7 +422,7 @@ class TestCodexTurnTimeoutConfig:
         """The turn budget must flow from the config reader into run_turn (not the 600s default)."""
         import inspect
 
-        import agent.codex_runtime as codex_runtime
+        from agent import codex_runtime
 
         source = inspect.getsource(codex_runtime.run_codex_app_server_turn)
         assert "_codex_turn_timeout()" in source

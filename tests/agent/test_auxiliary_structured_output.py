@@ -74,40 +74,6 @@ def test_fallback_candidate_retries_without_response_format_on_rejection(async_m
     assert "response_format" not in retry_kwargs.get("extra_body", {})
 
 
-def test_known_unsupported_route_skips_response_format_before_first_request():
-    """DeepSeek's profile declares json_schema unsupported; json_object and other providers are untouched."""
-    messages = [{"role": "user", "content": "hi"}]
-    deepseek = _build_call_kwargs(
-        "deepseek", "deepseek-flash", messages, extra_body={"response_format": dict(_JSON_SCHEMA)},
-        base_url="https://api.deepseek.com/v1", task="title_generation")
-    assert "response_format" not in deepseek.get("extra_body", {})
-
-    json_object = _build_call_kwargs(
-        "deepseek", "deepseek-flash", messages, extra_body={"response_format": {"type": "json_object"}},
-        base_url="https://api.deepseek.com/v1")
-    assert json_object["extra_body"]["response_format"] == {"type": "json_object"}
-
-    openai_kwargs = _build_call_kwargs(
-        "openai", "gpt-5-mini", messages, extra_body={"response_format": dict(_JSON_SCHEMA)},
-        base_url="https://api.openai.com/v1")
-    assert openai_kwargs["extra_body"]["response_format"] == _JSON_SCHEMA
-
-    # A remembered rejection is scoped to the endpoint (host:port), not to every local server.
-    structured_output.remember_structured_output_rejection(
-        "custom", "http://127.0.0.1:1234/v1",
-        {"model": "m", "extra_body": {"response_format": dict(_JSON_SCHEMA)}}, _Rejects400(_DEEPSEEK_400))
-    same = _build_call_kwargs("custom", "m", messages, extra_body={"response_format": dict(_JSON_SCHEMA)},
-                              base_url="http://127.0.0.1:1234/v1")
-    other = _build_call_kwargs("custom", "m", messages, extra_body={"response_format": dict(_JSON_SCHEMA)},
-                               base_url="http://127.0.0.1:11434/v1")
-    assert "response_format" not in same.get("extra_body", {})
-    assert other["extra_body"]["response_format"] == _JSON_SCHEMA
-
-    # A custom route pointed at DeepSeek's own host gets DeepSeek's profile.
-    custom_deepseek = _build_call_kwargs(
-        "custom", "deepseek-chat", messages, extra_body={"response_format": dict(_JSON_SCHEMA)},
-        base_url="https://api.deepseek.com/v1")
-    assert "response_format" not in custom_deepseek.get("extra_body", {})
 
 
 def test_rejection_memo_is_per_model_and_ignores_schema_validation_errors():

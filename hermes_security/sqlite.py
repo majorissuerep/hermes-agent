@@ -85,6 +85,16 @@ def _sqlcipher_module() -> Any:
     return sqlcipher
 
 
+def connection_version_info(connection) -> tuple[int, ...]:
+    """SQLCipher links its own SQLite; upgrading Python does not upgrade that library."""
+    driver = _MODULE
+    if driver is None and type(connection).__module__.split(".")[0] == "sqlcipher3":
+        driver = _sqlcipher_module()
+    if driver is not None and isinstance(connection, driver.Connection):
+        return driver.sqlite_version_info
+    return sqlite3.sqlite_version_info
+
+
 def connect(db_path: Path | str, *, purpose: str = _PURPOSE, key_path: Path | str | None = None, **kwargs: Any):
     """Open (creating if needed) a SQLCipher database keyed by the vault.
 

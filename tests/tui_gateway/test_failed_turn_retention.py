@@ -177,7 +177,7 @@ def test_returned_error_result_carries_error_surface(emits, turn_env):
     desktop names the failing layer instead of sniffing the message."""
     agent = types.SimpleNamespace(
         session_id="session-key",
-        provider="openrouter",
+        provider='ai-gateway',
         model="test/model",
         run_conversation=lambda *a, **k: {
             "final_response": "",
@@ -199,10 +199,10 @@ def test_returned_error_result_carries_error_surface(emits, turn_env):
         "retryable": True,
         # The failing session's identity rides the descriptor so clients
         # report the model that actually failed, not the composer's current.
-        "provider": "openrouter",
+        "provider": 'ai-gateway',
         "model": "test/model",
         # Every layer names the provider by its display label for the card copy.
-        "provider_label": "OpenRouter",
+        "provider_label": 'Vercel AI Gateway',
     }
 
     snapshot = server._inflight_snapshot(session)

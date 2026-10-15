@@ -26,8 +26,8 @@ def test_startup_route_keeps_configured_custom_provider_name(monkeypatch):
 def test_startup_route_does_not_consume_aggregator_namespace(monkeypatch):
     monkeypatch.setattr(model_switch, "DIRECT_ALIASES", {})
     route = model_switch.resolve_startup_model_route(
-        "openrouter/anthropic/claude-sonnet",
-        user_providers={"openrouter": {"base_url": "https://openrouter.ai/api/v1"}},
+        'ai-gateway/anthropic/claude-sonnet',
+        user_providers={'ai-gateway': {"base_url": 'https://ai-gateway.vercel.sh/v1'}},
     )
     assert route is None
 
@@ -46,7 +46,7 @@ def test_startup_route_aggregator_native_slug_stays_on_aggregator(monkeypatch):
     )
     route = model_switch.resolve_startup_model_route(
         "anthropic/claude-opus-4.6",
-        current_provider="openrouter",
+        current_provider='ai-gateway',
         user_providers={"anthropic": {"apiKey": "sk-test"}},
     )
     assert route is None
@@ -125,10 +125,10 @@ def test_startup_route_explicit_provider_wins_over_alias_label(monkeypatch):
         {"ds": model_switch.DirectAlias("deepseek-chat", "deepseek", "")},
     )
     route = model_switch.resolve_startup_model_route(
-        "ds", explicit_provider="openrouter"
+        "ds", explicit_provider='ai-gateway'
     )
     assert route is not None
-    assert route.provider == "openrouter"
+    assert route.provider == 'ai-gateway'
     assert route.model == "deepseek-chat"
 
 

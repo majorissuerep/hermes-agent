@@ -67,7 +67,7 @@ def scanner(tmp_path):
     def run(tool="", mode="clean"):
         if mode == "missing":
             (binaries / tool).unlink()
-        return subprocess.run([bash, str(root / "scripts" / "security_scan.sh")],
+        return subprocess.run([bash, str(root / "scripts" / "security_scan.sh")], check=False,
                               env=dict(env, FAULT_TOOL=tool, FAULT_MODE=mode),
                               capture_output=True, text=True, timeout=30)
     return run, calls

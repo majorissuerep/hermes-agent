@@ -13,22 +13,35 @@ function nativeIdentity(source) {
     fileDigest(path.join(import.meta.dirname, 'prepared-native-deps.mjs')),
     ...['build-command-screenshot-monitor.mjs', 'build-hud-modifier-monitor.mjs']
       .map(name => fileDigest(path.join(import.meta.dirname, name))),
-    ...['command-screenshot-monitor.m', 'hud-modifier-gesture.h', 'hud-modifier-gesture.cs',
-      'hud-modifier-monitor.m', 'hud-modifier-monitor-win.cs', 'hud-modifier-monitor-x11.c']
+    ...['command-screenshot-monitor.m', 'hud-modifier-gesture.h',
+      'hud-modifier-monitor.m', 'hud-modifier-monitor-x11.c']
       .map(name => fileDigest(path.join(source, 'apps/desktop/electron/native', name))),
   ])).digest('hex')
 }
 
 /**
  * The sidecar stays outside node_modules so it never ships in the application.
- * @param {{ source: string, out: string, platform: string, arch: string, nativeToolchain?: string }} inputs
+ * ``degraded`` records a soft-failed component (no get-windows, no X11 toolchain): the tree is
+ * consumable, but the identity cannot see the host fix that would complete it.
+ * @param {{ source: string, out: string, platform: string, arch: string, nativeToolchain?: string, degraded?: boolean }} inputs
  * @returns {void}
  */
-export function recordNativeInputs({ source, out, platform, arch, nativeToolchain }) {
+export function recordNativeInputs({ source, out, platform, arch, nativeToolchain, degraded = false }) {
   fs.writeFileSync(`${out}.prepared.json`, JSON.stringify({
     schema: 1, source: fs.realpathSync(source), out: fs.realpathSync(out),
-    platform, arch, nativeToolchain, identity: nativeIdentity(source), digest: treeDigest(out),
+    platform, arch, nativeToolchain, degraded, identity: nativeIdentity(source), digest: treeDigest(out),
   }) + '\n')
+}
+
+/** A local rebuild may skip restaging: the receipt is admitted and nothing in it soft-failed.
+ * @param {NativeSelection} inputs @returns {boolean} */
+export function nativeInputsComplete(inputs) {
+  try {
+    readNativeInputs(inputs)
+    return JSON.parse(fs.readFileSync(`${inputs.nativeDeps}.prepared.json`, 'utf8')).degraded === false
+  } catch {
+    return false
+  }
 }
 
 /** @param {NativeSelection} inputs @returns {string} */

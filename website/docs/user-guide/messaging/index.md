@@ -41,7 +41,7 @@ connected. An enabled platform can correctly show **Messaging gateway stopped**.
 | Signal | — | ✅ | ✅ | — | — | ✅ | — |
 | SMS | — | — | — | — | — | — | — |
 | Email | — | ✅ | ✅ | ✅ | — | — | — |
-| Home Assistant | — | — | — | — | — | — | — |
+| Home Assistant (plugin) | — | — | — | — | — | — | — |
 | Mattermost | ✅ | ✅ | ✅ | ✅ | — | ✅ | ✅ |
 | Matrix | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | DingTalk | — | ✅ | ✅ | — | ✅ | — | ✅ |
@@ -646,6 +646,8 @@ hermes ALL=(root) NOPASSWD: /usr/bin/systemctl --no-ask-password reset-failed he
 
 Avoid keeping both the user and system gateway units installed at once unless you really mean to. Hermes will warn if it detects both because start/stop/status behavior gets ambiguous.
 
+An installed unit (or launchd plist) belongs to the `HERMES_HOME` it pins. A gateway started from a different home, such as a test or scratch home that happens to resolve to the same service name, never rewrites it: `gateway run`, `start`, `restart` and `install --force` refuse with a message naming both homes and leave the file alone. To deliberately point an existing service at the current home, run `hermes gateway install --force-unit-path`.
+
 :::note Inside a container, only the system scope is offered
 `hermes gateway install` (and the `hermes gateway setup` wizard) refuse to install a **user** service when Hermes detects it is running inside a container. A user unit lands in `~/.config/systemd/user`, and when that home is bind-mounted from the host (podman/distrobox), the host's own `systemd --user` enables and starts the same unit — a second gateway polling the same bot token. Run the gateway as the container's main process (`hermes gateway run`, with a container restart policy), or in a systemd container (systemd as PID 1) install the isolated system scope: `sudo hermes gateway install --system --run-as-user <user>`.
 :::
@@ -686,72 +688,12 @@ macOS Local Network Privacy attributes a socket to the executable launchd spawne
 Agents run as threads inside the one gateway process; the only child processes are tool subprocesses (terminal commands, browsers), which never hold provider credentials. A running gateway also re-reads the `openai-codex` login it seeded from `auth.json` the next time its pool selects that entry after it had gone `exhausted` or `dead` (entries added with `hermes auth add openai-codex` are independent accounts and are not resynced). When you want every session on the fresh login at once, restart the gateway — but prefer the drain-aware path over a bare kill:
 
 - `hermes gateway restart` asks the gateway (SIGUSR1) to refuse new turns, waits up to `agent.restart_after_turn_timeout` (default 1800 s) for in-flight turns to finish, exits, and lets launchd's `KeepAlive` relaunch it; the new process reads `auth.json` from scratch.
-- `launchctl kickstart -k gui/$UID/ai.hermes.gateway` sends SIGTERM instead: the gateway interrupts in-flight chat turns after `agent.restart_drain_timeout` (default `0` — immediately; the user is told and the turn resumes on their next message), gives cron runs `agent.cron_drain_timeout` (default 30 s), kills tool subprocesses and exits, then launchd relaunches it. Nothing from the old process survives, so a session that still fails with `401` after the relaunch is talking to a different gateway process — check `hermes gateway status` (and `launchctl list | grep hermes`) for a second PID, such as a manually started `hermes gateway run`, and stop that one too.
+- `launchctl kickstart -k gui/$UID/ai.hermes.gateway` sends SIGTERM instead: the gateway interrupts in-flight chat turns after `agent.restart_drain_timeout` (default `0` — immediately; the user is told and the turn resumes on their next message), gives cron runs and api_server (`/v1`) runs `agent.cron_drain_timeout` (default 30 s), kills tool subprocesses and exits, then launchd relaunches it. Nothing from the old process survives, so a session that still fails with `401` after the relaunch is talking to a different gateway process — check `hermes gateway status` (and `launchctl list | grep hermes`) for a second PID, such as a manually started `hermes gateway run`, and stop that one too.
 :::
 
 :::info Multiple installations
 Like the Linux systemd service, each `HERMES_HOME` directory gets its own launchd label. The default `~/.hermes` uses `ai.hermes.gateway`; other installations use `ai.hermes.gateway-<suffix>`.
 :::
-
-### Windows (Task Scheduler)
-
-```powershell
-hermes gateway install               # Register the Hermes_Gateway Scheduled Task (runs at logon)
-hermes gateway start                 # Start the gateway hidden, without a console window
-hermes gateway stop                  # Drain and stop the service
-hermes gateway status                # Check status, including registration drift
-```
-
-The Scheduled Task runs `wscript.exe` on a generated `.vbs` launcher under `%USERPROFILE%\.hermes\gateway-service\`. The launcher starts `python.exe -m hermes_cli.main gateway run` with a hidden window and **exits immediately** — by design: `wscript.exe` has no console, so at logon it never receives the `CTRL_CLOSE_EVENT` that kills a `cmd.exe`-hosted gateway, and the gateway inherits one hidden console instead of every subprocess flashing its own (see `hermes_cli/gateway_windows.py::_build_gateway_vbs_script`).
-
-:::warning RestartOnFailure covers the launcher, not the gateway
-Because the launcher returns as soon as the gateway is spawned, Task Scheduler only ever sees the launcher's exit code. The `<RestartOnFailure>` policy in the registered task therefore fires only when `wscript.exe` itself fails to start the gateway — it does **not** restart a gateway that crashes or is killed later. Gateway auto-restart on Windows relies on the gateway's own in-process restart path (`/restart`, updates, and the `hermes gateway restart` command); a gateway killed from outside stays down until `hermes gateway start` or `schtasks /Run /TN <task>`.
-:::
-
-`hermes gateway install` writes the task from the current template; a task registered by an older build would otherwise keep its old settings (no `RestartOnFailure`, no logon `Delay`, an older launcher command line) indefinitely. `hermes gateway status` compares the registered task with the current template and warns when it predates it:
-
-```
-⚠ Scheduled Task registration predates the current template (missing: RestartOnFailure, LogonTrigger Delay; version 1.3 vs 1.4)
-  Repair: hermes gateway start  (or: hermes gateway install)
-```
-
-`hermes gateway start` and `hermes update` run the same comparison and re-register a drifted task from the current template automatically (like the systemd unit refresh on Linux); when `schtasks` refuses without elevation, re-run `hermes gateway install`, which can request administrator approval. The check is silent when the task cannot be queried, and it only inspects a few settings Hermes owns (task version, `RestartOnFailure`, the logon trigger delay and the launcher arguments), so deliberate local edits elsewhere in the task are not flagged.
-
-## Platform-Specific Toolsets
-
-Each platform has its own toolset:
-
-| Platform | Toolset | Capabilities |
-|----------|---------|--------------|
-| CLI | `hermes-cli` | Full access |
-| Telegram | `hermes-telegram` | Full tools including terminal |
-| Discord | `hermes-discord` | Full tools including terminal |
-| WhatsApp | `hermes-whatsapp` | Full tools including terminal |
-| WhatsApp Cloud API | `hermes-whatsapp` | Full tools including terminal (shares toolset with the Baileys bridge) |
-| Slack | `hermes-slack` | Full tools including terminal |
-| Google Chat | `hermes-google_chat` | Full tools including terminal |
-| Signal | `hermes-signal` | Full tools including terminal |
-| SMS | `hermes-sms` | Full tools including terminal |
-| Email | `hermes-email` | Full tools including terminal |
-| Home Assistant | `hermes-homeassistant` | Full tools + HA device control (ha_list_entities, ha_get_state, ha_call_service, ha_list_services) |
-| Mattermost | `hermes-mattermost` | Full tools including terminal |
-| Matrix | `hermes-matrix` | Full tools including terminal |
-| DingTalk | `hermes-dingtalk` | Full tools including terminal |
-| Feishu/Lark | `hermes-feishu` | Full tools including terminal |
-| WeCom | `hermes-wecom` | Full tools including terminal |
-| WeCom Callback | `hermes-wecom-callback` | Full tools including terminal |
-| Weixin | `hermes-weixin` | Full tools including terminal |
-| BlueBubbles | `hermes-bluebubbles` | Full tools including terminal |
-| QQBot | `hermes-qqbot` | Full tools including terminal |
-| Yuanbao | `hermes-yuanbao` | Full tools including terminal |
-| Microsoft Teams | `hermes-teams` | Full tools including terminal |
-| API Server | `hermes-api-server` | Full tools (drops `clarify`, `text_to_speech` — programmatic access doesn't have an interactive user) |
-| Webhooks | `hermes-webhook` | Full tools including terminal |
-| Raft | `hermes-raft` | Wake-only channel; agent uses Raft CLI for message I/O |
-
-## Operating a multi-platform gateway
-
-A gateway typically runs several adapters at once (Telegram + Discord + Slack, etc.). The sections below cover day-2 operations that span all platforms.
 
 ### `/platform` command
 
@@ -801,7 +743,7 @@ present → adapter starts.
 
 By default every platform adapter honors `HTTP_PROXY` / `HTTPS_PROXY` /
 `NO_PROXY` (and `SSL_CERT_FILE`) from the gateway's environment, and
-auto-detects the macOS system proxy. A gateway started by a Windows Scheduled
+auto-detects the macOS system proxy. A gateway started by a scheduled
 Task or a service manager can inherit a proxy the interactive shell never
 sees — a local Clash/V2Ray listener that isn't running yet — and log
 `Cannot connect to host 127.0.0.1:7890` on every poll. Turn the inherited
@@ -975,7 +917,7 @@ Defaults to `false`. Only platforms whose adapter implements `delete_message` ho
 - [Signal Setup](signal.md)
 - [SMS Setup (Twilio)](sms.md)
 - [Email Setup](email.md)
-- [Home Assistant Integration](homeassistant.md)
+- [Home Assistant Integration](homeassistant.md) (plugin catalog)
 - [Mattermost Setup](mattermost.md)
 - [Matrix Setup](matrix.md)
 - [DingTalk Setup](dingtalk.md)

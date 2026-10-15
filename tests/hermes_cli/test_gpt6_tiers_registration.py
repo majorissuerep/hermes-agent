@@ -60,22 +60,6 @@ def test_codex_forward_compat_only_synthesizes_published_gpt6_tiers():
     assert synthesized == {f"{base}{suffix}" for base in GPT6_TIERS for suffix in ("", "-900k")}
 
 
-def test_openrouter_omits_disable_the_openai_ladder_rejects(monkeypatch):
-    """OpenRouter's catalog advertises ``none`` for both Sol generations; only 6.1 must omit the disable."""
-    import hermes_cli.models_reasoning_caps as caps_mod
-    from providers import get_provider_profile
-
-    monkeypatch.setattr(caps_mod, "openrouter_model_reasoning_capabilities", lambda model: {
-        "supports_reasoning": True, "mandatory": False,
-        "supported_efforts": ["max", "xhigh", "high", "medium", "low", "none"]})
-    p = get_provider_profile("openrouter")
-    off = {"enabled": False}
-    body, _ = p.build_api_kwargs_extras(reasoning_config=off, supports_reasoning=True, model="openai/gpt-6.1-sol")
-    assert "reasoning" not in body
-    body, _ = p.build_api_kwargs_extras(reasoning_config=off, supports_reasoning=True, model="openai/gpt-6-sol")
-    assert body["reasoning"] == off
-
-
 def test_gpt61_sol_resolves_context_and_pricing_like_its_tier():
     from agent.model_metadata import DEFAULT_CONTEXT_LENGTHS, _CODEX_OAUTH_CONTEXT_FALLBACK
     from agent.usage_pricing import _OFFICIAL_DOCS_PRICING

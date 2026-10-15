@@ -22,29 +22,19 @@ def _max_tokens_fn(n):
     return {"max_completion_tokens": n}
 
 
-class TestNvidiaProfileParity:
+class TestProfileDefaults:
     def test_max_tokens_match(self, transport):
-        """The NVIDIA profile default max_tokens reaches the wire when the user sets none."""
+        """The custom profile default max_tokens reaches the wire when the user sets none."""
+        from dataclasses import replace
+        profile_config = replace(get_provider_profile("custom"), default_max_tokens=8192)
         profile = transport.build_kwargs(
-            model="nvidia/nemotron", messages=_msgs(), tools=None,
-            provider_profile=get_provider_profile("nvidia"),
+            model="fixture-model", messages=_msgs(), tools=None,
+            provider_profile=profile_config,
             max_tokens_param_fn=_max_tokens_fn,
         )
-        assert profile["max_completion_tokens"] == get_provider_profile("nvidia").default_max_tokens
+        assert profile["max_completion_tokens"] == profile_config.default_max_tokens
 
 
-class TestKimiProfileParity:
-    def test_temperature_omitted(self, transport):
-        legacy = transport.build_kwargs(
-            model="kimi-k2", messages=_msgs(), tools=None,
-            provider_profile=get_provider_profile("kimi-coding"), omit_temperature=True,
-        )
-        profile = transport.build_kwargs(
-            model="kimi-k2", messages=_msgs(), tools=None,
-            provider_profile=get_provider_profile("kimi"),
-        )
-        assert "temperature" not in legacy
-        assert "temperature" not in profile
 
 
 
@@ -74,7 +64,7 @@ class TestDeveloperRoleParity:
         msgs = [{"role": "system", "content": "Be helpful"}, {"role": "user", "content": "hi"}]
         kw = transport.build_kwargs(
             model="gpt-5.4", messages=msgs, tools=None,
-            provider_profile=get_provider_profile("openrouter"),
+            provider_profile=get_provider_profile("ai-gateway"),
         )
         assert kw["messages"][0]["role"] == "developer"
 
@@ -86,7 +76,7 @@ class TestRequestOverridesParity:
     def test_extra_body_override_legacy(self, transport):
         kw = transport.build_kwargs(
             model="gpt-5.4", messages=_msgs(), tools=None,
-            provider_profile=get_provider_profile("openrouter"),
+            provider_profile=get_provider_profile("ai-gateway"),
             request_overrides={"extra_body": {"custom_key": "custom_val"}},
         )
         assert kw["extra_body"]["custom_key"] == "custom_val"
@@ -96,7 +86,7 @@ class TestRequestOverridesParity:
     def test_top_level_override(self, transport):
         kw = transport.build_kwargs(
             model="gpt-5.4", messages=_msgs(), tools=None,
-            provider_profile=get_provider_profile("openrouter"),
+            provider_profile=get_provider_profile("ai-gateway"),
             request_overrides={"top_p": 0.9},
         )
         assert kw["top_p"] == 0.9

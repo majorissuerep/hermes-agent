@@ -5,7 +5,7 @@ other ``hermes_cli.sqlite_util.open_db`` store) to SQLCipher, but ``open_db`` un
 set ``row_factory = sqlite3.Row`` — stdlib Row rejects sqlcipher3 cursors, so every cron
 tick's ``PRAGMA journal_mode`` probe and hosted-room worker died with
 ``TypeError: Row() argument 1 must be sqlite3.Cursor, not sqlcipher3.dbapi2.Cursor``.
-``hermes_state.py`` already solved this shape (``_vaulted_row_factory``); ``open_db`` is the
+``hermes_state/__init__.py`` already solved this shape (``_vaulted_row_factory``); ``open_db`` is the
 same bug class for the small per-profile stores.
 """
 

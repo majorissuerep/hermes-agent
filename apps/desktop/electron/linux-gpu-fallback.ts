@@ -28,7 +28,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 
-import { alreadyHasDisableGpu, isHermesDesktopGpuOverrideOff } from './windows-stack-cookie-fallback'
+import { alreadyHasDisableGpu, isHermesDesktopGpuOverrideOff } from './sandbox-fallback'
 
 export const LINUX_GPU_FALLBACK_MARKER_FILENAME = 'linux-gpu-fallback.json'
 

@@ -8,7 +8,9 @@ import * as path from 'node:path'
 
 import type { App } from 'electron'
 
-import type { RelaunchWaiterHandle } from './relaunch-waiter'
+export interface RelaunchWaiterHandle {
+  cancel: () => Promise<void>
+}
 
 export interface PendingRelaunchMarker {
   schemaVersion: 1

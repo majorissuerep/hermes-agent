@@ -10,8 +10,7 @@ from __future__ import annotations
 
 import os
 
-JOB_GROUPS = ("darwin-arm64", "darwin-x64", "win32-arm64", "win32-x64",
-              "win32-bundle", "linux-x64", "linux-arm64", "termux")
+JOB_GROUPS = ("darwin-arm64", "darwin-x64", "linux-x64", "linux-arm64", "termux")  # fork: win32 groups removed
 ALL_JOBS = ",".join(JOB_GROUPS)
 
 # The workflow jobs each group runs, in the names desktop-bundled-release.yml
@@ -20,9 +19,6 @@ ALL_JOBS = ",".join(JOB_GROUPS)
 GROUP_JOBS = {
     "darwin-arm64": ("build-darwin-arm64",),
     "darwin-x64": ("build-darwin-x64",),
-    "win32-arm64": ("build-win32-arm64",),
-    "win32-x64": ("build-win32-x64",),
-    "win32-bundle": ("assemble-win32-bundle",),
     "termux": ("termux-deb",),
 }
 # The native smoke each group runs after its build. A claim that skipped
@@ -30,9 +26,9 @@ GROUP_JOBS = {
 GROUP_SMOKES = {
     "darwin-arm64": ("smoke-darwin-arm64",),
     "darwin-x64": ("smoke-darwin-x64",),
-    "win32-arm64": ("smoke-win32-arm64",),
-    "win32-x64": ("smoke-win32-x64",),
 }
+# The per-arch groups whose smoke installs the signed MSIX.
+SIGNED_WINDOWS_GROUPS = frozenset({"win32-arm64", "win32-x64"})
 
 
 def parse_jobs(raw: str | None) -> dict[str, bool]:
@@ -63,22 +59,25 @@ def selects_all(raw: str | None) -> bool:
     return all(parse_jobs(raw).values())
 
 
-def phase_jobs(selected: dict[str, bool], phase: str, *, skip_tests: bool = False) -> list[str]:
+def phase_jobs(selected: dict[str, bool], phase: str, *, skip_tests: bool = False,
+               skip_signed: bool = False) -> list[str]:
     """Jobs the stable phase result judges: an unselected group never fails it.
 
     B4 moved candidate-manifest into stable-release.yml, so the desktop
     workflow no longer owns it and the phase result never names it. A claim
-    that skipped tests runs no smoke, so the smokes are not judged.
+    that skipped tests runs no smoke, so the smokes are not judged. A claim without the signed
+    Windows packages smokes none of them (the Store bundle is not install-smoked).
     """
     required = ["validate"]
     if phase == "publish":
-        return required + ["stable-publish", "stable-store"]
+        # stable-store is not required: a Store failure never blocks publication.
+        return required + ["stable-publish"]
     if phase != "candidate":
         raise ValueError(f"Unknown release phase: {phase}")
     for group, jobs in GROUP_JOBS.items():
         if selected.get(group):
             required.extend(jobs)
-            if not skip_tests:
+            if not skip_tests and not (skip_signed and group in SIGNED_WINDOWS_GROUPS):
                 required.extend(GROUP_SMOKES.get(group, ()))
     return required
 

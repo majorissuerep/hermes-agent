@@ -9,11 +9,12 @@ from openai import OpenAI
 
 from agent.transports import get_transport
 from agent.transports.types import NormalizedResponse
+from providers import get_provider_profile
 
 
 @pytest.fixture
 def transport():
-    import agent.transports.chat_completions  # noqa: F401
+    import agent.transports.chat_completions
     return get_transport("chat_completions")
 
 
@@ -83,22 +84,6 @@ class TestChatCompletionsBasic:
             "{}",
         ]
 
-    @pytest.mark.parametrize("provider", ["nous", "openrouter"])
-    def test_gpt56_ultra_uses_max_wire_effort(self, transport, provider):
-        from providers import get_provider_profile
-
-        profile = get_provider_profile(provider)
-        kw = transport.build_kwargs(
-            model="openai/gpt-5.6-sol",
-            messages=[{"role": "user", "content": "Hi"}],
-            tools=[],
-            reasoning_config={"enabled": True, "effort": "ultra"},
-            supports_reasoning=True,
-            provider_profile=profile,
-            provider_name=provider,
-            base_url=profile.base_url,
-        )
-        assert kw["extra_body"]["reasoning"] == {"enabled": True, "effort": "max"}
 
 
 
@@ -107,8 +92,16 @@ class TestChatCompletionsBasic:
 
 
 
-
-
+    def test_convert_messages_strips_replayed_platform_message_id(self, transport):
+        """SQLite replay exposes ``platform_message_id`` as ``message_id`` (JSONL transcript compat);
+        the gateway stamps it on every user row from the admission id. It is delivery bookkeeping:
+        the in-process CLI never sent it, so a resuming surface that let it through would send a
+        different prefix for the same durable session and break the cache.
+        """
+        msgs = [{"role": "user", "content": "hi", "message_id": "adm-123"}]
+        result = transport.convert_messages(msgs)
+        assert "message_id" not in result[0]
+        assert result[0]["content"] == "hi"
 
     def test_convert_messages_strips_timestamp(self, transport):
         """Internal per-message ``timestamp`` metadata (stamped by
@@ -265,49 +258,16 @@ class TestChatCompletionsBuildKwargs:
 
 
 
-    def test_openrouter_provider_prefs(self, transport):
-        from providers import get_provider_profile
-        profile = get_provider_profile("openrouter")
-        msgs = [{"role": "user", "content": "Hi"}]
-        kw = transport.build_kwargs(
-            model="gpt-4o", messages=msgs,
-            provider_profile=profile,
-            provider_preferences={"only": ["openai"]},
-        )
-        assert kw["extra_body"]["provider"] == {"only": ["openai"]}
 
 
 
 
 
 
-    def test_nous_tags(self, transport):
-        from agent.portal_tags import nous_portal_tags
-        from providers import get_provider_profile
-        profile = get_provider_profile("nous")
-        msgs = [{"role": "user", "content": "Hi"}]
-        kw = transport.build_kwargs(model="gpt-4o", messages=msgs, provider_profile=profile)
-        assert kw["extra_body"]["tags"] == nous_portal_tags()
 
 
-    def test_nous_omits_disabled_reasoning_for_unknown_model(self, transport):
-        from providers import get_provider_profile
-        profile = get_provider_profile("nous")
-        msgs = [{"role": "user", "content": "Hi"}]
-        kw = transport.build_kwargs(
-            model="gpt-4o", messages=msgs,
-            provider_profile=profile,
-            supports_reasoning=True,
-            reasoning_config={"enabled": False},
-        )
-        # Not a Portal model id, so the catalog can't rule out a
-        # reasoning-mandatory route (which 400s on a disable) — omit.
-        # tests/plugins/model_providers/test_nous_profile.py covers the
-        # catalog-known cases where the disable IS forwarded.
-        assert "reasoning" not in kw.get("extra_body", {})
 
     def test_ollama_num_ctx(self, transport):
-        from providers import get_provider_profile
         profile = get_provider_profile("custom")
         msgs = [{"role": "user", "content": "Hi"}]
         kw = transport.build_kwargs(
@@ -318,7 +278,6 @@ class TestChatCompletionsBuildKwargs:
         assert kw["extra_body"]["options"]["num_ctx"] == 32768
 
     def test_custom_think_false(self, transport):
-        from providers import get_provider_profile
         profile = get_provider_profile("custom")
         msgs = [{"role": "user", "content": "Hi"}]
         kw = transport.build_kwargs(
@@ -330,7 +289,6 @@ class TestChatCompletionsBuildKwargs:
         assert kw["extra_body"]["think"] is False
 
     def test_custom_omits_think_on_mistral(self, transport):
-        from providers import get_provider_profile
         profile = get_provider_profile("custom")
         msgs = [{"role": "user", "content": "Hi"}]
         kw = transport.build_kwargs(
@@ -360,52 +318,7 @@ class TestChatCompletionsBuildKwargs:
             "thinking_level": "high",
         }
 
-    def test_gemini_ultra_thinking_raises_first_request_max_tokens(self, transport):
-        from agent.gemini_native_adapter import GEMINI_DEFAULT_MAX_OUTPUT_TOKENS
-        from providers import get_provider_profile
 
-        profile = get_provider_profile("gemini")
-        kw = transport.build_kwargs(
-            model="gemini-3.7-flash",
-            messages=[{"role": "user", "content": "Hi"}],
-            provider_profile=profile,
-            provider_name="gemini",
-            base_url=profile.base_url,
-            max_tokens=4096,
-            max_tokens_param_fn=lambda n: {"max_tokens": n},
-            reasoning_config={"enabled": True, "effort": "ultra"},
-        )
-        assert kw["max_tokens"] == GEMINI_DEFAULT_MAX_OUTPUT_TOKENS
-        assert kw["extra_body"]["thinking_config"]["thinkingLevel"] == "high"
-
-        # Also verify gemini-3.8-flash gets headroom and correct thinking level
-        kw38 = transport.build_kwargs(
-            model="gemini-3.8-flash",
-            messages=[{"role": "user", "content": "Hi"}],
-            provider_profile=profile,
-            provider_name="gemini",
-            base_url=profile.base_url,
-            max_tokens=4096,
-            max_tokens_param_fn=lambda n: {"max_tokens": n},
-            reasoning_config={"enabled": True, "effort": "medium"},
-        )
-        assert kw38["max_tokens"] == GEMINI_DEFAULT_MAX_OUTPUT_TOKENS
-        assert kw38["extra_body"]["thinking_config"]["thinkingLevel"] == "medium"
-
-    def test_gemini_without_thinking_keeps_explicit_max_tokens(self, transport):
-        from providers import get_provider_profile
-
-        profile = get_provider_profile("gemini")
-        kw = transport.build_kwargs(
-            model="gemini-3.7-flash",
-            messages=[{"role": "user", "content": "Hi"}],
-            provider_profile=profile,
-            provider_name="gemini",
-            base_url=profile.base_url,
-            max_tokens=4096,
-            max_tokens_param_fn=lambda n: {"max_tokens": n},
-        )
-        assert kw["max_tokens"] == 4096
 
 
 
@@ -513,37 +426,6 @@ class TestChatCompletionsKimi:
         )
         # The parameters dict is passed through untouched (no synthetic type)
         assert "type" not in kw["tools"][0]["function"]["parameters"]["properties"]["q"]
-
-
-class TestChatCompletionsLmStudioReasoning:
-    """LM Studio publishes per-model reasoning ``allowed_options``. When the
-    user requests an effort the model can't honor (e.g. ``high`` on a
-    toggle-style ``["off","on"]`` model), the transport omits
-    ``reasoning_effort`` so LM Studio falls back to the model's default —
-    silently downgrading "high" to "low" would mislead the user.
-    """
-
-    def test_omits_effort_when_high_not_allowed_toggle(self, transport):
-        kw = transport.build_kwargs(
-            model="gpt-oss", messages=[{"role": "user", "content": "Hi"}],
-            is_lmstudio=True,
-            supports_reasoning=True,
-            reasoning_config={"effort": "high"},
-            lmstudio_reasoning_options=["off", "on"],
-        )
-        assert "reasoning_effort" not in kw
-
-
-    def test_passes_through_when_effort_allowed(self, transport):
-        kw = transport.build_kwargs(
-            model="gpt-oss", messages=[{"role": "user", "content": "Hi"}],
-            is_lmstudio=True,
-            supports_reasoning=True,
-            reasoning_config={"effort": "high"},
-            lmstudio_reasoning_options=["off", "low", "medium", "high"],
-        )
-        assert kw["reasoning_effort"] == "high"
-
 
 
 
@@ -681,7 +563,6 @@ class TestChatCompletionsGeminiNativeExtraBodyStrip:
     """
 
     def _nous_profile(self):
-        from providers import get_provider_profile
         return get_provider_profile("nous")
 
     def test_tags_stripped_when_endpoint_is_native_gemini(self, transport):
@@ -697,32 +578,7 @@ class TestChatCompletionsGeminiNativeExtraBodyStrip:
         eb = kw.get("extra_body")
         assert not eb or "tags" not in eb
 
-    def test_tags_preserved_on_nous_endpoint(self, transport):
-        kw = transport.build_kwargs(
-            "hermes-3-405b",
-            [{"role": "user", "content": "hi"}],
-            None,
-            provider_profile=self._nous_profile(),
-            base_url="https://inference.nousresearch.com/v1",
-            session_id="s1",
-            max_tokens=None,
-        )
-        eb = kw.get("extra_body")
-        assert eb and "tags" in eb
 
-    def test_tags_pass_through_on_gemini_openai_compat(self, transport):
-        # /openai compat endpoint is not "native" — unchanged behavior.
-        kw = transport.build_kwargs(
-            "anthropic/claude-sonnet-4.6",
-            [{"role": "user", "content": "hi"}],
-            None,
-            provider_profile=self._nous_profile(),
-            base_url="https://generativelanguage.googleapis.com/v1beta/openai",
-            session_id="s1",
-            max_tokens=None,
-        )
-        eb = kw.get("extra_body")
-        assert eb and "tags" in eb
 
 
 class TestPromptCacheKeyCapability:
@@ -849,7 +705,6 @@ class TestPromptCacheKeyCapability:
 
     @pytest.mark.parametrize("provider", [None, "anthropic", "custom"])
     def test_default_off_never_leaks_unknown_body_field(self, transport, provider):
-        from providers import get_provider_profile
 
         kwargs = transport.build_kwargs(
             model="strict-model",

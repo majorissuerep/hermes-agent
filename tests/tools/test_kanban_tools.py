@@ -435,7 +435,7 @@ def test_block_happy_path(worker_env):
 def test_schedule_parks_current_worker_with_reason(worker_env):
     from hermes_cli import kanban_db as kb
     from hermes_cli import kanban_db_connect as kbc
-    from tools import kanban_tools  # noqa: F401 — ensure registration
+    from tools import kanban_tools
     from tools.registry import registry
 
     reason = "SCHEDULED_UNTIL=2026-09-13T00:00:00Z waiting for reconnect"
@@ -1249,7 +1249,7 @@ def test_live_tui_session_key_uses_profile_store(monkeypatch, tmp_path):
 def test_live_tui_session_key_fails_open_to_original_key(monkeypatch):
     """Store unavailability must degrade to current behaviour (subscribe to the inherited
     key), never fail the kanban_create call."""
-    import hermes_state_registry as registry
+    from hermes_state import registry
     from tools import kanban_tools as kt
 
     def _boom(db_path=None):

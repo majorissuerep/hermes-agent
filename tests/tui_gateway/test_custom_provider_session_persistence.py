@@ -81,7 +81,7 @@ class TestRuntimeModelConfigPersistsEntryIdentity:
 
 
     def test_keeps_bare_custom_when_no_entry_matches(self, monkeypatch):
-        monkeypatch.setattr(rp, "load_config", lambda: {})
+        monkeypatch.setattr(rp, "load_config", dict)
 
         from tui_gateway.server import _runtime_model_config
 
@@ -334,7 +334,7 @@ ULTRA_URL = "http://b200-cluster:30090/v1"
 ULTRA_CONFIG = {
     # Global default deliberately points at a BUILT-IN provider — the config
     # fallback must not fire; only the model lookup can recover the entry.
-    "model": {"default": "some-nous-model", "provider": "nous"},
+    "model": {"default": "some-nous-model", "provider": 'zai'},
     "providers": {
         "hermes-ultra": {
             "api": ULTRA_URL,
@@ -345,7 +345,7 @@ ULTRA_CONFIG = {
 }
 
 ULTRA_LEGACY_CONFIG = {
-    "model": {"default": "some-nous-model", "provider": "nous"},
+    "model": {"default": "some-nous-model", "provider": 'zai'},
     "custom_providers": [
         {
             "name": "hermes-ultra",
@@ -424,7 +424,7 @@ class TestStaleProviderNameFallsBack:
         configured default instead of failing the build."""
         config = {"custom_providers": NAMED_CONFIG["custom_providers"]}
         monkeypatch.setattr(rp, "load_config", lambda: config)
-        monkeypatch.setattr(rp, "_get_model_config", lambda: {})
+        monkeypatch.setattr(rp, "_get_model_config", dict)
 
         from tui_gateway.server import _stored_session_runtime_overrides
 
@@ -518,9 +518,9 @@ class TestRoomPlumbingRuntimeOverrides:
 
         row = {
             "model": "openai/gpt-5.6-luna-pro",
-            "billing_provider": "nous",
+            "billing_provider": 'zai',
             "model_config": json.dumps(
-                {"model": "openai/gpt-5.6-luna-pro", "provider": "nous", "room_plumbing": True}
+                {"model": "openai/gpt-5.6-luna-pro", "provider": 'zai', "room_plumbing": True}
             ),
         }
         assert _stored_session_runtime_overrides(row) == {}
@@ -530,7 +530,7 @@ class TestRoomPlumbingRuntimeOverrides:
 
         row = {
             "model": "openai/gpt-5.6-luna-pro",
-            "model_config": {"model": "openai/gpt-5.6-luna-pro", "provider": "nous", "room_plumbing": True},
+            "model_config": {"model": "openai/gpt-5.6-luna-pro", "provider": 'zai', "room_plumbing": True},
         }
         assert _stored_session_runtime_overrides(row) == {}
 
@@ -543,8 +543,8 @@ class TestRoomPlumbingRuntimeOverrides:
             "title": "Group: Ceo, Product Designer, Cfo, COO, CTO, Coding",
             "hidden": 1,
             "model": "openai/gpt-5.6-luna-pro",
-            "billing_provider": "nous",
-            "model_config": json.dumps({"model": "openai/gpt-5.6-luna-pro", "provider": "nous"}),
+            "billing_provider": 'zai',
+            "model_config": json.dumps({"model": "openai/gpt-5.6-luna-pro", "provider": 'zai'}),
         }
         assert _stored_session_runtime_overrides(row) == {}
 
@@ -557,14 +557,14 @@ class TestRoomPlumbingRuntimeOverrides:
             "title": "Analyze business idea gaps",
             "hidden": 0,
             "model": "glm-5.1",
-            "billing_provider": "ollama-cloud",
+            "billing_provider": 'zai',
             "model_config": json.dumps(
-                {"model": "glm-5.1", "provider": "ollama-cloud", "service_tier": "normal"}
+                {"model": "glm-5.1", "provider": 'zai', "service_tier": "normal"}
             ),
         }
         overrides = _stored_session_runtime_overrides(row)
         assert overrides["model_override"]["model"] == "glm-5.1"
-        assert overrides["model_override"]["provider"] == "ollama-cloud"
+        assert overrides["model_override"]["provider"] == 'zai'
 
     def test_hidden_normal_chat_untouched_by_legacy_shape(self):
         """A hidden NON-room chat (hidden without a "Group:" title) keeps the
@@ -575,8 +575,8 @@ class TestRoomPlumbingRuntimeOverrides:
             "title": "My hidden scratchpad",
             "hidden": 1,
             "model": "glm-5.1",
-            "billing_provider": "ollama-cloud",
-            "model_config": json.dumps({"model": "glm-5.1", "provider": "ollama-cloud"}),
+            "billing_provider": 'zai',
+            "model_config": json.dumps({"model": "glm-5.1", "provider": 'zai'}),
         }
         overrides = _stored_session_runtime_overrides(row)
         assert overrides["model_override"]["model"] == "glm-5.1"
@@ -596,22 +596,22 @@ class TestFollowProfileConfigRuntimeOverrides:
         ``session.resume`` on the deferred (cold, agent-less) path restores the pin while B's config.yaml
         model is unchanged, and drops it once B's profile model moves. Launch home A has a different
         model the whole time, so the compare must run under B's scope, not the launch profile's."""
-        import tui_gateway.server as server
+        from tui_gateway import server
 
         launch, secondary = tmp_path / "a", tmp_path / "b"
         for home, model in ((launch, "launch/model"), (secondary, "profile/default")):
             home.mkdir()
-            (home / "config.yaml").write_text(f"model:\n  default: {model}\n  provider: nous\n", encoding="utf-8")
+            (home / "config.yaml").write_text(f"model:\n  default: {model}\n  provider: zai\n", encoding="utf-8")
             (home / ".env").write_text("", encoding="utf-8")
         stored = "20260919-000000-botc"
         db = SessionDB(db_path=secondary / "state.db")
         db.create_session(stored, "desktop", model="profile/default",
-                          model_config={"model": "profile/default", "provider": "nous", "follow_profile_config": True})
+                          model_config={"model": "profile/default", "provider": 'zai', "follow_profile_config": True})
         db.append_message(stored, "user", "hi")
         db.append_message(stored, "assistant", "hello")
 
         class _FakeAgent:
-            model, provider, base_url, api_key, api_mode = "profile/default", "nous", "", "", ""
+            model, provider, base_url, api_key, api_mode = "profile/default", 'zai', "", "", ""
             _session_db = db
 
             def switch_model(self, **kw):
@@ -642,7 +642,7 @@ class TestFollowProfileConfigRuntimeOverrides:
                 server._apply_model_switch("sid-live", live, "glm-5.1")
 
             row = json.loads(db.get_session(stored)["model_config"])
-            assert row["composer_override_profile"] == {"model": "profile/default", "provider": "nous"}
+            assert row["composer_override_profile"] == {"model": "profile/default", "provider": 'zai'}
             assert row["model"] == "zai/glm-5.1"
 
             def resume():
@@ -656,9 +656,9 @@ class TestFollowProfileConfigRuntimeOverrides:
 
             record = resume()
             assert record["model_override"]["model"] == "zai/glm-5.1"
-            assert record["composer_override_profile"] == {"model": "profile/default", "provider": "nous"}
+            assert record["composer_override_profile"] == {"model": "profile/default", "provider": 'zai'}
 
-            (secondary / "config.yaml").write_text("model:\n  default: profile/new-default\n  provider: nous\n", encoding="utf-8")
+            (secondary / "config.yaml").write_text("model:\n  default: profile/new-default\n  provider: zai\n", encoding="utf-8")
             assert resume().get("model_override") is None
         finally:
             db.close()
@@ -671,12 +671,12 @@ class TestFollowProfileConfigRuntimeOverrides:
         chat-scoped pick a mid-chat switch records: the record carries the OWNING profile's model as the
         divergence marker (not the launch profile's), the first row write persists it, and the resume read
         under that profile restores model AND provider instead of the ambient fallback (#123805)."""
-        import tui_gateway.server as server
+        from tui_gateway import server
 
         launch, secondary = tmp_path / "a", tmp_path / "b"
         for home, model in ((launch, "launch/model"), (secondary, "profile/default")):
             home.mkdir()
-            (home / "config.yaml").write_text(f"model:\n  default: {model}\n  provider: nous\n")
+            (home / "config.yaml").write_text(f"model:\n  default: {model}\n  provider: zai\n")
             (home / ".env").write_text("")
         monkeypatch.setenv("HERMES_HOME", str(launch))
         monkeypatch.setattr(server, "_hermes_home", str(launch))
@@ -692,7 +692,7 @@ class TestFollowProfileConfigRuntimeOverrides:
                 "follow_profile_config": True}})
             assert "error" not in resp, resp
             session = server._sessions[resp["result"]["session_id"]]
-            assert session["composer_override_profile"] == {"model": "profile/default", "provider": "nous"}
+            assert session["composer_override_profile"] == {"model": "profile/default", "provider": 'zai'}
             assert server._ensure_session_db_row(session)
             db = SessionDB(db_path=secondary / "state.db")
             try:
@@ -709,28 +709,28 @@ class TestFollowProfileConfigRuntimeOverrides:
 
     def test_profile_model_change_supersedes_composer_override_on_resume_and_live(self, monkeypatch):
         """Changing the Bot profile invalidates both stored and live chat pins."""
-        import tui_gateway.server as server
+        from tui_gateway import server
 
-        monkeypatch.setattr(server, "_config_model_target", lambda: ("profile/new-default", "nous"))
+        monkeypatch.setattr(server, "_config_model_target", lambda: ("profile/new-default", 'zai'))
         row = {
             "title": "Bot Chat",
             "model": "openai/gpt-5.6-luna-pro",
             "model_config": json.dumps(
                 {
                     "model": "openai/gpt-5.6-luna-pro",
-                    "provider": "nous",
+                    "provider": 'zai',
                     "follow_profile_config": True,
-                    "composer_override_profile": {"model": "profile/old-default", "provider": "nous"},
+                    "composer_override_profile": {"model": "profile/old-default", "provider": 'zai'},
                 }
             ),
         }
         assert server._stored_session_runtime_overrides(row) == {}
 
         session = {
-            "agent": types.SimpleNamespace(model="openai/gpt-5.6-luna-pro", provider="nous"),
-            "model_override": {"model": "openai/gpt-5.6-luna-pro", "provider": "nous"},
-            "composer_override_profile": {"model": "profile/old-default", "provider": "nous"},
-            "config_model_seen": ("profile/old-default", "nous"),
+            "agent": types.SimpleNamespace(model="openai/gpt-5.6-luna-pro", provider='zai'),
+            "model_override": {"model": "openai/gpt-5.6-luna-pro", "provider": 'zai'},
+            "composer_override_profile": {"model": "profile/old-default", "provider": 'zai'},
+            "config_model_seen": ("profile/old-default", 'zai'),
         }
         apply_switch = MagicMock()
         monkeypatch.setattr(server, "_apply_model_switch", apply_switch)
@@ -740,7 +740,7 @@ class TestFollowProfileConfigRuntimeOverrides:
         assert "model_override" not in session
         assert session["composer_override_profile"] is None
         apply_switch.assert_called_once_with(
-            "sid", session, "profile/new-default --provider nous",
+            "sid", session, "profile/new-default --provider zai",
             confirm_expensive_model=True, pin_session_override=False, persist_override=False,
             count_switch=False,
         )
@@ -753,11 +753,11 @@ class TestFollowProfileConfigRuntimeOverrides:
 
         row = {
             "model": "openai/gpt-5.6-luna-pro",
-            "billing_provider": "nous",
+            "billing_provider": 'zai',
             "model_config": json.dumps(
                 {
                     "model": "openai/gpt-5.6-luna-pro",
-                    "provider": "nous",
+                    "provider": 'zai',
                     "follow_profile_config": True,
                 }
             ),
@@ -779,9 +779,9 @@ class TestFollowProfileConfigRuntimeOverrides:
                 "title": "Bot Chat",
                 "hidden": hidden,
                 "model": "openai/gpt-5.6-luna-pro",
-                "billing_provider": "nous",
+                "billing_provider": 'zai',
                 "model_config": json.dumps(
-                    {"model": "openai/gpt-5.6-luna-pro", "provider": "nous"}
+                    {"model": "openai/gpt-5.6-luna-pro", "provider": 'zai'}
                 ),
             }
             assert _stored_session_runtime_overrides(row) == {}
@@ -795,9 +795,9 @@ class TestFollowProfileConfigRuntimeOverrides:
             "title": "Bot Chat ideas for my app",
             "hidden": 0,
             "model": "glm-5.1",
-            "billing_provider": "ollama-cloud",
+            "billing_provider": 'zai',
             "model_config": json.dumps(
-                {"model": "glm-5.1", "provider": "ollama-cloud"}
+                {"model": "glm-5.1", "provider": 'zai'}
             ),
         }
         overrides = _stored_session_runtime_overrides(row)
@@ -806,47 +806,45 @@ class TestFollowProfileConfigRuntimeOverrides:
     def test_ensure_db_row_persists_contract_marker(self, monkeypatch):
         """_ensure_session_db_row stamps follow_profile_config into the row's
         model_config when the session carries the contract."""
-        import tui_gateway.server as server
+        from tui_gateway import server
 
         captured = {}
 
         class FakeDB:
             def create_session(self, *args, **kwargs):
                 captured["model_config"] = kwargs.get("model_config")
-                return None
 
         monkeypatch.setattr(server, "_get_db", lambda: FakeDB())
         monkeypatch.setattr(server, "_resolve_model", lambda: "glm-5.1")
 
         session = {
             "session_key": "key-1",
-            "model_override": {"model": "glm-5.1", "provider": "ollama-cloud"},
+            "model_override": {"model": "glm-5.1", "provider": 'zai'},
             "follow_profile_config": True,
-            "composer_override_profile": {"model": "profile/default", "provider": "nous"},
+            "composer_override_profile": {"model": "profile/default", "provider": 'zai'},
         }
         server._ensure_session_db_row(session)
         assert captured["model_config"].get("follow_profile_config") is True
         # A pick made before the first send rides the same first-write projection as the marker.
-        assert captured["model_config"].get("composer_override_profile") == {"model": "profile/default", "provider": "nous"}
+        assert captured["model_config"].get("composer_override_profile") == {"model": "profile/default", "provider": 'zai'}
 
     def test_ensure_db_row_omits_marker_without_contract(self, monkeypatch):
         """Sessions without the contract do NOT get the marker — normal chats
         keep the stored-runtime restore."""
-        import tui_gateway.server as server
+        from tui_gateway import server
 
         captured = {}
 
         class FakeDB:
             def create_session(self, *args, **kwargs):
                 captured["model_config"] = kwargs.get("model_config")
-                return None
 
         monkeypatch.setattr(server, "_get_db", lambda: FakeDB())
         monkeypatch.setattr(server, "_resolve_model", lambda: "glm-5.1")
 
         session = {
             "session_key": "key-2",
-            "model_override": {"model": "glm-5.1", "provider": "ollama-cloud"},
+            "model_override": {"model": "glm-5.1", "provider": 'zai'},
         }
         server._ensure_session_db_row(session)
         assert captured["model_config"].get("follow_profile_config") is None
@@ -901,12 +899,12 @@ class TestRuntimeModelConfigDropsStaleKeys:
         old model as its own."""
         from tui_gateway.server import _runtime_model_config
 
-        agent = _agent_like(model="", provider="nous")
-        existing = {"model": "meituan/longcat-2.0:free", "provider": "nous"}
+        agent = _agent_like(model="", provider='zai')
+        existing = {"model": "meituan/longcat-2.0:free", "provider": 'zai'}
         config = _runtime_model_config(agent, existing)
 
         assert "model" not in config, config
-        assert config["provider"] == "nous"
+        assert config["provider"] == 'zai'
 
     def test_truthy_provider_overwrites_stale_existing(self):
         from tui_gateway.server import _runtime_model_config
@@ -916,9 +914,9 @@ class TestRuntimeModelConfigDropsStaleKeys:
             "provider": "stealth-ox-alpha",
             "base_url": "https://api.venice.ai/api/v1",
         }
-        config = _runtime_model_config(_agent_like(provider="nous"), existing)
+        config = _runtime_model_config(_agent_like(provider='zai'), existing)
 
-        assert config["provider"] == "nous"
+        assert config["provider"] == 'zai'
         assert config["model"] == "deepseek/deepseek-v4-flash-0731"
 
     def test_resume_overrides_get_no_stale_provider(self):
@@ -940,15 +938,15 @@ class TestRuntimeModelConfigDropsStaleKeys:
         row = {
             "model": "deepseek/deepseek-v4-flash-0731",
             "model_config": json.dumps(config),
-            "billing_provider": "nous",
+            "billing_provider": 'zai',
         }
         overrides = _stored_session_runtime_overrides(row)
 
         assert overrides["model_override"]["model"] == "deepseek/deepseek-v4-flash-0731"
         # The stale endpoint identity is gone; resume routes through the
         # billing fallback to the profile's real provider.
-        assert overrides["model_override"]["provider"] == "nous"
-        assert overrides["provider_override"] == "nous"
+        assert overrides["model_override"]["provider"] == 'zai'
+        assert overrides["provider_override"] == 'zai'
 
 
     def test_existing_none_returns_only_agent_identity(self):
@@ -957,8 +955,6 @@ class TestRuntimeModelConfigDropsStaleKeys:
         crash on the None existing_config."""
         from tui_gateway.server import _runtime_model_config
 
-        config = _runtime_model_config(_agent_like(provider="nous"), None)
+        config = _runtime_model_config(_agent_like(provider='zai'), None)
 
-        assert config == {"model": "deepseek/deepseek-v4-flash-0731", "provider": "nous"}
-
-
+        assert config == {"model": "deepseek/deepseek-v4-flash-0731", "provider": 'zai'}

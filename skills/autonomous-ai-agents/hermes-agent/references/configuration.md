@@ -1,10 +1,10 @@
 # Configuration, Toolsets & Voice
 
-Use `hermes config edit` or `hermes config set section.key value` from a human-operated
-CLI that can unlock its vault. In this encrypted fork, a `terminal` child of a
-logged-in agent has no vault key: use a host operation or the logged-in settings UI.
-For MCP entries use `hermes mcp ... --via-host` (see `native-mcp.md`). Never read,
-patch, or overwrite the encrypted `config.yaml` or `.env` as plaintext.
+Use `hermes config set section.key value` through `terminal`: a local command in an
+unlocked session reuses its session authority, including from delegated agents.
+For MCP entries, `hermes mcp ... --via-host` also remains available (see `native-mcp.md`).
+Never patch or overwrite encrypted `config.yaml` or `.env` as plaintext; use their
+CLI writers. See `encrypted-self-management.md` for updates and repair.
 Full reference: https://hermes-agent.nousresearch.com/docs/user-guide/configuration
 
 ### Config Sections (most-used keys)
@@ -20,7 +20,7 @@ Full reference: https://hermes-agent.nousresearch.com/docs/user-guide/configurat
 | `stt` | `enabled`, `provider` (local/groq/openai/mistral/elevenlabs/deepinfra) |
 | `tts` | `provider` (edge/elevenlabs/openai/minimax/mistral/neutts/gemini/piper/kittentts/deepinfra/xai) |
 | `memory` | `memory_enabled`, `user_profile_enabled`, `provider`, `write_approval` |
-| `security` | `redact_secrets`, `tirith_enabled`, `website_blocklist` |
+| `security` | `redact_secrets`, `website_blocklist` |
 | `delegation` | `model`, `provider`, `max_concurrent_children`, `max_iterations` (50), `max_spawn_depth` |
 | `checkpoints` | `enabled`, `max_snapshots` (50) |
 | `curator` | `enabled`, `consolidate` (false, opt-in aux-model consolidation), `interval_hours`, `stale_after_days` |
@@ -58,7 +58,7 @@ Full enumeration: `TOOLSETS` dict in `toolsets.py` (`_HERMES_CORE_TOOLS` is the 
 | `kanban` | Multi-agent work-queue tools (gated to workers) |
 | `debugging` | Extra introspection tools (off by default) |
 | `safe` | Minimal low-risk toolset for locked-down sessions |
-| `spotify`, `homeassistant`, `discord`, `discord_admin`, `feishu_doc`, `feishu_drive`, `yuanbao` | Service integrations (gated on their credentials) |
+| `discord`, `discord_admin`, `feishu_doc`, `feishu_drive`, `yuanbao` | Service integrations (gated on their credentials). `homeassistant` (`ha_*` tools) and `spotify` (`spotify_*` tools) are not built in: they come from the `homeassistant` / `spotify` catalog plugins (`hermes plugins install <name>`) |
 
 Tool changes take effect on `/reset` (new session) — never mid-conversation, to preserve prompt caching.
 
@@ -73,7 +73,7 @@ stt:
   enabled: true
   provider: local   # local (faster-whisper, free) | groq | openai | mistral | elevenlabs | deepinfra
   local:
-    model: base     # tiny, base, small, medium, large-v3
+    model: base     # tiny, base, small, medium, large-v3, turbo
 ```
 
 Auto-detect priority: local faster-whisper (`python -c "import pm; pm.sync_venv(['stt-whisper'], explicit=True)"`) → Groq (`GROQ_API_KEY`, free tier) → OpenAI (`VOICE_TOOLS_OPENAI_KEY`) → Mistral Voxtral (`MISTRAL_API_KEY`).

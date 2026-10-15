@@ -73,12 +73,7 @@ def pip_config_candidates(env: Mapping[str, str]) -> list[Path]:
     if explicit == os.devnull:
         return []
     home = Path.home()
-    if sys.platform == "win32":
-        name = "pip.ini"
-        global_files = [Path(env.get("ProgramData") or r"C:\ProgramData") / "pip" / name]
-        user_files = [home / "pip" / name,
-                      Path(env.get("APPDATA") or home / "AppData" / "Roaming") / "pip" / name]
-    elif sys.platform == "darwin":
+    if sys.platform == "darwin":
         name = "pip.conf"
         global_files = [Path("/Library/Application Support/pip") / name]
         app_support = home / "Library" / "Application Support" / "pip"

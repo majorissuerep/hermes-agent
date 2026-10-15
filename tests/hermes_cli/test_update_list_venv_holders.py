@@ -12,7 +12,7 @@ import json
 import pytest
 
 from hermes_cli import main as cli_main
-from hermes_cli import update_cmd_windows
+from hermes_cli import update_cmd_holders
 
 
 def _args(**overrides):
@@ -25,7 +25,7 @@ def _args(**overrides):
 def _quiet_preflight(monkeypatch):
     monkeypatch.setattr("hermes_cli.config.is_managed", lambda: False)
     # No live psutil lookups: the fixture tuple IS the process table.
-    monkeypatch.setattr(update_cmd_windows, "_psutil", lambda: None)
+    monkeypatch.setattr(update_cmd_holders, "_psutil", lambda: None)
 
 
 def test_list_venv_holders_json_and_exit_3_when_holders_present(monkeypatch, capsys, _quiet_preflight):
@@ -40,7 +40,7 @@ def test_list_venv_holders_json_and_exit_3_when_holders_present(monkeypatch, cap
     with pytest.raises(SystemExit) as exc:
         cli_main.cmd_update(_args())
 
-    assert exc.value.code == update_cmd_windows.VENV_HOLDERS_EXIT == 3
+    assert exc.value.code == update_cmd_holders.VENV_HOLDERS_EXIT == 3
     payload = json.loads(capsys.readouterr().out)
     assert [(h["pid"], h["kind"]) for h in payload] == [
         (4242, "backend"), (4343, "gateway"), (4444, "hermes:kanban"), (4545, "python")]
@@ -49,7 +49,7 @@ def test_list_venv_holders_json_and_exit_3_when_holders_present(monkeypatch, cap
 
 
 def test_list_venv_holders_empty_list_exits_zero_without_updating(monkeypatch, capsys, _quiet_preflight):
-    monkeypatch.setattr(cli_main, "_detect_venv_python_processes", lambda: [])
+    monkeypatch.setattr(cli_main, "_detect_venv_python_processes", list)
 
     def _boom(*_a, **_k):  # the mutating update body must never run behind the read-only flag
         raise AssertionError("update body ran")

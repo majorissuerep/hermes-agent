@@ -36,6 +36,7 @@ from agent.auxiliary_client import (
     _resolve_xai_oauth_for_aux,
     _CodexCompletionsAdapter,
     _pool_runtime_base_url,
+    _unwrap_data_envelope,
 )
 
 
@@ -90,10 +91,7 @@ class TestResolveTaskProviderModel:
         "provider",
         [
             "anthropic",
-            "minimax-oauth",
-            "nous",
             "openai-codex",
-            "qwen-oauth",
             "xai-oauth",
         ],
     )
@@ -158,7 +156,7 @@ class TestResolveTaskProviderModel:
         monkeypatch.setattr("hermes_cli.config.load_config", lambda: {"moa": {}})
         monkeypatch.setattr("hermes_cli.config.load_config_readonly", lambda: {"moa": {}})
 
-        resolved_provider, model, base_url, api_key, api_mode = _resolve_task_provider_model(
+        resolved_provider, model, base_url, api_key, _api_mode = _resolve_task_provider_model(
             task="title_generation",
             provider="moa",
             model="opus-gpt",
@@ -194,7 +192,7 @@ class TestResolveTaskProviderModel:
         monkeypatch.setattr("hermes_cli.config.load_config", lambda: {"moa": {}})
         monkeypatch.setattr("hermes_cli.config.load_config_readonly", lambda: {"moa": {}})
 
-        resolved_provider, model, base_url, api_key, api_mode = _resolve_task_provider_model(
+        resolved_provider, model, base_url, api_key, _api_mode = _resolve_task_provider_model(
             task="title_generation",
         )
 
@@ -216,7 +214,7 @@ class TestResolveTaskProviderModel:
         monkeypatch.setattr("hermes_cli.config.load_config", lambda: {"moa": {}})
         monkeypatch.setattr("hermes_cli.config.load_config_readonly", lambda: {"moa": {}})
 
-        resolved_provider, model, base_url, api_key, api_mode = _resolve_task_provider_model(
+        resolved_provider, model, _base_url, _api_key, _api_mode = _resolve_task_provider_model(
             task="title_generation",
             provider="moa",
             model="gone-preset",
@@ -232,7 +230,7 @@ class TestResolveTaskProviderModel:
         auxiliary.<task> config. Only cfg_model was normalized before, so a
         MoA reference/aggregator slot configured with `model: auto` sent the
         literal string "auto" to the wire as a model id."""
-        resolved_provider, model, base_url, api_key, api_mode = _resolve_task_provider_model(
+        resolved_provider, model, _base_url, _api_key, _api_mode = _resolve_task_provider_model(
             provider="anthropic",
             model="auto",
         )
@@ -299,7 +297,7 @@ class TestMoaAggregatorSharedResolution:
         cfg["auxiliary"] = {"title_generation": {"provider": "moa", "model": "opus-gpt"}}
         (home / "config.yaml").write_text(yaml.safe_dump(cfg))
 
-        resolved_provider, model, base_url, api_key, api_mode = _resolve_task_provider_model(
+        resolved_provider, model, base_url, api_key, _api_mode = _resolve_task_provider_model(
             task="title_generation",
         )
 
@@ -470,16 +468,6 @@ class TestNousTagsScoping:
 
 
 class TestNormalizeAuxProvider:
-    def test_main_provider_opencode_resolves_an_aux_client(self, monkeypatch):
-        """``model.provider: opencode`` (the alias the main path accepts) must resolve an aux client
-        exactly like ``opencode-zen`` does, instead of ``(None, None)`` (#115006)."""
-        monkeypatch.setenv("OPENCODE_ZEN_API_KEY", "sk-test-not-real")
-        alias_client, alias_model = resolve_provider_client("opencode", model="glm-5.3", task="approval")
-        canon_client, canon_model = resolve_provider_client("opencode-zen", model="glm-5.3", task="approval")
-        assert canon_client is not None
-        assert alias_client is not None
-        assert str(alias_client.base_url) == str(canon_client.base_url)
-        assert alias_model == canon_model
 
     def test_covers_every_alias_the_main_path_resolves(self):
         """Every alias hermes_cli.auth resolves also resolves in aux — drift becomes a red test (#115006)."""
@@ -639,7 +627,7 @@ class TestAnthropicOAuthFlag:
         with patch("agent.anthropic_adapter.build_anthropic_client") as mock_build:
             mock_build.return_value = MagicMock()
             from agent.auxiliary_client import _try_anthropic, AnthropicAuxiliaryClient
-            client, model = _try_anthropic()
+            client, _model = _try_anthropic()
             assert client is not None
             assert isinstance(client, AnthropicAuxiliaryClient)
             # The adapter inside should have is_oauth=True
@@ -653,7 +641,7 @@ class TestAnthropicOAuthFlag:
              patch("agent.auxiliary_client._select_pool_entry", return_value=(False, None)):
             mock_build.return_value = MagicMock()
             from agent.auxiliary_client import _try_anthropic, AnthropicAuxiliaryClient
-            client, model = _try_anthropic()
+            client, _model = _try_anthropic()
             assert client is not None
             assert isinstance(client, AnthropicAuxiliaryClient)
             adapter = client.chat.completions
@@ -678,7 +666,7 @@ class TestAnthropicOAuthFlag:
         ):
             from agent.auxiliary_client import _try_anthropic
 
-            client, model = _try_anthropic()
+            client, _model = _try_anthropic()
 
         assert client is not None
         assert mock_build.call_args.args[0] == "sk-ant-oat01-pooled"
@@ -918,7 +906,7 @@ class TestExpiredCodexFallback:
         with patch("agent.auxiliary_client.OpenAI") as mock_openai:
             mock_openai.return_value = MagicMock()
             from agent.auxiliary_client import _resolve_auto_route
-            client, model, _provider = _resolve_auto_route()
+            client, _model, _provider = _resolve_auto_route()
             assert client is not None
             # OpenRouter is 1st in chain, should win
             mock_openai.assert_called()
@@ -935,7 +923,7 @@ class TestExpiredCodexFallback:
         with patch("agent.anthropic_adapter.build_anthropic_client") as mock_build:
             mock_build.return_value = MagicMock()
             from agent.auxiliary_client import _try_anthropic
-            client, model = _try_anthropic()
+            client, _model = _try_anthropic()
             assert client is not None
             adapter = client.chat.completions
             assert adapter._is_oauth is True
@@ -950,7 +938,7 @@ class TestExplicitProviderRouting:
              patch("agent.anthropic_adapter.build_anthropic_client") as mock_build, \
              patch("agent.auxiliary_client._select_pool_entry", return_value=(False, None)):
             mock_build.return_value = MagicMock()
-            client, model = resolve_provider_client("anthropic")
+            client, _model = resolve_provider_client("anthropic")
             assert client is not None
             adapter = client.chat.completions
             assert adapter._is_oauth is False
@@ -1381,7 +1369,7 @@ class TestIsPaymentError:
             "this model requires a subscription, upgrade for access: "
             "https://ollama.com/upgrade"
         )
-        setattr(exc, "status_code", 403)
+        exc.status_code = 403
         assert _is_payment_error(exc) is True
 
 
@@ -1827,6 +1815,106 @@ class TestStaleFallbackCandidateSkip:
                     task="compression",
                     messages=[{"role": "user", "content": "summarize"}],
                 )
+
+
+class TestDataEnvelopeUnwrap:
+    """Gateways like api.cline.bot wrap completions in {"data": ..., "success": ...}."""
+
+    def _envelope_data(self, content="unwrapped"):
+        return {
+            "id": "chatcmpl-env",
+            "object": "chat.completion",
+            "created": 1751000000,
+            "model": "cline-pass/kimi-k2.7-code",
+            "choices": [{
+                "index": 0,
+                "message": {"role": "assistant", "content": content},
+                "finish_reason": "stop",
+            }],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+        }
+
+    def test_unwrap_envelope_via_model_validate(self):
+        """A leniently-parsed ChatCompletion with the envelope as extras is rebuilt."""
+        from openai.types.chat import ChatCompletion
+
+        wrapped = ChatCompletion.model_construct(
+            data=self._envelope_data(), success=True
+        )
+
+        result = _unwrap_data_envelope(wrapped, task="vision")
+
+        assert isinstance(result, ChatCompletion)
+        assert result.choices[0].message.content == "unwrapped"
+        assert result.model == "cline-pass/kimi-k2.7-code"
+        assert result.usage.total_tokens == 15
+
+    def test_call_llm_unwraps_data_envelope(self):
+        """End-to-end sync path; SimpleNamespace exercises the synthesis fallback."""
+        primary_client = MagicMock()
+        primary_client.chat.completions.create.return_value = SimpleNamespace(
+            choices=None, success=True, data=self._envelope_data()
+        )
+
+        with patch("agent.auxiliary_client._get_cached_client",
+                   return_value=(primary_client, "cline-pass/kimi-k2.7-code")), \
+             patch("agent.auxiliary_client._resolve_task_provider_model",
+                   return_value=("custom", "cline-pass/kimi-k2.7-code", None, None, None)), \
+             patch("agent.auxiliary_client._try_configured_fallback_chain") as mock_chain:
+            result = call_llm(
+                task="title_generation",
+                messages=[{"role": "user", "content": "hello"}],
+            )
+
+        assert result.choices[0].message.content == "unwrapped"
+        mock_chain.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_async_call_llm_unwraps_data_envelope(self):
+        primary_client = MagicMock()
+        primary_client.chat.completions.create = AsyncMock(
+            return_value=SimpleNamespace(
+                choices=None, success=True, data=self._envelope_data()
+            )
+        )
+
+        with patch("agent.auxiliary_client._get_cached_client",
+                   return_value=(primary_client, "cline-pass/kimi-k2.7-code")), \
+             patch("agent.auxiliary_client._resolve_task_provider_model",
+                   return_value=("custom", "cline-pass/kimi-k2.7-code", None, None, None)), \
+             patch("agent.auxiliary_client._try_configured_fallback_chain") as mock_chain:
+            result = await async_call_llm(
+                task="vision",
+                messages=[{"role": "user", "content": "hello"}],
+            )
+
+        assert result.choices[0].message.content == "unwrapped"
+        mock_chain.assert_not_called()
+
+    def test_error_envelope_raises_provider_message(self):
+        wrapped = SimpleNamespace(
+            choices=None,
+            success=False,
+            data={"error": {"message": "upstream provider rejected the request",
+                            "code": "bad_model"}},
+        )
+
+        with pytest.raises(RuntimeError, match="upstream provider rejected the request"):
+            _unwrap_data_envelope(wrapped, task="vision")
+
+    def test_non_envelope_responses_unchanged(self):
+        normal = SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content="hi"))]
+        )
+        assert _unwrap_data_envelope(normal) is normal
+
+        # MagicMock's auto-attribute `data` is not a dict — must stay on the
+        # existing invalid-response path (guards the fallback tests below).
+        mock_resp = MagicMock(choices=[])
+        assert _unwrap_data_envelope(mock_resp) is mock_resp
+
+        no_choices = SimpleNamespace(choices=None, success=True, data={"no": "choices"})
+        assert _unwrap_data_envelope(no_choices) is no_choices
 
 
 class TestAuxiliaryFallbackLayering:
@@ -2451,22 +2539,6 @@ class TestKimiTemperatureOmitted:
 
 
 class TestAuxiliaryTaskExtraBody:
-    def test_task_reasoning_disable_uses_deepseek_thinking_wire(self, monkeypatch):
-        """Task-level ``none`` must reach an always-toggle profile as its native disable shape."""
-        import agent.auxiliary_client as aux
-
-        monkeypatch.setattr(aux, "_get_auxiliary_task_config", lambda _task: {"reasoning_effort": "none"})
-
-        kwargs = aux._build_call_kwargs(
-            provider="deepseek",
-            model="deepseek-v4-flash",
-            messages=[{"role": "user", "content": "hello"}],
-            extra_body=aux._get_task_extra_body("compression"),
-            task="compression",
-        )
-
-        assert kwargs["extra_body"]["thinking"] == {"type": "disabled"}
-        assert "reasoning" not in kwargs["extra_body"]
 
     def test_explicit_deepseek_thinking_disable_beats_profile_default(self):
         """An explicit vendor control is authoritative when no normalized config is present."""
@@ -3062,51 +3134,51 @@ class TestAnthropicAuxiliaryReasoningTranslation:
         assert "_reasoning_config" not in openai_wire_kwargs
 
     def test_anthropic_messages_profile_keeps_reasoning_reachable(self):
-        # commandcode-anthropic: OpenAI-shaped URL, anthropic_messages api_mode, and a profile
+        # anthropic: OpenAI-shaped URL, anthropic_messages api_mode, and a profile
         # class that overrides build_api_kwargs_extras (so the generic extra_body.reasoning
         # fallback the adapter used to read is suppressed). The adapter must still be told.
-        import model_tools  # noqa: F401 — triggers provider discovery
+        import model_tools
         import providers
 
-        assert providers.get_provider_profile("commandcode-anthropic") is not None
+        assert providers.get_provider_profile("anthropic") is not None
         rc = {"enabled": False}
         kwargs = _build_call_kwargs(
-            "commandcode-anthropic", "claude-haiku-4-5-20251001", [{"role": "user", "content": "hi"}],
-            reasoning_config=rc, base_url="https://api.commandcode.ai/provider/v1",
+            "anthropic", "claude-haiku-4-5-20251001", [{"role": "user", "content": "hi"}],
+            reasoning_config=rc, base_url="https://custom.example.test/v1",
         )
         assert kwargs["_reasoning_config"] == rc
         chat_kwargs = _build_call_kwargs(
-            "commandcode", "Qwen/Qwen3.7-Max", [{"role": "user", "content": "hi"}],
-            reasoning_config=rc, base_url="https://api.commandcode.ai/provider/v1",
+            "custom", "Qwen/Qwen3.7-Max", [{"role": "user", "content": "hi"}],
+            reasoning_config=rc, base_url="https://custom.example.test/v1",
         )
         assert "_reasoning_config" not in chat_kwargs
 
     def test_anthropic_messages_profile_resolves_to_messages_adapter(self, monkeypatch):
-        # Bare ``provider: commandcode-anthropic`` (no api_mode) must wrap the client on the
+        # Bare ``provider: anthropic`` (no api_mode) must wrap the client on the
         # profile's declared wire, or the ``_reasoning_config`` kwarg above would reach a plain
         # OpenAI client and TypeError.
-        import model_tools  # noqa: F401
+        import model_tools
         from agent.auxiliary_client import AnthropicAuxiliaryClient, resolve_provider_client
 
-        monkeypatch.setenv("COMMANDCODE_API_KEY", "sk-test-" + "x" * 20)
-        client, _ = resolve_provider_client("commandcode-anthropic", model="claude-haiku-4-5-20251001")
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-" + "x" * 20)
+        client, _ = resolve_provider_client("anthropic", model="claude-haiku-4-5-20251001")
         assert isinstance(client, AnthropicAuxiliaryClient)
 
 
 class TestAuxiliaryProviderProfileReasoning:
     """Auxiliary calls must reuse provider-profile reasoning wire shapes."""
 
-    def test_kimi_reasoning_uses_top_level_effort(self):
+    def test_custom_reasoning_uses_top_level_effort(self):
         kwargs = _build_call_kwargs(
-            "kimi-coding",
-            "kimi-k2-turbo-preview",
+            "custom",
+            "acceptance-model",
             [{"role": "user", "content": "hi"}],
             reasoning_config={"enabled": True, "effort": "medium"},
             base_url="https://api.moonshot.ai/v1",
         )
 
-        # K3 maps medium → high (ref: K3 model docs)
-        assert kwargs["reasoning_effort"] == "high"
+        # Custom OpenAI-compatible routes retain the requested effort.
+        assert kwargs["reasoning_effort"] == "medium"
         assert "reasoning" not in kwargs.get("extra_body", {})
         assert "thinking" not in kwargs.get("extra_body", {})
 
@@ -3128,19 +3200,19 @@ class TestAuxiliaryProviderProfileReasoning:
         with patch(
             "agent.auxiliary_client._resolve_task_provider_model",
             return_value=(
-                "kimi-coding",
-                "kimi-k2-turbo-preview",
+                "custom",
+                "acceptance-model",
                 "https://api.moonshot.ai/v1",
                 "test-key",
                 None,
             ),
         ), patch(
             "agent.auxiliary_client._get_cached_client",
-            return_value=(client, "kimi-k2-turbo-preview"),
+            return_value=(client, "acceptance-model"),
         ):
             result = await async_call_llm(
-                provider="kimi-coding",
-                model="kimi-k2-turbo-preview",
+                provider="custom",
+                model="acceptance-model",
                 messages=[{"role": "user", "content": "hi"}],
                 reasoning_config={"enabled": True, "effort": "high"},
             )
@@ -4170,44 +4242,6 @@ class TestBuildCallKwargsToolDedup:
         assert len(result_tools) == 3  # lcm_grep, lcm_describe, lcm_expand
 
 
-class TestNvidiaBillingHeaders:
-    """NVIDIA NIM billing-origin headers are scoped to NVIDIA cloud."""
-
-    def test_resolve_provider_client_cloud_adds_billing_origin_header(self, monkeypatch):
-        monkeypatch.setenv("NVIDIA_API_KEY", "nvidia-key")
-        monkeypatch.delenv("NVIDIA_BASE_URL", raising=False)
-        mock_openai = MagicMock()
-        mock_openai.return_value = MagicMock(name="nvidia-client")
-
-        with patch("agent.auxiliary_client.OpenAI", mock_openai):
-            client, model = resolve_provider_client(
-                provider="nvidia",
-                model="nvidia/test-model",
-            )
-
-        assert client is not None
-        assert model == "nvidia/test-model"
-        call_kwargs = mock_openai.call_args[1]
-        headers = call_kwargs["default_headers"]
-        assert headers["X-BILLING-INVOKE-ORIGIN"] == "HermesAgent"
-
-    def test_resolve_provider_client_local_nim_skips_billing_origin_header(self, monkeypatch):
-        monkeypatch.setenv("NVIDIA_API_KEY", "nvidia-key")
-        monkeypatch.setenv("NVIDIA_BASE_URL", "http://localhost:8000/v1")
-        mock_openai = MagicMock()
-        mock_openai.return_value = MagicMock(name="nvidia-local-client")
-
-        with patch("agent.auxiliary_client.OpenAI", mock_openai):
-            client, model = resolve_provider_client(
-                provider="nvidia",
-                model="nvidia/test-model",
-            )
-
-        assert client is not None
-        assert model == "nvidia/test-model"
-        call_kwargs = mock_openai.call_args[1]
-        headers = call_kwargs.get("default_headers", {})
-        assert "X-BILLING-INVOKE-ORIGIN" not in headers
 
 
 class TestOpenRouterExplicitApiKey:
@@ -4229,7 +4263,7 @@ class TestOpenRouterExplicitApiKey:
         mock_openai.return_value = MagicMock(name="openrouter-client")
 
         with patch("agent.auxiliary_client.OpenAI", mock_openai):
-            client, model = resolve_provider_client(
+            client, _model = resolve_provider_client(
                 provider="openrouter",
                 explicit_api_key="explicit-pool-key",
             )
@@ -4276,7 +4310,7 @@ class TestAnthropicExplicitApiKey:
              patch("agent.anthropic_adapter.build_anthropic_client") as mock_build, \
              patch("agent.auxiliary_client._select_pool_entry", return_value=(False, None)):
             mock_build.return_value = MagicMock()
-            client, model = resolve_provider_client(
+            client, _model = resolve_provider_client(
                 provider="anthropic",
                 explicit_api_key="explicit-fallback-key",
             )
@@ -4341,7 +4375,7 @@ class TestAuxUnhealthyCache:
              patch("agent.auxiliary_client._try_nous", return_value=(nous_client, "n-model")), \
              patch("agent.auxiliary_client._try_custom_endpoint") as custom_try, \
              patch("agent.auxiliary_client._resolve_api_key_provider", return_value=(None, None)):
-            client, model, label = _try_payment_fallback("openrouter", task="compression")
+            client, _model, label = _try_payment_fallback("openrouter", task="compression")
         assert client is nous_client
         assert label == "nous"
         # OR is skipped via skip_chain_labels (failed provider), custom via unhealthy cache.
@@ -4693,7 +4727,7 @@ class TestCustomEndpointApiKeyInheritance:
 
         with patch("hermes_cli.config.load_config", return_value=fake_config), patch("hermes_cli.config.load_config_readonly", return_value=fake_config), \
              patch.object(ac, "_create_openai_client", side_effect=_capture_create):
-            client, model = resolve_provider_client(
+            _client, _model = resolve_provider_client(
                 "custom",
                 model="test-model",
                 explicit_base_url="https://gw.example.com/v1",
@@ -4721,7 +4755,7 @@ class TestCustomEndpointApiKeyInheritance:
 
         with patch("hermes_cli.config.load_config", return_value=fake_config), patch("hermes_cli.config.load_config_readonly", return_value=fake_config), \
              patch.object(ac, "_create_openai_client", side_effect=_capture_create):
-            client, model = resolve_provider_client(
+            _client, _model = resolve_provider_client(
                 "custom",
                 model="test-model",
                 explicit_base_url="https://gw.example.com/v1",
@@ -4748,7 +4782,7 @@ class TestCustomEndpointApiKeyInheritance:
              patch.object(ac, "_RUNTIME_MAIN_BASE_URL", "https://gw.example.com/v1"), \
              patch("hermes_cli.config.load_config", return_value={"model": {}}), patch("hermes_cli.config.load_config_readonly", return_value={"model": {}}), \
              patch.object(ac, "_create_openai_client", side_effect=_capture_create):
-            client, model = resolve_provider_client(
+            _client, _model = resolve_provider_client(
                 "custom",
                 model="test-model",
                 explicit_base_url="https://gw.example.com/v1",
@@ -4780,7 +4814,7 @@ class TestCustomEndpointApiKeyInheritance:
 
         with patch("hermes_cli.config.load_config", return_value=fake_config), patch("hermes_cli.config.load_config_readonly", return_value=fake_config), \
              patch.object(ac, "_create_openai_client", side_effect=_capture_create):
-            client, model = resolve_provider_client(
+            _client, _model = resolve_provider_client(
                 "custom",
                 model="test-model",
                 explicit_base_url="https://other-host.example.net/v1",

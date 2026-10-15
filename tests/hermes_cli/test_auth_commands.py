@@ -81,7 +81,7 @@ def _codex_pool_only_store(*, exhausted: bool = False) -> dict:
 @pytest.fixture(autouse=True)
 def _clear_provider_env(monkeypatch):
     for key in (
-        "OPENROUTER_API_KEY",
+        "AI_GATEWAY_API_KEY",
         "OPENAI_API_KEY",
         "ANTHROPIC_API_KEY",
         "ANTHROPIC_TOKEN",
@@ -92,14 +92,14 @@ def _clear_provider_env(monkeypatch):
 
 def test_auth_add_api_key_persists_manual_entry(tmp_path, monkeypatch):
     monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes"))
-    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.delenv("AI_GATEWAY_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     _write_auth_store(tmp_path, {"version": 1, "providers": {}})
 
     from hermes_cli.auth_commands import auth_add_command
 
     class _Args:
-        provider = "openrouter"
+        provider = "ai-gateway"
         auth_type = "api-key"
         api_key = "sk-or-manual"
         label = "personal"
@@ -107,7 +107,7 @@ def test_auth_add_api_key_persists_manual_entry(tmp_path, monkeypatch):
     auth_add_command(_Args())
 
     payload = json.loads((tmp_path / "hermes" / "auth.json").read_text())
-    entries = payload["credential_pool"]["openrouter"]
+    entries = payload["credential_pool"]["ai-gateway"]
     entry = next(item for item in entries if item["source"] == "manual")
     assert entry["label"] == "personal"
     assert entry["auth_type"] == "api_key"
@@ -317,140 +317,6 @@ def test_auth_add_explicit_custom_provider_keeps_prefixed_pool_key(
     payload = json.loads((hermes_home / "auth.json").read_text(encoding="utf-8"))
     assert "custom:groq" in payload["credential_pool"]
     assert "groq" not in payload["credential_pool"]
-
-
-def test_auth_add_nous_oauth_persists_pool_entry(tmp_path, monkeypatch):
-    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes"))
-    _write_auth_store(tmp_path, {"version": 1, "providers": {}})
-    token = _jwt_with_email("nous@example.com")
-    monkeypatch.setattr(
-        "hermes_cli.auth._nous_device_code_login",
-        lambda **kwargs: {
-            "portal_base_url": "https://portal.example.com",
-            "inference_base_url": "https://inference.example.com/v1",
-            "client_id": "hermes-cli",
-            "scope": "inference:invoke",
-            "token_type": "Bearer",
-            "access_token": token,
-            "refresh_token": "refresh-token",
-            "obtained_at": "2026-03-23T10:00:00+00:00",
-            "expires_at": "2026-03-23T11:00:00+00:00",
-            "expires_in": 3600,
-            "agent_key": token,
-            "agent_key_id": None,
-            "agent_key_expires_at": "2026-03-23T10:30:00+00:00",
-            "agent_key_expires_in": 1800,
-            "agent_key_reused": False,
-            "agent_key_obtained_at": "2026-03-23T10:00:10+00:00",
-            "tls": {"insecure": False, "ca_bundle": None},
-        },
-    )
-
-    from hermes_cli.auth_commands import auth_add_command
-
-    class _Args:
-        provider = "nous"
-        auth_type = "oauth"
-        api_key = None
-        label = None
-        portal_url = None
-        inference_url = None
-        client_id = None
-        scope = None
-        no_browser = False
-        timeout = None
-        insecure = False
-        ca_bundle = None
-
-    auth_add_command(_Args())
-
-    payload = json.loads((tmp_path / "hermes" / "auth.json").read_text())
-
-    # Pool has exactly one canonical `device_code` entry — not a duplicate
-    # pair of `manual:device_code` + `device_code` (the latter would be
-    # materialised by _seed_from_singletons on every load_pool).
-    entries = payload["credential_pool"]["nous"]
-    device_code_entries = [
-        item for item in entries if item["source"] == "device_code"
-    ]
-    assert len(device_code_entries) == 1, entries
-    assert not any(item["source"] == "manual:device_code" for item in entries)
-    entry = device_code_entries[0]
-    assert entry["source"] == "device_code"
-    assert entry["agent_key"] == token
-    assert entry["portal_base_url"] == "https://portal.example.com"
-
-    # `hermes auth add nous` must also populate providers.nous so the
-    # 401-recovery path (resolve_nous_runtime_credentials) can refresh an
-    # invoke JWT when the token expires. If this mirror is missing, recovery
-    # raises "Hermes is not logged into Nous Portal" and the agent dies.
-    singleton = payload["providers"]["nous"]
-    assert singleton["access_token"] == token
-    assert singleton["refresh_token"] == "refresh-token"
-    assert singleton["agent_key"] == token
-    assert singleton["portal_base_url"] == "https://portal.example.com"
-    assert singleton["inference_base_url"] == "https://inference.example.com/v1"
-
-
-def test_auth_add_nous_oauth_honors_custom_label(tmp_path, monkeypatch):
-    """`hermes auth add nous --type oauth --label <name>` must preserve the
-    custom label end-to-end — it was silently dropped in the first cut of the
-    persist_nous_credentials helper because `--label` wasn't threaded through.
-    """
-    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes"))
-    _write_auth_store(tmp_path, {"version": 1, "providers": {}})
-    token = _jwt_with_email("nous@example.com")
-    monkeypatch.setattr(
-        "hermes_cli.auth._nous_device_code_login",
-        lambda **kwargs: {
-            "portal_base_url": "https://portal.example.com",
-            "inference_base_url": "https://inference.example.com/v1",
-            "client_id": "hermes-cli",
-            "scope": "inference:invoke",
-            "token_type": "Bearer",
-            "access_token": token,
-            "refresh_token": "refresh-token",
-            "obtained_at": "2026-03-23T10:00:00+00:00",
-            "expires_at": "2026-03-23T11:00:00+00:00",
-            "expires_in": 3600,
-            "agent_key": token,
-            "agent_key_id": None,
-            "agent_key_expires_at": "2026-03-23T10:30:00+00:00",
-            "agent_key_expires_in": 1800,
-            "agent_key_reused": False,
-            "agent_key_obtained_at": "2026-03-23T10:00:10+00:00",
-            "tls": {"insecure": False, "ca_bundle": None},
-        },
-    )
-
-    from hermes_cli.auth_commands import auth_add_command
-
-    class _Args:
-        provider = "nous"
-        auth_type = "oauth"
-        api_key = None
-        label = "my-nous"
-        portal_url = None
-        inference_url = None
-        client_id = None
-        scope = None
-        no_browser = False
-        timeout = None
-        insecure = False
-        ca_bundle = None
-
-    auth_add_command(_Args())
-
-    payload = json.loads((tmp_path / "hermes" / "auth.json").read_text())
-
-    # Custom label reaches the pool entry …
-    pool_entry = payload["credential_pool"]["nous"][0]
-    assert pool_entry["source"] == "device_code"
-    assert pool_entry["label"] == "my-nous"
-
-    # … and survives in providers.nous so a subsequent load_pool() re-seeds
-    # it without reverting to the auto-derived fingerprint.
-    assert payload["providers"]["nous"]["label"] == "my-nous"
 
 
 def test_auth_add_codex_oauth_keeps_distinct_pool_accounts(tmp_path, monkeypatch):
@@ -786,7 +652,7 @@ def test_clear_provider_auth_removes_provider_pool_entries(tmp_path, monkeypatch
                         "access_token": "pool-token",
                     }
                 ],
-                "openrouter": [
+                "ai-gateway": [
                     {
                         "id": "cred-2",
                         "label": "other-provider",
@@ -808,7 +674,7 @@ def test_clear_provider_auth_removes_provider_pool_entries(tmp_path, monkeypatch
     assert payload["active_provider"] is None
     assert "anthropic" not in payload.get("providers", {})
     assert "anthropic" not in payload.get("credential_pool", {})
-    assert "openrouter" in payload.get("credential_pool", {})
+    assert "ai-gateway" in payload.get("credential_pool", {})
 
 
 def test_logout_resets_codex_config_when_auth_state_already_cleared(tmp_path, monkeypatch, capsys):
@@ -835,7 +701,10 @@ def test_logout_resets_codex_config_when_auth_state_already_cleared(tmp_path, mo
 
     config_text = (hermes_home / "config.yaml").read_text()
     assert "provider: auto" in config_text
-    assert "base_url: https://openrouter.ai/api/v1" in config_text
+    assert "base_url:" not in config_text
+    from hermes_cli.auth import AuthError, resolve_provider
+    with pytest.raises(AuthError, match="not connected"):
+        resolve_provider("auto")
 
 
 def test_unsuppress_credential_source_clears_marker(tmp_path, monkeypatch):
@@ -883,75 +752,6 @@ def test_unsuppress_credential_source_preserves_other_markers(tmp_path, monkeypa
 # =============================================================================
 
 
-def test_seed_from_singletons_respects_hermes_pkce_suppression(tmp_path, monkeypatch):
-    """anthropic hermes_pkce must not re-seed from ~/.hermes/.anthropic_oauth.json when suppressed."""
-    hermes_home = tmp_path / "hermes"
-    hermes_home.mkdir(parents=True, exist_ok=True)
-    monkeypatch.setenv("HERMES_HOME", str(hermes_home))
-
-    import hermes_yaml as yaml
-    (hermes_home / "config.yaml").write_text(yaml.safe_dump({"model": {"provider": "anthropic", "model": "claude"}}))
-    (hermes_home / "auth.json").write_text(json.dumps({
-        "version": 1,
-        "providers": {},
-        "suppressed_sources": {"anthropic": ["hermes_pkce"]},
-    }))
-
-    # Stub the readers so only hermes_pkce is "available"; claude_code returns None
-    import agent.anthropic_credentials as aa
-    monkeypatch.setattr(aa, "read_hermes_oauth_credentials", lambda: {
-        "accessToken": "tok", "refreshToken": "r", "expiresAt": 9999999999000,
-    })
-    monkeypatch.setattr(aa, "read_claude_code_credentials", lambda: None)
-
-    from agent.credential_pool import _seed_from_singletons
-    entries = []
-    changed, active = _seed_from_singletons("anthropic", entries)
-    # hermes_pkce suppressed, claude_code returns None → nothing should be seeded
-    assert entries == []
-    assert "hermes_pkce" not in active
-
-
-def test_auth_remove_copilot_suppresses_all_variants(tmp_path, monkeypatch):
-    """Removing any copilot source must suppress gh_cli + all env:* variants
-    so the duplicate-seed paths don't resurrect the credential.
-    """
-    hermes_home = tmp_path / "hermes"
-    hermes_home.mkdir(parents=True, exist_ok=True)
-    monkeypatch.setenv("HERMES_HOME", str(hermes_home))
-
-    # The copilot pool entry is no longer persisted directly in auth.json —
-    # `(copilot, gh_cli)` is borrowed and stripped by
-    # sanitize_borrowed_credential_payload (PR #31416, May 2026). Tokens are
-    # hydrated at runtime via resolve_copilot_token(). Mock that path so the
-    # pool has an entry to remove.
-    _write_auth_store(
-        tmp_path,
-        {
-            "version": 1,
-            "credential_pool": {"copilot": []},
-        },
-    )
-
-    from types import SimpleNamespace
-    from hermes_cli.auth import is_source_suppressed
-    from hermes_cli.auth_commands import auth_remove_command
-
-    with patch(
-        "hermes_cli.copilot_auth.resolve_copilot_token",
-        return_value=("ghp_fake", "gh"),
-    ), patch(
-        "hermes_cli.copilot_auth.get_copilot_api_token",
-        return_value=("ghu_fake_api", None),
-    ):
-        auth_remove_command(SimpleNamespace(provider="copilot", target="1"))
-
-    assert is_source_suppressed("copilot", "gh_cli")
-    assert is_source_suppressed("copilot", "env:COPILOT_GITHUB_TOKEN")
-    assert is_source_suppressed("copilot", "env:GH_TOKEN")
-    assert is_source_suppressed("copilot", "env:GITHUB_TOKEN")
-
-
 def test_auth_remove_env_seeded_dotenv_with_bom_no_shell_hint(tmp_path, monkeypatch, capsys):
     """A Notepad-edited .env carries a UTF-8 BOM. The dotenv-vs-shell
     detector must still see the first variable as living in .env (and not
@@ -995,82 +795,3 @@ def test_auth_remove_env_seeded_dotenv_with_bom_no_shell_hint(tmp_path, monkeypa
     assert "still set in your shell environment" not in out
 
 
-def test_auth_add_openrouter_oauth_persists_pkce_key_without_touching_api_key_default(tmp_path, monkeypatch):
-    """`hermes auth add openrouter --type oauth` stores the PKCE-minted key as an ``api_key`` pool row
-    (OpenRouter returns a plain key, no refresh pair) that ``resolve_provider("auto")`` picks up with no
-    env var — same as a pasted key; the bare `--api-key` path keeps its API-key default."""
-    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes"))
-    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    _write_auth_store(tmp_path, {"version": 1, "providers": {}})
-    monkeypatch.setattr("hermes_cli.auth._openrouter_pkce_login", lambda **kw: {"api_key": "sk-or-v1-from-pkce"})
-
-    from hermes_cli.auth import resolve_provider
-    from hermes_cli.auth_commands import auth_add_command
-
-    class _Oauth:
-        provider = "openrouter"
-        auth_type = "oauth"
-        api_key = None
-        label = "browser-login"
-        timeout = None
-        no_browser = True
-
-    class _Plain:
-        provider = "openrouter"
-        auth_type = None  # no --type: must NOT fall into the OAuth flow
-        api_key = "sk-or-v1-pasted"
-        label = "pasted"
-
-    auth_add_command(_Oauth())
-    # No env var, no config.yaml provider: the pooled PKCE key alone must make openrouter resolvable.
-    assert resolve_provider("auto") == "openrouter"
-    auth_add_command(_Plain())
-
-    payload = json.loads((tmp_path / "hermes" / "auth.json").read_text())
-    by_source = {e["source"]: e for e in payload["credential_pool"]["openrouter"]}
-    assert by_source["manual:openrouter_pkce"]["auth_type"] == "api_key"
-    assert by_source["manual:openrouter_pkce"]["access_token"] == "sk-or-v1-from-pkce"
-    assert by_source["manual:openrouter_pkce"]["base_url"] == "https://openrouter.ai/api/v1"
-    assert by_source["manual"]["access_token"] == "sk-or-v1-pasted"
-
-
-def test_openrouter_loopback_callback_binds_nonce_path_and_rejects_forged_redirect(monkeypatch):
-    """The CSRF nonce lives in the callback PATH (OpenRouter echoes no ``state``): a redirect that
-    knows the port but not the nonce is a 404 and never yields a code; the genuine path does."""
-    import threading
-    import urllib.error
-    import urllib.parse
-    import urllib.request
-
-    import hermes_cli.auth_openrouter as orm
-
-    seen: dict = {}
-
-    def _browser(url):
-        callback = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)["callback_url"][0]
-        seen["callback"] = callback
-        forged = callback.rsplit("/", 1)[0] + "/forged-nonce?code=evil"
-
-        def _redirects():
-            try:
-                urllib.request.urlopen(forged, timeout=5)
-            except urllib.error.HTTPError as exc:
-                seen["forged_status"] = exc.code
-            with urllib.request.urlopen(f"{callback}?code=good-code", timeout=5) as resp:
-                seen["genuine_status"] = resp.status
-
-        threading.Thread(target=_redirects, daemon=True).start()
-        return True
-
-    monkeypatch.setattr(orm, "_can_open_graphical_browser", lambda: True)
-    monkeypatch.setattr(orm.webbrowser, "open", _browser)
-
-    code = orm._openrouter_loopback_code(
-        {"code_challenge": "c", "code_challenge_method": "S256"}, open_browser=True, timeout_seconds=10)
-
-    parsed = urllib.parse.urlparse(seen["callback"])
-    assert parsed.hostname == "127.0.0.1" and parsed.path.startswith("/callback/") and len(parsed.path) > 20
-    assert seen["forged_status"] == 404
-    assert seen["genuine_status"] == 200
-    assert code == "good-code"

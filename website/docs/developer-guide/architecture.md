@@ -41,7 +41,7 @@ This page is the top-level map of Hermes Agent internals. Use it to orient yours
 ┌───────────────────┐              ┌──────────────────────┐
 │ Session Storage   │              │ Tool Backends         │
 │ (SQLite + FTS5)   │              │ Terminal (7 backends) │
-│ hermes_state.py   │              │ Browser (5 backends)  │
+│ hermes_state/__init__.py   │              │ Browser (5 backends)  │
 │ gateway/session.py│              │ Web (4 backends)      │
 └───────────────────┘              │ MCP (dynamic)         │
                                    │ File, Vision, etc.    │
@@ -56,7 +56,7 @@ hermes-agent/
 ├── cli.py                    # HermesCLI facade — mixins in hermes_cli/cli_*_mixin.py
 ├── model_tools.py            # Tool discovery, schema collection, dispatch
 ├── toolsets.py               # Tool groupings and platform presets
-├── hermes_state.py           # SQLite session/state database facade (+ hermes_state_*.py siblings)
+├── hermes_state/__init__.py           # SQLite session/state database facade (+ hermes_state/*.py siblings)
 ├── hermes_constants.py       # HERMES_HOME, profile-aware paths
 ├── batch_runner.py           # Batch trajectory generation
 │
@@ -122,8 +122,9 @@ hermes-agent/
 │
 ├── plugins/platforms/        # Bundled platform plugins: telegram, discord, slack,
 │                             #   whatsapp, matrix, mattermost, email, sms, dingtalk,
-│                             #   feishu, wecom, homeassistant, irc, line, teams,
-│                             #   google_chat, buzz, ntfy, photon, raft, simplex
+│                             #   feishu, wecom, irc, line, teams, google_chat,
+│                             #   buzz, ntfy, photon, raft, simplex
+│                             #   (Home Assistant: `homeassistant` catalog plugin)
 │
 ├── acp_adapter/              # ACP server (VS Code / Zed / JetBrains)
 ├── cron/                     # Scheduler (jobs.py, scheduler.py)

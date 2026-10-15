@@ -36,8 +36,9 @@ def advertised_context_length(model: str, base_url: str = "") -> Optional[int]:
     latency or a failing request."""
     from agent.model_metadata import (
         DEFAULT_CONTEXT_LENGTHS, _load_model_metadata_disk_cache, _longest_key_match,
-        _strip_provider_prefix, get_cached_context_length,
+        get_cached_context_length,
     )
+    from agent.model_metadata_identity import _strip_provider_prefix
     model = _strip_provider_prefix(str(model or ""))
     if not model:
         return None

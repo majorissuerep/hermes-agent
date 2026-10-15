@@ -40,6 +40,16 @@ def _is_live_system_guard(exc: BaseException) -> bool:
 class SessionPersistenceMixin:
     """SessionStore storage plumbing: SessionDB handle resolution and routing-index load/save."""
 
+    def retire_runtime_sessions(self, session_ids):
+        """Publish committed retirement; durable fences reject delayed saves."""
+        with self._lock:
+            targets = set(session_ids)
+            for key, entry in list(self._entries.items()):
+                if entry.session_id in targets:
+                    del self._entries[key]
+            for sid in targets:
+                self._session_owner_hints.pop(sid, None)
+
     def _open_session_db_for_active_scope(self, db_path: Optional[Path] = None):
         """SessionDB for the active profile scope. ``db_path`` pins the store; otherwise
         ``_default_db_path()`` follows the context-local HERMES_HOME (resolved per call so
@@ -50,7 +60,7 @@ class SessionPersistenceMixin:
         that the multiplexed inbound path already performs actually reach session storage.
         """
         from hermes_state import _default_db_path
-        from hermes_state_registry import acquire
+        from hermes_state.registry import acquire
 
         path = Path(db_path) if db_path is not None else Path(_default_db_path())
 
@@ -203,7 +213,7 @@ class SessionPersistenceMixin:
         would strand secondary profiles' handles with their WAL lock held ('database is locked' on
         restart). Drained under the lock, closed outside it; a pinned handle is the pinner's."""
         def _close(db) -> None:
-            from hermes_state_registry import release_or_close  # shared instances no-op on close()
+            from hermes_state.registry import release_or_close  # shared instances no-op on close()
             try:
                 release_or_close(db)
             except Exception as exc:
@@ -315,6 +325,10 @@ class SessionPersistenceMixin:
                         type(entry_data).__name__)
                     continue
                 try:
+                    from hermes_state.mutation_retirement import retired_session
+                    db = self._routing_db
+                    if db is not None and retired_session(db, entry_data['session_id']):
+                        continue
                     self._entries[key] = SessionEntry.from_dict(entry_data)
                     imported += 1
                 except (ValueError, KeyError, TypeError) as e:
@@ -402,7 +416,7 @@ class SessionPersistenceMixin:
             "a crashed gateway", key, entry.session_id, row["end_reason"])
         return "prune"
 
-    def _entries_as_dicts(self) -> Dict[str, Any]:
+    def _entries_as_dicts(self) -> dict[str, Any]:
         """Serializable snapshot of ``_entries``. Lock held."""
         return {key: entry.to_dict() for key, entry in self._entries.items()}
 
@@ -446,12 +460,12 @@ class SessionPersistenceMixin:
         self._routing_db_loaded = True
         self._routing_fallback_baseline = None
 
-    def _snapshot_routing_locked(self) -> tuple[Dict[str, Any], int]:
+    def _snapshot_routing_locked(self) -> tuple[dict[str, Any], int]:
         """Capture immutable routing data and a monotonic generation."""
         self._reconcile_recovered_routing_locked()
         return self._entries_as_dicts(), self._next_routing_generation_locked()
 
-    def _persist_routing_data(self, data: Dict[str, Any], generation: int) -> None:
+    def _persist_routing_data(self, data: dict[str, Any], generation: int) -> None:
         """Serialize all whole-index writers through one durable write lock."""
         with self._lazy("_save_lock", threading.Lock):
             if generation <= getattr(self, "_persisted_routing_generation", 0):
@@ -489,7 +503,7 @@ class SessionPersistenceMixin:
                 for key in [k for k, (rev, _) in fast_persisted.items() if rev <= generation]:
                     del fast_persisted[key]
 
-    def _save_sessions_json(self, data: Dict[str, Any]) -> None:
+    def _save_sessions_json(self, data: dict[str, Any]) -> None:
         """Write the legacy sessions.json mirror of the routing index (atomic + fsync).
         Fork: envelope-aware inside a vaulted home."""
         _target = self.sessions_dir / "sessions.json"
@@ -511,7 +525,7 @@ class SessionPersistenceMixin:
         self._persist_routing_data(data, generation)
 
     def _save_entry(
-        self, session_key: str, *, entry_data: Optional[Dict[str, Any]] = None,
+        self, session_key: str, *, entry_data: Optional[dict[str, Any]] = None,
         lock_held: bool = False) -> None:
         """Persist ONE routing entry via UPSERT — the per-turn fast path (a full rewrite fsyncs a
         multi-MB sessions.json). The key -> session_id mapping never changes here: structural

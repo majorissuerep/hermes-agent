@@ -253,23 +253,6 @@ class TestDefaultModelFromCache:
             fetch.assert_not_called()
 
 
-    def test_shipped_manifest_labels_glm52_default(self, isolated_home):
-        """Contract with the in-repo manifest: both provider blocks label the
-        same default entry the code constant points at."""
-        import hermes_cli.model_catalog as model_catalog
-        from hermes_cli.models import PREFERRED_SILENT_DEFAULT_MODEL
-
-        repo_root = Path(model_catalog.__file__).resolve().parent.parent
-        manifest = json.loads(
-            (repo_root / "website" / "static" / "api" / "model-catalog.json").read_text()
-        )
-        for provider in ("openrouter", "nous"):
-            block = manifest["providers"][provider]
-            labeled = [m["id"] for m in block["models"] if m.get("default")]
-            assert labeled == [PREFERRED_SILENT_DEFAULT_MODEL], (
-                f"{provider}: exactly one entry must be labeled default and it "
-                f"must match PREFERRED_SILENT_DEFAULT_MODEL"
-            )
 
 
 class TestProviderOverride:
@@ -337,124 +320,29 @@ class TestIntegrationWithModelsModule:
 
 
 
-    def test_picker_nous_row_uses_curated_list(self, tmp_path, monkeypatch):
-        """The /model picker surfaces the curated ``_PROVIDER_MODELS["nous"]``
-        list in curated order — matching the ``hermes model`` CLI — not the live
-        ``/v1/models`` catalog or the manifest. Portal free/paid recommendations
-        are unioned in when reachable; offline (as here, with the Portal calls
-        stubbed out) it's exactly the curated list.
-        """
-        # We deliberately do NOT use the ``isolated_home`` fixture here:
-        # that fixture monkeypatches ``Path.home`` to ``tmp_path``, which
-        # trips the auth-store seat-belt in ``_auth_file_path()`` because
-        # ``HERMES_HOME / auth.json`` then resolves to the same path the
-        # seat-belt thinks is the "real" user store. Use the autouse
-        # ``_hermetic_environment`` HERMES_HOME directly instead.
-        import importlib
-        from hermes_cli import model_catalog
-        from hermes_cli.models import get_curated_nous_model_ids
-        importlib.reload(model_catalog)
-        try:
-            from hermes_cli.model_switch_providers import list_picker_providers
 
-            active_home = Path(os.environ["HERMES_HOME"])
-            (active_home / "auth.json").write_text(
-                json.dumps(
-                    {
-                        "providers": {"nous": {"access_token": "fake"}},
-                        "credential_pool": {},
-                    }
-                )
-            )
+    def test_picker_max_models_cap_semantics(self, monkeypatch):
+        """None, zero and a positive cap retain distinct semantics on the real picker path."""
+        from hermes_cli import models
+        from hermes_cli.model_switch import list_authenticated_providers
+        from hermes_cli.model_switch_providers import list_picker_providers
 
-            # Stub the Portal recommendation union so the row is deterministic
-            # (the curated list alone) and never touches the network. ``expected``
-            # is computed from the same source the picker uses internally
-            # (``curated["nous"] = get_curated_nous_model_ids()``), so the test
-            # stays an invariant — it can't rot as the curated/manifest list grows.
-            with patch.object(
-                model_catalog, "_fetch_manifest", return_value=_valid_manifest()
-            ), patch("hermes_cli.models.check_nous_free_tier", return_value=False), patch(
-                "hermes_cli.models.union_with_portal_free_recommendations",
-                side_effect=lambda ids, *a, **k: (ids, {}),
-            ), patch(
-                "hermes_cli.models.union_with_portal_paid_recommendations",
-                side_effect=lambda ids, *a, **k: (ids, {}),
-            ):
-                expected = get_curated_nous_model_ids()
-                picker = list_picker_providers(
-                    current_provider="nous", max_models=99
-                )
-        finally:
-            model_catalog.reset_cache()
+        expected = ["fixture-one", "fixture-two", "fixture-three"]
+        monkeypatch.setenv("AI_GATEWAY_API_KEY", "synthetic-picker-key")
+        monkeypatch.setattr("agent.models_dev.fetch_models_dev", dict)
+        monkeypatch.setitem(models._PROVIDER_MODELS, "ai-gateway", expected)
+        monkeypatch.setattr(models, "cached_provider_model_ids", lambda *_a, **_k: expected)
+        full = list_picker_providers(current_provider="ai-gateway", max_models=None)
+        one = list_picker_providers(current_provider="ai-gateway", max_models=1)
+        zero = list_authenticated_providers(current_provider="ai-gateway", max_models=0)
 
-        nous_row = next((r for r in picker if r["slug"] == "nous"), None)
-        assert nous_row is not None, "nous row must appear when authed"
-        assert nous_row["models"] == expected
+        def row(rows):
+            return next(r for r in rows if r["slug"] == "ai-gateway")
 
-    def test_picker_max_models_cap_semantics(self, tmp_path, monkeypatch):
-        """The cap argument has three distinct meanings on the real slicing
-        path: ``None`` = unlimited (the cap-removal fix, #48297), ``0`` = no
-        models (preserved for slug-only callers), an int N = first N. Guards
-        the ``is not None`` distinction the cap-removal follow-up introduced —
-        a ``if max_models`` (falsy) check would conflate ``0`` with unlimited.
-        """
-        import importlib
-        from hermes_cli import model_catalog
-        from hermes_cli.models import get_curated_nous_model_ids
-        importlib.reload(model_catalog)
-        try:
-            from hermes_cli.model_switch import list_authenticated_providers
-            from hermes_cli.model_switch_providers import list_picker_providers
-
-            active_home = Path(os.environ["HERMES_HOME"])
-            (active_home / "auth.json").write_text(
-                json.dumps(
-                    {
-                        "providers": {"nous": {"access_token": "fake"}},
-                        "credential_pool": {},
-                    }
-                )
-            )
-            with patch.object(
-                model_catalog, "_fetch_manifest", return_value=_valid_manifest()
-            ), patch("hermes_cli.models.check_nous_free_tier", return_value=False), patch(
-                "hermes_cli.models.union_with_portal_free_recommendations",
-                side_effect=lambda ids, *a, **k: (ids, {}),
-            ), patch(
-                "hermes_cli.models.union_with_portal_paid_recommendations",
-                side_effect=lambda ids, *a, **k: (ids, {}),
-            ):
-                expected = get_curated_nous_model_ids()
-                full = list_picker_providers(current_provider="nous", max_models=None)
-                one = list_picker_providers(current_provider="nous", max_models=1)
-                # 0 is exercised on list_authenticated_providers (the slug-only
-                # path); the picker variant drops empty-model rows entirely, so
-                # the empty-list contract lives on the auth-providers call.
-                zero = list_authenticated_providers(
-                    current_provider="nous", max_models=0
-                )
-        finally:
-            model_catalog.reset_cache()
-
-        def _nous(rows):
-            return next((r for r in rows if r["slug"] == "nous"), None)
-
-        # Only meaningful when the curated list actually exceeds 1 entry.
-        assert len(expected) > 1, "test needs a multi-model curated nous list"
-
-        full_row = _nous(full)
-        assert full_row is not None and full_row["models"] == expected
-
-        # The Nous row is already curated, so an int cap never trims it (its free tier sits last).
-        one_row = _nous(one)
-        assert one_row is not None and one_row["models"] == expected
-
-        zero_row = _nous(zero)
-        # 0 means an empty model list — NOT unlimited. total_models still real.
-        assert zero_row is not None
-        assert zero_row["models"] == []
-        assert zero_row["total_models"] == len(expected)
+        assert row(full)["models"] == expected
+        assert row(one)["models"] == expected[:1]
+        assert row(zero)["models"] == []
+        assert row(zero)["total_models"] == len(expected)
 
 
 # -----------------------------------------------------------------------------
@@ -539,7 +427,6 @@ class TestSwrRefreshProfileScope:
             with seen:
                 refreshed_paths.append(str(model_catalog._cache_path()))
             release.wait(5)
-            return None
 
         set_multiplex_active(True)
         try:

@@ -102,28 +102,6 @@ def _warn_running(auto_yes: bool, headline: str, running: list[str], lines: tupl
 def _detect_openclaw_processes() -> list[str]:
     """Detect running OpenClaw processes and services."""
     found: list[str] = []
-    if sys.platform == "win32":
-        # bounded_probe_run: plain subprocess.run(timeout=...) can hang forever on Windows when a
-        # conhost.exe descendant holds duplicated pipe handles — a hang is not an exception.
-        # See #87134.
-        from hermes_cli._subprocess_compat import bounded_probe_run
-        try:
-            for exe in ("openclaw.exe", "clawd.exe"):
-                result = bounded_probe_run(["tasklist", "/FI", f"IMAGENAME eq {exe}"], timeout=5)
-                if result is not None and exe in (result.stdout or "").lower():
-                    found.append(f"process: {exe}")
-            # Node.js-hosted OpenClaw — tasklist doesn't show command lines, so use PowerShell.
-            ps_cmd = (
-                'Get-CimInstance Win32_Process -Filter "Name = \'node.exe\'" | '
-                'Where-Object { $_.CommandLine -match "openclaw|clawd" } | '
-                'Select-Object -First 1 ProcessId')
-            result = bounded_probe_run(["powershell", "-NoProfile", "-Command", ps_cmd], timeout=5)
-            pid = (result.stdout or "").strip() if result is not None else ""
-            if pid:
-                found.append(f"node.exe process with openclaw in command line (PID {pid})")
-        except Exception:
-            pass
-        return found
     result = _posix_probe(["systemctl", "--user", "is-active", "openclaw-gateway.service"], 5)
     if result is not None and result.stdout.strip() == "active":
         found.append("systemd service: openclaw-gateway.service")
@@ -146,7 +124,7 @@ def _detect_openclaw_processes() -> list[str]:
 def _posix_probe(cmd: list[str], timeout: int):
     try:
         return subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8',
-                              errors='replace', timeout=timeout)
+                              errors='replace', timeout=timeout, check=False)
     except (FileNotFoundError, subprocess.TimeoutExpired):
         return None
 

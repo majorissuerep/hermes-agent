@@ -339,6 +339,8 @@ def test_auth_json_only_login_explains_instead_of_wizard(monkeypatch, capsys, tm
     import dataclasses
 
     import hermes_cli.runtime_provider as rp
+    from tests.hermes_cli.anon_portal import install_optional_portal_provider
+    install_optional_portal_provider(monkeypatch)
 
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
     (tmp_path / "config.yaml").write_text("model:\n  default: some-model\n", encoding="utf-8")

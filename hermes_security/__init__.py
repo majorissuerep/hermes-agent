@@ -36,19 +36,19 @@ from hermes_security.errors import (
 )
 
 __all__ = [
+    "PlaintextStateError",
     "Vault",
     "VaultError",
     "VaultIntegrityError",
     "VaultLockedError",
     "VaultNotInitializedError",
     "WrongMasterPasswordError",
-    "PlaintextStateError",
-    "get_vault",
     "clear_vault_cache",
+    "count_encrypted_files",
+    "get_vault",
     "is_unlocked",
     "lock_now",
     "vault_status",
-    "count_encrypted_files",
 ]
 
 _LAZY = {

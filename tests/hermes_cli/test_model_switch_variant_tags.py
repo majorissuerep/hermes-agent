@@ -18,7 +18,7 @@ from hermes_cli.model_switch import switch_model
 _MOCK_VALIDATION = {"accepted": True, "persist": True, "recognized": True, "message": None}
 
 
-def _run_switch(raw_input: str, current_provider: str = "openrouter") -> str:
+def _run_switch(raw_input: str, current_provider: str = 'ai-gateway') -> str:
     """Run switch_model with mocked dependencies, return the resolved model name."""
     with patch("hermes_cli.model_switch.resolve_alias", return_value=None), \
          patch("hermes_cli.model_switch.list_provider_models", return_value=[]), \
@@ -51,8 +51,8 @@ class TestVariantTagPreservation:
 
     def test_legacy_colon_format_converts_to_slash(self):
         """Legacy vendor:model (no slash) should still be converted to vendor/model."""
-        result = _run_switch("nvidia:nemotron-3-super-120b-a12b")
-        assert result == "nvidia/nemotron-3-super-120b-a12b"
+        result = _run_switch('zai:glm-5')
+        assert result == 'zai/glm-5'
 
 
 
@@ -63,10 +63,10 @@ class TestColonFormOffAggregators:
 
     def test_known_provider_colon_matches_slash_form(self):
         with patch("hermes_cli.model_switch.resolve_provider_full", return_value=None):
-            colon = _run_switch("Alibaba:qwen3.6-plus", current_provider="alibaba")
-            slash = _run_switch("Alibaba/qwen3.6-plus", current_provider="alibaba")
+            colon = _run_switch('ZAI:glm-5', current_provider='zai')
+            slash = _run_switch('ZAI/glm-5', current_provider='zai')
         assert colon == slash
 
     def test_non_provider_left_side_keeps_colon(self):
         with patch("hermes_cli.model_switch.resolve_provider_full", return_value=None):
-            assert _run_switch("qwen3.5:4b", current_provider="alibaba") == "qwen3.5:4b"
+            assert _run_switch("qwen3.5:4b", current_provider='zai') == "qwen3.5:4b"

@@ -249,7 +249,7 @@ def fake_mcp_server(populated_sessions_dir, mock_session_db, monkeypatch):
 
     monkeypatch.setattr(mcp_serve, "_get_sessions_dir", lambda: populated_sessions_dir)
     monkeypatch.setattr(mcp_serve, "_get_session_db", lambda: mock_session_db)
-    monkeypatch.setattr(mcp_serve, "_load_channel_directory", lambda: {})
+    monkeypatch.setattr(mcp_serve, "_load_channel_directory", dict)
     monkeypatch.setattr(mcp_serve, "_MCP_SERVER_AVAILABLE", True)
     monkeypatch.setattr(mcp_serve, "MCPServer", _FakeMCPServer)
 
@@ -480,7 +480,7 @@ def mcp_server_e2e(populated_sessions_dir, mock_session_db, monkeypatch, require
     import mcp_serve
     monkeypatch.setattr(mcp_serve, "_get_sessions_dir", lambda: populated_sessions_dir)
     monkeypatch.setattr(mcp_serve, "_get_session_db", lambda: mock_session_db)
-    monkeypatch.setattr(mcp_serve, "_load_channel_directory", lambda: {})
+    monkeypatch.setattr(mcp_serve, "_load_channel_directory", dict)
 
     bridge = mcp_serve.EventBridge()
     server = mcp_serve.create_mcp_server(event_bridge=bridge)
@@ -655,7 +655,7 @@ class TestE2EAttachmentsFetch:
 
 class TestE2EEventsPoll:
     def test_poll_empty(self, mcp_server_e2e, _event_loop):
-        server, bridge = mcp_server_e2e
+        server, _bridge = mcp_server_e2e
         result = _run_tool(server, "events_poll")
         assert result["events"] == []
         assert result["next_cursor"] == 0
@@ -1007,6 +1007,9 @@ class TestEventBridgePollE2E:
     def test_poll_skips_when_unchanged(self, tmp_path, monkeypatch):
         """Second poll with no file changes should be a no-op."""
         import mcp_serve
+        from hermes_state import SessionDB
+        from unittest.mock import patch
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
         sessions_dir = tmp_path / "sessions"
         sessions_dir.mkdir()
         monkeypatch.setattr(mcp_serve, "_get_sessions_dir", lambda: sessions_dir)
@@ -1024,37 +1027,16 @@ class TestEventBridgePollE2E:
             }
         }
         (sessions_dir / "sessions.json").write_text(json.dumps(sessions_data))
-        _create_test_db(db_path, session_id, [
-            {"role": "user", "content": "Hello", "timestamp": "2026-03-29T15:00:01"},
-        ])
-
-        class TestDB:
-            def __init__(self):
-                self.call_count = 0
-
-            def get_messages(self, sid):
-                self.call_count += 1
-                conn = sqlite3.connect(str(db_path))
-                conn.row_factory = sqlite3.Row
-                rows = conn.execute(
-                    "SELECT * FROM messages WHERE session_id = ? ORDER BY id",
-                    (sid,),
-                ).fetchall()
-                conn.close()
-                return [dict(r) for r in rows]
-
-        db = TestDB()
-        bridge = mcp_serve.EventBridge()
-
-        # First poll — should process
-        bridge._poll_once(db)
-        first_calls = db.call_count
-        assert first_calls >= 1
-
-        # Second poll — files unchanged, should skip entirely
-        bridge._poll_once(db)
-        assert db.call_count == first_calls, \
-            "Second poll should skip DB queries when files unchanged"
+        with SessionDB(db_path=db_path) as db:
+            db.create_session(session_id, source="gateway")
+            db.append_message(session_id, "user", "Hello")
+            bridge = mcp_serve.EventBridge()
+            with patch.object(db, "get_messages", wraps=db.get_messages) as reads:
+                bridge._poll_once(db)
+                first_calls = reads.call_count
+                assert first_calls >= 1
+                bridge._poll_once(db)
+                assert reads.call_count == first_calls, "unchanged files must not re-query messages"
 
     def test_poll_detects_new_message_after_db_write(self, tmp_path, monkeypatch):
         """Write a new message to the DB after first poll, verify it's detected."""

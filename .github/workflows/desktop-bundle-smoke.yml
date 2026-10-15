@@ -1,6 +1,19 @@
 name: Desktop bundle smoke
 
 on:
+  # Re-smoke an artifact that is already built, with the test scripts of any
+  # pushed ref (the ref this is dispatched on): `gh workflow run
+  # -f format=msix -f sha=<built commit> -f commit-build=true
+  # -f public-base=https://hermes-assets.nousresearch.com/`. No rebuild per test.
+  workflow_dispatch:
+    inputs:
+      platform: {required: true, type: string}
+      arch: {required: true, type: string}
+      format: {required: true, type: string}
+      sha: {description: Commit whose staged artifact is smoked, required: true, type: string}
+      tag: {default: '', type: string}
+      commit-build: {default: false, type: boolean}
+      public-base: {required: true, type: string}
   workflow_call:
     inputs:
       platform:
@@ -59,7 +72,7 @@ jobs:
         shell: bash
         run: |
           case "$TARGET" in
-            darwin/arm64/dmg|darwin/x64/dmg|darwin/arm64/zip|darwin/x64/zip|win32/arm64/msix|win32/x64/msix|win32/arm64/msixbundle|win32/x64/msixbundle) ;;
+            darwin/arm64/dmg|darwin/x64/dmg) ;;
             *) echo '::error::unsupported native smoke target'; exit 1 ;;
           esac
 
@@ -71,7 +84,7 @@ jobs:
     timeout-minutes: 30
     # Also constrains the recording action's nested cache to read-only.
     cache-mode: read
-    env: &smoke-env
+    env:
       RELEASE_COMMIT: ${{ inputs.sha }}
       RELEASE_TAG: ${{ inputs.tag }}
       ARCHIVE_TAG: ${{ inputs.archive-tag }}
@@ -84,14 +97,15 @@ jobs:
       PLATFORM: ${{ inputs.platform }}
       ARCH: ${{ inputs.arch }}
       FORMAT: ${{ inputs.format }}
-    steps: &smoke-steps
+    steps:
       - name: Isolate smoke paths
         shell: bash
         run: printf 'SMOKE_ROOT=%s/bundle-smoke\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
 
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a # v7.0.1
         with:
-          ref: ${{ inputs.channel-build != '' && inputs.controller-sha || inputs.sha }}
+          # A dispatch tests the artifact of `sha` with the dispatched ref's scripts.
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.sha || inputs.channel-build != '' && inputs.controller-sha || inputs.sha }}
           persist-credentials: false
 
       - name: Set up driver tools only
@@ -127,11 +141,7 @@ jobs:
           case "$PLATFORM/$ARCH/$FORMAT" in
             darwin/arm64/dmg|darwin/x64/dmg|darwin/arm64/zip|darwin/x64/zip)
               name="darwin-$ARCH"; pattern="$product-*-mac-$ARCH.$FORMAT" ;;
-            win32/arm64/msix|win32/x64/msix)
-              name="win32-$ARCH"; pattern="$product-*-win-$ARCH.msix" ;;
-            win32/arm64/msixbundle|win32/x64/msixbundle)
-              name=windows-universal; pattern="$product-*-win.msixbundle" ;;
-            *) echo '::error::unsupported native smoke target'; exit 1 ;;
+            *) echo '::error::unsupported native smoke target'; exit 1 ;;  # fork: win32 targets removed
           esac
           args=(--tag "${ARCHIVE_TAG:-$RELEASE_TAG}" --commit "$RELEASE_COMMIT")
           if [ "$COMMIT_BUILD" = true ]; then
@@ -182,58 +192,3 @@ jobs:
           if [ -n "${CHANNEL_BUILD:-}" ]; then args+=(--channel-request "$SMOKE_ROOT/request.json"); fi
           bash tests/install/macos-bundle-smoke.sh --artifact "$ARTIFACT" --arch "$ARCH" \
             --commit "$RELEASE_COMMIT" "${args[@]}" --work "$SMOKE_ROOT/work" --out "$SMOKE_ROOT/out"
-
-      - name: Install and chat on Windows
-        id: windows-chat
-        if: runner.os == 'Windows'
-        shell: powershell
-        env:
-          ARTIFACT: ${{ steps.artifact.outputs.path }}
-        run: |
-          $tagArgs = @()
-          if ($env:RELEASE_TAG) { $tagArgs = @('-Tag', $env:RELEASE_TAG) }
-          if ($env:CHANNEL_BUILD) { $tagArgs = @('-ChannelRequest', "$env:SMOKE_ROOT/request.json") }
-          powershell -NoProfile -ExecutionPolicy Bypass -File tests/install/windows-bundle-smoke.ps1 -Artifact $env:ARTIFACT -Arch $env:ARCH -Commit $env:RELEASE_COMMIT @tagArgs -Work "$env:SMOKE_ROOT/work" -Out "$env:SMOKE_ROOT/out"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-      - name: Stop screen recording
-        if: always()
-        # Evidence only. A failed stop must not fail a chat that already passed.
-        continue-on-error: true
-        uses: ./.github/actions/e2e-screen-record
-        with:
-          mode: stop
-          output: ${{ env.SMOKE_ROOT }}/out/recording.mkv
-
-      - name: Record smoke step outcomes
-        if: always()
-        shell: bash
-        env:
-          STEP_RESULTS: ${{ toJSON(steps) }}
-        run: |
-          mkdir -p "$SMOKE_ROOT/out"
-          printf '%s\n' "$STEP_RESULTS" > "$SMOKE_ROOT/out/steps.json"
-
-      - name: Upload smoke diagnostics
-        if: always()
-        # Evidence only. A 403 from the artifact store must not fail the smoke.
-        continue-on-error: true
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: desktop-smoke-${{ inputs.platform }}-${{ inputs.arch }}-${{ inputs.format }}-${{ github.run_id }}-${{ github.run_attempt }}
-          # Only evidence, never the isolated profile or installed application.
-          path: ${{ env.SMOKE_ROOT }}/out
-          if-no-files-found: warn
-          retention-days: 14
-
-  windows:
-    name: Windows install and chat
-    needs: validate
-    if: inputs.platform == 'win32'
-    runs-on: ${{ inputs.arch == 'arm64' && 'windows-latest-32-arm-core' || 'windows-latest-32-core' }}
-    # windows-11-arm runners are much slower (npm ci alone runs 12+ minutes and
-    # the MSIX leg exceeds 30 total); x64 legs complete in ~14.
-    timeout-minutes: 45
-    cache-mode: read
-    env: *smoke-env
-    steps: *smoke-steps

@@ -12,7 +12,7 @@ from tests.ci.desktop_release_roles import (
 )
 from tests.ci.test_commit_build_staging import shell_step
 from tests.ci.test_desktop_release_tag_admission import _workflow
-from tests.scripts.test_release_r2 import r2_server  # noqa: F401
+from tests.scripts.test_release_r2 import r2_server
 
 
 @pytest.mark.parametrize("gh_available", [False, True])
@@ -21,7 +21,6 @@ def test_admitted_failure_publishes_tag_info_without_promoting_channel(tmp_path,
     table = tag_summary(jobs)
     job = jobs[table]
     gates = selection_gates(jobs)
-    windows_publisher = updater_publishers(jobs)["win32"]
     termux = termux_builder(jobs)
     # This signing-context observer must survive failed needs without admitting
     # rejected tags, commit builds, dry runs, or stable release phases.
@@ -74,7 +73,7 @@ def test_admitted_failure_publishes_tag_info_without_promoting_channel(tmp_path,
     needs = {name: {"result": "success"} for name in job["needs"]}
     for name in [*gates.values(), termux]:
         needs[name]["result"] = "failure"
-    needs[windows_publisher]["result"] = "skipped"
+    needs[updater_publishers(jobs)["darwin"]]["result"] = "skipped"
     result = shell_step(tmp_path, r2_server, table, "Render", {
         "HERMES_PAYLOAD_TAG": tag, "GITHUB_REPOSITORY": "o/r",
         "RUN_URL": run_url,
@@ -89,7 +88,7 @@ def test_admitted_failure_publishes_tag_info_without_promoting_channel(tmp_path,
     release_url = r2.public_url_for("https://github.com/o/r/releases/tag", tag)
     assert f'href="{release_url}"' in page
     assert "Build incomplete" in page
-    assert f"{gates['win32-x64']} (failure)" in page and f"{windows_publisher} (skipped)" in page
+    assert f"{gates['darwin-arm64']} (failure)" in page  # fork: win32 legs removed
     assert "No downloadable artifacts" in page
     for name, info in needs.items():
         if info["result"] != "success":

@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 import hermes_yaml as yaml
+from hermes_cli.config_defaults import DEFAULT_CONFIG
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 TURN_TIMEOUT = 180.0
@@ -88,11 +89,15 @@ def make_home(root: Path, model: dict[str, Any], *, env_file: dict[str, str] | N
     for d in (nh.hermes_home, nh.project):
         d.mkdir(parents=True, exist_ok=True)
     cfg: dict[str, Any] = {
+        "_config_version": DEFAULT_CONFIG["_config_version"],
         "model": model,
         "agent": {"api_max_retries": 2},
         "updates": {"check": False},
         "auxiliary": {"title_generation": {"enabled": False}},
         "memory": {"memory_enabled": False, "user_profile_enabled": False},
+        # Answered at the current offer version (as write_hermes_home does), so an interactive
+        # chat never stops on the shared-metrics offer before the UI takes the terminal.
+        "telemetry": {"shared_metrics": {"enabled": False, "send": False}},
     }
     for key, value in (extra_config or {}).items():
         if isinstance(value, dict) and isinstance(cfg.get(key), dict):
@@ -125,7 +130,7 @@ def run_chat(nh: NativeHome, prompt: str, *, resume: str | None = None, env: dic
         argv += ["--resume", resume]
     started = time.monotonic()
     proc = subprocess.run(argv, cwd=nh.project, env=nh.env(env), capture_output=True, text=True,
-                          timeout=timeout, stdin=subprocess.DEVNULL)
+                          timeout=timeout, stdin=subprocess.DEVNULL, check=False)
     return ChatResult(proc.returncode, proc.stdout, proc.stderr, time.monotonic() - started)
 
 

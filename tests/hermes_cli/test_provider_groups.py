@@ -21,8 +21,6 @@ def _slugs(rows):
     return out
 
 
-
-
 def test_reverse_index_matches_groups():
     for gid, (_label, _desc, members) in PROVIDER_GROUPS.items():
         for m in members:
@@ -31,23 +29,15 @@ def test_reverse_index_matches_groups():
     assert provider_group_for_slug("") == ""
 
 
-
-
 def test_multi_member_group_folds_to_one_row():
-    rows = group_providers(["minimax", "minimax-oauth", "minimax-cn"])
+    rows = group_providers(["xai", "xai-oauth"])
     assert len(rows) == 1
     row = rows[0]
     assert row["kind"] == "group"
-    assert row["group_id"] == "minimax"
-    assert row["members"] == ["minimax", "minimax-oauth", "minimax-cn"]
+    assert row["group_id"] == "xai"
+    assert row["members"] == ["xai", "xai-oauth"]
     # group rows carry the short top-level description from PROVIDER_GROUPS
-    assert row["description"] == PROVIDER_GROUPS["minimax"][1]
+    assert row["description"] == PROVIDER_GROUPS["xai"][1]
     assert row["description"]
-
-
-
-
-
-
 
 

@@ -60,7 +60,7 @@ finally:
     cli._arm_exit_watchdog(timeout_s=0.2)
     time.sleep(60)
 """.replace("CODE", str(code))
-    result = subprocess.run([sys.executable, "-c", source], env=env,
+    result = subprocess.run([sys.executable, "-c", source], check=False, env=env,
                             capture_output=True, text=True, timeout=30)
     assert result.returncode == code, result.stderr
 

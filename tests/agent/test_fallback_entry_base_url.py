@@ -73,7 +73,7 @@ def test_anthropic_fallback_entry_refuses_a_non_anthropic_endpoint():
     assert mock_build.call_count == 0, "no canonical client may be constructed on refusal"
 
 
-def test_openrouter_fallback_entry_base_url_is_the_resolved_endpoint():
+def test_configured_custom_runtime_entry_base_url_is_the_resolved_endpoint():
     """A fallback entry pointing openrouter at a relay must not resolve to openrouter.ai."""
     from agent.auxiliary_client import resolve_provider_client
 

@@ -10,6 +10,7 @@ graph change cannot silently empty a test.
 """
 from __future__ import annotations
 
+import ast
 import re
 from pathlib import Path
 
@@ -23,7 +24,7 @@ SMOKE_WORKFLOW = "./.github/workflows/desktop-bundle-smoke.yml"
 BUILD_CACHE_ACTION = "./.github/actions/desktop-build-cache"
 SHA = "a" * 40
 CANARY_TAG = "v0.28.0+canary.20260818T101010Z"
-PLATFORMS = ("darwin", "win32")
+PLATFORMS = ("darwin",)  # fork: win32 native builds removed
 ARCHES = ("arm64", "x64")
 NATIVE_TARGETS = tuple(f"{platform}-{arch}" for platform in PLATFORMS for arch in ARCHES)
 # The release branch may write the shared dependency cache; commit and channel
@@ -89,11 +90,6 @@ def _stages(job: dict, receipt: str) -> bool:
                for step in job.get("steps", []))
 
 
-def universal_assembler(jobs: dict) -> str:
-    return _only([name for name, job in jobs.items() if _stages(job, "windows-universal")],
-                 "universal bundle assembly")
-
-
 def termux_builder(jobs: dict) -> str:
     return _only([name for name, job in jobs.items() if _stages(job, "termux")], "termux deb")
 
@@ -108,8 +104,11 @@ def updater_publishers(jobs: dict) -> dict[str, str]:
     publishers = {}
     for platform in PLATFORMS:
         own = {smokes[f"{platform}-{arch}"] for arch in ARCHES}
+        others = set(smokes.values()) - own
         publishers[platform] = _only(
-            [name for name, job in jobs.items() if set(needs_of(job)) & set(smokes.values()) == own],
+            [name for name, job in jobs.items()
+             if own <= set(needs_of(job)) and not (set(needs_of(job)) & others)
+             and name.startswith(f"publish-{platform}-")],
             f"{platform} updater publisher")
     return publishers
 
@@ -220,6 +219,8 @@ def evaluate(expression, inputs, needs, *, cancelled=False, failed=False, job_if
         'always': lambda: True, 'cancelled': lambda: cancelled,
         'success': lambda: not (cancelled or failed), 'failure': lambda: failed,
         'contains': lambda value, needle: needle in value,
+        # Expression strings reach eval already rewritten (true -> True), so read them as literals.
+        'fromJSON': ast.literal_eval,
     })
 
 

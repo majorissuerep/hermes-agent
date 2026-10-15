@@ -29,7 +29,7 @@ def _client():
     return connect()
 
 
-def _profile_param() -> Dict[str, str]:
+def _profile_param() -> dict[str, str]:
     """The caller's profile, plus — when an agent runs this from its terminal — the session speaking
     (``HERMES_SESSION_ID`` is bound per command), so the recipient sees who sent it and the host refuses
     a session closing or messaging itself."""
@@ -57,14 +57,14 @@ def short_path(path: str, width: int = 30) -> str:
     return path if len(path) <= width else "…" + path[-(width - 1):]
 
 
-def _summary(sessions: List[Dict[str, Any]]) -> str:
+def _summary(sessions: list[dict[str, Any]]) -> str:
     counts = {state: sum(1 for s in sessions if s["state"] == state) for state in STATE_STYLE}
     parts = [f"{len(sessions)} open"] + [f"{glyph} {counts[state]} {state}" for state, (glyph, _style)
                                         in STATE_STYLE.items() if counts[state]]
     return "  ·  ".join(parts)
 
 
-def render_table(sessions: List[Dict[str, Any]], *, console=None) -> None:
+def render_table(sessions: list[dict[str, Any]], *, console=None) -> None:
     from rich.console import Console
     from rich.table import Table
     from rich.text import Text
@@ -92,7 +92,7 @@ def render_table(sessions: List[Dict[str, Any]], *, console=None) -> None:
 
 
 def cmd_deck_ls(args: argparse.Namespace) -> int:
-    params: Dict[str, Any] = {"include_closed": bool(args.closed)}
+    params: dict[str, Any] = {"include_closed": bool(args.closed)}
     if args.profile:
         params["profiles"] = [args.profile]
     with _client() as client:
@@ -179,10 +179,12 @@ def cmd_deck_attach(args: argparse.Namespace) -> int:
 
 
 def cmd_deck(args: argparse.Namespace) -> int:
+    from hermes_cli.session_restore import cmd_restore
+
     handler = {
         None: _cmd_deck_open, "ls": cmd_deck_ls, "list": cmd_deck_ls, "send": cmd_deck_send,
         "close": cmd_deck_close, "peek": cmd_deck_peek, "interrupt": cmd_deck_interrupt,
-        "attach": cmd_deck_attach,
+        "attach": cmd_deck_attach, "restore": cmd_restore,
     }[getattr(args, "deck_command", None)]
     from hermes_cli.session_host import HostRpcError, HostUnavailable
 

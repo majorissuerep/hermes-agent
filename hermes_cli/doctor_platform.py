@@ -107,7 +107,7 @@ def _report_database_holders(name: str, db_path: Path) -> None:
     """Name the processes holding ``db_path`` (or a WAL sidecar) so the operator knows what to stop before the
     offline journal-mode conversion; a partial or unavailable scan is reported as "cannot prove quiet", never as
     an all-clear (the scan is the same fail-closed authority repair/VACUUM/checkpoint admission uses)."""
-    from hermes_state_holders import describe_holder_pid, foreign_state_db_holders
+    from hermes_state.holders import describe_holder_pid, foreign_state_db_holders
     unknown: list[str] = []
     by_pid: dict[int, set[str]] = {}
     for pid, target in foreign_state_db_holders(db_path):
@@ -128,7 +128,7 @@ def _report_database_journal_modes(hermes_home: Path | None = None, version_info
     """List each database's journal mode; warn on WAL under a vulnerable SQLite, and on a configured
     ``database.journal_mode: delete`` that never took effect."""
     from hermes_cli.doctor import HERMES_HOME
-    from hermes_state_wal import (
+    from hermes_state.wal import (
         _path_on_cross_vm_fs, _wal_reset_repair_hint, is_sqlite_wal_reset_vulnerable, resolve_journal_mode,
     )
     vulnerable = is_sqlite_wal_reset_vulnerable(version_info)
@@ -225,7 +225,7 @@ def _report_host_gateway_slot(mgr, issues: list[str]) -> None:
                       "hermes --profile default gateway migrate --multiplex")
 
 
-def check_certificates(should_fix: bool = False, issues: "list | None" = None) -> None:
+def check_certificates(should_fix: bool = False, issues: list | None = None) -> None:
     """Verify the actual TLS policy is usable before the first HTTPS call tracebacks.
 
     The policy is ``agent.ssl_verify``: the platform verifier (truststore) is
@@ -334,7 +334,7 @@ def _macos_desktop_dr(app: Path) -> str | None:
     """Return the bundle's designated requirement string, or None on failure (a hanging codesign must never abort doctor)."""
     codesign = shutil.which("codesign")
     try:
-        proc = subprocess.run([codesign, "-d", "--requirements", "-", str(app)], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=15) if codesign else None
+        proc = subprocess.run([codesign, "-d", "--requirements", "-", str(app)], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=15, check=False) if codesign else None
     except (FileNotFoundError, subprocess.TimeoutExpired):
         return None
     return None if proc is None or proc.returncode != 0 else (proc.stdout or "") + (proc.stderr or "")
@@ -409,7 +409,7 @@ def _check_security_advisories(should_fix: bool, f: Finding) -> None:
             check_warn(f"{h.package}=={h.installed_version} still installed (advisory {h.advisory.id} acknowledged)")
 
 
-def _staged_venv_dir() -> "Path | None":
+def _staged_venv_dir() -> Path | None:
     """pm's provisioned runtime venv, or None when nothing is staged.
 
     ``pm.packages.Venv().venv_dir()`` is pm's public authority for where
@@ -420,7 +420,7 @@ def _staged_venv_dir() -> "Path | None":
     doctor must not read an empty directory as staged dependencies.
     """
     try:
-        import pm  # noqa: F401 — imports pm.packages, registering the definitions
+        import pm
         from pm.packages import Venv
 
         venv_dir = Venv().venv_dir()
@@ -443,7 +443,7 @@ def _check_python_environment(should_fix: bool, f: Finding) -> None:
     # python-build-standalone can keep a vulnerable SQLite across upgrades).
     with warn_on_error("SQLite version probe failed: {e}", ""):
         import sqlite3
-        from hermes_state_wal import is_sqlite_wal_reset_vulnerable, sqlite_source_id
+        from hermes_state.wal import is_sqlite_wal_reset_vulnerable, sqlite_source_id
         src = sqlite_source_id()
         # Warn-only: Hermes already refuses WAL on fresh DBs and runtime repair is best-effort.
         check_bool(not is_sqlite_wal_reset_vulnerable(), f"SQLite {sqlite3.sqlite_version}",
@@ -506,8 +506,7 @@ def _check_required_packages(should_fix: bool, f: Finding) -> None:
 def _check_windows_gateway_autostart(should_fix: bool, f: Finding) -> None:
     """Windows: the gateway must start at logon from ONE mechanism — a Scheduled Task and a
     Startup-folder entry side by side launch it twice (#80569)."""
-    if sys.platform != "win32":
-        return
+    return
     from hermes_cli import gateway_windows
     redundant = gateway_windows.redundant_autostart_entries()
     if not redundant:
@@ -553,6 +552,7 @@ def _check_web_dashboard_import(should_fix: bool, f: Finding) -> None:
             timeout=120,
             cwd=str(PROJECT_ROOT),
             env=env,
+            check=False,
         )
     except subprocess.TimeoutExpired:
         _fail_and_issue(
@@ -591,8 +591,6 @@ def _check_gateway_supervision(should_fix: bool, f: Finding) -> None:
 def _check_command_installation(should_fix: bool, f: Finding) -> None:
     """Check the install-owned launch contract without replacing custom commands."""
     from hermes_cli.doctor import PROJECT_ROOT
-    if sys.platform == "win32":
-        return
     _section("Command Installation")
     from hermes_cli.config import detect_install_method
 

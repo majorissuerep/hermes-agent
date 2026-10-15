@@ -30,10 +30,10 @@ def is_post_swap_child() -> bool:
 
 
 def write_handoff(payload: dict[str, Any]) -> Path:
-    """Persist the post-swap payload under HERMES_HOME; returns its path."""
-    from hermes_constants import get_hermes_home
+    """Persist the post-swap payload beside the receipts (the ROOT home); returns its path."""
+    from hermes_constants import get_default_hermes_root
 
-    directory = get_hermes_home() / "logs" / "update_receipts"
+    directory = get_default_hermes_root() / "logs" / "update_receipts"
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / f"post_swap_{os.getpid()}.json"
     path.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
@@ -52,8 +52,7 @@ def post_swap_python() -> Path:
     under) the project's Windows console shim — the shim can never be re-executed on Windows
     because it holds itself open for the whole process lifetime (#88838, #89599) — else the
     running interpreter."""
-    if sys.platform != "win32":
-        return Path(sys.executable)
+    return Path(sys.executable)
     from hermes_cli._launchers import _is_windows
     from hermes_constants import project_venv_dir
     from pm.environments import venv_python

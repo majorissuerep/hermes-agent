@@ -11,7 +11,7 @@ from hermes_security import io, vault
 def test_profile_soul_editors_preserve_encryption_a_b_a(tmp_path, monkeypatch, surface):
     from hermes_cli import profiles
     from hermes_cli.web_routers import profiles as web
-    import tui_gateway.server as server
+    from tui_gateway import server
 
     homes = {name: tmp_path / name for name in ("alpha", "beta")}
     for name, home in homes.items():

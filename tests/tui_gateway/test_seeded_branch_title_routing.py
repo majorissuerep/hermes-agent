@@ -17,7 +17,7 @@ def test_seeded_desktop_branch_title_is_derived_until_the_user_renames(monkeypat
     db = SessionDB(tmp_path / "state.db")
     monkeypatch.setattr(server, "_get_db", lambda: db)
     monkeypatch.setattr(server, "_sessions", {})
-    monkeypatch.setattr(server, "_load_cfg", lambda: {})
+    monkeypatch.setattr(server, "_load_cfg", dict)
     monkeypatch.setattr(server, "_profile_home", lambda *a: None)
     monkeypatch.setattr(server, "_resolve_model", lambda: "test-model")
     monkeypatch.setattr(server, "_enable_gateway_prompts", lambda: None)
@@ -37,7 +37,7 @@ def test_seeded_desktop_branch_title_is_derived_until_the_user_renames(monkeypat
         assert "error" not in response, response
         child = response["result"]["stored_session_id"]
         # A DERIVED title is what memory providers skip when naming sessions (the provenance
-        # contract in hermes_state_common); a generated parent title must not arrive as USER/LLM.
+        # contract in hermes_state.common); a generated parent title must not arrive as USER/LLM.
         assert db.get_session_title_source(child) == SessionDB.TITLE_SOURCE_DERIVED
         assert db.message_count(child) == len(history)
         # A subsequent explicit rename must retain user authority.

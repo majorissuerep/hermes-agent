@@ -203,7 +203,7 @@ class TestGuidanceNeverNamesLiveDb:
         assert ".recover" in explanation  # the warning still names the hazard
 
     def test_repair_budget_error_names_safe_lane(self, tmp_path: Path):
-        import hermes_state_repair as hermes_state  # helper lives in the split-out repair module
+        import hermes_state.repair as hermes_state  # helper lives in the split-out repair module
 
         message = hermes_state._persistent_repair_exhausted_error(
             tmp_path / "state.db"
@@ -244,7 +244,7 @@ class TestEmittedCommandsSatisfyCliContract:
     """
 
     @staticmethod
-    def _namespace(source: Path, **overrides) -> "argparse.Namespace":
+    def _namespace(source: Path, **overrides) -> argparse.Namespace:
         """The namespace hermes main() produces for `sessions recover`.
 
         Mirrors the registrations in hermes_cli/main.py (sessions_recover

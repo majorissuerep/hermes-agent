@@ -3,7 +3,7 @@
 ``list_picker_providers`` wraps ``list_authenticated_providers`` and
 post-processes the result for interactive pickers (Telegram, Discord):
 
-- OpenRouter's ``models`` are replaced with the live-filtered output of
+- Vercel's ``models`` are replaced with the live-filtered output of
   ``fetch_openrouter_models``, so IDs the live catalog no longer carries
   drop out.
 - Provider rows with an empty ``models`` list are dropped, except custom
@@ -45,22 +45,6 @@ def _make_provider(slug, name=None, models=None, *, is_current=False,
     return entry
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 def test_passthrough_kwargs_to_base(monkeypatch):
     """All kwargs must be forwarded to ``list_authenticated_providers`` unchanged.
 
@@ -80,7 +64,7 @@ def test_passthrough_kwargs_to_base(monkeypatch):
                         lambda *a, **kw: [])
 
     model_switch_providers.list_picker_providers(
-        current_provider="openrouter",
+        current_provider="ai-gateway",
         current_base_url="http://x",
         current_model="openai/gpt-5.4",
         user_providers={"foo": {"api": "http://x"}},
@@ -88,7 +72,7 @@ def test_passthrough_kwargs_to_base(monkeypatch):
         max_models=12,
     )
 
-    assert captured["current_provider"] == "openrouter"
+    assert captured["current_provider"] == "ai-gateway"
     assert captured["current_base_url"] == "http://x"
     assert captured["current_model"] == "openai/gpt-5.4"
     assert captured["user_providers"] == {"foo": {"api": "http://x"}}
@@ -96,10 +80,9 @@ def test_passthrough_kwargs_to_base(monkeypatch):
     assert captured["max_models"] == 12
 
 
-
 def test_current_custom_endpoint_passthrough_marks_current_row(monkeypatch):
     """Interactive picker should preserve current custom endpoint semantics."""
-    monkeypatch.setattr("agent.models_dev.fetch_models_dev", lambda: {})
+    monkeypatch.setattr("agent.models_dev.fetch_models_dev", dict)
     monkeypatch.setattr("agent.models_dev.PROVIDER_TO_MODELS_DEV", {})
     monkeypatch.setattr("hermes_cli.providers.HERMES_OVERLAYS", {})
     monkeypatch.setattr("hermes_cli.models.fetch_openrouter_models",
@@ -135,7 +118,6 @@ def test_current_custom_endpoint_passthrough_marks_current_row(monkeypatch):
     assert row["slug"] == "custom:ollama"
     assert row["is_current"] is True
     assert row["models"] == ["glm-5.1", "qwen3"]
-
 
 
 # ---------------------------------------------------------------------------
@@ -191,66 +173,14 @@ def _stub_kimi_discovery(monkeypatch, *, canonical):
     monkeypatch.setattr(hm, "clear_provider_models_cache", lambda *a, **k: None)
 
 
-def test_single_kimi_credential_yields_one_canonical_row(monkeypatch):
-    """One Kimi key yields a single row under the canonical 'kimi-coding' slug."""
-    import hermes_cli.models as hm
-    from hermes_cli import models_catalog_static
-
-    _stub_kimi_discovery(
-        monkeypatch,
-        canonical=[models_catalog_static.ProviderEntry("kimi-coding", "Kimi / Kimi Coding Plan", "desc")],
-    )
-    monkeypatch.setenv("KIMI_API_KEY", "sk-test-kimi")
-
-    rows = model_switch.list_authenticated_providers(max_models=10)
-    slugs = [r["slug"] for r in rows]
-
-    # Exactly one Kimi / kimi-for-coding-backed row, under the canonical slug —
-    # not both the alias ("kimi") and its canonical ("kimi-coding").
-    kimi_rows = [s for s in slugs if s in {"kimi", "kimi-coding"}]
-    assert kimi_rows == ["kimi-coding"], (
-        f"expected a single canonical Kimi row, got: {slugs}"
-    )
-    assert slugs.count("kimi-coding") == 1
-    assert "kimi" not in slugs
-
-
-def test_distinct_kimi_china_credential_still_listed(monkeypatch):
-    """A separate China (kimi-coding-cn) credential remains its own row.
-
-    Negative-control guard: the de-dup must collapse only the alias/canonical
-    pair that share a credential, not legitimately distinct providers.
-    """
-    import hermes_cli.models as hm
-    from hermes_cli import models_catalog_static
-
-    _stub_kimi_discovery(
-        monkeypatch,
-        canonical=[
-            models_catalog_static.ProviderEntry("kimi-coding", "Kimi / Kimi Coding Plan", "desc"),
-            models_catalog_static.ProviderEntry("kimi-coding-cn", "Kimi / Moonshot (China)", "desc"),
-        ],
-    )
-    monkeypatch.setenv("KIMI_API_KEY", "sk-test-kimi")
-    monkeypatch.setenv("KIMI_CN_API_KEY", "sk-test-kimi-cn")
-
-    rows = model_switch.list_authenticated_providers(max_models=10)
-    slugs = [r["slug"] for r in rows]
-
-    assert "kimi-coding" in slugs       # canonical global row
-    assert slugs.count("kimi-coding") == 1
-    assert "kimi" not in slugs          # alias collapsed into the canonical row
-    assert "kimi-coding-cn" in slugs    # distinct China endpoint preserved
-
-
 def test_non_blocking_listing_opens_no_socket(monkeypatch, tmp_path):
     """#74003: ``non_blocking_catalogs=True`` must not run a single live catalog probe in the calling
-    thread — not the per-provider ``/models`` prefetch and not OpenRouter's curated-catalog GET —
+    thread — not the per-provider ``/models`` prefetch and not Vercel's curated-catalog GET —
     even with several credentialed providers and an empty on-disk cache."""
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
     monkeypatch.setattr(models_mod, "_openrouter_catalog_cache", None)
     for key in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "DEEPSEEK_API_KEY", "GROQ_API_KEY",
-                "MISTRAL_API_KEY", "XAI_API_KEY", "OPENROUTER_API_KEY"):
+                "MISTRAL_API_KEY", "XAI_API_KEY", "AI_GATEWAY_API_KEY"):
         monkeypatch.setenv(key, "dummy")
     (tmp_path / "provider_models_cache.json").write_text("{}", encoding="utf-8")
     monkeypatch.setattr("agent.models_dev.fetch_models_dev", lambda *a, **k: {})
@@ -267,25 +197,8 @@ def test_non_blocking_listing_opens_no_socket(monkeypatch, tmp_path):
     monkeypatch.setattr(models_mod, "_spawn_swr_refresh", lambda *a, **k: None)  # background warm is not "live"
 
     rows = model_switch_providers.list_picker_providers(
-        max_models=50, include_moa=True, current_provider="openrouter", user_providers={},
+        max_models=50, include_moa=True, current_provider="ai-gateway", user_providers={},
         custom_providers=[], excluded_providers=[], non_blocking_catalogs=True)
 
     assert live == [], f"cache-only listing ran live probes in the request path: {live}"
-    assert any(r.get("slug") == "openrouter" and r.get("models") for r in rows), "OpenRouter row lost its curated snapshot"
-
-
-def test_curated_openrouter_row_keeps_free_tail_past_max_models(monkeypatch):
-    """The OpenRouter row is already curated; its bottom "Free tier" block must survive the picker cap
-    while an ordinary provider row stays capped."""
-    curated = [(f"vendor/model-{i}", "") for i in range(55)] + [("stealth/free-model", "free, stealth model")]
-    other = [f"other-{i}" for i in range(60)]
-    monkeypatch.setattr(model_switch, "list_authenticated_providers", lambda **_: [
-        _make_provider("openrouter", models=[mid for mid, _ in curated][:50]),
-        _make_provider("deepseek", models=other[:50]) | {"total_models": len(other)},
-    ])
-    monkeypatch.setattr(models_mod, "fetch_openrouter_models", lambda **_: curated)
-
-    rows = {r["slug"]: r for r in model_switch_providers.list_picker_providers(max_models=50)}
-
-    assert rows["openrouter"]["models"] == [mid for mid, _ in curated]
-    assert len(rows["deepseek"]["models"]) == 50
+    assert any(r.get("slug") == "ai-gateway" and r.get("models") for r in rows), "Vercel row lost its curated snapshot"

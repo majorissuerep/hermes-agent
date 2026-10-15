@@ -7,7 +7,7 @@
 > [!IMPORTANT]
 > **This is an unofficial fork** of [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent), maintained by [@majorissuerep](https://github.com/majorissuerep) for personal infrastructure.
 > It is **not** built, supported, or endorsed by Nous Research. It diverges from upstream — encrypted state at rest (vault), different security defaults, fork-only integrations — and its behavior is only tested on the maintainer's machines.
-> **Be cautious:** review the [differences vs upstream](https://github.com/NousResearch/hermes-agent/compare/main...majorissuerep:hermes-agent:main) before installing, inspect the installer before piping it to a shell, and report fork issues [here](https://github.com/majorissuerep/hermes-agent/issues) — never upstream. If you are looking for the original project, use [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent).
+> **Be cautious:** review the [differences vs upstream](https://github.com/NousResearch/hermes-agent/compare/main...majorissuerep:hermes-agent:main) before installing, inspect the installer before piping it to a shell, and report fork problems to [the fork maintainer](https://github.com/majorissuerep) — never upstream. If you are looking for the original project, use [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent).
 
 <p align="center">
   Upstream: <a href="https://github.com/NousResearch/hermes-agent">NousResearch/hermes-agent</a>
@@ -24,7 +24,7 @@
 
 **A fork of the self-improving AI agent built by [Nous Research](https://nousresearch.com) (upstream).** Same learning loop — skills from experience, agent-curated memory, cross-session recall — plus fork-only hardening: encrypted state at rest under a master-password/key-file vault, a configurable switch to disable all external messaging adapters, and profile-scoped secrets. It runs on a $5 VPS, a GPU cluster, or serverless infrastructure. Not tied to your laptop — talk to it from a messaging platform while it works on a cloud VM.
 
-Use any model you want — OpenRouter, OpenAI, your own endpoint, and [many others](website/docs/integrations/providers.md). Switch with `hermes model` — no code changes, no lock-in.
+Supported connections: ChatGPT/Codex, Anthropic, LiteLLM, custom OpenAI/Anthropic endpoints, Z.AI, Grok, and Vercel AI Gateway. Direct OpenAI API access is also available. Choose with `hermes model`; see the [provider guide](website/docs/integrations/providers.md).
 
 <table>
 <tr><td><b>A real terminal interface</b></td><td>Full TUI with multiline editing, slash-command autocomplete, conversation history, interrupt-and-redirect, and streaming tool output.</td></tr>
@@ -50,71 +50,7 @@ Use any model you want — OpenRouter, OpenAI, your own endpoint, and [many othe
 curl -fsSL https://raw.githubusercontent.com/majorissuerep/hermes-agent/main/scripts/install.sh | bash
 ```
 
-### Windows (native, PowerShell)
-
-> **Heads up:** Native Windows runs Hermes without WSL — CLI, gateway, TUI, and tools all work natively. If you'd rather use WSL2, the Linux/macOS one-liner above works there too. Found a bug? Please [file issues on the fork](https://github.com/majorissuerep/hermes-agent/issues) — the upstream tracker cannot help with fork code.
-
-Run this in PowerShell:
-
-```powershell
-iex (irm https://raw.githubusercontent.com/majorissuerep/hermes-agent/main/scripts/install.ps1)
-```
-
-The source installer delegates Python 3.14, Node.js, npm, ripgrep, FFmpeg,
-and Python dependencies to PM. If Git is absent, it stages the verified Git
-for Windows archive in Hermes' tool store. It does not replace your system Git.
-See [installation methods](https://hermes-agent.nousresearch.com/docs/getting-started/installation)
-for the separate MSIX/App Installer package and its update ownership.
-
-> **Android / Termux:** The signed APT packages described in the [upstream Termux guide](https://hermes-agent.nousresearch.com/docs/getting-started/termux) contain upstream Hermes, without this fork’s vault and session features. This fork does not publish Termux packages.
->
-> **Windows:** Native Windows is fully supported — the PowerShell one-liner above installs everything. If you'd rather use WSL2, the Linux command works there too. Native Windows install lives under `%LOCALAPPDATA%\hermes`; WSL2 installs under `~/.hermes` as on Linux.
-
-After installation, open a new terminal (or reload your shell with `source ~/.bashrc` / `source ~/.zshrc`) and check the vault:
-
-```bash
-hermes secure-vault status
-```
-
-If no vault exists, run `hermes secure-vault migrate` from a terminal and choose a master password. Then run `hermes setup` and `hermes` to start chatting. Commands that access state require the vault to be unlocked. See [encrypted-state setup](website/docs/getting-started/installation.md#initialize-encrypted-state) for unattended services and recovery credentials.
-
-**Already have an upstream installation?** Follow [switching an existing installation](website/docs/getting-started/installation.md#switch-existing-installation) to preserve and migrate your data. The upstream desktop downloads install upstream code; this fork's install and update channel is `majorissuerep/hermes-agent` on `main`.
-
 ### Troubleshooting
-
-#### Windows Defender or antivirus flags `uv.exe` as malware
-
-If your antivirus (Bitdefender, Windows Defender, etc.) quarantines `uv.exe` from the Hermes `bin` folder (`%LOCALAPPDATA%\hermes\bin\uv.exe`), this is a **false positive**. The file is Astral's `uv` — the Rust Python package manager Hermes bundles to manage its Python environment. ML-based antivirus engines commonly flag unsigned Rust binaries that download and install packages.
-
-**To verify your copy is authentic:**
-
-```powershell
-# Install GitHub CLI if needed
-winget install --id GitHub.cli
-
-# Login to GitHub
-gh auth login
-
-# Run verification
-$uv = "$env:LOCALAPPDATA\hermes\bin\uv.exe"
-$ver = (& $uv --version).Split(' ')[1]
-[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-$zip = "$env:TEMP\uv.zip"
-Invoke-WebRequest "https://github.com/astral-sh/uv/releases/download/$ver/uv-x86_64-pc-windows-msvc.zip" -OutFile $zip -UseBasicParsing
-gh attestation verify $zip --repo astral-sh/uv
-Expand-Archive $zip "$env:TEMP\uv_x" -Force
-(Get-FileHash "$env:TEMP\uv_x\uv.exe").Hash -eq (Get-FileHash $uv).Hash
-```
-
-If attestation says "Verification succeeded" and the last line prints `True`, you're good.
-
-**To whitelist Hermes:**
-- **Windows Defender:** Run PowerShell as Admin → `Add-MpPreference -ExclusionPath "$env:LOCALAPPDATA\hermes\bin"`
-- **Bitdefender:** Add an exception in the Bitdefender console (Protection > Antivirus > Settings > Manage Exceptions)
-- Whitelist the **folder**, not the file hash — Hermes updates `uv` and the hash changes every version
-
-For more context, see the upstream Astral reports: [astral-sh/uv#13553](https://github.com/astral-sh/uv/issues/13553), [astral-sh/uv#15011](https://github.com/astral-sh/uv/issues/15011), [astral-sh/uv#10079](https://github.com/astral-sh/uv/issues/10079).
-
 ---
 
 ## Getting Started
@@ -136,22 +72,22 @@ hermes doctor       # Diagnose any issues
 
 ---
 
-## Skip the API-key collection — Nous Portal
+## Encrypted self-management
 
-Hermes works with whatever provider you want — that's not changing. But if you'd rather not collect five separate API keys for the model, web search, image generation, TTS, and a cloud browser, **[Nous Portal](https://portal.nousresearch.com)** covers all of them under one subscription:
+Unlock once when starting a session. Local CLI calls and delegated agents reuse
+that session's temporary authority for config changes and self-management, without
+another passphrase. A standalone update asks once and preserves encrypted state.
+The passphrase is never exported or saved.
 
-- **300+ models** — pick any of them with `/model <name>`
-- **Tool Gateway** — web search, image generation (FAL), text-to-speech (OpenAI), cloud browser (Browser Use), all routed through your sub. No extra accounts.
-
-One command from a fresh install:
-
-```bash
-hermes setup --portal
+```sh
+hermes config set delegation.max_concurrent_children 4
+hermes update
+hermes secure-vault status
 ```
 
-That logs you in via OAuth, sets Nous as your provider, and turns on the Tool Gateway. Check what's wired up any time with `hermes portal info`. Full details on the [Tool Gateway docs page](website/docs/user-guide/features/tool-gateway.md).
-
-You can still bring your own keys per-tool whenever you want — the gateway is per-backend, not all-or-nothing.
+Use the CLI writers; never overwrite encrypted config, auth or databases as plaintext.
+The supported desktop/CLI platforms are Linux and macOS. See the [encrypted lifecycle
+VM suite](scripts/e2e/README.md) for the install, update, repair and restore contracts.
 
 ---
 

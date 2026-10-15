@@ -1,10 +1,4 @@
-"""Classic REPL in the session deck.
-
-The prompt_toolkit REPL keeps its agent in-process (the session host serves ``hermes --tui``), so it
-still dies with its terminal — but its conversation stays OPEN in the deck (dormant, resumable) until
-``/close``. While it runs it is a first-class deck member: it receives deck messages at idle (the same
-owner-pinned mailbox the host uses), and a close issued from elsewhere ends it.
-"""
+"""Classic REPL deck membership, with all state.db writes owned by the gateway."""
 
 from __future__ import annotations
 
@@ -39,10 +33,10 @@ class CLIDeckMixin:
 
     def _deck_register(self) -> None:
         """Open (or re-open) this conversation's deck row. Best-effort: the REPL works without a deck."""
-        from hermes_cli.session_deck import current_profile, open_db
-
-        with contextlib.suppress(Exception), open_db(current_profile()) as db:
-            self._deck_handle = db.deck_open(str(self.session_id), surface="cli", cwd=os.getcwd())
+        try:
+            self._deck_handle = self._session_db.deck_open(str(self.session_id), surface="cli", cwd=os.getcwd())
+        except Exception:
+            logger.debug("deck registration unavailable", exc_info=True)
 
     def _deck_ref(self) -> str:
         from hermes_cli.session_deck import DeckRef, current_profile
@@ -74,11 +68,8 @@ class CLIDeckMixin:
         return {"live_session_id": str(self.session_id), "bot_live_delivery_consumer": True}
 
     def _deck_closed_elsewhere(self) -> bool:
-        from hermes_cli.session_deck import current_profile, open_db
-
         try:
-            with open_db(current_profile()) as db:
-                row = db.deck_row(self._deck_handle)
+            row = self._session_db.deck_row(self._deck_handle)
         except Exception:
             return False
         if row is None or row["closed_at"] is None:
@@ -101,7 +92,7 @@ class CLIDeckMixin:
         lease = getattr(self, "_active_session_lease", None)
         if lease is None or getattr(lease, "released", False):
             return
-        from tools.bot_live_delivery import claim_pending_delivery, has_mailbox
+        from tools.bot_live_delivery import claim_pending_deck_delivery, has_mailbox
 
         home = self._deck_home()
         if not has_mailbox(home):
@@ -109,7 +100,7 @@ class CLIDeckMixin:
         owner = {"profile_home": str(home), "session_id": str(self.session_id), "lease_id": lease.lease_id,
                  "live_session_id": str(self.session_id)}
         try:
-            claimed = claim_pending_delivery(home, owner)
+            claimed = claim_pending_deck_delivery(home, owner)
         except Exception:
             logger.debug("deck mailbox claim failed", exc_info=True)
             return
@@ -145,12 +136,16 @@ class CLIDeckMixin:
     def _handle_close_command(self, cmd_original: str):
         """``/close``: end this session for good — it leaves the deck. (``/quit`` leaves it open.)"""
         from cli import _cprint
-        from hermes_cli.session_deck import DeckRef, close_row, current_profile
+        from hermes_cli.session_deck import DECK_CLOSE_REASON, DeckRef, current_profile
 
         if self._deck_handle is not None:
             ref = DeckRef(current_profile(), self._deck_handle)
-            with contextlib.suppress(Exception):
-                close_row(ref, closed_by="/close")
+            try:
+                self._session_db.deck_close(self._deck_handle, reason=DECK_CLOSE_REASON, closed_by="/close")
+            except Exception as exc:
+                logger.warning("Could not close deck session %s", ref, exc_info=True)
+                _cprint(f"Could not close {ref}: {exc}")
+                return True
             self._deck_handle = None
             _cprint(f"■ {ref} closed.")
         return False

@@ -19,9 +19,9 @@ from unittest.mock import patch
 import pytest
 
 import hermes_state
-import hermes_state_wal
+import hermes_state.wal
 from hermes_state import SessionDB, get_last_init_error
-from hermes_state_wal import WalUnsupportedError, apply_wal_with_fallback
+from hermes_state.wal import WalUnsupportedError, apply_wal_with_fallback
 
 
 # ``sqlite3.Connection.execute`` is a C-level slot and can't be monkeypatched
@@ -84,22 +84,22 @@ def _reset_last_init_error():
 @pytest.fixture(autouse=True)
 def _reset_wal_fallback_warned_paths():
     """Reset the WAL-fallback warned-paths set so dedup doesn't leak between tests."""
-    hermes_state_wal._wal_fallback_warned_paths.clear()
-    hermes_state_wal._wal_delete_fallback_failed_paths.clear()
+    hermes_state.wal._wal_fallback_warned_paths.clear()
+    hermes_state.wal._wal_delete_fallback_failed_paths.clear()
     yield
-    hermes_state_wal._wal_fallback_warned_paths.clear()
-    hermes_state_wal._wal_delete_fallback_failed_paths.clear()
+    hermes_state.wal._wal_fallback_warned_paths.clear()
+    hermes_state.wal._wal_delete_fallback_failed_paths.clear()
 
 
 @pytest.fixture(autouse=True)
 def _assume_fixed_sqlite(monkeypatch):
     """NFS-fallback tests assume a SQLite build without the WAL-reset bug."""
     monkeypatch.setattr(
-        hermes_state_wal, "is_sqlite_wal_reset_vulnerable", lambda version_info=None: False
+        hermes_state.wal, "is_sqlite_wal_reset_vulnerable", lambda version_info=None: False
     )
-    hermes_state_wal._wal_reset_bug_warned_paths.clear()
+    hermes_state.wal._wal_reset_bug_warned_paths.clear()
     yield
-    hermes_state_wal._wal_reset_bug_warned_paths.clear()
+    hermes_state.wal._wal_reset_bug_warned_paths.clear()
 
 
 class TestApplyWalWithFallback:
@@ -129,7 +129,7 @@ class TestApplyWalWithFallback:
         # Post-fallback the DB is still usable for real writes
         conn.execute("CREATE TABLE t (x INTEGER)")
         conn.execute("INSERT INTO t VALUES (1)")
-        assert list(conn.execute("SELECT x FROM t"))[0][0] == 1
+        assert next(iter(conn.execute("SELECT x FROM t")))[0] == 1
         conn.close()
 
     def test_falls_back_on_not_authorized(self, tmp_path):
@@ -221,7 +221,7 @@ class TestApplyWalWithFallback:
         # Post-fallback the DB is still usable for real writes
         conn.execute("CREATE TABLE t (x INTEGER)")
         conn.execute("INSERT INTO t VALUES (1)")
-        assert list(conn.execute("SELECT x FROM t"))[0][0] == 1
+        assert next(iter(conn.execute("SELECT x FROM t")))[0] == 1
         conn.close()
 
     def test_persistent_disk_io_error_never_downgrades_wal_disk(self, tmp_path):
@@ -400,7 +400,7 @@ class TestApplyWalWithFallback:
         # Connection is still usable for non-journal_mode SQL
         conn.execute("CREATE TABLE t (x INTEGER)")
         conn.execute("INSERT INTO t VALUES (1)")
-        assert list(conn.execute("SELECT x FROM t"))[0][0] == 1
+        assert next(iter(conn.execute("SELECT x FROM t")))[0] == 1
         conn.close()
 
     def test_both_pragmas_fail_but_readback_reports_actual_mode(self, tmp_path, caplog):

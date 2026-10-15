@@ -1,4 +1,4 @@
-"""Vercel AI Gateway provider profile: attribution headers + reasoning passthrough."""
+"""Vercel AI Gateway provider profile and reasoning passthrough."""
 
 from typing import Any
 
@@ -7,7 +7,7 @@ from providers.base import ProviderProfile
 
 
 class VercelAIGatewayProfile(ProviderProfile):
-    """Vercel AI Gateway — attribution headers + reasoning passthrough."""
+    """Vercel AI Gateway reasoning passthrough."""
 
     def build_api_kwargs_extras(
         self, *, reasoning_config: dict | None = None, supports_reasoning: bool = True, **ctx: Any
@@ -21,7 +21,6 @@ class VercelAIGatewayProfile(ProviderProfile):
 vercel = VercelAIGatewayProfile(
     name="ai-gateway", aliases=("vercel", "vercel-ai-gateway", "ai_gateway", "aigateway"),
     env_vars=("AI_GATEWAY_API_KEY",), base_url="https://ai-gateway.vercel.sh/v1",
-    default_headers={"HTTP-Referer": "https://hermes-agent.nousresearch.com", "X-Title": "Hermes Agent"},
     default_aux_model="google/gemini-3-flash",
 )
 

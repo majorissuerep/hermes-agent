@@ -17,7 +17,7 @@ from hermes_cli.cli_output import (
 def _run_text(cmd: list, *, timeout, capture_output: bool = True,
               **kwargs) -> subprocess.CompletedProcess:
     """Run a text subprocess with consistent decoding."""
-    return subprocess.run(cmd, capture_output=capture_output, text=True, encoding="utf-8",
+    return subprocess.run(cmd, capture_output=capture_output, text=True, encoding="utf-8",  # noqa: PLW1510 -- forwarding wrapper: callers pass subprocess kwargs via **kwargs (check may arrive through it); an explicit check=False would raise TypeError
                           errors="replace", timeout=timeout, **kwargs)
 
 
@@ -170,8 +170,7 @@ def _ps_single_quote(value: str) -> str:
 
 def _cua_driver_autostart_registered_windows(binary: Optional[str] = None) -> bool:
     """A task targeting a previous PM version is not a ready registration."""
-    if sys.platform != "win32":
-        return False
+    return False
     from xml.etree import ElementTree
 
     binary = binary or _resolved_cua_driver_cmd()
@@ -180,7 +179,7 @@ def _cua_driver_autostart_registered_windows(binary: Optional[str] = None) -> bo
     try:
         result = subprocess.run(
             ["schtasks.exe", "/Query", "/TN", "cua-driver-serve", "/XML"],
-            capture_output=True, timeout=10, creationflags=_post_setup_no_window_flags())
+            capture_output=True, timeout=10, creationflags=_post_setup_no_window_flags(), check=False)
         if result.returncode:
             return False
         # Parse bytes: schtasks' XML declaration carries the output encoding.
@@ -223,8 +222,7 @@ def _repair_cua_driver_autostart_windows(driver_cmd: str, *, verbose: bool) -> b
     nothing, silently — returning True (nothing to repair) keeps callers from
     printing "auto-start was not registered" warnings for an intentional
     absence."""
-    if sys.platform != "win32":
-        return True
+    return True
     if not _cua_autostart_opt_in():
         # On-demand default (#97389): the per-boot cua-driver-serve task is opt-in
         # via computer_use.autostart. Registering here would recreate, on every

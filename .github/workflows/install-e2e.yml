@@ -10,9 +10,7 @@ name: Install & Update E2E
 #   Matrix: linux     the real curl|bash install one-liner, isolated by a
 #                     git URL redirect to a local bare clone
 #                     (install-e2e-run.yml)
-#   Matrix: windows   the real desktop user flow: website Hermes-Setup.exe
 #                     clicked by AutoHotkey, update via the app, Playwright
-#                     clicking "Update now" (install-e2e-windows-run.yml)
 #   Matrix: macos     script installs on the shared OS-agnostic driver,
 #                     plus the real desktop user flow: website
 #                     Hermes-Setup.dmg mounted and run, updates via the
@@ -32,31 +30,19 @@ name: Install & Update E2E
 # between. A hardcoded list would stop covering the newest release the day
 # after it ships, and would pin an "oldest" that nobody still runs.
 #
-# Triggers:
-#   * every 12 hours, so upstream drift (a new uv, a Node bump, a PyPI change)
-#     surfaces on a schedule rather than in someone's review cycle;
-#   * manually, where you can pick the route (a preset or specific legs) and how many
-#     releases to sample;
-#   * pull_request, path-filtered to the install/update surface, runs ONLY the
-#     `pr` route (generate-e2e-matrix.mjs PR_SUBSET): installer-script ->
-#     hermes-update on linux (newest release -> PR, and PR -> NEXT), windows
-#     (PR -> NEXT) and macos (newest release -> PR), sampling just the newest tag.
-#     Four legs in parallel keep a PR's wall clock near one leg (~15 min);
-#     the full matrix multiplies that, so it stays on the clock and releases.
-#     A red scheduled run is reported by install-e2e-red.yml.
+# Triggers: release builds only. The stable-release gate calls it
+# (workflow_call, route=all), and a maintainer can dispatch it by hand to pick
+# the route (a preset or specific legs) and how many releases to sample. It
+# never runs on pull requests, pushes to main, or a schedule.
 
 on:
   workflow_dispatch:
     inputs:
       route:
-        description: 'Which legs to run: all = every OS; both/update/installer = the linux legs; windows-desktop / macos-desktop = that OS; bundled / windows-bundled / macos-bundled = the signed-bundle legs. Anything else selects legs by name (a leg or job name, or a fragment of one).'
+        description: 'Which legs to run: all = every OS; both/update/installer = the linux legs; macos-desktop = that OS; bundled / macos-bundled = the signed-bundle legs. Anything else selects legs by name (a leg or job name, or a fragment of one).'  # fork: windows legs removed
         required: false
         type: string
         default: all
-      windows-bundle-manifest:
-        description: 'HTTPS manifest pinning signed Windows OLD/NEW msixbundles; NEW must match this ref.'
-        type: string
-        default: ''
       macos-bundle-manifest:
         description: 'HTTPS manifest pinning signed macOS OLD/NEW app ZIPs; NEW must match this ref.'
         type: string
@@ -81,21 +67,20 @@ on:
     # manual dispatch — a source (non-bundle) release run passes route=all
     # with empty manifests and gets the source install/update matrix only.
     inputs:
+      commit:
+        description: Commit to test and build. Empty keeps the triggering commit.
+        type: string
+        default: ''
       release:
         description: 'Stable-release candidate run (informational; jobs behave as route=all with empty manifests).'
         required: false
         type: boolean
         default: false
       route:
-        description: 'Which legs to run: all = every OS; both/update/installer = the linux legs; windows-desktop / macos-desktop = that OS; bundled / windows-bundled / macos-bundled = the signed-bundle legs. Anything else selects legs by name (a leg or job name, or a fragment of one).'
+        description: 'Which legs to run: all = every OS; both/update/installer = the linux legs; macos-desktop = that OS; bundled / macos-bundled = the signed-bundle legs. Anything else selects legs by name (a leg or job name, or a fragment of one).'  # fork: windows legs removed
         required: false
         type: string
         default: all
-      windows-bundle-manifest:
-        description: 'HTTPS manifest pinning signed Windows OLD/NEW msixbundles; NEW must match this ref.'
-        required: false
-        type: string
-        default: ''
       macos-bundle-manifest:
         description: 'HTTPS manifest pinning signed macOS OLD/NEW app ZIPs; NEW must match this ref.'
         required: false
@@ -116,54 +101,20 @@ on:
         required: false
         type: string
         default: ''
-  schedule:
-    # Every 12 hours, off the hour to avoid the top-of-hour runner crunch.
-    - cron: '20 7,19 * * *'
-  pull_request:
-    # The install/update surface: derived from 60 days of commits whose subject
-    # names update/install/pm/bootstrap/relaunch. Keep it to code a real
-    # install or `hermes update` executes; hermes_cli/main.py and friends are
-    # deliberately absent (they change daily and are covered by e2e-upgrade).
-    paths:
-      - 'scripts/install*'
-      - 'scripts/desktop-update/**'
-      - 'setup-hermes.*'
-      - 'hermes_bootstrap.py'
-      - 'pm/**'
-      - 'hermes_cli/update*'
-      - 'hermes_cli/*update*'
-      - 'hermes_cli/pm*'
-      - 'hermes_cli/*install*'
-      - 'hermes_cli/_early_recovery.py'
-      - 'hermes_cli/_launchers.py'
-      - 'hermes_cli/managed_uv.py'
-      - 'hermes_cli/venv_sync.py'
-      - 'hermes_cli/relaunch.py'
-      - 'hermes_cli/gateway.py'
-      - 'gateway/status.py'
-      - 'apps/bootstrap-installer/**'
-      - 'apps/desktop/electron/*update*'
-      - 'apps/desktop/electron/updater/**'
-      - 'pyproject.toml'
-      - 'uv.lock'
-      - 'package.json'
-      - 'package-lock.json'
-      - 'tests/install/**'
-      - 'scripts/sandbox/generate-e2e-matrix.mjs'
-      - 'scripts/sandbox/pick-release-tags.sh'
-      - 'scripts/ci/setup_toolchain.py'
-      - '.github/actions/setup-pm/**'
-      - '.github/workflows/install-e2e*.yml'
 
 permissions:
   contents: read
 
 # A workflow_call run (stable release) is never cancelled: its group uses
 # github.run_id so a parent rerun cannot kill this child mid-flight. The
-# scheduled/manual runs keep ref-scoped collapse.
+# manual runs keep ref-scoped collapse.
 concurrency:
   group: install-e2e-${{ inputs.release == true && github.run_id || github.ref }}
   cancel-in-progress: ${{ inputs.release != true }}
+
+env:
+  # A stable run is on the default branch, so GITHUB_SHA is not the commit under test.
+  HERMES_TESTED_COMMIT: ${{ inputs.commit || github.sha }}
 
 jobs:
   pick-releases:
@@ -179,6 +130,7 @@ jobs:
       # has none.
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a # v7.0.1
         with:
+          ref: ${{ inputs.commit }}
           filter: blob:none
           fetch-tags: true
           sparse-checkout: |
@@ -190,14 +142,13 @@ jobs:
           # Inputs never touch shell syntax directly: TAG_COUNT arrives via
           # the environment and is validated decimal-only (bash arithmetic
           # reads a leading zero as octal). GitHub's 256-job cap applies to
-          # each per-OS matrix separately; at 10 tags the largest is windows
           # at 180 (first over the cap at 15 tags = 270).
           #
           # EXCLUDE_REF removes one tag from the sampled OLD baselines: on a
           # stable release the candidate tag itself is the newest release
           # tag, and sampling it as an OLD version would produce a no-change
           # update leg — the candidate must never update from itself.
-          TAG_COUNT: ${{ github.event_name == 'pull_request' && '1' || inputs.tag-count || 2 }}
+          TAG_COUNT: ${{ inputs.tag-count || 2 }}
           INSTALL_REF: ${{ inputs.install-ref }}
           EXCLUDE_REF: ${{ inputs.exclude-ref }}
           RELEASE_MODE: ${{ inputs.release }}
@@ -236,27 +187,25 @@ jobs:
     timeout-minutes: 5
     outputs:
       linux: ${{ steps.gen.outputs.linux }}
-      windows: ${{ steps.gen.outputs.windows }}
       macos: ${{ steps.gen.outputs.macos }}
       linux-legs: ${{ steps.gen.outputs.linux-legs }}
-      windows-legs: ${{ steps.gen.outputs.windows-legs }}
       macos-legs: ${{ steps.gen.outputs.macos-legs }}
     steps:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a # v7.0.1
         with:
+          ref: ${{ inputs.commit }}
           sparse-checkout: scripts/sandbox/generate-e2e-matrix.mjs
           sparse-checkout-cone-mode: false
       - id: gen
         env:
           # Free text on dispatch, so it reaches the script as data, never as script.
-          # Scheduled runs have no inputs: the default route. PRs run the pr subset.
-          ROUTE: ${{ github.event_name == 'pull_request' && 'pr' || inputs.route || 'all' }}
+          ROUTE: ${{ inputs.route || 'all' }}
         run: |
           set -euo pipefail
           matrices="$(node scripts/sandbox/generate-e2e-matrix.mjs \
             --tags '${{ needs.pick-releases.outputs.tags }}' --route "$ROUTE")"
           echo "$matrices"
-          for key in linux windows macos; do
+          for key in linux macos; do  # fork: windows legs removed
             echo "$key=$(echo "$matrices" | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>console.log(JSON.stringify(JSON.parse(d)[process.argv[1]])))' "$key")" >> "$GITHUB_OUTPUT"
             echo "$key-legs=$(echo "$matrices" | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>console.log(JSON.parse(d)[process.argv[1]].include.length))' "$key")" >> "$GITHUB_OUTPUT"
           done
@@ -268,41 +217,23 @@ jobs:
 
   bundle-inputs:
     name: Validate pinned bundle transitions
-    # Bundled legs need dispatch-only manifests; a PR never runs them.
-    if: github.event_name != 'pull_request'
+    # Bundled legs need dispatch-only manifests.
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
-      windows: ${{ steps.inputs.outputs.windows }}
       macos: ${{ steps.inputs.outputs.macos }}
-      windows-arch: ${{ steps.inputs.outputs.windows-arch }}
       macos-arch: ${{ steps.inputs.outputs.macos-arch }}
     steps:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a # v7.0.1
+        with:
+          ref: ${{ inputs.commit }}
       - id: inputs
         env:
-          BUNDLE_WINDOWS_MANIFEST: ${{ inputs.windows-bundle-manifest }}
           BUNDLE_MACOS_MANIFEST: ${{ inputs.macos-bundle-manifest }}
           BUNDLE_ROUTE: ${{ inputs.route }}
         run: |
           npm ci --ignore-scripts --no-audit --no-fund
           node tests/install/e2e-assets/bundle-plan.mjs
-
-  windows-bundled:
-    name: ${{ matrix.name }}
-    if: inputs.windows-bundle-manifest != '' && contains(fromJSON('["all", "bundled", "windows-bundled"]'), inputs.route)
-    needs: bundle-inputs
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJSON(needs.bundle-inputs.outputs.windows) }}
-    uses: ./.github/workflows/install-e2e-windows-run.yml
-    with:
-      install-method: packaged-app
-      update-method: open-app-update
-      install-ref: ${{ matrix.install_ref }}
-      leg-id: ${{ matrix.leg_id }}
-      bundle-manifest-url: ${{ inputs.windows-bundle-manifest }}
-      bundle-arch: ${{ needs.bundle-inputs.outputs.windows-arch }}
 
   macos-bundled:
     name: ${{ matrix.name }}
@@ -313,6 +244,7 @@ jobs:
       matrix: ${{ fromJSON(needs.bundle-inputs.outputs.macos) }}
     uses: ./.github/workflows/install-e2e-macos-run.yml
     with:
+      commit: ${{ inputs.commit }}
       install-method: packaged-app
       update-method: open-app-update
       install-ref: ${{ matrix.install_ref }}
@@ -333,22 +265,7 @@ jobs:
       matrix: ${{ fromJSON(needs.generate-matrix.outputs.linux) }}
     uses: ./.github/workflows/install-e2e-run.yml
     with:
-      install-method: ${{ matrix.install_method }}
-      update-method: ${{ matrix.update_method }}
-      install-ref: ${{ matrix.install_ref }}
-      update-ref: ${{ matrix.update_ref }}
-      tag-has-desktop: ${{ matrix.tag_has_desktop }}
-      leg-id: ${{ matrix.leg_id }}
-
-  windows:
-    name: ${{ matrix.name }}
-    if: needs.generate-matrix.outputs.windows-legs != '0'
-    needs: generate-matrix
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJSON(needs.generate-matrix.outputs.windows) }}
-    uses: ./.github/workflows/install-e2e-windows-run.yml
-    with:
+      commit: ${{ inputs.commit }}
       install-method: ${{ matrix.install_method }}
       update-method: ${{ matrix.update_method }}
       install-ref: ${{ matrix.install_ref }}
@@ -367,6 +284,7 @@ jobs:
     # and the published-dmg GUI driver; the run workflow routes.
     uses: ./.github/workflows/install-e2e-macos-run.yml
     with:
+      commit: ${{ inputs.commit }}
       install-method: ${{ matrix.install_method }}
       update-method: ${{ matrix.update_method }}
       install-ref: ${{ matrix.install_ref }}
@@ -388,6 +306,7 @@ jobs:
     steps:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a # v7.0.1
         with:
+          ref: ${{ inputs.commit }}
           sparse-checkout: tests/install/e2e-assets/playback.html
           sparse-checkout-cone-mode: false
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -409,22 +328,20 @@ jobs:
   source-gate:
     name: Source matrix gate
     if: always() && inputs.release == true
-    needs: [generate-matrix, linux, windows, macos]
+    needs: [generate-matrix, linux, macos]  # fork: windows legs removed
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: Evaluate source legs
         env:
           LINUX: ${{ needs.linux.result }}
-          WINDOWS: ${{ needs.windows.result }}
           MACOS: ${{ needs.macos.result }}
           LINUX_MATRIX: ${{ needs.generate-matrix.outputs.linux }}
-          WINDOWS_MATRIX: ${{ needs.generate-matrix.outputs.windows }}
           MACOS_MATRIX: ${{ needs.generate-matrix.outputs.macos }}
         run: |
           set -euo pipefail
           fail=0
-          for os_name in LINUX WINDOWS MACOS; do
+          for os_name in LINUX MACOS; do  # fork: windows removed
             result="${!os_name}"
             matrix_var="${os_name}_MATRIX"
             matrix="${!matrix_var}"
@@ -451,12 +368,13 @@ jobs:
   report:
     name: Result chart
     if: always()
-    needs: [leg-player, pick-releases, linux, windows, macos, bundle-inputs, windows-bundled, macos-bundled]
+    needs: [leg-player, pick-releases, linux, macos, bundle-inputs, macos-bundled]  # fork: windows legs removed
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a # v7.0.1
         with:
+          ref: ${{ inputs.commit }}
           sparse-checkout: |
             scripts/sandbox/generate-e2e-matrix.mjs
             tests/install/e2e-assets/known-failures.json
@@ -486,7 +404,7 @@ jobs:
             exit 0
           fi
           {
-            echo "OS jobs: linux ${{ needs.linux.result }}, windows ${{ needs.windows.result }}, macos ${{ needs.macos.result }}"
+            echo "OS jobs: linux ${{ needs.linux.result }}, macos ${{ needs.macos.result }}"  # fork: windows removed
             echo
             # The tag annotations let the chart say WHY a cell skipped
             # (pre-desktop vs declared TODO) instead of a flat "skip".

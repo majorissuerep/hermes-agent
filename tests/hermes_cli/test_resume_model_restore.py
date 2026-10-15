@@ -1,7 +1,7 @@
 """Tests for CLI resume model restoration and /model session persistence.
 
 Covers _restore_session_model, _persist_model_switch_to_session (cli.py) and
-SessionDB.session_gateway_runtime (hermes_state.py) — the round trip that
+SessionDB.session_gateway_runtime (hermes_state/__init__.py) — the round trip that
 makes `hermes --resume` reopen a session on the model/provider it actually
 used instead of the ambient config default (#57588-class, #79536).
 """
@@ -186,7 +186,7 @@ def test_persist_model_switch_writes_model_and_both_route_shapes():
     stub = _make_stub(_session_db=_DB(), session_id="s1")
     stub._persist_model_switch_to_session(_Result())
     assert written["model"] == ("s1", "deepseek-v4-flash-free")
-    sid, patch = written["patch"]
+    _sid, patch = written["patch"]
     # Nested shape for the CLI reader...
     assert patch["gateway_runtime"]["provider"] == "custom:opencode-zen"
     # ...and top-level for the TUI gateway's _stored_session_runtime_overrides.

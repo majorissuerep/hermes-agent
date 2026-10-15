@@ -285,6 +285,10 @@ def test_pairing_probe_reuses_live_profile_roots_until_the_profile_set_moves(wat
     os.utime(home / "profiles", ns=(0, 10**18))  # deterministic parent-mtime bump
     server._broadcast_watched_changes(now=20.0)
     (home / "profiles" / "play" / "platforms" / "pairing" / "discord-approved.json").write_text("{}", encoding="utf-8")
+    ledger = home / "profiles" / "play" / "platforms" / "pairing" / "discord-approved.json"
+    previous = home / "profiles" / "work" / "platforms" / "pairing" / "telegram-pending.json"
+    newer_ns = previous.stat().st_mtime_ns + 1_000_000
+    os.utime(ledger, ns=(newer_ns, newer_ns))
     server._broadcast_watched_changes(now=30.0)
     assert events == [("pairing.changed", {})] * 2
     assert sorted(live_calls) == ["play", "work", "work"]
@@ -424,7 +428,7 @@ def test_new_envelope_after_drain_fires_pending_again(watcher_home):
 
 
 def test_no_outbox_dir_never_fires_pending(watcher_home):
-    home, events = watcher_home
+    _home, events = watcher_home
     server._broadcast_watched_changes(now=0.0)
     server._broadcast_watched_changes(now=10.0)
 
@@ -438,7 +442,7 @@ def test_broken_probe_never_kills_the_pass(watcher_home, monkeypatch):
     monkeypatch.setitem(
         server._CHANGE_WATCHES,
         "cron.changed",
-        (1.0, lambda: (_ for _ in ()).throw(RuntimeError("boom")), lambda: {}),
+        (1.0, lambda: (_ for _ in ()).throw(RuntimeError("boom")), dict),
     )
     _write_session_change(home / "state.db", "created")
     server._broadcast_watched_changes(now=10.0)

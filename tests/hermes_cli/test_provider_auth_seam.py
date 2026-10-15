@@ -160,7 +160,7 @@ def test_oauth_plugin_without_handler_fails_loud_and_builtins_are_untouched(tmp_
         auth_command(_parse_auth_args(["add", "handlerless"]))
     assert "ships no auth_handler" in str(excinfo.value) and "oauth_external" in str(excinfo.value)
 
-    auth_command(_parse_auth_args(["add", "openrouter", "--api-key", "sk-or-fixture", "--label", "personal"]))
+    auth_command(_parse_auth_args(["add", "ai-gateway", "--api-key", "sk-gateway-fixture", "--label", "personal"]))
     assert _log(tmp_path) == []
     pool = json.loads((tmp_path / "hermes" / "auth.json").read_text(encoding="utf-8"))["credential_pool"]
-    assert next(e for e in pool["openrouter"] if e["access_token"] == "sk-or-fixture")["label"] == "personal"
+    assert next(e for e in pool["ai-gateway"] if e["access_token"] == "sk-gateway-fixture")["label"] == "personal"

@@ -104,7 +104,7 @@ test('channel smoke binds the complete admitted request, not a commit-build iden
       expect(run('identity').status).not.toBe(0)
     }
     for (const invalid of [{ ...request, commit: 'b'.repeat(40) }, { ...request, channel: 'smoke/invalid' },
-      { ...request, windowsVersion: '1.2.3.0' }, { ...request, identity: { token } }]) {
+      { ...request, identity: { token } }]) {
       fs.writeFileSync(requestPath, JSON.stringify(invalid))
       expect(run('identity').status).not.toBe(0)
     }

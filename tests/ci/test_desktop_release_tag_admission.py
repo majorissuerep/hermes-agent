@@ -180,8 +180,12 @@ def _run_admission(clone: Path, tag: str, claim_tag: str) -> subprocess.Complete
         RELEASE_CLAIM_OBJECT=_git("rev-parse", f"refs/tags/{claim_tag}", cwd=clone),
         GITHUB_OUTPUT=str(gh_output),
         RELEASE_PHASE="candidate",
-        GITHUB_REF=f"refs/tags/{claim_tag}",
-        GITHUB_SHA=_git("rev-parse", "HEAD", cwd=clone),
+        # Stable runs from the default branch; GITHUB_SHA is not the claim commit.
+        GITHUB_REPOSITORY="example/hermes-agent",
+        GITHUB_EVENT_NAME="workflow_dispatch",
+        GITHUB_REF="refs/heads/main",
+        GITHUB_WORKFLOW_REF="example/hermes-agent/.github/workflows/stable-release.yml@refs/heads/main",
+        GITHUB_SHA="e" * 40,
         PYTHONPATH=str(_REPO),
     )
     return subprocess.run(
@@ -191,6 +195,7 @@ def _run_admission(clone: Path, tag: str, claim_tag: str) -> subprocess.Complete
         capture_output=True,
         text=True,
         timeout=120,
+        check=False,
     )
 
 
@@ -222,6 +227,25 @@ def test_claim_on_origin_main_is_admitted_and_exports_the_full_sha(
     assert f"sha={expected}" in gh_output
 
 
+def test_claim_on_a_release_branch_is_admitted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    origin, clone = _seed_repo(tmp_path)
+    # A hotfix lands on origin's release/0.1.2 only; main never sees it.
+    _git("checkout", "-b", "release/0.1.2", cwd=origin)
+    (origin / "fix.txt").write_text("hotfix\n", encoding="utf-8")
+    _git("add", "-A", cwd=origin)
+    _git("commit", "-m", "hotfix", cwd=origin)
+    _git("checkout", "main", cwd=origin)
+    _git("fetch", "origin", cwd=clone)
+    _git("checkout", "--detach", "origin/release/0.1.2", cwd=clone)
+    monkeypatch.setenv("GIT_COMMITTER_DATE", "@1790000000 +0000")
+    _git("tag", "-a", "rc.1-v0.1.2", "-m", _claim_message(clone), cwd=clone)
+    _git("push", "origin", "refs/tags/rc.1-v0.1.2", cwd=clone)
+
+    proc = _run_admission(clone, "v0.1.2", "rc.1-v0.1.2")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert f"sha={_git('rev-parse', 'HEAD', cwd=clone)}" in (clone / "github_output.txt").read_text(encoding="utf-8")
+
+
 def test_claim_not_on_origin_main_is_refused(tmp_path: Path):
     _origin, clone = _seed_repo(tmp_path)
     # A commit that exists ONLY in the clone — never pushed, never reviewed.
@@ -233,7 +257,7 @@ def test_claim_not_on_origin_main_is_refused(tmp_path: Path):
 
     proc = _run_admission(clone, "v0.1.2", "rc.1-v0.1.2")
     assert proc.returncode != 0, "a tag off origin/main must not be admitted"
-    assert "is not on main" in proc.stdout + proc.stderr
+    assert "is not on main or a release/* branch" in proc.stdout + proc.stderr
     # And nothing was exported for the signing jobs to consume.
     assert "sha=" not in (clone / "github_output.txt").read_text(encoding="utf-8")
 
@@ -250,40 +274,3 @@ def test_malformed_claim_is_refused(tmp_path: Path):
 def _builds(step: dict) -> bool:
     run = step.get("run", "")
     return "scripts/bundles/desktop.py" in run and "--prepared " in run
-
-
-@pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
-def test_downloadable_native_builds_refuse_to_ship_unsigned(tmp_path: Path):
-    """The Windows signer only warns without AZURE_SIGN_*; every native build
-    leg whose artifacts are downloadable must therefore fail before building,
-    under one gate shared with the macOS signing-credential check."""
-    jobs = _workflow()["jobs"]
-    legs = native_builds(jobs)
-    for name in legs.values():
-        steps = jobs[name]["steps"]
-        step = credential_gate(jobs[name])
-        builds = [index for index, candidate in enumerate(steps) if _builds(candidate)]
-        assert builds and steps.index(step) < builds[0], f"{name} checks credentials after building"
-        for dispatch, inputs in DOWNLOADABLE_DISPATCHES.items():
-            assert gate(step["if"], inputs, {}, job_if=False), (name, dispatch)
-        assert not gate(step["if"], DRY_DISPATCH, {}, job_if=False), name
-
-    windows = {credential_gate(jobs[name])["run"]: credential_gate(jobs[name])
-               for (target, _), name in legs.items() if target.startswith("win32-")}
-    assert windows, "walk broken: no Windows build legs"
-    for step in windows.values():
-        names = list(step["env"])
-        assert {"AZURE_SIGN_ENDPOINT", "AZURE_SIGN_ACCOUNT", "AZURE_SIGN_PROFILE", "AZURE_CLIENT_ID"} <= set(names)
-
-        def run(**values: str) -> subprocess.CompletedProcess:
-            env = {"PATH": os.environ["PATH"], "RUNNER_TEMP": str(tmp_path)}
-            env.update({name: "" for name in names})
-            env.update(values)
-            return subprocess.run(["bash", "-euo", "pipefail", "-c", step["run"]], env=env,
-                                  capture_output=True, text=True, timeout=60)
-
-        proc = run()
-        assert proc.returncode != 0 and "::error::" in proc.stdout and "AZURE_SIGN_ENDPOINT" in proc.stdout
-        assert run(**{name: "x" for name in names}).returncode == 0
-        partial = run(**{name: "x" for name in names if name != "AZURE_CLIENT_ID"})
-        assert partial.returncode != 0 and "AZURE_CLIENT_ID" in partial.stdout

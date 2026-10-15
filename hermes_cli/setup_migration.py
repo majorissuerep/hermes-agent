@@ -17,31 +17,23 @@ PROJECT_ROOT = Path(__file__).parent.parent.resolve()
 
 # ── Post-Migration Section Skip Logic ──
 
-_OPENROUTER_ENV_VARS = ("OPENROUTER_API_KEY", "OPENAI_API_KEY")
-
-
 def _model_section_has_credentials(config: dict) -> bool:
     """True when any known inference provider has usable credentials: ``active_provider`` in the
-    auth store (OAuth providers), ``PROVIDER_REGISTRY`` ``api_key_env_vars``, or the legacy
-    OpenRouter aggregator env vars (``OPENAI_API_KEY`` / ``OPENROUTER_API_KEY``)."""
+    auth store or the registered inference provider's ``api_key_env_vars``.
+
+    Tool-only vendor keys are not inference credentials without an explicit provider plugin."""
     from hermes_cli.setup import get_env_value
+    from hermes_cli.auth import PROVIDER_REGISTRY
     try:
         from hermes_cli.auth import get_active_provider
-        if get_active_provider():
+        if get_active_provider() in PROVIDER_REGISTRY:
             return True
     except Exception:
         pass
-    try:
-        from hermes_cli.auth import PROVIDER_REGISTRY
-    except Exception:
-        PROVIDER_REGISTRY = {}  # type: ignore[assignment]
-
     def _has_key(pconfig) -> bool:
         # CLAUDE_CODE_OAUTH_TOKEN is set by Claude Code itself, not by the user —
         # mirrors is_provider_explicitly_configured in auth.py.
         return any(get_env_value(v) for v in pconfig.api_key_env_vars if v != "CLAUDE_CODE_OAUTH_TOKEN")
-
-    any_openrouter_key = any(get_env_value(v) for v in _OPENROUTER_ENV_VARS)
 
     # Prefer the provider declared in config.yaml, avoids false positives from stray
     # env vars (GH_TOKEN, etc.) when the user has already picked a different provider.
@@ -50,12 +42,6 @@ def _model_section_has_credentials(config: dict) -> bool:
         provider_id = (model_cfg.get("provider") or "").strip().lower()
         if provider_id in PROVIDER_REGISTRY and _has_key(PROVIDER_REGISTRY[provider_id]):
             return True
-        if provider_id == "openrouter" and any_openrouter_key:
-            return True
-
-    # OpenRouter aggregator fallback (no provider declared in config).
-    if any_openrouter_key:
-        return True
     # Skip copilot in auto-detect: GH_TOKEN / GITHUB_TOKEN are commonly set for git tooling.
     # Mirrors resolve_provider in auth.py.
     return any(_has_key(pconfig) for pid, pconfig in PROVIDER_REGISTRY.items() if pid != "copilot")

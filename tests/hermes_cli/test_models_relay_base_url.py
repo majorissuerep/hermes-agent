@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-import hermes_cli.models as models
+from hermes_cli import models
 
 
 class _RecordingProfile:
@@ -19,7 +19,7 @@ class _RecordingProfile:
         return ["relay-only-model"]
 
 
-@pytest.mark.parametrize("provider", ["openai-codex", "copilot", "nous", "opencode-zen", "openrouter"])
+@pytest.mark.parametrize("provider", ["openai-codex", "xai", "ai-gateway"])
 def test_canonical_url_preserves_native_catalog_but_other_paths_stay_relays(monkeypatch, provider):
     from hermes_cli.config import atomic_config_write
     from hermes_constants import get_hermes_home
@@ -52,7 +52,7 @@ def test_relay_base_url_is_probed_for_configured_provider(monkeypatch):
         models,
         "_get_model_config_dict",
         lambda: {
-            "provider": "deepseek",
+            "provider": "ai-gateway",
             "base_url": "http://127.0.0.1:9001/deepseek/v1",
         },
     )
@@ -65,13 +65,13 @@ def test_relay_base_url_is_probed_for_configured_provider(monkeypatch):
         models,
         "_PROVIDER_CATALOG_FETCHERS",
         {
-            "deepseek": lambda n, f: (_ for _ in ()).throw(
+            "ai-gateway": lambda n, f: (_ for _ in ()).throw(
                 AssertionError("canonical host touched")
             )
         },
     )
 
-    assert models.provider_model_ids("deepseek", force_refresh=True) == [
+    assert models.provider_model_ids("ai-gateway", force_refresh=True) == [
         "relay-only-model"
     ]
     assert profile.calls == [(None, "http://127.0.0.1:9001/deepseek/v1")]
@@ -82,7 +82,7 @@ def test_base_url_for_a_different_provider_is_ignored(monkeypatch):
         models,
         "_get_model_config_dict",
         lambda: {
-            "provider": "deepseek",
+            "provider": "ai-gateway",
             "base_url": "http://127.0.0.1:9001/deepseek/v1",
         },
     )
@@ -107,7 +107,7 @@ def test_a_failed_relay_probe_never_falls_back_to_the_vendor_host(monkeypatch, p
         models,
         "_get_model_config_dict",
         lambda: {
-            "provider": "deepseek",
+            "provider": "ai-gateway",
             "base_url": "http://127.0.0.1:9001/deepseek/v1",
         },
     )
@@ -132,10 +132,10 @@ def test_a_failed_relay_probe_never_falls_back_to_the_vendor_host(monkeypatch, p
     def _egress(*a, **k):
         raise AssertionError("vendor host touched after a failed relay probe")
 
-    monkeypatch.setattr(models, "_PROVIDER_CATALOG_FETCHERS", {"deepseek": _egress})
+    monkeypatch.setattr(models, "_PROVIDER_CATALOG_FETCHERS", {"ai-gateway": _egress})
     monkeypatch.setattr(models, "_profile_live_catalog", _egress)
     monkeypatch.setattr(models, "_merge_with_models_dev", _egress)
-    monkeypatch.setattr(models, "_PROVIDER_MODELS", {"deepseek": ["curated-local"]})
+    monkeypatch.setattr(models, "_PROVIDER_MODELS", {"ai-gateway": ["curated-local"]})
 
     # Degrades locally to the curated list, with no vendor egress at all.
-    assert models.provider_model_ids("deepseek") == ["curated-local"]
+    assert models.provider_model_ids("ai-gateway") == ["curated-local"]

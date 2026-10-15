@@ -29,35 +29,8 @@ def _append_row(rows: list[tuple[int, str]], pid_text: str, command: str) -> Non
 def _iter_process_table() -> list[tuple[int, str]]:
     """``(pid, cmdline)`` for every process, via wmic (Windows) or ps. Raises on scan failure."""
     rows: list[tuple[int, str]] = []
-    if sys.platform == "win32":
-        # errors="ignore": wmic may emit the system code page. bounded_probe_run, not run():
-        # run()'s post-timeout cleanup joins pipe readers unbounded and a conhost descendant
-        # holding duplicated handles wedges it forever.
-        # In text mode, subprocess output decoding depends on Python's configuration (locale-dependent by
-        # default, or UTF-8 in UTF-8 mode). The important protection here is errors="ignore": it prevents a
-        # reader-thread UnicodeDecodeError from leaving result.stdout=None and turning the later .split()
-        # into an AttributeError (#17049). bounded_probe_run (rather than subprocess.run with a timeout)
-        # keeps a slow scan from wedging the caller forever: run()'s post-timeout cleanup joins the pipe
-        # reader threads unbounded, and a conhost.exe descendant holding duplicated pipe handles blocks that
-        # join indefinitely (#87134). It also passes CREATE_NO_WINDOW: this scan can run from the windowless
-        # pythonw.exe desktop/gateway backend during an update, where a bare wmic spawn would pop a console
-        # window.
-        from hermes_cli._subprocess_compat import bounded_probe_run
-        result = bounded_probe_run(
-            ["wmic", "process", "get", "ProcessId,CommandLine", "/FORMAT:LIST"],
-            timeout=10, errors="ignore")
-        if result is None or result.returncode != 0 or result.stdout is None:
-            return rows
-        current_cmd = ""
-        for line in result.stdout.split("\n"):
-            line = line.strip()
-            if line.startswith("CommandLine="):
-                current_cmd = line[len("CommandLine=") :]
-            elif line.startswith("ProcessId="):
-                _append_row(rows, line[len("ProcessId=") :], current_cmd)
-        return rows
     # ps, not `pgrep -f "hermes.*dashboard"` (greedy regex; consistent with gateway pid scan).
-    result = subprocess.run(["ps", "-A", "-o", "pid=,command="], timeout=10, **_PS_RUN_KWARGS)
+    result = subprocess.run(["ps", "-A", "-o", "pid=,command="], timeout=10, **_PS_RUN_KWARGS, check=False)
     if result.returncode == 0:
         for line in getattr(result, "stdout", "").split("\n"):
             parts = line.strip().split(None, 1)
@@ -83,7 +56,7 @@ def _scan_dashboard_processes(*, exclude_pids: set[int] | None = None) -> list[t
     # Canonical token matcher, never argv substrings: ``hermes serve`` is a prefix of ``hermes
     # server`` and this list decides a SIGTERM — ``herdr --session hermes server`` (a terminal
     # multiplexer) was killed and its unit restarted by ``hermes update`` (#121156).
-    from hermes_cli.update_cmd_windows import _hermes_holder_subcommand
+    from hermes_cli.update_cmd_holders import _hermes_holder_subcommand
     try:
         found = [(pid, cmd) for pid, cmd in _iter_process_table()
                  if pid not in skip and _hermes_holder_subcommand(cmd) in ("dashboard", "serve")]
@@ -188,12 +161,7 @@ def _hermes_home_for_pid(pid: int) -> str | None:
         Path(env_home).parent.name == "profiles" or env.get("HERMES_UPDATE_POST_SWAP") == "1"
     ):
         return env_home
-    if sys.platform == "win32":
-        local_appdata = env.get("LOCALAPPDATA", "").strip()
-        base = Path(local_appdata) if local_appdata else Path(env.get("USERPROFILE") or Path.home()) / "AppData" / "Local"
-        default_home = base / "hermes"
-    else:
-        default_home = Path(env.get("HOME") or _pid_passwd_home(pid) or Path.home()) / ".hermes"
+    default_home = Path(env.get("HOME") or _pid_passwd_home(pid) or Path.home()) / ".hermes"
     root = profile_root_for_env_home(env_home, default_home)
     fixed_identity = any(env.get(k) for k in ("HERMES_SUPERVISED_CHILD", "HERMES_S6_SUPERVISED_CHILD",
                                                "HERMES_GATEWAY_EXTERNAL_SUPERVISOR")) or is_desktop_ssh_backend_argv(argv)
@@ -438,9 +406,9 @@ def _kill_pids_windows(pids: list[int], killed: list[int], failed: list[tuple[in
                 failed.append((pid, "not hermes-owned or process identity changed"))
             else:
                 result = subprocess.run(
-                    ["taskkill", "/PID", str(pid), "/F"], stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE, stdin=subprocess.DEVNULL, text=True, encoding="utf-8",
-                    errors="replace", timeout=10, creationflags=windows_hide_flags())
+                    ["taskkill", "/PID", str(pid), "/F"], capture_output=True,
+                    stdin=subprocess.DEVNULL, text=True, encoding="utf-8",
+                    errors="replace", timeout=10, creationflags=windows_hide_flags(), check=False)
                 if result.returncode == 0:
                     killed.append(pid)
                 else:
@@ -500,7 +468,7 @@ def _posix_descendants(roots: list[int]) -> dict[int, tuple[int, int | None]]:
     """
     from gateway.status import get_process_start_time
     try:
-        result = subprocess.run(["ps", "-A", "-o", "pid=,ppid=,tty="], timeout=10, **_PS_RUN_KWARGS)
+        result = subprocess.run(["ps", "-A", "-o", "pid=,ppid=,tty="], timeout=10, **_PS_RUN_KWARGS, check=False)
     except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
         return {}
     children: dict[int, list[tuple[int, str]]] = {}
@@ -588,7 +556,7 @@ def _kill_pids_posix(pids: list[int], killed: list[int], failed: list[tuple[int,
 
 def _kill_stale_dashboard_processes(
     reason: str = "the running backend no longer matches the updated frontend", *,
-    restart_managed: bool = False, already_restarted_units: "set[str] | None" = None,
+    restart_managed: bool = False, already_restarted_units: set[str] | None = None,
     scope_home: str | None = None,
 ) -> dict[str, list]:
     """Kill running ``hermes dashboard`` / ``hermes serve`` processes (update end, ``--stop``).
@@ -776,7 +744,7 @@ def _is_desktop_local_serve_cmdline(command: str) -> bool:
     Long-lived headless serves (``--host <tailscale-ip> --port 9119``) must never match —
     those are operator-managed remote backends that legitimately run with ppid 1.
     """
-    from hermes_cli.update_cmd_windows import _hermes_holder_subcommand
+    from hermes_cli.update_cmd_holders import _hermes_holder_subcommand
     # Canonical token matcher, never argv substrings: ``kanban --preserve-cache`` contains "serve" and
     # ``vim notes about hermes serve`` contains both markers — this predicate decides a kill.
     if _hermes_holder_subcommand(command) != "serve":
@@ -812,9 +780,7 @@ def _process_ancestors(pid: int, *, max_depth: int = 8) -> list[int]:
 def _process_ppid(pid: int) -> int | None:
     """Best-effort parent pid; None on failure (always None on Windows: desktop tree-kill reaps)."""
     try:
-        if sys.platform == "win32":
-            return None
-        result = subprocess.run(["ps", "-o", "ppid=", "-p", str(pid)], timeout=5, **_PS_RUN_KWARGS)
+        result = subprocess.run(["ps", "-o", "ppid=", "-p", str(pid)], timeout=5, **_PS_RUN_KWARGS, check=False)
         if result.returncode != 0 or not result.stdout:
             return None
         return int(result.stdout.strip().split()[0])
@@ -951,8 +917,6 @@ def _reap_orphaned_desktop_local_serves(
     sleep_fn = sleep_fn or _time.sleep
     lock_owned_pids_fn = lock_owned_pids_fn or _lock_owned_serve_pids
     process_age_seconds_fn = process_age_seconds_fn or _process_age_seconds
-    if sys.platform == "win32":  # Windows desktop uses taskkill tree teardown
-        return _empty_result()
 
     def _owned_pids() -> set[int]:
         try:

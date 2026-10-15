@@ -3,7 +3,7 @@ import path from 'node:path'
 
 import { sourceDeclaresServe } from './backend-command'
 import { execProbe, isTimeoutError, PROBE_TIMEOUT_MS } from './backend-probes'
-import { windowsShellCommand } from './windows-child-options'
+import { windowsShellCommand } from './child-process-options'
 
 interface ServeCandidate {
   command?: string | null

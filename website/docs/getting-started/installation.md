@@ -26,13 +26,6 @@ These installers clone `majorissuerep/hermes-agent` and track its `main` branch.
 curl -fsSL https://raw.githubusercontent.com/majorissuerep/hermes-agent/main/scripts/install.sh | bash
 ```
 
-#### Windows (native)
-
-Run in powershell:
-```powershell
-iex (irm https://raw.githubusercontent.com/majorissuerep/hermes-agent/main/scripts/install.ps1)
-```
-
 ### Initialize encrypted state {#initialize-encrypted-state}
 
 Open a new terminal after installation and check whether setup already created the vault:
@@ -58,14 +51,16 @@ hermes setup
 
 State-accessing commands prompt for the master password. For unattended services, authorize a private key with `hermes secure-vault keygen` and `hermes secure-vault add-key --public-key <file>`, then give the service `HERMES_VAULT_PRIVATE_KEY=/path/to/private-key`. This variable contains a **file path**, never the master password. Use `--help` on those commands for their key-file options.
 
-If startup reports that `.env` **holds mangled ciphertext**, run:
+If startup reports that `.env` **holds mangled ciphertext** or fails vault
+authentication, run:
 
 ```bash
 hermes secure-vault repair
 ```
 
-This command remains available when automatic update completion fails. It prompts
-for the master password and attempts to restore the damaged `.env` from a
+This command remains available when automatic update completion fails. It reuses
+an existing unlock or `HERMES_VAULT_PRIVATE_KEY` key file, otherwise prompting for
+the master password, and attempts to restore the damaged `.env` from a
 pre-migration backup, preserving the damaged contents as encrypted `.env.clobbered`.
 If no usable backup exists, repair reports the file as unrecoverable; preserve the
 existing files and recover or re-enter the credentials before resuming setup.
@@ -78,7 +73,7 @@ On Linux, macOS, or WSL2, run the takeover script from a terminal after saving o
 curl -fsSL https://raw.githubusercontent.com/majorissuerep/hermes-agent/main/scripts/takeover.sh | bash
 ```
 
-The script stops running Hermes processes, keeps the previous source checkout, installs the fork's `main` branch, and migrates the active home with a backup and verification. It uses the same PM-managed Python, dependencies, app builds, and launcher as a fresh source installation. The source lives under `$HERMES_HOME/hermes-agent` (defaulting to `~/.hermes/hermes-agent`), and the launcher under `~/.local/bin`. For another layout or native Windows, keep a backup, stop the existing Hermes processes, install the fork for the same data home, and run `hermes secure-vault migrate` if that home has no vault.
+The script stops running Hermes processes, keeps the previous source checkout, installs the fork's `main` branch, and migrates the active home with a backup and verification. It uses the same PM-managed Python, dependencies, app builds, and launcher as a fresh source installation. The source lives under `$HERMES_HOME/hermes-agent` (defaulting to `~/.hermes/hermes-agent`), and the launcher under `~/.local/bin`. For another layout, keep a backup, stop the existing Hermes processes, install the fork for the same data home, and run `hermes secure-vault migrate` if that home has no vault.
 
 With a terminal available, takeover asks for a master password. Without a terminal it creates a key-only vault and prints the private-key path; retain that file and provide its path through `HERMES_VAULT_PRIVATE_KEY` when starting Hermes. Check `hermes secure-vault status` and a real chat before removing the saved source checkout or plaintext migration backup.
 
@@ -102,23 +97,22 @@ The scripts clone the source, bootstrap uv, and delegate dependency preparation
 to PM. PM provides pinned Python, Node.js, npm, ripgrep, and FFmpeg. The source
 installation selects the `all` Python extra, not every optional extra.
 PM also installs the browser and computer-use tools by default: `agent-browser`
-and its pinned Chromium, and `cua-driver` (the computer-use driver, on macOS,
-Windows and glibc Linux). If a download fails, the install still completes and
+and its pinned Chromium, and `cua-driver` (the computer-use driver, on macOS
+and glibc Linux). If a download fails, the install still completes and
 prints the command to retry. The default browser driver (browser-harness, the
 engine of the Browser Use CLI) is a regular Python dependency, so every install,
 the Desktop app included, already has it.
 Other optional tools use their feature-specific installation paths.
 
-To leave the browser tools out, pass `--skip-browser` on POSIX or `-SkipBrowser`
-on Windows; for the computer-use driver, `--skip-computer-use` /
-`-SkipComputerUse`. Hermes remembers these choices: later installs and
+To leave the browser tools out, pass `--skip-browser`; for the computer-use
+driver, `--skip-computer-use`. Hermes remembers these choices: later installs and
 `hermes update` do not add them back. Run `hermes pm install agent-browser` or
 `hermes pm install cua-driver` to install them and undo the choice.
 
 The scripts create a launcher and prepare the data directory. Interactive runs
-also invoke setup and gateway configuration. `--non-interactive` on POSIX, or
-`-NonInteractive` on Windows, skips stages that need input. The optional
-`--include-desktop` / `-IncludeDesktop` stage builds the desktop from source.
+also invoke setup and gateway configuration. `--non-interactive` skips stages
+that need input. The optional `--include-desktop` stage builds the desktop from
+source.
 
 On a terminal the scripts show one status line per step and write the output
 of git, uv and the builds to `logs/install.log` under the Hermes data
@@ -131,14 +125,16 @@ directory; a failed step prints its last lines and the log path. CI (`CI` or
 | Method | Code | CLI entry point | Default user data |
 |---|---|---|---|
 | POSIX source script | `~/.hermes/hermes-agent/` | `~/.local/bin/hermes` wrapper | `~/.hermes/` |
-| Windows source script | `%LOCALAPPDATA%\hermes\hermes-agent\` | `%LOCALAPPDATA%\hermes\bin\` | `%LOCALAPPDATA%\hermes\` |
-| Desktop bundle | Inside the installed app package | Packaged launchers; Windows execution aliases | Platform default Hermes data directory |
+| Desktop bundle | Inside the installed app package | Packaged launchers | Platform default Hermes data directory |
 | Docker | `/opt/hermes/` | Image entrypoint and `hermes` shim | Mounted `/opt/data/` |
 | Termux APT | `$PREFIX/lib/hermes-agent/` | Symlinks in `$PREFIX/bin/` | `~/.hermes/` |
 
+This fork does not support native Windows. On Windows, run the POSIX script
+inside WSL (see PLATFORMS.md).
+
 `HERMES_HOME` selects user data. The POSIX script's `--dir` selects its source
-checkout independently. Windows provides `-HermesHome` and `-InstallDir`.
-Running the POSIX script as root does not select an automatic FHS layout:
+checkout independently. Running the POSIX script as root does not select an
+automatic FHS layout:
 it uses root's home unless you provide an explicit source path.
 
 PM's tool store and per-install Python generations have separate lifetimes.
@@ -165,14 +161,13 @@ hermes config get     # Inspect individual config values
 hermes setup          # Or run the full setup wizard to configure everything at once
 ```
 
-:::tip Fastest path: Nous Portal
-One subscription covers 300+ models plus the [Tool Gateway](../user-guide/features/tool-gateway.md) (web search, image generation, TTS, cloud browser). Skip the per-tool key juggling:
+:::tip Connect your model
+Run `hermes model` to choose ChatGPT/Codex, Anthropic, OpenAI API, LiteLLM,
+a custom OpenAI/Anthropic endpoint, Z.AI, Grok, or Vercel AI Gateway.
+There is no anonymous provider fallback. See [AI Providers](../integrations/providers.md).
 
-```bash
-hermes setup --portal
-```
-
-That logs you in, sets Nous as your provider, and turns on the Tool Gateway in one command.
+Unlock the encrypted home once at startup. Local self-management commands and
+subagents reuse the session's temporary authority; never copy keys or passphrases.
 :::
 
 :::tip Already running Hermes on another machine?
@@ -184,7 +179,6 @@ You don't need to rebuild your setup from scratch. Restore a full backup with `h
 ## Prerequisites
 
 For the POSIX source script, provide Git, curl, tar, and SHA-256 utilities.
-Windows can bootstrap its pinned Git for Windows archive when Git is absent.
 The script always downloads its verified uv pin; a uv already on your PATH is never used.
 
 Current first-party installations run on **Python 3.14**. The broader
@@ -198,6 +192,16 @@ Source builds can require a native compiler and platform development libraries.
 Building Electron from source adds Node native-module requirements. These
 build prerequisites do not apply to installing a complete desktop package.
 Linux Chromium also requires system libraries supplied by the distribution.
+
+On glibc Linux, the managed Node.js links `libatomic.so.1`, which minimal
+Debian, Ubuntu and RHEL-family images do not ship. When the library is
+missing, the installer and `hermes update` install the distro package
+(`libatomic1` on apt and zypper, `libatomic` on dnf/yum and apk, `gcc-libs`
+on pacman). They run the package manager directly as root, or as
+`sudo -n` otherwise. An interactive run asks for your sudo password once,
+before installing dependencies. `--non-interactive` runs never prompt. If
+the install cannot run, the error names the exact command for the package
+manager it found.
 
 :::tip Nix users
 Nix is **no longer an explicitly supported install path** (best-effort only). If you already use Nix (on NixOS, macOS, or Linux), there's a dedicated setup path with a Nix flake, declarative NixOS module, and optional container mode. See the **[Nix & NixOS Setup](./nix-setup.md)** guide.
@@ -241,9 +245,11 @@ configuration, and launcher must belong to that user.
    sudo loginctl enable-linger SERVICE_USER
    ```
 
-The current source installer does not run Playwright's `--with-deps` step or
-provide a package-manager-specific sudo fallback. PM manages tool binaries;
-the administrator supplies system libraries. See
+The current source installer does not run Playwright's `--with-deps` step.
+Apart from Node.js's `libatomic` (see Prerequisites), it does not install
+system packages. PM manages tool binaries; the administrator supplies system
+libraries. A service user without sudo gets the exact `libatomic` command to
+ask an administrator to run. See
 [Browser automation](../user-guide/features/browser.md) and
 [Messaging Gateway](../user-guide/messaging/index.md).
 

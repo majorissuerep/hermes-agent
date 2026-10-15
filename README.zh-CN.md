@@ -32,27 +32,6 @@
 
 ---
 
-## 快速安装
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/majorissuerep/hermes-agent/main/scripts/install.sh | bash
-```
-
-支持 Linux、macOS 和 WSL2。安装程序会自动处理平台特定的配置。
-
-> **Android / Termux：** [上游 Termux 指南](https://hermes-agent.nousresearch.com/docs/getting-started/termux)中的 APT 软件包是上游版本，不包含本分支的加密保险库和会话功能。本分支目前不发布 Termux 软件包。
->
-> **Windows：** 在 PowerShell 中运行：
-> ```powershell
-> iex (irm https://raw.githubusercontent.com/majorissuerep/hermes-agent/main/scripts/install.ps1)
-> ```
-> 安装完成后，可能需要重启终端，然后运行 `hermes` 开始对话。
-
-安装后请先运行 `hermes secure-vault status`。若尚无 vault，请在终端中执行 `hermes secure-vault migrate` 并设置主密码，再运行 `hermes setup`。访问状态的命令需要解锁 vault；已有上游安装请参阅[迁移说明](website/i18n/zh-Hans/docusaurus-plugin-content-docs/current/getting-started/installation.md#switch-existing-installation)。
-
-完成后：
-
-```bash
 source ~/.bashrc    # 重新加载 shell（或: source ~/.zshrc）
 hermes              # 开始对话！
 ```

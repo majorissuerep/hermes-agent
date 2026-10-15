@@ -13,10 +13,10 @@ from urllib.parse import quote, unquote
 import pytest
 
 from tests.ci.desktop_release_roles import (
-    commit_summary, native_builds, needs_of, selection_gates, stage_step, termux_builder, universal_assembler,
+    commit_summary, native_builds, needs_of, selection_gates, stage_step, termux_builder,
 )
 from tests.ci.test_desktop_release_tag_admission import _BASH, _child_env, _workflow
-from tests.scripts.test_release_r2 import r2_server  # noqa: F401
+from tests.scripts.test_release_r2 import r2_server
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -59,7 +59,7 @@ def shell_step(tmp_path, r2_server, job, name, env, *, script=None):
     environment = _child_env(**env)
     environment['PATH'] = str(helper) + os.pathsep + environment['PATH']
     return subprocess.run([_BASH, '-e', '-o', 'pipefail', str(script_file)], cwd=tmp_path,
-                          env=environment, capture_output=True, text=True, encoding='utf-8', timeout=60)
+                          env=environment, capture_output=True, text=True, encoding='utf-8', timeout=60, check=False)
 
 
 @pytest.mark.parametrize("has_download", [True, False])
@@ -70,22 +70,24 @@ def test_failed_commit_summary_publishes_downloads_or_run_links(tmp_path, r2_ser
     summary = tmp_path / 'summary.md'
     jobs = _workflow()['jobs']
     summary_job = commit_summary(jobs)
-    bundle_env = {'HERMES_HOME': None, 'HERMES_SKIP_INTRO': '',
+    bundle_env = {'HERMES_HOME': None, 'HERMES_DESKTOP_USER_DATA_DIR': '',
                   'HERMES_SHARED_AUTH_DIR': '<script>\n"café" & value</script>'}
     env = dict(HERMES_BUILD_COMMIT=sha, HERMES_PAYLOAD_TAG='', RELEASE_COMMIT=sha,
                GITHUB_REPOSITORY='fixture-owner/fixture-repo',
                HERMES_BUNDLE_ENV_JSON=json.dumps(bundle_env), CI_SECRET='must-not-appear',
-               RELEASE_PHASE='', TARGET='win32-x64', RUN_URL=run_url,
+               RELEASE_PHASE='', TARGET='darwin-arm64', RUN_URL=run_url,
                GITHUB_STEP_SUMMARY=str(summary), CLOUDFLARE_R2_PUBLIC_URL=base,
                CLOUDFLARE_R2_ACCOUNT_ID='loopback', CLOUDFLARE_R2_ACCESS_KEY_ID='test-inert',
                CLOUDFLARE_R2_SECRET_ACCESS_KEY='test-inert', CLOUDFLARE_R2_BUCKET='hermes-releases',
                RELEASE_NEEDS=json.dumps({name: {'result': 'success' if name == 'validate' else 'failure'}
                                          for name in needs_of(jobs[summary_job])}))
     if has_download:
-        artifact = tmp_path / 'apps/desktop/release/HermesBundled-0.33.0-win-x64.msix'
+        artifact = tmp_path / 'apps/desktop/release/HermesBundled-0.33.0-mac-arm64.dmg'
         artifact.parent.mkdir(parents=True)
         artifact.write_bytes(b'inert downloadable fixture')
-        producer = jobs[native_builds(jobs)[('win32-x64', 'commit')]]
+        for extra in ('HermesBundled-0.33.0-mac-arm64.zip', 'HermesBundled-0.33.0-mac-arm64.zip.blockmap'):
+            (tmp_path / 'apps/desktop/release' / extra).write_bytes(b'inert downloadable fixture')
+        producer = jobs[native_builds(jobs)[('darwin-arm64', 'commit')]]
         staged = shell_step(tmp_path, r2_server, '', '', env, script=stage_step(producer)['run'])
         assert staged.returncode == 0, staged.stdout + staged.stderr
     result = shell_step(tmp_path, r2_server, summary_job,
@@ -97,13 +99,14 @@ def test_failed_commit_summary_publishes_downloads_or_run_links(tmp_path, r2_ser
         page = response.read().decode()
     assert f'href="https://github.com/fixture-owner/fixture-repo/commit/{sha}"' in page
     assert 'Bundle environment' in page and 'HERMES_HOME' in page and 'Unset' in page
-    assert '<code>HERMES_SKIP_INTRO</code></td><td><code>&quot;&quot;</code>' in page
+    assert '<code>HERMES_DESKTOP_USER_DATA_DIR</code></td><td><code>&quot;&quot;</code>' in page
     assert html.escape(json.dumps(bundle_env['HERMES_SHARED_AUTH_DIR'], ensure_ascii=False)) in page
     assert '<script>' not in page and 'must-not-appear' not in page and 'CI_SECRET' not in page
     links = re.findall(r'\]\((https?://[^)]+)\)', text)
-    download_links = [url for url in links if url.endswith('.msix')]
+    download_links = [url for url in links if url.endswith(('.dmg', '.zip'))]
     assert run_url in links
-    assert text.count('✅ Built') == page.count('✅ Built') == int(has_download)
+    expected_built = 2 if has_download else 0  # dmg + zip rows staged for the darwin leg (blockmap not listed)
+    assert text.count('✅ Built') == page.count('✅ Built') == expected_built
     for url in download_links:
             assert url.startswith(base + '/')
             with urlopen(url, timeout=5) as response:
@@ -138,15 +141,12 @@ def test_commit_staging_and_summary_bind_every_produced_file_without_channels(tm
     gates = selection_gates(jobs)
     summary_job = commit_summary(jobs)
     producers = [
-        (legs[('win32-x64', 'commit')], 'win32-x64', ['HermesBundled-0.33.0-win-x64.msix']),
-        (legs[('win32-arm64', 'commit')], 'win32-arm64', ['HermesBundled-0.33.0-win-arm64.msix']),
         (legs[('darwin-arm64', 'commit')], 'darwin-arm64', [
             'HermesBundled-0.33.0-mac-arm64.dmg', 'HermesBundled-0.33.0-mac-arm64.zip',
             'HermesBundled-0.33.0-mac-arm64.zip.blockmap']),
         (legs[('darwin-x64', 'commit')], 'darwin-x64', [
             'HermesBundled-0.33.0-mac-x64.dmg', 'HermesBundled-0.33.0-mac-x64.zip',
             'HermesBundled-0.33.0-mac-x64.zip.blockmap']),
-        (universal_assembler(jobs), 'windows-universal', ['HermesBundled-0.33.0.0-win.msixbundle']),
     ]
     artifact_keys = set()
     for job, target, names in producers:
@@ -203,7 +203,7 @@ def test_commit_staging_and_summary_bind_every_produced_file_without_channels(tm
     assert all(key.startswith(f'releases/commit/{sha}/') for key in r2_server.store)
     assert not any(method == 'DELETE' for method, _, _ in r2_server.requests)
 
-    receipt_key = f'releases/commit/{sha}/handoff-win32-x64.json'
+    receipt_key = f'releases/commit/{sha}/handoff-darwin-arm64.json'
     original = r2_server.store[receipt_key]
     r2_server.store[receipt_key] = (b'not-json', '"invalid"')
     failed = shell_step(tmp_path, r2_server, summary_job,

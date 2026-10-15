@@ -397,11 +397,13 @@ async def _check_error_registration(monkeypatch, adapter, app):
 async def _check_error_cancel_before_entry(monkeypatch, adapter, app, delivered):
     scheduled, effects = [], []
     create = app._Application__create_task
+    settled = asyncio.Event()
 
     def cancel_on_schedule(coroutine, *args, **kwargs):
         task = create(coroutine, *args, **kwargs)
         if kwargs.get("is_error_handler"):
             scheduled.append((task, coroutine))
+            task.add_done_callback(lambda _: settled.set())
             task.cancel()
         return task
 
@@ -416,6 +418,8 @@ async def _check_error_cancel_before_entry(monkeypatch, adapter, app, delivered)
         assert "111:10" in adapter._inflight_update_ids
         await app.process_update(update(app.bot))
         await app.stop()
+        # PTB stop may finish before a pre-entry cancellation's done callbacks.
+        await asyncio.wait_for(settled.wait(), 5)
     assert len(scheduled) == 1 and not effects
     assert not adapter._inflight_update_ids and not adapter._seen_update_ids
     # The cancelled PTB task never awaited the callback coroutine: it must be closed too.
@@ -592,7 +596,7 @@ async def test_only_pre_handoff_failure_reopens_admission(monkeypatch, tmp_path,
 
             conversation = ConversationHandler(entry_points=[TypeHandler(Update, entry)], states={}, fallbacks=[])
             app.add_handler(conversation, group=-1)
-            async with connected(monkeypatch, bot_id=222) as (other, other_app, _):
+            async with connected(monkeypatch, bot_id=222) as (_other, other_app, _):
                 other_app.add_handler(conversation, group=-1)
                 for _ in range(2):
                     await other_app.process_update(update(other_app.bot))
@@ -800,15 +804,15 @@ async def test_connect_builds_concurrent_update_processor(monkeypatch):
     the update fetcher then awaits each update's full handler chain inline, so one slow
     update deafens every other chat (and local commands) until it finishes. The adapter
     must enable a bounded concurrent processor, overridable via config extra (#125098)."""
-    async with connected(monkeypatch) as (adapter, app, delivered):
+    async with connected(monkeypatch) as (_adapter, app, _delivered):
         assert isinstance(app.update_processor, PerChatUpdateProcessor)
         assert app.concurrent_updates == DEFAULT_MAX_CONCURRENT_UPDATES
 
-    async with connected(monkeypatch, extra={"max_concurrent_updates": 7}) as (adapter, app, delivered):
+    async with connected(monkeypatch, extra={"max_concurrent_updates": 7}) as (_adapter, app, _delivered):
         assert app.concurrent_updates == 7
 
     for bad in ("lots", float("inf")):  # .inf in YAML: int() raises OverflowError
-        async with connected(monkeypatch, extra={"max_concurrent_updates": bad}) as (adapter, app, delivered):
+        async with connected(monkeypatch, extra={"max_concurrent_updates": bad}) as (_adapter, app, _delivered):
             assert app.concurrent_updates == DEFAULT_MAX_CONCURRENT_UPDATES
 
     # Cancelling a waiting same-chat update must neither fail its running predecessor nor
@@ -823,13 +827,17 @@ async def test_connect_builds_concurrent_update_processor(monkeypatch):
 
     chat = SimpleNamespace(effective_chat=SimpleNamespace(id=1))
     tasks = []
-    for name in "ABC":
-        tasks.append(asyncio.create_task(processor.process_update(chat, handler(name))))
+    callbacks = [handler(name) for name in "ABC"]
+    for callback in callbacks:
+        tasks.append(asyncio.create_task(processor.process_update(chat, callback)))
         await asyncio.sleep(0.01)
     tasks[1].cancel()
     await asyncio.sleep(0.01)
     gate.set()
     results = await asyncio.gather(*tasks, return_exceptions=True)
+    # The cancelled waiter never takes ownership of the test-created callback.
+    for callback in callbacks:
+        callback.close()
     assert results[0] is None and results[2] is None
     assert order == ["start A", "end A", "start C", "end C"]  # C waits for A even after B is cancelled
 
@@ -883,6 +891,6 @@ async def test_slow_update_does_not_block_other_chats(monkeypatch):
                 break
             await asyncio.sleep(0.02)
         await asyncio.gather(*adapter._pending_text_batch_tasks.values())
-        assert [e.source.chat_id for e in delivered][0] == "43"
+        assert next(e.source.chat_id for e in delivered) == "43"
         same_chat = "\n".join(e.text for e in delivered if e.source.chat_id == "42")
         assert same_chat == "hello\nsecond"

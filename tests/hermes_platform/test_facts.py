@@ -22,27 +22,17 @@ def test_normalize_arch(raw: str, expected: str) -> None:
     assert facts.normalize_arch(raw) == expected
 
 @pytest.mark.parametrize(
-    ("wow64_native", "machine", "env_arch", "expected"),
+    ("cpuinfo", "vendor"),
     [
-        (0xAA64, "AMD64", "x86", "arm64"),
-        (None, "x86_64", "ARM64", "amd64"),
-        (None, "unknown", "ARM64", "arm64"),
+        ("processor : 0\nvendor_id : GenuineIntel\nmodel name : Intel Xeon\n", "GenuineIntel"),
+        ("processor : 0\nCPU implementer : 0x41\nCPU part : 0xd87\n", "ARM"),
+        ("processor : 0\nCPU implementer : 0x61\n", "Apple"),
+        ("processor : 0\nCPU implementer : 0xee\n", ""),
+        ("processor : 0\n", ""),
     ],
 )
-def test_windows_native_arch_precedence(
-    wow64_native: int | None,
-    machine: str,
-    env_arch: str | None,
-    expected: str,
-) -> None:
-    assert (
-        facts.windows_native_arch(
-            wow64_native=wow64_native,
-            machine=machine,
-            env_arch=env_arch,
-        )
-        == expected
-    )
+def test_cpu_vendor_from_cpuinfo(cpuinfo: str, vendor: str) -> None:
+    assert facts.parse_cpuinfo_vendor(cpuinfo) == vendor
 
 @pytest.mark.parametrize(
     ("text", "device_tree_model", "expected"),
@@ -68,24 +58,16 @@ def cleared_fact_caches():
     facts.clear_caches()
     yield
     facts.clear_caches()
-
-@pytest.mark.platforms("windows")
-def test_windows_native_arch_matches_registry_identifier(cleared_fact_caches) -> None:
-    winreg = importlib.import_module("winreg")
-    with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, facts._CPU_KEY) as key:
-        identifier = str(winreg.QueryValueEx(key, "Identifier")[0]).strip()
-
-    expected = "arm64" if identifier.upper().startswith("ARMV8") else "amd64"
-    assert facts.native_arch() == expected
-
 @pytest.mark.platforms("macos")
 def test_macos_live_cpu_facts(cleared_fact_caches) -> None:
     assert facts.cpu_model()
+    assert facts.cpu_vendor()
     assert facts.native_arch() in {"arm64", "amd64"}
+    assert facts.gpu_class() != "unknown"
 
 @pytest.mark.platforms("linux")
 def test_linux_live_cpu_facts_match_cpuinfo(cleared_fact_caches) -> None:
     cpuinfo = Path("/proc/cpuinfo").read_text(encoding="utf-8", errors="replace")
 
-    assert facts.cpu_vendor() in cpuinfo
+    assert facts.cpu_vendor() == facts.parse_cpuinfo_vendor(cpuinfo)
     assert facts.cpu_model() in cpuinfo

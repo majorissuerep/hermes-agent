@@ -1,14 +1,14 @@
 """Regression tests for vendor-prefix model routing and dict model.aliases (#87189).
 
-``--model nous/deepseek-v4-pro`` / ``--model ollama/qwen3.5:4b`` used to fall
+``--model nous/glm-5`` / ``--model ollama/qwen3.5:4b`` used to fall
 through provider auto-detection and be sent to the configured default provider
 (api.anthropic.com) with the prefixed name intact, producing HTTP 404. Dict
 entries under ``model.aliases`` (``localqwen: {model: ..., provider: ...}``)
 were silently dropped because only string values were parsed.
 """
 
-import hermes_cli.models as models
-import hermes_cli.model_switch as model_switch
+from hermes_cli import models
+from hermes_cli import model_switch
 
 
 class TestVendorPrefixRouting:
@@ -18,8 +18,8 @@ class TestVendorPrefixRouting:
     def test_configured_provider_prefix_routes_to_provider(self, monkeypatch):
         monkeypatch.setattr(models, "_find_openrouter_slug", lambda _name: None)
         monkeypatch.setattr(models, "_configured_provider_ids", lambda: {"nous"})
-        detected = models.detect_provider_for_model("nous/deepseek-v4-pro", "anthropic")
-        assert detected == ("nous", "deepseek-v4-pro")
+        detected = models.detect_provider_for_model("nous/glm-5", "anthropic")
+        assert detected == ("nous", "glm-5")
 
     def test_local_provider_prefix_routes_to_provider(self, monkeypatch):
         monkeypatch.setattr(models, "_find_openrouter_slug", lambda _name: None)
@@ -66,20 +66,23 @@ class TestVendorPrefixRouting:
         """Aggregator-native slugs keep their existing OpenRouter routing (when OpenRouter is
         authenticated — an unkeyed aggregator is never auto-selected)."""
         from hermes_cli import models_detect
+        from tests.hermes_cli.provider_fixtures import install_optional_aggregator
+
+        install_optional_aggregator(monkeypatch)
         monkeypatch.setattr(models_detect, "provider_has_credentials", lambda p: p == "openrouter")
         monkeypatch.setattr(
-            models, "_find_openrouter_slug", lambda _name: "deepseek/deepseek-chat"
+            models, "_find_openrouter_slug", lambda _name: "zai/deepseek-chat"
         )
-        monkeypatch.setattr(models, "_configured_provider_ids", lambda: {"deepseek"})
-        detected = models.detect_provider_for_model("deepseek/deepseek-chat", "anthropic")
-        assert detected == ("openrouter", "deepseek/deepseek-chat")
+        monkeypatch.setattr(models, "_configured_provider_ids", lambda: {"zai"})
+        detected = models.detect_provider_for_model("zai/deepseek-chat", "anthropic")
+        assert detected == ("openrouter", "zai/deepseek-chat")
 
     def test_bare_model_detection_unchanged(self, monkeypatch):
         from hermes_cli import models_detect
-        monkeypatch.setattr(models_detect, "provider_has_credentials", lambda p: p == "deepseek")
+        monkeypatch.setattr(models_detect, "provider_has_credentials", lambda p: p == "zai")
         monkeypatch.setattr(models, "_find_openrouter_slug", lambda _name: None)
-        detected = models.detect_provider_for_model("deepseek-chat", "anthropic")
-        assert detected == ("deepseek", "deepseek-chat")
+        detected = models.detect_provider_for_model("glm-5", "anthropic")
+        assert detected == ("zai", "glm-5")
 
 
 class TestDictModelAliases:
@@ -133,12 +136,12 @@ class TestDictModelAliases:
     def test_string_entries_still_parse(self, monkeypatch):
         cfg = {
             "model": {
-                "aliases": {"ds-flash": "deepseek/deepseek-v4-flash"},
+                "aliases": {"ds-flash": "zai/glm-5"},
             },
         }
         aliases = self._load_with(monkeypatch, cfg)
         da = aliases["ds-flash"]
-        assert (da.model, da.provider) == ("deepseek-v4-flash", "deepseek")
+        assert (da.model, da.provider) == ("glm-5", "zai")
 
     def test_model_aliases_block_keeps_priority_over_model_aliases(self, monkeypatch):
         cfg = {

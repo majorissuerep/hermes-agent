@@ -139,7 +139,7 @@ def test_raising_close_is_swallowed_and_not_retried():
     agent.close()  # flag already cleared — no second attempt
 
     assert attempts == [1]
-    assert getattr(agent, "_owns_session_db") is False
+    assert agent._owns_session_db is False
 
 
 def test_close_still_ends_the_session_row_before_closing():
@@ -178,7 +178,7 @@ def test_lazy_recall_open_is_owned_by_the_agent(monkeypatch):
         opened.append(db)
         return db
 
-    monkeypatch.setattr("hermes_state_registry.acquire", _factory)
+    monkeypatch.setattr("hermes_state.registry.acquire", _factory)
 
     agent = _bare_agent(_session_db=None, _persist_disabled=False)
     got = agent._get_session_db_for_recall()
@@ -261,7 +261,7 @@ def build_env(monkeypatch, tmp_path):
         opened.append(db)
         return db
 
-    monkeypatch.setattr("hermes_state_registry.acquire", _factory)
+    monkeypatch.setattr("hermes_state.registry.acquire", _factory)
     for name, value in [
         ("_set_session_context", lambda _key, cwd=None: []),
         ("_clear_session_context", lambda _tokens: None),
@@ -272,7 +272,7 @@ def build_env(monkeypatch, tmp_path):
         ("_notify_session_boundary", lambda *a, **k: None),
         ("_session_info", lambda *a, **k: {}),
         ("_probe_config_health", lambda _cfg: None),
-        ("_load_cfg", lambda: {}),
+        ("_load_cfg", dict),
         ("_emit", lambda *a, **k: None),
         ("_schedule_mcp_late_refresh", lambda *a, **k: None),
         ("_session_source", lambda _current: None),

@@ -43,7 +43,7 @@ def keyed_provider_config(monkeypatch):
     }
     monkeypatch.setattr(rp, "load_config", lambda *a, **k: config)
     monkeypatch.setattr("hermes_cli.config.load_config", lambda *a, **k: config)
-    monkeypatch.setattr(rp, "_get_model_config", lambda: {})
+    monkeypatch.setattr(rp, "_get_model_config", dict)
     return config
 
 
@@ -95,7 +95,7 @@ def test_legacy_unkeyed_entry_keeps_its_name_identity(monkeypatch):
     }
     monkeypatch.setattr(rp, "load_config", lambda *a, **k: config)
     monkeypatch.setattr("hermes_cli.config.load_config", lambda *a, **k: config)
-    monkeypatch.setattr(rp, "_get_model_config", lambda: {})
+    monkeypatch.setattr(rp, "_get_model_config", dict)
 
     assert rp.canonical_custom_identity(config_provider="Legacy Endpoint") == "custom:legacy-endpoint"
 
@@ -111,7 +111,7 @@ class TestIsRoutableProvider:
         assert rp.is_routable_provider(None) is True
         assert rp.is_routable_provider("") is True
         assert rp.is_routable_provider("auto") is True
-        assert rp.is_routable_provider("openrouter") is True
+        assert rp.is_routable_provider("ai-gateway") is True
 
     def test_bare_custom_is_not_routable(self, keyed_provider_config):
         # The resolved billing class, not a routable identity — restore
@@ -141,7 +141,7 @@ class TestIsRoutableProvider:
         }
         monkeypatch.setattr(rp, "load_config", lambda *a, **k: config)
         monkeypatch.setattr("hermes_cli.config.load_config", lambda *a, **k: config)
-        monkeypatch.setattr(rp, "_get_model_config", lambda: {})
+        monkeypatch.setattr(rp, "_get_model_config", dict)
 
         assert rp.is_routable_provider("legacy-endpoint") is True
         assert rp.is_routable_provider("custom:legacy-endpoint") is True

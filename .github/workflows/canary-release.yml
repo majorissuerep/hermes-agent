@@ -29,8 +29,20 @@ jobs:
     name: Tag, draft, and start the canary build
     runs-on: ubuntu-24.04
     # A dispatch from a feature branch would tag unmerged code as the canary.
-    if: github.ref_name == github.event.repository.default_branch
+    if: github.ref_name == github.event.repository.default_branch && (github.event_name == 'workflow_dispatch' || vars.ENABLE_AUTOMATIC_RELEASES == 'true')
+    environment: release-signing
     steps:
+      - name: Require configured artifact storage before creating a release
+        env:
+          R2_ACCOUNT: ${{ secrets.CLOUDFLARE_R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY: ${{ secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
+          R2_SECRET_KEY: ${{ secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ vars.CLOUDFLARE_R2_BUCKET }}
+        run: |
+          set -euo pipefail
+          for name in R2_ACCOUNT R2_ACCESS_KEY R2_SECRET_KEY R2_BUCKET; do
+            test -n "${!name}" || { echo "::error::Release storage is not configured: $name"; exit 1; }
+          done
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a # v7.0.1
         with:
           # The changelog walks commits since the previous canary tag

@@ -83,7 +83,7 @@ def _grant(args) -> int:
             report = scan_path(path)
             print("\n".join(report.summary_lines(limit=25)))
             if not report.clean:
-                print(f"✗ Not granted. Re-run with --force to grant it anyway.")
+                print("✗ Not granted. Re-run with --force to grant it anyway.")
                 return 1
     grants = [g for g in (section.get("grants") or []) if parse_grant(g).path != grant.path]
     section["grants"] = [*grants, grant.spec]
@@ -154,7 +154,7 @@ def _scan(args) -> int:
 
 def _probe(spec: dict, shell: str) -> tuple[int, str]:
     from hermes_security.sandbox.spawn import wrap_argv
-    proc = subprocess.run(wrap_argv(["/bin/sh", "-c", shell], spec), capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60)
+    proc = subprocess.run(wrap_argv(["/bin/sh", "-c", shell], spec), check=False, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60)
     return proc.returncode, (proc.stdout + proc.stderr).strip()
 
 
@@ -174,7 +174,7 @@ def _check(args) -> int:
         (outside / "secret.txt").write_text("secret\n", encoding="utf-8")
         policy = SandboxPolicy(enabled=True, grants=(Grant(str(granted), "rw"),))
         spec = policy.launch_spec()
-        q = lambda p: "'" + str(p).replace("'", "'\\''") + "'"  # noqa: E731
+        q = lambda p: "'" + str(p).replace("'", "'\\''") + "'"
         probes = [
             ("read a granted file", f"cat {q(granted / 'in.txt')}", True),
             ("write inside a rw grant", f"echo x > {q(granted / 'new.txt')}", True),

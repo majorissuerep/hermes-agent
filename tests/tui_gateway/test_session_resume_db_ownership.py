@@ -47,6 +47,7 @@ class _RecordingDB:
         self.closed = 0
         self.rows: dict = {}
         self.reopen_error: Exception | None = None
+        self.read_error: Exception | None = None
 
     def close(self):
         self.closed += 1
@@ -65,9 +66,13 @@ class _RecordingDB:
             raise self.reopen_error
 
     def get_resume_conversations(self, _target):
+        if self.read_error is not None:
+            raise self.read_error
         return ([], [])
 
     def get_ancestor_display_prefix(self, _target):
+        if self.read_error is not None:
+            raise self.read_error
         return []
 
     def get_messages_as_conversation(self, _target, **_kwargs):
@@ -90,7 +95,7 @@ def profile_dbs(monkeypatch, tmp_path):
         opened.append(db)
         return db
 
-    monkeypatch.setattr("hermes_state_registry.acquire", _factory)
+    monkeypatch.setattr("hermes_state.registry.acquire", _factory)
     monkeypatch.setattr(
         server, "_profile_home", lambda profile: profile_home if profile else None
     )
@@ -146,7 +151,7 @@ def test_deferred_desktop_resume_keeps_stored_workspace_provenance(
         profile_dbs.append(db)
         return db
 
-    monkeypatch.setattr("hermes_state_registry.acquire", _factory)
+    monkeypatch.setattr("hermes_state.registry.acquire", _factory)
 
     resp = _resume(session_id="s1", profile="work", source="desktop")
     session = server._sessions[resp["result"]["session_id"]]
@@ -157,22 +162,25 @@ def test_deferred_desktop_resume_keeps_stored_workspace_provenance(
 
 
 def test_resume_closes_profile_db_when_reopen_fails(profile_dbs, monkeypatch):
-    """The 'resume failed' early return must not leak the handle."""
+    """The 'resume failed' early return must not leak the handle.
+
+    #85303 made the mount read-only (resume no longer calls ``reopen_session``),
+    so the failure this guards against moved to the history read: a read that
+    raises must still surface as a resume error AND close the profile handle.
+    """
 
     def _factory(db_path=None, **kwargs):
         db = _RecordingDB(db_path=db_path, **kwargs)
         db.rows["s1"] = {"id": "s1", "cwd": ""}
-        db.reopen_error = RuntimeError("database is locked")
+        db.read_error = RuntimeError("database is locked")
         profile_dbs.append(db)
         return db
 
-    monkeypatch.setattr("hermes_state_registry.acquire", _factory)
+    monkeypatch.setattr("hermes_state.registry.acquire", _factory)
 
     resp = _resume(session_id="s1", profile="work")
 
     assert resp["error"]["code"] == 5000
-    # Plain "could not reopen" lead; the raw cause survives on the Details line.
-    assert "Could not reopen" in resp["error"]["message"]
     assert "database is locked" in resp["error"]["message"]
     assert profile_dbs[0].closed == 1
 
@@ -191,7 +199,7 @@ def test_resume_closes_profile_db_on_live_session_fast_path(profile_dbs, monkeyp
         profile_dbs.append(db)
         return db
 
-    monkeypatch.setattr("hermes_state_registry.acquire", _factory)
+    monkeypatch.setattr("hermes_state.registry.acquire", _factory)
     live_session = {}
     with server._sessions_lock:
         server._sessions["live-sid"] = live_session
@@ -227,7 +235,7 @@ def test_resume_closes_profile_db_on_deferred_cold_resume(profile_dbs, monkeypat
         profile_dbs.append(db)
         return db
 
-    monkeypatch.setattr("hermes_state_registry.acquire", _factory)
+    monkeypatch.setattr("hermes_state.registry.acquire", _factory)
     monkeypatch.setattr(server, "_stored_session_runtime_overrides", lambda _found: {})
 
     resp = _resume(session_id="s1", profile="work")
@@ -260,7 +268,7 @@ def test_resume_hands_profile_db_to_deferred_history_worker(profile_dbs, monkeyp
         profile_dbs.append(db)
         return db
 
-    monkeypatch.setattr("hermes_state_registry.acquire", _factory)
+    monkeypatch.setattr("hermes_state.registry.acquire", _factory)
     monkeypatch.setattr(server, "_stored_session_runtime_overrides", lambda _found: {})
     monkeypatch.setattr(server, "_start_agent_build", lambda *_args, **_kwargs: None)
 
@@ -302,7 +310,7 @@ def test_resume_keeps_profile_db_open_after_ownership_transfer(profile_dbs, monk
     def _fake_init_session(sid, key, agent, history, session_db=None, **_kwargs):
         captured["init_db"] = session_db
 
-    monkeypatch.setattr("hermes_state_registry.acquire", _factory)
+    monkeypatch.setattr("hermes_state.registry.acquire", _factory)
     monkeypatch.setattr(server, "_make_agent", _fake_make_agent)
     monkeypatch.setattr(server, "_init_session", _fake_init_session)
     monkeypatch.setattr(server, "_set_session_context", lambda _target, cwd=None: [])
@@ -347,7 +355,7 @@ def test_resume_drops_half_built_session_when_init_session_raises(
             server._sessions[sid] = {"agent": agent, "session_key": key}
         raise RuntimeError("database is locked")
 
-    monkeypatch.setattr("hermes_state_registry.acquire", _factory)
+    monkeypatch.setattr("hermes_state.registry.acquire", _factory)
     monkeypatch.setattr(
         server, "_make_agent", lambda *a, **k: types.SimpleNamespace(model="test")
     )

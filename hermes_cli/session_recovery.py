@@ -18,8 +18,8 @@ from typing import Any, Callable, Iterator, Optional
 
 from hermes_cli.timefmt import EPOCH_MAX, EPOCH_MIN
 from hermes_state import SessionDB
-from hermes_state_common import FTS_STORAGE_VERSION, SCHEMA_VERSION
-from hermes_state_repair import _db_opens_cleanly
+from hermes_state.common import FTS_STORAGE_VERSION, SCHEMA_VERSION
+from hermes_state.repair import _db_opens_cleanly
 
 def _vault_maybe_connect(db_path, **kwargs):
     """Fork: sqlite3.connect that routes vaulted-home databases to SQLCipher."""
@@ -54,7 +54,14 @@ _AUXILIARY_TABLE_SCHEMAS: dict[str, Callable[[sqlite3.Connection], None]] = {
     "delivery_obligations": _init_delivery_ledger_schema,
 }
 _AUXILIARY_TABLES = tuple(_AUXILIARY_TABLE_SCHEMAS)
-_INVENTORY_TABLES = (*_CANONICAL_TABLES, "state_meta", *_TOPIC_TABLES, *_AUXILIARY_TABLES)
+# Salvage is a transcript output, not a runnable clone of accepted work. Copying
+# only part of this ledger could replay already-started effects or adopt workers
+# from another owner. Inventory and report the exclusions rather than losing them
+# silently. Activation under exclusive ownership creates a fresh runtime epoch;
+# ordinary full backup/restore instead preserves the complete ledger for startup
+# reconciliation (started -> unknown; never blindly replay started work).
+_RUNTIME_TABLES = ("runtime_epoch", "session_admissions", "worker_executions", "worker_receipts")
+_INVENTORY_TABLES = (*_CANONICAL_TABLES, "state_meta", *_TOPIC_TABLES, *_AUXILIARY_TABLES, *_RUNTIME_TABLES)
 
 # Derived-index / optional-schema markers: a fresh destination regenerates these, never copies them.
 _GENERATED_META_KEYS = frozenset({
@@ -195,7 +202,7 @@ def _copy_source_bundle(source: Path, snapshot_dir: Path) -> tuple[Path, list[st
 
     The whole copy runs inside ``offline_file_access`` (holds the connection-lifecycle lock). Recovery
     normally runs as its own CLI process against an offline file, so the refusal should never fire; the
-    guard keeps this path consistent with ``hermes_state_repair._backup_db_file``.
+    guard keeps this path consistent with ``hermes_state.repair._backup_db_file``.
 
     Checking for a live connection and *then* copying would be a check/use race: a connection could open in
     that window, and the copy's ``close()`` would cancel its POSIX advisory locks -- the failure class
@@ -936,7 +943,7 @@ def _sanitize_session_model_config(destination: sqlite3.Connection) -> int:
     ``integrity_check`` validates b-tree structure, never column *contents*: a row whose
     JSON was truncated by the damage verifies clean, and the recovered store then raises
     ``OperationalError: malformed JSON`` the first time ``reopen_session`` rewrites the
-    reset-child markers with ``json_set`` (``hermes_state_sessions.py::reopen_session``) —
+    reset-child markers with ``json_set`` (``hermes_state/sessions.py::reopen_session``) —
     i.e. on the first resume of a parent session. Read paths are already guarded
     (``_sql_json_extract`` wraps every extract in ``CASE WHEN json_valid``), so this is
     about the write path. The blob is unrecoverable either way, so neutralise it at the
@@ -1193,10 +1200,38 @@ def _recovery_report(
         "partial": bool(verification.get("loss_detected")),
         "verified": bool(verification.get("healthy") and source_unchanged),
         "installed": False,
+        "runtime_state": {
+            "policy": "transcript-only; runtime ledger excluded; fresh epoch on activation",
+            "excluded_tables": {table: inspection["tables"].get(table, {}) for table in _RUNTIME_TABLES},
+        },
     }
 
 
 def recover_session_database(
+    source_path: Path, output_path: Path, *, work_dir: Optional[Path] = None, chunk_size: int = 1_000,
+    progress_cb: Optional[ProgressCallback] = None, allow_partial: bool = False,
+) -> dict[str, Any]:
+    """Separate-output salvage is allowed; a canonical output requires offline ownership."""
+    from gateway.runtime_ownership import OwnershipConflict, exclusive_maintenance
+    from contextlib import nullcontext
+    # Validate before creating any lock or output. Reserve only a canonical
+    # destination, not the live source or an unrelated requested output file.
+    _, output, _ = _validate_paths(source_path, output_path=output_path, work_dir=work_dir)
+    assert output is not None
+    guard = exclusive_maintenance([output.parent]) if output.name == 'state.db' else nullcontext()
+    try:
+        with guard:
+            # Repeat the no-overwrite validation under the reservation: startup
+            # may have created state.db between the first check and lock claim.
+            return _recover_session_database_output(
+                source_path, output_path, work_dir=work_dir, chunk_size=chunk_size,
+                progress_cb=progress_cb, allow_partial=allow_partial,
+            )
+    except OwnershipConflict as exc:
+        raise SessionRecoverySafetyError(str(exc)) from exc
+
+
+def _recover_session_database_output(
     source_path: Path, output_path: Path, *, work_dir: Optional[Path] = None, chunk_size: int = 1_000,
     progress_cb: Optional[ProgressCallback] = None, allow_partial: bool = False,
 ) -> dict[str, Any]:

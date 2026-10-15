@@ -71,7 +71,7 @@ If your skill is specialized, community-contributed, or niche, it's better suite
 
 ## Memory Providers: Ship as a Standalone Plugin
 
-**We are no longer accepting new memory providers into this repo.** The set of built-in providers under `plugins/memory/` (mem0, byterover, holographic, openviking, retaindb) is closed, and the former in-tree providers hindsight, honcho and supermemory now ship from the plugin catalog. If you want to add a new memory backend, publish it as a **standalone plugin repo** that users install into `~/.hermes/plugins/` (or via a pip entry point).
+**We are no longer accepting new memory providers into this repo.** The set of built-in providers under `plugins/memory/` (byterover, retaindb) is closed, and the former in-tree providers hindsight, honcho, supermemory, mem0, openviking and holographic now ship from the plugin catalog. If you want to add a new memory backend, publish it as a **standalone plugin repo** that users install into `~/.hermes/plugins/` (or via a pip entry point).
 
 Standalone memory plugins:
 
@@ -145,15 +145,8 @@ source ./activate.fish
 hermes --version
 ```
 
-PowerShell:
-
-```powershell
-. .\activate.ps1
-hermes --version
-```
-
 Run `hermes` for this checkout. Activation defines it as a function for this
-worktree, so it hides a global `hermes` command or MSIX alias and refuses
+worktree, so it hides a global `hermes` command and refuses
 outside the worktree. PM activation
 syncs tools and Python dependencies before adding them to the shell. It does not
 install JS workspaces or rewrite launchers and shell configuration. `deactivate`
@@ -167,8 +160,8 @@ To run one command in the environment without activating a shell, use
 Use the [PM developer workflow](website/docs/reference/package-management.md#developer-workflow) to prepare Python 3.14 (`>=3.14,<3.15`) first.
 Run these commands from that checkout with its prepared Python. Keep the same
 development `HERMES_HOME`. PM must be able to start before it can build another
-environment. On Windows, initialize the native C++ build environment for your
-architecture before building source dependencies.
+environment. On Windows hosts, do all development inside WSL — this fork does
+not support native Windows (see PLATFORMS.md).
 
 Build an independent interpreter for tests and editor tools:
 
@@ -195,7 +188,7 @@ path. Set `HERMES_PYTHON` to that environment's interpreter:
 The canonical runner discovers repository `.venv` automatically. It clears
 `PYTHONPATH`, so pytest must be installed in the interpreter's own environment.
 This test environment does not replace PM's application selection or tool
-store. Do not point a bundled app at it or install into an MSIX payload.
+store. Do not point a bundled app at it.
 
 For an isolated development instance, select a disposable `HERMES_HOME` before
 starting the source command. Use `hermes setup` to configure it rather
@@ -229,7 +222,7 @@ scripts/run_tests.sh
 scripts/run_tests.sh tests/agent/ -v
 ```
 
-On Windows, run the script through Bash. When no local `.venv` or `venv`
+When no local `.venv` or `venv`
 contains pytest, the runner accepts the explicit `HERMES_PYTHON` above. It
 clears credentials, isolates `HERMES_HOME`, and runs each test file in a separate
 subprocess through `scripts/run_tests_parallel.py`. It does not use xdist.
@@ -248,7 +241,7 @@ hermes-agent/
 ├── cli.py                    # HermesCLI class — interactive CLI orchestrator (~4.6k LOC + hermes_cli/cli_*_mixin.py)
 ├── model_tools.py            # Tool orchestration (thin layer over tools/registry.py)
 ├── toolsets.py               # Tool groupings and presets (hermes-cli, hermes-telegram, etc.)
-├── hermes_state.py           # SessionDB facade (~1.4k LOC); implementation in hermes_state_*.py (21 siblings) — FTS5 search, session titles
+├── hermes_state/__init__.py           # SessionDB facade (~1.4k LOC); implementation in hermes_state/*.py (21 siblings) — FTS5 search, session titles
 ├── batch_runner.py           # Parallel batch processing for trajectory generation
 │
 ├── agent/                    # Agent internals (extracted modules)
@@ -306,7 +299,6 @@ hermes-agent/
 │
 ├── scripts/                  # Installer and bridge scripts
 │   ├── install.sh                # Linux/macOS installer
-│   ├── install.ps1               # Windows PowerShell installer
 │   └── whatsapp-bridge/          # Node.js WhatsApp bridge (Baileys)
 │
 ├── skills/                   # Bundled skills (copied to ~/.hermes/skills/ on install)
@@ -357,7 +349,7 @@ User message → AIAgent._run_agent_loop()
 
 - **Self-registering tools**: Each tool file calls `registry.register()` at import time. `model_tools.py` triggers discovery by importing all tool modules.
 - **Toolset grouping**: Tools are grouped into toolsets (`web`, `terminal`, `file`, `browser`, etc.) that can be enabled/disabled per platform.
-- **Session persistence**: All conversations are stored in SQLite (`hermes_state.py`) with full-text search and unique session titles. Automatic per-session JSON snapshots have been removed. Existing files are left untouched; use `/save json` or `hermes sessions export` for an explicit export.
+- **Session persistence**: All conversations are stored in SQLite (`hermes_state/__init__.py`) with full-text search and unique session titles. Automatic per-session JSON snapshots have been removed. Existing files are left untouched; use `/save json` or `hermes sessions export` for an explicit export.
 - **Ephemeral injection**: System prompts and prefill messages are injected at API call time, never persisted to the database or logs.
 - **Provider abstraction**: The agent works with any OpenAI-compatible API. Provider resolution happens at init time (Nous Portal OAuth, OpenRouter API key, or custom endpoint).
 - **Provider routing**: When using OpenRouter, `provider_routing` in config.yaml controls provider selection (sort by throughput/latency/price, allow/ignore specific providers, data retention policies). These are injected as `extra_body.provider` in API requests.
@@ -371,6 +363,7 @@ User message → AIAgent._run_agent_loop()
 - **Error handling**: Catch specific exceptions. Log with `logger.warning()`/`logger.error()` — use `exc_info=True` for unexpected errors so stack traces appear in logs
 - **Error messages**: every user-facing error message names the actual cause and the remediation step — never the proximate symptom. A missing API key is "no OpenRouter API key configured — set `OPENROUTER_API_KEY`", never "payment/credit error"; a failed request logs the exception class and message (secret-redacted) rather than an empty reason; a timed-out long job reports the timeout and where the job went, not a fallback-routing noise string. If you know the cause, say it; if you don't, say what you do know plus what to check — never a placeholder that points somewhere else.
 - **Cross-platform**: Never assume Unix. See [Cross-Platform Compatibility](#cross-platform-compatibility)
+- **Code health ratchet**: `python scripts/check` runs every blocking lint check CI runs, with the same pinned tools. To run it automatically, `python scripts/check --install-hook pre-push` judges the tip of each branch you push, as CI judges the PR as a whole, not each intermediate commit (`--install-hook` alone runs it on every commit instead, judging what you staged; `--uninstall-hook` removes either; `--no-verify` skips once). The hook covers every worktree of your clone, judges each pushed tip with that tip's own checker, prefers the repo's `.venv`/`venv` Python (3.11+), and needs ruff 0.15.10 or `uv` on `PATH`; re-run `--install-hook` after pulling to refresh the hook script. Its code-health part gives every function and file its own cap: new functions stay at cyclomatic complexity ≤ 20, ≤ 300 lines and nesting ≤ 6, files at ≤ 2,000 lines, and code already over a target may only get smaller (a file already past 2,000 lines may not grow: offset the growth by moving an existing function into a `<stem>_<topic>` sibling, or put new tests in a new test file). Pattern rules (blind `except Exception`, missing timeouts, profile-scope hazards such as a hardcoded `~/.hermes` or a new `HERMES_*` env var) track each existing violation where it sits, so existing debt never blocks you, but a new instance does, even one that replaces an identical violation you removed. Moving code keeps its history: a function or module-level statement moved to another file keeps the cap and the existing violations it had, and so does a moved function you lightly edit, unless a function of that name already exists in the destination (the edited one is then judged against that function's cap). A function you both rename and edit is new code, and so is a copy that leaves the original in place. A file the checker cannot parse or measure fails. TypeScript complexity follows ESLint's `complexity` rule except where `scripts/code_health/ts_units.mjs` says otherwise. Each finding prints its fix; a genuine exception takes a `# health: allow <RULE> -- <why>` comment on the line (or on a comment-only line directly above it), which reviewers read; ruff's `# noqa` does not waive a ratchet finding, and a broad catch that logs must keep the traceback (`logger.exception` or `exc_info=True`). Heuristic rules print as warnings until a frozen replay of merged PRs shows they are precise enough to block. Rules and targets: `scripts/code_health/config.py`. Maintainers switch the whole ratchet with `ENFORCEMENT` there (`blocking`, `advisory` or `off`): it is always read from main (CI: the merge commit's first parent; local runs: `origin/main`), never from the branch under test, so a one-line commit to main reaches every open PR on its next CI run (a re-run reuses the old merge commit) and every local hook after a fetch, and a PR cannot relax its own check; one rule can be demoted with `blocking=False`.
 
 ### Fail loud at integration boundaries
 
@@ -717,179 +710,14 @@ See `hermes_cli/skin_engine.py` for the full schema and existing skins as exampl
 
 ## Cross-Platform Compatibility
 
-Hermes runs on Linux, macOS, and native Windows (plus WSL2). When writing code
-that touches the OS, assume *any* platform can hit your code path.
+Hermes runs on Linux and macOS; on Windows hosts it runs inside WSL2. When
+writing code that touches the OS, assume *any* supported platform can hit your
+code path.
 
-> **Before you PR:** run `scripts/check-windows-footguns.py` to catch the
-> common Windows-unsafe patterns in your diff. It's grep-based and cheap;
-> CI runs it on every PR too.
+> **Fork policy:** native Windows is not supported (see PLATFORMS.md). Do not
+> add Windows-specific code paths or `sys.platform == "win32"` branches — the
+> fork targets Linux, macOS, and WSL only.
 
-### Critical rules
-
-1. **Never call `os.kill(pid, 0)` for liveness checks.** `os.kill(pid, 0)`
-   is a standard POSIX idiom to check "is this PID alive" — the signal 0
-   is a no-op permission check. **On Windows it is NOT a no-op.** Python's
-   Windows `os.kill` maps `sig=0` to `CTRL_C_EVENT` (they collide at the
-   integer value 0) and routes it through `GenerateConsoleCtrlEvent(0, pid)`,
-   which broadcasts Ctrl+C to the **entire console process group** containing
-   the target PID. "Probe if alive" silently becomes "kill the target and
-   often unrelated processes sharing its console." See [bpo-14484](https://bugs.python.org/issue14484)
-   (open since 2012 — will never be fixed for compat reasons).
-
-   **Preferred:** use `psutil` (a core dependency — always available):
-
-   ```python
-   import psutil
-   if psutil.pid_exists(pid):
-       # process is alive — safe on every platform
-       ...
-   ```
-
-   If you specifically need the hermes wrapper (it has a stdlib fallback
-   for scaffold-phase imports before PM finishes dependency preparation), use
-   `gateway.status._pid_exists(pid)`. It calls `psutil.pid_exists` first
-   and falls back to a hand-rolled `OpenProcess + WaitForSingleObject`
-   dance on Windows only when psutil is somehow missing.
-
-   Audit grep for new callsites: `rg "os\.kill\([^,]+,\s*0\s*\)"`. Any hit
-   in non-test code is presumptively a Windows silent-kill bug.
-
-2. **Use `shutil.which()` before shelling out — don't assume Windows has
-   tools Linux has.** `wmic` was removed in Windows 10 21H1 and later. `ps`,
-   `kill`, `grep`, `awk`, `fuser`, `lsof`, `pgrep`, and most POSIX CLI tools
-   simply don't exist on Windows. Test availability with
-   `shutil.which("tool")` and fall back to a Windows-native equivalent —
-   usually PowerShell via `subprocess.run(["powershell", "-NoProfile",
-   "-Command", ...])`.
-
-   For process enumeration: PowerShell's `Get-CimInstance Win32_Process` is
-   the modern replacement for `wmic process`. See
-   `hermes_cli/gateway.py::_scan_gateway_pids` for the pattern.
-   ```
-
-3. **File encoding.** Windows may save `.env` files in `cp1252`. Always
-   handle encoding errors:
-   ```python
-   try:
-       load_dotenv(env_path)
-   except UnicodeDecodeError:
-       load_dotenv(env_path, encoding="latin-1")
-   ```
-   Config files (`config.yaml`) may be saved with a UTF-8 BOM by Notepad and
-   similar editors — use `encoding="utf-8-sig"` when reading files that
-   could have been touched by a Windows GUI editor.
-
-4. **Process management.** `os.setsid()`, `os.killpg()`, `os.fork()`,
-   `os.getuid()`, and POSIX signal handling differ on Windows. Guard with
-   `platform.system()`, `sys.platform`, or `hasattr(os, "setsid")`:
-   ```python
-   if platform.system() != "Windows":
-       kwargs["preexec_fn"] = os.setsid
-   else:
-       kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
-   ```
-
-   **Preferred:** for killing a process AND its children (what `os.killpg`
-   does on POSIX), use `psutil` — it works on every platform:
-   ```python
-   import psutil
-   try:
-       parent = psutil.Process(pid)
-       # Kill children first (leaf-up), then the parent.
-       for child in parent.children(recursive=True):
-           child.kill()
-       parent.kill()
-   except psutil.NoSuchProcess:
-       pass
-   ```
-
-5. **Signals that don't exist on Windows: `SIGALRM`, `SIGCHLD`, `SIGHUP`,
-   `SIGUSR1`, `SIGUSR2`, `SIGPIPE`, `SIGQUIT`, `SIGKILL`.** Python's
-   `signal` module raises `AttributeError` at import time if you reference
-   them on Windows. Use `getattr(signal, "SIGKILL", signal.SIGTERM)` or
-   gate the whole block behind a platform check. `loop.add_signal_handler`
-   raises `NotImplementedError` on Windows — always catch it.
-
-6. **Path separators.** Use `pathlib.Path` instead of string concatenation
-   with `/`. Forward slashes work almost everywhere on Windows, but
-   `subprocess.run(["cmd.exe", "/c", ...])` and other shell contexts can
-   require backslashes — convert with `str(path)` at the subprocess boundary,
-   not inside Python logic.
-
-7. **Symlinks need elevated privileges on Windows** (unless Developer Mode is
-   on). Tests that create symlinks need `@pytest.mark.skipif(sys.platform ==
-   "win32", reason="Symlinks require elevated privileges on Windows")`.
-
-8. **POSIX file modes (0o600, 0o644, etc.) are NOT enforced on NTFS** by
-   default. Tests that assert on `stat().st_mode & 0o777` must skip on
-   Windows — the concept doesn't translate. Use ACLs (`icacls`, `pywin32`)
-   for Windows secret-file protection if needed.
-
-9. **Detached background daemons on Windows need `pythonw.exe`, NOT
-    `python.exe`.** `python.exe` always allocates or attaches to a console,
-    which makes it vulnerable to `CTRL_C_EVENT` broadcasts from any sibling
-    process. `pythonw.exe` is the no-console variant. Combine with
-    `CREATE_NO_WINDOW | DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP |
-    CREATE_BREAKAWAY_FROM_JOB` in `subprocess.Popen(creationflags=...)`.
-    See `hermes_cli/gateway_windows.py::_spawn_detached` for the reference
-    implementation.
-
-10. **`subprocess.Popen` with `.cmd` or `.bat` shims needs `shutil.which`
-    to resolve.** Passing `"agent-browser"` to `Popen` on Windows finds
-    the extensionless POSIX shebang shim in `node_modules/.bin/`, which
-    `CreateProcessW` can't execute — you'll get `WinError 193 "not a valid
-    Win32 application"`. Use `shutil.which("agent-browser", path=local_bin)`
-    which honors PATHEXT and picks the `.CMD` variant on Windows.
-
-11. **Don't use shell shebangs as a way to run Python.** `#!/usr/bin/env
-    python` only works when the file is executed through a Unix shell.
-    `subprocess.run(["./myscript.py"])` on Windows fails even if the file
-    has a shebang line. Always invoke Python explicitly:
-    `[sys.executable, "myscript.py"]`.
-
-12. **Shell commands in installers.** If you change `scripts/install.sh`,
-    make the equivalent change in `scripts/install.ps1`. The two scripts
-    are the canonical example of "works on Linux does not mean works on
-    Windows" and have drifted multiple times — keep them in lockstep.
-
-13. **Known paths that are OneDrive-redirected on Windows:** Desktop,
-    Documents, Pictures, Videos. The "real" path when OneDrive Backup is
-    enabled is `%USERPROFILE%\OneDrive\Desktop` (etc.), NOT
-    `%USERPROFILE%\Desktop` (which exists as an empty husk). Resolve the
-    real location via `ctypes` + `SHGetKnownFolderPath` or by reading the
-    `Shell Folders` registry key — never assume `~/Desktop`.
-
-14. **CRLF vs LF in generated scripts.** Windows `cmd.exe` and `schtasks`
-    parse line-by-line; mixed or LF-only line endings can break multi-line
-    `.cmd` / `.bat` files. Use `open(path, "w", encoding="utf-8",
-    newline="\r\n")` — or `open(path, "wb")` + explicit bytes — when
-    generating scripts Windows will execute.
-
-15. **Two different quoting schemes in one command line.** `subprocess.run
-    (["schtasks", "/TR", some_cmd])` → schtasks itself parses `/TR`, AND
-    the `some_cmd` string is re-parsed by `cmd.exe` when the task fires.
-    Different parsers, different escape rules. Use two separate quoting
-    helpers and never cross them. See `hermes_cli/gateway_windows.py::
-    _quote_cmd_script_arg` and `_quote_schtasks_arg` for the reference
-    pair.
-
-### Testing cross-platform
-
-Tests of host-specific behavior must run on that host. Apply one `platforms`
-marker to each test, rather than changing `sys.platform`:
-
-```python
-@pytest.mark.platforms("windows", arch="arm64")
-def test_native_windows_arm64_behavior():
-    ...
-```
-
-For several supported hosts, use one marker with multiple arguments, such as
-`@pytest.mark.platforms("linux", "macos")`. Do not stack host markers.
-Tests of pure functions that accept a platform as data need no host marker.
-See [AGENTS.md](AGENTS.md#dont-fake-the-host-os) for the complete contract.
-
----
 
 ## Security Considerations
 
@@ -975,9 +803,10 @@ refactor/description   # Code restructuring
 ### Before submitting
 
 1. **Run tests**: use `scripts/run_tests.sh` for the same environment and per-file isolation as CI.
-2. **Test manually**: Run `hermes` and exercise the code path you changed
-3. **Check cross-platform impact**: If you touch file I/O, process management, or terminal handling, consider macOS, Linux, and WSL2
-4. **Keep PRs focused**: One logical change per PR. Don't mix a bug fix with a refactor with a new feature.
+2. **Run the lint checks**: `python scripts/check` (the blocking lint lane, locally).
+3. **Test manually**: Run `hermes` and exercise the code path you changed
+4. **Check cross-platform impact**: If you touch file I/O, process management, or terminal handling, consider macOS, Linux, and WSL2
+5. **Keep PRs focused**: One logical change per PR. Don't mix a bug fix with a refactor with a new feature.
 
 ### PR description
 

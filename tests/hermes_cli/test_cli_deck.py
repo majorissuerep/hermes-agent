@@ -21,6 +21,8 @@ class _Repl(CLIDeckMixin):
         self._should_exit = False
         self._last_turn_interrupted = False
         self._app = MagicMock(is_running=False)
+        from hermes_state import SessionDB
+        self._session_db = SessionDB(db_path=self._deck_home() / "state.db")
         lease, refusal = try_acquire_active_session(
             session_id=session_id, surface="cli", config={}, metadata=self._deck_lease_metadata())
         assert refusal is None
@@ -43,6 +45,7 @@ def repl():
     yield make
     for r in made:
         r._active_session_lease.release()
+        r._session_db.close()
 
 
 def test_deck_message_runs_as_next_turn_and_its_reply_is_the_receipt(repl):

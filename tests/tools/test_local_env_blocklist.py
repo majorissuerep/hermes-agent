@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 import pytest
 
-from tests.tools._child_env_fixtures import child_env, observe_child, observe_terminal  # noqa: F401
+from tests.tools._child_env_fixtures import child_env, observe_child, observe_terminal
 from tools.environments import local
 from tools.environments import local_pythonpath as pp
 from tools.environments.local_env_policy import _HERMES_PROVIDER_ENV_BLOCKLIST
@@ -35,7 +35,7 @@ def _physical_repo_root(tmp_path: Path) -> Path:
 STATIC_BLOCKED = """
 OPENAI_BASE_URL OPENAI_API_KEY OPENAI_API_BASE OPENAI_ORG_ID OPENAI_ORGANIZATION
 OPENROUTER_API_KEY ANTHROPIC_BASE_URL ANTHROPIC_API_KEY ANTHROPIC_TOKEN LLM_MODEL
-VERTEX_CREDENTIALS_PATH GOOGLE_APPLICATION_CREDENTIALS AWS_BEARER_TOKEN_BEDROCK
+VERTEX_CREDENTIALS_PATH GOOGLE_APPLICATION_CREDENTIALS
 GOOGLE_API_KEY DEEPSEEK_API_KEY MISTRAL_API_KEY GROQ_API_KEY TOGETHER_API_KEY
 PERPLEXITY_API_KEY COHERE_API_KEY FIREWORKS_API_KEY XAI_API_KEY HELICONE_API_KEY
 TELEGRAM_HOME_CHANNEL TELEGRAM_HOME_CHANNEL_NAME DISCORD_HOME_CHANNEL
@@ -396,7 +396,7 @@ def test_passthrough_accepted_before_an_adapter_owns_the_name_stops_forwarding_i
     else:
         home = child_env / "hermes"
         home.mkdir(exist_ok=True)
-        (home / "config.yaml").write_text("terminal:\n  env_passthrough: [%s]\n" % ", ".join(names), encoding="utf-8")
+        (home / "config.yaml").write_text("terminal:\n  env_passthrough: [{}]\n".format(", ".join(names)), encoding="utf-8")
     builders = [lambda: local._make_run_env({}), lambda: local._sanitize_subprocess_env(dict(os.environ)),
                 lambda: _scrub_child_env(dict(os.environ))]
     assert [observe_child(b(), names) for b in builders] == [
@@ -588,7 +588,6 @@ def test_pythonpath_descendants_are_not_owned():
 @pytest.mark.parametrize("link_at", ["home", "repo", "unrelated"])
 @pytest.mark.parametrize("profile", [False, True])
 def test_launcher_alias_provenance(child_env, monkeypatch, link_at, profile):
-    from hermes_cli.gateway_windows import _preserve_hermes_home_path
     from hermes_cli.profiles import resolve_profile_env
     physical_home = child_env / "physical-home"
     physical_root = physical_home / "hermes-agent"
@@ -610,8 +609,6 @@ def test_launcher_alias_provenance(child_env, monkeypatch, link_at, profile):
     monkeypatch.setenv("HERMES_HOME", str(configured))
     assert Path(resolve_profile_env("default")) == configured
     assert Path(resolve_profile_env("coder")) == configured / "profiles/coder"
-    if link_at == "home":
-        assert Path(_preserve_hermes_home_path(physical_root)) == lexical_root
     active_home = configured / "profiles/coder" if profile else configured
     aliases = pp._build_hermes_repo_root_aliases(physical_root.resolve(), physical_root, active_home)
     monkeypatch.setattr(local, "_hermes_repo_root_aliases", aliases)
@@ -654,6 +651,42 @@ def test_runtime_provenance_is_independent_of_aliases_and_virtual_env(child_env,
     assert result["PYTHONPATH"].split(os.pathsep) == expected
     assert "VIRTUAL_ENV" not in result
     assert base["VIRTUAL_ENV"] == str(user_venv)
+
+
+@pytest.mark.usefixtures("child_env")
+def test_sealed_payload_venv_is_runtime_provenance_without_facts(tmp_path, monkeypatch):
+    """A sealed payload boots its store interpreter (not a venv) on its shipped venv
+    before PM commits a generation; that venv's site-packages must never reach a child."""
+    from pm.environments import site_packages
+    shipped = tmp_path / "payload/venv"
+    shipped.mkdir(parents=True)
+    (shipped / "pyvenv.cfg").write_text("version = 3.14\n", encoding="utf-8")
+    monkeypatch.setattr("pm.environments.install_state_dir", lambda repo: tmp_path / "payload/state")
+    monkeypatch.setattr("pm.environments.payload_venv", lambda repo: shipped)
+    monkeypatch.setattr(local, "_in_venv", False)
+    monkeypatch.setattr(local, "_hermes_site_packages", None)
+    user_site = tmp_path / "user-site"
+    result = local._sanitize_subprocess_env(
+        {"PYTHONPATH": os.pathsep.join([str(site_packages(shipped)), str(user_site)])})
+    assert result["PYTHONPATH"] == str(user_site)
+
+
+@pytest.mark.usefixtures("child_env")
+@pytest.mark.parametrize("shipped", ["phantom", "escapes-root"])
+def test_payload_venv_that_is_not_real_is_not_provenance(tmp_path, monkeypatch, shipped):
+    """A stray manifest.json can name a venv that does not exist, or one that escapes its root:
+    neither may be trusted (a phantom path would shadow the user's own venv) or raise."""
+    def payload_venv(repo):
+        if shipped == "escapes-root":
+            raise RuntimeError("payload environment escapes its root")
+        return tmp_path / "no-such-venv"
+
+    monkeypatch.setattr("pm.environments.install_state_dir", lambda repo: tmp_path / "payload/state")
+    monkeypatch.setattr("pm.environments.payload_venv", payload_venv)
+    monkeypatch.setattr(local, "_hermes_repo_root_aliases", ())
+    from tools.environments.local_pythonpath import _validated_runtime_venv
+
+    assert _validated_runtime_venv({}) is None
 
 
 @pytest.mark.parametrize("existing,expected", [
@@ -709,6 +742,7 @@ def _make_directory_link(link: Path, target: Path) -> None:
     result = subprocess.run(
         ["cmd", "/c", "mklink", "/J", str(link), str(target)],
         capture_output=True,
+        check=False,
     )
     if result.returncode != 0:
         detail = result.stderr.decode("utf-8", errors="replace").strip()
@@ -787,7 +821,7 @@ class TestNativeEnvironmentContracts:
         runner: sys.prefix represents base Python, while validated VIRTUAL_ENV
         identifies ``<repo>/venv`` as the Hermes runtime producer contract.
         """
-        import tools.environments.local as local
+        from tools.environments import local
         from tools.environments import local_pythonpath
 
         repo_root = tmp_path / "hermes-agent"
@@ -817,7 +851,7 @@ class TestNativeEnvironmentContracts:
 
     def test_unrelated_virtual_env_is_not_runtime_provenance(self, tmp_path, monkeypatch):
         """An arbitrary inherited VIRTUAL_ENV cannot claim PYTHONPATH ownership."""
-        import tools.environments.local as local
+        from tools.environments import local
         from tools.environments import local_pythonpath
 
         repo_root = tmp_path / "hermes-agent"
@@ -1031,47 +1065,6 @@ class TestNativeEnvironmentContracts:
         assert direct_child in entries
         assert "/home/user/my-lib" in entries
 
-    def test_configured_home_alias_matches_launcher_output(self, tmp_path, monkeypatch):
-        """The real producer spelling is derived and consumed end to end."""
-        import tools.environments.local as local
-        from tools.environments import local_pythonpath
-        from hermes_cli.gateway_windows import _preserve_hermes_home_path
-
-        physical_home = tmp_path / "physical-home"
-        physical_root = _physical_repo_root(tmp_path)
-        configured_home = tmp_path / "configured-home"
-        try:
-            _make_directory_link(configured_home, physical_home)
-        except OSError as exc:
-            pytest.skip(f"directory link unavailable on this host: {exc}")
-        monkeypatch.setenv("HERMES_HOME", str(configured_home))
-
-        launcher_entry = Path(_preserve_hermes_home_path(physical_root))
-        aliases = local_pythonpath._build_hermes_repo_root_aliases(
-            physical_root.resolve(),
-            physical_root,
-            configured_home,
-        )
-
-        assert launcher_entry == configured_home / "hermes-agent"
-        assert launcher_entry in aliases
-
-        monkeypatch.setattr(local, "_hermes_repo_root_aliases", aliases)
-        nested_user_path = launcher_entry / "user-data"
-        env = {
-            "PYTHONPATH": os.pathsep.join([
-                str(launcher_entry),
-                str(nested_user_path),
-                "/home/user/my-lib",
-            ])
-        }
-        local_pythonpath._strip_hermes_owned_pythonpath(env)
-
-        assert env["PYTHONPATH"].split(os.pathsep) == [
-            str(nested_user_path),
-            "/home/user/my-lib",
-        ]
-
     def test_profile_rehome_keeps_junction_lexical_alias(self, tmp_path, monkeypatch):
         """Profile re-home must not lose the launcher's lexical repo-root spelling.
 
@@ -1082,7 +1075,7 @@ class TestNativeEnvironmentContracts:
         builder must still recover the lexical root so the inherited lexical
         repo-root entry is stripped.
         """
-        import tools.environments.local as local
+        from tools.environments import local
         from tools.environments import local_pythonpath
         from hermes_cli.profiles import resolve_profile_env
 
@@ -1127,7 +1120,7 @@ class TestNativeEnvironmentContracts:
         alias builder must recover the lexical spelling via exact-identity
         proof (strict resolve), not a name-based guess.
         """
-        import tools.environments.local as local
+        from tools.environments import local
         from tools.environments import local_pythonpath
 
         physical_root = _physical_repo_root(tmp_path)
@@ -1158,7 +1151,7 @@ class TestNativeEnvironmentContracts:
         is never aliased or stripped.  Exact filesystem identity decides,
         not the name; no ownership provenance means no strip.
         """
-        import tools.environments.local as local
+        from tools.environments import local
         from tools.environments import local_pythonpath
 
         physical_root = _physical_repo_root(tmp_path)
@@ -1187,7 +1180,7 @@ class TestNativeEnvironmentContracts:
         The root spelling must be derived (profiles -> grandparent) and then
         the lexical repo alias recovered from it.
         """
-        import tools.environments.local as local
+        from tools.environments import local
         from tools.environments import local_pythonpath
 
         physical_root = _physical_repo_root(tmp_path)
@@ -1219,7 +1212,7 @@ class TestNativeEnvironmentContracts:
         VIRTUAL_ENV (<lexical repo>/venv) validates and its site-packages is
         stripped together with the repo root, while user entries survive.
         """
-        import tools.environments.local as local
+        from tools.environments import local
         from tools.environments import local_pythonpath
 
         physical_root = _physical_repo_root(tmp_path)
@@ -1530,7 +1523,7 @@ class TestSanePathIncludesHomebrew:
         """
         from tools.environments import local as local_mod
         from tools.environments.local import _SANE_PATH, _make_run_env
-        monkeypatch.setattr(local_mod, "_git_bash_bin_dirs", lambda: [])
+        monkeypatch.setattr(local_mod, "_git_bash_bin_dirs", list)
         minimal_env = {"PATH": "/some/custom/bin"}
         with patch.dict(os.environ, minimal_env, clear=True):
             result = _make_run_env({})
@@ -1576,7 +1569,7 @@ class TestSanePathIncludesHomebrew:
         windows_env = {"Path": r"C:\Windows\System32;C:\Program Files\Git\bin",
                        **{k: os.environ[k] for k in ("USERPROFILE", "HOMEDRIVE", "HOMEPATH", "HERMES_HOME")
                           if k in os.environ}}
-        monkeypatch.setattr(local_mod, "_git_bash_bin_dirs", lambda: [])
+        monkeypatch.setattr(local_mod, "_git_bash_bin_dirs", list)
         with patch.object(local_mod.os, "environ", windows_env):
             result = _make_run_env({})
         assert result["Path"] == windows_env["Path"]

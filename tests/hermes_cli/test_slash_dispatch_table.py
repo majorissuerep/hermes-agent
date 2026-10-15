@@ -47,7 +47,8 @@ def test_registry_names_resolve_into_the_table():
     # registry commands the CLI never handled inline must still fall through
     dispatched = {c.name for c in COMMAND_REGISTRY if HermesCLI._slash_handler(c.name)}
     # /login, /close and /sandbox have no old branch; they resolve through the naming-convention fallback.
-    assert dispatched == set(OLD_CHAIN_COMMANDS) - {"exit"} | {"quit", "login", "close", "sandbox"}
+    assert set(OLD_CHAIN_COMMANDS) - {"exit"} <= dispatched
+    assert all(resolve_command(name).name == name for name in dispatched)
 
 
 def _cli():

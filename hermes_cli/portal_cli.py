@@ -149,11 +149,11 @@ def _cmd_login(args) -> int:
     return 0
 
 
-# Default (None/"") is the one-shot onboarding (alias for `hermes auth add nous --type oauth` /
-# `hermes setup --portal`). `status` kept as a back-compat alias for `info`.
+# Legacy tool-service accounts remain inspectable, but no removed inference
+# provider is offered by default. An installed provider plugin owns opt-in login.
 _SUBCOMMANDS = {
-    None: _cmd_login,
-    "": _cmd_login,
+    None: _cmd_status,
+    "": _cmd_status,
     "login": _cmd_login,
     "info": _cmd_status,
     "status": _cmd_status,
@@ -177,13 +177,11 @@ def add_parser(subparsers) -> None:
     """Register `hermes portal` on the given argparse subparsers object."""
     portal_parser = subparsers.add_parser(
         "portal",
-        help="Set up Nous Portal (login, model pick, Tool Gateway); see also `portal info`",
+        help="Inspect an existing Nous tool-service account",
         description=(
-            "Run `hermes portal` with no subcommand to log in to Nous Portal "
-            "and set it up — pick a model, set Nous as your provider, and offer "
-            "the Tool Gateway (the human-readable alias for `hermes auth add "
-            "nous --type oauth`, identical to `hermes setup --portal`). "
-            "Subcommands: login (default), info, open, tools."
+            "Inspect an existing Nous tool-service account and routing. "
+            "For inference, choose a supported provider with `hermes setup model`. "
+            "Subcommands: info (default), open, tools; login requires a provider plugin."
         ),
     )
     portal_sub = portal_parser.add_subparsers(dest="portal_command")

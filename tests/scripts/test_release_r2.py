@@ -40,12 +40,9 @@ from scripts.releases.r2 import (
     commit_page_key_for,
     commit_prefix_for,
     encode_key_path,
-    feed_referenced_keys,
     public_base_url,
     public_url_for,
-    referenced_feed_bundle_filenames,
     rfc3986_encode,
-    stale_feed_bundle_keys,
 )
 
 from scripts.releases.r2_scope import R2Scope, channel_public_base
@@ -236,10 +233,6 @@ def test_channel_public_base_defaults_to_production(monkeypatch):
 
 
 @pytest.mark.parametrize('key,content_type,immutable', [
-    ('releases/tag/v1.2.3/app.msix', 'application/msix', None),
-    ('releases/tag/v1.2.3/app.msixbundle', 'application/msixbundle', None),
-    ('releases/win32/stable/X.APPINSTALLER', 'application/appinstaller', None),
-    ('releases/win32/stable/stable.appinstaller', 'application/appinstaller', False),
     ('releases/stable/INDEX.HTML', 'text/html; charset=utf-8', False),
     ('releases/canary/index.html', 'text/html; charset=utf-8', False),
     (f'releases/commit/{"a" * 40}/index.html', 'text/html; charset=utf-8', False),
@@ -271,63 +264,209 @@ def test_canonical_request_reads_mixed_case_header_values():
         "host": host,
         "x-amz-date": NOW,
         "x-amz-content-sha256": body_hash,
-        "Content-Type": "application/msix",
+        "Content-Type": "application/zip",
     }
     canon = canonical_request(
-        "PUT", "/hermes-releases/HermesBundled-0.28.0-win-x64.msix", "", headers, body_hash
+        "PUT", "/hermes-releases/HermesBundled-0.28.0-mac-arm64.zip", "", headers, body_hash
     )
-    assert "content-type:application/msix" in canon
+    assert "content-type:application/zip" in canon
     assert "undefined" not in canon
     assert "content-type;host;x-amz-content-sha256;x-amz-date" in canon
 
 
-# ── C22: canary feed-dir retention (fail-closed, keep-days grace) ───────────
+@pytest.mark.parametrize("failure", [None, "part", "complete", "transient", "disconnect", "lost-response"])
+def test_multipart_publication_is_atomic_and_retryable(r2_server, tmp_path, failure):
+    path = tmp_path / "bundle.zip"
+    payload = b"a" * (5 * 1024 * 1024) + b"b" * (5 * 1024 * 1024) + b"last"
+    path.write_bytes(payload)
+    state = r2_server.multipart
+    state.failure, state.reject_existing = failure, failure is not None
+    key = "releases/stable/bundle.zip"
+    creds, base, bucket = r2.credentials()
 
-CANARY_FEED_XML = (
-    '<?xml version="1.0" encoding="utf-8"?>\n'
-    '<AppInstaller Uri="https://r2.example/releases/win32/canary/canary.appinstaller" '
-    'Version="0.27.2.9" xmlns="http://schemas.microsoft.com/appx/appinstaller/2017/2">\n'
-    '  <MainPackage Name="NousResearch.HermesBundled" Publisher="CN=..." Version="0.27.2.9" '
-    'Uri="https://r2.example/releases/win32/canary/HermesBundled-0.27.2.9-win.msixbundle" />\n'
-    "</AppInstaller>\n"
-)
+    def upload():
+        r2.put_object(creds, base, bucket, key, path, r2.amz_timestamp(),
+                      "application/zip", {"If-None-Match": "*"}, multipart_part_size=5 * 1024 * 1024)
+
+    if failure in {"part", "complete"}:
+        with pytest.raises(r2.R2RequestError):
+            upload()
+        assert key not in r2_server.store and state.aborted == 1
+        assert not any(method == "HEAD" for method, _, _ in r2_server.requests)
+        return
+    upload()
+    assert r2_server.store[key][0] == payload
+    assert state.attempts[2] >= 2
+    assert state.created == (2 if failure else 1)
+    for method, _, headers in r2_server.requests:
+        assert headers["authorization"].startswith("AWS4-HMAC-SHA256 ")
+        if method == "POST":
+            assert headers["If-None-Match"] == "*"
+    metadata = next(headers for method, url, headers in r2_server.requests if "uploads=" in url)
+    assert metadata["Content-Type"] == "application/zip" and metadata["Cache-Control"] == "no-store"
+    upload()
+    path.write_bytes(payload[:-1] + b"!")
+    with pytest.raises(ValueError, match="checksum mismatch"):
+        upload()
+    assert r2_server.store[key][0] == payload
 
 
-def test_referenced_feed_bundle_filenames_reads_main_package_only():
-    names = referenced_feed_bundle_filenames(CANARY_FEED_XML)
-    assert names == ["HermesBundled-0.27.2.9-win.msixbundle"]
-    # The AppInstaller ROOT Uri (the feed pointer itself) must NOT count.
-    assert "canary.appinstaller" not in names
-    assert referenced_feed_bundle_filenames("") == []
-    assert referenced_feed_bundle_filenames("<html>ServiceUnavailable</html>") == []
-    # A bundle Uri OUTSIDE MainPackage/MainBundle is not a reference.
-    assert referenced_feed_bundle_filenames('<Foo Uri="https://x/HermesBundled-1.0.0-win.msixbundle" />') == []
-
-
-def test_feed_referenced_keys_protects_bundle_and_absolute_tag_uris():
-    tag_feed = CANARY_FEED_XML.replace(
-        'Uri="https://r2.example/releases/win32/canary/HermesBundled-0.27.2.9-win.msixbundle"',
-        'Uri="https://r2.example/releases/tag/v0.27.2+canary.20260829T000000Z/HermesBundled-0.27.2-win-x64.msix"',
+def test_cli_reuses_an_immutable_multipart_object(r2_server, tmp_path):
+    path = tmp_path / "bundle.zip"
+    payload = b"x" * (64 * 1024 * 1024 + 1)
+    path.write_bytes(payload)
+    r2_server.store["releases/tag/v1.0.0/bundle.zip"] = (payload, '"existing"')
+    r2_server.multipart.reject_existing = True
+    # Redirect only sockets: CLI and sibling imports must keep one exception identity.
+    script = (
+        "import http.client, runpy, sys\n"
+        f"http.client.HTTPSConnection = lambda *a, **k: http.client.HTTPConnection('127.0.0.1', {r2_server.server_port})\n"
+        "sys.argv = ['r2', *sys.argv[1:]]\n"
+        "runpy.run_module('scripts.releases.r2', run_name='__main__')\n"
     )
-    keys = feed_referenced_keys("releases/win32/canary", tag_feed)
-    assert "releases/win32/canary/HermesBundled-0.27.2-win-x64.msix" in keys
-    assert "releases/tag/v0.27.2+canary.20260829T000000Z/HermesBundled-0.27.2-win-x64.msix" in keys
+    result = subprocess.run(
+        [sys.executable, "-c", script, "put", "--tag", "v1.0.0", "--key", path.name, "--file", str(path), "--immutable"],
+        cwd=Path(__file__).resolve().parents[2], env=os.environ, capture_output=True, text=True, timeout=60,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert [method for method, _, _ in r2_server.requests] == ["POST", "GET", "HEAD"]
 
 
-CANARY_DIR = "releases/win32/canary"
-CUTOFF_MS = 1787356800  # 2026-08-21T00:00:00Z
+def test_put_streams_a_file_and_verifies_size(r2_server):
+    import tempfile
+
+    payload = os.urandom(5 * 1024 * 1024 + 123)  # multi-chunk stream
+    with tempfile.NamedTemporaryFile(delete=False) as handle:
+        handle.write(payload)
+        path = handle.name
+    try:
+        r2.put("v0.28.0", "artifact.bin", path)
+    finally:
+        os.unlink(path)
+    key = "releases/tag/v0.28.0/artifact.bin"
+    stored, _etag = r2_server.store[key]
+    assert stored == payload
+    puts = [r for r in r2_server.requests if r[0] == "PUT"]
+    assert len(puts) == 1
+    # Every request carries a signed Authorization header.
+    for _method, _path, headers in r2_server.requests:
+        assert headers["authorization"].startswith("AWS4-HMAC-SHA256 ")
+    # The streamed body's hash was signed as x-amz-content-sha256.
+    import hashlib
+
+    expected_hash = hashlib.sha256(payload).hexdigest()
+    assert puts[0][2]["x-amz-content-sha256"] == expected_hash
 
 
-@pytest.mark.parametrize("unknown", [None, float("nan"), float("inf")])
-def test_stale_feed_bundle_keys_missing_lastmodified_keeps_object(unknown):
-    keys = [f'{CANARY_DIR}/unreferenced.msixbundle']
-    metadata = {key: unknown for key in keys}
-    doomed = stale_feed_bundle_keys(keys, {CANARY_DIR: [CANARY_FEED_XML]}, metadata, CUTOFF_MS)
-    assert doomed == []
-    assert stale_feed_bundle_keys(keys, {CANARY_DIR: [None]}, {keys[0]: 0}, CUTOFF_MS) == []
+def test_put_page_object_carries_html_type_and_no_store(r2_server):
+    """A downloads page must RENDER in a browser: the object it is stored
+    under has to arrive as HTML, and it is a mutable pointer, so it must not
+    be cached. Without the registered content type R2 serves it as an opaque
+    octet-stream download."""
+    import tempfile
+
+    page = "<!DOCTYPE html>\n<html lang=\"en\"><body><h1>Hermes stable builds</h1></body></html>\n"
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", newline="\n", delete=False) as handle:
+        handle.write(page)
+        path = handle.name
+    try:
+        r2.put(tag="", key=r2.channel_page_key_for("stable"), file=path, key_is_full=True)
+    finally:
+        os.unlink(path)
+    stored, _etag = r2_server.store["releases/stable/index.html"]
+    assert stored == page.encode("utf-8")
+    headers = next(r[2] for r in r2_server.requests if r[0] == "PUT")
+    assert headers["Content-Type"] == "text/html; charset=utf-8"
+    assert headers["Cache-Control"] == "no-store"
 
 
-# ── Real loopback HTTP protocol tests ───────────────────────────────────────
+def test_put_immutable_conflict_verifies_remote_bytes(r2_server):
+    import tempfile
+
+    existing = b"already published artifact"
+    key = "releases/tag/v0.28.0/HermesBundled-0.28.0-mac-arm64.zip"
+    r2_server.store[key] = (existing, '"etag-1"')
+    with tempfile.NamedTemporaryFile(delete=False) as handle:
+        handle.write(existing)
+        path = handle.name
+    try:
+        r2.put("v0.28.0", "HermesBundled-0.28.0-mac-arm64.zip", path, immutable=True)
+    finally:
+        os.unlink(path)
+    # Nothing was overwritten: the remote bytes are unchanged.
+    assert r2_server.store[key][0] == existing
+
+
+def test_put_immutable_conflict_with_corrupt_remote_fails(r2_server):
+    import tempfile
+
+    key = "releases/tag/v0.28.0/HermesBundled-0.28.0-mac-x64.zip"
+    r2_server.store[key] = (b"corrupt different bytes", '"etag-1"')
+    with tempfile.NamedTemporaryFile(delete=False) as handle:
+        handle.write(b"local truth")
+        path = handle.name
+    try:
+        with pytest.raises(ValueError, match="checksum mismatch"):
+            r2.put("v0.28.0", "HermesBundled-0.28.0-mac-x64.zip", path, immutable=True)
+    finally:
+        os.unlink(path)
+    assert r2_server.store[key][0] == b"corrupt different bytes"
+
+
+def test_list_cli_paginates_and_decodes_keys(r2_server, capsys):
+    r2_server.page_size = 1
+    keys = ['releases/tag/v1.2.3/a&b.zip', 'releases/tag/v1.2.3/nested space/b.yml']
+    r2_server.store.update({key: (b'x', '"e"') for key in keys})
+    r2_server.store['outside.bin'] = (b'outside', '"e"')
+    r2_server.last_modified[keys[0]] = '2026-08-18T00:00:00.123Z'
+    result = r2.list_objects(prefix='releases/tag/v1.2.3/')
+    assert result == {'keys': keys, 'lastModified': {keys[0]: 1787011200, keys[1]: 1785542400}}
+    queries = [parse_qs(urlsplit(path).query) for method, path, _ in r2_server.requests if method == 'GET']
+    assert len(queries) == 2 and queries[1]['continuation-token'] == ['page+/=1']
+    r2.main(['list', '--prefix', 'releases/tag/v1.2.3/'])
+    assert capsys.readouterr().out.splitlines() == keys
+
+
+@pytest.mark.parametrize('bad_feed', [None, b'', b'<html>boom</html>',
+    b'version: 0.28.0\nfiles: []', b'version: 0.28.0\nfiles: [{}]'])
+def test_real_prune_retention_and_second_feed_failure(r2_server, capsys, bad_feed):
+    import hermes_yaml as yaml
+
+    tag_reference = 'releases/tag/v0.27.2+canary.20260801T000000Z/live.zip'
+    other_reference = 'releases/tag/v0.27.2+canary.20260801T000000Z/other.dmg'
+
+    def feed(key):
+        return yaml.safe_dump({'version': '0.27.2+canary.20260801T000000Z', 'files': [
+            {'url': '/' + key, 'sha512': base64.b64encode(b'x' * 64).decode(), 'size': 8}]}).encode()
+
+    doomed = {'releases/tag/v0.27.2+canary.20260801T000000Z/old.zip'}
+    kept = {tag_reference, tag_reference + '.blockmap', other_reference, other_reference + '.blockmap',
+            'releases/tag/v0.28.0/old.zip', 'releases/tag/v0.28.0+canary.20260904T000000Z/today.zip'}
+    r2_server.store.update({key: (b'artifact', '"e"') for key in doomed | kept})
+    r2_server.store['releases/darwin/canary/canary-mac.yml'] = (feed(tag_reference), '"e"')
+    r2_server.store['releases/darwin/stable/stable-mac.yml'] = (feed(other_reference) if bad_feed is None else bad_feed, '"e"')
+    r2_server.page_size = 3
+    before = dict(r2_server.store)
+    if bad_feed is not None:
+        with pytest.raises(ValueError):
+            r2.prune(keep_days=14, now_epoch=1788547200)
+        assert r2_server.store == before
+        assert not any(method == 'DELETE' for method, _, _ in r2_server.requests)
+        return
+    r2.prune(keep_days=14, dry_run=True, now_epoch=1788547200)
+    assert {line.removeprefix('(dry-run) would delete r2:') for line in capsys.readouterr().out.splitlines()} == doomed
+    assert r2_server.store == before and not any(method == 'DELETE' for method, _, _ in r2_server.requests)
+    r2.prune(keep_days=14, now_epoch=1788547200)
+    assert set(r2_server.store) == set(before) - doomed
+
+
+def test_cli_usage_rejects_unknown_flags(capsys):
+    with pytest.raises(SystemExit):
+        r2.main(["bogus-command"])
+    with pytest.raises(SystemExit):
+        r2.main(["put", "--wat", "x"])
+
 
 class _R2StubHandler(BaseHTTPRequestHandler):
     """Minimal R2-shaped backend: in-memory objects, records requests."""
@@ -520,198 +659,6 @@ def r2_server(monkeypatch):
     thread.join(timeout=5)
 
 
-@pytest.mark.parametrize("failure", [None, "part", "complete", "transient", "disconnect", "lost-response"])
-def test_multipart_publication_is_atomic_and_retryable(r2_server, tmp_path, failure):
-    path = tmp_path / "bundle.msixbundle"
-    payload = b"a" * (5 * 1024 * 1024) + b"b" * (5 * 1024 * 1024) + b"last"
-    path.write_bytes(payload)
-    state = r2_server.multipart
-    state.failure, state.reject_existing = failure, failure is not None
-    key = "releases/stable/bundle.msixbundle"
-    creds, base, bucket = r2.credentials()
-
-    def upload():
-        r2.put_object(creds, base, bucket, key, path, r2.amz_timestamp(),
-                      "application/msixbundle", {"If-None-Match": "*"}, multipart_part_size=5 * 1024 * 1024)
-
-    if failure in {"part", "complete"}:
-        with pytest.raises(r2.R2RequestError):
-            upload()
-        assert key not in r2_server.store and state.aborted == 1
-        assert not any(method == "HEAD" for method, _, _ in r2_server.requests)
-        return
-    upload()
-    assert r2_server.store[key][0] == payload
-    assert state.attempts[2] >= 2
-    assert state.created == (2 if failure else 1)
-    for method, _, headers in r2_server.requests:
-        assert headers["authorization"].startswith("AWS4-HMAC-SHA256 ")
-        if method == "POST":
-            assert headers["If-None-Match"] == "*"
-    metadata = next(headers for method, url, headers in r2_server.requests if "uploads=" in url)
-    assert metadata["Content-Type"] == "application/msixbundle" and metadata["Cache-Control"] == "no-store"
-    upload()
-    path.write_bytes(payload[:-1] + b"!")
-    with pytest.raises(ValueError, match="checksum mismatch"):
-        upload()
-    assert r2_server.store[key][0] == payload
-
-
-def test_cli_reuses_an_immutable_multipart_object(r2_server, tmp_path):
-    path = tmp_path / "bundle.msixbundle"
-    payload = b"x" * (64 * 1024 * 1024 + 1)
-    path.write_bytes(payload)
-    r2_server.store["releases/tag/v1.0.0/bundle.msixbundle"] = (payload, '"existing"')
-    r2_server.multipart.reject_existing = True
-    # Redirect only sockets: CLI and sibling imports must keep one exception identity.
-    script = (
-        "import http.client, runpy, sys\n"
-        f"http.client.HTTPSConnection = lambda *a, **k: http.client.HTTPConnection('127.0.0.1', {r2_server.server_port})\n"
-        "sys.argv = ['r2', *sys.argv[1:]]\n"
-        "runpy.run_module('scripts.releases.r2', run_name='__main__')\n"
-    )
-    result = subprocess.run(
-        [sys.executable, "-c", script, "put", "--tag", "v1.0.0", "--key", path.name, "--file", str(path), "--immutable"],
-        cwd=Path(__file__).resolve().parents[2], env=os.environ, capture_output=True, text=True, timeout=60,
-    )
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert [method for method, _, _ in r2_server.requests] == ["POST", "GET", "HEAD"]
-
-
-def test_put_streams_a_file_and_verifies_size(r2_server):
-    import tempfile
-
-    payload = os.urandom(5 * 1024 * 1024 + 123)  # multi-chunk stream
-    with tempfile.NamedTemporaryFile(delete=False) as handle:
-        handle.write(payload)
-        path = handle.name
-    try:
-        r2.put("v0.28.0", "artifact.bin", path)
-    finally:
-        os.unlink(path)
-    key = "releases/tag/v0.28.0/artifact.bin"
-    stored, _etag = r2_server.store[key]
-    assert stored == payload
-    puts = [r for r in r2_server.requests if r[0] == "PUT"]
-    assert len(puts) == 1
-    # Every request carries a signed Authorization header.
-    for _method, _path, headers in r2_server.requests:
-        assert headers["authorization"].startswith("AWS4-HMAC-SHA256 ")
-    # The streamed body's hash was signed as x-amz-content-sha256.
-    import hashlib
-
-    expected_hash = hashlib.sha256(payload).hexdigest()
-    assert puts[0][2]["x-amz-content-sha256"] == expected_hash
-
-
-def test_put_page_object_carries_html_type_and_no_store(r2_server):
-    """A downloads page must RENDER in a browser: the object it is stored
-    under has to arrive as HTML, and it is a mutable pointer, so it must not
-    be cached. Without the registered content type R2 serves it as an opaque
-    octet-stream download."""
-    import tempfile
-
-    page = "<!DOCTYPE html>\n<html lang=\"en\"><body><h1>Hermes stable builds</h1></body></html>\n"
-    with tempfile.NamedTemporaryFile("w", encoding="utf-8", newline="\n", delete=False) as handle:
-        handle.write(page)
-        path = handle.name
-    try:
-        r2.put(tag="", key=r2.channel_page_key_for("stable"), file=path, key_is_full=True)
-    finally:
-        os.unlink(path)
-    stored, _etag = r2_server.store["releases/stable/index.html"]
-    assert stored == page.encode("utf-8")
-    headers = [r[2] for r in r2_server.requests if r[0] == "PUT"][0]
-    assert headers["Content-Type"] == "text/html; charset=utf-8"
-    assert headers["Cache-Control"] == "no-store"
-
-
-def test_put_immutable_conflict_verifies_remote_bytes(r2_server):
-    import tempfile
-
-    existing = b"already published artifact"
-    key = "releases/tag/v0.28.0/HermesBundled-0.28.0-mac-arm64.zip"
-    r2_server.store[key] = (existing, '"etag-1"')
-    with tempfile.NamedTemporaryFile(delete=False) as handle:
-        handle.write(existing)
-        path = handle.name
-    try:
-        r2.put("v0.28.0", "HermesBundled-0.28.0-mac-arm64.zip", path, immutable=True)
-    finally:
-        os.unlink(path)
-    # Nothing was overwritten: the remote bytes are unchanged.
-    assert r2_server.store[key][0] == existing
-
-
-def test_put_immutable_conflict_with_corrupt_remote_fails(r2_server):
-    import tempfile
-
-    key = "releases/tag/v0.28.0/HermesBundled-0.28.0-mac-x64.zip"
-    r2_server.store[key] = (b"corrupt different bytes", '"etag-1"')
-    with tempfile.NamedTemporaryFile(delete=False) as handle:
-        handle.write(b"local truth")
-        path = handle.name
-    try:
-        with pytest.raises(ValueError, match="checksum mismatch"):
-            r2.put("v0.28.0", "HermesBundled-0.28.0-mac-x64.zip", path, immutable=True)
-    finally:
-        os.unlink(path)
-    assert r2_server.store[key][0] == b"corrupt different bytes"
-
-
-def test_list_cli_paginates_and_decodes_keys(r2_server, capsys):
-    r2_server.page_size = 1
-    keys = ['releases/tag/v1.2.3/a&b.msix', 'releases/tag/v1.2.3/nested space/b.yml']
-    r2_server.store.update({key: (b'x', '"e"') for key in keys})
-    r2_server.store['outside.bin'] = (b'outside', '"e"')
-    r2_server.last_modified[keys[0]] = '2026-08-18T00:00:00.123Z'
-    result = r2.list_objects(prefix='releases/tag/v1.2.3/')
-    assert result == {'keys': keys, 'lastModified': {keys[0]: 1787011200, keys[1]: 1785542400}}
-    queries = [parse_qs(urlsplit(path).query) for method, path, _ in r2_server.requests if method == 'GET']
-    assert len(queries) == 2 and queries[1]['continuation-token'] == ['page+/=1']
-    r2.main(['list', '--prefix', 'releases/tag/v1.2.3/'])
-    assert capsys.readouterr().out.splitlines() == keys
-
-
-@pytest.mark.parametrize('bad_feed', [None, b'', b'<html>boom</html>',
-    b'<Foo Uri="https://x/old.msixbundle" />', b'<MainPackage Uri="https://x/old.msixbundle" />',
-    b'<AppInstaller><MainBundle Uri="https://x/old.msixbundle" />'])
-def test_real_prune_retention_and_second_feed_failure(r2_server, capsys, bad_feed):
-    tag_reference = 'releases/tag/v0.27.2+canary.20260801T000000Z/live.msixbundle'
-    second = f'<AppInstaller><MainBundle Uri="https://cdn.example/{tag_reference}" /></AppInstaller>'
-    doomed = {f'{CANARY_DIR}/old.msixbundle', 'releases/tag/v0.27.2+canary.20260801T000000Z/old.zip'}
-    kept = {f'{CANARY_DIR}/HermesBundled-0.27.2.9-win.msixbundle', f'{CANARY_DIR}/live.msixbundle',
-            f'{CANARY_DIR}/fresh.msixbundle', f'{CANARY_DIR}/unknown.msixbundle', tag_reference,
-            'releases/win32/stable/old.msixbundle', 'releases/unknown/old.msixbundle',
-            'releases/tag/v0.28.0/old.zip', 'releases/tag/v0.28.0+canary.20260904T000000Z/today.zip'}
-    r2_server.store.update({key: (b'artifact', '"e"') for key in doomed | kept})
-    r2_server.store[f'{CANARY_DIR}/canary.appinstaller'] = (CANARY_FEED_XML.encode(), '"e"')
-    r2_server.store[f'{CANARY_DIR}/second.appinstaller'] = (second.encode() if bad_feed is None else bad_feed, '"e"')
-    r2_server.store['releases/win32/stable/stable.appinstaller'] = (CANARY_FEED_XML.encode(), '"e"')
-    r2_server.last_modified[f'{CANARY_DIR}/fresh.msixbundle'] = '2026-09-03T00:00:00Z'
-    r2_server.last_modified[f'{CANARY_DIR}/unknown.msixbundle'] = None
-    r2_server.page_size = 3
-    before = dict(r2_server.store)
-    if bad_feed is not None:
-        with pytest.raises(RuntimeError, match='refusing to prune'):
-            r2.prune(keep_days=14, now_epoch=1788547200)
-        assert r2_server.store == before
-        assert not any(method == 'DELETE' for method, _, _ in r2_server.requests)
-        return
-    r2.prune(keep_days=14, dry_run=True, now_epoch=1788547200)
-    assert {line.removeprefix('(dry-run) would delete r2:') for line in capsys.readouterr().out.splitlines()} == doomed
-    assert r2_server.store == before and not any(method == 'DELETE' for method, _, _ in r2_server.requests)
-    r2.prune(keep_days=14, now_epoch=1788547200)
-    assert set(r2_server.store) == set(before) - doomed
-
-
-def test_cli_usage_rejects_unknown_flags(capsys):
-    with pytest.raises(SystemExit):
-        r2.main(["bogus-command"])
-    with pytest.raises(SystemExit):
-        r2.main(["put", "--wat", "x"])
-
-
 @pytest.fixture
 def bounded_reads(monkeypatch):
     real_read = http.client.HTTPResponse.read
@@ -792,11 +739,28 @@ def test_download_streams_verified_bytes_and_preserves_destination_on_failure(r2
     monkeypatch.setattr(r2.time, 'sleep', lambda _: None)
     r2.download_object(**args)
     assert request_times == [NOW, refreshed]
+    # A body corrupted in transit (right length, wrong bytes) is fetched again, not failed on the spot.
+    sent = []
+
+    def corrupt_once(handler):
+        sent.append(1)
+        if len(sent) == 1:
+            handler._send(200, payload[:-1] + bytes([payload[-1] ^ 1]))
+        else:
+            original_get(handler)
+
+    monkeypatch.setattr(_R2StubHandler, 'do_GET', corrupt_once)
+    target.write_bytes(b"previous complete file")
+    r2.download_object(**args)
+    assert target.read_bytes() == payload and len(sent) == 2
     monkeypatch.setattr(_R2StubHandler, 'do_GET', original_get)
 
+    # A stored object that really differs from its receipt still fails, after the bounded attempts.
     r2_server.store[key] = (b"corrupt replacement", '"e"')
+    r2_server.requests.clear()
     with pytest.raises(ValueError, match="checksum mismatch"):
         r2.download_object(**args)
+    assert sum(1 for method, _, _ in r2_server.requests if method == "GET") == 3
     assert target.read_bytes() == payload
     assert list(target.parent.iterdir()) == [target]
     del r2_server.store[key]

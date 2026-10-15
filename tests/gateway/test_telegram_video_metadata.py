@@ -85,7 +85,7 @@ def test_video_helpers_read_real_geometry(tmp_path):
     clip = tmp_path / "clip.mp4"
     subprocess.run(
         ["ffmpeg", "-y", "-f", "lavfi", "-i", "testsrc=size=640x360:rate=10:duration=2",
-         "-c:v", "libx264", "-pix_fmt", "yuv420p", str(clip)],
+         "-c:v", "mpeg4", "-pix_fmt", "yuv420p", str(clip)],
         capture_output=True, check=True)
 
     geometry = telegram_mod._probe_video_geometry(str(clip))

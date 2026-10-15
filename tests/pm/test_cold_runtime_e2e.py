@@ -37,7 +37,7 @@ class _ArchiveHandler(SimpleHTTPRequestHandler):
 
 def _run(command, *, cwd, env, expected=0, timeout=240):
     result = subprocess.run(command, cwd=cwd, env=env, capture_output=True,
-                            text=True, timeout=timeout)
+                            text=True, timeout=timeout, check=False)
     assert result.returncode == expected, (
         f"{command!r}\nexit={result.returncode}\n{result.stdout}\n{result.stderr}"
     )
@@ -98,7 +98,7 @@ def test_cold_cli_builds_own_runtime_discovers_plugins_and_repairs_app(tmp_path,
     source = Path(__file__).resolve().parents[2]
     repo = tmp_path / "source"
     repo.mkdir()
-    for name in ("pm", "hermes_cli", "hermes_security", "hermes_platform", "agent", "gateway", "tools", "cron"):
+    for name in ("pm", "hermes_state", "hermes_cli", "hermes_security", "hermes_platform", "agent", "gateway", "tools", "cron"):
         shutil.copytree(source / name, repo / name,
                         ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
     for path in source.glob("*.py"):

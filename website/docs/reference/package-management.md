@@ -196,22 +196,20 @@ requires trust in that plugin and its dependencies.
 
 ## Optional security tools
 
-PM owns the pinned `bws`, `tirith`, and `iron-proxy` packages in
+PM owns the pinned `bws` and `iron-proxy` packages in
 `pm/security_packages.py`. Their versions, artifact URLs, and SHA-256 hashes
 come from `pm/lock.json`. Downloads and publication use the shared tool store,
 not private installers under `$HERMES_HOME/bin`.
 
-For Tirith and iron-proxy, PM also acquires pinned signature files and checks
-that the release checksums cover the pinned archive. Package staging calls the
-integration's signature checker. Cosign and GPG checks remain conditional on
-available executables. Locked provenance files must still be available and
+For iron-proxy, PM also acquires pinned signature files and checks that the
+release checksums cover the pinned archive. Package staging calls the
+integration's signature checker. The GPG check remains conditional on an
+available executable. Locked provenance files must still be available and
 match their hashes. An explicit signature rejection aborts installation.
 External executables remain outside PM's hash and signature guarantees.
 
 `bws` and iron-proxy honor an executable on `PATH` before checking PM selection.
-Tirith honors `security.tirith_path`, then uses `PATH` before its PM selection
-for the default name. An explicit Tirith path never triggers a replacement
-download. Lazy installation obeys PM policy. Explicit install commands check
+Lazy installation obeys PM policy. Explicit install commands check
 and repair managed entries, including requests with `--force`.
 
 ## Developer workflow {#developer-workflow}
@@ -226,7 +224,7 @@ Use an ordinary terminal outside the packaged Hermes app. Leave any existing
 Python virtual environment first. On Windows, use native PowerShell with Git.
 On ARM64, PM prepares Visual Studio C++ tools, Clang, native Rust, and static
 OpenSSL development libraries before every dependency build from a checkout:
-setup, `activate.ps1`, `install.ps1`, `hermes update`, and repair alike. It
+setup, `activate`, `hermes update`, and repair alike. It
 reuses existing installations and installs missing prerequisites. Missing
 Visual Studio components need administrator rights: an interactive install
 asks through a UAC prompt, while CI, ssh and scheduled runs need an
@@ -272,7 +270,7 @@ $env:HERMES_RUNTIME_DIR = Join-Path $env:HERMES_HOME 'tools'
 
 `HERMES_RUNTIME_DIR` in these examples is a process-local development override.
 It makes the bootstrap and PM use the same writable store. Do not persist a
-path into an installed MSIX or macOS bundle. Activation runs the setup script's
+path into an installed macOS bundle. Activation runs the setup script's
 runtime-only path to provision tools and sync the `all` Python extra. It does
 not select `dev` or install JS workspaces. It maintains installation-local
 commands and repairs existing owned PATH wrappers, but does not create new PATH
@@ -341,7 +339,7 @@ environment, including when re-sourcing an already active environment.
 After sync, activation prepends installed PM tools to `PATH` and sets
 `PYTHONPATH` to this checkout and its selected dependency tree. It also
 defines `hermes` as a shell function for this worktree. The function runs
-this checkout's CLI and hides the installed command, including an MSIX alias.
+this checkout's CLI and hides the installed command.
 It runs only while the shell is inside this worktree and refuses outside it,
 so a sibling worktree does not inherit the command. The prompt gains a prefix
 naming the branch, and drops it outside the tree. It does not
@@ -438,7 +436,7 @@ before starting another Python process.
 ### Syncing after you edit pyproject.toml
 
 1. Edit `pyproject.toml`. Pin every dependency as the
-   [Dependency Pinning Policy](https://github.com/majorissuerep/hermes-agent/blob/main/AGENTS.md#dependency-pinning-policy)
+   [Dependency Pinning Policy](https://github.com/majorissuerep/hermes-agent/blob/main/pm/AGENTS.md#dependency-pinning-policy)
    requires. Express platform limits with PEP 508 markers, or gate a whole
    extra in `[tool.hermes.extras-platforms]`.
 2. Relock:
@@ -448,7 +446,7 @@ before starting another Python process.
    ```
 
    This re-resolves `uv.lock` from `pyproject.toml` with the same settings CI
-   checks, including the 14-day `exclude-newer` quarantine. It changes no
+   checks, including the 14-day `exclude-newer` release-age check. It changes no
    environment. When the lock is already current, it says so and writes
    nothing. (`hermes pm lock --bump NAME VERSION` is a different operation: it
    pins a managed tool in `pm/lock.json` and does not touch `uv.lock`.)
@@ -544,7 +542,7 @@ hermes pm install chromium
 | `pm doctor` | Check installed tool identities, files, and digests against the lock. |
 | `pm repair` | Rebuild the recorded Python dependency set in a new generation, validate it, then select it. Does not update pins, features, or plugin configuration. |
 | `pm status` | Print the latest sync/update receipt as JSON, or report that no receipt exists. |
-| `pm gc` | Remove unreferenced tool-store entries, eligible download partials, and unused lease-managed Python generations. |
+| `pm gc` | Remove unreferenced tool-store entries, eligible download partials, unused lease-managed Python generations, and the `installs/INSTALL_KEY/` state of deleted checkouts (a worktree removed from a `.worktrees/` dir that still exists, or a clone under the data root; checkouts this process cannot see, such as a host install viewed from a container sharing the data root, are kept, as is any state whose install lock or generation lease is still held). The worktree pruner that runs at startup reclaims those orphaned state dirs too. |
 
 `pm env` excludes inherited process variables, including credentials. Its
 output can still reveal local installation paths; review it before sharing.
@@ -587,6 +585,26 @@ other permanent failures. A successful probe followed by a range GET 403 or 404
 retains the CDN fallback: one serial attempt at the missing ranges. Extraction,
 verification and publication are not repeated. Python and npm package requests
 remain under uv and npm's own retry policies.
+
+## Release age and package mirrors
+
+Every ordinary Python package Hermes itself depends on must be at least fourteen days old
+when Hermes locks it (uv's `exclude-newer`, enforced by CI's lock check), so a
+freshly published, possibly compromised release cannot reach `uv.lock`. Users
+install from that lock, and installing or enabling a plugin never re-checks
+dates, so package mirrors that publish no upload times work. Set a mirror with `index-url` in `pip.conf`,
+which Hermes passes to uv, or with `UV_INDEX_URL`.
+
+`hermes pm lock` is the one step that applies the check. Run against a mirror
+without upload times, it stops with `has no publish time`; use
+`https://pypi.org/simple` for that step.
+
+The encrypted fork temporarily preserves the synced native runtime with
+`nemo-relay==0.10.0`. Its owner-approved exception ends immediately after that
+release's upload timestamps, not after an open-ended date or a floating version.
+Remove the override after October 23, 2026 UTC, once the entire release has aged
+fourteen days. All other packages retain the normal quarantine. Generated user
+installation workspaces strip both forms of release-age policy and trust the lock.
 
 ## Diagnostics
 

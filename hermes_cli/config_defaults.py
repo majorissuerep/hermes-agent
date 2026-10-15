@@ -98,13 +98,11 @@ DEFAULT_CONFIG = {
         # TimeoutStopSec or risk SIGKILL mid-cleanup; for /restart prefer restart_after_turn_timeout
         # so turns finish BEFORE stop().
         "restart_drain_timeout": 0,
-        # Cron-only floor under the stop()/drain wait (seconds). Interrupted chat turns resume on
-        # the next message, but an interrupted cron run is recorded as a permanent failure, so it
-        # must not inherit restart_drain_timeout's 0. Clamped to the shutdown-watchdog leash minus
-        # teardown headroom (~50s unless TimeoutStopSec is raised). 0 = opt out.
-        # A chat turn interrupted by a restart is announced to the user and resumed on their next message;
-        # an interrupted cron run is written to jobs.json as a permanent failure that nobody is waiting on,
-        # so it must not inherit restart_drain_timeout's 0 (#82161).
+        # Floor under the stop()/drain wait (seconds) for cron jobs and api_server runs. Interrupted
+        # chat turns resume on the next message, but an interrupted cron run is recorded as a
+        # permanent failure and an interrupted /v1 run fails its waiting caller, so neither may
+        # inherit restart_drain_timeout's 0 (#82161, #132989). Clamped to the shutdown-watchdog
+        # leash minus teardown headroom (~50s unless TimeoutStopSec is raised). 0 = opt out.
         "cron_drain_timeout": 30,
         # In-band restart (/restart, SIGUSR1): refuse new work, then wait up to this many seconds
         # for in-flight agents/cron/api runs to finish before stop(). 0 = enter stop() at once. 30
@@ -278,11 +276,11 @@ DEFAULT_CONFIG = {
         # Model name (any reasonable spelling) -> effort level; overrides agent.reasoning_effort
         # when the current model matches. Edit in config.yaml (no CLI support: dots in keys).
         "reasoning_overrides": {},
-        # Preserve assistant `reasoning_content` on history replay. Echo families (DeepSeek,
-        # Kimi/Moonshot, Xiaomi MiMo) are auto-detected by provider name/base-URL host; custom
-        # providers and OpenAI-compatible gateways proxying them are not. Set `reasoning_echo: true`
-        # on a `model:` entry or a `fallback_providers:` entry to opt in per provider. Default
-        # false: strict providers (Mistral, Groq, Cerebras) reject the field.
+        # Stored reasoning is replayed to every provider that can read it by default. This flag
+        # only adds the must-echo " " pad on reasoning-less tool-call turns, which DeepSeek,
+        # Kimi/Moonshot and Xiaomi MiMo require (auto-detected by provider name/host). Set
+        # `reasoning_echo: true` on a `model:` or `fallback_providers:` entry for a custom gateway
+        # proxying one of them. Strict providers (Mistral, Groq, Cerebras) never get the field.
         "reasoning_echo": False,
         # Turn liveness watchdog: a turn with no observable progress for `timeout_s` seconds is
         # logged, force-interrupted so the UI can retry, and its lease stops renewing so stale-turn
@@ -384,8 +382,8 @@ DEFAULT_CONFIG = {
         "docker_snap_compat": False,
         # Trusted profiles sharing one Docker container identity; empty = per-profile boundary.
         "docker_shared_container_key": "",
-        # Keep a long-lived bash shell across execute() calls so cwd/env/shell variables survive.
-        # Applies to non-local backends (SSH); local is opt-in via TERMINAL_LOCAL_PERSISTENT env.
+        # SSH: carry exported env vars between commands (cwd always carries). false = every command
+        # starts from the login env, profile functions included. Local: TERMINAL_LOCAL_PERSISTENT.
         "persistent_shell": True,
     },
 
@@ -540,7 +538,7 @@ DEFAULT_CONFIG = {
         # reload rebuilds the tool surface and INVALIDATES the provider prompt cache (next message
         # re-sends the full prefix) — costly on long-context models. When false the watcher still
         # detects the change and prints /reload-mcp guidance.
-        "auto_reload_on_config_change": True,
+        "auto_reload_on_config_change": False,
         # Max MCP servers connected (and their stdio child trees spawned) at once per discovery
         # pass — at boot, on /reload-mcp and on the config watcher's reconcile. Unbounded, a config
         # with N servers spawns N process trees in the same instant (RAM/CPU spike, 429 fan-out on
@@ -1078,18 +1076,17 @@ DEFAULT_CONFIG = {
         "enabled": True,
         # Echo the raw transcript of gateway voice messages back as a 🎙️ message.
         "echo_transcripts": True,
-        # No seeded "provider": a stored value counts as an explicit user pick; unset = autodetect
-        # ladder. Valid: "local" (faster-whisper) | "groq" | "openai" | "mistral" | "elevenlabs" |
-        # "deepinfra". Global language hint unless a per-provider language overrides it. "en"
-        # because Whisper auto-detect misreads short/accented clips; "" = auto; or "es", "zh", ...
+        # No seeded "provider" (a stored value is an explicit pick; unset = autodetect): local | groq |
+        # openai | mistral | elevenlabs | deepinfra | xai. Global language hint unless a per-provider one
+        # overrides it; "en" because Whisper auto-detect misreads short clips; "" = auto; "es", ...
         "language": "en",
-        # Client-side ffmpeg silence trim before cloud upload (local whisper uses VAD): silence
-        # inflates upload time, billing and hallucinations. Failure = raw upload.
+        "streaming": False,  # live partial text while speaking (openai/xai/elevenlabs); failure = file path
+        # Pre-upload ffmpeg silence trim (local whisper uses VAD); failure = raw upload.
         "cloud_trim_silence": True,
         "cloud_trim_threshold_db": -40,  # quieter than this counts as silence
         "cloud_trim_keep_ms": 300,  # how much of each pause survives (natural pacing)
         "local": {
-            "model": "base",  # tiny, base, small, medium, large-v3
+            "model": "base",  # tiny, base, small, medium, large-v3, turbo
             "language": "",  # auto-detect; set "en", "es", ... to force
             "initial_prompt": "",
             # Anti-hallucination (faster-whisper decodes junk from silence). vad: Silero filter
@@ -1102,13 +1099,13 @@ DEFAULT_CONFIG = {
             "unload_after_idle_seconds": 0,  # 0 = never; e.g. 300 frees the model after 5min
         },
         "groq": {
-            # whisper-large-v3, whisper-large-v3-turbo, distil-whisper-large-v3-en
-            "model": "whisper-large-v3-turbo",
+            "model": "whisper-large-v3-turbo",  # whisper-large-v3-turbo, whisper-large-v3
             "language": "",  # auto-detect; set "en", "es", ... to force
         },
         "openai": {
             # whisper-1, gpt-4o-mini-transcribe, gpt-4o-transcribe, gpt-transcribe
             "model": "whisper-1",
+            "streaming_model": "gpt-live-transcribe",  # stt.streaming; the one model with mid-utterance deltas
             "language": "",  # auto-detect; set "en", "es", ... to force
             "timeout": 60,  # seconds; allow self-hosted backends time to cold-start
             "max_retries": 1,  # OpenAI SDK transport retries
@@ -1118,6 +1115,7 @@ DEFAULT_CONFIG = {
             "language": "",  # auto-detect; set "en", "es", ... to force
         },
         "xai": {
+            "model": "",  # "" = STT_XAI_MODEL or grok-voice-transcribe-2.0; or grok-voice-transcribe-1.0
             "language": "",  # auto-detect; set "en", "es", ... to force
         },
         "elevenlabs": {
@@ -1232,6 +1230,7 @@ DEFAULT_CONFIG = {
     "memory": {  # Persistent memory — bounded curated memory injected into the system prompt
         "memory_enabled": True,
         "user_profile_enabled": True,
+        "prefetch_spill_enabled": False,  # External recall opt-in to hooks.output_spill.
         # Approval gate for memory writes on BOTH foreground turns and the background review fork.
         # true = foreground writes prompt inline; background writes are staged (/memory
         # pending|approve <id>|reject <id>). To disable memory: memory_enabled.
@@ -1240,9 +1239,8 @@ DEFAULT_CONFIG = {
         "user_char_limit": 1375,     # ~500 tokens at 2.75 chars/token
         # Periodic built-in memory review; 0 when an external provider auto-extracts.
         "nudge_interval": 10,
-        # External memory provider plugin (empty = built-in only); only ONE at a time: "openviking",
-        # "mem0", "holographic", "retaindb", "byterover", or a catalog-installed one ("honcho",
-        # "hindsight", "supermemory").
+        # One external provider: bundled (retaindb, byterover) or catalog-installed (honcho,
+        # hindsight, supermemory, mem0, openviking, holographic). Empty = built-in only.
         "provider": "",
     },
     # Subagent delegation — override the provider:model used by delegate_task so children run on a
@@ -1385,7 +1383,7 @@ DEFAULT_CONFIG = {
         # Substitute ${HERMES_SKILL_DIR} / ${HERMES_SESSION_ID} in SKILL.md content.
         "template_vars": True,
         # Pre-execute !`cmd` snippets in SKILL.md, inlining stdout (dates, git state...). Off:
-        # skill-author content would run on the host unapproved — trusted sources only.
+        # host-unapproved skill-author code; community hub installs never auto-execute (#63307).
         "inline_shell": False,
         "inline_shell_timeout": 10,  # seconds per !`cmd` snippet
         # Security-scan skills the agent writes via skill_manage. Off: the agent can run the same
@@ -1730,10 +1728,6 @@ DEFAULT_CONFIG = {
         # globs on the basename (e.g. "*.mdc").
         "protected_instruction_files": True,
         "protected_instruction_extra_patterns": [],
-        "tirith_enabled": True,
-        "tirith_path": "tirith",
-        "tirith_timeout": 5,
-        "tirith_fail_open": True,
         "website_blocklist": {"enabled": False, "domains": [], "shared_files": []},
         # IDs of supply-chain advisories the user has read and acted on; acked ones stop the startup
         # banner. Add via `hermes doctor --ack <id>`; remove by editing the list. Catalog:
@@ -1965,11 +1959,11 @@ DEFAULT_CONFIG = {
             # tool eager. The runtime fallback in tools/tool_search.py derives from this value.
             "defer": [
                 "computer_use", "session_search", "image_generate",
-                "todo_list", "process_manage", "cronjob_manage",
-                # Desktop GUI surface (desktop_ui + project toolsets)
-                "drive_preview", "gui_tour", "desktop_preview", "annotate_preview",
+                "todo_list", "process_manage", "cronjob_manage", "browser_vault",
+                # Desktop GUI surface (desktop_ui, project and catalog toolsets)
+                "drive_preview", "gui_tour", "desktop_preview", "annotate_preview", "manage_catalog",
                 "show_tip", "desktop_project", "close_terminal",
-                "apply_layout", "read_terminal", "read_window_below", "focus_pane",
+                "set_theme", "read_terminal", "read_window_below", "focus_pane",
             ],
         },
         # Remote connector discovery/lifecycle through the Nous tool gateway.
@@ -2053,7 +2047,10 @@ DEFAULT_CONFIG = {
         "external_platforms": True,
         # Seconds to let a SIGTERM-interrupted gateway agent unwind before adapter/database
         # teardown. Keep short so service-manager shutdowns don't exhaust their stop budget.
+        "unmanaged_idle_exit_seconds": 600,  # client-auto-started gateway only; 0 disables
+        # Seconds a SIGTERM-interrupted agent unwinds before teardown (short: service stop budgets).
         "signal_interrupt_grace_timeout": 1,
+        "service_install_choice": None,  # null | install | decline; never authorizes ordinary launch installation.
         # Durable delivery-obligation ledger: final responses are recorded in state.db around the
         # platform send; a gateway that died between finalize and platform ACK redelivers on next
         # boot (ambiguous cases carry a "recovered reply — may be a duplicate" marker;
@@ -2275,13 +2272,12 @@ DEFAULT_CONFIG = {
         # per session, so full-DB backups of small sessions work.
         "max_export_messages": 20000,
     },
-    # First-touch onboarding hints (agent/onboarding.py). Each hint shows once and is latched under
-    # `seen`; wipe the section to re-see all hints.
+    # First-touch onboarding hints (agent/onboarding.py), each latched under `seen` once shown.
     "onboarding": {
         "seen": {},
-        # First-ever gateway message: ask = offer to build a user profile (consent- gated; never
-        # reads connected accounts silently); off = plain intro only.
-        "profile_build": "ask",
+        "profile_build": "ask",  # first-ever message: ask = offer; off = plain intro only
+        # Desktop first run, root profile only (onboarding_run.py): None = fresh install; true = next launch; false = done
+        "run": None,
     },
     # Fork: telemetry removed. Collection and transmission are disabled at the
     # source (sender is a no-op); the endpoint default is scrubbed.
@@ -2397,7 +2393,7 @@ DEFAULT_CONFIG = {
     },
     # External secret sources — pull credentials from secret managers at startup instead of storing
     # them in ~/.hermes/.env.
-    # Browser credential vault: which login sources browser_vault_list/fill may draw from. The local
+    # Browser credential vault: which login sources browser_vault may draw from. The local
     # encrypted vault (`hermes vault add`, Desktop → Settings → Credential Vault) is always on.
     # External password managers are unlocked per session with a masked master-password prompt;
     # headless sessions (cron, webhook, API) never prompt and see them as locked.
@@ -2670,7 +2666,7 @@ DEFAULT_CONFIG = {
         # Extra ports detection probes for an external llama-server (besides 8080).
         "detect_ports": [],
     },
-    "_config_version": 49,  # Config schema version - bump this when adding new required fields
+    "_config_version": 51,  # Config schema version - bump this when adding new required fields
 }
 
 
@@ -2719,115 +2715,20 @@ def _base_url(name, prompt_name=None):
 # tools=[...] lists the model tools the key unlocks.
 OPTIONAL_ENV_VARS = {
     # ── Provider (handled in provider selection, not shown in checklists) ──
-    "NOUS_BASE_URL": _base_url("Nous Portal"),
-    "HERMES_ANON_API_SECRET": _env(
-        "Shared secret for the Nous free-tier sign-up endpoints while they are in their gated "
-        "integration phase (not needed once the gate is removed)",
-        "Nous free-tier shared secret (leave empty unless given one)", password=True,
-        category="provider", advanced=True),
     "OPENROUTER_API_KEY": _env("OpenRouter API key (for vision, web scraping helpers, and MoA)",
         "OpenRouter API key", url="https://openrouter.ai/keys", password=True, tools=["vision_analyze"],
-        category="provider", advanced=True),
-    "GOOGLE_API_KEY": _prov("Google AI Studio API key (also recognized as GEMINI_API_KEY)",
+        category="tool", advanced=True),
+    "GOOGLE_API_KEY": _tool("Google AI Studio tool-service key (also recognized as GEMINI_API_KEY)",
         "Google AI Studio API key", "https://aistudio.google.com/app/apikey"),
-    "GEMINI_API_KEY": _prov("Google AI Studio API key (alias for GOOGLE_API_KEY)", "Gemini API key",
+    "GEMINI_API_KEY": _tool("Google AI Studio tool-service key (alias for GOOGLE_API_KEY)", "Gemini API key",
         "https://aistudio.google.com/app/apikey"),
-    "GEMINI_BASE_URL": _base_url("Google AI Studio", "Gemini"),
-    "VERTEX_CREDENTIALS_PATH": _prov(
-        "Path to a Google Cloud service account JSON for Vertex AI (Gemini). Vertex uses "
-        "OAuth2, not a static API key — this points at the credentials Hermes mints short-lived "
-        "tokens from. Falls back to GOOGLE_APPLICATION_CREDENTIALS, then to ADC (gcloud auth "
-        "application-default login). Set project/region under vertex: in config.yaml.",
-        "Vertex service account JSON path (leave empty to use ADC / "
-        "GOOGLE_APPLICATION_CREDENTIALS)", "https://cloud.google.com/iam/docs/keys-create-delete",
-        password=False),
     "XAI_API_KEY": _prov("xAI API key", "xAI API key", "https://console.x.ai/"),
     "XAI_BASE_URL": _base_url("xAI"),
-    "NVIDIA_API_KEY": _prov("NVIDIA NIM API key (build.nvidia.com or local NIM endpoint)",
-        "NVIDIA NIM API key", "https://build.nvidia.com/"),
-    "NVIDIA_BASE_URL": _prov(
-        "NVIDIA NIM base URL override (e.g. http://localhost:8000/v1 for local NIM)",
-        "NVIDIA NIM base URL (leave empty for default)", None, password=False),
-    "LM_API_KEY": _prov("LM Studio bearer token for auth-enabled local servers",
-        "LM Studio API key / bearer token", None),
-    "LM_BASE_URL": _base_url("LM Studio"),
     "GLM_API_KEY": _prov("Z.AI / GLM API key (also recognized as ZAI_API_KEY / Z_AI_API_KEY)",
         "Z.AI / GLM API key", "https://z.ai/"),
     "ZAI_API_KEY": _prov("Z.AI API key (alias for GLM_API_KEY)", "Z.AI API key", "https://z.ai/"),
     "Z_AI_API_KEY": _prov("Z.AI API key (alias for GLM_API_KEY)", "Z.AI API key", "https://z.ai/"),
     "GLM_BASE_URL": _base_url("Z.AI / GLM"),
-    "KIMI_API_KEY": _prov("Kimi / Moonshot API key", "Kimi API key",
-        "https://platform.moonshot.cn/"),
-    "KIMI_BASE_URL": _base_url("Kimi / Moonshot", "Kimi"),
-    "KIMI_CN_API_KEY": _prov("Kimi / Moonshot China API key", "Kimi (China) API key",
-        "https://platform.moonshot.cn/"),
-    "STEPFUN_API_KEY": _prov("StepFun Step Plan API key", "StepFun Step Plan API key",
-        "https://platform.stepfun.com/"),
-    "STEPFUN_BASE_URL": _base_url("StepFun Step Plan"),
-    "ARCEEAI_API_KEY": _prov("Arcee AI API key", "Arcee AI API key", "https://chat.arcee.ai/"),
-    "ARCEE_BASE_URL": _base_url("Arcee AI", "Arcee"),
-    "GMI_API_KEY": _prov("GMI Cloud API key", "GMI Cloud API key", "https://www.gmicloud.ai/"),
-    "GMI_BASE_URL": _base_url("GMI Cloud"),
-    "ACTUAL_API_KEY": _prov("Actual Computer inference key (ac_...)",
-        "Actual Computer inference key", "https://actual.inc/user/keys"),
-    "FIREWORKS_API_KEY": _prov("Fireworks AI API key", "Fireworks AI API key",
-        "https://app.fireworks.ai/settings/users/api-keys"),
-    "MINIMAX_API_KEY": _prov("MiniMax API key (international)", "MiniMax API key",
-        "https://www.minimax.io/"),
-    "MINIMAX_BASE_URL": _base_url("MiniMax"),
-    "MINIMAX_CN_API_KEY": _prov("MiniMax API key (China endpoint)", "MiniMax (China) API key",
-        "https://www.minimaxi.com/"),
-    "MINIMAX_CN_BASE_URL": _base_url("MiniMax (China)"),
-    "DEEPSEEK_API_KEY": _prov("DeepSeek API key for direct DeepSeek access", "DeepSeek API Key",
-        "https://platform.deepseek.com/api_keys", advanced=False),
-    "DEEPSEEK_BASE_URL": _prov("Custom DeepSeek API base URL (advanced)", "DeepSeek Base URL", "",
-        password=False, advanced=False),
-    "DASHSCOPE_API_KEY": _prov("Alibaba Cloud DashScope API key (Qwen + multi-provider models)",
-        "DashScope API Key", "https://modelstudio.console.alibabacloud.com/", advanced=False),
-    "DASHSCOPE_BASE_URL": _prov(
-        "Custom DashScope base URL (default: coding-intl OpenAI-compat endpoint)",
-        "DashScope Base URL", "", password=False),
-    "HERMES_QWEN_BASE_URL": _prov(
-        "Qwen Portal base URL override (default: https://portal.qwen.ai/v1)",
-        "Qwen Portal base URL (leave empty for default)", None, password=False),
-    "OPENCODE_ZEN_API_KEY": _prov("OpenCode Zen API key (pay-as-you-go access to curated models)",
-        "OpenCode Zen API key", "https://opencode.ai/auth"),
-    "COMMANDCODE_API_KEY": _prov(
-        "CommandCode API key (GOAT/Pro/Max/Provider plans — 30+ models via one key)",
-        "CommandCode API key", "https://commandcode.ai/studio/"),
-    "OPENCODE_ZEN_BASE_URL": _base_url("OpenCode Zen"),
-    "OPENCODE_GO_API_KEY": _prov("OpenCode Go API key ($10/month subscription for open models)",
-        "OpenCode Go API key", "https://opencode.ai/auth"),
-    "OPENCODE_GO_BASE_URL": _base_url("OpenCode Go"),
-    "HF_TOKEN": _prov(
-        "Hugging Face token for Inference Providers (20+ open models via router.huggingface.co)",
-        "Hugging Face Token", "https://huggingface.co/settings/tokens", advanced=False),
-    "HF_BASE_URL": _base_url("Hugging Face Inference Providers", "HF"),
-    "OLLAMA_API_KEY": _prov("Ollama Cloud API key (ollama.com — cloud-hosted open models)",
-        "Ollama Cloud API key", "https://ollama.com/settings"),
-    "OLLAMA_BASE_URL": _prov("Ollama Cloud base URL override (default: https://ollama.com/v1)",
-        "Ollama base URL (leave empty for default)", None, password=False),
-    "XIAOMI_API_KEY": _prov(
-        "Xiaomi MiMo API key for MiMo models (mimo-v2.5-pro, mimo-v2.5, mimo-v2-pro, "
-        "mimo-v2-omni, mimo-v2-flash)", "Xiaomi MiMo API Key", "https://platform.xiaomimimo.com",
-        advanced=False),
-    "XIAOMI_BASE_URL": _prov(
-        "Xiaomi MiMo base URL override (default: https://api.xiaomimimo.com/v1)",
-        "Xiaomi base URL (leave empty for default)", None, password=False),
-    "UPSTAGE_API_KEY": _prov("Upstage API key for Solar LLM models", "Upstage API Key",
-        "https://console.upstage.ai/api-keys", advanced=False),
-    "UPSTAGE_BASE_URL": _prov("Upstage base URL override (default: https://api.upstage.ai/v1)",
-        "Upstage base URL (leave empty for default)", None, password=False),
-    "AWS_REGION": _prov("AWS region for Bedrock API calls (e.g. us-east-1, eu-central-1)",
-        "AWS Region", "https://docs.aws.amazon.com/bedrock/latest/userguide/bedrock-regions.html",
-        password=False),
-    "AWS_PROFILE": _prov("AWS named profile for Bedrock authentication (from ~/.aws/credentials)",
-        "AWS Profile", None, password=False),
-    "AZURE_FOUNDRY_API_KEY": _prov("Azure Foundry API key for custom Azure endpoints",
-        "Azure Foundry API Key", "https://ai.azure.com/", advanced=False),
-    "AZURE_FOUNDRY_BASE_URL": _prov(
-        "Azure Foundry base URL (set via 'hermes model' for endpoint-specific config)",
-        "Azure Foundry base URL", None, password=False),
     # ── Tool API keys ──
     "EXA_API_KEY": _tool("Exa API key for AI-native web search and contents", "Exa API key",
         "https://exa.ai/", tools=["web_search", "web_extract"]),
@@ -2970,14 +2871,6 @@ OPTIONAL_ENV_VARS = {
         "OpenViking API key", tools=["viking_search"]),
     "OPENVIKING_ENDPOINT": _tool("OpenViking server URL (default: http://127.0.0.1:1933)",
         "OpenViking endpoint", password=None, advanced=True),
-    # ── Langfuse observability ──
-    "HERMES_LANGFUSE_PUBLIC_KEY": _tool("Langfuse project public key (pk-lf-...)",
-        "Langfuse public key", "https://cloud.langfuse.com", password=False),
-    "HERMES_LANGFUSE_SECRET_KEY": _tool("Langfuse project secret key (sk-lf-...)",
-        "Langfuse secret key", "https://cloud.langfuse.com"),
-    "HERMES_LANGFUSE_BASE_URL": _tool("Langfuse server URL (default: https://cloud.langfuse.com)",
-        "Langfuse server URL (leave empty for cloud.langfuse.com)", None, password=False,
-        advanced=True),
     # ── Messaging platforms ──
     "TELEGRAM_BOT_TOKEN": _msg(
         "Complete Telegram bot token created by @BotFather (numeric bot ID followed by a colon "

@@ -18,13 +18,10 @@ def _hold_gil(secs: int) -> None:
     """Block in a foreign call that keeps the GIL — mirrors native ``primp``.
     ``ctypes.PyDLL`` (unlike ``CDLL``/``WinDLL``) does not release the GIL."""
     import ctypes
-    if sys.platform == "win32":
-        sleep, secs = ctypes.PyDLL("kernel32").Sleep, secs * 1000
-    else:
-        try:
-            sleep = ctypes.PyDLL(None).sleep
-        except AttributeError:  # pragma: no cover — macOS libSystem fallback
-            sleep = ctypes.PyDLL("/usr/lib/libSystem.B.dylib").sleep
+    try:
+        sleep = ctypes.PyDLL(None).sleep
+    except AttributeError:  # pragma: no cover — macOS libSystem fallback
+        sleep = ctypes.PyDLL("/usr/lib/libSystem.B.dylib").sleep
     sleep.argtypes = [ctypes.c_uint]
     sleep(int(secs))
 
@@ -50,7 +47,7 @@ def _fail(error: str, code: int) -> int:
 def main() -> int:
     try:
         request = json.load(sys.stdin)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return _fail(f"invalid request: {exc}", 2)
     hook = request.get("test_hook")
     if hook:
@@ -65,7 +62,7 @@ def main() -> int:
         from plugins.web.ddgs.provider import _run_ddgs_search  # lazy: light startup, patchable
         _write_envelope({"ok": True, "results": _run_ddgs_search(query, safe_limit)})
         return 0
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return _fail(f"{type(exc).__name__}: {exc}", 1)
 
 

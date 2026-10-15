@@ -220,10 +220,10 @@ class ChannelPublisher:
             record, etag = current
             self._preview("allocate", record)
             sequence = record["nextSequence"]
-            version, windows_version = package_versions(sequence)
+            version = package_versions(sequence)[0]  # fork: windows quad unused
             request = {"schema": 1, "buildId": uuid.uuid4().hex, "channel": name,
                        "sequence": sequence, "repository": self.repository, "commit": commit,
-                       "sourceVersion": source_version, "version": version, "windowsVersion": windows_version,
+                       "sourceVersion": source_version, "version": version,
                        "identity": deepcopy(record["identity"]), "bundleEnv": bundle_env,
                        "publicBase": self.public_base}
             if controller_commit is not None:
@@ -256,12 +256,13 @@ class ChannelPublisher:
             raise ChannelError("Protected publication requires the successful release gate")
 
     def allocate_protected(self, name: str, commit: str, source_version: str, *,
-                           release_tag: str, version: str, windows_version: str,
+                           release_tag: str, version: str,
+                           windows_version: str | None = None,  # fork: unused, win32 removed
                            identity: dict, policy: str, release_gate,
                            archive_ref: str | None = None) -> dict:
         """Reserve accepted legacy bytes, never authorize a custom build as stable."""
         facts = {"schema": 1, "channel": name, "repository": self.repository, "commit": commit,
-                 "sourceVersion": source_version, "version": version, "windowsVersion": windows_version,
+                 "sourceVersion": source_version, "version": version,
                  "releaseTag": release_tag, "identity": deepcopy(identity), "bundleEnv": {},
                  "publicBase": self.public_base}
         if archive_ref is not None:
@@ -394,7 +395,6 @@ class ChannelPublisher:
                 raise ChannelError("A newer build is published; stale completion refused")
             if policy is not None and record["head"] is not None:
                 from scripts.releases.semver import compare
-                from scripts.releases.stable import windows_version
                 from hermes_cli.update_channel import canary_timestamp
                 previous_head = record["head"]
                 previous = self.store.get(previous_head["manifestKey"])
@@ -411,8 +411,7 @@ class ChannelPublisher:
                     )
                 else:
                     source_increases = compare(request["version"], previous_request["version"]) > 0
-                if (not source_increases
-                        or windows_version(request["windowsVersion"]) <= windows_version(previous_request["windowsVersion"])):
+                if not source_increases:  # fork: Windows quad comparison removed
                     raise ChannelError("Protected native versions must increase; stale completion refused")
             if self.verify_build is None or self.verify_build(request, manifest) is not True:
                 raise ChannelError("Publication requires complete native build qualification")
@@ -443,6 +442,15 @@ class ChannelPublisher:
             raise ChannelError("Retirement requires a directly active stable-release destination")
         target_raw = self.reader.read_bytes(target["head"]["manifestKey"], target["head"]["sha256"])
         manifest = validate_manifest(decode_json(target_raw), target, self.public_base)
+        # Clients pin destinationHead and need their own package in it, so a
+        # stable head that left a target out (macOS Intel is opt-in) cannot
+        # receive a preview that shipped that target.
+        if record["head"] is not None:
+            source_raw = self.reader.read_bytes(record["head"]["manifestKey"], record["head"]["sha256"])
+            source = validate_manifest(decode_json(source_raw), record, self.public_base)
+            covered = {(p["platform"], p["arch"]) for p in manifest["packages"]}
+            if any((p["platform"], p["arch"]) not in covered for p in source["packages"]):
+                raise ChannelError("Retirement destination lacks a package this channel ships")
         # Two-tier retirement: the kind is derived, never asserted by the caller.
         # A suffixed (canary/commit) identity can never match stable's, so
         # "in-place" cannot be mis-assigned; the kind is a client routing hint.

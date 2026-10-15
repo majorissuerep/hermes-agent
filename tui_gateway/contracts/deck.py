@@ -1,7 +1,7 @@
 """Session deck (``deck.*``): the machine-wide registry of open sessions and the cross-session verbs.
 
 Handlers: ``tui_gateway/methods_deck.py``; row shapes: ``hermes_cli/session_deck.py`` over
-``hermes_state_deck.py``. References are ``#N`` (the caller's profile) or ``<profile>#N``.
+``hermes_state/deck.py``. References are ``#N`` (the caller's profile) or ``<profile>#N``.
 """
 
 from __future__ import annotations
@@ -29,6 +29,7 @@ class DeckSession(Result):
     owner_surface: str
     owner_pid: int | None = None
     live_session_id: str  # runtime id in THIS host ("" when not live here)
+    attached: bool = False  # a terminal/viewer currently shows this session
     message_count: int
     opened_at: float
     last_active: float

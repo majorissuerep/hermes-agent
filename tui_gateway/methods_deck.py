@@ -75,6 +75,7 @@ def _deck_row_payload(row: dict, index: dict | None = None) -> dict:
         "group_name": row["group_name"], "parent_handle": row["parent_handle"], "state": state,
         "owner_surface": row["owner_surface"], "owner_pid": row["owner_pid"],
         "live_session_id": live[0] if live else "", "message_count": int(row["message_count"]),
+        "attached": bool(_session_has_live_transport(live[1])) if live else bool(row.get("owner_pid")),
         "opened_at": float(row["opened_at"]), "last_active": float(row["last_active"]),
         "estimated_cost_usd": row["estimated_cost_usd"],
     }
@@ -118,6 +119,10 @@ def _deck_mark(sid: str, session: dict, profile: str, handle: int) -> str | None
     session["deck"] = {"profile": profile, "handle": int(handle)}
     _cancel_ws_orphan_reap(sid)
     refusal = _ensure_active_session_slot(sid, session)
+    if refusal is None and (lease := session.get("active_session_lease")) is not None:
+        from hermes_cli.active_sessions import transfer_active_session
+        if not transfer_active_session(lease, session_id=session["session_key"], metadata=_lease_metadata(sid)):
+            return "could not publish the deck session's live lease"
     _deck_ensure_snapshot_loop()
     return str(refusal) if refusal else None
 
