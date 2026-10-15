@@ -103,6 +103,8 @@ archive_after_days, backup.*`.
 set/get/unset <NAME>` route any bare name registered in `OPTIONAL_ENV_VARS` / `_EXTRA_ENV_KEYS`
   (or carrying a `setup_hidden_env` platform suffix) to `.env` via `config_env_routing.py` — the
   file the platform setup flows write — never to the top level of config.yaml.
+  Migration normalization lives in `config_env_sanitize.py`; it must use the
+  envelope reader before the shared writer, never decode ciphertext as text.
 - **One writer seam.** Every write of a `config.yaml` (main or profile) goes through
   `hermes_cli.config.atomic_config_write` (refuses deletion by omission) or the explicit
   `atomic_config_replace` full-state path (→ `utils.atomic_roundtrip_yaml_save`, ruamel

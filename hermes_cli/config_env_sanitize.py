@@ -1,4 +1,5 @@
 """Normalize credential-file formatting during configuration migration."""
+import io
 
 
 def sanitize_env_file() -> int:
@@ -9,8 +10,10 @@ def sanitize_env_file() -> int:
     if not env_path.exists():
         return 0
     with config._env_write_lock(env_path):
-        with open(env_path, encoding="utf-8-sig", errors="replace") as f:
-            original_lines = f.readlines()
+        # The writer seals this file; the reader must authenticate/decrypt it
+        # before normalization, including when an updater invokes migration.
+        text = config._hermes_io().read_text(env_path, purpose="env", encoding="utf-8-sig")
+        original_lines = io.StringIO(text or "", newline=None).readlines()
         sanitized = config._sanitize_env_lines(original_lines)
         if sanitized == original_lines:
             return 0
