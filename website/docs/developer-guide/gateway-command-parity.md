@@ -26,7 +26,7 @@ narrower routes (`hermes_cli/gateway_chat_commands.py`).
 setting to this local session (its next turn and `config.get`), saving config.yaml only where the
 handler does; `client-local (cli_only)` commands are terminal/UI features of a client.
 
-102 registry commands: 28 control, 18 read, 56 refused.
+105 registry commands: 28 control, 18 read, 59 refused.
 
 | Command | Gateway (`slash.exec`) | Classic CLI | Ink | Desktop | ACP | Notes |
 |---|---|---|---|---|---|---|
@@ -42,6 +42,7 @@ handler does; `client-local (cli_only)` commands are terminal/UI features of a c
 | `/bundles` | read | HermesCLI._handle_bundles_command | slash.exec | slash.exec | refused |  |
 | `/busy` | control | HermesCLI._handle_busy_command | canonical route | unavailable: terminal | refused | per-session setting (gateway handler) |
 | `/clear` | refused | HermesCLI._cmd_clear | local | action: new | refused | client-local (cli_only) |
+| `/close` | refused | HermesCLI._handle_close_command | sidecar: deck.close | unavailable: terminal | refused | client-local (cli_only) |
 | `/codex-runtime` (/codex_runtime) | control | HermesCLI._handle_codex_runtime | slash.exec | slash.exec | refused | per-session setting (gateway handler) |
 | `/commands` | read | messaging-only: unknown command | slash.exec | action: help | refused | messaging-only |
 | `/compress` (/compact) | refused | HermesCLI._manual_compress | canonical route | action: compress | session.mutate compress |  |
@@ -77,6 +78,7 @@ handler does; `client-local (cli_only)` commands are terminal/UI features of a c
 | `/memory` | read (bare / `pending`) | HermesCLI._handle_memory_command | slash.exec | slash.exec | refused |  |
 | `/moa` | control | HermesCLI._cmd_moa | slash.exec | slash.exec | refused |  |
 | `/model` | refused | HermesCLI._handle_model_switch | canonical route | picker: model | session.mutate model |  |
+| `/name` (/rename) | refused | HermesCLI._handle_name_command | **broken**: session.title (-32601) | slash.exec: refused | refused | client-local (cli_only) |
 | `/new` (/reset) | refused | HermesCLI._cmd_new | local | action: new | refused |  |
 | `/palette` | refused | HermesCLI._open_command_palette | slash.exec: refused | slash.exec: refused | refused | client-local (cli_only) |
 | `/paste` | refused | HermesCLI._handle_paste_command | local | unavailable: terminal | refused | client-local (cli_only) |
@@ -102,6 +104,7 @@ handler does; `client-local (cli_only)` commands are terminal/UI features of a c
 | `/retry` | refused | HermesCLI._cmd_retry | canonical route | action: retry | refused |  |
 | `/review` | control | HermesCLI._handle_review_command | slash.exec | slash.exec | refused |  |
 | `/rollback` | refused | HermesCLI._handle_rollback_command | rollback.diff, rollback.list, rollback.restore | slash.exec: refused | refused | restores filesystem checkpoints |
+| `/sandbox` | refused | HermesCLI._handle_sandbox_command | slash.exec: refused | slash.exec: refused | refused |  |
 | `/save` | refused | HermesCLI.save_conversation | session.save | rpc session.save | refused | writes an export file on the gateway host |
 | `/sessions` | refused | HermesCLI._handle_sessions_command | local | picker: session | refused | messaging origin-scoped listing (`/sessions all` needs a messaging admin) |
 | `/sethome` (/set-home) | refused | messaging-only: unknown command | slash.exec: refused | unavailable: terminal | refused | messaging-only |

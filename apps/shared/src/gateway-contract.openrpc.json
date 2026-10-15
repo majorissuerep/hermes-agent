@@ -16850,6 +16850,11 @@
             "title": "Live Session Id",
             "type": "string"
           },
+          "attached": {
+            "default": false,
+            "title": "Attached",
+            "type": "boolean"
+          },
           "message_count": {
             "title": "Message Count",
             "type": "integer"
@@ -38405,6 +38410,11 @@
             ],
             "default": null,
             "title": "Title"
+          },
+          "generate": {
+            "default": false,
+            "title": "Generate",
+            "type": "boolean"
           }
         },
         "required": [

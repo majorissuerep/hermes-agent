@@ -1343,6 +1343,7 @@ export interface DeckSession {
   owner_surface: string
   owner_pid?: number | null
   live_session_id: string
+  attached?: boolean
   message_count: number
   opened_at: number
   last_active: number
@@ -3388,6 +3389,7 @@ export interface SessionTitleParams {
   session_id: string
   profile?: string | null
   title?: string | null
+  generate?: boolean
 }
 export interface SessionTitleResult {
   title: string
