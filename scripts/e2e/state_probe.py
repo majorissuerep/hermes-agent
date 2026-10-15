@@ -167,20 +167,22 @@ def main() -> None:
                     args = json.loads(function["arguments"])
                     command = args.get("command", "").strip()
                     if command not in {"hermes config get agent.max_turns", "hermes update --check",
-                                       "hermes config set agent.max_turns 17"}:
+                                       "hermes config set agent.max_turns 23"}:
                         continue
                     result = json.loads(replies[call["id"]])
                     if result.get("exit_code") == 0:
                         executed[command] = session_id in child_ids
         finally:
             db.close()
-        if not calls or not children:
-            raise RuntimeError("live task did not actually invoke delegation and persist a child conversation")
-        if (executed.get("hermes config get agent.max_turns") is not True
-                or executed.get("hermes update --check") is not False
-                or executed.get("hermes config set agent.max_turns 17") is not False):
+        complete = bool(calls and children
+                and executed.get("hermes config get agent.max_turns") is True
+                and executed.get("hermes update --check") is False
+                and executed.get("hermes config set agent.max_turns 23") is False
+                and read_raw_config()["agent"]["max_turns"] == 23)
+        if not complete and not request.get("allow_pending"):
             raise RuntimeError("live task did not successfully execute the required child/parent Hermes calls")
-        return {"delegation_calls": calls, "child_sessions": children, "verified_hermes_calls": len(executed)}
+        return {"complete": complete, "delegation_calls": calls, "child_sessions": children,
+                "verified_hermes_calls": len(executed)}
 
     def diagnostics():
         from hermes_cli.logs import _read_tail

@@ -40,6 +40,10 @@ installer/updater fetches from a local, exact-SHA Git transport; no fake release
 published and no production home is reused. The passphrase is generated in driver
 memory and entered only through a PTY. One update prompt is required; extra prompts
 fail immediately. Local commands inside the live session must not prompt again.
+The live CLI remains interactive while asynchronous delegation completes. The driver
+detaches with EOF only after a durable child conversation, all three successful
+parent/child Hermes calls, the changed encrypted config, and a nonce file are proven.
+An initial "waiting for subagent" reply is not completion.
 
 Update/broken-file baselines require their old runtime's system prerequisites
 (Ubuntu: `libatomic1`). The workflow prepares those explicitly; the cold fresh

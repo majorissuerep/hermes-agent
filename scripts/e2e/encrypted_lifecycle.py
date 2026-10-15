@@ -72,7 +72,7 @@ class Rehearsal:
             value = value.replace(secret, "[REDACTED]")
         return value
 
-    def run(self, name, argv, *, prompts=0, timeout=1800, data=None, cwd=None):
+    def run(self, name, argv, *, prompts=0, timeout=1800, data=None, cwd=None, completion=None):
         print(f"[{self.args.scenario}] {name}", flush=True)
         started = time.monotonic()
         log = self.evidence / (name + ".log")
@@ -92,6 +92,8 @@ class Rehearsal:
         output = bytearray()
         consumed = count = 0
         last_progress = started
+        last_check = started
+        detached = False
         try:
             while True:
                 if time.monotonic() - started > timeout:
@@ -110,8 +112,7 @@ class Rehearsal:
                     if not chunk:
                         break
                     output.extend(chunk)
-                    if name == "install":
-                        log.write_text(self.clean(output.decode(errors="replace")))
+                    log.write_text(self.clean(output.decode(errors="replace")))
                     for match in _PROMPT.finditer(output, consumed):
                         count += 1
                         consumed = match.end()
@@ -120,6 +121,14 @@ class Rehearsal:
                         os.write(master, self.password.encode() + b"\n")
                 elif proc.poll() is not None:
                     break
+                if completion and not detached and count == prompts and time.monotonic() - last_check >= 5:
+                    last_check = time.monotonic()
+                    if completion():
+                        # The public interactive CLI owns asynchronous delegation.
+                        # Detach only after the independent durable-state oracle
+                        # proves both the child and its parent's follow-up finished.
+                        os.write(master, b"\x04")
+                        detached = True
             code = proc.wait(timeout=10)
             if code or count != prompts:
                 raise RuntimeError(f"{name}: exit={code}, passphrase prompts={count}, expected={prompts}")
@@ -140,7 +149,7 @@ class Rehearsal:
         # that boot BEFORE consuming stdin, just as the public launcher does.
         boot = "import hermes_bootstrap, runpy; runpy.run_path(" + repr(str(script)) + ", run_name='__main__')"
         text = self.run(action, [str(self.python), "-c", boot], cwd=self.code,
-                        data={"action": action, "password": self.password, **extra})
+                        data={"action": action, "password": self.password, **extra}, timeout=60)
         return json.loads(text.strip().splitlines()[-1])
 
     def install(self, sha):
@@ -169,15 +178,20 @@ class Rehearsal:
             f"This is an install acceptance task. Use delegate_task to ask ONE subagent to run "
             f"`hermes config get agent.max_turns` through terminal, then create the file {marker} "
             f"containing exactly {nonce}. The subagent must verify its contents. "
-            "Then YOU run `hermes update --check` and `hermes config set agent.max_turns 17` through terminal. "
+            "Then YOU run `hermes update --check` and `hermes config set agent.max_turns 23` through terminal. "
             "Use the existing unlocked session, never ask for or pass a passphrase/key. "
             "Run each of those three hermes commands as its own foreground terminal tool call "
             "with timeout=120; do not combine them with other commands or use execute_code. "
             "Do not simulate these actions; perform them, verify the file, and stop."
         )
+        def completed():
+            if not marker.is_file() or marker.read_text().strip() != nonce:
+                return False
+            return self.probe("live-proof", allow_pending=True)["complete"]
+
         self.run("live-" + phase, [str(self.launcher), "chat", "--yolo", "--accept-hooks",
                                    "--toolsets", "terminal,file,delegation", "--max-turns", "10",
-                                   "-q", prompt], prompts=1, timeout=480)
+                                   "-q", prompt], prompts=1, timeout=480, completion=completed)
         if not marker.is_file() or marker.read_text().strip() != nonce:
             raise RuntimeError("live LLM/delegation did not produce the independent file oracle")
         self.receipt["checks"]["live-" + phase].update(self.probe("live-proof"))
