@@ -93,7 +93,7 @@ def _available_key_pool_provider() -> str | None:
 def reset_config_provider() -> Path:
     """Reset config.yaml provider back to auto after logout."""
     from hermes_cli.auth import (get_config_path, require_readable_config_before_write,
-                                 read_raw_config, atomic_config_replace, OPENROUTER_BASE_URL)
+                                 read_raw_config, atomic_config_replace)
 
     config_path = get_config_path()
     if not config_path.exists():
@@ -105,8 +105,7 @@ def reset_config_provider() -> Path:
     model = config.get("model")
     if isinstance(model, dict):
         model["provider"] = "auto"
-        if "base_url" in model:
-            model["base_url"] = OPENROUTER_BASE_URL
+        model.pop("base_url", None)
     atomic_config_replace(config_path, config)
     return config_path
 
