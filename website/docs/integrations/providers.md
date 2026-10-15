@@ -37,6 +37,12 @@ remain available.
 Endpoint settings belong in `config.yaml`; API keys belong in the encrypted secret
 store and are referenced with `key_env`. For example:
 
+### Named custom providers
+
+Name each endpoint once under `providers:` and select that name when configuring
+an auxiliary task or model route. `extra_body` may contain request fields your
+gateway explicitly supports; it is not a universal provider-routing format.
+
 ```yaml
 model:
   provider: litellm
@@ -73,6 +79,37 @@ Use `anthropic_messages` for a custom Anthropic Messages endpoint,
 `chat_completions` for OpenAI Chat Completions, or `codex_responses` for an endpoint
 that actually supports OpenAI Responses. A provider URL is not an API credential.
 Local OpenAI-compatible servers are custom endpoints, not separate bundled vendors.
+
+## Context length detection
+
+Hermes resolves context capacity from the selected provider/model catalog and
+endpoint capabilities, then applies explicit model overrides. A model name alone
+does not prove a gateway exposes the same context window as the first-party API.
+Inspect the selected model with `hermes model`. If your endpoint has a known limit,
+set `model.context_length` through `hermes config set`, not by editing ciphertext.
+Keep the configured window within the endpoint's actual capacity. See
+[context compression](../user-guide/configuration.md#context-compression) for
+compaction thresholds and per-model overrides.
+
+## Tool calls appear as text instead of executing
+
+A custom server must parse the selected model's tool-call format. If the model
+prints a tool-call JSON object as ordinary text, check the server configuration:
+
+| Custom server | Check |
+|---|---|
+| llama.cpp | Enable its tool-aware chat template (`--jinja`) |
+| vLLM | Enable automatic tool choice and a tool-call parser matching the model |
+| Ollama or another OpenAI-compatible server | Use a tool-capable model and the server's OpenAI-compatible endpoint |
+
+These are custom endpoint integrations, not additional bundled providers.
+
+## Grok prompt caching
+
+Keep the selected xAI route, model, and session stable. Hermes owns the request
+identity and conversation prefix; rebuilding the live system prompt or tool schema
+discards cached context. Apply model/tool configuration changes to the next session
+unless you deliberately choose an operation's immediate-activation option.
 
 ## Credentials, profiles and updates
 

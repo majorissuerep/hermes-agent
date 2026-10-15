@@ -1369,7 +1369,7 @@ Hermes turns on cross-session prompt caching automatically when the active provi
 
 For Claude on **native Anthropic**, **OpenRouter**, and **Nous Portal**, Hermes attaches `cache_control` breakpoints with the 1-hour TTL (`ttl: "1h"`) on the system prompt and skill blocks. The first send within a fresh hour pays full input rates; subsequent sends across any session within the same hour pull from the cache at the discounted cached-read rate. This means the system prompt, loaded skill content, and the early portion of any long-context include get reused across `hermes` sessions and across forked subagents for the first hour.
 
-The Qwen Cloud (Alibaba DashScope) upstream caps cache TTL at 5 minutes, so Hermes uses the 5-minute breakpoint TTL there instead. Other Claude-via-third-party paths (AWS Bedrock, Azure Foundry) fall back to the provider's own caching defaults. xAI Grok uses a separate session-pinned conversation-id mechanism — see [xAI prompt caching](../integrations/providers.md#xai-grok--responses-api--prompt-caching).
+The Qwen Cloud (Alibaba DashScope) upstream caps cache TTL at 5 minutes, so Hermes uses the 5-minute breakpoint TTL there instead. Other Claude-via-third-party paths (AWS Bedrock, Azure Foundry) fall back to the provider's own caching defaults. xAI Grok uses a separate session-pinned conversation-id mechanism — see [xAI prompt caching](../integrations/providers.md#grok-prompt-caching).
 
 No knob exists to disable this — caching is always-on and saves money even on single-turn conversations because the system prompt alone is a meaningful fraction of the input token count.
 
@@ -1631,7 +1631,7 @@ Each auxiliary task has a configurable `timeout` (in seconds). Defaults: vision 
 :::
 
 :::info
-Context compression has its own `compression:` block for thresholds and an `auxiliary.compression:` block for model/provider settings — see [Context Compression](#context-compression) above. The primary fallback chain uses a top-level `fallback_providers:` list — see [Fallback Providers](../integrations/providers.md#fallback-providers). All three follow the same provider/model/base_url pattern.
+Context compression has its own `compression:` block for thresholds and an `auxiliary.compression:` block for model/provider settings — see [Context Compression](#context-compression) above. The primary fallback chain uses a top-level `fallback_providers:` list — see [Fallback Providers](../integrations/providers.md#explicit-fallbacks). All three follow the same provider/model/base_url pattern.
 :::
 
 ### Per-task fallback chain for auxiliary tasks
@@ -1685,27 +1685,24 @@ auxiliary:
 
 The semaphore wraps the entire call including retries and fallbacks, so a single slow call counts only once toward the limit.
 
-### OpenRouter routing & Pareto Code for auxiliary tasks
+### Gateway request options for auxiliary tasks
 
-When an auxiliary task resolves to OpenRouter (either explicitly or via `provider: "main"` while your main agent is on OpenRouter), the main agent's `provider_routing` and `openrouter.min_coding_score` settings **do not propagate** — by design, each auxiliary task is independent. To set OpenRouter provider preferences or use the [Pareto Code router](../integrations/providers.md#openrouter-pareto-code-router) for a specific aux task, set them per-task via `extra_body`:
+Auxiliary tasks have independent provider/model settings. Main-agent routing
+preferences do not implicitly become per-task request fields. Select a supported
+connection or a named custom endpoint, then set only the `extra_body` fields that
+endpoint documents:
 
 ```yaml
 auxiliary:
   compression:
-    provider: openrouter
-    model: openrouter/pareto-code         # use the Pareto Code router for this task
-    extra_body:
-      provider:                            # OpenRouter provider routing prefs
-        order: [anthropic, google]         # try these providers in order
-        sort: throughput                   # or "price" | "latency"
-        # only: [anthropic]                # restrict to a specific provider
-        # ignore: [deepinfra]              # exclude specific providers
-      plugins:                             # OpenRouter Pareto Code router knob
-        - id: pareto-router
-          min_coding_score: 0.5            # 0.0–1.0; higher = stronger coders
+    provider: litellm
+    model: your-compression-model
+    extra_body: {}  # Optional gateway-specific request fields
 ```
 
-The shape mirrors what OpenRouter accepts in the chat completions request body. Hermes forwards the entire `extra_body` verbatim, so any other OpenRouter request-body field documented at [openrouter.ai/docs](https://openrouter.ai/docs) works the same way.
+Hermes forwards those explicit request options to that task's endpoint. Retired
+providers and their vendor-specific router presets are not bundled; see
+[AI Providers](../integrations/providers.md) for the supported surface.
 
 ### Changing the Vision Model
 
