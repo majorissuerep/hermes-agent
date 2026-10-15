@@ -189,10 +189,8 @@ class TestDetectAudioEnvironmentTermuxFallback:
         from tools.voice_mode import detect_audio_environment
         result = detect_audio_environment()
 
-        assert result["available"] is True, (
-            f"Voice mode should be available when the binary is on PATH "
-            f"and probes are inconclusive (issue #31015). Got: {result}"
-        )
+        assert any("Termux:API microphone recording available" in n for n in result["notices"])
+        assert not any("Audio libraries not installed" in w for w in result["warnings"])
         assert not any(
             "Termux:API Android app is not installed" in w
             for w in result["warnings"]

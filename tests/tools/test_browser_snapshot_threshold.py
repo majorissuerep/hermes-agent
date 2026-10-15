@@ -27,10 +27,8 @@ def isolated_snapshot_threshold(tmp_path, monkeypatch):
 
 
 def _write_threshold(hermes_home, value):
-    (hermes_home / "config.yaml").write_text(
-        f"browser:\n  snapshot_threshold: {value}\n",
-        encoding="utf-8",
-    )
+    from hermes_cli.config import atomic_config_write
+    atomic_config_write(hermes_home / "config.yaml", {"browser": {"snapshot_threshold": value}})
 
 
 def _long_snapshot(chars: int) -> str:
