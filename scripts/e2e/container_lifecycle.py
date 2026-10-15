@@ -149,9 +149,11 @@ class Docker(Container):
         return {"container_id": value["Id"], "image_id": value["Image"], "backend": "docker"}
 
     def close(self):
-        owned = command(["docker", "container", "ls", "-aq", "--filter", "name=^" + self.name + "$"]).strip()
-        if owned:
-            command(["docker", "rm", "-f", owned.decode()])
+        try:
+            command(["docker", "rm", "-f", self.name])
+        except subprocess.CalledProcessError as exc:
+            if b"No such container:" not in (exc.stderr or b""):
+                raise
 
 
 class Kubernetes(Container):

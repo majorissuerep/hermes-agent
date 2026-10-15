@@ -110,3 +110,7 @@ scripts/run_tests.sh tests/scripts/e2e/
 These fast regression tests exercise real subprocess/PTY/state paths, source
 export and negative receipt controls. They have no live credentials and are not
 a substitute for the four cold container/live-LLM receipts.
+
+The remote-backends CI lane additionally runs `test_container_docker_live.py`
+against a real Docker daemon with `--fail-on-skip`. It verifies source transport,
+no host mounts or inherited model credential, and actual container removal.

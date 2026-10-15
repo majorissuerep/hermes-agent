@@ -191,6 +191,8 @@ _RUST_FILENAMES = {"Cargo.toml", "Cargo.lock"}
 # them, the tests it runs, the sshd it starts, and the runner's env allowlist
 # that carries the sshd/image coordinates into each pytest process.
 _REMOTE_BACKEND_PATHS = (
+    "scripts/e2e/container_lifecycle.py",
+    "tests/scripts/e2e/test_container_docker_live.py",
     "tools/environments/",
     "tools/terminal_tool",
     "tests/tools/test_ssh_environment.py",

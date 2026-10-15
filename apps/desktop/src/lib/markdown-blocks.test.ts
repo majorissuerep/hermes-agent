@@ -160,7 +160,7 @@ describe('parseMarkdownIntoBlocksCached', () => {
         expect(parseMarkdownIntoBlocksCached(text)).toEqual(parseMarkdownIntoBlocks(text))
       }
     },
-    30_000,
+    30_000
   )
 
   it('falls back to the raw text block when the lexer throws instead of crashing the thread (#80621)', () => {
