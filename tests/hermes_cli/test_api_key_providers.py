@@ -1,6 +1,6 @@
 """Tests for API-key provider support (z.ai/GLM, Kimi, MiniMax, AI Gateway)."""
 
-import json
+import json as json_module
 import os
 
 import pytest
@@ -298,9 +298,8 @@ class TestHasAnyProviderConfigured:
         the registry sweep. get_auth_status may be called ONLY for the active
         provider from auth.json — any other provider id means the sweep ran.
         """
-        import json
         hermes_home = self._setup_home(monkeypatch, tmp_path)
-        (hermes_home / "auth.json").write_text(json.dumps({
+        (hermes_home / "auth.json").write_text(json_module.dumps({
             "active_provider": "openai-codex",
         }))
         calls = []

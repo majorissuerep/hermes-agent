@@ -141,7 +141,7 @@ def test_assemble_rejects_missing_and_changed_receipts(tmp_path, staged_candidat
                  lanes=lane_set.NAMES)
 
 
-def test_candidate_materialization_digest_binding_and_publication(tmp_path, monkeypatch, r2_server, staged_candidate):
+def test_candidate_materialization_digest_binding_and_publication(tmp_path, monkeypatch, r2_server, staged_candidate):  # health: allow F811 -- pytest injects the imported r2_server fixture by parameter name
     manifest, _, base = staged_candidate
     tag, commit = manifest['tag'], manifest['commit']
     raw = r2_server.store[f"releases/tag/{manifest['archive']}/release-candidates.json"][0]

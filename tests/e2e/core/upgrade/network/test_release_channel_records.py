@@ -85,7 +85,7 @@ def test_fork_refuses_even_a_valid_upstream_stable_record(inst):
     _refused(inst, r, before, "upstream stable record")
     assert "own main branch" in r.out, r.report(inst)
     reads = [h.path for h in r.edge.proxy.requests(S.ASSETS)] if r.edge else []
-    assert STABLE not in reads, "fork updater consulted an upstream release feed"
+    assert not any("/releases/" in path for path in reads), "fork updater consulted an upstream release feed"
 
 
 def _refused(inst: S.Installed, r: S.Result, before: dict, what: str) -> None:

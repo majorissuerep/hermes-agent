@@ -431,7 +431,6 @@ def test_list_cli_paginates_and_decodes_keys(r2_server, capsys):
 @pytest.mark.parametrize('bad_feed', [None, b'', b'<html>boom</html>',
     b'version: 0.28.0\nfiles: []', b'version: 0.28.0\nfiles: [{}]'])
 def test_real_prune_retention_and_second_feed_failure(r2_server, capsys, bad_feed):
-    import base64
     import hermes_yaml as yaml
 
     tag_reference = 'releases/tag/v0.27.2+canary.20260801T000000Z/live.zip'

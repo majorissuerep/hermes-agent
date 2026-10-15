@@ -268,7 +268,6 @@ class TestChatCompletionsBuildKwargs:
 
 
     def test_ollama_num_ctx(self, transport):
-        from providers import get_provider_profile
         profile = get_provider_profile("custom")
         msgs = [{"role": "user", "content": "Hi"}]
         kw = transport.build_kwargs(
@@ -279,7 +278,6 @@ class TestChatCompletionsBuildKwargs:
         assert kw["extra_body"]["options"]["num_ctx"] == 32768
 
     def test_custom_think_false(self, transport):
-        from providers import get_provider_profile
         profile = get_provider_profile("custom")
         msgs = [{"role": "user", "content": "Hi"}]
         kw = transport.build_kwargs(
@@ -291,7 +289,6 @@ class TestChatCompletionsBuildKwargs:
         assert kw["extra_body"]["think"] is False
 
     def test_custom_omits_think_on_mistral(self, transport):
-        from providers import get_provider_profile
         profile = get_provider_profile("custom")
         msgs = [{"role": "user", "content": "Hi"}]
         kw = transport.build_kwargs(
@@ -566,7 +563,6 @@ class TestChatCompletionsGeminiNativeExtraBodyStrip:
     """
 
     def _nous_profile(self):
-        from providers import get_provider_profile
         return get_provider_profile("nous")
 
     def test_tags_stripped_when_endpoint_is_native_gemini(self, transport):
@@ -709,7 +705,6 @@ class TestPromptCacheKeyCapability:
 
     @pytest.mark.parametrize("provider", [None, "anthropic", "custom"])
     def test_default_off_never_leaks_unknown_body_field(self, transport, provider):
-        from providers import get_provider_profile
 
         kwargs = transport.build_kwargs(
             model="strict-model",
