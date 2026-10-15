@@ -7,12 +7,12 @@ provider vanished from the menu until the window reset, then came back. These te
 real payload builder against a real ``auth.json`` pool in a temp home.
 """
 
-import json
 import time
 from datetime import datetime
 
 import pytest
 
+from hermes_cli.auth import _save_auth_store
 from hermes_cli.inventory import build_model_options_payload, load_picker_context
 
 
@@ -43,18 +43,22 @@ def pooled_home(tmp_path, monkeypatch):
     # Only the pooled credential under test may authenticate anything.
     (home / "config.yaml").write_text(
         "model:\n  provider: nous\n  default: test-model\nauth:\n  adopt_external_logins: false\n")
+    # A background catalog refresh must not replace the model between the healthy
+    # and cooled reads: this contract is about pool state, not model discovery.
+    monkeypatch.setattr("hermes_cli.models.cached_provider_model_ids",
+                        lambda *_a, **_kw: ["pool-test-model", "pool-test-sibling"])
 
     def write(provider: str, cooldown: str, model: str = "some-model") -> dict:
         entry = _pool_entry(provider, cooldown, model)
-        (home / "auth.json").write_text(json.dumps({
+        _save_auth_store({
             "version": 1, "providers": {},
-            "credential_pool": {provider: [entry]}}))
+            "credential_pool": {provider: [entry]}})
         return entry
 
     return write
 
 
-# anthropic reaches the picker through the overlay section, gemini through the models.dev one.
+# Anthropic reaches the picker through the overlay section, Z.AI through the models.dev one.
 @pytest.mark.parametrize("provider", ["anthropic", "zai"])
 @pytest.mark.parametrize("cooldown", ["exhausted", "model_cooldown"])
 @pytest.mark.parametrize("explicit_only", [True, False])
