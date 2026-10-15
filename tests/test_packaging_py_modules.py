@@ -17,7 +17,7 @@ import tomllib
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-PACKAGES = ("agent", "tools", "hermes_cli", "gateway", "tui_gateway", "cron", "acp_adapter", "plugins", "providers")
+PACKAGES = ("agent", "tools", "hermes_cli", "gateway", "tui_gateway", "cron", "acp_adapter", "plugins", "providers", "hermes_state")
 
 
 def _root_py_modules() -> set[str]:
@@ -72,4 +72,5 @@ def test_every_root_module_imported_by_packaged_code_is_shipped():
     missing = {f: sorted(n for n in names if n not in shipped) for f, names in _imported_root_names(paths).items()}
     missing = {f: v for f, v in missing.items() if v}
     assert not missing, f"packaged code imports root modules the wheel would not ship: {missing}"
-    assert "hermes_state" in shipped and "setup" not in shipped
+    assert "setup" not in shipped
+    assert (REPO_ROOT / "hermes_state" / "__init__.py").is_file()

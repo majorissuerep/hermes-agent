@@ -32,6 +32,9 @@ def test_partial_config_import_cannot_invert_config_and_module_locks(tmp_path):
         opener_inside_resolve = Event()
         importer_load_returned = Event()
         original_resolve = wal.resolve_journal_mode
+        # Importing the state package can warm config; this probe owns a genuinely
+        # cold config import so its partial-initialization barrier is meaningful.
+        sys.modules.pop("hermes_cli.config", None)
 
         def controlled_list_providers():
             module = sys.modules["hermes_cli.config"]
@@ -43,9 +46,9 @@ def test_partial_config_import_cannot_invert_config_and_module_locks(tmp_path):
             importer_load_returned.set()
             return []
 
-        def controlled_resolve():
+        def controlled_resolve(**kwargs):
             opener_inside_resolve.set()
-            return original_resolve()
+            return original_resolve(**kwargs)
 
         providers.list_providers = controlled_list_providers
         wal.resolve_journal_mode = controlled_resolve
@@ -110,7 +113,7 @@ def test_existing_database_does_not_wait_for_config_writer(
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("HERMES_HOME", str(tmp_path / ".hermes"))
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
-    monkeypatch.setattr(wal, "is_sqlite_wal_reset_vulnerable", lambda: vulnerable)
+    monkeypatch.setattr(wal, "is_sqlite_wal_reset_vulnerable", lambda **_kwargs: vulnerable)
     config.save_config({"database": {"journal_mode": mode}, "marker": "before"})
     config.load_config_readonly()
     path = tmp_path / "existing.db"
@@ -175,7 +178,7 @@ def test_unestablished_or_strict_modes_still_wait_for_real_policy(tmp_path, monk
     monkeypatch.setenv("HERMES_HOME", str(tmp_path / ".hermes"))
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
-    monkeypatch.setattr(wal, "is_sqlite_wal_reset_vulnerable", lambda: False)
+    monkeypatch.setattr(wal, "is_sqlite_wal_reset_vulnerable", lambda **_kwargs: False)
     config.save_config({"database": {"journal_mode": "wal"}})
     path = tmp_path / "policy.db"
     if state != "empty":
@@ -186,9 +189,9 @@ def test_unestablished_or_strict_modes_still_wait_for_real_policy(tmp_path, monk
     resolving = Event()
     original = wal.resolve_journal_mode
 
-    def resolve():
+    def resolve(**kwargs):
         resolving.set()
-        return original()
+        return original(**kwargs)
 
     monkeypatch.setattr(wal, "resolve_journal_mode", resolve)
 
@@ -208,7 +211,7 @@ def test_deferred_mode_change_is_applied_after_writer_finishes(tmp_path, monkeyp
     monkeypatch.setenv("HERMES_HOME", str(tmp_path / ".hermes"))
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
-    monkeypatch.setattr(wal, "is_sqlite_wal_reset_vulnerable", lambda: False)
+    monkeypatch.setattr(wal, "is_sqlite_wal_reset_vulnerable", lambda **_kwargs: False)
     config.save_config({"database": {"journal_mode": "wal"}})
     path = tmp_path / "deferred.db"
     with closing(sqlite3.connect(path)) as conn:

@@ -45,7 +45,6 @@ def server():
                                       get_process_hermes_home=hermes_constants.get_process_hermes_home),
         "hermes_cli.env_loader": MagicMock(),
         "hermes_cli.banner": MagicMock(),
-        "hermes_state": MagicMock(),
     }):
         import importlib
         mod = importlib.import_module("tui_gateway.server")
