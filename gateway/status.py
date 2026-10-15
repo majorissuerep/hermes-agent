@@ -30,7 +30,10 @@ from hermes_constants import _get_platform_default_hermes_home, get_hermes_home,
 from hermes_cli._subprocess_compat import pid_exists_stdlib
 from gateway import status_records as _records
 
-import fcntl
+if sys.platform == "win32":
+    import msvcrt
+else:
+    import fcntl
 
 _GATEWAY_KIND = "hermes-gateway"
 _RUNTIME_STATUS_FILE = "gateway_state.json"

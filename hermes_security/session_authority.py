@@ -75,8 +75,9 @@ class SessionAuthority:
         self.references = 1
         self.server = _Server(("127.0.0.1", 0), _Handler)
         self.server.authority = self
-        self.thread = threading.Thread(target=self.server.serve_forever, kwargs={"poll_interval": 0.05},
-                                       name="hermes-session-unlock", daemon=True)
+        from agent.memory_provider import spawn_context_thread
+        self.thread = spawn_context_thread(self.server.serve_forever, kwargs={"poll_interval": 0.05},
+                                           name="hermes-session-unlock", daemon=True)
         self.thread.start()
 
     def environment(self) -> dict[str, str]:

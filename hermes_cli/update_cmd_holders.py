@@ -642,11 +642,11 @@ def _desktop_owns_gateway_lifecycle() -> bool:
 
 def _win_service(name: str):
     """No-op: native Windows support removed from this fork (WSL is the Windows answer)."""
-    return None
+    return
 
 def _sc_exe(verb: str, name: str, service, settled_status: str) -> None:
     """No-op: native Windows support removed from this fork (WSL is the Windows answer)."""
-    return None
+    return
 
 def _original_process_is_alive(psutil, pid: int, create_time: float) -> bool:
     """Is the process with this exact ``(pid, create_time)`` identity still alive? AccessDenied/unknown reads
@@ -677,19 +677,19 @@ def _process_create_time(psutil, pid: int, label: str) -> float:
 
 def _verify_service_identities(psutil, name: str, service, expected_service_identity, expected_gateway_identity) -> None:
     """No-op: native Windows support removed from this fork (WSL is the Windows answer)."""
-    return None
+    return
 
 def _stop_windows_gateway_service(*args, **kwargs):
     """No-op: native Windows support removed from this fork (WSL is the Windows answer)."""
-    return None
+    return
 
 def _start_windows_gateway_service(name: str, *, timeout: float = 30.0) -> None:
     """No-op: native Windows support removed from this fork (WSL is the Windows answer)."""
-    return None
+    return
 
 def _restore_windows_gateway_service(name: str, *, timeout: float = 60.0) -> None:
     """No-op: native Windows support removed from this fork (WSL is the Windows answer)."""
-    return None
+    return
 
 def _windows_cold_start_plan() -> dict | None:
     """No-op: native Windows support removed from this fork (WSL is the Windows answer)."""
@@ -803,15 +803,15 @@ def _cold_start_pause_token(adopted: dict | None, claims: list) -> dict | None:
 
 def _stop_windows_gateways(*args, **kwargs):
     """No-op: native Windows support removed from this fork (WSL is the Windows answer)."""
-    return None
+    return
 
 def _record_attested_cold_start_profiles(token: dict, running_profiles: set) -> None:
     """No-op: native Windows support removed from this fork (WSL is the Windows answer)."""
-    return None
+    return
 
 def _cold_start_attested_profiles(token: dict) -> None:
     """No-op: native Windows support removed from this fork (WSL is the Windows answer)."""
-    return None
+    return
 
 def _cold_start_windows_gateway_after_update(token: dict | None = None) -> bool:
     """No-op: native Windows support removed from this fork (WSL is the Windows answer)."""
@@ -819,7 +819,7 @@ def _cold_start_windows_gateway_after_update(token: dict | None = None) -> bool:
 
 def _refresh_windows_gateway_launchers() -> None:
     """No-op: native Windows support removed from this fork (WSL is the Windows answer)."""
-    return None
+    return
 
 def _refresh_bootstrap_cache_scripts(branch: str = "main") -> None:
     """Heal mutable POSIX installer-cache entries; leave immutable commit pins alone."""
@@ -859,7 +859,7 @@ def _service_running(name: str) -> bool:
 
 def _resume_windows_services(token: dict) -> None:
     """No-op: native Windows support removed from this fork (WSL is the Windows answer)."""
-    return None
+    return
 
 def _relaunch_paused_gateways(profiles: dict, unmapped: list) -> tuple[dict, list]:
     """No-op: native Windows support removed from this fork (WSL is the Windows answer)."""
@@ -971,7 +971,7 @@ def _poll_until_ready(targets: list, deadline: float, taken: set) -> dict:
 
 def _verify_relaunched_gateways_alive(token: dict, profiles: dict, unmapped: list) -> None:
     """No-op: native Windows support removed from this fork (WSL is the Windows answer)."""
-    return None
+    return
 
 def _resume_windows_gateways_after_update(token: dict | None) -> None:
     """Settle the shared pause token, including Linux/macOS pre-swap pauses."""
@@ -1058,5 +1058,6 @@ def _resume_windows_gateways_and_merge_outcome(outcome, _windows_gateway_resume,
     except Exception as exc:
         outcome.incomplete = True
         outcome.phase_errors.append(str(exc))
+        logger.warning("Gateway restart incomplete after update", exc_info=True)
         print(f"  ⚠ Gateway restart incomplete: {exc}")
 

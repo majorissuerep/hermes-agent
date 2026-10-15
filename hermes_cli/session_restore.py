@@ -52,7 +52,8 @@ def attach_client(args) -> int:
                HERMES_TUI_RESUME=row["tip_session_id"], HERMES_TUI_CWD=cwd, HERMES_CWD=cwd,
                NODE_ENV="production")
     # No prompt/query is sent: resume restores history and waits for the user.
-    return subprocess.call(json.loads(args.client_command), cwd=cwd, env=env)
+    # This is the interactive terminal session, not a bounded launcher probe.
+    return subprocess.call(json.loads(args.client_command), cwd=cwd, env=env)  # health: allow HX006 -- the user's attached terminal runs until they exit
 
 
 def cmd_restore(args) -> int:

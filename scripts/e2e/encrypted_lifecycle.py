@@ -79,7 +79,7 @@ class Rehearsal:
         started = time.monotonic()
         log = self.evidence / (name + ".log")
         if data is not None:
-            result = subprocess.run(argv, input=json.dumps(data), text=True, capture_output=True,
+            result = subprocess.run(argv, check=False, input=json.dumps(data), text=True, capture_output=True,
                                     env=self.env, cwd=cwd or self.workspace, timeout=timeout)
             text = self.clean(result.stdout + result.stderr)
             log.write_text(text)
@@ -89,7 +89,7 @@ class Rehearsal:
         master, slave = pty.openpty()
         proc = subprocess.Popen(argv, stdin=slave, stdout=slave, stderr=slave,
                                 env=self.env, cwd=cwd or self.workspace, start_new_session=True,
-                                preexec_fn=lambda: fcntl.ioctl(0, termios.TIOCSCTTY, 0))
+                                preexec_fn=lambda: fcntl.ioctl(0, termios.TIOCSCTTY, 0))  # noqa: PLW1509 -- single-threaded controller; child needs its controlling PTY
         os.close(slave)
         output = bytearray()
         consumed = count = 0
@@ -143,7 +143,7 @@ class Rehearsal:
         finally:
             if proc.poll() is None:
                 os.killpg(proc.pid, signal.SIGKILL)
-                proc.wait()
+                proc.wait(timeout=10)
             os.close(master)
             log.write_text(self.clean(output.decode(errors="replace")))
             self.receipt["checks"][name] = {"passphrase_prompts": count,
@@ -306,8 +306,8 @@ def main():
     ref_env = {key: value for key, value in os.environ.items() if key in {"PATH", "HOME", "LANG"}}
     for field in ("baseline", "candidate"):
         resolved = subprocess.run(["git", "-C", str(args.source), "rev-parse", "--verify", "--end-of-options",
-                                   getattr(args, field) + "^{commit}"],
-                                  capture_output=True, text=True, env=ref_env)
+                                   getattr(args, field) + "^{commit}"], check=False,
+                                  capture_output=True, text=True, env=ref_env, timeout=120)
         if resolved.returncode:
             parser.error(f"{field} is unavailable in the source checkout; fetch that ref first")
         setattr(args, field, resolved.stdout.strip())
@@ -321,7 +321,7 @@ def main():
         if hasattr(rehearsal, "python") and (rehearsal.home / ".hermes-vault").is_file():
             try:
                 rehearsal.probe("diagnostics")
-            except Exception as diagnostic_error:
+            except Exception as diagnostic_error:  # health: allow BLE001 -- diagnostics must not replace the scenario failure; recorded in the receipt
                 rehearsal.receipt["diagnostic_error"] = rehearsal.clean(str(diagnostic_error))
         raise
     finally:

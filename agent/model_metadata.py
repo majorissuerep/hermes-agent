@@ -432,16 +432,6 @@ _URL_TO_PROVIDER: dict[str, str] = {
     "ollama.com": "ollama-cloud",
 }
 
-# Auto-extend with provider-profile hostnames not already mapped.
-try:
-    for _pp in _list_providers():
-        _host = _pp.get_hostname()
-        if _host and _host not in _URL_TO_PROVIDER:
-            _URL_TO_PROVIDER[_host] = _pp.name
-except Exception:
-    pass
-
-
 def _infer_provider_from_url(base_url: str) -> Optional[str]:
     """models.dev provider name for a base URL (custom endpoints need no explicit provider)."""
     parsed = _parse_base_url(base_url, "https")
@@ -451,6 +441,11 @@ def _infer_provider_from_url(base_url: str) -> Optional[str]:
     for url_part, provider in _URL_TO_PROVIDER.items():
         if url_part in host:
             return provider
+    # Plugin profiles are scope-dependent; never freeze them at module import.
+    from providers import list_providers
+    for profile in list_providers():
+        if (hostname := profile.get_hostname()) and hostname in host:
+            return profile.name
     return None
 
 

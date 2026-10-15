@@ -143,6 +143,7 @@ class CLIDeckMixin:
             try:
                 self._session_db.deck_close(self._deck_handle, reason=DECK_CLOSE_REASON, closed_by="/close")
             except Exception as exc:
+                logger.warning("Could not close deck session %s", ref, exc_info=True)
                 _cprint(f"Could not close {ref}: {exc}")
                 return True
             self._deck_handle = None
