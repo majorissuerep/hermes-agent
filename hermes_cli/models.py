@@ -1124,7 +1124,8 @@ def detect_provider_for_model(
     NAMED the provider (``/model nous``), or there is no current provider yet (``auto``) — then the
     first guess is returned so the credential step fails loudly instead of silently ignoring input."""
     from hermes_cli.models_detect import (
-        current_provider_catalog_match, current_provider_owns_vendor, provider_has_credentials)
+        current_provider_catalog_match, current_provider_owns_vendor, provider_has_credentials,
+        detection_candidates)
 
     name = (model_name or "").strip()
     if not name:
@@ -1143,7 +1144,7 @@ def detect_provider_for_model(
 
     no_selection = (current_provider or "").strip().lower() in {"", "auto"}
     first_guess = None
-    for candidate in _detection_candidates(name, current_provider):
+    for candidate in detection_candidates(name, current_provider):
         if candidate is None:
             return None  # the current catalog owns this name
         if candidate[0] == current_provider or provider_has_credentials(candidate[0]):
@@ -1157,37 +1158,6 @@ def detect_provider_for_model(
     # A ``vendor/model`` prefix naming a provider the user DECLARED in ``providers:`` is a selection,
     # not a guess — hand it back even before its key is wired up.
     return _resolve_provider_prefix(name)
-
-
-def _detection_candidates(name: str, current_provider: str):
-    """Yield ``(provider, model)`` guesses in ladder order; ``None`` means the current provider's own
-    catalog owns the name (stop, stay)."""
-    static_match = detect_static_provider_for_model(name, current_provider)
-    if static_match:
-        yield static_match
-        # Sibling catalogs listing the same slug (openai-api / openai-codex share the gpt-5.6
-        # family): the credential gate downstream takes the first one the user can actually use.
-        for sibling in _static_catalog_matches(name, current_provider):
-            if sibling != static_match:
-                yield sibling
-    if _model_in_provider_catalog(name.lower(), _provider_keys(current_provider)):
-        yield None
-        return
-
-    # OpenRouter catalog (exact slug, then bare model part).
-    from hermes_cli.auth import _registry_lookup
-    or_slug = _find_openrouter_slug(name) if _registry_lookup("openrouter") is not None else None
-    if or_slug:
-        if current_provider == "openrouter" and or_slug == name:
-            yield None  # already on openrouter with matching name
-            return
-        yield ("openrouter", or_slug)
-
-    # Explicit ``vendor/model`` prefix naming a configured provider — AFTER the OpenRouter lookup so
-    # aggregator-native slugs (``deepseek/deepseek-chat``) keep their routing.
-    prefixed = _resolve_provider_prefix(name)
-    if prefixed:
-        yield prefixed
 
 
 def _find_openrouter_slug(model_name: str) -> Optional[str]:
@@ -1205,18 +1175,18 @@ def _find_openrouter_slug(model_name: str) -> Optional[str]:
 def normalize_provider(provider: Optional[str]) -> str:
     """Normalize provider aliases to canonical ids. ``"auto"`` passes through — use
     ``hermes_cli.auth.resolve_provider()`` to resolve it from credentials."""
-    normalized = (provider or "openrouter").strip().lower()
+    normalized = (provider or "auto").strip().lower()
     return _PROVIDER_ALIASES.get(normalized, normalized)
 
 
 def provider_label(provider: Optional[str]) -> str:
     """Return a human-friendly label for a provider id or alias."""
-    original = (provider or "openrouter").strip()
+    original = (provider or "auto").strip()
     normalized = original.lower()
     if normalized == "auto":
         return "Auto"
     normalized = normalize_provider(normalized)
-    return _PROVIDER_LABELS.get(normalized, original or "OpenRouter")
+    return _PROVIDER_LABELS.get(normalized, original or "Auto")
 
 
 def _is_openai_fast_model(model_id: Optional[str]) -> bool:

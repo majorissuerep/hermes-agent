@@ -11,12 +11,15 @@ def test_removed_bundled_providers_cannot_return_through_metadata_or_runtime(tmp
     from hermes_cli.runtime_provider import resolve_runtime_provider
     from hermes_cli.auth_commands import auth_add_command
     from hermes_cli.models_detect import provider_has_credentials
+    from hermes_cli.models import normalize_provider, provider_label
     from types import SimpleNamespace
 
     supported = {"openai-codex", "openai-api", "anthropic", "litellm", "custom",
                  "zai", "xai", "xai-oauth", "ai-gateway"}
     assert {p.name for p in list_providers()} <= supported
     assert {p.slug for p in listed_canonical_providers()} == supported
+    assert normalize_provider(None) == "auto"
+    assert provider_label(None) == "Auto"
     for name in ("openrouter", "nous", "gemini", "bedrock", "fireworks", "deepseek", "copilot"):
         assert get_provider(name, allow_network=False) is None
         with pytest.raises(AuthError):

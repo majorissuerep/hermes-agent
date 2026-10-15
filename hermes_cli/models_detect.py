@@ -102,3 +102,39 @@ def connected_routing_aggregator() -> Optional[str]:
 
     connected = [pid for pid in sorted(_AGGREGATOR_PROVIDERS) if provider_has_credentials(pid)]
     return connected[0] if len(connected) == 1 else None
+
+
+def detection_candidates(name: str, current_provider: str):
+    """Yield ``(provider, model)`` guesses in ladder order; ``None`` means the current provider's own
+    catalog owns the name (stop, stay)."""
+    from hermes_cli.models import (
+        detect_static_provider_for_model, _static_catalog_matches, _model_in_provider_catalog,
+        _provider_keys, _find_openrouter_slug, _resolve_provider_prefix,
+    )
+
+    static_match = detect_static_provider_for_model(name, current_provider)
+    if static_match:
+        yield static_match
+        # Sibling catalogs listing the same slug (openai-api / openai-codex share the gpt-5.6
+        # family): the credential gate downstream takes the first one the user can actually use.
+        for sibling in _static_catalog_matches(name, current_provider):
+            if sibling != static_match:
+                yield sibling
+    if _model_in_provider_catalog(name.lower(), _provider_keys(current_provider)):
+        yield None
+        return
+
+    # OpenRouter catalog (exact slug, then bare model part).
+    from hermes_cli.auth import _registry_lookup
+    or_slug = _find_openrouter_slug(name) if _registry_lookup("openrouter") is not None else None
+    if or_slug:
+        if current_provider == "openrouter" and or_slug == name:
+            yield None  # already on openrouter with matching name
+            return
+        yield ("openrouter", or_slug)
+
+    # Explicit ``vendor/model`` prefix naming a configured provider — AFTER the OpenRouter lookup so
+    # aggregator-native slugs (``deepseek/deepseek-chat``) keep their routing.
+    prefixed = _resolve_provider_prefix(name)
+    if prefixed:
+        yield prefixed

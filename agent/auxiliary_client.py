@@ -602,29 +602,6 @@ _CODEX_GPT54_GPT55_COMPACTION_THRESHOLD = 0.85
 _CODEX_SPARK_COMPACTION_THRESHOLD = 0.70
 
 
-def _is_codex_gpt54_or_gpt55(model: Optional[str], provider: Optional[str] = None) -> bool:
-    """True for gpt-5.4/5.5/5.6, gpt-6 Sol/Terra/Luna, gpt-6 Astra (and the Daybreak Sol alias) on the Codex OAuth route only.
-
-    Other routes expose a larger window for the same slug and keep the user's threshold.
-    Prefix-matched so ``-pro`` and dated snapshots track every 272K-capped family; ``-900k``
-    picker variants are excluded. Astra is substring-matched (any slug containing ``astra``
-    without ``900k``). Name kept for the ``compression.codex_gpt55_autoraise`` key.
-    """
-    bare = _codex_route_bare_model(model, provider)
-    if bare is None:
-        return False
-    from agent.model_metadata import is_codex_context_variant
-    if is_codex_context_variant(bare):
-        return False
-    if "astra" in bare:
-        return "900k" not in bare
-    from agent.reasoning_effort import is_gpt61_model
-
-    return bare == "gpt-daybreak-blue-latest" or is_gpt61_model(bare) or any(
-        bare == fam or bare.startswith(fam + "-") or bare.startswith(fam + ".")
-        for fam in ("gpt-5.4", "gpt-5.5", "gpt-5.6", "gpt-6-sol", "gpt-6.1-sol", "gpt-6-luna"))
-
-
 def _codex_route_bare_model(model: Optional[str], provider: Optional[str]) -> Optional[str]:
     """Lowercased bare model slug when ``provider`` is the Codex OAuth route, else None."""
     return _bare_model(model) if (provider or "").strip().lower() == "openai-codex" else None
@@ -681,6 +658,8 @@ def _compression_threshold_for_model(
     Arcee Trinity Large Thinking → 0.75 (preserve reasoning context); Codex-route gpt-5.4/5.5/5.6/Astra
     → 0.85, gated by ``allow_codex_gpt55_autoraise``; Codex-route gpt-5.3-codex-spark → 0.70, ungated.
     """
+    from agent.auxiliary_compaction import _is_codex_gpt54_or_gpt55
+
     if _is_arcee_trinity_thinking(model):
         return 0.75
     if allow_codex_gpt55_autoraise and _is_codex_gpt54_or_gpt55(model, provider):

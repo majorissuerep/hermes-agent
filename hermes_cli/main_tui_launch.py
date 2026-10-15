@@ -427,6 +427,19 @@ def _refuse_unforwarded_tui_flags(args) -> None:
         raise SystemExit(2)
 
 
+def _resolve_native_mode(requested: Optional[bool]) -> bool:
+    if requested is not None:
+        return requested
+    try:
+        from hermes_cli.config import load_config
+        from utils import is_truthy_value
+        display = load_config().get("display", {})
+        return is_truthy_value(display.get("tui_native", False)) if isinstance(display, dict) else False
+    except Exception:
+        logger.debug("Could not read configured native TUI mode", exc_info=True)
+        return False
+
+
 def _launch_tui(
     resume_session_id: Optional[str] = None, tui_dev: bool = False, native_mode: Optional[bool] = None,
     model: Optional[str] = None,
@@ -479,15 +492,7 @@ def _launch_tui(
     os.close(active_session_fd)
     env["HERMES_TUI_ACTIVE_SESSION_FILE"] = active_session_file
     env.setdefault("NODE_ENV", "development" if tui_dev else "production")
-    if native_mode is None:
-        try:
-            from hermes_cli.config import load_config
-            from utils import is_truthy_value
-            display = load_config().get("display", {})
-            native_mode = is_truthy_value(display.get("tui_native", False)) if isinstance(display, dict) else False
-        except Exception:
-            native_mode = False
-    env["HERMES_TUI_NATIVE"] = "1" if native_mode else "0"
+    env["HERMES_TUI_NATIVE"] = "1" if _resolve_native_mode(native_mode) else "0"
 
     wt_info = None
     if worktree:
