@@ -830,15 +830,9 @@ class CLIInfoMixin:
         """Detect mcp_servers changes in config.yaml (polled from process_loop every
         CONFIG_WATCH_INTERVAL seconds) and react.
 
-        Default (``mcp.auto_reload_on_config_change: true``) auto-triggers ``_reload_mcp()``.
-        When opted out it only notifies and points at ``/reload-mcp`` — every reload rebuilds the
-        tool surface and INVALIDATES the provider prompt cache (next message re-sends the full
-        prefix), so silent reloads are wrong when external tooling rewrites config.yaml often.
-
-        Instead it notifies the user that the config changed and that they can apply it with ``/reload-mcp``
-        — while warning that ``/reload-mcp`` rebuilds the tool surface and **invalidates the provider prompt
-        cache** (the next message re-sends the full input prefix, expensive on long-context / high-reasoning
-        models). See #1474.
+        Default to a notification and explicit ``/reload-mcp`` activation. Automatic
+        reload requires ``mcp.auto_reload_on_config_change: true``: every reload
+        rebuilds tool schemas and invalidates the conversation's cached prefix.
         """
         now = time.monotonic()
         if now - self._last_config_check < CONFIG_WATCH_INTERVAL:
@@ -858,23 +852,20 @@ class CLIInfoMixin:
 
         self._config_sig = sig
         try:
-            from hermes_cli.config import read_user_config_raw
-            new_cfg = read_user_config_raw(cfg_path)
+            from hermes_cli.config_effective import load_user_config_effective
+            new_cfg = load_user_config_effective(cfg_path, fail_closed=True)
         except Exception:
             return
 
-        # Expand ${VAR} templates so the comparison matches the init snapshot (populated from the
-        # deep-merged + expanded config); otherwise any save_config_value() rewrite of an
-        # unrelated key would false-positive on "${POWERMEM_API_KEY}" vs its expanded value.
-        from hermes_cli.config import _expand_env_vars
-        new_mcp = _expand_env_vars(new_cfg.get("mcp_servers") or {})
+        # The effective loader expands ${VAR} like the initial CLI snapshot.
+        new_mcp = new_cfg.get("mcp_servers") or {}
         if new_mcp == self._config_mcp_servers:
             return  # some other section was edited
 
         # Read the toggle from the config just parsed so the user can flip it in the same edit;
-        # missing key means default-on.
+        # Missing key defers activation so an external edit cannot discard prompt caching.
         _mcp_cfg = new_cfg.get("mcp")
-        _auto = _mcp_cfg.get("auto_reload_on_config_change", True) if isinstance(_mcp_cfg, dict) else True
+        _auto = _mcp_cfg.get("auto_reload_on_config_change", False) if isinstance(_mcp_cfg, dict) else False
         self._config_mcp_servers = new_mcp
 
         if not _auto:

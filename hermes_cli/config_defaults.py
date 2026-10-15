@@ -538,7 +538,7 @@ DEFAULT_CONFIG = {
         # reload rebuilds the tool surface and INVALIDATES the provider prompt cache (next message
         # re-sends the full prefix) — costly on long-context models. When false the watcher still
         # detects the change and prints /reload-mcp guidance.
-        "auto_reload_on_config_change": True,
+        "auto_reload_on_config_change": False,
         # Max MCP servers connected (and their stdio child trees spawned) at once per discovery
         # pass — at boot, on /reload-mcp and on the config watcher's reconcile. Unbounded, a config
         # with N servers spawns N process trees in the same instant (RAM/CPU spike, 429 fan-out on

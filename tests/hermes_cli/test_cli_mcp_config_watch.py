@@ -34,6 +34,24 @@ def _make_cli(tmp_path, mcp_servers=None, extra_config=None):
 
 class TestMCPConfigWatch:
 
+    def test_unset_and_default_config_defer_reload_until_explicit_activation(self, tmp_path):
+        from hermes_cli.config import atomic_config_replace
+        from hermes_cli.config_defaults import DEFAULT_CONFIG
+
+        for ordinal, mcp in enumerate((None, DEFAULT_CONFIG["mcp"])):
+            home = tmp_path / str(ordinal)
+            home.mkdir()
+            obj, cfg_file = _make_cli(home)
+            config = {"mcp_servers": {"fixture": {"url": "https://mcp.invalid"}}}
+            if mcp is not None:
+                config["mcp"] = mcp
+            atomic_config_replace(cfg_file, config)
+            obj._config_sig = None
+            with patch("hermes_cli.config.get_config_path", return_value=cfg_file):
+                obj._check_config_mcp_changes()
+            obj._reload_mcp.assert_not_called()
+            assert obj._config_mcp_servers == config["mcp_servers"]
+
 
 
     def test_new_mcp_server_triggers_reload(self, tmp_path):
@@ -42,12 +60,14 @@ class TestMCPConfigWatch:
         obj, cfg_file = _make_cli(tmp_path, mcp_servers={})
 
         # Simulate user adding a new MCP server to config.yaml
-        cfg_file.write_text(yaml.safe_dump({"mcp_servers": {"github": {"url": "https://mcp.github.com"}}}))
+        cfg_file.write_text(yaml.safe_dump({"mcp": {"auto_reload_on_config_change": True},
+                                          "mcp_servers": {"github": {"url": "https://mcp.github.com"}}}))
         obj._config_sig = None  # force stale mtime
 
         with patch("hermes_cli.config.get_config_path", return_value=cfg_file):
             obj._check_config_mcp_changes()
 
+        assert obj._reload_event.wait(5)
         obj._reload_mcp.assert_called_once()
 
     def test_removed_mcp_server_triggers_reload(self, tmp_path):
@@ -56,12 +76,13 @@ class TestMCPConfigWatch:
         obj, cfg_file = _make_cli(tmp_path, mcp_servers={"github": {"url": "https://mcp.github.com"}})
 
         # Simulate user removing the server
-        cfg_file.write_text(yaml.safe_dump({"mcp_servers": {}}))
+        cfg_file.write_text(yaml.safe_dump({"mcp": {"auto_reload_on_config_change": True}, "mcp_servers": {}}))
         obj._config_sig = None
 
         with patch("hermes_cli.config.get_config_path", return_value=cfg_file):
             obj._check_config_mcp_changes()
 
+        assert obj._reload_event.wait(5)
         obj._reload_mcp.assert_called_once()
 
 
@@ -137,6 +158,7 @@ class TestMCPConfigWatch:
         )
 
         cfg_file.write_text(yaml.safe_dump({
+            "mcp": {"auto_reload_on_config_change": True},
             "auxiliary": {"mcp": {"auto_reload_on_config_change": False}},
             "mcp_servers": {"github": {"url": "https://mcp.github.com"}},
         }))
@@ -146,6 +168,7 @@ class TestMCPConfigWatch:
             obj._check_config_mcp_changes()
 
         # Reload happened because the aux-task path is not the toggle.
+        assert obj._reload_event.wait(5)
         obj._reload_mcp.assert_called()
 
     def test_env_var_templates_do_not_false_positive_on_unrelated_saves(
@@ -222,10 +245,10 @@ def test_pinned_mtime_same_size_replacement_triggers_reload(tmp_path):
     import os
 
     obj, cfg_file = _make_cli(tmp_path, mcp_servers={"bb": {"command": "b"}})
-    cfg_file.write_text("mcp_servers:\n  bb: {command: b}\n")
+    cfg_file.write_text("mcp: {auto_reload_on_config_change: true}\nmcp_servers:\n  bb: {command: b}\n")
     obj._config_sig = file_signature(cfg_file.stat())
     other = tmp_path / "other.yaml"
-    other.write_text("mcp_servers:\n  aa: {command: a}\n")
+    other.write_text("mcp: {auto_reload_on_config_change: true}\nmcp_servers:\n  aa: {command: a}\n")
     other.replace(cfg_file)
     os.utime(cfg_file, ns=(obj._config_sig[0], obj._config_sig[0]))
 
@@ -253,7 +276,7 @@ def test_encrypted_profile_config_changes_reach_the_scoped_watcher(tmp_path, mon
         for ordinal, home in enumerate((homes[0], homes[1], homes[0])):
             monkeypatch.setenv("HERMES_HOME", str(home))
             servers = {home.name: {"url": f"https://{home.name}.invalid/mcp-{ordinal}"}}
-            save_config({"mcp_servers": servers}, merge_existing=True)
+            save_config({"mcp": {"auto_reload_on_config_change": True}, "mcp_servers": servers}, merge_existing=True)
             obj = watchers[home]
             obj._last_config_check = 0.0
             obj._reload_event.clear()

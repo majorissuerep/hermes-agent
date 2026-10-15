@@ -33,6 +33,8 @@ their stores. Source files in the checkout are ordinary code and can be edited u
 Config/skills/tool changes take effect in the next session unless the command offers
 an explicit `--now` and the user requests it. Do not rebuild the active system prompt
 or tool schema mid-conversation; preserve prompt caching.
+MCP config watching only notifies by default. `/reload-mcp` explicitly applies the
+change; `mcp.auto_reload_on_config_change: true` opts into cache-invalidating reloads.
 
 ## Update and recover
 
