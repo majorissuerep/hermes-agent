@@ -1,6 +1,8 @@
-"""The VM driver counts actual getpass prompts and never records their answers."""
+"""The isolated driver counts actual getpass prompts and never records their answers."""
 from argparse import Namespace
+import io
 import json
+import os
 from pathlib import Path
 import sys
 import shlex
@@ -11,7 +13,8 @@ import pytest
 from scripts.e2e.encrypted_lifecycle import Rehearsal
 
 
-def test_unreachable_gateway_stops_before_installation_or_work_creation(tmp_path, monkeypatch):
+@pytest.mark.parametrize("credentials_stdin", [False, True])
+def test_unreachable_gateway_stops_before_installation_or_work_creation(tmp_path, monkeypatch, credentials_stdin):
     import socket
 
     from scripts.e2e import encrypted_lifecycle as driver
@@ -27,18 +30,25 @@ def test_unreachable_gateway_stops_before_installation_or_work_creation(tmp_path
         monkeypatch.setenv("E2E_LLM_MODEL", "fixture")
         monkeypatch.setenv("E2E_LLM_API_KEY", "synthetic-provider-secret")
         monkeypatch.setenv("E2E_LLM_BASE_URL", f"http://127.0.0.1:{unavailable.getsockname()[1]}/v1")
-        monkeypatch.setattr(sys, "argv", ["encrypted_lifecycle.py", "--scenario", "fresh",
+        argv = ["encrypted_lifecycle.py", "--scenario", "fresh",
             "--source", str(source), "--baseline", "HEAD", "--candidate", "HEAD",
-            "--work-dir", str(work), "--evidence", str(evidence)])
+            "--work-dir", str(work), "--evidence", str(evidence)]
+        if credentials_stdin:
+            argv.append("--credentials-stdin")
+            monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps({
+                "provider": "litellm", "model": "fixture", "api_key": "synthetic-provider-secret",
+                "base_url": f"http://127.0.0.1:{unavailable.getsockname()[1]}/v1"})))
+        monkeypatch.setattr(sys, "argv", argv)
 
         def must_not_install(_rehearsal):
             pytest.fail("installation started before provider transport preflight")
 
         monkeypatch.setattr(Rehearsal, "execute", must_not_install)
-        with pytest.raises(RuntimeError, match="gateway is unreachable from this VM"):
+        with pytest.raises(RuntimeError, match="gateway is unreachable"):
             driver.main()
     assert list(work.iterdir()) == []
     assert not evidence.exists()
+    assert "E2E_LLM_API_KEY" not in os.environ
 
 
 def test_failed_runtime_cleanup_cannot_publish_green_or_delete_its_work(tmp_path, monkeypatch):

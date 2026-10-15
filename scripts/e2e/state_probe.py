@@ -1,4 +1,4 @@
-"""Real state readers/writers used by the encrypted lifecycle VM rehearsal.
+"""Real state readers/writers used by the isolated encrypted lifecycle rehearsal.
 
 Input travels on stdin, never argv/environment. Only semantic hashes leave this
 process. No application dependency is mocked or replaced.
@@ -66,7 +66,8 @@ def main() -> None:
         db = SessionDB()
         try:
             db.create_session("e2e-retained", "cli")
-            db.append_message("e2e-retained", "user", "retained user message")
+            db.append_message("e2e-retained", "user", "Remember this retained marker for later: "
+                              + request.get("resume_token", "synthetic-retained-resume-token"))
             db.append_message("e2e-retained", "assistant", "retained assistant message")
         finally:
             db.close()
@@ -113,6 +114,9 @@ def main() -> None:
             "attachment": (io.read_bytes(home / "attachments" / "e2e.bin", purpose="state") or b"").hex(),
             "skill": (home / "skills" / "e2e-retained" / "SKILL.md").read_text(),
         }
+        if (home / "memories" / "legacy.md").exists():
+            files["legacy_memory"] = io.read_text(home / "memories" / "legacy.md", purpose="memory")
+            files["legacy_secret"] = load_env().get("E2E_LEGACY_SECRET")
         if not messages or not all(files.values()):
             raise RuntimeError("retained state is incomplete")
         for path in (home / "config.yaml", home / ".env", home / "memories" / "MEMORY.md"):
@@ -220,7 +224,26 @@ def main() -> None:
             raise RuntimeError("the rehearsal's gateway survived cleanup")
         return {"stopped": True}
 
+    def legacy_proof():
+        memory = io.read_text(home / "memories" / "legacy.md", purpose="memory")
+        secret = load_env().get("E2E_LEGACY_SECRET")
+        turns = read_raw_config().get("agent", {}).get("max_turns")
+        if memory != request["nonce"] or secret != request["nonce"] or turns != request["max_turns"]:
+            raise RuntimeError("dirty installation discarded or changed pre-existing state")
+        if not (home / "memories" / "legacy.md").read_bytes().startswith(b"HRMVAULT"):
+            raise RuntimeError("legacy memory was not encrypted")
+        return {"memory": digest(memory), "secret": digest(secret), "config": digest(turns)}
+
+    def resume_proof():
+        with SessionDB() as db:
+            messages = db.get_messages("e2e-retained")
+        verified = len(messages) > 2 and any(row["role"] == "tool" for row in messages[2:])
+        if not verified and not request.get("allow_pending"):
+            raise RuntimeError("resumed conversation did not persist its new tool activity")
+        return {"history_verified": verified}
+
     handlers = {"seed": seed, "manifest": manifest, "snapshot": snapshot, "restore": restore,
+                "legacy-proof": legacy_proof, "resume-proof": resume_proof,
                 "update-status": update_status, "live-proof": live_proof, "diagnostics": diagnostics,
                 "stop-runtime": stop_runtime}
     print(json.dumps(handlers[request["action"]](), sort_keys=True))

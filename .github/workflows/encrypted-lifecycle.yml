@@ -1,7 +1,7 @@
-name: Encrypted lifecycle VM acceptance
+name: Encrypted lifecycle container acceptance
 
-# Deliberate, bounded runs: every matrix leg gets a fresh Ubuntu VM.
-# LAN gateways use one-job private VM runners, never a shared workstation.
+# Every leg gets a cold, digest-pinned container, never a live Hermes installation.
+# Private gateways use one-job coordinators that create isolated Kubernetes pods.
 # No schedules, historical upstream tag sampling, mocks, or green credential skips.
 on:
   push:
@@ -17,7 +17,7 @@ on:
         type: string
         default: ''
       private_runner:
-        description: 'Use disposable private Ubuntu VMs labelled hermes-encrypted-vm'
+        description: 'Use private Kubernetes coordinators labelled hermes-encrypted-container'
         type: boolean
         default: false
   workflow_call:
@@ -44,8 +44,8 @@ concurrency:
 
 jobs:
   lifecycle:
-    name: Encrypted ${{ matrix.scenario }} (live LLM)
-    runs-on: ${{ fromJSON((inputs.private_runner || startsWith(github.ref, 'refs/heads/e2e/encrypted/private/')) && '["self-hosted","linux","hermes-encrypted-vm"]' || '["ubuntu-24.04"]') }}
+    name: Encrypted ${{ matrix.scenario }} (cold container, live LLM)
+    runs-on: ${{ fromJSON((inputs.private_runner || startsWith(github.ref, 'refs/heads/e2e/encrypted/private/')) && '["self-hosted","linux","hermes-encrypted-container"]' || '["ubuntu-24.04"]') }}
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -66,10 +66,7 @@ jobs:
           set -euo pipefail
           echo "baseline=$(git rev-parse --verify "$BASELINE^{commit}")" >> "$GITHUB_OUTPUT"
           echo "candidate=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-      - name: Prepare the old runtime's system prerequisite
-        if: matrix.scenario == 'update' || matrix.scenario == 'broken-files'
-        run: sudo apt-get update -qq && sudo apt-get install -y libatomic1
-      - name: Real installer, update, restore and delegated LLM task
+      - name: Cold isolated installer, update, restore, resume and delegated LLM task
         env:
           E2E_LLM_API_KEY: ${{ secrets.E2E_LLM_API_KEY }}
           E2E_LLM_BASE_URL: ${{ vars.E2E_LLM_BASE_URL }}
@@ -78,10 +75,18 @@ jobs:
           SCENARIO: ${{ matrix.scenario }}
           BASELINE_SHA: ${{ steps.refs.outputs.baseline }}
           CANDIDATE_SHA: ${{ steps.refs.outputs.candidate }}
+          EXECUTION_BACKEND: ${{ (inputs.private_runner || startsWith(github.ref, 'refs/heads/e2e/encrypted/private/')) && 'kubernetes' || 'docker' }}
+          TEST_NAMESPACE: ${{ vars.E2E_KUBERNETES_NAMESPACE }}
         run: |
-          python3 scripts/e2e/encrypted_lifecycle.py \
+          set -euo pipefail
+          backend_args=(--backend "$EXECUTION_BACKEND")
+          if [ "$EXECUTION_BACKEND" = kubernetes ]; then
+            test -n "$TEST_NAMESPACE" || { echo '::error::Set E2E_KUBERNETES_NAMESPACE to a dedicated test namespace'; exit 1; }
+            backend_args+=(--namespace "$TEST_NAMESPACE")
+          fi
+          python3 scripts/e2e/container_lifecycle.py "${backend_args[@]}" \
             --scenario "$SCENARIO" --baseline "$BASELINE_SHA" --candidate "$CANDIDATE_SHA" \
-            --work-dir "$RUNNER_TEMP" --evidence "$GITHUB_WORKSPACE/lifecycle-evidence"
+            --max-parallel 1 --evidence "$GITHUB_WORKSPACE/lifecycle-evidence"
       - name: Upload sanitized exact-SHA evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -98,8 +103,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - name: Require executed success from all four fresh VMs
+      - name: Require executed success from all four cold containers
         env:
           RESULT: ${{ needs.lifecycle.result }}
         run: |
-          test "$RESULT" = success || { echo "::error::Encrypted VM acceptance did not fully pass ($RESULT)"; exit 1; }
+          test "$RESULT" = success || { echo "::error::Encrypted container acceptance did not fully pass ($RESULT)"; exit 1; }
