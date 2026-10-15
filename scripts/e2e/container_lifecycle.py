@@ -20,7 +20,7 @@ import tempfile
 import urllib.request
 
 SCENARIOS = ("fresh", "update", "broken-files", "dirty-install")
-IMAGE = "ubuntu:24.04@sha256:f610ab94648195aa356059f5b41d6085c9d4d903c072430cdd1af7bdb646106b"
+IMAGE = "docker.io/library/ubuntu:24.04@sha256:f610ab94648195aa356059f5b41d6085c9d4d903c072430cdd1af7bdb646106b"
 SNAPSHOT = "20261001T000000Z"
 CA_PACKAGE_URL = ("https://snapshot.ubuntu.com/ubuntu/20261001T000000Z/pool/main/c/ca-certificates/"
                   "ca-certificates_20260601~24.04.1_all.deb")
@@ -160,13 +160,15 @@ class Kubernetes(Container):
 
     def start(self):
         pod = {"apiVersion": "v1", "kind": "Pod", "metadata": {
-            "name": self.name, "namespace": self.namespace, "labels": {"app": "hermes-encrypted-e2e"}},
+            "name": self.name, "namespace": self.namespace, "labels": {
+                "app": "hermes-encrypted-e2e", "app.kubernetes.io/name": "hermes-encrypted-e2e",
+                "app.kubernetes.io/part-of": "hermes-agent", "app.kubernetes.io/managed-by": "hermes-e2e"}},
             "spec": {"restartPolicy": "Never", "activeDeadlineSeconds": 5400,
                      "automountServiceAccountToken": False, "nodeSelector": {"kubernetes.io/arch": "amd64"},
                      "securityContext": {"seccompProfile": {"type": "RuntimeDefault"}},
                      "containers": [{"name": "lifecycle", "image": IMAGE, "imagePullPolicy": "IfNotPresent",
                         "command": ["sleep", "infinity"],
-                        "securityContext": {"allowPrivilegeEscalation": False,
+                        "securityContext": {"allowPrivilegeEscalation": False, "privileged": False,
                                             "capabilities": {"drop": ["NET_RAW"]}},
                         "resources": {"requests": {"cpu": "2", "memory": "4Gi", "ephemeral-storage": "10Gi"},
                                       "limits": {"cpu": "4", "memory": "8Gi", "ephemeral-storage": "40Gi"}}}]}}
