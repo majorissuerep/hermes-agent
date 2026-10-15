@@ -32,7 +32,6 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Callable, Union
 
-from hermes_cli.observability.shared_metrics_consent import OFFER_VERSION
 
 MODEL_ID = "fake-model"
 
@@ -430,8 +429,11 @@ def write_hermes_home(
     provider), retries are capped so fault tests finish quickly, and no real
     provider credential is ever present.
     """
+    from hermes_cli.config_defaults import DEFAULT_CONFIG
+
     home.mkdir(parents=True, exist_ok=True)
     (home / "config.yaml").write_text(
+        f"_config_version: {DEFAULT_CONFIG['_config_version']}\n"
         "model:\n"
         "  provider: custom\n"
         f"  base_url: {base_url}\n"
@@ -439,13 +441,11 @@ def write_hermes_home(
         "  context_length: 128000\n"
         "agent:\n"
         "  api_max_retries: 1\n"
-        # Answered at the current offer version, so an interactive chat never stops on the
-        # shared-metrics offer (a "No thanks" without offer_version is re-asked).
+        # Explicit local opt-out keeps every surface non-interactive.
         "telemetry:\n"
         "  shared_metrics:\n"
         "    enabled: false\n"
         "    send: false\n"
-        f"    offer_version: {OFFER_VERSION}\n"
         + extra_config,
         encoding="utf-8",
     )

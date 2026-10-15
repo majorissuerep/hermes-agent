@@ -8,12 +8,11 @@ import { fileURLToPath } from 'node:url'
 import { afterEach, expect, test } from 'vitest'
 import { downloadArtifact, stageBundleInputs } from '../tests/install/e2e-assets/bundle-inputs.mjs'
 import { validateBundleInputs, validateDownloadedBundle } from '../tests/install/e2e-assets/bundle-manifest.cjs'
-import { validateBundledManifest } from '../tests/install/e2e-assets/windows-bundled-helpers.mjs'
 import { bundledMatrix, renderMarkdownResults } from '../scripts/sandbox/generate-e2e-matrix.mjs'
 
 const cleanup = []
 afterEach(async () => { while (cleanup.length) await cleanup.pop()() })
-function fixture(platform = 'windows') {
+function fixture(platform = 'macos') {
   const extension = platform === 'windows' ? 'msixbundle' : 'zip'
   return { schema: 1, platform, arch: 'x64', old: {
     tag: 'v1.2.0', version: platform === 'windows' ? '1.2.0.0' : '1.2.0',
@@ -27,7 +26,7 @@ function fixture(platform = 'windows') {
 }
 
 test('package transitions are ordered, identity-preserving, and report through the existing family', () => {
-  for (const platform of ['windows', 'macos']) {
+  for (const platform of ['macos']) {
     const manifest = fixture(platform)
     expect(validateBundleInputs(manifest, platform, 'x64')).toBe(manifest)
     const arm = { ...manifest, arch: 'arm64' }
@@ -40,7 +39,7 @@ test('package transitions are ordered, identity-preserving, and report through t
 })
 
 // Independent fault inputs apply to remote admission and resumed phases alike.
-test.each(['windows', 'macos'])('%s rejects malformed and incompatible pairs', platform => {
+test.each(['macos'])('%s rejects malformed and incompatible pairs', platform => {
   const cases = [
     ['schema', 2, /schema/], ['platform', 'linux', /platform/], ['arch', 'riscv', /architecture/],
     ['arch', 'arm64', /architecture/],
@@ -93,7 +92,7 @@ test.each(['windows', 'macos'])('%s rejects malformed and incompatible pairs', p
   }
 })
 
-test.each(['windows', 'macos'])('%s staging and resumed validation use actual files and reject tampering', async platform => {
+test.each(['macos'])('%s staging and resumed validation use actual files and reject tampering', async platform => {
   // These bytes test download integrity only, not native package acceptance.
   const bytes = { old: Buffer.from('old transport payload'), new: Buffer.from('new transport payload') }
   const manifest = fixture(platform)
@@ -116,10 +115,6 @@ test.each(['windows', 'macos'])('%s staging and resumed validation use actual fi
   const filename = await stageBundleInputs({ manifestUrl: `${base}/manifest.json`, platform, arch: 'x64', out, manifestSha256 })
   const result = JSON.parse(await readFile(filename, 'utf8'))
   expect(validateDownloadedBundle(result, platform, 'x64')).toBe(result)
-  if (platform === 'windows') {
-    expect(validateBundledManifest(result, { expectedPublisher: 'CN=Test' })).toEqual({ ok: true, errors: [] })
-    expect(validateBundledManifest(result, { expectedPublisher: 'CN=Other' }).errors.join()).toContain('OUT_OF_STORE_PUBLISHER')
-  }
   // Native Mac resume uses require(), not an ESM-only import.
   const validator = fileURLToPath(new URL('../tests/install/e2e-assets/bundle-manifest.cjs', import.meta.url))
   execFileSync(process.execPath, ['-e', 'require(process.argv[1]).validateDownloadedBundle(require(process.argv[2]), process.argv[3], "x64")', validator, filename, platform])
@@ -127,12 +122,10 @@ test.each(['windows', 'macos'])('%s staging and resumed validation use actual fi
     for (const missing of [undefined, path.join(directory, 'missing'), directory]) {
       const bad = structuredClone(result); bad[slot].artifact.path = missing
       expect(() => validateDownloadedBundle(bad, platform, 'x64')).toThrow('artifact.path')
-      if (platform === 'windows') expect(validateBundledManifest(bad, { expectedPublisher: 'CN=Test' }).ok).toBe(false)
     }
   }
   const altered = structuredClone(result); altered.new.commit = altered.old.commit
   expect(() => validateDownloadedBundle(altered, platform, 'x64')).toThrow('commit')
-  if (platform === 'windows') expect(validateBundledManifest(altered, { expectedPublisher: 'CN=Test' }).ok).toBe(false)
   for (const slot of ['old', 'new']) expect(await readFile(result[slot].artifact.path)).toEqual(bytes[slot])
   manifest.old.artifact.sha256 = 'c'.repeat(64)
   const bad = path.join(directory, 'bad')

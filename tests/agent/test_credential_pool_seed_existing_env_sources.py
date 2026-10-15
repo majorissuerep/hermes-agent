@@ -32,14 +32,14 @@ def home(tmp_path, monkeypatch):
     home = tmp_path / ".hermes"
     home.mkdir()
     monkeypatch.setenv("HERMES_HOME", str(home))
-    for var in ("DEEPSEEK_API_KEY", "DEEPSEEK_API_KEY_2", "OPENROUTER_API_KEY", "OPENROUTER_API_KEY_2"):
+    for var in ("ZAI_API_KEY", "ZAI_API_KEY_2", "OPENAI_API_KEY", "OPENAI_API_KEY_2"):
         monkeypatch.delenv(var, raising=False)
     return home
 
 
-# openrouter has its own early-return branch in _seed_from_env; deepseek is a
+# openai-api has its own early-return branch in _seed_from_env; zai is a
 # plain registry provider. Both must honour the on-disk env row.
-@pytest.mark.parametrize("provider,primary", [("deepseek", "DEEPSEEK_API_KEY"), ("openrouter", "OPENROUTER_API_KEY")])
+@pytest.mark.parametrize("provider,primary", [("zai", "ZAI_API_KEY"), ("openai-api", "OPENAI_API_KEY")])
 def test_on_disk_env_row_outside_registry_tuple_joins_rotation(home, provider, primary):
     from agent.credential_pool import load_pool
 
@@ -59,20 +59,20 @@ def test_on_disk_env_row_outside_registry_tuple_joins_rotation(home, provider, p
 def test_unset_env_row_stays_out_of_rotation_and_on_disk(home):
     from agent.credential_pool import load_pool
 
-    _write_home(home, "deepseek", {"DEEPSEEK_API_KEY": SYN_PRIMARY}, "DEEPSEEK_API_KEY_2")
+    _write_home(home, "zai", {"ZAI_API_KEY": SYN_PRIMARY}, "ZAI_API_KEY_2")
 
-    pool = load_pool("deepseek")
+    pool = load_pool("zai")
     available, _ = pool._available_entries()
-    assert [e.source for e in available] == ["env:DEEPSEEK_API_KEY"]
+    assert [e.source for e in available] == ["env:ZAI_API_KEY"]
     # load_pool() is a non-destructive read for env rows (#9331): the
     # reference survives for the process that does have the var.
-    assert "env:DEEPSEEK_API_KEY_2" in {e.source for e in pool._entries}
+    assert "env:ZAI_API_KEY_2" in {e.source for e in pool._entries}
 
 
 # Numbered siblings need no auth.json row at all: setting the variable is the
 # whole opt-in (#76593). Discovery stops at the first gap so a leftover _5 does
 # not silently enter rotation.
-@pytest.mark.parametrize("provider,primary", [("deepseek", "DEEPSEEK_API_KEY"), ("openrouter", "OPENROUTER_API_KEY")])
+@pytest.mark.parametrize("provider,primary", [("zai", "ZAI_API_KEY"), ("openai-api", "OPENAI_API_KEY")])
 def test_numbered_env_siblings_seed_rotation_without_config(home, provider, primary, monkeypatch):
     from agent.credential_pool import load_pool
 

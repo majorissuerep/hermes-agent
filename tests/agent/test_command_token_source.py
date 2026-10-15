@@ -398,7 +398,7 @@ class TestExplicitCallableSurvivesCustomResolution:
             ac.resolve_provider_client("dbx", explicit_api_key=key)
         elif shape == "api_key_branch":
             monkeypatch.setattr(hauth, "resolve_api_key_provider_credentials", lambda provider: {})
-            ac.resolve_provider_client("deepseek", explicit_base_url=self.BASE, explicit_api_key=key)
+            ac.resolve_provider_client("openai-api", explicit_base_url=self.BASE, explicit_api_key=key)
         else:  # pragma: no cover
             raise AssertionError(shape)
         return seen

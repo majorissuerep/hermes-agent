@@ -14,7 +14,9 @@ def _strip_provider_prefix(model: str) -> str:
     prefix, suffix = model.split(":", 1)
     try:
         from providers import get_provider_profile
-        is_provider = get_provider_profile(prefix.strip().lower()) is not None
+        canonical = prefix.strip().lower()
+        # Direct OpenAI API is auth-registry-owned, not a bundled profile.
+        is_provider = canonical in {"openai", "openai-api"} or get_provider_profile(canonical) is not None
     except Exception:
         is_provider = False
     if is_provider and not _OLLAMA_TAG_PATTERN.match(suffix.strip()):

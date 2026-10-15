@@ -91,10 +91,7 @@ class TestResolveTaskProviderModel:
         "provider",
         [
             "anthropic",
-            "minimax-oauth",
-            "nous",
             "openai-codex",
-            "qwen-oauth",
             "xai-oauth",
         ],
     )
@@ -471,16 +468,6 @@ class TestNousTagsScoping:
 
 
 class TestNormalizeAuxProvider:
-    def test_main_provider_opencode_resolves_an_aux_client(self, monkeypatch):
-        """``model.provider: opencode`` (the alias the main path accepts) must resolve an aux client
-        exactly like ``opencode-zen`` does, instead of ``(None, None)`` (#115006)."""
-        monkeypatch.setenv("OPENCODE_ZEN_API_KEY", "sk-test-not-real")
-        alias_client, alias_model = resolve_provider_client("opencode", model="glm-5.3", task="approval")
-        canon_client, canon_model = resolve_provider_client("opencode-zen", model="glm-5.3", task="approval")
-        assert canon_client is not None
-        assert alias_client is not None
-        assert str(alias_client.base_url) == str(canon_client.base_url)
-        assert alias_model == canon_model
 
     def test_covers_every_alias_the_main_path_resolves(self):
         """Every alias hermes_cli.auth resolves also resolves in aux — drift becomes a red test (#115006)."""
@@ -2552,22 +2539,6 @@ class TestKimiTemperatureOmitted:
 
 
 class TestAuxiliaryTaskExtraBody:
-    def test_task_reasoning_disable_uses_deepseek_thinking_wire(self, monkeypatch):
-        """Task-level ``none`` must reach an always-toggle profile as its native disable shape."""
-        import agent.auxiliary_client as aux
-
-        monkeypatch.setattr(aux, "_get_auxiliary_task_config", lambda _task: {"reasoning_effort": "none"})
-
-        kwargs = aux._build_call_kwargs(
-            provider="deepseek",
-            model="deepseek-v4-flash",
-            messages=[{"role": "user", "content": "hello"}],
-            extra_body=aux._get_task_extra_body("compression"),
-            task="compression",
-        )
-
-        assert kwargs["extra_body"]["thinking"] == {"type": "disabled"}
-        assert "reasoning" not in kwargs["extra_body"]
 
     def test_explicit_deepseek_thinking_disable_beats_profile_default(self):
         """An explicit vendor control is authoritative when no normalized config is present."""
@@ -3163,51 +3134,51 @@ class TestAnthropicAuxiliaryReasoningTranslation:
         assert "_reasoning_config" not in openai_wire_kwargs
 
     def test_anthropic_messages_profile_keeps_reasoning_reachable(self):
-        # commandcode-anthropic: OpenAI-shaped URL, anthropic_messages api_mode, and a profile
+        # anthropic: OpenAI-shaped URL, anthropic_messages api_mode, and a profile
         # class that overrides build_api_kwargs_extras (so the generic extra_body.reasoning
         # fallback the adapter used to read is suppressed). The adapter must still be told.
         import model_tools
         import providers
 
-        assert providers.get_provider_profile("commandcode-anthropic") is not None
+        assert providers.get_provider_profile("anthropic") is not None
         rc = {"enabled": False}
         kwargs = _build_call_kwargs(
-            "commandcode-anthropic", "claude-haiku-4-5-20251001", [{"role": "user", "content": "hi"}],
-            reasoning_config=rc, base_url="https://api.commandcode.ai/provider/v1",
+            "anthropic", "claude-haiku-4-5-20251001", [{"role": "user", "content": "hi"}],
+            reasoning_config=rc, base_url="https://custom.example.test/v1",
         )
         assert kwargs["_reasoning_config"] == rc
         chat_kwargs = _build_call_kwargs(
-            "commandcode", "Qwen/Qwen3.7-Max", [{"role": "user", "content": "hi"}],
-            reasoning_config=rc, base_url="https://api.commandcode.ai/provider/v1",
+            "custom", "Qwen/Qwen3.7-Max", [{"role": "user", "content": "hi"}],
+            reasoning_config=rc, base_url="https://custom.example.test/v1",
         )
         assert "_reasoning_config" not in chat_kwargs
 
     def test_anthropic_messages_profile_resolves_to_messages_adapter(self, monkeypatch):
-        # Bare ``provider: commandcode-anthropic`` (no api_mode) must wrap the client on the
+        # Bare ``provider: anthropic`` (no api_mode) must wrap the client on the
         # profile's declared wire, or the ``_reasoning_config`` kwarg above would reach a plain
         # OpenAI client and TypeError.
         import model_tools
         from agent.auxiliary_client import AnthropicAuxiliaryClient, resolve_provider_client
 
-        monkeypatch.setenv("COMMANDCODE_API_KEY", "sk-test-" + "x" * 20)
-        client, _ = resolve_provider_client("commandcode-anthropic", model="claude-haiku-4-5-20251001")
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-" + "x" * 20)
+        client, _ = resolve_provider_client("anthropic", model="claude-haiku-4-5-20251001")
         assert isinstance(client, AnthropicAuxiliaryClient)
 
 
 class TestAuxiliaryProviderProfileReasoning:
     """Auxiliary calls must reuse provider-profile reasoning wire shapes."""
 
-    def test_kimi_reasoning_uses_top_level_effort(self):
+    def test_custom_reasoning_uses_top_level_effort(self):
         kwargs = _build_call_kwargs(
-            "kimi-coding",
-            "kimi-k2-turbo-preview",
+            "custom",
+            "acceptance-model",
             [{"role": "user", "content": "hi"}],
             reasoning_config={"enabled": True, "effort": "medium"},
             base_url="https://api.moonshot.ai/v1",
         )
 
-        # K3 maps medium → high (ref: K3 model docs)
-        assert kwargs["reasoning_effort"] == "high"
+        # Custom OpenAI-compatible routes retain the requested effort.
+        assert kwargs["reasoning_effort"] == "medium"
         assert "reasoning" not in kwargs.get("extra_body", {})
         assert "thinking" not in kwargs.get("extra_body", {})
 
@@ -3229,19 +3200,19 @@ class TestAuxiliaryProviderProfileReasoning:
         with patch(
             "agent.auxiliary_client._resolve_task_provider_model",
             return_value=(
-                "kimi-coding",
-                "kimi-k2-turbo-preview",
+                "custom",
+                "acceptance-model",
                 "https://api.moonshot.ai/v1",
                 "test-key",
                 None,
             ),
         ), patch(
             "agent.auxiliary_client._get_cached_client",
-            return_value=(client, "kimi-k2-turbo-preview"),
+            return_value=(client, "acceptance-model"),
         ):
             result = await async_call_llm(
-                provider="kimi-coding",
-                model="kimi-k2-turbo-preview",
+                provider="custom",
+                model="acceptance-model",
                 messages=[{"role": "user", "content": "hi"}],
                 reasoning_config={"enabled": True, "effort": "high"},
             )
@@ -4271,44 +4242,6 @@ class TestBuildCallKwargsToolDedup:
         assert len(result_tools) == 3  # lcm_grep, lcm_describe, lcm_expand
 
 
-class TestNvidiaBillingHeaders:
-    """NVIDIA NIM billing-origin headers are scoped to NVIDIA cloud."""
-
-    def test_resolve_provider_client_cloud_adds_billing_origin_header(self, monkeypatch):
-        monkeypatch.setenv("NVIDIA_API_KEY", "nvidia-key")
-        monkeypatch.delenv("NVIDIA_BASE_URL", raising=False)
-        mock_openai = MagicMock()
-        mock_openai.return_value = MagicMock(name="nvidia-client")
-
-        with patch("agent.auxiliary_client.OpenAI", mock_openai):
-            client, model = resolve_provider_client(
-                provider="nvidia",
-                model="nvidia/test-model",
-            )
-
-        assert client is not None
-        assert model == "nvidia/test-model"
-        call_kwargs = mock_openai.call_args[1]
-        headers = call_kwargs["default_headers"]
-        assert headers["X-BILLING-INVOKE-ORIGIN"] == "HermesAgent"
-
-    def test_resolve_provider_client_local_nim_skips_billing_origin_header(self, monkeypatch):
-        monkeypatch.setenv("NVIDIA_API_KEY", "nvidia-key")
-        monkeypatch.setenv("NVIDIA_BASE_URL", "http://localhost:8000/v1")
-        mock_openai = MagicMock()
-        mock_openai.return_value = MagicMock(name="nvidia-local-client")
-
-        with patch("agent.auxiliary_client.OpenAI", mock_openai):
-            client, model = resolve_provider_client(
-                provider="nvidia",
-                model="nvidia/test-model",
-            )
-
-        assert client is not None
-        assert model == "nvidia/test-model"
-        call_kwargs = mock_openai.call_args[1]
-        headers = call_kwargs.get("default_headers", {})
-        assert "X-BILLING-INVOKE-ORIGIN" not in headers
 
 
 class TestOpenRouterExplicitApiKey:

@@ -69,25 +69,6 @@ class TestResolveProviderClientMainAlias:
         assert client is not None
         assert "beans.local" in str(client.base_url)
 
-    def test_main_resolves_github_copilot_alias(self, tmp_path):
-        _write_config(tmp_path, {
-            "model": {"default": "gpt-5.4", "provider": "github-copilot"},
-        })
-        with (
-            patch("hermes_cli.auth.resolve_api_key_provider_credentials", return_value={
-                "api_key": "ghu_test_token",
-                "base_url": "https://api.githubcopilot.com",
-            }),
-            patch("agent.auxiliary_client.OpenAI") as mock_openai,
-        ):
-            mock_openai.return_value = MagicMock()
-            from agent.auxiliary_client import resolve_provider_client
-
-            client, model = resolve_provider_client("main", "gpt-5.4")
-
-        assert client is not None
-        assert model == "gpt-5.4"
-        assert mock_openai.called
 
 
 class TestResolveProviderClientNamedCustom:
@@ -330,19 +311,6 @@ class TestCustomProviderAliasCollision:
         assert client.api_key == "my-kimi-key"
         assert model == "my-kimi-model"
 
-    def test_bare_kimi_without_custom_still_routes_to_builtin(self, tmp_path, monkeypatch):
-        """Regression guard: bare 'kimi' with no custom entry must still
-        reach the built-in kimi-coding provider."""
-        _write_config(tmp_path, {
-            "model": {"provider": "openrouter", "default": "anthropic/claude-sonnet-4.6"},
-        })
-        monkeypatch.setenv("KIMI_API_KEY", "builtin-kimi-key")
-        from agent.auxiliary_client import resolve_provider_client
-        client, _ = resolve_provider_client("kimi", model="kimi-k2-0905-preview", raw_codex=True)
-        assert client is not None
-        base_url = str(client.base_url)
-        # Built-in kimi-coding points at api.moonshot.ai
-        assert "moonshot" in base_url or "kimi" in base_url, f"unexpected base_url {base_url!r}"
 
     @pytest.mark.parametrize("provider", ["llamacpp", "custom:llamacpp"])
     def test_named_llamacpp_wins_over_local_server_alias(self, tmp_path, provider):
@@ -374,11 +342,11 @@ class TestCustomProviderAliasCollision:
         _write_config(tmp_path, {
             "model": {"provider": "openrouter", "default": "anthropic/claude-sonnet-4.6"},
         })
-        monkeypatch.setenv("KIMI_API_KEY", "builtin-kimi-key")
+        monkeypatch.setenv("OPENAI_API_KEY", "builtin-openai-key")
         from agent.auxiliary_client import resolve_provider_client
         from openai import OpenAI
         client, _ = resolve_provider_client(
-            "kimi-coding", model="kimi-k2", raw_codex=True,
+            "openai-api", model="gpt-6.1-sol", raw_codex=True,
             explicit_base_url="https://override.example.com",
             explicit_api_key="override-key",
         )

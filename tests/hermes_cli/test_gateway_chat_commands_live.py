@@ -21,7 +21,7 @@ import uuid
 
 import pytest
 
-from hermes_cli.observability.shared_metrics_consent import OFFER_VERSION
+from hermes_cli.config_defaults import DEFAULT_CONFIG
 from tests.gateway.fixtures.local_recovery_probe import Model
 from tests.gateway.test_normal_runtime_boot import control
 
@@ -39,14 +39,15 @@ def classic_session(tmp_path):
     threading.Thread(target=peer.serve_forever, daemon=True).start()
     url = f"http://127.0.0.1:{peer.server_port}/v1"
     (home / "config.yaml").write_text(json.dumps({
+        "_config_version": DEFAULT_CONFIG["_config_version"],
         "gateway": {"multiplex_profiles": False},
         "model": {"provider": "custom", "default": "view-model", "base_url": url},
         "auxiliary": {"title_generation": {"enabled": False}},
         # Answered at the current offer version, as tests/fakes/fake_llm_provider.write_hermes_home
         # does: main's interactive chat asks it first on a home that never answered.
-        "telemetry": {"shared_metrics": {"enabled": False, "send": False, "offer_version": OFFER_VERSION}}}))
+        "telemetry": {"shared_metrics": {"enabled": False, "send": False}}}))
     env = {k: os.environ[k] for k in ("PATH", "LANG", "TZ") if k in os.environ}
-    env.update(HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home), PYTHONPATH=str(root),
+    env.update(HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home), HERMES_ALLOW_NO_VAULT="1", PYTHONPATH=str(root),
                PYTHONUNBUFFERED="1", OPENAI_API_KEY="loopback-only", OPENAI_BASE_URL=url)
     tmux_name = "hermes-cli-cmds-" + uuid.uuid4().hex
 

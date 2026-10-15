@@ -43,14 +43,15 @@ class Rehearsal:
         self.env = {key: value for key, value in os.environ.items()
                     if not key.startswith(("HERMES_", "__HERMES_", "E2E_LLM_"))}
         self.env.update(HOME=str(self.root / "user"), HERMES_HOME=str(self.home),
-                        HERMES_RUNTIME_DIR=str(self.root / "runtime"),
+                        HERMES_RUNTIME_DIR=str(args.tool_cache.resolve() if args.tool_cache else self.root / "runtime"),
                         GIT_CONFIG_GLOBAL=str(self.root / "gitconfig"), GIT_CONFIG_NOSYSTEM="1",
                         TZ="UTC", LANG="C.UTF-8", TERM="dumb")
         Path(self.env["HOME"]).mkdir()
         self.env["PATH"] = str(Path(self.env["HOME"]) / ".local" / "bin") + os.pathsep + self.env["PATH"]
         self.receipt = {"scenario": args.scenario, "baseline": args.baseline,
                         "candidate": args.candidate, "live_provider": credential["provider"],
-                        "model": credential["model"], "checks": {}, "status": "running"}
+                        "model": credential["model"], "checks": {}, "status": "running",
+                        "tool_cache_reused": args.tool_cache is not None}
         self.receipt["harness_sha256"] = hashlib.sha256(
             Path(__file__).read_bytes() + Path(__file__).with_name("state_probe.py").read_bytes()).hexdigest()
 
@@ -249,10 +250,13 @@ def main():
     parser.add_argument("--candidate", required=True)
     parser.add_argument("--evidence", type=Path, required=True)
     parser.add_argument("--work-dir", type=Path)
+    parser.add_argument("--tool-cache", type=Path, help="Optional PM tool-only cache for update/dirty rehearsals")
     parser.add_argument("--keep-work", action="store_true")
     parser.add_argument("--transport-url", help="Optional read-only test Git server whose main is the candidate")
     parser.add_argument("--credentials-stdin", action="store_true")
     args = parser.parse_args()
+    if args.scenario == "fresh" and args.tool_cache:
+        parser.error("fresh acceptance must provision its own cold tool store")
     if args.credentials_stdin:
         credential = json.load(sys.stdin)
     else:

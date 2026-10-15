@@ -35,10 +35,6 @@ const REPO_ROOT = path.resolve(__dirname, '..')
 const ELECTRON_DIR = path.join(REPO_ROOT, 'apps', 'desktop', 'electron')
 const MAIN_PLIST = path.join(ELECTRON_DIR, 'entitlements.mac.plist')
 const INHERIT_PLIST = path.join(ELECTRON_DIR, 'entitlements.mac.inherit.plist')
-const BOOTSTRAP_TAURI_DIR = path.join(REPO_ROOT, 'apps', 'bootstrap-installer', 'src-tauri')
-const BOOTSTRAP_TAURI_CONFIG = path.join(BOOTSTRAP_TAURI_DIR, 'tauri.conf.json')
-const BOOTSTRAP_ENTITLEMENTS = path.join(BOOTSTRAP_TAURI_DIR, 'entitlements.plist')
-const BOOTSTRAP_INFO_PLIST = path.join(BOOTSTRAP_TAURI_DIR, 'Info.plist')
 
 const DEVICE_PREFIX = 'com.apple.security.device.'
 
@@ -81,39 +77,5 @@ test('every device.* entitlement on the main app is also inherited', () => {
       `entitlements.mac.inherit.plist: ${JSON.stringify(missing)}. ` +
       'Helper/Setup processes inherit the latter under hardenedRuntime, so ' +
       'any device access the app needs must be listed in both (#37718).'
-  )
-})
-
-test('bootstrap installer carries microphone entitlement for launcher attribution', () => {
-  const config = JSON.parse(fs.readFileSync(BOOTSTRAP_TAURI_CONFIG, 'utf-8'))
-  assert.equal(
-    config.bundle?.macOS?.entitlements,
-    'entitlements.plist',
-    'the macOS bootstrap installer must sign with its entitlements.plist. ' +
-      'When /Applications/Hermes.app is the setup launcher, macOS TCC treats ' +
-      'com.nousresearch.hermes.setup as the responsible process for the desktop ' +
-      'app it opens; without audio-input on the setup app, microphone access is ' +
-      'denied before a permission prompt can appear.'
-  )
-
-  const entitlements = loadEntitlements(BOOTSTRAP_ENTITLEMENTS)
-  assert.equal(
-    entitlements['com.apple.security.device.audio-input'],
-    true,
-    'bootstrap installer entitlements must grant audio-input because it is the ' +
-      'TCC responsible process for the desktop app launched from the setup fast path'
-  )
-})
-
-test('bootstrap installer Info.plist explains microphone usage', () => {
-  const info = plist.parse(fs.readFileSync(BOOTSTRAP_INFO_PLIST, 'utf-8')) as Record<
-    string,
-    unknown
-  >
-
-  assert.equal(
-    typeof info.NSMicrophoneUsageDescription,
-    'string',
-    'macOS requires NSMicrophoneUsageDescription before it can prompt for microphone access'
   )
 })

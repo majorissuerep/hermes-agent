@@ -13,7 +13,7 @@ from scripts.e2e.encrypted_lifecycle import Rehearsal
 def test_actual_pty_prompt_budget_is_enforced_and_credentials_are_redacted(tmp_path, actual_prompts):
     rehearsal = Rehearsal(Namespace(
         work_dir=tmp_path, evidence=tmp_path / "evidence", keep_work=False,
-        baseline="old", candidate="new", scenario="update",
+        baseline="old", candidate="new", scenario="update", tool_cache=None,
     ), {"provider": "litellm", "model": "fixture", "api_key": "synthetic-provider-secret"})
     script = ("import getpass; "
               f"answers=[getpass.getpass('Master password: ') for _ in range({actual_prompts})]; "

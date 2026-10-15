@@ -63,9 +63,12 @@ def daemon(tmp_path, model_peer, request):
     }
     for key, value in (request.param.items() if isinstance(getattr(request, 'param', None), dict) else ()):
         config.setdefault(key, {}).update(value)
+    from hermes_cli.config_defaults import DEFAULT_CONFIG
+    config["_config_version"] = DEFAULT_CONFIG["_config_version"]
     (home / "config.yaml").write_text(json.dumps(config))
     env = {k: os.environ[k] for k in ("PATH", "LANG", "TZ") if k in os.environ}
     env.update(HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home),
+               HERMES_ALLOW_NO_VAULT="1",
                PYTHONPATH=str(root), PYTHONUNBUFFERED="1",
                OPENAI_API_KEY="loopback-only", OPENAI_BASE_URL=model_url,
                HERMES_ACP_SKIP_CONFIGURED_MCP="1")

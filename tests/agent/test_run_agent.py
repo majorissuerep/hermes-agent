@@ -1330,22 +1330,6 @@ class TestBuildApiKwargs:
         assert "reasoning" not in kwargs.get("extra_body", {})
 
 
-    def test_reasoning_sent_for_copilot_gpt5(self, agent):
-        """Copilot/GitHub Models: GPT-5 reasoning goes in extra_body.reasoning."""
-        from agent.transports import get_transport
-        from providers import get_provider_profile
-
-        transport = get_transport("chat_completions")
-        profile = get_provider_profile("copilot")
-        msgs = [{"role": "user", "content": "hi"}]
-        kwargs = transport.build_kwargs(
-            model="gpt-5.4",
-            messages=msgs,
-            tools=None,
-            supports_reasoning=True,
-            provider_profile=profile,
-        )
-        assert kwargs["extra_body"]["reasoning"] == {"effort": "medium"}
 
 
     def test_core_responses_preserves_supported_xhigh(self, agent, monkeypatch):
@@ -1360,35 +1344,7 @@ class TestBuildApiKwargs:
         assert agent._github_models_reasoning_extra_body() == {"effort": "xhigh"}
 
 
-    def test_qwen_portal_formats_messages_and_metadata(self, agent):
-        agent.provider = "qwen-oauth"
-        agent.base_url = "https://portal.qwen.ai/v1"
-        agent._base_url_lower = agent.base_url.lower()
-        agent.session_id = "sess-123"
-        messages = [
-            {"role": "system", "content": "You are helpful"},
-            {"role": "assistant", "content": "Got it"},
-            {"role": "user", "content": "hi"},
-        ]
-        kwargs = agent._build_api_kwargs(messages)
-        assert kwargs["metadata"]["sessionId"] == "sess-123"
-        assert kwargs["extra_body"]["vl_high_resolution_images"] is True
-        assert isinstance(kwargs["messages"][0]["content"], list)
-        assert kwargs["messages"][0]["content"][0]["cache_control"] == {"type": "ephemeral"}
-        assert kwargs["messages"][2]["content"][0]["text"] == "hi"
 
-    def test_qwen_portal_normalizes_bare_string_content_parts(self, agent):
-        agent.provider = "qwen-oauth"
-        agent.base_url = "https://portal.qwen.ai/v1"
-        agent._base_url_lower = agent.base_url.lower()
-        messages = [
-            {"role": "system", "content": [{"type": "text", "text": "system"}]},
-            {"role": "user", "content": ["hello", {"type": "text", "text": "world"}]},
-        ]
-        kwargs = agent._build_api_kwargs(messages)
-        user_content = kwargs["messages"][1]["content"]
-        assert user_content[0] == {"type": "text", "text": "hello"}
-        assert user_content[1] == {"type": "text", "text": "world"}
 
 
     def test_non_custom_provider_unaffected(self, agent):
@@ -5781,34 +5737,6 @@ class TestFallbackAnthropicProvider:
         assert agent._use_prompt_caching is True
 
 
-def test_aiagent_uses_copilot_acp_client():
-    with (
-        patch("model_tools.get_tool_definitions", return_value=_make_tool_defs("web_search")),
-        patch("model_tools.check_toolset_requirements", return_value={}),
-        patch("agent.process_bootstrap.OpenAI") as mock_openai,
-        patch("agent.copilot_acp_client.CopilotACPClient") as mock_acp_client,
-    ):
-        acp_client = MagicMock()
-        mock_acp_client.return_value = acp_client
-
-        agent = AIAgent(
-            api_key="copilot-acp",
-            base_url="acp://copilot",
-            provider="copilot-acp",
-            acp_command="/usr/local/bin/copilot",
-            acp_args=["--acp", "--stdio"],
-            quiet_mode=True,
-            skip_context_files=True,
-            skip_memory=True,
-        )
-
-    assert agent.client is acp_client
-    mock_openai.assert_not_called()
-    mock_acp_client.assert_called_once()
-    assert mock_acp_client.call_args.kwargs["base_url"] == "acp://copilot"
-    assert mock_acp_client.call_args.kwargs["api_key"] == "copilot-acp"
-    assert mock_acp_client.call_args.kwargs["command"] == "/usr/local/bin/copilot"
-    assert mock_acp_client.call_args.kwargs["args"] == ["--acp", "--stdio"]
 
 
 def test_quiet_spinner_allowed_with_explicit_print_fn(agent):

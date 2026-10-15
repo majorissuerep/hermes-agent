@@ -1399,9 +1399,9 @@ class TestBedrockContextCachePersistence:
 class TestStripProviderPrefix:
     def test_known_provider_prefix_is_stripped(self):
         assert _strip_provider_prefix("local:my-model") == "my-model"
-        assert _strip_provider_prefix("openrouter:anthropic/claude-sonnet-4") == "anthropic/claude-sonnet-4"
+        assert _strip_provider_prefix("openai-api:anthropic/claude-sonnet-4") == "anthropic/claude-sonnet-4"
         assert _strip_provider_prefix("anthropic:claude-sonnet-4") == "claude-sonnet-4"
-        assert _strip_provider_prefix("stepfun:step-3.5-flash") == "step-3.5-flash"
+        assert _strip_provider_prefix("zai:glm-5") == "glm-5"
 
 
     def test_http_urls_preserved(self):
@@ -1424,9 +1424,7 @@ class TestStripProviderPrefix:
         assert _strip_provider_prefix("fake-alias:org/model") == "org/model"
 
     def test_bundled_plugin_provider_prefix_is_stripped(self):
-        assert _strip_provider_prefix("fireworks:accounts/fireworks/models/foo") == (
-            "accounts/fireworks/models/foo"
-        )
+        assert _strip_provider_prefix("xai:grok-4.6") == "grok-4.6"
 
     def test_unknown_provider_prefix_is_unchanged(self):
         assert _strip_provider_prefix("not-a-provider:org/model") == (
@@ -1802,14 +1800,16 @@ class TestMoAContextLength:
     ):
         import os
         os.makedirs(home, exist_ok=True)
+        from hermes_cli.config_defaults import DEFAULT_CONFIG
         payload = {
+            "_config_version": DEFAULT_CONFIG["_config_version"],
             "moa": {
                 "default_preset": "p",
                 "presets": {
                     "p": {
                         "enabled": True,
                         "reference_models": [
-                            {"provider": "openrouter", "model": "openai/gpt-5.5"}
+                            {"provider": "ai-gateway", "model": "openai/gpt-5.5"}
                         ],
                         "aggregator": aggregator,
                     }
@@ -1826,12 +1826,13 @@ class TestMoAContextLength:
     def test_moa_resolves_from_aggregator(self, tmp_path, monkeypatch):
         home = str(tmp_path / ".hermes")
         monkeypatch.setenv("HERMES_HOME", home)
-        self._write_moa_config(home, {"provider": "openrouter", "model": "anthropic/claude-opus-4.8"})
+        monkeypatch.setenv("AI_GATEWAY_API_KEY", "synthetic-moa-key")
+        self._write_moa_config(home, {"provider": "ai-gateway", "model": "anthropic/claude-opus-4.8"})
 
         # The MoA preset name + virtual base_url would otherwise fall through to
         # the 256K default; instead it mirrors the aggregator's real window.
         agg_ctx = get_model_context_length(
-            "anthropic/claude-opus-4.8", base_url="https://openrouter.ai/api/v1", provider="openrouter"
+            "anthropic/claude-opus-4.8", base_url="https://ai-gateway.vercel.sh/v1", provider="ai-gateway"
         )
         moa_ctx = get_model_context_length("p", base_url="http://127.0.0.1/v1", provider="moa")
         assert moa_ctx == agg_ctx

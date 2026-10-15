@@ -55,27 +55,29 @@ def test_auth_surface_names_oauth_vs_api_key_recovery():
     """The desktop's one-click fix differs by credential kind: an OAuth provider
     (Accounts tab) needs a re-login, an API-key provider a new key. The descriptor
     carries the kind + display label so the client never guesses from the slug."""
-    oauth = build_error_surface_from_result(_failed_result("auth"), provider="nous")
+    oauth = build_error_surface_from_result(_failed_result("auth"), provider="openai-codex")
     assert oauth["auth_kind"] == "oauth"
-    assert oauth["provider_label"] == "Nous Portal"
+    from hermes_cli.models import provider_label
+    assert oauth["provider_label"] == provider_label("openai-codex")
 
-    key = build_error_surface_from_result(_failed_result("auth"), provider="openrouter")
+    key = build_error_surface_from_result(_failed_result("auth"), provider="openai-api")
     assert key["auth_kind"] == "api_key"
-    assert key["api_key_env"] == "OPENROUTER_API_KEY"
+    assert key["api_key_env"] == "OPENAI_API_KEY"
     assert "api_key_env" not in oauth
 
-    opencode = build_error_surface_from_result(_failed_result("auth"), provider="opencode-go")
-    assert opencode["api_key_env"] == "OPENCODE_GO_API_KEY"
+    gateway = build_error_surface_from_result(_failed_result("auth"), provider="ai-gateway")
+    assert gateway["api_key_env"] == "AI_GATEWAY_API_KEY"
 
     # Non-auth layers never carry the field (clients gate the button on it).
-    assert "auth_kind" not in build_error_surface_from_result(_failed_result("rate_limit"), provider="nous")
+    assert "auth_kind" not in build_error_surface_from_result(_failed_result("rate_limit"), provider="openai-codex")
 
 
 def test_every_provider_surface_carries_the_display_label():
     """Card copy names the provider ("OpenCode Go did not answer…"); without the
     label on non-auth layers clients fell back to the config slug."""
-    surface = build_error_surface_from_result(_failed_result("timeout"), provider="opencode-go")
-    assert surface["provider_label"] == "OpenCode Go"
+    surface = build_error_surface_from_result(_failed_result("timeout"), provider="ai-gateway")
+    from hermes_cli.models import provider_label
+    assert surface["provider_label"] == provider_label("ai-gateway")
     assert "provider_label" not in build_error_surface_from_result(_failed_result("timeout"))
 
 
@@ -133,9 +135,9 @@ def test_result_prefers_classifier_retry_verdict():
 
 def test_result_stamps_failing_session_identity():
     surface = build_error_surface_from_result(
-        _failed_result("rate_limit"), provider="openrouter", model="test/m1"
+        _failed_result("rate_limit"), provider="openai-api", model="test/m1"
     )
-    assert surface["provider"] == "openrouter"
+    assert surface["provider"] == "openai-api"
     assert surface["model"] == "test/m1"
 
     # Absent identity omits the keys instead of stamping empty strings.
@@ -200,7 +202,7 @@ def test_exception_with_status_code_routes_through_classifier():
         status_code = 429
 
     surface = build_error_surface_from_exception(
-        FakeAPIError("rate limited"), provider="openrouter"
+        FakeAPIError("rate limited"), provider="openai-api"
     )
     # 429 → rate_limit → provider layer via the real classifier.
     assert surface["layer"] == LAYER_PROVIDER
@@ -253,7 +255,7 @@ def test_free_tier_block_gets_its_own_code_and_carries_the_sentence():
     provider layer, with the chat sentence riding along as the card body."""
     result = _failed_result("auth_permanent", error="HTTP 403: no permissions",
                             free_tier={"kind": "disabled", "message": "Using Hermes without signing in is switched off."})
-    surface = build_error_surface_from_result(result, provider="nous", model="nous/welcome")
+    surface = build_error_surface_from_result(result, provider="openai-codex", model="nous/welcome")
     assert surface["layer"] == LAYER_PROVIDER and surface["code"] == "free_tier_disabled"
     assert surface["retryable"] is False and "auth_kind" not in surface
     assert surface["message"] == "Using Hermes without signing in is switched off."
@@ -264,13 +266,13 @@ def test_free_tier_block_gets_its_own_code_and_carries_the_sentence():
     ("disabled", False), ("model_not_free", False), ("route", False), ("refused", False),
 ])
 def test_free_tier_kinds_say_whether_a_later_send_can_succeed(kind, retryable):
-    surface = build_error_surface_from_result(_failed_result("rate_limit", free_tier={"kind": kind}), provider="nous")
+    surface = build_error_surface_from_result(_failed_result("rate_limit", free_tier={"kind": kind}), provider="openai-codex")
     assert surface["code"] == f"free_tier_{kind}" and surface["retryable"] is retryable
     assert "message" not in surface
 
 
 def test_a_free_tier_block_without_a_kind_is_ignored():
-    surface = build_error_surface_from_result(_failed_result("auth_permanent", free_tier={}), provider="nous")
+    surface = build_error_surface_from_result(_failed_result("auth_permanent", free_tier={}), provider="openai-codex")
     assert surface["code"] == "auth_permanent" and surface["layer"] == LAYER_AUTH
 
 

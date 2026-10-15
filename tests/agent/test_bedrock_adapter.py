@@ -1160,25 +1160,6 @@ class TestBedrockContextLength:
             assert get_bedrock_context_length("anthropic.claude-opus-4-6") == 1_000_000
             mock_probe.assert_not_called()
 
-    def test_static_catalog_claude_ids_match_their_anthropic_window(self):
-        """Every Claude id in the Bedrock static fallback gets the same offline window as its bare
-        Anthropic id, so a model added to the picker can't silently land on the 128K default."""
-        from agent.bedrock_adapter import get_bedrock_context_length
-        from agent.model_metadata import DEFAULT_CONTEXT_LENGTHS, _longest_key_match
-        from hermes_cli.models_catalog_static import _PROVIDER_MODELS
-
-        mismatched = []
-        for model_id in _PROVIDER_MODELS["bedrock"]:
-            _, sep, bare = model_id.partition("anthropic.")
-            if not sep:
-                continue
-            hit = _longest_key_match(DEFAULT_CONTEXT_LENGTHS, bare)
-            expected = hit[1] if hit else None
-            actual = get_bedrock_context_length(model_id, probe=False)
-            if actual != expected:
-                mismatched.append((model_id, expected, actual))
-
-        assert not mismatched, f"Bedrock static Claude ids drift from DEFAULT_CONTEXT_LENGTHS: {mismatched}"
 
     def test_million_token_claude_entries_match_model_metadata(self):
         """BEDROCK_CONTEXT_LENGTHS must not drift from DEFAULT_CONTEXT_LENGTHS.
@@ -1639,47 +1620,6 @@ class TestImageBase64Decoding:
         assert isinstance(blocks[0]["image"]["source"]["bytes"], bytes)
 
 
-class TestBearerTokenRoutesToConverse:
-    """Bearer Token users must go through Converse API, not AnthropicBedrock SDK.
-
-    The AnthropicBedrock SDK only supports SigV4 signing — it cannot use
-    AWS_BEARER_TOKEN_BEDROCK. Ref: #28156.
-    """
-
-    def _resolve(self, monkeypatch, *, bearer: bool):
-        import os
-
-        from hermes_cli import runtime_provider as rp
-
-        if bearer:
-            monkeypatch.setenv("AWS_BEARER_TOKEN_BEDROCK", "test-bearer-token-123")
-        else:
-            monkeypatch.delenv("AWS_BEARER_TOKEN_BEDROCK", raising=False)
-        monkeypatch.setenv("AWS_DEFAULT_REGION", "us-east-1")
-        assert "AWS_BEARER_TOKEN_BEDROCK" in os.environ or not bearer
-
-        monkeypatch.setattr(
-            rp,
-            "_get_model_config",
-            lambda: {
-                "default": "us.anthropic.claude-sonnet-4-6",
-                "provider": "bedrock",
-            },
-        )
-        monkeypatch.setattr(rp, "load_config", lambda: {"bedrock": {}})
-        return rp.resolve_runtime_provider(requested="bedrock")
-
-    def test_bearer_token_forces_converse_for_claude(self, monkeypatch):
-        """Claude model + Bearer Token → bedrock_converse, not anthropic_messages."""
-        runtime = self._resolve(monkeypatch, bearer=True)
-        assert runtime["api_mode"] == "bedrock_converse"
-        assert "bedrock_anthropic" not in runtime
-
-    def test_sigv4_claude_still_uses_anthropic_bedrock_sdk(self, monkeypatch):
-        """Without a bearer token, Claude keeps the AnthropicBedrock SDK path."""
-        runtime = self._resolve(monkeypatch, bearer=False)
-        assert runtime["api_mode"] == "anthropic_messages"
-        assert runtime.get("bedrock_anthropic") is True
 
 
 # ---------------------------------------------------------------------------

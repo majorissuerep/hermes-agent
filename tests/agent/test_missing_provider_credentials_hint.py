@@ -1,8 +1,8 @@
 """The "no credentials" error for an explicit provider names a remedy that can actually work.
 
 Deriving the env var from the provider id (``f"{id.upper()}_API_KEY"``) invents names nothing reads:
-``MINIMAX-OAUTH_API_KEY`` for OAuth ids (#114405, #78996) and ``ALIBABA_API_KEY`` where the registry
-reads ``DASHSCOPE_API_KEY``. Both the auxiliary ladder and main-agent init share one helper.
+``OPENAI-CODEX_API_KEY`` for OAuth ids (#114405, #78996) and ``ZAI_UNKNOWN_API_KEY`` where the registry
+reads ``ZAI_API_KEY``. Both the auxiliary ladder and main-agent init share one helper.
 """
 import pytest
 import hermes_yaml as yaml
@@ -12,13 +12,13 @@ from hermes_cli.auth import PROVIDER_REGISTRY
 
 
 @pytest.mark.parametrize("provider, expected, forbidden", [
-    ("minimax-oauth", "hermes auth add minimax-oauth", "MINIMAX-OAUTH_API_KEY"),
-    ("alibaba", "Set the DASHSCOPE_API_KEY environment variable", "ALIBABA_API_KEY"),
+    ("openai-codex", "hermes auth add openai-codex", "OPENAI-CODEX_API_KEY"),
+    ("zai", "Set the GLM_API_KEY environment variable", "ZAI_UNKNOWN_API_KEY"),
 ])
 def test_aux_ladder_names_registry_remedy_for_explicit_provider(tmp_path, monkeypatch, provider, expected, forbidden):
     """Real call_llm → ladder with the compression provider pinned and no credentials anywhere."""
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
-    for var in ("MINIMAX_API_KEY", "DASHSCOPE_API_KEY"):
+    for var in ("OPENAI_API_KEY", "ZAI_API_KEY"):
         monkeypatch.delenv(var, raising=False)
     (tmp_path / "config.yaml").write_text(yaml.safe_dump({
         "model": {"provider": provider, "default": "test-model"},
@@ -40,9 +40,9 @@ def test_main_init_shares_helper_and_no_registry_provider_gets_an_invented_env_v
     from agent.agent_init import _routed_client_kwargs
 
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
-    agent = SimpleNamespace(provider="minimax-oauth", model="m", base_url=None, api_key=None,
-                            _fallback_activated=False, _explicit_provider="minimax-oauth")
-    with pytest.raises(RuntimeError, match=r"hermes auth add minimax-oauth"):
+    agent = SimpleNamespace(provider="openai-codex", model="m", base_url=None, api_key=None,
+                            _fallback_activated=False, _explicit_provider="openai-codex")
+    with pytest.raises(RuntimeError, match=r"hermes auth add openai-codex"):
         _routed_client_kwargs(agent, None, 60)
 
     for pid, pconfig in PROVIDER_REGISTRY.items():

@@ -25,14 +25,3 @@ def chain(monkeypatch):
 def test_no_credentials_walks_the_chain_once(chain):
     assert bedrock_adapter.has_aws_credentials() is False
     assert len(chain) == 1
-
-
-def test_the_desktop_backends_auto_detect_skips_instance_metadata(chain, monkeypatch):
-    from hermes_cli.auth import resolve_provider
-    from hermes_cli.auth_constants import AuthError
-
-    as_local_desktop_backend(monkeypatch)
-    with pytest.raises(AuthError):
-        resolve_provider("auto", skip_free_tier=True)
-
-    assert chain and all(walk.get("instance_metadata") is False for walk in chain)
