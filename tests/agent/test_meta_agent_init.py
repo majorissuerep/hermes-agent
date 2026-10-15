@@ -1,4 +1,6 @@
-"""Tests for AIAgent provider=meta host-mandated api_mode."""
+"""Custom endpoint wire compatibility and unsupported-name handling."""
+
+import pytest
 
 
 
@@ -114,8 +116,8 @@ def test_agent_init_meta_url_without_provider_implies_codex_responses():
     assert agent.api_mode == "codex_responses"
 
 
-def test_agent_init_meta_provider_without_meta_url_falls_through_to_chat_completions(monkeypatch):
-    """`provider="meta"` without an api.meta.ai base_url falls through to chat_completions.
+def test_unconfigured_meta_name_is_refused_but_explicit_custom_endpoint_works(monkeypatch):
+    """An unsupported name without a configured endpoint must not select a vendor default.
 
     The Meta wire protocol is URL-driven by design so custom OpenAI-compatible
     endpoints configured under `providers.meta` are not broken by forcing Responses API.
@@ -124,19 +126,17 @@ def test_agent_init_meta_provider_without_meta_url_falls_through_to_chat_complet
 
     monkeypatch.setenv("META_API_KEY", "sk-test-meta")
 
-    agent_empty = AIAgent(
-        provider="meta",
-        base_url="",
-        api_key="sk-test-meta",
-        model="muse-spark-1.2",
-        api_mode=None,
-        quiet_mode=True,
-        skip_context_files=True,
-        skip_memory=True,
-    )
-    assert agent_empty.api_mode == "chat_completions"
-    assert agent_empty.provider == "meta"
-
+    with pytest.raises(RuntimeError, match="Provider 'meta'"):
+        AIAgent(
+            provider="meta",
+            base_url="",
+            api_key="sk-test-meta",
+            model="muse-spark-1.2",
+            api_mode=None,
+            quiet_mode=True,
+            skip_context_files=True,
+            skip_memory=True,
+        )
     agent_custom = AIAgent(
         provider="meta",
         base_url="https://custom.meta.endpoint.internal/v1",
