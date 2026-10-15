@@ -1194,8 +1194,11 @@ def _build_curated_lists(current_provider: str, current_base_url: str, current_m
     for _pp in list_providers():
         if _pp.fallback_models and not curated.get(_pp.name):
             curated[_pp.name] = list(_pp.fallback_models)
-    # Remote manifest so new Portal models surface without a release; in-repo snapshot fallback.
-    curated["nous"] = get_curated_nous_model_ids()
+    # Retired providers must not trigger discovery merely because another picker opened.
+    # An explicitly installed provider profile can still opt into its own catalog.
+    from hermes_cli.providers import get_provider
+    if get_provider("nous", allow_network=False) is not None:
+        curated["nous"] = get_curated_nous_model_ids()
     if "ollama-cloud" not in curated:
         from hermes_cli.models import fetch_ollama_cloud_models
         # Read path: cache only; the row's own SWR refresh (cached_provider_model_ids) warms it.
