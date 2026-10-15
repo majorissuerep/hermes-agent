@@ -1477,9 +1477,9 @@ def _compression_threshold(agent, cfg: dict[str, Any]) -> tuple[float, bool]:
     notice_enabled = _cfg_flag(cfg, "codex_gpt55_autoraise_notice", True)
     agent._compression_threshold_autoraised = None
     with suppress(Exception):
+        from agent.auxiliary_compaction import _is_codex_gpt54_or_gpt55 as _is_codex_gpt54_or_gpt55_fn
         from agent.auxiliary_client import (
             _compression_threshold_for_model as _cthresh_fn,
-            _is_codex_gpt54_or_gpt55 as _is_codex_gpt54_or_gpt55_fn,
             _is_codex_spark as _is_codex_spark_fn,
         )
         _model_cthresh = _cthresh_fn(
