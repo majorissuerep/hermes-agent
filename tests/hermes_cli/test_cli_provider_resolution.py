@@ -205,8 +205,8 @@ def test_startup_alias_base_url_reaches_runtime_resolution(
         "model",
         {
             "default": "fallback-model",
-            "provider": "openrouter",
-            "base_url": "https://openrouter.ai/api/v1",
+            "provider": "ai-gateway",
+            "base_url": "https://ai-gateway.vercel.sh/v1",
         },
     )
     monkeypatch.setattr(
@@ -273,9 +273,9 @@ def test_runtime_resolution_failure_is_not_sticky(monkeypatch):
         if calls["count"] == 1:
             raise RuntimeError("temporary auth failure")
         return {
-            "provider": "openrouter",
+            "provider": "ai-gateway",
             "api_mode": "chat_completions",
-            "base_url": "https://openrouter.ai/api/v1",
+            "base_url": "https://ai-gateway.vercel.sh/v1",
             "api_key": "test-key",
             "source": "env/config",
         }
@@ -334,18 +334,18 @@ def test_fallback_runtime_resolves_the_fallback_entry_model(monkeypatch, tmp_pat
     home = tmp_path / "hermes"
     home.mkdir()
     (home / "config.yaml").write_text(
-        "model:\n  default: mimo-v2.5-free\n  provider: opencode\n  base_url: https://opencode.ai/zen/v1\n")
+        "model:\n  default: claude-sonnet-4\n  provider: anthropic\n  base_url: https://api.anthropic.com\n")
     monkeypatch.setenv("HERMES_HOME", str(home))
-    monkeypatch.setenv("OPENCODE_GO_API_KEY", "sk-test-go")
+    monkeypatch.setenv("ZAI_API_KEY", "sk-test-go")
     monkeypatch.setattr("cli._cprint", lambda *a, **k: None, raising=False)
 
     shell = CLIAgentSetupMixin.__new__(CLIAgentSetupMixin)
-    shell._fallback_model = [{"provider": "opencode-go", "model": "mimo-v2.5"}]
-    runtime = shell._resolve_fallback_runtime(AuthError("no key", provider="opencode-zen", code="missing_api_key"))
+    shell._fallback_model = [{"provider": "zai", "model": "glm-5"}]
+    runtime = shell._resolve_fallback_runtime(AuthError("no key", provider="anthropic", code="missing_api_key"))
 
     assert runtime is not None
-    assert shell.model == "mimo-v2.5"
-    assert runtime["base_url"] == "https://opencode.ai/zen/go/v1"
+    assert shell.model == "glm-5"
+    assert runtime["base_url"] == "https://api.z.ai/api/paas/v4"
 
 
 def _quota_auth_error():
@@ -442,6 +442,8 @@ def test_ensure_runtime_credentials_records_quota_vs_bad_key(monkeypatch, tmp_pa
 
 
 def test_model_flow_nous_does_not_restore_stale_custom_api_key(tmp_path, monkeypatch):
+    from tests.hermes_cli.anon_portal import install_optional_portal_provider
+    install_optional_portal_provider(monkeypatch)
     import hermes_yaml as yaml
 
     config_home = tmp_path / "hermes"
@@ -749,7 +751,9 @@ def test_model_flow_custom_persists_selected_api_mode(monkeypatch):
     assert saved_env[key_env] == "test-key"
 
 
-def test_cmd_model_forwards_nous_login_tls_options(monkeypatch):
+def test_optional_nous_model_flow_forwards_login_tls_options(monkeypatch):
+    from tests.hermes_cli.anon_portal import install_optional_portal_provider
+    install_optional_portal_provider(monkeypatch)
     monkeypatch.setattr(hermes_main, "_require_tty", lambda *a: None)
     monkeypatch.setattr(
         "hermes_cli.config.load_config",
@@ -777,8 +781,8 @@ def test_cmd_model_forwards_nous_login_tls_options(monkeypatch):
 
     monkeypatch.setattr("hermes_cli.auth._login_nous", _fake_login)
 
-    hermes_main.cmd_model(
-        SimpleNamespace(
+    hermes_main._model_flow_nous(
+        {}, args=SimpleNamespace(
             portal_url="https://portal.nousresearch.com",
             inference_url="https://inference.nousresearch.com/v1",
             client_id="hermes-local",

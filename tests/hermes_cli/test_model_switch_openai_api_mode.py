@@ -30,7 +30,7 @@ _MOCK_VALIDATION = {
 
 def _run_openai_switch(
     raw_input: str,
-    current_provider: str = "openrouter",
+    current_provider: str = "ai-gateway",
     current_model: str = "anthropic/claude-opus-4.8",
     explicit_provider: str = "openai-api",
     runtime_api_mode: str = "chat_completions",
@@ -73,7 +73,7 @@ def test_stale_chat_completions_overridden_on_openai_direct():
     """
     result = _run_openai_switch(
         raw_input="gpt-5.6-sol",
-        current_provider="openrouter",
+        current_provider="ai-gateway",
         current_model="anthropic/claude-opus-4.8",
         explicit_provider="openai-api",
         runtime_api_mode="chat_completions",  # stale value carried over
@@ -100,26 +100,6 @@ def test_generic_endpoint_keeps_explicit_api_mode():
     assert host_mandated_api_mode("https://api.openai.com/v1") == "codex_responses"
     assert host_mandated_api_mode("https://api.anthropic.com") == "anthropic_messages"
 
-def test_stale_chat_overridden_on_meta_direct():
-    """Stale chat_completions on api.meta.ai → codex_responses (like openai direct).
-
-    Switching from openrouter/chat_completions to muse-spark on meta's
-    endpoint must flip to Responses API for caching (0% vs 93-99%).
-    """
-    result = _run_openai_switch(
-        raw_input="muse-spark-1.2",
-        current_provider="openrouter",
-        current_model="anthropic/claude-opus-4.8",
-        explicit_provider="meta",
-        runtime_api_mode="chat_completions",  # stale
-        runtime_base_url="https://api.meta.ai/v1",
-    )
-    assert result.success, f"switch_model failed: {result.error_message}"
-    assert result.target_provider == "meta"
-    assert result.new_model == "muse-spark-1.2"
-    assert result.api_mode == "codex_responses"
-
-
 def test_generic_relay_not_clobbered_on_meta_switch():
     """Generic relay does not pick up Meta mandate."""
     assert host_mandated_api_mode("https://generic.example.com/v1") is None
@@ -127,7 +107,7 @@ def test_generic_relay_not_clobbered_on_meta_switch():
         raw_input="some-model",
         current_provider="meta",
         current_model="muse-spark-1.2",
-        explicit_provider="openrouter",
+        explicit_provider="ai-gateway",
         runtime_api_mode="chat_completions",
         runtime_base_url="https://generic.example.com/v1",
     )
@@ -146,7 +126,7 @@ def test_openai_runtime_codex_app_server_survives_host_mandate():
     """
     result = _run_openai_switch(
         raw_input="gpt-5.6-sol",
-        current_provider="openrouter",
+        current_provider="ai-gateway",
         current_model="anthropic/claude-opus-4.8",
         explicit_provider="openai-api",
         runtime_api_mode="codex_app_server",

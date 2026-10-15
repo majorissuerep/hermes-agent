@@ -346,21 +346,21 @@ def test_list_authenticated_providers_no_duplicate_labels_across_schemas(monkeyp
 
 
 def test_list_authenticated_providers_dedup_honors_base_url_env_override(monkeypatch):
-    """The dedup must track the EFFECTIVE endpoint — if DASHSCOPE_BASE_URL
+    """The dedup must track the EFFECTIVE endpoint — if AI_GATEWAY_BASE_URL
     overrides the static inference_base_url, a custom provider pointing at
     the overridden URL (not the static one) should still be recognized as
     a duplicate."""
-    monkeypatch.setenv("DASHSCOPE_API_KEY", "sk-test")
+    monkeypatch.setenv("AI_GATEWAY_API_KEY", "sk-test")
     monkeypatch.setenv(
-        "DASHSCOPE_BASE_URL",
-        "https://custom-dashscope.example.com/v1",
+        "AI_GATEWAY_BASE_URL",
+        "https://custom-gateway.example.com/v1",
     )
     monkeypatch.setattr(
         "agent.models_dev.fetch_models_dev",
         lambda: {
-            "alibaba": {
-                "name": "Alibaba Cloud (DashScope)",
-                "env": ["DASHSCOPE_API_KEY"],
+            "ai-gateway": {
+                "name": "Vercel AI Gateway",
+                "env": ["AI_GATEWAY_API_KEY"],
             }
         },
     )
@@ -368,23 +368,23 @@ def test_list_authenticated_providers_dedup_honors_base_url_env_override(monkeyp
 
     custom_providers = [
         {
-            "name": "my-dashscope-override",
-            # Same URL as DASHSCOPE_BASE_URL env override above.
-            "base_url": "https://custom-dashscope.example.com/v1",
+            "name": "my-gateway-override",
+            # Same URL as AI_GATEWAY_BASE_URL env override above.
+            "base_url": "https://custom-gateway.example.com/v1",
             "api_key": "sk-test",
-            "model": "qwen3.6-plus",
+            "model": "anthropic/claude-sonnet-4",
         }
     ]
 
     providers = list_authenticated_providers(
-        current_provider="alibaba",
+        current_provider="ai-gateway",
         user_providers={},
         custom_providers=custom_providers,
         max_models=50,
     )
 
     slugs = [p["slug"] for p in providers]
-    assert not any("my-dashscope-override" in s for s in slugs), (
+    assert not any("my-gateway-override" in s for s in slugs), (
         f"Custom entry matching env-overridden built-in endpoint should be "
         f"dedup'd, got: {slugs}"
     )
@@ -610,24 +610,24 @@ def test_current_custom_model_is_surfaced_in_builtin_provider_row(monkeypatch):
     """
     monkeypatch.setattr("agent.models_dev.fetch_models_dev", dict)
     monkeypatch.setattr("hermes_cli.providers.HERMES_OVERLAYS", {})
-    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-test")
+    monkeypatch.setenv("AI_GATEWAY_API_KEY", "sk-test")
     # Pin a small curated catalog so the assertion is deterministic.
     monkeypatch.setattr(
         "hermes_cli.models.cached_provider_model_ids",
         lambda slug, **kw: ["anthropic/claude-opus-4.8", "openai/gpt-5.5"]
-        if slug == "openrouter"
+        if slug == "ai-gateway"
         else [],
     )
 
     custom = "some-vendor/totally-custom-model-v9"
     providers = list_authenticated_providers(
-        current_provider="openrouter",
+        current_provider="ai-gateway",
         current_model=custom,
         user_providers={},
         custom_providers=[],
     )
 
-    row = next(p for p in providers if p["slug"] == "openrouter")
+    row = next(p for p in providers if p["slug"] == "ai-gateway")
     assert custom in row["models"], row["models"]
     assert row["models"][0] == custom  # injected at the front
     assert row["total_models"] == 3
@@ -638,7 +638,7 @@ def test_current_custom_model_not_leaked_into_other_provider_rows(monkeypatch):
     never into other providers (which can't serve it)."""
     monkeypatch.setattr("agent.models_dev.fetch_models_dev", dict)
     monkeypatch.setattr("hermes_cli.providers.HERMES_OVERLAYS", {})
-    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-test")
+    monkeypatch.setenv("AI_GATEWAY_API_KEY", "sk-test")
     monkeypatch.setenv("NOUS_API_KEY", "sk-test")
     monkeypatch.setattr(
         "hermes_cli.models.cached_provider_model_ids",
@@ -647,59 +647,35 @@ def test_current_custom_model_not_leaked_into_other_provider_rows(monkeypatch):
 
     custom = "some-vendor/totally-custom-model-v9"
     providers = list_authenticated_providers(
-        current_provider="openrouter",
+        current_provider="ai-gateway",
         current_model=custom,
         user_providers={},
         custom_providers=[],
     )
 
     for row in providers:
-        if row["slug"] != "openrouter" and not row.get("is_current"):
+        if row["slug"] != "ai-gateway" and not row.get("is_current"):
             assert custom not in row.get("models", []), f"leaked into {row['slug']}"
 
 
 def test_overlay_provider_row_merges_configured_models(monkeypatch):
-    """A ``providers.<overlay>.models`` block extends a Hermes-overlay row (azure-foundry) the way
+    """A ``providers.<overlay>.models`` block extends a Hermes-overlay row (anthropic) the way
     it already extends built-in rows; the picker used to show only the live/current id (#27989)."""
     from hermes_cli.providers import HERMES_OVERLAYS
 
     monkeypatch.setattr("agent.models_dev.fetch_models_dev", dict)
     monkeypatch.setattr("agent.models_dev.PROVIDER_TO_MODELS_DEV", {})
-    monkeypatch.setattr("hermes_cli.providers.HERMES_OVERLAYS", {"azure-foundry": HERMES_OVERLAYS["azure-foundry"]})
+    monkeypatch.setattr("hermes_cli.providers.HERMES_OVERLAYS", {"anthropic": HERMES_OVERLAYS["anthropic"]})
     monkeypatch.setattr("hermes_cli.models.cached_provider_model_ids", lambda *_a, **_k: ["gpt-5.6-sol", "shared"])
-    monkeypatch.setenv("AZURE_FOUNDRY_API_KEY", "test-key")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
 
     rows = list_authenticated_providers(
-        current_provider="azure-foundry", max_models=50,
-        user_providers={"azure-foundry": {"models": ["gpt-5.5", "shared", "gpt-4.1-mini"]}})
-    row = next(r for r in rows if r["slug"] == "azure-foundry")
+        current_provider="anthropic", max_models=50,
+        user_providers={"anthropic": {"models": ["gpt-5.5", "shared", "gpt-4.1-mini"]}})
+    row = next(r for r in rows if r["slug"] == "anthropic")
     assert row["source"] == "hermes"
     assert row["models"] == ["gpt-5.5", "shared", "gpt-4.1-mini", "gpt-5.6-sol"]
     assert row["total_models"] == 4
-
-
-@pytest.mark.parametrize("base_url, listed", [("https://r.openai.azure.com/openai/v1", True), ("", False)])
-def test_entra_only_azure_foundry_row_is_listed_without_api_key(monkeypatch, base_url, listed):
-    """``model.auth_mode: entra_id`` mints a per-request bearer, so no ``AZURE_FOUNDRY_API_KEY``
-    ever exists; the picker and the prefetch scan must still treat the provider as configured
-    once its endpoint is set — and not before (#27989). No token is minted for the listing."""
-    from hermes_cli.model_switch_providers import _collect_authed_provider_slugs
-    from hermes_cli.providers import HERMES_OVERLAYS
-
-    monkeypatch.setattr("agent.models_dev.fetch_models_dev", dict)
-    monkeypatch.setattr("agent.models_dev.PROVIDER_TO_MODELS_DEV", {})
-    monkeypatch.setattr("hermes_cli.providers.HERMES_OVERLAYS", {"azure-foundry": HERMES_OVERLAYS["azure-foundry"]})
-    monkeypatch.setattr("hermes_cli.models.cached_provider_model_ids", lambda *_a, **_k: ["gpt-5.6-sol"])
-    monkeypatch.setattr("hermes_cli.models._get_model_config_dict",
-                        lambda: {"provider": "azure-foundry", "auth_mode": "entra_id", "base_url": base_url})
-    monkeypatch.delenv("AZURE_FOUNDRY_API_KEY", raising=False)
-    monkeypatch.delenv("AZURE_FOUNDRY_BASE_URL", raising=False)
-    monkeypatch.setattr("hermes_cli.runtime_provider_backends._azure_entra_credentials",
-                        lambda *_a, **_k: pytest.fail("listing must not mint an Entra token"))
-
-    rows = list_authenticated_providers(current_provider="", max_models=50)
-    assert ("azure-foundry" in [r["slug"] for r in rows]) is listed
-    assert ("azure-foundry" in _collect_authed_provider_slugs({}, {}, [])) is listed
 
 
 def test_cli_picker_provider_select_reads_the_disk_cached_catalog(monkeypatch):

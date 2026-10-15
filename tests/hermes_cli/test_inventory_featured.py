@@ -1,6 +1,6 @@
 """Regression tests for the ``featured_models`` shortlist in hermes_cli.inventory.
 
-The shortlist exists to keep multi-lab *routing aggregators* (OpenRouter) from
+The shortlist exists to keep multi-lab *routing aggregators* (Vercel AI Gateway) from
 flooding the desktop picker's default-visible set. A user-defined provider's
 ``models:`` list is an explicit allow-list: every configured model must stay
 default-visible, so such rows (and every other non-aggregator row) carry an
@@ -101,11 +101,11 @@ def test_builtin_flat_namespace_reseller_gets_no_featured_shortlist():
 
 
 def test_builtin_routing_aggregator_keeps_featured_shortlist():
-    """The affordance survives: OpenRouter's row still carries a curated
+    """The affordance survives: Vercel AI Gateway's row still carries a curated
     shortlist so its huge catalog does not flood the default-visible set."""
     row = {
-        "slug": "openrouter",
-        "name": "OpenRouter",
+        "slug": "ai-gateway",
+        "name": "Vercel AI Gateway",
         "is_current": False,
         "is_user_defined": False,
         "models": [f"lab{i % 3}/model-{i}" for i in range(12)],

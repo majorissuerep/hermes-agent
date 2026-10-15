@@ -60,13 +60,13 @@ def _capture_provider_labels(config_home):
 
 
 def test_cli_picker_hides_excluded_provider(config_home):
-    """``excluded_providers: [openrouter]`` must remove the OpenRouter row
+    """``excluded_providers: [openrouter]`` must remove the Vercel AI Gateway row
     from the ``hermes model`` provider menu."""
-    _write_config(config_home, model_catalog={"excluded_providers": ["openrouter"]})
+    _write_config(config_home, model_catalog={"excluded_providers": ["ai-gateway"]})
 
     labels = _capture_provider_labels(config_home)
     assert labels, "provider menu was empty"
-    assert not any("OpenRouter" in lbl for lbl in labels), (
+    assert not any("Vercel AI Gateway" in lbl for lbl in labels), (
         f"OpenRouter should be hidden by excluded_providers, got: {labels}"
     )
 
@@ -151,14 +151,14 @@ def test_unconfigured_rows_hide_excluded_provider():
     from hermes_cli.inventory import _append_unconfigured_rows
 
     baseline = {r["slug"].lower() for r in _append_unconfigured_rows([], _picker_ctx())}
-    assert "openrouter" in baseline, "sanity: openrouter should be a canonical skeleton row"
+    assert "ai-gateway" in baseline, "sanity: openrouter should be a canonical skeleton row"
 
     slugs = {
         r["slug"].lower()
-        for r in _append_unconfigured_rows([], _picker_ctx(excluded=["openrouter"]))
+        for r in _append_unconfigured_rows([], _picker_ctx(excluded=["ai-gateway"]))
     }
-    assert "openrouter" not in slugs, "excluded provider must not be re-added as a skeleton row"
-    assert slugs == baseline - {"openrouter"}, "only the excluded provider should be removed"
+    assert "ai-gateway" not in slugs, "excluded provider must not be re-added as a skeleton row"
+    assert slugs == baseline - {"ai-gateway"}, "only the excluded provider should be removed"
 
 
 def test_unconfigured_rows_exclusion_is_case_insensitive():
@@ -166,9 +166,9 @@ def test_unconfigured_rows_exclusion_is_case_insensitive():
 
     slugs = {
         r["slug"].lower()
-        for r in _append_unconfigured_rows([], _picker_ctx(excluded=["OpenRouter"]))
+        for r in _append_unconfigured_rows([], _picker_ctx(excluded=["AI-GATEWAY"]))
     }
-    assert "openrouter" not in slugs
+    assert "ai-gateway" not in slugs
 
 
 def test_unconfigured_rows_hide_excluded_provider_by_alias():
@@ -207,9 +207,9 @@ def test_unconfigured_rows_exclude_current_provider_matches_cli():
     from hermes_cli.inventory import _append_unconfigured_rows
 
     rows = _append_unconfigured_rows(
-        [], _picker_ctx(excluded=["openrouter"], current_provider="openrouter", current_model="some-model")
+        [], _picker_ctx(excluded=["ai-gateway"], current_provider="ai-gateway", current_model="some-model")
     )
-    assert "openrouter" not in {r["slug"].lower() for r in rows}
+    assert "ai-gateway" not in {r["slug"].lower() for r in rows}
 
 
 def test_unconfigured_rows_empty_excluded_is_noop():

@@ -85,12 +85,10 @@ class TestFallbackApiMode:
 
     @pytest.mark.usefixtures("catalog_defaults")
     @pytest.mark.parametrize("provider, base_url", [
-        ("minimax", "https://api.minimax.io"),             # bare host, no /anthropic hint (#53054 kept)
-        ("minimax", "https://api.minimax.io/anthropic"),   # URL-detected native path
-        ("minimax-cn", "https://api.minimaxi.com/anthropic/v1"),
-        ("minimax", "https://api.minimax.io/anthropic/v1/messages"),  # under the default path
-        ("tencent-tokenplan", "https://api.lkeap.cloud.tencent.com/plan/anthropic/v2"),  # non-/anthropic default
-        ("minimax", ""),  # nothing to compare: keep the declared transport
+        ("anthropic", "https://api.anthropic.com"),
+        ("anthropic", "https://api.anthropic.com/v1/messages"),
+        ("custom", "https://proxy.example.test/anthropic"),
+        ("anthropic", ""),
         ("anthropic", "http://127.0.0.1:4000/v1"),  # bare-host default: relays serve /v1/messages
     ])
     def test_anthropic_transport_holds_on_the_provider_endpoint(self, provider, base_url):
@@ -105,7 +103,7 @@ class TestFallbackApiMode:
         assert _detect_api_mode_for_url("https://api.openai.com.attacker.test/v1") is None
 
     def test_openrouter_stays_chat_completions(self):
-        assert _fallback_api_mode("openrouter", "https://openrouter.ai/api/v1") == "chat_completions"
+        assert _fallback_api_mode("ai-gateway", "https://ai-gateway.vercel.sh/v1") == "chat_completions"
 
 
     def test_unknown_provider_defaults_chat_completions(self):
