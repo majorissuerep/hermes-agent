@@ -111,7 +111,7 @@ class TestIsRoutableProvider:
         assert rp.is_routable_provider(None) is True
         assert rp.is_routable_provider("") is True
         assert rp.is_routable_provider("auto") is True
-        assert rp.is_routable_provider("openrouter") is True
+        assert rp.is_routable_provider("ai-gateway") is True
 
     def test_bare_custom_is_not_routable(self, keyed_provider_config):
         # The resolved billing class, not a routable identity — restore

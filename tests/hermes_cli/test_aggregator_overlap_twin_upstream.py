@@ -5,10 +5,10 @@ import pytest
 from hermes_cli import inventory
 
 
-def _builtin_openrouter_row(models: list) -> dict:
+def _builtin_gateway_row(models: list) -> dict:
     return {
-        "slug": "openrouter",
-        "name": "OpenRouter",
+        "slug": "ai-gateway",
+        "name": "Vercel AI Gateway",
         "is_current": False,
         "is_user_defined": False,
         "models": list(models),
@@ -30,14 +30,14 @@ def _user_row(slug: str, api_url: str, models: list) -> dict:
     }
 
 
-@pytest.mark.parametrize("twin_slug", ["custom:openrouter", "custom:my-or-relay"])
+@pytest.mark.parametrize("twin_slug", ["custom:ai-gateway", "custom:my-gateway-relay"])
 def test_built_in_row_keeps_models_when_user_row_is_same_upstream(twin_slug):
     # The twin's catalog is a superset of the built-in row's; counting it as "another provider
     # serves these ids" emptied the built-in row beside a live twin row. The twin is detected by
     # its custom:<aggregator> slug or, under any other name, by its upstream URL.
     rows = [
-        _builtin_openrouter_row(["anthropic/claude-fable-5", "openai/gpt-6"]),
-        _user_row(twin_slug, "https://openrouter.ai/api/v1", [
+        _builtin_gateway_row(["anthropic/claude-fable-5", "openai/gpt-6"]),
+        _user_row(twin_slug, "https://ai-gateway.vercel.sh/v1", [
             "anthropic/claude-fable-5",
             "openai/gpt-6",
             "qwen/qwen-4-max",

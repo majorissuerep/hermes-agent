@@ -31,5 +31,5 @@ def test_models_dev_only_provider_is_not_selectable(monkeypatch):
 
 
 def test_special_runtime_provider_does_not_require_registry_membership():
-    assert is_runtime_provider_routable("openrouter")
+    assert is_runtime_provider_routable("ai-gateway")
     assert is_runtime_provider_routable("custom:local-lab")

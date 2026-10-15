@@ -29,7 +29,7 @@ def _no_aws(monkeypatch):
 
 
 def _clear_provider_env(monkeypatch):
-    for var in ("OPENAI_API_KEY", "OPENROUTER_API_KEY", "GLM_API_KEY", "ZAI_API_KEY",
+    for var in ("OPENAI_API_KEY", "AI_GATEWAY_API_KEY", "GLM_API_KEY", "ZAI_API_KEY",
                 "KIMI_API_KEY", "MINIMAX_API_KEY", "HERMES_INFERENCE_PROVIDER"):
         monkeypatch.delenv(var, raising=False)
 
@@ -63,10 +63,8 @@ class TestProviderPrecedence:
         assert resolve_provider("auto") == "anthropic"
 
 
-
-
     def test_openrouter_pool_beats_stale_oauth(self, monkeypatch):
-        """An OpenRouter credential-pool entry (no env var) wins over a logged-in
+        """An Vercel AI Gateway credential-pool entry (no env var) wins over a logged-in
         OAuth provider — the pool rung sits above OAuth (#42130 + #29285)."""
         _clear_provider_env(monkeypatch)
         _no_aws(monkeypatch)
@@ -74,11 +72,14 @@ class TestProviderPrecedence:
         _config(monkeypatch, {})
 
         class _Pool:
-            def has_credentials(self):
-                return True
+            def __init__(self, name):
+                self.name = name
 
-        monkeypatch.setattr("agent.credential_pool.load_pool", lambda name: _Pool())
-        assert resolve_provider("auto") == "openrouter"
+            def has_available(self):
+                return self.name == "ai-gateway"
+
+        monkeypatch.setattr("agent.credential_pool.load_pool", _Pool)
+        assert resolve_provider("auto") == "ai-gateway"
 
 
 @pytest.fixture
@@ -111,7 +112,8 @@ class TestFreeTierBeatsImplicitHostCredentials:
 
     def test_a_claimed_trial_on_the_desktop_backend_beats_the_bedrock_chain(self, portal, monkeypatch):
         _claimed_trial_with_aws(monkeypatch)
-        assert resolve_provider("auto") == "nous"
+        with pytest.raises(AuthError, match="not connected"):
+            resolve_provider("auto")
 
     @pytest.mark.parametrize("env_key, config_provider, expected", [
         ("OPENAI_API_KEY", None, "openai-api"),  # an exported key wins
@@ -130,7 +132,8 @@ class TestFreeTierBeatsImplicitHostCredentials:
         _claimed_trial_with_aws(monkeypatch)
         monkeypatch.delenv("HERMES_DESKTOP", raising=False)
         monkeypatch.delenv("HERMES_DASHBOARD_SESSION_TOKEN", raising=False)
-        assert resolve_provider("auto") == "bedrock"
+        with pytest.raises(AuthError, match="not connected"):
+            resolve_provider("auto")
         monkeypatch.setattr("agent.bedrock_adapter.has_aws_credentials", lambda *_a, **_kw: False)
         with pytest.raises(AuthError):
             resolve_provider("auto")
@@ -140,6 +143,7 @@ class TestFreeTierBeatsImplicitHostCredentials:
         to the next real rung."""
         _claimed_trial_with_aws(monkeypatch)
         monkeypatch.setattr("agent.bedrock_adapter.has_aws_credentials", lambda *_a, **_kw: False)
-        assert resolve_provider("auto") == "nous"
+        with pytest.raises(AuthError, match="not connected"):
+            resolve_provider("auto")
         with pytest.raises(AuthError):
             resolve_provider("auto", skip_free_tier=True)

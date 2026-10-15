@@ -178,8 +178,6 @@ def test_picker_empty_native_catalog_is_not_stale_served(monkeypatch):
     assert _fetch_picker_live_models("sk-ollama", url, "custom", False) == ["back:latest"]
 
 
-
-
 def test_list_authenticated_providers_includes_custom_providers(monkeypatch):
     monkeypatch.setattr("agent.models_dev.fetch_models_dev", dict)
     monkeypatch.setattr(providers_mod, "HERMES_OVERLAYS", {})
@@ -192,7 +190,7 @@ def test_list_authenticated_providers_includes_custom_providers(monkeypatch):
             {
                 "name": "Local (127.0.0.1:4141)",
                 "base_url": "http://127.0.0.1:4141/v1",
-                "model": "rotator-openrouter-coding",
+                "model": "rotator-ai-gateway-coding",
             }
         ],
         max_models=50,
@@ -201,11 +199,10 @@ def test_list_authenticated_providers_includes_custom_providers(monkeypatch):
     assert any(
         p["slug"] == "custom:local-(127.0.0.1:4141)"
         and p["name"] == "Local (127.0.0.1:4141)"
-        and p["models"] == ["rotator-openrouter-coding"]
+        and p["models"] == ["rotator-ai-gateway-coding"]
         and p["api_url"] == "http://127.0.0.1:4141/v1"
         for p in providers
     )
-
 
 
 def test_list_authenticated_providers_numeric_yaml_provider_dict_key(monkeypatch):
@@ -344,9 +341,6 @@ def test_list_authenticated_providers_can_skip_custom_provider_live_probe(monkey
     row = next(p for p in providers if p["slug"] == "custom:slow-local")
     assert row["models"] == ["local-model"]
     assert row["total_models"] == 1
-
-
-
 
 
 def test_resolve_provider_full_finds_named_custom_provider():
@@ -514,8 +508,8 @@ def test_switch_model_accepts_explicit_bare_custom_current_endpoint(monkeypatch)
 
 
 def test_switch_to_bare_custom_from_another_provider_resolves_the_configured_endpoint(monkeypatch, tmp_path):
-    """#73680: the per-turn config sync adopting ``provider: custom`` from an OpenRouter session
-    must land on the configured custom endpoint, not pair the new model with OpenRouter's URL
+    """#73680: the per-turn config sync adopting ``provider: custom`` from an Vercel AI Gateway session
+    must land on the configured custom endpoint, not pair the new model with Vercel AI Gateway's URL
     and key."""
     home = tmp_path / "hermes-home"
     home.mkdir()
@@ -530,10 +524,10 @@ def test_switch_to_bare_custom_from_another_provider_resolves_the_configured_end
 
     result = switch_model(
         raw_input="qwen3:8b",
-        current_provider="openrouter",
+        current_provider="ai-gateway",
         current_model="anthropic/claude-sonnet-4",
-        current_base_url="https://openrouter.ai/api/v1",
-        current_api_key="sk-openrouter",
+        current_base_url="https://ai-gateway.vercel.sh/v1",
+        current_api_key="sk-ai-gateway",
         explicit_provider="custom",
         user_providers={},
         custom_providers=[],
@@ -547,13 +541,13 @@ def test_switch_to_bare_custom_from_another_provider_resolves_the_configured_end
 
 def test_switch_to_bare_custom_with_no_configured_endpoint_keeps_the_current_one(monkeypatch, tmp_path):
     """#74143 shape on the switched-provider path: with no ``model.base_url`` the bare-custom
-    resolver lands on OpenRouter's default whenever an OpenRouter key exists — a host the user
+    resolver lands on Vercel AI Gateway's default whenever an Vercel AI Gateway key exists — a host the user
     never picked. An Anthropic session must stay on its own endpoint instead."""
     home = tmp_path / "hermes-home"
     home.mkdir()
     (home / "config.yaml").write_text("model:\n  default: m\n  provider: anthropic\n", encoding="utf-8")
     monkeypatch.setenv("HERMES_HOME", str(home))
-    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-env")
+    monkeypatch.setenv("AI_GATEWAY_API_KEY", "sk-or-env")
     monkeypatch.setattr("hermes_cli.models_validate.validate_requested_model", lambda *a, **k: _MOCK_VALIDATION)
     monkeypatch.setattr("hermes_cli.model_switch.get_model_info", lambda *a, **k: None)
     monkeypatch.setattr("hermes_cli.model_switch.get_model_capabilities", lambda *a, **k: None)
@@ -574,7 +568,7 @@ def test_switch_to_bare_custom_with_no_configured_endpoint_keeps_the_current_one
 
 
 def test_openrouter_mirror_read_never_raises_without_a_secret_scope(monkeypatch):
-    """The mirror guard reads ``OPENROUTER_BASE_URL`` through the profile secret scope: with
+    """The mirror guard reads ``AI_GATEWAY_BASE_URL`` through the profile secret scope: with
     multiplexing on and no scope installed that read raises ``UnscopedSecretError``. A guard read
     must degrade to 'no mirror detected' (the caller then keeps the session endpoint) instead of
     propagating out of ``switch_model``, where the resolver's own read of the same name is
@@ -582,7 +576,7 @@ def test_openrouter_mirror_read_never_raises_without_a_secret_scope(monkeypatch)
     from agent import secret_scope
     from hermes_cli.model_switch import _openrouter_mirror_base_url
 
-    monkeypatch.setenv("OPENROUTER_BASE_URL", "https://mirror.example.com/v1")
+    monkeypatch.setenv("AI_GATEWAY_BASE_URL", "https://mirror.example.com/v1")
     secret_scope.set_multiplex_active(True)
     try:
         assert _openrouter_mirror_base_url() == ""
@@ -591,15 +585,15 @@ def test_openrouter_mirror_read_never_raises_without_a_secret_scope(monkeypatch)
 
 
 def test_switch_to_bare_custom_ignores_an_openrouter_mirror(monkeypatch, tmp_path):
-    """#115661 follow-up: with ``OPENROUTER_BASE_URL`` set to a mirror and nothing configured for
+    """#115661 follow-up: with ``AI_GATEWAY_BASE_URL`` set to a mirror and nothing configured for
     ``custom``, the ladder's last rung hands back that mirror — a host the user configured for
-    OpenRouter — with the ``no-key-required`` placeholder. It must not replace the session's own
+    Vercel AI Gateway — with the ``no-key-required`` placeholder. It must not replace the session's own
     endpoint and key (the switched arm used to adopt it, dropping a working credential)."""
     home = tmp_path / "hermes-home"
     home.mkdir()
     (home / "config.yaml").write_text("model:\n  default: m\n  provider: custom\n", encoding="utf-8")
     monkeypatch.setenv("HERMES_HOME", str(home))
-    monkeypatch.setenv("OPENROUTER_BASE_URL", "https://mirror.example.com/v1")
+    monkeypatch.setenv("AI_GATEWAY_BASE_URL", "https://mirror.example.com/v1")
     monkeypatch.setattr("hermes_cli.models_validate.validate_requested_model", lambda *a, **k: _MOCK_VALIDATION)
     monkeypatch.setattr("hermes_cli.model_switch.get_model_info", lambda *a, **k: None)
     monkeypatch.setattr("hermes_cli.model_switch.get_model_capabilities", lambda *a, **k: None)
@@ -619,7 +613,7 @@ def test_switch_to_bare_custom_ignores_an_openrouter_mirror(monkeypatch, tmp_pat
     assert (result.base_url, result.api_key) == ("https://api.anthropic.com", "sk-ant")
 
     # Two env vars aimed at the SAME proxy: the URL is the endpoint configured for `custom`, so the
-    # OpenRouter rung is not the source and the switch adopts it (#115661's behaviour).
+    # Vercel AI Gateway rung is not the source and the switch adopts it (#115661's behaviour).
     monkeypatch.setenv("CUSTOM_BASE_URL", "https://mirror.example.com/v1")
     configured = switch_model(
         raw_input="m2",
@@ -638,8 +632,6 @@ def test_switch_to_bare_custom_ignores_an_openrouter_mirror(monkeypatch, tmp_pat
 def test_is_aggregator_recognizes_named_custom_provider():
     assert providers_mod.is_aggregator("custom:hpc-ai") is True
     assert providers_mod.is_aggregator("custom:litellm") is True
-
-
 
 
 def test_switch_model_does_not_send_ollama_headers_to_unrelated_custom_endpoint(monkeypatch):
@@ -699,9 +691,6 @@ def test_switch_model_does_not_send_ollama_headers_to_unrelated_custom_endpoint(
     assert validation_headers == [None]
 
 
-
-
-
 def test_picker_selection_resolves_named_custom_provider_model_id(monkeypatch):
     """Picker prefixes must not leak into a named custom provider API model id."""
     monkeypatch.setattr(
@@ -744,10 +733,6 @@ def test_picker_selection_resolves_named_custom_provider_model_id(monkeypatch):
     assert result.new_model == "deepseek-v4-flash"
 
 
-
-
-
-
 def test_list_groups_same_name_custom_providers_into_one_row(monkeypatch):
     """Multiple custom_providers entries sharing a name should produce one row
     with all models collected, not N duplicate rows."""
@@ -756,7 +741,7 @@ def test_list_groups_same_name_custom_providers_into_one_row(monkeypatch):
     monkeypatch.setattr("hermes_cli.models.fetch_api_models", lambda *a, **k: [])
 
     providers = list_authenticated_providers(
-        current_provider="openrouter",
+        current_provider="ai-gateway",
         user_providers={},
         custom_providers=[
             {"name": "Ollama Cloud", "base_url": "https://ollama.com/v1", "model": "qwen3-coder:480b-cloud"},
@@ -788,7 +773,7 @@ def test_list_deduplicates_same_model_in_group(monkeypatch):
     monkeypatch.setattr("hermes_cli.models.fetch_api_models", lambda *a, **k: [])
 
     providers = list_authenticated_providers(
-        current_provider="openrouter",
+        current_provider="ai-gateway",
         user_providers={},
         custom_providers=[
             {"name": "MyProvider", "base_url": "http://localhost:11434/v1", "model": "llama3", "discover_models": False},
@@ -841,8 +826,6 @@ def test_custom_provider_no_key_singular_model_still_probes_live_models(monkeypa
     row = next(p for p in providers if p["name"] == "Local llama.cpp")
     assert row["models"] == ["llama3", "mistral", "qwen3-coder"]
     assert row["total_models"] == 3
-
-
 
 
 def test_custom_provider_group_explicit_duplicate_skips_probe(monkeypatch):
@@ -1055,11 +1038,6 @@ def test_list_enumerates_dict_format_models_without_singular_model(monkeypatch):
         "gemma-4-31B-it-Q4_K_M",
     }
     assert thor_rows[0]["total_models"] == 3
-
-
-
-
-
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1329,8 +1307,6 @@ def test_list_authenticated_providers_same_url_different_key_env_and_api_mode_st
     assert by_slug["custom:claude"]["is_current"] is False
 
 
-
-
 def test_lmstudio_picker_probes_active_config_base_url(monkeypatch):
     """When `provider: lmstudio` is saved with a remote base_url and no
     LM_BASE_URL env var, the picker must probe the saved base_url — not
@@ -1405,8 +1381,8 @@ def test_lmstudio_picker_skips_probe_when_not_configured(monkeypatch):
     monkeypatch.setattr("hermes_cli.models_local.fetch_lmstudio_models", _fake_fetch)
 
     list_authenticated_providers(
-        current_provider="openrouter",
-        current_base_url="https://openrouter.ai/api/v1",
+        current_provider="ai-gateway",
+        current_base_url="https://ai-gateway.vercel.sh/v1",
     )
 
     assert "base_url" not in captured
@@ -1484,19 +1460,6 @@ def test_lmstudio_providers_block_with_explicit_endpoint_still_uses_section3(mon
     assert rows[0]["models"] == ["remote-model"]
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
 def test_custom_providers_uses_live_models_for_multi_model_endpoint(monkeypatch):
     """Custom providers with api_key + base_url should prefer live /models.
 
@@ -1531,8 +1494,8 @@ def test_custom_providers_uses_live_models_for_multi_model_endpoint(monkeypatch)
     ]
 
     providers = list_authenticated_providers(
-        current_provider="openrouter",
-        current_base_url="https://openrouter.ai/api/v1",
+        current_provider="ai-gateway",
+        current_base_url="https://ai-gateway.vercel.sh/v1",
         custom_providers=custom_providers,
         max_models=50,
     )
@@ -1578,8 +1541,8 @@ def test_same_endpoint_different_extra_headers_not_collapsed(monkeypatch):
     monkeypatch.setattr("hermes_cli.models.fetch_api_models", fake_fetch_api_models)
 
     providers = list_authenticated_providers(
-        current_provider="openrouter",
-        current_base_url="https://openrouter.ai/api/v1",
+        current_provider="ai-gateway",
+        current_base_url="https://ai-gateway.vercel.sh/v1",
         custom_providers=[
             {
                 "name": "Proxy Tenant A",
@@ -1610,10 +1573,6 @@ def test_same_endpoint_different_extra_headers_not_collapsed(monkeypatch):
     # Each row surfaces the model list its own headers unlocked.
     models_by_row = {tuple(r["models"]) for r in rows}
     assert models_by_row == {("model-a",), ("model-b",)}
-
-
-
-
 
 
 def test_resolve_custom_provider_passes_key_env():
@@ -1693,8 +1652,6 @@ def test_discovered_models_auto_saved_to_cache(monkeypatch):
     )
     assert gateway_prov is not None
     assert gateway_prov["models"] == ["discovered-a", "discovered-b", "discovered-c"]
-
-
 
 
 def test_save_discovered_models_preserves_dict_form(monkeypatch):
@@ -1824,8 +1781,8 @@ def test_shared_url_different_display_names_are_separate_rows(monkeypatch):
     )
 
     providers = list_authenticated_providers(
-        current_provider="openrouter",
-        current_base_url="https://openrouter.ai/api/v1",
+        current_provider="ai-gateway",
+        current_base_url="https://ai-gateway.vercel.sh/v1",
         user_providers={},
         custom_providers=[
             {"name": "Cerebras", "base_url": "https://proxy.example.com/v1",
@@ -1855,29 +1812,29 @@ def test_excluded_providers_hides_builtin_row(monkeypatch):
     otherwise surface when its credentials are present."""
     monkeypatch.setattr("agent.models_dev.fetch_models_dev", dict)
     monkeypatch.setattr(providers_mod, "HERMES_OVERLAYS", {})
-    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
+    monkeypatch.setenv("AI_GATEWAY_API_KEY", "sk-or-test")
 
     baseline = list_authenticated_providers(
-        current_provider="openrouter",
-        current_base_url="https://openrouter.ai/api/v1",
+        current_provider="ai-gateway",
+        current_base_url="https://ai-gateway.vercel.sh/v1",
         user_providers={},
         custom_providers=[],
         max_models=50,
     )
-    assert any(p["slug"] == "openrouter" for p in baseline), (
-        "sanity: openrouter row must appear when OPENROUTER_API_KEY is set"
+    assert any(p["slug"] == "ai-gateway" for p in baseline), (
+        "sanity: ai-gateway row must appear when AI_GATEWAY_API_KEY is set"
     )
 
     filtered = list_authenticated_providers(
-        current_provider="openrouter",
-        current_base_url="https://openrouter.ai/api/v1",
+        current_provider="ai-gateway",
+        current_base_url="https://ai-gateway.vercel.sh/v1",
         user_providers={},
         custom_providers=[],
         max_models=50,
-        excluded_providers=["openrouter"],
+        excluded_providers=["ai-gateway"],
     )
-    assert not any(p["slug"] == "openrouter" for p in filtered), (
-        "excluded_providers=['openrouter'] must hide the openrouter row"
+    assert not any(p["slug"] == "ai-gateway" for p in filtered), (
+        "excluded_providers=['ai-gateway'] must hide the ai-gateway row"
     )
 
 
@@ -2424,11 +2381,11 @@ def test_legacy_sentinel_catalog_still_resolves_and_migrates(tmp_path, monkeypat
 def test_same_provider_switch_on_session_only_custom_endpoint_keeps_endpoint(monkeypatch):
     """#74143: a same-provider ``/model`` on a bare ``custom`` session whose base_url is NOT the
     trusted config ``model.base_url`` must stay on that endpoint with its key — re-resolving from
-    config fell through to the OpenRouter default and moved the next turn to a host the user never
+    config fell through to the Vercel AI Gateway default and moved the next turn to a host the user never
     picked."""
-    for var in ("OPENROUTER_API_KEY", "OPENROUTER_BASE_URL", "CUSTOM_BASE_URL", "CUSTOM_API_KEY", "OPENAI_API_KEY"):
+    for var in ("AI_GATEWAY_API_KEY", "AI_GATEWAY_BASE_URL", "CUSTOM_BASE_URL", "CUSTOM_API_KEY", "OPENAI_API_KEY"):
         monkeypatch.delenv(var, raising=False)
-    monkeypatch.setattr("hermes_cli.model_switch.load_config", lambda: {"model": {"provider": "openrouter", "default": "x"}}, raising=False)
+    monkeypatch.setattr("hermes_cli.model_switch.load_config", lambda: {"model": {"provider": "ai-gateway", "default": "x"}}, raising=False)
     monkeypatch.setattr(
         "hermes_cli.models.probe_api_models",
         lambda api_key, base_url, **kw: {"models": ["m-a", "m-b"], "url": base_url + "/models", "base_url": base_url,

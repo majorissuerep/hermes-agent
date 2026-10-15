@@ -83,10 +83,6 @@ def _empty_ctx(provider="orig", model="orig-model", base_url="orig-url"):
     )
 
 
-
-
-
-
 # ─── build_models_payload ──────────────────────────────────────────────
 
 
@@ -112,11 +108,11 @@ def _nous_row(model: str = "openai/gpt-5.5") -> dict:
 
 def test_build_models_payload_returns_expected_shape():
     rows = [
-        {"slug": "openrouter", "name": "OpenRouter", "models": ["m1"],
+        {"slug": "ai-gateway", "name": "Vercel AI Gateway", "models": ["m1"],
          "total_models": 1, "is_current": True, "is_user_defined": False,
          "source": "built-in"},
     ]
-    ctx = _empty_ctx(provider="openrouter", model="m1", base_url="")
+    ctx = _empty_ctx(provider="ai-gateway", model="m1", base_url="")
     raw_config = {
         "moa": {
             "presets": {
@@ -132,7 +128,7 @@ def test_build_models_payload_returns_expected_shape():
         payload = build_models_payload(ctx)
     assert set(payload.keys()) == {"providers", "model", "provider"}
     assert payload["model"] == "m1"
-    assert payload["provider"] == "openrouter"
+    assert payload["provider"] == "ai-gateway"
     assert payload["providers"][0]["slug"] == "moa"
     assert payload["providers"][0]["models"] == ["default"]
     assert payload["providers"][1:] == rows
@@ -142,11 +138,11 @@ def test_build_models_payload_hides_moa_without_raw_preset():
     """Strict opt-in (#63353): no ``moa`` row when the raw config has no enabled preset —
     the DEFAULT_CONFIG ``default`` preset everyone gets via ``load_config()`` is not a user choice."""
     rows = [
-        {"slug": "openrouter", "name": "OpenRouter", "models": ["m1"],
+        {"slug": "ai-gateway", "name": "Vercel AI Gateway", "models": ["m1"],
          "total_models": 1, "is_current": True, "is_user_defined": False,
          "source": "built-in"},
     ]
-    ctx = _empty_ctx(provider="openrouter", model="m1", base_url="")
+    ctx = _empty_ctx(provider="ai-gateway", model="m1", base_url="")
     # load_config() still returns the synthesized DEFAULT_CONFIG moa preset.
     synthesized = {"moa": {"presets": {"default": {"enabled": True}}}}
     with (
@@ -155,13 +151,7 @@ def test_build_models_payload_hides_moa_without_raw_preset():
         patch("hermes_cli.config.load_config", return_value=synthesized),
     ):
         payload = build_models_payload(ctx)
-    assert [r["slug"] for r in payload["providers"]] == ["openrouter"]
-
-
-
-
-
-
+    assert [r["slug"] for r in payload["providers"]] == ["ai-gateway"]
 
 
 def test_include_unconfigured_appends_canonical_skeletons():
@@ -170,14 +160,14 @@ def test_include_unconfigured_appends_canonical_skeletons():
     models and source='canonical'. MoA is a virtual routing mode, not a
     canonical provider, so it is excluded — see issue #63353."""
     rows = [
-        {"slug": "openrouter", "name": "OpenRouter", "models": ["m1"],
+        {"slug": "ai-gateway", "name": "Vercel AI Gateway", "models": ["m1"],
          "total_models": 1, "is_current": True, "is_user_defined": False,
          "source": "built-in"},
     ]
-    ctx = _empty_ctx(provider="openrouter")
+    ctx = _empty_ctx(provider="ai-gateway")
     with _list_auth_returning(rows):
         payload = build_models_payload(ctx, include_unconfigured=True)
-    # All canonical providers other than openrouter should appear as
+    # All canonical providers other than ai-gateway should appear as
     # skeleton rows. MoA is virtual/opt-in and excluded from unconfigured;
     # so is a pre-release provider the user has not signed into.
     from hermes_cli.models_catalog_static import listed_canonical_providers
@@ -348,13 +338,12 @@ def test_anthropic_oauth_presence_accepts_pool_only_oauth_entry():
         assert _anthropic_oauth_credentials_present() is False
 
 
-
 # ─── picker_hints ──────────────────────────────────────────────────────
 
 
 def test_picker_hints_marks_authed_rows_authenticated():
     rows = [
-        {"slug": "openrouter", "name": "OpenRouter", "models": ["m1"],
+        {"slug": "ai-gateway", "name": "Vercel AI Gateway", "models": ["m1"],
          "total_models": 1, "is_current": True, "is_user_defined": False,
          "source": "built-in"},
     ]
@@ -461,9 +450,9 @@ def test_end_to_end_with_real_context_no_credentials_leak(monkeypatch):
     list_authenticated_providers. Verify no credential string ever
     appears in the returned payload, even with picker_hints=True."""
     canary = "sk-canary-XYZ-must-not-appear"
-    monkeypatch.setenv("OPENROUTER_API_KEY", canary)
+    monkeypatch.setenv("AI_GATEWAY_API_KEY", canary)
     monkeypatch.setenv("ANTHROPIC_API_KEY", canary)
-    cfg = _cfg(model={"provider": "openrouter"})
+    cfg = _cfg(model={"provider": "ai-gateway"})
     with patch("hermes_cli.config.load_config", return_value=cfg):
         ctx = load_picker_context()
     payload = build_models_payload(
@@ -480,7 +469,7 @@ def test_payload_shape_compatible_with_modelpickerdialog_frontend():
     Verify every authenticated/skeleton row exposes those keys.
     """
     rows = [
-        {"slug": "openrouter", "name": "OpenRouter", "models": ["m1"],
+        {"slug": "ai-gateway", "name": "Vercel AI Gateway", "models": ["m1"],
          "total_models": 1, "is_current": True, "is_user_defined": False,
          "source": "built-in"},
     ]
@@ -564,7 +553,7 @@ def test_aggregator_dedup_removes_overlapping_models():
             "nvidia/nim/minimax-m3",
             "nvidia/nim/kimi-k2.6",
         ]),
-        _aggregator_row("openrouter", [
+        _aggregator_row("ai-gateway", [
             "minimax/minimax-m3",
             "nvidia/nim/minimax-m3",  # overlaps with litellm-proxy
             "anthropic/claude-sonnet-4.6",
@@ -574,7 +563,7 @@ def test_aggregator_dedup_removes_overlapping_models():
     with _list_auth_returning(rows):
         payload = build_models_payload(ctx)
 
-    or_row = next(r for r in payload["providers"] if r["slug"] == "openrouter")
+    or_row = next(r for r in payload["providers"] if r["slug"] == "ai-gateway")
     proxy_row = next(r for r in payload["providers"] if r["slug"] == "litellm-proxy")
 
     # User-defined provider keeps all its models
@@ -585,8 +574,6 @@ def test_aggregator_dedup_removes_overlapping_models():
     assert "minimax/minimax-m3" in or_row["models"]
     assert "anthropic/claude-sonnet-4.6" in or_row["models"]
     assert or_row["total_models"] == 2
-
-
 
 
 def test_flat_namespace_reseller_keeps_first_party_models_overlapping_user_proxy():
@@ -608,14 +595,14 @@ def test_flat_namespace_reseller_keeps_first_party_models_overlapping_user_proxy
             "kimi-k2.6", "minimax-m3", "minimax-m2.7", "glm-5",
             "deepseek-v4-flash", "qwen3.7-max",
         ]),
-        _aggregator_row("openrouter", ["minimax-m3", "anthropic/claude-sonnet-4.6"]),
+        _aggregator_row("ai-gateway", ["minimax-m3", "anthropic/claude-sonnet-4.6"]),
     ]
     ctx = _empty_ctx()
     with _list_auth_returning(rows):
         payload = build_models_payload(ctx)
 
     go_row = next(r for r in payload["providers"] if r["slug"] == "opencode-go")
-    or_row = next(r for r in payload["providers"] if r["slug"] == "openrouter")
+    or_row = next(r for r in payload["providers"] if r["slug"] == "ai-gateway")
 
     # The reseller keeps ALL of its first-party models — nothing stripped.
     assert go_row["models"] == [
@@ -627,8 +614,6 @@ def test_flat_namespace_reseller_keeps_first_party_models_overlapping_user_proxy
     # A TRUE routing aggregator is still deduped against the user's models.
     assert "minimax-m3" not in or_row["models"]
     assert "anthropic/claude-sonnet-4.6" in or_row["models"]
-
-
 
 
 def test_build_models_payload_no_max_models_returns_full_list():
@@ -662,8 +647,6 @@ def test_build_models_payload_no_max_models_returns_full_list():
 # ─── refresh flag (cache-bust) ─────────────────────────────────────────
 
 
-
-
 def test_list_authenticated_providers_refresh_busts_cache():
     """refresh=True clears the provider-model disk cache exactly once;
     refresh=False leaves it untouched (so normal picker opens stay snappy)."""
@@ -692,7 +675,7 @@ def test_picker_metadata_uses_one_config_read_for_real_models_dev_lookups(tmp_pa
     (home / "config.yaml").write_text(
         "providers:\n"
         "  lab:\n"
-        "    catalog_provider: openrouter\n"
+        "    catalog_provider: vercel\n"
         "model_overrides: {}\n",
         encoding="utf-8",
     )
@@ -706,7 +689,7 @@ def test_picker_metadata_uses_one_config_read_for_real_models_dev_lookups(tmp_pa
         "openai/model-g", "anthropic/model-h",
     ]
     registry = {
-        "openrouter": {
+        "vercel": {
             "models": {
                 model: {
                     "id": model,

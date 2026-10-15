@@ -18,8 +18,8 @@ def isolated_home(tmp_path, monkeypatch):
     home.mkdir()
     (home / ".env").write_text("", encoding="utf-8")
     monkeypatch.setenv("HERMES_HOME", str(home))
-    for var in ("OPENAI_API_KEY", "OPENROUTER_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_BASE_URL",
-                "OPENROUTER_BASE_URL", "HERMES_INFERENCE_PROVIDER", "NOUS_API_KEY"):
+    for var in ("OPENAI_API_KEY", "AI_GATEWAY_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_BASE_URL",
+                "AI_GATEWAY_BASE_URL", "HERMES_INFERENCE_PROVIDER", "NOUS_API_KEY"):
         monkeypatch.delenv(var, raising=False)
     monkeypatch.setattr("agent.bedrock_adapter.has_aws_credentials", lambda *_a, **_kw: False)
     from hermes_cli import free_tier_bootstrap as fb
@@ -46,19 +46,19 @@ def isolated_home(tmp_path, monkeypatch):
             "custom",
             id="loopback-base-url-only",
         ),
-        # #109397: ``model.provider: openrouter`` is explicit intent like a registry pin, not
-        # "nothing configured" (both ``custom`` and ``openrouter`` are absent from PROVIDER_REGISTRY).
+        # #109397: ``model.provider: ai-gateway`` is explicit intent like a registry pin, not
+        # "nothing configured" (both ``custom`` and ``ai-gateway`` are absent from PROVIDER_REGISTRY).
         pytest.param(
-            "model:\n  default: openrouter/auto\n  provider: openrouter\n",
-            "openrouter",
-            id="provider-openrouter",
+            "model:\n  default: ai-gateway/auto\n  provider: ai-gateway\n",
+            "ai-gateway",
+            id="provider-ai-gateway",
         ),
-        # A non-openrouter ``base_url`` under the openrouter pin is a deliberate mirror (#10622).
+        # A non-ai-gateway ``base_url`` under the ai-gateway pin is a deliberate mirror (#10622).
         pytest.param(
-            "model:\n  default: openrouter/auto\n  provider: openrouter\n"
-            "  base_url: https://openrouter-mirror.example.com/api/v1\n",
-            "openrouter",
-            id="provider-openrouter-mirror",
+            "model:\n  default: ai-gateway/auto\n  provider: ai-gateway\n"
+            "  base_url: https://ai-gateway-mirror.example.com/api/v1\n",
+            "ai-gateway",
+            id="provider-ai-gateway-mirror",
         ),
         # A bare ``model.provider`` naming a ``providers:`` entry is explicit intent too:
         # has_named_custom_provider() already routes it at runtime (``hermes chat`` works), so the
@@ -86,7 +86,7 @@ def test_configured_custom_endpoint_resolves_as_a_provider(isolated_home, model_
 def test_stale_remote_base_url_without_a_custom_pin_is_not_a_provider(isolated_home):
     """The URL rung follows the runtime's own trust rule: a non-loopback ``base_url`` left behind
     under a bare (unpinned) provider is not custom intent (#14676), so a blank machine still reads
-    as unconfigured. (A ``provider: openrouter`` pin is excluded from this guard — a non-openrouter
+    as unconfigured. (A ``provider: ai-gateway`` pin is excluded from this guard — a non-ai-gateway
     ``base_url`` under it is a deliberate mirror/proxy, #10622/#109397.)"""
     (isolated_home / "config.yaml").write_text(
         "model:\n  default: some/model\n  base_url: https://api.z.ai/v1\n",

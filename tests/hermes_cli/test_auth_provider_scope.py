@@ -35,19 +35,19 @@ def _install_profile(tmp_path: Path, provider: str, env_text: str) -> Path:
 def test_auto_resolution_sees_profile_scoped_key(tmp_path):
     """The scoped provider key must be visible to auto-detection.
 
-    Before the fix: the DEEPSEEK_API_KEY lived only in the scope, bare
+    Before the fix: the GLM_API_KEY lived only in the scope, bare
     os.getenv found nothing, and auto-resolution reported no provider.
     """
     from hermes_cli.auth import resolve_provider
 
-    home = _install_profile(tmp_path, "auto", "DEEPSEEK_API_KEY=sk-scoped\n")
+    home = _install_profile(tmp_path, "auto", "GLM_API_KEY=sk-scoped\n")
 
     ss.set_multiplex_active(True)
     home_token = set_hermes_home_override(str(home))
     try:
         scope_token = ss.set_secret_scope(ss.build_profile_secret_scope(home))
         try:
-            assert resolve_provider("auto") == "deepseek"
+            assert resolve_provider("auto") == "zai"
         finally:
             ss.reset_secret_scope(scope_token)
     finally:
@@ -59,22 +59,22 @@ def test_auto_resolution_falls_back_to_os_environ_when_unscoped(monkeypatch):
     """Single-profile / CLI path unchanged: exported env keys still win."""
     from hermes_cli.auth import resolve_provider
 
-    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-env")
-    assert resolve_provider("auto") == "openrouter"
+    monkeypatch.setenv("AI_GATEWAY_API_KEY", "sk-env")
+    assert resolve_provider("auto") == "ai-gateway"
 
 
 def test_auto_resolution_honors_explicit_config_provider(tmp_path):
     """An explicit config provider still wins over env-key detection."""
     from hermes_cli.auth import resolve_provider
 
-    home = _install_profile(tmp_path, "opencode-go", "OPENCODE_GO_API_KEY=sk\n")
+    home = _install_profile(tmp_path, "zai", "GLM_API_KEY=synthetic-scoped-key\n")
 
     ss.set_multiplex_active(True)
     home_token = set_hermes_home_override(str(home))
     try:
         scope_token = ss.set_secret_scope(ss.build_profile_secret_scope(home))
         try:
-            assert resolve_provider("auto") == "opencode-go"
+            assert resolve_provider("auto") == "zai"
         finally:
             ss.reset_secret_scope(scope_token)
     finally:
