@@ -1143,7 +1143,12 @@ def _ladder_rungs(requested_provider, explicit_api_key, explicit_base_url, targe
     pconfig = PROVIDER_REGISTRY.get(provider)
     if pconfig and pconfig.auth_type == "api_key":
         yield _api_key_provider_runtime(provider, pconfig, requested_provider, model_cfg, target_model)
-    fallback = _configured_custom_runtime(requested_provider, explicit_api_key, explicit_base_url)
+    try:
+        fallback = _configured_custom_runtime(requested_provider, explicit_api_key, explicit_base_url)
+    except AuthError as exc:
+        if swallowed_auth_error is not None and exc.code == "no_provider_configured":
+            raise swallowed_auth_error from exc
+        raise
     if swallowed_auth_error is not None and not fallback.get("api_key"):
         fallback["auth_error"] = swallowed_auth_error
     yield fallback
