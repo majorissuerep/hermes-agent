@@ -201,10 +201,11 @@ def _map_ssl_cert_file_for_git(git_cmd) -> None:
 
 
 # Compiled before (preflight) and after (post-pull guard, ZIP gate) every tree move. The first rows
-# are what the launcher and ``hermes_bootstrap`` import before any application code (review G3);
-# test_update_post_pull_syntax_guard derives that set from the real entry paths and pins it here.
+# are what the launcher and ``hermes_bootstrap`` import before any application code (review G3).
+# Vault handoff is part of that bootstrap even when the active home is not encrypted.
 _UPDATE_CRITICAL_FILES = (
-    "hermes_bootstrap.py", "hermes_cli/_parser.py", "hermes_cli/_launchers.py",
+    "hermes_bootstrap.py", "hermes_security/__init__.py", "hermes_security/handoff.py",
+    "hermes_cli/_parser.py", "hermes_cli/_launchers.py",
     "hermes_cli/_early_recovery.py", "hermes_cli/update_lock.py", "hermes_cli/update_custody.py",
     "hermes_cli/update_handoff.py", "hermes_cli/venv_sync.py", "pm/__init__.py", "pm/environments.py",
     "hermes_cli/main.py", "hermes_cli/config.py", "hermes_cli/__init__.py",

@@ -154,37 +154,30 @@ def test_a_python_bump_is_judged_by_an_interpreter_the_target_admits(tmp_path, m
         assert judged == ("hermes_constants.py", f"SyntaxError: judged by the target (judged by {target_python})")
 
 
-def test_the_critical_inventory_covers_every_module_the_entry_paths_import_first():
-    """``hermes_bootstrap.py`` was absent from the inventory, so a target that broke only the
-    bootstrap passed preflight and the post-pull guard and failed at the first import (review G3).
-    Derived from the real launcher text, ``hermes_bootstrap``'s imports and the recovery closure."""
-    import ast
+@pytest.mark.parametrize("entry", ["hermes_security/__init__.py", "hermes_security/handoff.py"])
+def test_malformed_vault_bootstrap_is_refused_before_and_after_move(tmp_path, entry):
+    """The generated launcher imports vault handoff before the application can recover."""
+    from hermes_cli import update_cmd_commit as commit
 
-    from hermes_cli import _launchers
-    from hermes_cli._early_recovery import RECOVERY_CLOSURE
+    def git(*args):
+        return subprocess.run(
+            ["git", *args], cwd=tmp_path, check=True, capture_output=True,
+            text=True, encoding="utf-8",
+        ).stdout.strip()
 
-    root = Path(update_cmd.__file__).resolve().parents[1]
+    git("init", "-b", "main")
+    git("config", "user.email", "test@example.invalid")
+    git("config", "user.name", "Test")
+    source = tmp_path / entry
+    source.parent.mkdir(parents=True)
+    source.write_text("def broken(:\n", encoding="utf-8")
+    git("add", ".")
+    git("commit", "-m", "malformed vault bootstrap")
 
-    def files(source: str) -> set[str]:
-        names = set()
-        for node in ast.walk(ast.parse(source)):
-            if isinstance(node, ast.Import):
-                names |= {alias.name for alias in node.names}
-            elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
-                names |= {node.module, *(f"{node.module}.{alias.name}" for alias in node.names)}
-        found = set()
-        for name in names:
-            parts = name.split(".")
-            for i in range(1, len(parts) + 1):
-                stem = "/".join(parts[:i])
-                found |= {rel for rel in (f"{stem}.py", f"{stem}/__init__.py") if (root / rel).is_file()}
-        return found
-
-    launcher = _launchers._launcher_script("hermes", root, None)
-    entry = files(launcher) | files((root / "hermes_bootstrap.py").read_text(encoding="utf-8"))
-    entry |= {"hermes_bootstrap.py", *RECOVERY_CLOSURE}
-    assert "hermes_bootstrap.py" in entry and "hermes_cli/main.py" in entry
-    assert entry <= set(update_cmd._UPDATE_CRITICAL_FILES), sorted(entry - set(update_cmd._UPDATE_CRITICAL_FILES))
+    refused = commit.target_syntax_error(["git"], tmp_path, "HEAD", update_cmd._UPDATE_CRITICAL_FILES)
+    assert refused is not None and refused[0] == entry
+    ok, failed, error = update_cmd._validate_critical_files_syntax(tmp_path)
+    assert not ok and Path(failed) == source and "SyntaxError" in error
 
 
 def test_a_malformed_bootstrap_is_refused_before_the_move(tmp_path):
