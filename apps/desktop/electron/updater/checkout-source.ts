@@ -4,8 +4,8 @@ import path from 'node:path'
 import { promisify } from 'node:util'
 
 import { buildDesktopBackendEnv } from '../backend-env'
-import { resolveInstallationLauncher } from '../updater-process'
 import { hiddenWindowsChildOptions } from '../child-process-options'
+import { resolveInstallationLauncher } from '../updater-process'
 
 import type { UpdaterStatusWire } from './index'
 

@@ -20,9 +20,9 @@
 import { execFile } from 'node:child_process'
 import fs from 'node:fs'
 
+import { hiddenWindowsChildOptions } from './child-process-options'
 import { electronProcessStartMarker } from './parent-process-identity'
 import { isPidAlive } from './update-marker'
-import { hiddenWindowsChildOptions } from './child-process-options'
 
 export function execText(command: string, args: string[], { timeout = 3000 } = {}): Promise<string> {
   return new Promise<string>((resolve, reject) => {

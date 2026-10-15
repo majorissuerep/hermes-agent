@@ -20,8 +20,8 @@ export function resolveVenvDir(updateRoot: string): string {
   return path.join(updateRoot, 'venv')
 }
 
-import { platformDefaultHermesHome } from './data-paths'
 import { hiddenWindowsChildOptions } from './child-process-options'
+import { platformDefaultHermesHome } from './data-paths'
 
 /** Exact installation identity; PATH may refer to another checkout. */
 export function resolveInstallationLauncher(

@@ -9,7 +9,6 @@ import fs from 'node:fs'
 import { createRequire } from 'node:module'
 import os from 'node:os'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
 
 import type { AppInfo as BuilderAppInfo, Configuration, Metadata, Packager, Protocol } from 'app-builder-lib'
 import { build, type BuildResult } from 'esbuild'

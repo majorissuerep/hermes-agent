@@ -3,8 +3,8 @@ import assert from 'node:assert/strict'
 import { test } from 'vitest'
 
 import { stopBackendChild } from './backend-child'
-import { createLocalBackendLifecycle } from './local-backend-lifecycle'
 import { hiddenWindowsChildOptions, windowsShellCommand } from './child-process-options'
+import { createLocalBackendLifecycle } from './local-backend-lifecycle'
 
 // #74064: cmd.exe truncates a shell:true command line at the first space in
 // the executable token, so a spaced install path (C:\Users\John Doe\...) must

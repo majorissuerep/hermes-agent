@@ -53,7 +53,6 @@ import {
   withRetry
 } from './api-transport'
 import { appIconCandidates, resolveAppIcon, shouldOverrideDockIcon } from './app-icon'
-import { stageAppInstallerFile } from './app-installer-file'
 import {
   appVersionInfo,
   type AppVersionInfo,
@@ -85,7 +84,7 @@ import {
   createBackendOwnership,
   createBackendShutdownCoordinator
 } from './backend-ownership'
-import { canImportHermesCli, PROBE_TIMEOUT_MS, shouldTrustHermesOverride, verifyHermesCli } from './backend-probes'
+import { PROBE_TIMEOUT_MS, shouldTrustHermesOverride, verifyHermesCli } from './backend-probes'
 import { recycleOwnedBackend } from './backend-recycle'
 import { isPidAliveWindows, waitForBackendRelease } from './backend-release-gate'
 import { createInstalledRuntimeGate } from './backend-resolution'
@@ -130,6 +129,7 @@ import {
 } from './bundle-swap'
 import { CHALLENGE_PARTITION } from './challenge-window'
 import { registerChallengeWindowIpc } from './challenge-window-ipc'
+import { hiddenWindowsChildOptions } from './child-process-options'
 import { provisionCliLinks } from './cli-provision'
 import { closeStopFailureMessage, finishWindowsCloseStop, type RuntimeLock } from './close-stop-kill'
 import { shouldAttemptCloudBootCascade } from './cloud-boot-cascade'
@@ -412,7 +412,7 @@ import {
 import { wireOauthSessionResponse } from './oauth-session-response'
 import { listWindowsProcesses, reapPackageRootedProcesses } from './package-process-reap'
 import { createParentStartMarkerResolver } from './parent-process-identity'
-import { bundledPayload, installIdForRoot, type PayloadInfo, payloadPythonPath } from './payload-backend'
+import { bundledPayload, installIdForRoot, type PayloadInfo } from './payload-backend'
 import { petOverlayClickThrough, shouldPopInOnOverlayClosed } from './pet-overlay'
 import { placePetOverlay, registerPetOverlayIpc } from './pet-overlay-ipc'
 import {
@@ -532,6 +532,19 @@ import { loadRendererLoadErrorPage } from './renderer-load-error-page'
 import { attachRendererConsoleCapture, formatRendererBoundaryReport } from './renderer-log'
 import { fetchRosterSourceData } from './roster-source-fetch'
 import { rosterSourceStatus } from './roster-source-status'
+import type { SandboxFallbackReason } from './sandbox-fallback'
+import {
+  alreadyHasDisableGpu,
+  alreadyHasNoSandbox,
+  buildDisableGpuRelaunchArgs,
+  buildNoSandboxRelaunchArgs,
+  decideWindowsSandboxLaunch,
+  fallbackMarker,
+  isHermesDesktopGpuOverrideOff,
+  markerAfterSuccessfulBoot,
+  readSandboxMarker,
+  writeSandboxMarker
+} from './sandbox-fallback'
 import {
   classifyStoredSecret,
   readSecretStoragePolicy,
@@ -617,8 +630,6 @@ import {
   stagedUpdaterSupportsPrewrittenMarker,
   userLauncherInstallRoot
 } from './updater-process'
-import { AppInstallerStrategy } from './updater/app-installer'
-import { createChannelAppInstallerStrategy } from './updater/app-installer'
 import { ChannelResolver, type ChannelTarget } from './updater/channel'
 import { inspectRunningChannelApp } from './updater/channel-native'
 import { ChannelStrategy } from './updater/channel-strategy'
@@ -630,9 +641,7 @@ import { createChannelMacStrategy, createMacStrategy } from './updater/mac-clien
 import { UpdateOperation } from './updater/operation'
 import {
   type ConsumedRelaunch,
-  consumePendingRelaunch,
-  registerUpdateRelaunch,
-  type RelaunchRegistration
+  consumePendingRelaunch
 } from './updater/relaunch'
 import { preflightStateDb } from './updater/state-db-preflight'
 import { isExternalVenvHolder, isHermesOwnedVenvDaemon } from './venv-holder-select'
@@ -664,24 +673,6 @@ import {
   MIN_WIDTH as WINDOW_MIN_WIDTH,
   windowSize
 } from './window-state'
-import { hiddenWindowsChildOptions, windowsShellCommand } from './child-process-options'
-import {
-  DISABLE_GPU_SWITCH,
-  GPU_OVERRIDE_OFF,
-  GPU_OVERRIDE_ON,
-  SandboxFallbackReason,
-  alreadyHasDisableGpu,
-  alreadyHasNoSandbox,
-  buildDisableGpuRelaunchArgs,
-  buildNoSandboxRelaunchArgs,
-  decideWindowsSandboxLaunch,
-  fallbackMarker,
-  isHermesDesktopGpuOverrideOff,
-  markerAfterSuccessfulBoot,
-  readSandboxMarker,
-  writeSandboxMarker
-} from './sandbox-fallback'
-
 import { isPackagedInstallPath as isPackagedInstallPathUnderRoots } from './workspace-cwd'
 import { readWslWindowsClipboardImage } from './wsl-clipboard-image'
 import { resolvePickerDefaultPath, setActiveGatewayProfile, setWslBridgeProfileState } from './wsl-path-bridge'

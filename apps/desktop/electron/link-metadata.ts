@@ -4,13 +4,13 @@ import path from 'node:path'
 
 import { app, BrowserWindow, net as electronNet, session } from 'electron'
 
+import { hiddenWindowsChildOptions } from './child-process-options'
 import { type FaviconIo, resolveFavicon } from './favicon'
 import { CURL_TITLE_WRITE_OUT, parseCurlTitleResponse } from './link-title-curl'
 import { canonicalTitleCacheKey, isFetchableHttpUrl } from './link-title-url'
 import { isAuthWall, resolveLinkTitle } from './link-title-wall'
 import { createLinkTitleWindow, guardLinkTitleSession, readLinkTitleWindowTitle } from './link-title-window'
 import { decodeWebText } from './web-text-decoder'
-import { hiddenWindowsChildOptions } from './child-process-options'
 
 // Link title resolution — curl (tier 1) → hidden BrowserWindow (tier 2).
 const titleCache = new Map()
