@@ -65,13 +65,6 @@ For aarch64 Android devices, use the separate [Termux APT guide](./termux.md).
 curl -fsSL https://raw.githubusercontent.com/majorissuerep/hermes-agent/main/scripts/install.sh | bash
 ```
 
-#### Windows (native)
-
-Run in powershell:
-```powershell
-iex (irm https://raw.githubusercontent.com/majorissuerep/hermes-agent/main/scripts/install.ps1)
-```
-
 After it finishes, reload your shell:
 
 ```bash

@@ -1031,8 +1031,9 @@ def _named_custom_rung(requested_provider, explicit_api_key, explicit_base_url, 
 
 
 def _openrouter_fallback(requested_provider, explicit_api_key, explicit_base_url) -> dict[str, Any]:
-    return _tag(_resolve_openrouter_runtime(requested_provider=requested_provider, explicit_api_key=explicit_api_key,
-                                            explicit_base_url=explicit_base_url), requested_provider)
+    raise AuthError(
+        f"Provider '{requested_provider}' has no configured endpoint or usable credentials. Run `hermes model`.",
+        provider=requested_provider, code="no_provider_configured")
 
 
 def resolve_runtime_provider(*, requested: Optional[str] = None, explicit_api_key: Optional[str] = None,
@@ -1055,6 +1056,8 @@ def resolve_runtime_provider(*, requested: Optional[str] = None, explicit_api_ke
     OpenCode Zen/Go where different models route through different API surfaces)."""
     requested_provider = resolve_requested_provider(requested)
     _raise_if_provider_disabled(requested_provider)
+    if requested_provider not in {"auto", "moa"} and not has_named_custom_provider(requested_provider):
+        resolve_provider(requested_provider)
     # Same alias expansion the auxiliary client applies, so ``provider: openai`` means one thing on
     # every path (background review, curator, MoA slots, delegation) instead of "Unknown provider".
     # The pre-expansion name is what the codex_app_server overlay judges: ``openai`` is eligible,

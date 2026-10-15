@@ -16,7 +16,7 @@ after a model is downloaded.
 
 ## Desktop availability and downloads
 
-Local Models is on by default in the desktop app on macOS, Windows, and Linux
+Local Models is on by default in the desktop app on macOS and Linux
 (x64 and arm64), on every release channel. On other platforms, launch the app
 with `--local` to show it. A runtime can already be bundled; its absence
 triggers the managed-tool install path, not an arbitrary latest llama.cpp
@@ -188,7 +188,6 @@ Selecting a local model as your main model uses the standard
 
 ## Requirements and limits
 
-- **Windows:** CUDA on supported NVIDIA targets, Vulkan on x64, or CPU.
   **Linux:** CUDA on x64 and arm64 NVIDIA (needs a CUDA 13 driver), Vulkan, or CPU.
   **macOS:** Metal or CPU. HIP/ROCm is an explicit choice on supported x64
   targets. Unsupported backend/target pairs fail before any download.

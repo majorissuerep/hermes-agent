@@ -66,7 +66,7 @@ Portal 代理了来自整个生态系统的精选 agentic 模型目录——统�
 
 ### 跨平台一致性
 
-[原生 Windows](../user-guide/windows-native.md) 上，逐个配置 API 密钥是其最大痛点——在 Windows 上分别安装网页搜索账号、FAL 账号、Browser Use 账号、OpenAI 密钥，是整个 agent 配置过程中摩擦最高的部分。Portal 订阅消除了这一问题：一次 OAuth 覆盖模型和所有 gateway 工具，Windows 用户无需手动配置四个后端，即可获得与 macOS/Linux 相同的体验。
+Windows（WSL2） 上，逐个配置 API 密钥是其最大痛点——在 Windows 上分别安装网页搜索账号、FAL 账号、Browser Use 账号、OpenAI 密钥，是整个 agent 配置过程中摩擦最高的部分。Portal 订阅消除了这一问题：一次 OAuth 覆盖模型和所有 gateway 工具，Windows 用户无需手动配置四个后端，即可获得与 macOS/Linux 相同的体验。
 
 ## 关于 Hermes 4 的说明
 

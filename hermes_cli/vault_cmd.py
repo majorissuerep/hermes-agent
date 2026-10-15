@@ -382,6 +382,7 @@ def gate_locked_vault(args: Any, home) -> None:
     if vault_mod.is_unlocked(home):
         return
     from hermes_security.handoff import adopt_inherited_key
+    from hermes_security.session_authority import SessionAuthorityError
 
     try:
         # A detached child (the session host) inherits its launcher's unlocked key over a pipe fd.
@@ -420,6 +421,9 @@ def gate_locked_vault(args: Any, home) -> None:
                 "run 'hermes secure-vault repair'",
                 file=sys.stderr,
             )
+    except SessionAuthorityError as exc:
+        print(f"✗ {exc}", file=sys.stderr)
+        raise SystemExit(2) from None
     except vault_errors.WrongMasterPasswordError:
         print("✗ Wrong master password")
         raise SystemExit(2)

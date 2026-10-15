@@ -118,7 +118,7 @@ between channels, edit the channel path and suite in `hermes-agent.list`, then
 
 ## Gateway
 
-This APT installation does not use systemd, launchd, or Windows Scheduled Tasks.
+This APT installation does not use systemd or launchd.
 Run the gateway in a Termux session:
 
 ```bash

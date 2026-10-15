@@ -134,8 +134,14 @@ class ClientLifecycleMixin:
                 if owner and owner != task_id:
                     clear_file_ops_cache(owner)
 
+        def revoke_session_unlock() -> None:
+            authority = getattr(self, "_vault_session_authority", None)
+            self._vault_session_authority = None
+            if authority is not None:
+                authority.close()
+
         for step in (kill_processes, lambda: cleanup_vm(task_id), lambda: cleanup_browser(task_id),
-                     release_computer_use, forget_file_state):
+                     release_computer_use, forget_file_state, revoke_session_unlock):
             _quietly(step)
 
     def _client_log_context(self) -> str:

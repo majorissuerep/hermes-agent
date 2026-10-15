@@ -330,7 +330,7 @@ the desktop app itself last. See
   turns that into a password prompt on every launch. If you want at-rest
   encryption on top of the file permissions, turn on **Settings → Gateway →
   "Encrypt saved secrets with the OS keychain"**; existing stored secrets are
-  re-encrypted in place (Keychain on macOS, DPAPI on Windows, the session
+  re-encrypted in place (Keychain on macOS, the session
   keyring backend on Linux). Turning it back off decrypts them again.
 - **The registry file** (`connections.json` under the app's user-data
   directory) holds labels, URLs, and hosts — secrets only ever appear inside

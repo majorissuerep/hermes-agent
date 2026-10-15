@@ -1,0 +1,94 @@
+name: Encrypted lifecycle VM acceptance
+
+# Deliberate, bounded runs: every matrix leg gets a fresh hosted Ubuntu VM.
+# No schedules, historical upstream tag sampling, mocks, or green credential skips.
+on:
+  push:
+    branches: ['e2e/encrypted/**']
+  workflow_dispatch:
+    inputs:
+      baseline:
+        description: 'OLD fork ref; must differ from this candidate for update legs'
+        type: string
+        default: main
+      commit:
+        description: 'Exact candidate commit (empty uses the dispatch ref)'
+        type: string
+        default: ''
+  workflow_call:
+    inputs:
+      baseline:
+        type: string
+        default: main^
+      commit:
+        type: string
+        required: true
+    secrets:
+      E2E_LLM_API_KEY:
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: encrypted-lifecycle-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  lifecycle:
+    name: Encrypted ${{ matrix.scenario }} (live LLM)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        scenario: [fresh, update, broken-files, dirty-install]
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a # v7.0.1
+        with:
+          ref: ${{ inputs.commit || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Pin both ends of the real update
+        id: refs
+        env:
+          BASELINE: ${{ inputs.baseline || 'origin/main' }}
+        run: |
+          set -euo pipefail
+          echo "baseline=$(git rev-parse --verify "$BASELINE^{commit}")" >> "$GITHUB_OUTPUT"
+          echo "candidate=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Real installer, update, restore and delegated LLM task
+        env:
+          E2E_LLM_API_KEY: ${{ secrets.E2E_LLM_API_KEY }}
+          E2E_LLM_BASE_URL: ${{ vars.E2E_LLM_BASE_URL }}
+          E2E_LLM_MODEL: ${{ vars.E2E_LLM_MODEL }}
+          E2E_LLM_PROVIDER: litellm
+          SCENARIO: ${{ matrix.scenario }}
+          BASELINE_SHA: ${{ steps.refs.outputs.baseline }}
+          CANDIDATE_SHA: ${{ steps.refs.outputs.candidate }}
+        run: |
+          python3 scripts/e2e/encrypted_lifecycle.py \
+            --scenario "$SCENARIO" --baseline "$BASELINE_SHA" --candidate "$CANDIDATE_SHA" \
+            --work-dir "$RUNNER_TEMP" --evidence "$GITHUB_WORKSPACE/lifecycle-evidence"
+      - name: Upload sanitized exact-SHA evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: encrypted-${{ matrix.scenario }}-${{ github.sha }}
+          path: lifecycle-evidence/
+          if-no-files-found: warn
+          retention-days: 14
+
+  acceptance:
+    name: Encrypted lifecycle gate
+    if: always()
+    needs: lifecycle
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require executed success from all four fresh VMs
+        env:
+          RESULT: ${{ needs.lifecycle.result }}
+        run: |
+          test "$RESULT" = success || { echo "::error::Encrypted VM acceptance did not fully pass ($RESULT)"; exit 1; }

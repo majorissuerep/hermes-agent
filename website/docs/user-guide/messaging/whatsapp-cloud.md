@@ -96,14 +96,11 @@ The Cloud API delivers inbound messages by HTTPS POST to your webhook URL — th
 
 ### Cloudflare Tunnel (recommended)
 
-Free, no port forwarding, works on Windows / macOS / Linux.  Runs as a separate process alongside the gateway.
+Free, no port forwarding, works on macOS and Linux.  Runs as a separate process alongside the gateway.
 
 **Install:**
 
 ```bash
-# Windows
-winget install Cloudflare.cloudflared
-
 # macOS
 brew install cloudflared
 
@@ -284,7 +281,6 @@ WhatsApp distinguishes between a "voice note" (the green waveform bubble) and a 
 Hermes TTS produces MP3. Two paths:
 
 - **With ffmpeg on PATH** (recommended) — outbound TTS is converted and arrives as a proper voice note. Install:
-  - Windows: `winget install Gyan.FFmpeg`
   - macOS: `brew install ffmpeg`
   - Linux: package manager
 - **Without ffmpeg** — outbound TTS arrives as an MP3 audio attachment. Plays fine, just doesn't look like a voice note. A one-time warning fires in the gateway log so you know.

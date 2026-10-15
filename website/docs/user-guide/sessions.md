@@ -849,7 +849,7 @@ waiting out openers (a holder that appears mid-way makes SQLite refuse instead
 of racing it), and verifies the file header reports the new mode. It reminds
 you to set `database.journal_mode` to the same value when the config disagrees,
 because the next open re-applies the configured mode. The holder scan is local
-(open-file tables on Linux/macOS, the Restart Manager on Windows), so it
+(open-file tables on Linux/macOS), so it
 cannot see a process in another container or VM sharing the volume. If the
 scan itself fails the command refuses because it cannot prove the store is
 quiet; `--force` waives only that case after you have stopped every Hermes

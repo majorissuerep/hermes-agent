@@ -5,14 +5,13 @@ name: OS-specific tests
 # The main Python suite (.github/workflows/tests.yml) runs on
 # ubuntu-latest and covers everything that is either platform-agnostic or
 # genuinely Linux-specific. Tests whose subject is macOS- or
-# Windows-specific behaviour carry a marker (see the ``_OS_MARKS`` block
+# OS-specific behaviour carries a marker (see the ``_OS_MARKS`` block
 # comment in tests/conftest.py) and are SKIPPED on Linux, because faking
 # ``sys.platform`` on a Linux runner selects the branch under test without
 # reproducing any of the OS behaviour that branch exists for. This workflow
 # is where those markers actually execute:
 #
 #   macos    → ``-m platforms``    on macos-latest
-#   windows  → ``-m platforms``    on windows-latest-32-core and windows-latest-32-arm-core
 #
 # (tests/conftest.py's ``pytest_collection_modifyitems`` hook skips
 # foreign-OS ``platforms(...)`` markers on each host, so one shared ``-m
@@ -124,8 +123,8 @@ jobs:
 
           EXTRA_ARGS=()
 
-          # ``tr -d '\r'``: on Windows the helper's redirected stdout gains
-          # CRLF line endings; a stray \r would corrupt the path. The list
+          # ``tr -d '\r'``: defensive CRLF strip (fork: POSIX runners).
+          # line endings; a stray \r would corrupt the path. The list
           # uses the native path-list separator consumed by --files.
           #
           # Any non-zero exit propagates red: real test failures, or the

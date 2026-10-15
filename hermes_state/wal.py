@@ -17,6 +17,7 @@ from typing import Any, Dict, Optional
 
 from hermes_cli.sqlite_runtime import is_sqlite_wal_reset_vulnerable as _is_sqlite_wal_reset_vulnerable
 from hermes_state.errors import is_sqlite_lock_error
+from hermes_security.sqlite import connection_version_info
 
 # Log-record parity with the origin module (caplog tests pin "hermes_state").
 logger = logging.getLogger("hermes_state")
@@ -285,12 +286,12 @@ def apply_wal_with_fallback(conn: sqlite3.Connection, *, db_label: str = "state.
             # Preserve its observed mode; defer configuration-driven transitions.
             current_mode = _on_disk_journal_mode(conn)
             if current_mode == "wal":
-                if is_sqlite_wal_reset_vulnerable():
+                if is_sqlite_wal_reset_vulnerable(version_info=connection_version_info(conn)):
                     return _apply_delete_for_wal_reset_bug(conn, db_label=db_label)
                 _apply_wal_companions(conn)
                 return "wal"
             if current_mode == "delete" and not require_wal and _database_has_content(conn):
-                if is_sqlite_wal_reset_vulnerable():
+                if is_sqlite_wal_reset_vulnerable(version_info=connection_version_info(conn)):
                     _log_wal_reset_bug_once(db_label, kept_wal=False)
                 return "delete"
         configured = resolve_journal_mode()
@@ -300,7 +301,7 @@ def apply_wal_with_fallback(conn: sqlite3.Connection, *, db_label: str = "state.
 
     # Vulnerable SQLite: never enable WAL on non-WAL files (configured mode resolved first so an explicit DELETE
     # request is still verified).
-    if is_sqlite_wal_reset_vulnerable():
+    if is_sqlite_wal_reset_vulnerable(version_info=connection_version_info(conn)):
         return _apply_delete_for_wal_reset_bug(conn, db_label=db_label, require_delete=configured == "delete")
     # Read-only probe (no flock/checkpoint/WAL-SHM unlink): WAL-init must not unlink files other connections hold.
     current_mode = _on_disk_journal_mode(conn)

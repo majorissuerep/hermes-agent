@@ -10,7 +10,7 @@ import { canonicalTitleCacheKey, isFetchableHttpUrl } from './link-title-url'
 import { isAuthWall, resolveLinkTitle } from './link-title-wall'
 import { createLinkTitleWindow, guardLinkTitleSession, readLinkTitleWindowTitle } from './link-title-window'
 import { decodeWebText } from './web-text-decoder'
-import { hiddenWindowsChildOptions } from './windows-child-options'
+import { hiddenWindowsChildOptions } from './child-process-options'
 
 // Link title resolution — curl (tier 1) → hidden BrowserWindow (tier 2).
 const titleCache = new Map()

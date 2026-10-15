@@ -27,8 +27,6 @@ class Lane:
 
 LANES = (
     Lane("docker", True, "build and publish the Docker image"),
-    Lane("windows", True, "signed Windows x64 + arm64 MSIX and the universal bundle (the update channel's package)"),
-    Lane("windows-store", True, "unsigned Microsoft Store bundle, submitted to Partner Center (needs no signing)"),
     Lane("macos-arm64", True, "macOS Apple Silicon DMG + ZIP"),
     Lane("macos-intel", False, "macOS Intel DMG + ZIP (unsupported on main; its runner adds over an hour)"),
     Lane("termux", False, "Termux (Android aarch64) APT package"),
@@ -36,9 +34,7 @@ LANES = (
     Lane("nix", True, "Nix checks"),
     Lane("docker-tests", True, "tests of the Docker image before it is published"),
     Lane("pm-bundle", True, "PM bundle acceptance"),
-    Lane("windows-live", True, "Windows live venv E2E"),
     Lane("install-e2e", True, "install and update E2E"),
-    Lane("bootstrap-version", True, "bootstrap installer release identity check"),
     Lane("termux-checks", True, "Termux verification (runs only with termux)"),
     Lane("smoke", True, "native install + chat smoke of each built desktop package"),
     Lane("upgrade", True, "signed-package upgrade acceptance (OLD to NEW) of each built desktop package"),
@@ -46,14 +42,13 @@ LANES = (
 NAMES = tuple(lane.name for lane in LANES)
 DEFAULT = frozenset(lane.name for lane in LANES if lane.default)
 
-DESKTOP = ("windows", "macos-arm64", "macos-intel")
-WINDOWS = ("windows", "windows-store")
-BUNDLES = (*DESKTOP, "windows-store", "termux")
+DESKTOP = ("macos-arm64", "macos-intel")
+BUNDLES = (*DESKTOP, "termux")
 # The protected desktop channel, the update feeds and the Termux index move only for a release that
 # built every desktop package the channel serves. A partial set still stages, verifies and (for
 # Windows) submits its packages, but leaves the channels on the previous release.
-CHANNEL_DESKTOP = ("windows", "macos-arm64")
-DERIVED = ("bundles", "desktop-channel", "windows-build")
+CHANNEL_DESKTOP = ("macos-arm64",)
+DERIVED = ("bundles", "desktop-channel")
 
 # Each stable-release.yml job and the lanes that must all be on for it to run. A job named here
 # reports `skipped` when one is off and `success` otherwise; a job not named never skips. DERIVED
@@ -67,36 +62,26 @@ JOB_LANES: dict[str, frozenset[str]] = {name: frozenset(needs) for name, needs i
     "publish-docker": ("docker",),
     "pm-bundle": ("pm-bundle",),
     "termux-checks": ("termux-checks", "termux"),
-    "windows-live": ("windows-live",),
     "install-e2e": ("install-e2e",),
-    "bootstrap-version": ("bootstrap-version",),
     "candidates-darwin-arm64": ("macos-arm64",),
     "candidates-darwin-x64": ("macos-intel",),
-    "candidates-win32-arm64": ("windows-build",),
-    "candidates-win32-x64": ("windows-build",),
-    "candidates-win32-bundle": ("windows-build",),
     "candidates-termux": ("termux",),
     "candidate-manifest": ("bundles",),
     "publish-bundles": ("bundles",),
     "transitions-darwin-arm64": ("macos-arm64", "upgrade"),
     "transitions-darwin-x64": ("macos-intel", "upgrade"),
-    "transitions-win32": ("windows", "upgrade"),
     "macos-packaged-arm64": ("macos-arm64", "upgrade"),
     "macos-packaged-x64": ("macos-intel", "upgrade"),
-    "windows-packaged": ("windows", "upgrade"),
 }.items()}
 
 CANDIDATE_CALLS = tuple(job for job in JOB_LANES if job.startswith("candidates-"))
 
 # Candidate handoff group and manifest target, each with the lane that builds it.
-HANDOFF_LANE = {"win32-x64": "windows-build", "win32-arm64": "windows-build", "windows-universal": "windows-build",
-                "darwin-arm64": "macos-arm64", "darwin-x64": "macos-intel", "termux": "termux"}
-TARGET_LANE = {"windows/x64": "windows", "windows/arm64": "windows", "macos/arm64": "macos-arm64",
+HANDOFF_LANE = {"darwin-arm64": "macos-arm64", "darwin-x64": "macos-intel", "termux": "termux"}
+TARGET_LANE = {"macos/arm64": "macos-arm64",
                "macos/x64": "macos-intel", "termux/aarch64": "termux"}
 LEFT_OUT = {
     "docker": "the Docker image keeps its previous stable tag",
-    "windows": "no signed Windows packages: the Windows update channel stays on its previous release",
-    "windows-store": "no Microsoft Store submission",
     "macos-arm64": "no macOS Apple Silicon package",
     "macos-intel": "Intel Macs get no update: the shared macOS stable feed lists arm64 only",
     "termux": "the Termux APT channel stays on its previous release",
@@ -130,8 +115,7 @@ def parse_list(values: Iterable[str] | None) -> list[str] | None:
 def effective(lanes: Iterable[str]) -> frozenset[str]:
     lanes = frozenset(lanes)
     return lanes | {name for name, derived in (("bundles", has_bundles(lanes)),
-                                               ("desktop-channel", advances_desktop(lanes)),
-                                               ("windows-build", bool(lanes & set(WINDOWS)))) if derived}
+                                               ("desktop-channel", advances_desktop(lanes))) if derived}
 
 
 def flags(lanes: Iterable[str]) -> dict[str, bool]:
@@ -189,11 +173,11 @@ def moves_channels(lanes: Iterable[str]) -> bool:
 # Claims record `lanesRevision` next to `lanes`. A claim without it was cut when "windows" also meant
 # the Store bundle, so it reads as windows plus windows-store; the two lanes cannot otherwise be told
 # apart from a revision-2 claim that chose "windows" alone.
-LANES_REVISION = 2
+LANES_REVISION = 3
 _LEGACY_OPTIONAL = ("includeMacosIntel", "includeTermux")
 _LEGACY_BUNDLE_LANES = frozenset({*BUNDLES, "pm-bundle", "upgrade", "smoke"})
-_TEST_LANES = frozenset({"ci", "nix", "docker-tests", "pm-bundle", "windows-live", "install-e2e",
-                         "bootstrap-version", "termux-checks", "smoke", "upgrade"})
+_TEST_LANES = frozenset({"ci", "nix", "docker-tests", "pm-bundle", "install-e2e",
+                         "termux-checks", "smoke", "upgrade"})
 
 
 def claim_lanes(metadata: Mapping) -> frozenset[str]:
@@ -215,8 +199,6 @@ def claim_lanes(metadata: Mapping) -> frozenset[str]:
             known = _known(lanes)
         except ValueError as error:
             raise ValueError("Stable claim metadata is invalid") from error
-        if "lanesRevision" not in metadata and "windows" in known:
-            known |= {"windows-store"}
         return known
     if any(not isinstance(metadata.get(key), bool)
            for key in ("skipBundles", "skipTests", *(k for k in _LEGACY_OPTIONAL if k in metadata))):

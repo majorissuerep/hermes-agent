@@ -14,7 +14,7 @@ import sys
 
 from agent.i18n import t
 from hermes_constants import get_hermes_home
-from hermes_state.ids import new_session_id
+from agent.session_ids import new_session_id
 from pathlib import Path
 from rich.console import Console
 from rich.markup import escape as _escape

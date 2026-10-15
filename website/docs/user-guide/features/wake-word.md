@@ -76,8 +76,8 @@ backend process.
 
 | Engine | Cost | API key | Notes |
 |--------|------|---------|-------|
-| **openWakeWord** | Free | None | TFLite through `pyopen-wakeword`. Includes the **"hey hermes"** model. Custom models require a `.tflite` file. Not available on Intel macOS or native Windows ARM64. |
-| **sherpa** | Free | None | Open-vocabulary detection for typed phrases. Downloads an English model on first use. Supports native Windows ARM64. |
+| **openWakeWord** | Free | None | TFLite through `pyopen-wakeword`. Includes the **"hey hermes"** model. Custom models require a `.tflite` file. Not available on Intel macOS. |
+| **sherpa** | Free | None | Open-vocabulary detection for typed phrases. Downloads an English model on first use. |
 | **Porcupine** | Free tier / paid | `PORCUPINE_ACCESS_KEY` | Picovoice engine; built-in keywords + custom `.ppn` files |
 
 The default provider is **`auto`**. It selects the first platform-supported

@@ -60,42 +60,6 @@ updates:
 
 旧版布尔值仍然有效：`true` 等同于 `full`，`false` 等同于 `off`。
 
-### Windows：另一个 `hermes.exe` 正在运行
-
-在 Windows 上，如果 `hermes update` 检测到另一个 `hermes.exe` 进程持有 venv 入口点可执行文件的句柄，它将拒绝运行 — 最常见的情况是 Hermes Desktop 应用启动的后端进程、另一个终端中打开的 `hermes` REPL，或正在运行的 gateway：
-
-```
-$ hermes update
-✗ Another hermes.exe is running:
-    PID 12345  hermes.exe
-
-  Updating now would fail to overwrite ...\venv\Scripts\hermes.exe because
-  Windows blocks REPLACE on a running executable.
-
-  Close Hermes Desktop, exit any open `hermes` REPLs, and
-  stop the gateway (`hermes gateway stop`) before retrying.
-  Override with `hermes update --force` if you've already
-  confirmed those processes will not write to the venv.
-```
-
-关闭列出的进程后重试。如果你确定并发进程不会造成干扰（极少见 — 通常仅在杀毒软件 shim 被误判时有用），可传入 `--force` 跳过检查。此时更新程序仍会以指数退避方式重试 `.exe` 重命名操作，对于顽固的文件锁，会通过 `MoveFileEx(MOVEFILE_DELAY_UNTIL_REBOOT)` 将替换操作安排在下次重启时执行，以确保更新能够完成。
-
-预期输出如下：
-
-```
-$ hermes update
-Updating Hermes Agent...
-📥 Pulling latest code...
-Already up to date.  (or: Updating abc1234..def5678)
-📦 Updating dependencies...
-✅ Dependencies updated
-🔍 Checking for new config options...
-✅ Config is up to date  (or: Found 2 new options — running migration...)
-🔄 Restarting gateways...
-✅ Gateway restarted
-✅ Hermes Agent updated successfully!
-```
-
 ### 更新后建议的验证步骤
 
 `hermes update` 处理主要的更新流程，但快速验证可确认一切正常落地：

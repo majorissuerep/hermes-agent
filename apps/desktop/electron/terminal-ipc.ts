@@ -14,8 +14,6 @@ import { resolveTerminalConnectionForSender } from './connection-apply'
 import { ensureSpawnHelperExecutable } from './spawn-helper-perms'
 import { buildInteractiveSshArgs } from './ssh-connection'
 import { createTerminalOutputGate } from './terminal-output-gate'
-import { applyWindowsMsysBashEnvDefaults } from './windows-msys-bash-env'
-import { buildWindowsInteractiveCommand } from './windows-remote-lifecycle'
 
 export interface TerminalIpcDeps {
   isWindows: boolean
@@ -185,7 +183,7 @@ export function registerTerminalIpc({
     // which marks the agent *backend* and gates cron/gateway behavior.
     env.HERMES_DESKTOP_TERMINAL = '1'
 
-    return applyWindowsMsysBashEnvDefaults(env, isWindows)
+    return env // fork: MSYS bash env defaults removed (native Windows unsupported)
   }
 
   function terminalChannel(id, suffix) {
@@ -317,10 +315,7 @@ export function registerTerminalIpc({
     const remote = Boolean(sshTarget)
     const remoteState = remote ? getSshConnectionState(sshTarget.scope) : null
 
-    const remoteCommand =
-      remoteState?.remotePlatform === 'Windows'
-        ? buildWindowsInteractiveCommand(String(payload?.cwd || '').trim())
-        : undefined
+    const remoteCommand = undefined // fork: Windows SSH remotes removed (native Windows unsupported)
 
     const ptyProcess = remote
       ? nodePty.spawn(

@@ -61,7 +61,6 @@ import {
   nativeAboutVersion,
   packagedReleaseChannel
 } from './app-version'
-import { runAppInstallerChecker } from './appinstaller-checker'
 import { installApplicationMenuAfterFirstWindow } from './application-menu-startup'
 import { stopBackendChild as stopBackendChildImpl, waitForBackendExit } from './backend-child'
 import {
@@ -623,7 +622,6 @@ import { createChannelAppInstallerStrategy } from './updater/app-installer'
 import { ChannelResolver, type ChannelTarget } from './updater/channel'
 import { inspectRunningChannelApp } from './updater/channel-native'
 import { ChannelStrategy } from './updater/channel-strategy'
-import { verifyPreparedChannelInstaller } from './updater/channel-windows-host'
 import { type CheckoutStrategy, createCheckoutStrategy } from './updater/checkout'
 import { readSourceUpdate, sourceChannelName, type SourceUpdate } from './updater/checkout-source'
 import { ExternalStrategy } from './updater/external'
@@ -638,7 +636,6 @@ import {
 } from './updater/relaunch'
 import { startUpdateRelaunchWaiter } from './updater/relaunch-waiter'
 import { preflightStateDb } from './updater/state-db-preflight'
-import { createStoreStrategy } from './updater/store-client'
 import { isExternalVenvHolder, isHermesOwnedVenvDaemon } from './venv-holder-select'
 import { fetchMarketplaceThemes, searchMarketplaceThemes } from './vscode-marketplace'
 import { createWakeIndicatorWindowController } from './wake-indicator-window'
@@ -668,40 +665,28 @@ import {
   MIN_WIDTH as WINDOW_MIN_WIDTH,
   windowSize
 } from './window-state'
-import { hiddenWindowsChildOptions } from './windows-child-options'
-import { buildPathExtCandidates, chooseUpdaterArgs, resolveVenvHermesCommand } from './windows-hermes-path'
+import { hiddenWindowsChildOptions, windowsShellCommand } from './child-process-options'
+import {
+  DISABLE_GPU_SWITCH,
+  GPU_OVERRIDE_OFF,
+  GPU_OVERRIDE_ON,
+  SandboxFallbackReason,
+  alreadyHasDisableGpu,
+  alreadyHasNoSandbox,
+  buildDisableGpuRelaunchArgs,
+  buildNoSandboxRelaunchArgs,
+  decideWindowsSandboxLaunch,
+  fallbackMarker,
+  isHermesDesktopGpuOverrideOff,
+  markerAfterSuccessfulBoot,
+  readSandboxMarker,
+  writeSandboxMarker
+} from './sandbox-fallback'
 import {
   detectRemotePlatform,
   helper,
   terminateOwnedWindowsDashboardForUpdate
 } from './windows-remote-lifecycle'
-import {
-  alreadyHasNoSandbox,
-  buildNoSandboxRelaunchArgs,
-  decideWindowsSandboxLaunch,
-  fallbackMarker,
-  grantAllApplicationPackagesAcl,
-  markerAfterSuccessfulBoot,
-  readSandboxMarker,
-  type SandboxFallbackReason,
-  shouldAttemptAclRepair,
-  shouldRelaunchForGpuSandboxCrash,
-  shouldRelaunchForRendererSandboxCrashLoop,
-  writeSandboxMarker
-} from './windows-sandbox-fallback'
-import {
-  alreadyHasDisableGpu,
-  buildDisableGpuRelaunchArgs,
-  decideWindowsGpuStackCookieLaunch,
-  gpuStackCookieFallbackMarker,
-  isHermesDesktopGpuOverrideOff,
-  markerAfterSuccessfulGpuStackCookieBoot,
-  readGpuStackCookieMarker,
-  shouldRelaunchForRendererStackCookieCrashLoop,
-  shouldSurfaceErrorForRendererStackCookieCrashLoop,
-  writeGpuStackCookieMarker
-} from './windows-stack-cookie-fallback'
-import { readWindowsUserEnvVar } from './windows-user-env'
 import { isPackagedInstallPath as isPackagedInstallPathUnderRoots } from './workspace-cwd'
 import { readWslWindowsClipboardImage } from './wsl-clipboard-image'
 import { resolvePickerDefaultPath, setActiveGatewayProfile, setWslBridgeProfileState } from './wsl-path-bridge'
@@ -780,33 +765,6 @@ let windowsGpuStackCookieFallbackActive = false
 let windowsGpuStackCookieFallbackSticky = false
 let windowsGpuStackCookieRelaunchAttempted = false
 
-if (IS_WINDOWS) {
-  const windowsGpuUserData = app.getPath('userData')
-
-  const gpuStackCookieDecision = decideWindowsGpuStackCookieLaunch({
-    argv: process.argv,
-    marker: readGpuStackCookieMarker(windowsGpuUserData),
-    env: process.env,
-    appVersion: app.getVersion()
-  })
-
-  windowsGpuStackCookieFallbackActive = gpuStackCookieDecision.enable
-  windowsGpuStackCookieFallbackSticky = gpuStackCookieDecision.nextMarker.state === 'fallback'
-
-  try {
-    writeGpuStackCookieMarker(windowsGpuUserData, gpuStackCookieDecision.nextMarker)
-  } catch {
-    void 0
-  }
-
-  if (gpuStackCookieDecision.enable && !REMOTE_DISPLAY_REASON) {
-    app.disableHardwareAcceleration()
-    app.commandLine.appendSwitch('disable-gpu-compositing')
-    console.log(
-      `[hermes] Windows GPU stack-cookie fallback enabled (${gpuStackCookieDecision.reason}); disabling GPU hardware acceleration (0xC0000409 / #108047)`
-    )
-  }
-}
 
 // Renderer debugging port. On for dev-server runs (`hgui` / `npm run dev`) so
 // the CDP tooling in scripts/ can attach; never for a packaged build — see
@@ -914,40 +872,40 @@ if (NVIDIA_EGL_FALLBACK.enable) {
 // #40077 GPU process died to Chromium's health-check SIGTERM, exit_code=15).
 if (NVIDIA_DRIVER_MAJOR !== null && process.platform === 'linux') {
   app.on('child-process-gone', (_event, details) => {
-    if (
-      !shouldRelaunchForNvidiaGpuDeath({
-        details,
-        fallbackActive: nvidiaEglFallbackActive,
-        relaunchAttempted: nvidiaEglRelaunchAttempted
-      })
-    ) {
-      return
-    }
+  if (
+    !shouldRelaunchForNvidiaGpuDeath({
+      details,
+      fallbackActive: nvidiaEglFallbackActive,
+      relaunchAttempted: nvidiaEglRelaunchAttempted
+    })
+  ) {
+    return
+  }
 
-    nvidiaEglRelaunchAttempted = true
+  nvidiaEglRelaunchAttempted = true
 
-    try {
-      writeNvidiaEglMarker(
-        app.getPath('userData'),
-        nvidiaEglFallbackMarker(app.getVersion(), NVIDIA_DRIVER_VERSION ?? String(NVIDIA_DRIVER_MAJOR))
-      )
-    } catch {
-      void 0
-    }
-
-    console.warn(
-      `[hermes] NVIDIA GPU process died (reason=${details?.reason}, exit=${details?.exitCode}); ` +
-        'relaunching once with --use-angle=swiftshader (#40077, #124255)'
+  try {
+    writeNvidiaEglMarker(
+      app.getPath('userData'),
+      nvidiaEglFallbackMarker(app.getVersion(), NVIDIA_DRIVER_VERSION ?? String(NVIDIA_DRIVER_MAJOR))
     )
+  } catch {
+    void 0
+  }
 
-    try {
-      app.relaunch({
-        args: [...process.argv.slice(1), '--use-angle=swiftshader']
-      })
-      void exitAfterBackendShutdown(0)
-    } catch (error) {
-      console.error(`[hermes] NVIDIA SwiftShader relaunch failed: ${error?.message || error}`)
-    }
+  console.warn(
+    `[hermes] NVIDIA GPU process died (reason=${details?.reason}, exit=${details?.exitCode}); ` +
+      'relaunching once with --use-angle=swiftshader (#40077, #124255)'
+  )
+
+  try {
+    app.relaunch({
+      args: [...process.argv.slice(1), '--use-angle=swiftshader']
+    })
+    void exitAfterBackendShutdown(0)
+  } catch (error) {
+    console.error(`[hermes] NVIDIA SwiftShader relaunch failed: ${error?.message || error}`)
+  }
   })
 }
 
@@ -1040,25 +998,9 @@ let windowsNoSandboxRelaunchAttempted = false
 // recovery as #38216: two consecutive mid-boot aborts engage `--no-sandbox`,
 // an app update re-probes the sandbox once. Windows-only extras (ACL repair,
 // renderer crash-loop relaunch) stay inside the IS_WINDOWS branch.
-if (IS_WINDOWS || process.platform === 'linux') {
+if (process.platform === 'linux') { // fork: Windows sandbox fallback removed
   const windowsUserData = app.getPath('userData')
   const priorMarker = readSandboxMarker(windowsUserData)
-
-  // Best-effort ACL repair, only when the last boot aborted or the fallback is
-  // engaged — icacls /T recurses the whole install tree, so healthy launches
-  // skip it (the installer already granted the ACE at install time). Repair
-  // targets the install dir only: granting AppContainer read on userData would
-  // expose Hermes sessions/config to every packaged app on the machine.
-  if (shouldAttemptAclRepair(priorMarker)) {
-    const exeDir = path.dirname(process.execPath)
-    const acl = grantAllApplicationPackagesAcl(exeDir, { execFileSync })
-
-    if (acl.ok) {
-      console.log(`[hermes] granted ALL APPLICATION PACKAGES RX on ${exeDir} (#38216)`)
-    } else if (acl.error && acl.error !== 'missing-target-or-exec') {
-      console.warn(`[hermes] AppContainer ACL grant failed on ${exeDir}: ${acl.error}`)
-    }
-  }
 
   const sandboxDecision = decideWindowsSandboxLaunch({
     argv: process.argv,
@@ -1087,45 +1029,9 @@ if (IS_WINDOWS || process.platform === 'linux') {
   // One coalesced Linux GPU-child recovery (#86073, #124843, #121954): the
   // sandbox signature is tried first (that host's matrix shows --disable-gpu
   // still crashes), then the software ladder — including the relapse after a
-  // --no-sandbox boot died again. One death, one bounded relaunch; Windows
-  // keeps its breakpoint-signature fast path unchanged.
+  // --no-sandbox boot died again. One death, one bounded relaunch.
+  // fork: Windows breakpoint fast path removed (native Windows unsupported).
   app.on('child-process-gone', (_event, details) => {
-    if (IS_WINDOWS) {
-      if (
-        !shouldRelaunchForGpuSandboxCrash({
-          details,
-          alreadyNoSandbox: windowsSandboxFallbackActive || alreadyHasNoSandbox(process.argv, process.env),
-          relaunchAttempted: windowsNoSandboxRelaunchAttempted
-        })
-      ) {
-        return
-      }
-
-      windowsNoSandboxRelaunchAttempted = true
-      windowsSandboxFallbackActive = true
-      windowsSandboxFallbackSticky = true
-      windowsSandboxFallbackReason = 'gpu-breakpoint'
-
-      try {
-        writeSandboxMarker(app.getPath('userData'), fallbackMarker('gpu-breakpoint', app.getVersion()))
-      } catch {
-        void 0
-      }
-
-      console.warn(
-        `[hermes] GPU child died with the sandbox signature (exit=${details?.exitCode}); relaunching once with --no-sandbox (#38216)`
-      )
-
-      try {
-        app.relaunch({ args: buildNoSandboxRelaunchArgs(process.argv.slice(1)) })
-        void exitAfterBackendShutdown(0)
-      } catch (error) {
-        console.error(`[hermes] --no-sandbox relaunch failed: ${error?.message || error}`)
-      }
-
-      return
-    }
-
     const alreadySoftware =
       LINUX_GPU_SOFTWARE_ACTIVE || linuxGpuFallbackActive || alreadyHasDisableGpu(process.argv, process.env)
 
@@ -1268,9 +1174,8 @@ if (process.env.HERMES_DESKTOP_TMPDIR) {
 
 const HERMES_HOME: string = resolveDesktopHermesHome({
   home: app.getPath('home'),
-  directoryExists,
-  readWindowsHome: (): string | null => readWindowsUserEnvVar('HERMES_HOME')
-})
+  directoryExists
+}) // fork: readWindowsHome removed (native Windows unsupported)
 
 // #77311: `desktop.electron_flags` and the renderer heap ceiling
 // (`desktop.renderer_max_old_space_mb`) used to reach Chromium only through
@@ -2962,7 +2867,7 @@ function findOnPath(command) {
   // shell-script shim named `hermes` — must not shadow `hermes.cmd`/`hermes.exe`.
   // The empty entry is kept LAST so callers that already include the extension
   // (py.exe, pwsh.exe, powershell.exe) still resolve.
-  const extensions = buildPathExtCandidates(process.env.PATHEXT, IS_WINDOWS)
+  const extensions = ['']  // fork: PATHEXT resolution removed (native Windows unsupported)
 
   for (const entry of pathEntries) {
     for (const extension of extensions) {
@@ -2981,20 +2886,8 @@ function isCommandScript(command) {
   return IS_WINDOWS && /\.(cmd|bat)$/i.test(command || '')
 }
 
-async function unwrapWindowsVenvHermesCommand(command, backendArgs) {
-  return resolveVenvHermesCommand(command, backendArgs, {
-    isWindows: IS_WINDOWS,
-    isCommandScript,
-    fileExists,
-    directoryExists,
-    canImportHermesCli,
-    getVenvPython,
-    buildDesktopBackendEnv,
-    resolvePath: (...segments) => path.resolve(...segments),
-    dirname: p => path.dirname(p),
-    basename: p => path.basename(p),
-    rememberLog
-  })
+async function unwrapWindowsVenvHermesCommand(command, _backendArgs) {
+  return command // fork: Windows venv .cmd unwrap removed (native Windows unsupported)
 }
 
 // Does the resolved runtime understand the `serve` subcommand? The desktop
@@ -4516,7 +4409,8 @@ async function handOffWindowsBootstrapRecovery(reason) {
   // Recovery can run without Python. Keep the chosen branch; do not guess a replacement.
   const branch: string = configuredBranch || DEFAULT_UPDATE_BRANCH
 
-  const updaterArgs: string[] = chooseUpdaterArgs({ runtimeUsable: await isSourceRuntimeUsable(updateRoot) }, branch)
+  const runtimeUsable = await isSourceRuntimeUsable(updateRoot)
+  const updaterArgs: string[] = runtimeUsable ? ['--update', '--branch', branch] : ['--repair', '--branch', branch]
 
   await stopBackendsForUpdate()
 
@@ -13892,7 +13786,7 @@ function createWindow() {
       // --no-sandbox so the next launcher click does not re-enter the GPU
       // FATAL crash loop. The marker records the app version so the next
       // update re-probes the sandbox.
-      if (IS_WINDOWS || process.platform === 'linux') {
+      if (process.platform === 'linux') { // fork: Windows stack-cookie marker removed
         try {
           writeSandboxMarker(
             app.getPath('userData'),
@@ -13904,18 +13798,6 @@ function createWindow() {
           )
         } catch (error) {
           rememberLog(`[sandbox] marker update after main-window reveal failed: ${error?.message || error}`)
-        }
-
-        try {
-          writeGpuStackCookieMarker(
-            app.getPath('userData'),
-            markerAfterSuccessfulGpuStackCookieBoot({
-              fallbackActive: windowsGpuStackCookieFallbackSticky,
-              appVersion: app.getVersion()
-            })
-          )
-        } catch (error) {
-          rememberLog(`[gpu] stack-cookie marker update after main-window reveal failed: ${error?.message || error}`)
         }
       }
 
@@ -14047,100 +13929,8 @@ function createWindow() {
       reload: () => {
         mainWindow.webContents.reload()
       },
-      onCrashLoopSuppressed: details => {
-        // #108047: STATUS_STACK_BUFFER_OVERRUN crash loops get a one-shot GPU
-        // disable relaunch. Checked BEFORE the sandbox path so 0xC0000409 never
-        // piggybacks --no-sandbox. If GPU fallback cannot run, surface the
-        // visible error page instead of leaving a blank window.
-        const stackCookieCrashLoop = {
-          reason: details?.reason,
-          exitCode: details?.exitCode,
-          alreadyGpuDisabled:
-            Boolean(REMOTE_DISPLAY_REASON) ||
-            windowsGpuStackCookieFallbackActive ||
-            alreadyHasDisableGpu(process.argv, process.env),
-          relaunchAttempted: windowsGpuStackCookieRelaunchAttempted,
-          gpuOverrideOff: isHermesDesktopGpuOverrideOff(process.env)
-        }
-
-        if (shouldRelaunchForRendererStackCookieCrashLoop(stackCookieCrashLoop)) {
-          windowsGpuStackCookieRelaunchAttempted = true
-          windowsGpuStackCookieFallbackActive = true
-          windowsGpuStackCookieFallbackSticky = true
-
-          try {
-            writeGpuStackCookieMarker(
-              app.getPath('userData'),
-              gpuStackCookieFallbackMarker('renderer-crash-loop', app.getVersion())
-            )
-          } catch {
-            void 0
-          }
-
-          rememberLog(
-            '[renderer] Windows stack-cookie crash loop (0xC0000409); relaunching once with GPU disabled (#108047)'
-          )
-
-          try {
-            app.relaunch({ args: buildDisableGpuRelaunchArgs(process.argv.slice(1)) })
-            void exitAfterBackendShutdown(0)
-          } catch (err) {
-            rememberLog(`[renderer] GPU-disable relaunch failed: ${err?.message || err}`)
-          }
-
-          return
-        }
-
-        if (shouldSurfaceErrorForRendererStackCookieCrashLoop(stackCookieCrashLoop)) {
-          rememberLog(
-            '[renderer] Windows stack-cookie crash loop (0xC0000409) with GPU fallback unavailable; surfacing error page (#108047)'
-          )
-          void loadRendererLoadErrorPage(mainWindow, {
-            errorCode: details?.exitCode,
-            errorDescription:
-              'The desktop renderer crashed repeatedly (Windows STATUS_STACK_BUFFER_OVERRUN / 0xC0000409). GPU fallback could not recover the window.',
-            repairHint: 'hermes desktop --force-build',
-            reloadUrl: DEV_SERVER || pathToFileURL(resolveRendererIndex()).toString()
-          })
-
-          return
-        }
-
-        // #38216 renderer flavor (same recovery as #56726, credit @Sahil-SS9):
-        // a deterministic Windows renderer crash loop with the sandbox
-        // breakpoint signature gets one --no-sandbox relaunch instead of a
-        // dead window. Gated on the exit code so unrelated crash loops don't
-        // silently drop the sandbox.
-        if (
-          !shouldRelaunchForRendererSandboxCrashLoop({
-            reason: details?.reason,
-            exitCode: details?.exitCode,
-            alreadyNoSandbox: windowsSandboxFallbackActive || alreadyHasNoSandbox(process.argv, process.env),
-            relaunchAttempted: windowsNoSandboxRelaunchAttempted
-          })
-        ) {
-          return
-        }
-
-        windowsNoSandboxRelaunchAttempted = true
-        windowsSandboxFallbackActive = true
-        windowsSandboxFallbackSticky = true
-        windowsSandboxFallbackReason = 'renderer-crash-loop'
-
-        try {
-          writeSandboxMarker(app.getPath('userData'), fallbackMarker('renderer-crash-loop', app.getVersion()))
-        } catch {
-          void 0
-        }
-
-        rememberLog('[renderer] Windows sandbox crash loop detected; relaunching once with --no-sandbox (#38216)')
-
-        try {
-          app.relaunch({ args: buildNoSandboxRelaunchArgs(process.argv.slice(1)) })
-          void exitAfterBackendShutdown(0)
-        } catch (err) {
-          rememberLog(`[renderer] --no-sandbox relaunch failed: ${err?.message || err}`)
-        }
+      onCrashLoopSuppressed: _details => {
+        // fork: Windows 0xC0000409 stack-cookie crash-loop recovery removed (native Windows unsupported).
       },
       // #95575: a renderer that repeatedly fails to load (torn bundle after
       // an update, file locked by AV, missing index.html) used to sit on a

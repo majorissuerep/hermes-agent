@@ -14,6 +14,7 @@ from tests.waiting import async_wait_until
 
 def test_restore_refuses_live_authority_without_changing_data(tmp_path):
     from hermes_cli.backup import create_quick_snapshot
+    from hermes_cli.config_defaults import DEFAULT_CONFIG
     from hermes_cli.update_cmd_maint import _restore_state_db_from_snapshot
 
     root = Path(__file__).resolve().parents[2]
@@ -27,6 +28,7 @@ def test_restore_refuses_live_authority_without_changing_data(tmp_path):
     thread.start()
     url = f'http://127.0.0.1:{peer.server_port}/v1'
     (home / 'config.yaml').write_text(json.dumps({
+        '_config_version': DEFAULT_CONFIG['_config_version'],
         'gateway': {'multiplex_profiles': False},
         'model': {'provider': 'custom', 'default': 'fixture', 'base_url': url},
         'auxiliary': {'title_generation': {'enabled': False}},
@@ -34,7 +36,7 @@ def test_restore_refuses_live_authority_without_changing_data(tmp_path):
     }))
     env = {k: os.environ[k] for k in ('PATH', 'LANG', 'TZ', 'TIRITH_ENABLED') if k in os.environ}
     env.update(HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home), PYTHONPATH=str(root),
-               OPENAI_API_KEY='loopback-only', OPENAI_BASE_URL=url)
+               OPENAI_API_KEY='loopback-only', OPENAI_BASE_URL=url, HERMES_ALLOW_NO_VAULT='1')
 
     def rows():
         with closing(sqlite3.connect(f'file:{home / "state.db"}?mode=ro', uri=True)) as db:
@@ -50,7 +52,7 @@ def test_restore_refuses_live_authority_without_changing_data(tmp_path):
             snapshot = create_quick_snapshot(hermes_home=home)
             assert snapshot, snapshot
             await rpc(ws, 'prompt.submit', session_id=session, input_id='started', text='BLOCK_STARTED')
-            assert await asyncio.to_thread(peer.blocked.wait, 25)
+            assert await asyncio.to_thread(peer.blocked.wait, 25), (home / 'restart.log').read_text()
             await rpc(ws, 'prompt.submit', session_id=session, input_id='queued', text='FOLLOWER')
             before = rows()
             assert dict(before) == {'warm': 'terminal', 'started': 'started', 'queued': 'queued'}
@@ -164,7 +166,7 @@ def test_update_restore_excludes_startup_until_publication(tmp_path, monkeypatch
         assert arrived.wait(20)
         root = Path(__file__).resolve().parents[2]
         env = {k: os.environ[k] for k in ('PATH', 'LANG', 'TZ', 'TIRITH_ENABLED') if k in os.environ}
-        env.update(HOME=str(tmp_path / 'user'), HERMES_HOME=str(home), PYTHONPATH=str(root))
+        env.update(HOME=str(tmp_path / 'user'), HERMES_HOME=str(home), PYTHONPATH=str(root), HERMES_ALLOW_NO_VAULT='1')
         contender = subprocess.run([sys.executable, '-c',
             "import logging, runpy; logging.basicConfig(level=logging.INFO); runpy.run_module('gateway.run', run_name='__main__')"],
             cwd=root, env=env, stdin=subprocess.DEVNULL, capture_output=True,

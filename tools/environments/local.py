@@ -279,6 +279,8 @@ def _finalize_child_env(env: dict) -> dict:
     Kanban scrub. Returns the (possibly new) dict."""
     _apply_profile_home(env)
     _inject_session_context_env(env)
+    from hermes_security.session_authority import apply_session_environment
+    apply_session_environment(env)
     _strip_hermes_owned_pythonpath_and_runtime_markers(env)
     _apply_windows_msys_bash_env_defaults(env)
     from agent.delegation_context import delegated_child_subprocess_env
@@ -432,6 +434,8 @@ def served_profile_child_env(
                     "no profile secret scope bound while multiplexing is on; the child would inherit the "
                     "launch profile's credentials. Bind the profile scope (or pass target_home) at the spawn site.")
         env.update((k, v) for k, v in (secrets or {}).items() if v is not None)
+    from hermes_security.session_authority import apply_session_environment
+    apply_session_environment(env)
     return env
 
 

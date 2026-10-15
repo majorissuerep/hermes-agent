@@ -40,8 +40,8 @@ from agent.memory_provider import PRE_COMPRESS_CHECKPOINT_API_VERSION
 from agent.model_metadata import estimate_messages_tokens_rough, estimate_request_tokens_rough
 from agent.session_activity import ActivityProvenance, normalize_activity_provenance
 from agent.usage_anchor import set_usage_anchor
-from hermes_state.ids import new_session_id as mint_session_id
-from hermes_state.pidns import holder_namespace_token
+from agent.session_ids import new_session_id as mint_session_id
+from hermes_platform.process_identity import holder_namespace_token
 
 logger = logging.getLogger(__name__)
 
@@ -1736,7 +1736,7 @@ def recover_rotated_compression_session(agent: Any) -> Optional[list[dict[str, A
 
 
 def _compression_lock_holder(agent: Any) -> str:
-    """Build a unique lock holder id: ``pid[:pidns]:tid:agent-instance:uuid`` (pidns: see ``hermes_state.pidns``).
+    """Build a unique lock holder id: ``pid[:pidns]:tid:agent-instance:uuid`` (pidns: see ``hermes_platform.process_identity``).
     pid+tid tell crashed holders apart; instance id and per-acquire uuid disambiguate co-resident/pooled agents."""
     return f"pid={os.getpid()}{holder_namespace_token()}:tid={threading.get_ident()}:agent={id(agent):x}:nonce={uuid.uuid4().hex[:8]}"
 

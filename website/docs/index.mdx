@@ -89,19 +89,11 @@ For aarch64 Android devices, use the separate [Termux APT guide](./getting-start
 curl -fsSL https://raw.githubusercontent.com/majorissuerep/hermes-agent/main/scripts/install.sh | bash
 ```
 
-#### Windows (native)
-
-Run in powershell:
-
-```powershell
-iex (irm https://raw.githubusercontent.com/majorissuerep/hermes-agent/main/scripts/install.ps1)
-```
-
 After installation, check `hermes secure-vault status`. If no vault exists, run `hermes secure-vault migrate` from a terminal before setup or chat. See [encrypted-state setup](./getting-started/installation.md#initialize-encrypted-state).
 
 The [upstream Desktop downloads](https://hermes-agent.nousresearch.com/) install upstream Hermes. To use Desktop with this fork, install the CLI and initialize its vault, then run `hermes desktop`.
 
-See the full **[Installation Guide](./getting-started/installation.md)** for what the installer does, the per-user vs root layout, and Windows-specific notes. For the complete platform support matrix, see **[Platform Support](./getting-started/platform-support.md)**.
+See the full **[Installation Guide](./getting-started/installation.md)** for what the installer does, and the per-user vs root layout. This fork supports Linux, macOS, and WSL only. For the complete platform support matrix, see **[Platform Support](./getting-started/platform-support.md)**.
 
 :::tip Fastest path to a working agent
 After installing, run `hermes setup --portal` — one OAuth covers a model plus all four Tool Gateway tools (web search, image generation, TTS, browser). See [Nous Portal](./integrations/nous-portal.md).
@@ -115,7 +107,7 @@ It's not a coding copilot tethered to an IDE or a chatbot wrapper around a singl
 
 |                                                                         |                                                                       |
 | ----------------------------------------------------------------------- | --------------------------------------------------------------------- |
-| 🚀 **[Installation](./getting-started/installation.md)**                    | Install in 60 seconds on Linux, macOS, WSL2, native Windows, Nix & NixOS or Android |
+| 🚀 **[Installation](./getting-started/installation.md)**                    | Install in 60 seconds on Linux, macOS (including Linux under WSL2), Nix & NixOS or Android |
 | 📖 **[Quickstart Tutorial](./getting-started/quickstart.md)**               | Your first conversation and key features to try                       |
 | 🗺️ **[Learning Path](./getting-started/learning-path.md)**                  | Find the right docs for your experience level                         |
 | ⚙️ **[Configuration](./user-guide/configuration.md)**                       | Config file, providers, models, and options                           |

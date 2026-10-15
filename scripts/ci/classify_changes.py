@@ -169,10 +169,8 @@ _SHARED_FIXTURE_CONSUMERS: dict[str, tuple[str, ...]] = {
     # A7 rule 7: the update-marker parse / judge / release corpus.
     "tests/fixtures/update_marker_corpus.json": (
         "tests/hermes_cli/test_update_marker_corpus.py",  # Python: update_lock
-        "apps/bootstrap-installer/src-tauri/src/marker_tests.rs",  # Rust: cargo test
         "apps/desktop/electron/update-marker-corpus.test.ts",  # Electron: vitest
         "tests/scripts/desktop_update/test_desktop_update_posix_marker_corpus.py",  # marker.sh
-        "tests/scripts/desktop_update/test_desktop_update_windows_marker_corpus.py",  # marker.ps1
         "apps/desktop/electron/remote-update-marker-programs.test.ts",  # SSH remote judge
         "apps/desktop/electron/remote-lifecycle-v2-marker.test.ts",  # SSH relaunch/spawn gate
     ),
@@ -180,7 +178,7 @@ _SHARED_FIXTURE_CONSUMERS: dict[str, tuple[str, ...]] = {
 # What a fixture inherits from its consumers: the lanes that run them as tests.
 # Not the slow suites a consumer's path also matches (an Electron test file under
 # electron/update-* starts the Desktop update E2E, which never reads the corpus).
-_FIXTURE_CONSUMER_LANES = ("python", "rust", "frontend", "desktop_updater")
+_FIXTURE_CONSUMER_LANES = ("python", "frontend", "desktop_updater")  # fork: rust lane removed with the Tauri crate
 
 # Rust crates — currently just the Tauri bootstrap installer (Hermes-Setup).
 # These live under ``apps/``, so before this lane existed a ``.rs`` edit matched
@@ -261,7 +259,6 @@ _UPDATE_PIPELINE = (
     "hermes_cli/dashboard_procs.py",
     "hermes_cli/desktop_update",  # desktop_update_verify
     "hermes_cli/gateway.py",  # fleet restart / verify
-    "hermes_cli/gateway_windows",  # Windows pause / resume
     "hermes_cli/gateway_launchd.py",
     "hermes_cli/gateway_migrate",
     "hermes_cli/gateway_supervised_restart.py",
@@ -285,6 +282,14 @@ _UPDATE_PIPELINE = (
 # one is routed to the suite below or is a _SHARED_HUBS entry.
 _UPDATE_ENTRY_POINTS = (
     "hermes_cli/update_",
+    # fork: encrypted update receipt custody (imported by update_vault/update_receipt)
+    "hermes_security/io.py",
+    "hermes_security/__init__.py",
+    "hermes_security/errors.py",
+    "hermes_security/vault.py",
+    "hermes_security/migrate.py",
+    "hermes_security/sqlite.py",
+    "hermes_security/frames.py",
     "hermes_cli/_update_",
     "hermes_cli/source_",
     "hermes_cli/old_updater",
@@ -403,13 +408,14 @@ _E2E_LANES: dict[str, tuple[str, ...]] = {
         *_PY_TEST_HARNESS,
         *_DEP_MANIFESTS,
         "tests/e2e/core/upgrade/",
-        "tests/e2e/core/windows_update/",
         "tests/compat/",
         "pm/",
         "scripts/install.",
         "setup-hermes.sh",
         "hermes_cli/update_",
         "hermes_cli/_update_",
+        "hermes_cli/home_data_layout.py",   # fork: encrypted custody chain
+        "hermes_cli/config_backups.py",
         "hermes_cli/old_updater",
         # The downgrade refusal (hermes_cli/update_downgrade_guard.py) reads state.db through it.
         "hermes_state/holders.py",
@@ -498,7 +504,7 @@ for _lane in ("e2e_upgrade", "e2e_desktop_update"):
 # The upgrade journeys are their own lane; editing one does not start ``e2e``.
 # The update suite shares apps/desktop/e2e/ with the core suite but not its specs.
 _E2E_LANE_EXCLUDES = {
-    "e2e": ("tests/e2e/core/upgrade/", "tests/e2e/core/windows_update/"),
+    "e2e": ("tests/e2e/core/upgrade/",),
     "e2e_desktop_core": ("apps/desktop/e2e/update/",),
 }
 _DOCKER_PATHS = (*_DOCKER_META, *_DEP_MANIFESTS, *_NPM_MANIFESTS, "pm/", "tests/docker/")

@@ -29,7 +29,7 @@ from hermes_constants import (
     reset_hermes_home_override, set_hermes_home_override)
 from hermes_cli.env_loader import load_hermes_dotenv
 from utils import file_signature, is_truthy_value
-from hermes_state.ids import new_session_id
+from agent.session_ids import new_session_id
 from tools.environments.local import hermes_subprocess_env
 from agent.fast_mode import STATIC_TIERS
 from agent.replay_cleanup import canonicalize_replay_history

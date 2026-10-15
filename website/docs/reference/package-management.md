@@ -224,7 +224,7 @@ Use an ordinary terminal outside the packaged Hermes app. Leave any existing
 Python virtual environment first. On Windows, use native PowerShell with Git.
 On ARM64, PM prepares Visual Studio C++ tools, Clang, native Rust, and static
 OpenSSL development libraries before every dependency build from a checkout:
-setup, `activate.ps1`, `install.ps1`, `hermes update`, and repair alike. It
+setup, `activate`, `hermes update`, and repair alike. It
 reuses existing installations and installs missing prerequisites. Missing
 Visual Studio components need administrator rights: an interactive install
 asks through a UAC prompt, while CI, ssh and scheduled runs need an
@@ -270,7 +270,7 @@ $env:HERMES_RUNTIME_DIR = Join-Path $env:HERMES_HOME 'tools'
 
 `HERMES_RUNTIME_DIR` in these examples is a process-local development override.
 It makes the bootstrap and PM use the same writable store. Do not persist a
-path into an installed MSIX or macOS bundle. Activation runs the setup script's
+path into an installed macOS bundle. Activation runs the setup script's
 runtime-only path to provision tools and sync the `all` Python extra. It does
 not select `dev` or install JS workspaces. It maintains installation-local
 commands and repairs existing owned PATH wrappers, but does not create new PATH
@@ -339,7 +339,7 @@ environment, including when re-sourcing an already active environment.
 After sync, activation prepends installed PM tools to `PATH` and sets
 `PYTHONPATH` to this checkout and its selected dependency tree. It also
 defines `hermes` as a shell function for this worktree. The function runs
-this checkout's CLI and hides the installed command, including an MSIX alias.
+this checkout's CLI and hides the installed command.
 It runs only while the shell is inside this worktree and refuses outside it,
 so a sibling worktree does not inherit the command. The prompt gains a prefix
 naming the branch, and drops it outside the tree. It does not

@@ -27,7 +27,7 @@ from rich.markup import escape as _escape
 from rich.panel import Panel
 
 from hermes_constants import display_hermes_home
-from hermes_state.ids import new_session_id as mint_session_id
+from agent.session_ids import new_session_id as mint_session_id
 from agent.i18n import t
 from agent.message_metadata import message_identity
 from agent.turn_context import extract_api_content_sidecar

@@ -452,7 +452,7 @@ On Unix systems, press **`Ctrl+Z`** to suspend Hermes to the background — just
 Hermes Agent has been suspended. Run `fg` to bring Hermes Agent back.
 ```
 
-Type `fg` in your shell to resume the session exactly where you left off. This is not supported on Windows.
+Type `fg` in your shell to resume the session exactly where you left off.
 
 ## Tool Progress Display
 

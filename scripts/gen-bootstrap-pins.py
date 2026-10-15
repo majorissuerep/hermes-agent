@@ -182,9 +182,6 @@ def main() -> int:
         "scripts/install.sh": _splice(
             REPO_ROOT / "scripts" / "install.sh", _sh_fragment(uv), args.check
         ),
-        "scripts/install.ps1": _splice(
-            REPO_ROOT / "scripts" / "install.ps1", _ps1_fragment(uv, git), args.check
-        ),
         # setup-hermes.sh deliberately holds NO fragment: it runs after a
         # checkout exists, so it reads the pin straight from pm/lock.json
         # at run time (the pm.sh-derived bootstrap). The fragment exists

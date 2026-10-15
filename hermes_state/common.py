@@ -11,7 +11,7 @@ import time
 from typing import Any
 
 from hermes_cli.timefmt import EPOCH_MAX, EPOCH_MIN
-from hermes_state.pidns import persistent_record_pidns_checkable, pid_namespace_id
+from hermes_platform.process_identity import persistent_record_pidns_checkable, pid_namespace_id
 from agent.skill_commands import AUTO_LOAD_SCAFFOLD_SQL_LIKE, SKILL_EXCERPT_JOINT, SKILL_SCAFFOLD_SQL_LIKE, describe_skill_invocation
 from agent.context_compressor import (LEGACY_SUMMARY_PREFIX, SUMMARY_PREFIX, _MERGED_PRIOR_CONTEXT_HEADER,
     _MERGED_SUMMARY_DELIMITER, _SUMMARY_END_MARKER)
@@ -1212,7 +1212,7 @@ def _write_lock_holder_record(handle) -> None:
 
     Written under the flock so contenders that time out can tell an orphaned-fd holder (recorded process
     dead, flock inherited by a forked child — issue #100108) from a live wedged holder.  ``pidns``: see
-    ``hermes_state.pidns``.
+    ``hermes_platform.process_identity``.
     """
     record = {"pid": os.getpid(), "pidns": pid_namespace_id(),
               "start_ticks": _proc_start_ticks(os.getpid()), "acquired_at": time.time()}
@@ -1227,7 +1227,7 @@ def _clear_lock_holder_record(handle) -> None:
 def _lock_holder_provably_dead(record) -> bool:
     """True ONLY when the recorded holder is provably dead or PID-recycled.  Anything indeterminate
     (no/malformed record, PID owned by another user, /proc unavailable, foreign PID namespace)
-    is False: FAIL CLOSED and defer.  Unstamped records keep probing: see ``hermes_state.pidns``."""
+    is False: FAIL CLOSED and defer.  Unstamped records keep probing: see ``hermes_platform.process_identity``."""
     try:
         pid = int(record["pid"])
     except (KeyError, TypeError, ValueError):

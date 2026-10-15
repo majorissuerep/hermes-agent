@@ -1,33 +1,42 @@
 # Providers & Model Aliases
 
-Set via `hermes model` (picker) or `hermes setup`. 35+ provider profiles ship as
-plugins under `plugins/model-providers/`; user plugins of the same name override.
-Full docs: https://hermes-agent.nousresearch.com/docs/integrations/providers
+Set via `hermes model` or `hermes setup`. This fork intentionally ships a small
+provider set. Provider plugins installed explicitly by the user remain an extension
+point; vendor models can still be served through LiteLLM, Vercel or a custom endpoint.
 
-### Providers
+| Provider | Authentication |
+|---|---|
+| `openai-codex` (ChatGPT/Codex) | Subscription OAuth, `hermes auth add openai-codex` |
+| `openai-api` | `OPENAI_API_KEY`, or use a custom OpenAI endpoint |
+| `anthropic` | `ANTHROPIC_API_KEY` or existing Claude Code authentication |
+| `litellm` | Configured gateway + `LITELLM_API_KEY` / `ML_GATEWAY_API_KEY` |
+| `custom` / `custom:<name>` | OpenAI- or Anthropic-compatible endpoint + `key_env` |
+| `zai` | `GLM_API_KEY` / `ZAI_API_KEY` / `Z_AI_API_KEY` |
+| `xai` / `xai-oauth` (Grok) | `XAI_API_KEY` or subscription OAuth |
+| `ai-gateway` (Vercel) | `AI_GATEWAY_API_KEY` |
 
-| Provider | Auth | Key env var(s) |
-|----------|------|----------------|
-| openrouter | API key | `OPENROUTER_API_KEY` |
-| anthropic | API key | `ANTHROPIC_API_KEY` (also `CLAUDE_CODE_OAUTH_TOKEN`) |
-| nous | OAuth device code | `hermes auth add nous` (or `NOUS_API_KEY`) |
-| openai-codex | OAuth | `hermes auth add openai-codex` |
-| qwen-oauth | OAuth | `hermes auth add qwen-oauth` |
-| minimax-oauth | OAuth | `hermes auth add minimax-oauth` |
-| copilot | Token | `COPILOT_GITHUB_TOKEN` / `GH_TOKEN` (Copilot device flow — `gh auth login` tokens do NOT work) |
-| copilot-acp | External CLI | Copilot CLI on PATH or `COPILOT_CLI_PATH` |
-| gemini | API key | `GOOGLE_API_KEY` or `GEMINI_API_KEY` |
-| xai | API key | `XAI_API_KEY` (SuperGrok OAuth also supported) |
-| deepseek | API key | `DEEPSEEK_API_KEY` |
-| zai (GLM) | API key | `GLM_API_KEY` / `ZAI_API_KEY` |
-| minimax / minimax-cn | API key | `MINIMAX_API_KEY` / `MINIMAX_CN_API_KEY` |
-| kimi-coding / -cn | API key | `KIMI_API_KEY` / `KIMI_CN_API_KEY` |
-| alibaba (+coding-plan) | API key | `DASHSCOPE_API_KEY` / `ALIBABA_CODING_PLAN_API_KEY` |
-| xiaomi | API key | `XIAOMI_API_KEY` |
-| huggingface | Token | `HF_TOKEN` |
-| fireworks / novita / nvidia / deepinfra / gmi / arcee / stepfun / upstage / kilocode / ai-gateway / opencode-zen / opencode-go / ollama-cloud | API key | `<NAME>_API_KEY` |
-| bedrock / vertex / azure-foundry | Cloud SDK / key | AWS SDK creds / Vertex ADC / `AZURE_FOUNDRY_API_KEY` |
-| custom | Config | `model.base_url` + `model.api_key` in config.yaml |
+Fireworks and other direct providers are not bundled. Existing credentials are
+preserved during updates but do not silently select a removed provider. Select a
+supported route or configure an explicit custom endpoint; do not erase auth state.
+
+Gateway configuration (save with `hermes config set`; do not edit ciphertext):
+
+```yaml
+model:
+  provider: litellm
+  default: your-gateway-model
+providers:
+  litellm:
+    base_url: https://gateway.example.com/v1
+    key_env: LITELLM_API_KEY
+  private-claude:
+    base_url: https://claude.example.com
+    api_mode: anthropic_messages
+    key_env: PRIVATE_CLAUDE_API_KEY
+```
+
+Keep API keys in the encrypted credential store, not the YAML. The base URL is a
+non-secret setting. For no-prompt changes inside Hermes, see `encrypted-self-management.md`.
 
 Multiple credentials per provider pool and rotate automatically (`hermes auth`).
 Fallback chain when the primary fails: `hermes fallback add|remove|list`.
@@ -55,10 +64,10 @@ model_aliases:
     key_env: THETA_API_KEY        # or: api_key: "${THETA_API_KEY}"
 
 # Short form ("provider/model"), also via CLI:
-#   hermes config set model.aliases.fav openrouter/anthropic/claude-sonnet-4.6
+#   hermes config set model.aliases.fav anthropic/claude-sonnet-4.6
 model:
   aliases:
-    fav: openrouter/anthropic/claude-sonnet-4.6
+    fav: anthropic/claude-sonnet-4.6
 ```
 
 `/model fav` — session-scoped; add `--global` to persist as default.

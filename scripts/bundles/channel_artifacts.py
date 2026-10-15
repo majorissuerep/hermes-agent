@@ -7,10 +7,10 @@ from pathlib import Path
 
 
 from hermes_cli.release_channels import ChannelError, build_prefix, canonical_json, validate_manifest
-from scripts.bundles.release_artifacts import single, validate_windows_bundle, write_appinstaller
+from scripts.bundles.release_artifacts import single
 
 
-ALL_TARGETS = tuple((platform, arch) for platform in ("macos", "windows") for arch in ("arm64", "x64"))
+ALL_TARGETS = (("macos", "arm64"), ("macos", "x64"))  # fork: Windows targets removed
 
 
 def _leg_sha512(root: Path, files: dict, arch: str) -> dict[str, str]:
@@ -34,7 +34,7 @@ def assemble(request: dict, native: dict, root: Path, *, artifact_prefix: str,
              targets=ALL_TARGETS, local_bytes: bool = True) -> tuple[dict, list[Path]]:
     """``targets`` defaults to every native target. A stable release that did not
     opt into macOS Intel passes the three it built; arm64 macOS and both Windows
-    arches are always required.
+    arch requirement is macOS-only in this fork.
 
     ``local_bytes=False`` trusts the receipts instead of downloaded packages:
     every artifact is bound by its receipt sha256 (and was validated when the
@@ -43,31 +43,26 @@ def assemble(request: dict, native: dict, root: Path, *, artifact_prefix: str,
     files = native["files"]
     rows = native["packages"]
     targets = sorted(targets)
-    if not {("macos", "arm64"), ("windows", "arm64"), ("windows", "x64")} <= set(targets) \
+    if not {("macos", "arm64")} <= set(targets) \
             or not set(targets) <= set(ALL_TARGETS):
-        raise ChannelError("Native targets must include macOS arm64 and both Windows architectures")
+        raise ChannelError("Native targets must include macOS arm64 (fork: Windows targets removed)")
     if sorted((row["platform"], row["arch"]) for row in rows) != targets:
-        raise ChannelError("Native metadata must cover both platforms and architectures")
+        raise ChannelError("Native metadata must cover every requested platform and architecture (fork: darwin-only)")
     prefix = build_prefix(request["buildId"])
     base = request["publicBase"]
-    windows = [row for row in rows if row["platform"] == "windows"]
-    if windows[0]["applicationId"] != request["identity"]["appNamePascal"]:
-        raise ChannelError("Windows application identity mismatch")
-    bundle_name = single(name for name in files if name.endswith(".msixbundle") and not name.startswith("Store-"))
-    if local_bytes:
-        validate_windows_bundle(root / bundle_name, windows)
+    # fork: Windows targets removed — no msixbundle row, no appinstaller descriptor.
     packages, mac_files = [], []
     for row in rows:
         mac = row["platform"] == "macos"
-        filename = row["filename"] if mac else bundle_name
+        filename = row["filename"]
         receipt = files.get(filename)
         if receipt is None or (local_bytes and not (root / filename).is_file()):
             raise ChannelError("Missing receipt-bound native artifact")
-        signing = "teamId" if mac else "publisher"
-        packages.append({"platform": "darwin" if mac else "win32", "arch": row["arch"], "variant": "bundled",
+        signing = "teamId"
+        packages.append({"platform": "darwin", "arch": row["arch"], "variant": "bundled",
                          "identity": row["identity"], "version": row["version"], signing: row.get(signing),
                          "artifact": {"key": artifact_prefix + filename, "sha256": receipt["sha256"], "size": receipt["size"]},
-                         "feed": {"key": prefix + ("darwin/stable-mac.yml" if mac else "win32/stable.appinstaller"),
+                         "feed": {"key": prefix + "darwin/stable-mac.yml",
                                   "channel": "stable"}})
         if mac:
             leg_digests = None if local_bytes else _leg_sha512(root, files, row["arch"])
@@ -91,14 +86,10 @@ def assemble(request: dict, native: dict, root: Path, *, artifact_prefix: str,
     record = {"name": request["channel"], "repository": request["repository"], "identity": request["identity"],
               "policy": ("canary-release" if is_canary_tag(tag) else "stable-release") if tag else "preview", "head": None}
     validate_manifest(manifest, record, base)
-    descriptor = root / "win32" / "stable.appinstaller"
-    write_appinstaller(descriptor, identity=windows[0]["identity"], publisher=windows[0]["publisher"],
-                       version=windows[0]["version"], self_uri=f"{base}/{prefix}win32/stable.appinstaller",
-                       artifact_uri=f"{base}/{artifact_prefix}{bundle_name}", update_policy="pinned")
     feed = root / "darwin" / "stable-mac.yml"
     feed.parent.mkdir(parents=True, exist_ok=True)
     first = single(row for row in mac_files if row["url"].endswith("-arm64.zip"))
     # A neutral feed name avoids interpreting custom channel names as prereleases.
     feed.write_bytes(canonical_json({"version": request["version"], "files": mac_files,
                                     "path": first["url"], "sha512": first["sha512"]}))
-    return manifest, [feed, descriptor]
+    return manifest, [feed]

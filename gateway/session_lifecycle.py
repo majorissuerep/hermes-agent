@@ -9,7 +9,7 @@ import uuid
 from datetime import datetime, timedelta, timezone, UTC
 from typing import TYPE_CHECKING, Optional
 
-from hermes_state.ids import new_session_id
+from agent.session_ids import new_session_id
 
 if TYPE_CHECKING:
     from gateway.session import SessionEntry, SessionSource

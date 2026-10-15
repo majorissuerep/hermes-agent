@@ -11,7 +11,7 @@ import queue
 import threading
 from datetime import datetime
 from hermes_cli.fallback_config import get_fallback_chain
-from hermes_state.ids import new_session_id
+from agent.session_ids import new_session_id
 from pathlib import Path
 from rich.console import Console
 from typing import Any, Dict, List, Optional
@@ -405,7 +405,7 @@ class CLIInitMixin:
         from hermes_cli.gateway_session_store import GatewaySessionStore
         store = getattr(self, "_session_db", None)
         if not isinstance(store, GatewaySessionStore) or not getattr(self, "_gateway_session_open", False):
-            from hermes_state.ids import new_session_id
+            from agent.session_ids import new_session_id
             return new_session_id(now)
         if branch_of:
             return store.branch(branch_of, title)

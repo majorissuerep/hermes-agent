@@ -7,8 +7,9 @@ description: "Which operating systems, distribution methods, and features Hermes
 # Platform Support
 
 :::info Fork installation
-Start with the [fork installation guide](./installation.md). The Nous Research
-desktop downloads, MSIX packages, Docker images, and Termux APT packages referenced
+Start with the [fork installation guide](./installation.md). This fork supports
+Linux, macOS, and WSL only — native Windows (including MSIX packages) is not
+supported (see PLATFORMS.md). The Docker images and Termux APT packages referenced
 below are upstream distributions; they do not include this fork's encrypted vault
 or other fork changes. Their support tiers describe upstream's release policy.
 :::
@@ -24,8 +25,7 @@ We strive to never break installations and updates for these. Issues & regressio
 | OS / Architecture                                                             | Installation methods                                                                                                           | Notes                                                                                                                                                     |
 | ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **macOS** (Apple Silicon)                                                     | [Hermes Desktop](https://hermes-agent.nousresearch.com/), [`install.sh`](./installation.md) |
-| [**Windows 10 / 11**](../user-guide/windows-native.md) (x86_64, aarch64) | [`install.ps1`](./installation.md), [MSIX desktop](../user-guide/windows-native.md) | The MSIX package requires Windows 11 22H2 or later. Optional dependencies have [architecture limits](../user-guide/windows-native.md). |
-| **Linux / [WSL2](../user-guide/windows-wsl-quickstart.md)** (x86_64, aarch64) | [`install.sh`](./installation.md)                                                           | We test on the latest Ubuntu and WSL2. If your distro has glibc, systemd, and follows the Filesystem Hierarchy Standard, it's likely to work pretty well. |
+| **Linux / WSL2** (x86_64, aarch64) | [`install.sh`](./installation.md)                                                           | We test on the latest Ubuntu and WSL2. If your distro has glibc, systemd, and follows the Filesystem Hierarchy Standard, it's likely to work pretty well. |
 | [**Docker Container**](../user-guide/docker.md) (x86_64, aarch64) | [`docker pull`](../user-guide/docker.md)                                                                           | Docker installs do not support `hermes update`. Updating is done by running a new image.                                                                  |
 
 ---

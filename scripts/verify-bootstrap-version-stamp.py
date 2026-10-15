@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Verify the version stamp a bootstrap installer ships.
 
-The bootstrap installers (scripts/install.sh, scripts/install.ps1) finish
+The bootstrap installer (scripts/install.sh) finishes
 with a ``complete`` stage that writes ``.hermes-bootstrap-complete`` into the
 install dir: ``{"schemaVersion": 1, "pinnedCommit": <40-hex sha>,
 "pinnedBranch": <name>, "completedAt": <UTC ISO-8601>}``. That stamp is what

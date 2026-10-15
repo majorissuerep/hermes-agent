@@ -219,6 +219,10 @@ def render(text: Any, context: Mapping[str, Any]) -> Any:
     if not isinstance(text, str):
         return text
     whole = _TEMPLATE.fullmatch(text.strip())
-    if whole:
+    # A scalar with several embedded expressions that ENDS in ``}}`` still fullmatches
+    # (``.*?`` stretches to the last closing braces), poisoning the lone-expression
+    # fast path with unterminated junk. Only a template whose single captured
+    # expression contains no braces of its own may take it (fork fix).
+    if whole and "${{" not in whole.group(1) and "}}" not in whole.group(1):
         return evaluate(whole.group(1), context)
     return _TEMPLATE.sub(lambda m: to_string(evaluate(m.group(1), context)), text)

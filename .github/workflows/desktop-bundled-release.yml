@@ -10,20 +10,11 @@ name: Desktop Bundled Release
 # Per-OS topology (canary feeds follow their own platform builds; stable
 # publication and Store submission require the accepted cross-platform candidate):
 #
-#   build-win32 (win32-x64 + win32-arm64)   → stage packages + receipts to R2
-#     Stable runs pick which Windows packages these build: `skip-signed` builds
-#     only the unsigned Store variant (no Azure signing), `skip-store` only the
-#     signed bundled one.
 #   build-darwin (darwin-arm64 + darwin-x64) → sign + notarize + stage
 #     dmg/zip/blockmap + per-arch feed inputs to the R2 tag archive
 #   build-linux                              → DISABLED for now (dummy skips)
-#   assemble-win32-bundle                   → native universal bundles
-#     (needs build-win32): all downloadable builds stage without touching feeds.
-#   smoke-darwin / smoke-win32 (per arch) → native install + chat
-#   publish-win32-updater                   → tested canary bytes + feed
-#     (needs BOTH Windows smoke matrices); stable promotion is sequenced by
+#   smoke-darwin (per arch) → native install + chat
 #     the stable publication controller after GitHub publication.
-#   stable-store                           → verified Store submission
 #     (needs stable-publish): materialize the immutable accepted Store bundle
 #     and submit via the MSStore CLI without rebuilding.
 #   publish-darwin-updater                  → macOS electron-updater feed
@@ -33,7 +24,6 @@ name: Desktop Bundled Release
 #     same-channel publications.
 #
 # Feed layout (matches apps/desktop/electron/app-updater.ts's arms):
-#   releases/win32/<stable|canary>/<ch>.appinstaller   App Installer feed
 #     canary bundles live beside the feed; stable points into releases/tag/<tag>/
 #   releases/darwin/<stable|canary>/<channel>-mac.yml  electron-updater feed
 #     (dmg/zip live once in releases/tag/<tag>/; the merged feed points at
@@ -72,16 +62,6 @@ name: Desktop Bundled Release
 # non-secret vars. scripts/releases/r2.py derives the S3 endpoint from
 # the account id. Upload/list operations need only Python; feed operations use ruamel.yaml.
 #
-# Windows Store submission (stable-store): MSStore CLI via
-# microsoft/microsoft-store-apppublisher. Credentials live in the
-# release-signing environment:
-#     secrets: MS_STORE_TENANT_ID, MS_STORE_SELLER_ID, MS_STORE_CLIENT_ID,
-#              MS_STORE_CLIENT_SECRET
-#     vars:    MS_STORE_PRODUCT_ID (the Partner Center product ID)
-#   msstore reconfigure → msstore publish
-#   <Store-*.msixbundle> -id <productId>
-# The Store bundle is UNSIGNED on purpose — Partner Center re-signs on
-# ingestion (see sign-msix.mjs).
 
 on:
   workflow_call:
@@ -104,7 +84,7 @@ on:
       jobs:
         description: 'Comma-separated job groups. Default: every group.'
         type: string
-        default: 'darwin-arm64,darwin-x64,win32-arm64,win32-x64,win32-bundle,linux-x64,linux-arm64,termux'
+        default: 'darwin-arm64,darwin-x64,linux-x64,linux-arm64,termux'  # fork: win32 targets removed
       skip-tests:
         description: 'Stable candidates only: build and stage without native smokes or in-build test suites (the claim has no smoke lane).'
         type: boolean
@@ -130,12 +110,6 @@ on:
       darwin-x64-receipt-sha256:
         value: ${{ jobs.stage-receipt-darwin-x64.outputs.receipt-sha256 }}
         description: Digest of the darwin-x64 stable receipt
-      win32-bundle-receipt-url:
-        value: ${{ jobs.assemble-win32-bundle.outputs.receipt-url }}
-        description: Immutable win32-bundle stable receipt
-      win32-bundle-receipt-sha256:
-        value: ${{ jobs.assemble-win32-bundle.outputs.receipt-sha256 }}
-        description: Digest of the win32-bundle stable receipt
   workflow_dispatch:
     inputs:
       tag:
@@ -180,7 +154,7 @@ on:
         description: 'Comma-separated job groups. Default: every group.'
         required: false
         type: string
-        default: 'darwin-arm64,darwin-x64,win32-arm64,win32-x64,win32-bundle,linux-x64,linux-arm64,termux'
+        default: 'darwin-arm64,darwin-x64,linux-x64,linux-arm64,termux'  # fork: win32 targets removed
       termux_upgrade_from_tag:
         description: 'Published release tag whose R2 Termux package must upgrade to this build'
         required: false
@@ -245,9 +219,6 @@ jobs:
       # One admission-parsed switch per job group; every job gates on its own.
       darwin-arm64: ${{ steps.admission.outputs.darwin-arm64 }}
       darwin-x64: ${{ steps.admission.outputs.darwin-x64 }}
-      win32-arm64: ${{ steps.admission.outputs.win32-arm64 }}
-      win32-x64: ${{ steps.admission.outputs.win32-x64 }}
-      win32-bundle: ${{ steps.admission.outputs.win32-bundle }}
       linux-x64: ${{ steps.admission.outputs.linux-x64 }}
       linux-arm64: ${{ steps.admission.outputs.linux-arm64 }}
       termux: ${{ steps.admission.outputs.termux }}
@@ -441,9 +412,6 @@ jobs:
             *)          echo "channel=stable" >> "$GITHUB_OUTPUT" ;;
           esac
           echo "sha=$SHA" >> "$GITHUB_OUTPUT"
-
-  # ── Windows builders (REAL) ───────────────────────────────────────────────
-  # Windows assembly and publication depend on these native Windows legs.
   # Pinned-input archiving runs as a validate step with the job's own gate
   # shape, so a skipped archive must not skip the selected build legs.
   #
@@ -725,7 +693,6 @@ jobs:
 
       - name: Stage macOS packages and feed inputs to R2
         # Channel dispatches stage through the pinned request step above; see
-        # the Windows leg for the empty-tag fallthrough this gate prevents.
         if: needs.validate.outputs.channel-build == '' && (inputs.upload_release == true || inputs.release-phase == 'candidate' || inputs.build_commit != '')
         shell: bash
         env:
@@ -1030,24 +997,14 @@ jobs:
         validate,
         build-darwin-arm64,
         build-darwin-x64,
-        build-win32-arm64,
-        build-win32-x64,
-        assemble-win32-bundle,
         smoke-darwin-arm64,
         smoke-darwin-x64,
-        smoke-win32-arm64,
-        smoke-win32-x64
       ]
     if: >-
       !cancelled() && needs.validate.outputs.channel-build != '' && needs.validate.result == 'success'
       && needs.validate.outputs.darwin-arm64 == 'true' && needs.validate.outputs.darwin-x64 == 'true'
-      && needs.validate.outputs.win32-arm64 == 'true' && needs.validate.outputs.win32-x64 == 'true'
-      && needs.validate.outputs.win32-bundle == 'true'
       && needs.build-darwin-arm64.result == 'success' && needs.build-darwin-x64.result == 'success'
-      && needs.build-win32-arm64.result == 'success' && needs.build-win32-x64.result == 'success'
-      && needs.assemble-win32-bundle.result == 'success'
       && needs.smoke-darwin-arm64.result == 'success' && needs.smoke-darwin-x64.result == 'success'
-      && needs.smoke-win32-arm64.result == 'success' && needs.smoke-win32-x64.result == 'success'
     runs-on: ubuntu-24.04
     environment: release-signing
     cache-mode: read
@@ -1553,18 +1510,12 @@ jobs:
     needs:
       [
         validate,
-        build-win32-x64,
-        build-win32-arm64,
         build-darwin-arm64,
         build-darwin-x64,
         build-linux-x64,
         build-linux-arm64,
-        assemble-win32-bundle,
         smoke-darwin-arm64,
         smoke-darwin-x64,
-        smoke-win32-arm64,
-        smoke-win32-x64,
-        publish-win32-updater,
         publish-darwin-updater,
         termux-deb
       ]
@@ -1615,17 +1566,12 @@ jobs:
     needs:
       [
         validate,
-        build-win32-x64,
-        build-win32-arm64,
         build-darwin-arm64,
         build-darwin-x64,
         build-linux-x64,
         build-linux-arm64,
-        assemble-win32-bundle,
         smoke-darwin-arm64,
         smoke-darwin-x64,
-        smoke-win32-arm64,
-        smoke-win32-x64,
         termux-deb
       ]
     if: |
@@ -1714,60 +1660,6 @@ jobs:
           cache-python: false
       - run: python -m scripts.bundles.release_artifacts publish --root verified
 
-  stable-store:
-    name: Submit the verified Store package
-    needs: [validate, stable-publish]
-    if: inputs.release-phase == 'publish' && inputs.skip-store != true
-    # The Store is not a release gate: a failed submission leaves the release publishable
-    # and the summary names the Store package for a manual Partner Center upload.
-    continue-on-error: true
-    runs-on: windows-latest-32-core
-    environment: release-signing
-    timeout-minutes: 60
-    env:
-      RELEASE_TAG: ${{ inputs.tag }}
-      RELEASE_COMMIT: ${{ needs.validate.outputs.sha }}
-      HERMES_ARCHIVE_TAG: ${{ needs.validate.outputs.archive-tag }}
-      CANDIDATE_MANIFEST_SHA256: ${{ inputs.manifest-sha256 }}
-      CLOUDFLARE_R2_PUBLIC_URL: ${{ vars.CLOUDFLARE_R2_PUBLIC_URL }}
-      MS_STORE_TENANT_ID: ${{ secrets.MS_STORE_TENANT_ID }}
-      MS_STORE_SELLER_ID: ${{ secrets.MS_STORE_SELLER_ID }}
-      MS_STORE_CLIENT_ID: ${{ secrets.MS_STORE_CLIENT_ID }}
-      MS_STORE_CLIENT_SECRET: ${{ secrets.MS_STORE_CLIENT_SECRET }}
-      MS_STORE_PRODUCT_ID: ${{ vars.MS_STORE_PRODUCT_ID }}
-    steps:
-      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a # v7.0.1
-        with:
-          ref: ${{ needs.validate.outputs.sha }}
-      - uses: ./.github/actions/setup-pm
-        with:
-          cache-python: false
-      - name: Retrieve the exact Store candidate
-        shell: bash
-        run: python -m scripts.bundles.release_artifacts materialize --root verified --store-only
-      - uses: microsoft/microsoft-store-apppublisher@cc9910a8d59f2eb55cbb83df0a3800cf3b5300e0 # v1.4
-      - name: Submit without rebuilding
-        shell: bash
-        run: |
-          test -n "$MS_STORE_PRODUCT_ID"
-          msstore reconfigure --tenantId "$MS_STORE_TENANT_ID" --sellerId "$MS_STORE_SELLER_ID" --clientId "$MS_STORE_CLIENT_ID" --clientSecret "$MS_STORE_CLIENT_SECRET"
-          files=(verified/Store-*.msixbundle)
-          test "${#files[@]}" -eq 1
-          test -f "${files[0]}"
-          # Auto-publish stays off: the submission is committed with
-          # targetPublishMode Manual and is released by the publication pass.
-          python -m scripts.releases.store submit "${files[0]}"
-      - name: Name the Store package for a manual upload
-        if: failure()
-        shell: bash
-        run: |
-          name=$(cd verified 2>/dev/null && ls Store-*.msixbundle 2>/dev/null | head -1)
-          base="${CLOUDFLARE_R2_PUBLIC_URL%/}/releases/tag/$HERMES_ARCHIVE_TAG"
-          url="$base/${name:-handoff-windows-universal.json}"
-          msg="Store submission failed; the release is still publishable. Upload this package in Partner Center: $url"
-          echo "::warning title=Microsoft Store::$msg"
-          { echo "## Microsoft Store: manual upload needed"; echo; echo "$msg"; } >> "$GITHUB_STEP_SUMMARY"
-
   stable-phase-result:
     name: Stable bundle phase completed
     if: always() && inputs.release-phase != ''
@@ -1776,16 +1668,10 @@ jobs:
         validate,
         build-darwin-arm64,
         build-darwin-x64,
-        build-win32-arm64,
-        build-win32-x64,
-        assemble-win32-bundle,
         smoke-darwin-arm64,
         smoke-darwin-x64,
-        smoke-win32-arm64,
-        smoke-win32-x64,
         termux-deb,
         stable-publish,
-        stable-store
       ]
     runs-on: ubuntu-24.04
     steps:
@@ -1816,19 +1702,13 @@ jobs:
     needs:
       [
         validate,
-        build-win32-x64,
-        build-win32-arm64,
         build-darwin-arm64,
         build-darwin-x64,
         build-linux-x64,
         build-linux-arm64,
         builds-table,
-        assemble-win32-bundle,
         smoke-darwin-arm64,
         smoke-darwin-x64,
-        smoke-win32-arm64,
-        smoke-win32-x64,
-        publish-win32-updater,
         publish-darwin-updater
       ]
     if: |
@@ -1837,17 +1717,11 @@ jobs:
       && inputs.upload_release == true
       && contains(inputs.tag, '+canary.')
       && needs.validate.outputs.darwin-arm64 == 'true' && needs.validate.outputs.darwin-x64 == 'true'
-      && needs.validate.outputs.win32-arm64 == 'true' && needs.validate.outputs.win32-x64 == 'true'
-      && needs.validate.outputs.win32-bundle == 'true'
       && needs.validate.outputs.linux-x64 == 'true' && needs.validate.outputs.linux-arm64 == 'true'
-      && needs.build-win32-x64.result == 'success' && needs.build-win32-arm64.result == 'success'
       && needs.build-darwin-arm64.result == 'success' && needs.build-darwin-x64.result == 'success'
       && needs.build-linux-x64.result == 'success' && needs.build-linux-arm64.result == 'success'
       && needs.builds-table.result == 'success'
-      && needs.assemble-win32-bundle.result == 'success'
       && needs.smoke-darwin-arm64.result == 'success' && needs.smoke-darwin-x64.result == 'success'
-      && needs.smoke-win32-arm64.result == 'success' && needs.smoke-win32-x64.result == 'success'
-      && needs.publish-win32-updater.result == 'success'
       && needs.publish-darwin-updater.result == 'success'
     runs-on: ubuntu-24.04
     environment: release-signing

@@ -126,7 +126,7 @@ def _shadowed_by_builtin(requested_norm: str) -> bool:
     cron jobs fail with ``auth_unavailable``). Defer to the built-in only when the raw name IS the
     canonical provider (``nous``); an entry matching merely an alias (``kimi`` → ``kimi-coding``)
     is the user's target."""
-    if requested_norm == "custom" or requested_norm.startswith("custom:"):
+    if requested_norm in {"custom", "litellm"} or requested_norm.startswith("custom:"):
         return False
     rp = _rp()
     try:

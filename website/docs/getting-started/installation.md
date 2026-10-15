@@ -26,13 +26,6 @@ These installers clone `majorissuerep/hermes-agent` and track its `main` branch.
 curl -fsSL https://raw.githubusercontent.com/majorissuerep/hermes-agent/main/scripts/install.sh | bash
 ```
 
-#### Windows (native)
-
-Run in powershell:
-```powershell
-iex (irm https://raw.githubusercontent.com/majorissuerep/hermes-agent/main/scripts/install.ps1)
-```
-
 ### Initialize encrypted state {#initialize-encrypted-state}
 
 Open a new terminal after installation and check whether setup already created the vault:
@@ -80,7 +73,7 @@ On Linux, macOS, or WSL2, run the takeover script from a terminal after saving o
 curl -fsSL https://raw.githubusercontent.com/majorissuerep/hermes-agent/main/scripts/takeover.sh | bash
 ```
 
-The script stops running Hermes processes, keeps the previous source checkout, installs the fork's `main` branch, and migrates the active home with a backup and verification. It uses the same PM-managed Python, dependencies, app builds, and launcher as a fresh source installation. The source lives under `$HERMES_HOME/hermes-agent` (defaulting to `~/.hermes/hermes-agent`), and the launcher under `~/.local/bin`. For another layout or native Windows, keep a backup, stop the existing Hermes processes, install the fork for the same data home, and run `hermes secure-vault migrate` if that home has no vault.
+The script stops running Hermes processes, keeps the previous source checkout, installs the fork's `main` branch, and migrates the active home with a backup and verification. It uses the same PM-managed Python, dependencies, app builds, and launcher as a fresh source installation. The source lives under `$HERMES_HOME/hermes-agent` (defaulting to `~/.hermes/hermes-agent`), and the launcher under `~/.local/bin`. For another layout, keep a backup, stop the existing Hermes processes, install the fork for the same data home, and run `hermes secure-vault migrate` if that home has no vault.
 
 With a terminal available, takeover asks for a master password. Without a terminal it creates a key-only vault and prints the private-key path; retain that file and provide its path through `HERMES_VAULT_PRIVATE_KEY` when starting Hermes. Check `hermes secure-vault status` and a real chat before removing the saved source checkout or plaintext migration backup.
 
@@ -104,23 +97,22 @@ The scripts clone the source, bootstrap uv, and delegate dependency preparation
 to PM. PM provides pinned Python, Node.js, npm, ripgrep, and FFmpeg. The source
 installation selects the `all` Python extra, not every optional extra.
 PM also installs the browser and computer-use tools by default: `agent-browser`
-and its pinned Chromium, and `cua-driver` (the computer-use driver, on macOS,
-Windows and glibc Linux). If a download fails, the install still completes and
+and its pinned Chromium, and `cua-driver` (the computer-use driver, on macOS
+and glibc Linux). If a download fails, the install still completes and
 prints the command to retry. The default browser driver (browser-harness, the
 engine of the Browser Use CLI) is a regular Python dependency, so every install,
 the Desktop app included, already has it.
 Other optional tools use their feature-specific installation paths.
 
-To leave the browser tools out, pass `--skip-browser` on POSIX or `-SkipBrowser`
-on Windows; for the computer-use driver, `--skip-computer-use` /
-`-SkipComputerUse`. Hermes remembers these choices: later installs and
+To leave the browser tools out, pass `--skip-browser`; for the computer-use
+driver, `--skip-computer-use`. Hermes remembers these choices: later installs and
 `hermes update` do not add them back. Run `hermes pm install agent-browser` or
 `hermes pm install cua-driver` to install them and undo the choice.
 
 The scripts create a launcher and prepare the data directory. Interactive runs
-also invoke setup and gateway configuration. `--non-interactive` on POSIX, or
-`-NonInteractive` on Windows, skips stages that need input. The optional
-`--include-desktop` / `-IncludeDesktop` stage builds the desktop from source.
+also invoke setup and gateway configuration. `--non-interactive` skips stages
+that need input. The optional `--include-desktop` stage builds the desktop from
+source.
 
 On a terminal the scripts show one status line per step and write the output
 of git, uv and the builds to `logs/install.log` under the Hermes data
@@ -133,14 +125,16 @@ directory; a failed step prints its last lines and the log path. CI (`CI` or
 | Method | Code | CLI entry point | Default user data |
 |---|---|---|---|
 | POSIX source script | `~/.hermes/hermes-agent/` | `~/.local/bin/hermes` wrapper | `~/.hermes/` |
-| Windows source script | `%LOCALAPPDATA%\hermes\hermes-agent\` | `%LOCALAPPDATA%\hermes\bin\` | `%LOCALAPPDATA%\hermes\` |
-| Desktop bundle | Inside the installed app package | Packaged launchers; Windows execution aliases | Platform default Hermes data directory |
+| Desktop bundle | Inside the installed app package | Packaged launchers | Platform default Hermes data directory |
 | Docker | `/opt/hermes/` | Image entrypoint and `hermes` shim | Mounted `/opt/data/` |
 | Termux APT | `$PREFIX/lib/hermes-agent/` | Symlinks in `$PREFIX/bin/` | `~/.hermes/` |
 
+This fork does not support native Windows. On Windows, run the POSIX script
+inside WSL (see PLATFORMS.md).
+
 `HERMES_HOME` selects user data. The POSIX script's `--dir` selects its source
-checkout independently. Windows provides `-HermesHome` and `-InstallDir`.
-Running the POSIX script as root does not select an automatic FHS layout:
+checkout independently. Running the POSIX script as root does not select an
+automatic FHS layout:
 it uses root's home unless you provide an explicit source path.
 
 PM's tool store and per-install Python generations have separate lifetimes.
@@ -186,7 +180,6 @@ You don't need to rebuild your setup from scratch. Restore a full backup with `h
 ## Prerequisites
 
 For the POSIX source script, provide Git, curl, tar, and SHA-256 utilities.
-Windows can bootstrap its pinned Git for Windows archive when Git is absent.
 The script always downloads its verified uv pin; a uv already on your PATH is never used.
 
 Current first-party installations run on **Python 3.14**. The broader

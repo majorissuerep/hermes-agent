@@ -1,7 +1,7 @@
 ---
 sidebar_position: 2
 title: "安装"
-description: "在 Linux、macOS、WSL2 或原生 Windows 上安装 Hermes Agent"
+description: "在 Linux、macOS 或 WSL2 上安装 Hermes Agent（本 fork 不支持原生 Windows）"
 ---
 
 # 安装
@@ -22,44 +22,18 @@ description: "在 Linux、macOS、WSL2 或原生 Windows 上安装 Hermes Agent"
 curl -fsSL https://raw.githubusercontent.com/majorissuerep/hermes-agent/main/scripts/install.sh | bash
 ```
 
-### Windows（原生，PowerShell）
-
-原生 Windows 无需 WSL 即可运行 Hermes——CLI、gateway、TUI 和工具均可原生运行。（原生安装与 WSL2 安装可干净共存；唯一仅限 WSL2 的功能见下方功能说明。）遇到 bug 请[提交 issue](https://github.com/majorissuerep/hermes-agent/issues)。
-
-打开 PowerShell 并运行：
-
-```powershell
-iex (irm https://raw.githubusercontent.com/majorissuerep/hermes-agent/main/scripts/install.ps1)
-```
-
-源码安装脚本克隆仓库，再由 PM 准备 Python 3.14、Node.js、npm、ripgrep、FFmpeg 和 Python 依赖。
-缺少 Git 时，脚本下载经过 SHA-256 验证的 Git for Windows 到工具存储目录。
-它不替换系统 Git，也不再使用 MinGit 或 `hermes\node` 的旧布局。
-安装完成后，打开新终端以读取用户 PATH。
-
-**桌面软件包：** MSIX/App Installer 是自包含的软件包，与源码脚本不同。
-它要求 Windows 11 22H2 或更新版本，首次启动无需克隆源码或编译基础运行时。
-打开 `.appinstaller` 文件安装并登记更新源。Microsoft Store 版本由商店更新。
-`Hermes-Setup.exe` 则是下载并配置源码的引导安装程序。
-
-macOS 的 DMG 包含应用；将它复制到 Applications 后启动。
-其自动更新使用包含已签名应用的 ZIP。详情见 [桌面指南](../user-guide/desktop.md)。
-
 ### Android / Termux
 
 aarch64 Android 设备可通过 Termux 安装预发布的 APT 软件包。软件包包含 Python、Node.js 和 TUI，无需在手机上编译核心依赖。请按照 [Termux 指南](./termux.md)配置签名仓库，然后运行 `pkg install hermes-agent`。桌面和服务器的安装脚本不支持 Termux。
 
 ### 功能与安装目录
 
-Windows 的 CLI、TUI、gateway 和桌面应用可原生运行。
 Dashboard 终端使用 `pywinpty`/ConPTY，不再是尚未实现的 POSIX-only 功能。
-部分可选依赖仍受架构限制，请参阅 [Windows 指南](../user-guide/windows-native.md)。
 
 | 安装方式 | 代码 | 命令入口 | 默认数据目录 |
 |---|---|---|---|
 | POSIX 源码脚本 | `~/.hermes/hermes-agent/` | `~/.local/bin/hermes` 包装器 | `~/.hermes/` |
-| Windows 源码脚本 | `%LOCALAPPDATA%\hermes\hermes-agent\` | `%LOCALAPPDATA%\hermes\bin\` | `%LOCALAPPDATA%\hermes\` |
-| 桌面软件包 | 应用包内部 | 包内启动器；Windows 执行别名 | 平台默认数据目录 |
+| 桌面软件包 | 应用包内部 | 包内启动器 | 平台默认数据目录 |
 | Docker | `/opt/hermes/` | 镜像入口和 `hermes` | 挂载的 `/opt/data/` |
 | Termux APT | `$PREFIX/lib/hermes-agent/` | `$PREFIX/bin/` 符号链接 | `~/.hermes/` |
 
@@ -88,7 +62,7 @@ Linux、macOS 或 WSL2 用户应先保存正在进行的工作、关闭 Hermes D
 curl -fsSL https://raw.githubusercontent.com/majorissuerep/hermes-agent/main/scripts/takeover.sh | bash
 ```
 
-脚本会停止 Hermes 进程、保留旧源码目录、安装本 fork 的 `main` 分支，并备份、加密和验证当前 home。它使用用户级布局（`$HERMES_HOME/hermes-agent`，默认为 `~/.hermes/hermes-agent`），启动器位于 `~/.local/bin`。其他布局或原生 Windows 应先备份并停止旧进程，为同一数据目录安装 fork，再在尚无 vault 时运行 `hermes secure-vault migrate`。
+脚本会停止 Hermes 进程、保留旧源码目录、安装本 fork 的 `main` 分支，并备份、加密和验证当前 home。它使用用户级布局（`$HERMES_HOME/hermes-agent`，默认为 `~/.hermes/hermes-agent`），启动器位于 `~/.local/bin`。其他布局应先备份并停止旧进程，为同一数据目录安装 fork，再在尚无 vault 时运行 `hermes secure-vault migrate`。
 
 有终端时脚本会询问主密码；没有终端时会生成仅私钥解锁的 vault 并输出私钥路径。请保管该文件，并通过 `HERMES_VAULT_PRIVATE_KEY` 将路径提供给 Hermes。确认 vault 状态和实际对话正常后，再移除旧源码和明文迁移备份。
 

@@ -179,25 +179,11 @@ CASES = {
     # pytest files, so they must turn on python (which gates tests-os).
     "install.ps1 → python + e2e_upgrade": (["scripts/install.ps1"], _lanes(python=True, e2e_upgrade=True)),
     "installer suite → python": (["scripts/tests/test-install-ps1-longpath.ps1"], _lanes(python=True)),
-    # The Windows desktop-update hand-off is a PowerShell integration surface:
-    # its tests spawn the real script and poll its loopback server. They run
-    # when the script, the Electron side that launches it, or their own test
-    # files change — not on every hermes_state/__init__.py PR. The script runs a real
-    # `hermes update`, and the Windows crash cells that kill it mid-run live in
-    # the install + update journey, so it starts e2e_upgrade as well.
-    "windows.ps1 → desktop_updater": (
-        ["scripts/desktop-update/windows.ps1"],
-        _lanes(python=True, desktop_updater=True, e2e_upgrade=True, e2e_desktop_update=True),
-    ),
     # The shipped updater page is exercised by the desktop Electron suite;
     # a page-only change must run that suite as well as the server tests.
     "updater ui.html → frontend + desktop_updater": (
         ["scripts/desktop-update/ui.html"],
         _lanes(python=True, frontend=True, desktop_updater=True, e2e_upgrade=True, e2e_desktop_update=True),
-    ),
-    "desktop-update test → desktop_updater": (
-        ["tests/scripts/desktop_update/test_desktop_update_windows_progress.py"],
-        _lanes(python=True, python_prod=False, scan=True, desktop_updater=True),
     ),
     "updater-process.ts → desktop_updater": (
         ["apps/desktop/electron/updater-process.ts"],
@@ -477,7 +463,6 @@ _UPDATE_PATH_FILES = (
     "hermes_cli/process_identity.py",
     "hermes_cli/relaunch.py",
     "hermes_cli/gateway.py",
-    "hermes_cli/gateway_windows.py",
     "hermes_cli/gateway_migrate.py",
     "hermes_cli/desktop_update_verify.py",
     "hermes_bootstrap.py",
@@ -485,7 +470,6 @@ _UPDATE_PATH_FILES = (
     "gateway/status.py",
     "gateway/control_socket.py",
     "gateway/code_skew.py",
-    "scripts/desktop-update/windows.ps1",
     "scripts/desktop-update/posix.sh",
 )
 _DESKTOP_UPDATE_PATH_FILES = (
@@ -498,7 +482,6 @@ _DESKTOP_UPDATE_PATH_FILES = (
     "apps/desktop/electron/desktop-installation.ts",
     "apps/desktop/electron/backend-discovery.ts",
     "apps/desktop/electron/local-gateway.ts",
-    "scripts/desktop-update/windows.ps1",
     "scripts/desktop-update/posix.sh",
     "hermes_cli/desktop_update_verify.py",
     "hermes_cli/main_desktop.py",
@@ -575,9 +558,7 @@ def _iter_if_expressions(job: object):
 # suite: each runs on a PR exactly when its lane fires and then gates the merge.
 _REAL_UPDATE_LANES = (
     ("ci.yaml", "tests", "tests.yml", "e2e_upgrade"),
-    ("ci.yaml", "tests-os", "tests-os.yml", "e2e_upgrade"),
     ("ci.yaml", "e2e-desktop-update", "e2e-desktop-update.yml", "e2e_desktop_update"),
-    ("tests-os.yml", "install-update-e2e", "windows-install-update-e2e.yml", "e2e_upgrade"),
     # Not an update suite, but the same contract: the real SSH/Docker backend lane.
     ("ci.yaml", "remote-backends", "remote-backends.yml", "remote_backends"),
 )
@@ -616,13 +597,6 @@ def test_remote_backends_lane_runs_test_files_that_exist_and_start_it():
     assert "scripts/run_tests.sh --fail-on-skip" in text
 
 
-def test_windows_venv_e2e_runs_only_test_files_that_exist():
-    """``run_tests.sh`` drops a missing path (or a ``::node`` selector) without
-    a word, so a stale entry silently stops running on every wine2e push."""
-    text = (_REPO / ".github/workflows/windows-venv-e2e.yml").read_text(encoding="utf-8-sig")
-    paths = re.findall(r"(tests/[\w/.:-]+)", text)
-    assert paths
-    assert [p for p in paths if "::" in p or not (_REPO / p).is_file()] == []
 
 
 def _write_event(tmp_path, number: int | None = 88442) -> Path:

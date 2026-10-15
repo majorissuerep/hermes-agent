@@ -1,10 +1,10 @@
 # Configuration, Toolsets & Voice
 
-Use `hermes config edit` or `hermes config set section.key value` from a human-operated
-CLI that can unlock its vault. In this encrypted fork, a `terminal` child of a
-logged-in agent has no vault key: use a host operation or the logged-in settings UI.
-For MCP entries use `hermes mcp ... --via-host` (see `native-mcp.md`). Never read,
-patch, or overwrite the encrypted `config.yaml` or `.env` as plaintext.
+Use `hermes config set section.key value` through `terminal`: a local command in an
+unlocked session reuses its session authority, including from delegated agents.
+For MCP entries, `hermes mcp ... --via-host` also remains available (see `native-mcp.md`).
+Never patch or overwrite encrypted `config.yaml` or `.env` as plaintext; use their
+CLI writers. See `encrypted-self-management.md` for updates and repair.
 Full reference: https://hermes-agent.nousresearch.com/docs/user-guide/configuration
 
 ### Config Sections (most-used keys)

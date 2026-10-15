@@ -74,18 +74,17 @@ Do not add a surface-specific goal parser. ACP has no goal command or goal loop 
 
 ### Agent-driven operations in the encrypted fork
 
-An agent's terminal child does not inherit the session host's vault key. MCP
-management uses `hermes mcp <action> --via-host` (`mcp_host.py`), a noninteractive
-client of the existing `mcp.servers.*` RPCs, with profile resolved from the caller's
-home. The precise `vault_gate.py` exemption applies only to supported host-only
-actions; normal CLI commands still unlock. Attach only to a live authenticated
-host serving the same root, never spawn one or fall back to disk. Credentials enter
-through `set-api-key --value-stdin`, never argv. Adds save without discovery; `test`
-probes separately, and mutations report `activation: next_session` without reloading
-live tool arrays. Extend capability-specific operations; do not add generic remote
-shell execution or give terminal children vault keys. E2E:
-`tests/hermes_cli/test_mcp_host.py` uses real CLI children and the ASGI/WS route with
-two encrypted homes under multiplexing.
+An unlocked session lends temporary, home-scoped authority to local CLI and delegated
+children through `hermes_security/session_authority.py`. The passphrase is never
+retained or exported. Local subprocess builders select the active session's grant,
+strip wrong-profile grants, and PM build workers strip authority entirely. Closing
+the owning agent revokes its grant; closing a subagent must preserve its parent's.
+Use ordinary CLI config writers for self-management, never plaintext state edits.
+MCP's `hermes mcp <action> --via-host` remains an alternative through existing
+`mcp.servers.*` RPCs, scoped to the same authenticated home. Credentials enter
+through `set-api-key --value-stdin`, never argv. Mutations default to the next session
+without rebuilding live prompts or tool arrays. Live contracts belong in the
+session-authority tests and encrypted lifecycle VM suite.
 
 - **config.yaml option:** add to `DEFAULT_CONFIG`. Bump `_config_version` ONLY to actively
   migrate/transform existing config (rename keys, restructure); new keys deep-merge automatically.

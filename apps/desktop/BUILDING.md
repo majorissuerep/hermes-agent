@@ -7,7 +7,6 @@ commands package the current desktop build; they do not stage a fresh runtime.
 
 | Target | Artifact | Update owner |
 |---|---|---|
-| Windows x64 / ARM64, sideload | Signed per-architecture MSIX packages, combined into a universal `.msixbundle`; `.appinstaller` descriptor | Windows App Installer |
 | Windows x64 / ARM64, Store | Store-identity MSIX packages and a separate Store bundle | Microsoft Store |
 | macOS ARM64 / x64 | Signed, notarized `Hermes.app` in DMG and ZIP artifacts | `electron-updater` with Squirrel.Mac |
 | Linux x64 / ARM64 | Local builder can produce AppImage | External replacement; Linux desktop release legs are disabled |
@@ -95,9 +94,6 @@ Developer ID in your keychain.
 next patch after the newest published stable tag, and deletes it when the
 build ends. The tag is never pushed. Each architecture builds on its own host.
 `-Store` prints the claim timestamp as `HERMES_RELEASE_EPOCH=<n>`. To combine the
-x64 and arm64 Store packages, copy both `Store-*.msix` files into one
-`apps/desktop/release`, then run this on that host:
-
 ```powershell
 $env:HERMES_RELEASE_EPOCH = '<n from the build>'
 node scripts/bundle-store-msixbundle.mjs --tag vX.Y.Z
@@ -277,7 +273,7 @@ arguments. Local unsigned builds are not release-acceptance artifacts.
 
 The packaging hooks sanitize invalid PE certificate tables, then sign and
 timestamp payload EXEs/DLLs. The product EXE receives its signature after
-resource edits. `scripts/sign-msix.mjs` signs the sideload package envelope.
+resource edits.
 Store package envelopes remain unsigned for Partner Center to sign.
 
 Unchanged payload files reuse verified signatures from

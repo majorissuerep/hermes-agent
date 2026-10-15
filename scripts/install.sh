@@ -429,7 +429,7 @@ check_platform() {
     case "$(uname -s 2>/dev/null)" in
         Linux*) : ;;
         Darwin*) : ;;
-        *) fail "unsupported platform: $(uname -s). On Windows use install.ps1." unsupported_platform ;;
+        *) fail "unsupported platform: $(uname -s). On Windows, use WSL2 and this same installer inside it." unsupported_platform ;;
     esac
 }
 

@@ -22,16 +22,14 @@ from scripts.releases.draft_warning import strip_draft_warning
 from scripts.releases.versioning import tag_record
 SHA = re.compile(r"[a-f0-9]{40}")
 DIGEST = re.compile(r"[a-f0-9]{64}")
-DESKTOP_TARGETS = ("windows/x64", "windows/arm64", "macos/x64", "macos/arm64")
+DESKTOP_TARGETS = ("macos/x64", "macos/arm64")
 ALL_TARGETS = tuple(lane_set.TARGET_LANE)
 SMOKE_JOBS = {
     "smoke-darwin-arm64": "macOS DMG + ZIP (arm64)",
     "smoke-darwin-x64": "macOS DMG + ZIP (x64)",
-    "smoke-win32-arm64": "Windows MSIX (arm64)",
-    "smoke-win32-x64": "Windows MSIX (x64)",
 }
 SMOKE_TARGETS = {"smoke-darwin-arm64": "macos/arm64", "smoke-darwin-x64": "macos/x64",
-                 "smoke-win32-arm64": "windows/arm64", "smoke-win32-x64": "windows/x64"}
+                 }
 
 
 # Stable releases are cut from ``main`` or from a ``release/*`` maintenance branch.
@@ -91,8 +89,7 @@ def require_success(needs: dict, required: list[str]) -> None:
 
 # Each signed-package upgrade arm and the transitions job that plans it.
 PACKAGED_BY = {"macos-packaged-arm64": "transitions-darwin-arm64",
-               "macos-packaged-x64": "transitions-darwin-x64",
-               "windows-packaged": "transitions-win32"}
+               "macos-packaged-x64": "transitions-darwin-x64"}
 
 
 def gate_expectations(required: list[str], lanes: Iterable[str]) -> dict:
@@ -163,20 +160,11 @@ def require_targets_match_claim(manifest: dict, lanes: Iterable[str]) -> None:
         raise ValueError(f"Candidate manifest targets {sorted(present)} differ from the claim's {sorted(wanted)}")
 
 
-def stable_windows_version(epoch: object) -> str:
-    if isinstance(epoch, bool) or not isinstance(epoch, int) or epoch < 0:
-        raise ValueError("Stable release epoch must be a non-negative integer")
-    instant = datetime.fromtimestamp(epoch, tz=UTC)
-    start = datetime(instant.year, 1, 1, tzinfo=UTC)
-    hour_of_year = (instant - start).days * 24 + instant.hour
-    second_of_hour = instant.minute * 60 + instant.second
-    return f"{instant.year}.{hour_of_year}.{second_of_hour}.0"
 
 
 RECEIPT_TARGETS = {
     "darwin-arm64": ("macos/arm64",),
     "darwin-x64": ("macos/x64",),
-    "win32-bundle": ("windows/x64", "windows/arm64"),
 }
 
 # The staged handoffs each receipt is assembled from. The Windows bundle
@@ -186,9 +174,8 @@ RECEIPT_TARGETS = {
 RECEIPT_HANDOFFS = {
     "darwin-arm64": ("darwin-arm64",),
     "darwin-x64": ("darwin-x64",),
-    "win32-bundle": ("win32-x64", "win32-arm64", "windows-universal"),
 }
-RECEIPT_INCLUDES = ("metadata-*.json", "*.zip", "*.msixbundle")
+RECEIPT_INCLUDES = ("metadata-*.json", "*.zip")
 
 
 def _validated_rows(manifest: dict, tag: str, commit: str, public_base: str,
@@ -200,7 +187,6 @@ def _validated_rows(manifest: dict, tag: str, commit: str, public_base: str,
     if manifest.get("archive") != archive:
         raise ValueError("Candidate manifest names a different release archive")
     admitted_epoch = manifest.get("releaseEpoch")
-    expected_windows_version = stable_windows_version(admitted_epoch)
     if release_epoch is not None and admitted_epoch != release_epoch:
         raise ValueError("Candidate release epoch differs from the admitted claim")
     prefix = urlsplit(f"{public_base.rstrip('/')}/releases/tag/{archive}/")
@@ -220,13 +206,6 @@ def _validated_rows(manifest: dict, tag: str, commit: str, public_base: str,
             raise ValueError(f"Candidate package is outside its immutable tag archive: {target}")
         if not DIGEST.fullmatch(artifact.get("sha256", "")) or not item.get("identity"):
             raise ValueError(f"Invalid candidate digest or identity: {target}")
-        if item["platform"] == "windows":
-            if (item.get("version") != expected_windows_version
-                    or item.get("executableVersion") != expected_windows_version):
-                raise ValueError("Windows candidate version differs from the admitted release epoch")
-            windows_version(item["version"])
-            if not item.get("publisher") or not item.get("applicationId") or not url.path.endswith(".msixbundle"):
-                raise ValueError("Windows candidate needs publisher, applicationId and MSIX bundle")
         elif item["platform"] == "macos":
             if item.get("version") != tag[1:] or not re.fullmatch(r"[A-Z0-9]{10}", item.get("teamId", "")) or not url.path.endswith(".zip"):
                 raise ValueError("macOS candidate needs matching version, signing team and app ZIP")
@@ -271,26 +250,12 @@ def validate_receipt(manifest: dict, receipt: str, tag: str, commit: str, public
     return rows
 
 
-def windows_version(value: str) -> tuple[int, ...]:
-    if not isinstance(value, str) or not re.fullmatch(r"\d+\.\d+\.\d+\.\d+", value):
-        raise ValueError("Windows package version must have four numeric components")
-    result = tuple(map(int, value.split(".")))
-    if any(n > 65535 for n in result):
-        raise ValueError("Windows package version exceeds 16 bits")
-    return result
-
-
 def _transition_row(target: str, left: dict, right: dict) -> dict:
     if left["identity"] != right["identity"] or left["commit"] == right["commit"] or left["artifact"]["sha256"] == right["artifact"]["sha256"]:
         raise ValueError("Update must preserve package identity and change the build")
-    if right["platform"] == "windows":
-        if (left["publisher"], left["applicationId"]) != (right["publisher"], right["applicationId"]):
-            raise ValueError("Update must preserve publisher and applicationId")
-        newer = windows_version(right["version"]) > windows_version(left["version"])
-    else:
-        if left["teamId"] != right["teamId"]:
-            raise ValueError("Update must preserve signing team")
-        newer = tuple(map(int, right["version"].split("."))) > tuple(map(int, left["version"].split(".")))
+    if left["teamId"] != right["teamId"]:
+        raise ValueError("Update must preserve signing team")
+    newer = tuple(map(int, right["version"].split("."))) > tuple(map(int, left["version"].split(".")))
     if not newer:
         raise ValueError("New package version must increase")
     return {"target": target.replace("/", "-"), "transition": {
@@ -352,15 +317,9 @@ def _receipt_manifest(root: Path, receipt: str, tag: str, commit: str, archive: 
             digests[row["path"]] = row["sha256"]
     rows = [json.loads(file.read_text(encoding="utf-8-sig"))
             for file in sorted(root.glob("metadata-*.json"))]
-    universal = None
-    if receipt == "win32-bundle":
-        bundles = [file.name for file in root.glob("*.msixbundle") if not file.name.startswith("Store-")]
-        if len(bundles) != 1:
-            raise ValueError(f"Expected one universal bundle, found {len(bundles)}")
-        universal = bundles[0]
     packages = []
     for row in rows:
-        filename = universal if row["platform"] == "windows" else row.get("filename")
+        filename = row.get("filename")
         if not filename or filename not in digests or not (root / filename).is_file():
             raise ValueError(f"Receipt {receipt} is missing staged bytes for "
                              f"{row['platform']}/{row['arch']}")
@@ -371,13 +330,8 @@ def _receipt_manifest(root: Path, receipt: str, tag: str, commit: str, archive: 
                              "sha256": digests[filename]},
             }.items() if key != "filename"
         })
-        if row["platform"] != "windows" and not filename.endswith(".zip"):
+        if not filename.endswith(".zip"):
             raise ValueError(f"Receipt {receipt} needs a signed app ZIP for {row['platform']}/{row['arch']}")
-    if receipt == "win32-bundle":
-        from scripts.bundles.release_artifacts import validate_windows_bundle
-
-        validate_windows_bundle(root / universal,
-                                [row for row in rows if row["platform"] == "windows"])
     return {"schema": 2, "tag": tag, "commit": commit, "releaseEpoch": release_epoch,
             "archive": archive, "packages": packages}
 
@@ -758,8 +712,8 @@ def transitions(env: dict) -> None:
     """Plan one install arm from its own receipt.
 
     Each transitions job reads exactly one group's receipt (decision 11) and
-    emits only that group's rows, so a Mac arch and the Windows bundle start
-    their install arms independently of the other groups.
+    emits only that group's rows, so each Mac arch starts its install arm
+    independently of the other groups.
     """
     receipt = env.get("RECEIPT", "")
     if receipt not in RECEIPT_TARGETS:
@@ -769,7 +723,7 @@ def transitions(env: dict) -> None:
     archive = claim["claim_tag"]
     previous = _published_baseline(env, base)
     receipt_manifest = _receipt_from_env(env, receipt, "RECEIPT", base)
-    matrices = {"windows": {"include": []}, "macos": {"include": []}}
+    matrices = {"macos": {"include": []}}  # fork: windows transitions removed
     if previous is None or not baseline_covers(previous, receipt, base):
         # Native smokes still gate this release. Its packages become the
         # baseline that the next bundle release must upgrade from. A baseline
@@ -791,12 +745,9 @@ def transitions(env: dict) -> None:
 CALL_SMOKE_JOBS = {
     "candidates-darwin-arm64": "smoke-darwin-arm64",
     "candidates-darwin-x64": "smoke-darwin-x64",
-    "candidates-win32-arm64": "smoke-win32-arm64",
-    "candidates-win32-x64": "smoke-win32-x64",
-}
-CANDIDATE_HANDOFFS = ("win32-x64", "win32-arm64", "darwin-x64", "darwin-arm64",
-                      "termux", "windows-universal")
-CANDIDATE_INCLUDES = ("metadata-*.json", "*.msixbundle")
+}  # fork: win32 candidate jobs removed
+CANDIDATE_HANDOFFS = ("darwin-x64", "darwin-arm64", "termux")  # fork: win32 handoffs removed
+CANDIDATE_INCLUDES = ("metadata-*.json",)  # fork: msixbundle removed
 
 
 def candidate_manifest(env: dict) -> None:
@@ -1025,7 +976,7 @@ def main(argv: list[str] | None = None, env: dict | None = None) -> None:
         return
     if argv and argv[0] == "stage-receipt":
         if len(argv) != 3 or argv[1] != "--receipt" or argv[2] not in RECEIPT_TARGETS:
-            raise ValueError("Expected stage-receipt --receipt darwin-arm64|darwin-x64|win32-bundle")
+            raise ValueError("Expected stage-receipt --receipt darwin-arm64|darwin-x64|termux")
         stage_receipt(env, argv[2])
         return
     commands = {"admit": admit, "verify": verify, "transitions": transitions,

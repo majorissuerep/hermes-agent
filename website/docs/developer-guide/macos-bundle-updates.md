@@ -85,4 +85,4 @@ Native macOS packaged-update drivers are part of the existing
 requires signed-package transitions on both architectures. Each acceptance
 claim needs a successful native run for the exact old/new package pair.
 Workflow definitions and historical helper results do not establish acceptance
-of the current head. See [PM audit status](pm-audit-status.md) for scoped receipts.
+of the current head.

@@ -107,7 +107,7 @@ jobs:
           PAYLOAD_CACHE: ${{ runner.temp }}/payload-inputs
           PYTHONUTF8: '1'
         run: |
-          if [ "$RUNNER_OS" = Windows ]; then bootstrap=python; else bootstrap=python3; fi
+          bootstrap=python3  # fork: POSIX runners only
           "$bootstrap" -S -B scripts/bundles/native_build.py --prepare-only \
             --source "$GITHUB_WORKSPACE" --work "$PAYLOAD_WORK" --cache "$PAYLOAD_CACHE" \
             --out "$GITHUB_WORKSPACE/build/agent-payload" --ref HEAD
@@ -127,7 +127,7 @@ jobs:
       - name: Assemble the prepared payload without dependency acquisition
         shell: bash
         run: |
-          if [ "$RUNNER_OS" = Windows ]; then bootstrap=python; else bootstrap=python3; fi
+          bootstrap=python3  # fork: POSIX runners only
           "$bootstrap" -S -B scripts/bundles/native_build.py \
             --prepared "$GITHUB_WORKSPACE/build/agent-payload.prepared.json"
 

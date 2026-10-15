@@ -1,14 +1,14 @@
 ---
 sidebar_position: 3
 title: "Hermes Desktop"
-description: "The native Hermes desktop app — a polished experience for chatting with Hermes, with streaming tool output, side-by-side previews, a file browser, voice, cron, profiles, skills, and settings. macOS, Windows, and Linux."
+description: "The native Hermes desktop app — a polished experience for chatting with Hermes, with streaming tool output, side-by-side previews, a file browser, voice, cron, profiles, skills, and settings. macOS and Linux."
 ---
 
 # Hermes Desktop
 
 The Hermes desktop app is a native app built around the **same** agent you get from the CLI and the gateway — same config, same API keys, same sessions, same skills, same memory. It is not a separate product or a lightweight clone; it uses the same Hermes Agent core and settings, and drives it through a modern & thoughtfully designed UI. If you have used `hermes` in a terminal, everything you set up there is already here, and anything you do here shows up there.
 
-It runs on **macOS (Apple Silicon), Windows, and Linux** — see [Platform Support](../getting-started/platform-support.md) for the full matrix.
+It runs on **macOS (Apple Silicon) and Linux** (on Windows, use WSL) — see [Platform Support](../getting-started/platform-support.md) for the full matrix.
 
 :::tip Which interface is which?
 Hermes has several front ends that all talk to the same agent:
@@ -842,4 +842,3 @@ time. Grants are stable from then on. If a permission gets stuck, reset it with
 - [TUI](./tui.md) — the modern terminal UI used by `hermes --tui` and the dashboard chat tab
 - [Web Dashboard](./features/web-dashboard.md) — browser admin panel with an embedded chat tab
 - [Configuration](./configuration.md) — config that the desktop app reads and writes
-- [Windows (Native)](./windows-native.md) — native Windows install path

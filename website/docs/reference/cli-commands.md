@@ -99,7 +99,7 @@ The install also ships `hermes-agent`, a minimal runner that sends one query and
 | `hermes plugins` | Manage Hermes Agent plugins (install, enable, disable, remove). |
 | `hermes portal` | Nous Portal status, subscription link, and Tool Gateway routing. See [Tool Gateway](../user-guide/features/tool-gateway.md). |
 | `hermes tools` | Configure enabled tools per platform. |
-| `hermes computer-use` | Install or check the Computer Use (cua-driver) backend (macOS/Windows/Linux). |
+| `hermes computer-use` | Install or check the Computer Use (cua-driver) backend (macOS/Linux). |
 | `hermes pets` | Browse, install, and select [petdex](../user-guide/features/pets.md) animated pets shown across the CLI, TUI, and desktop app. Subcommands: `list`, `install`, `select`, `show`, `off`, `scale`, `remove`, `doctor`. |
 | `hermes sessions` | Browse, export, prune, rename, and delete sessions. |
 | `hermes insights` | Show token/cost/activity analytics. |
@@ -1728,7 +1728,7 @@ Subcommands:
 
 | Subcommand | Description |
 |------------|-------------|
-| `install` | Run the upstream cua-driver installer (macOS, Windows, and Linux). |
+| `install` | Run the upstream cua-driver installer (macOS and Linux). |
 | `install --upgrade` | Re-run the installer even if cua-driver is already on PATH. The upstream script always pulls the latest release, so this performs an in-place upgrade. |
 | `status` | Print whether `cua-driver` is on `$PATH` and which version is installed. |
 | `doctor [--include CHECK] [--skip CHECK] [--json]` | Run cua-driver's health report and show its platform checks. |

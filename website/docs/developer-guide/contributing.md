@@ -189,8 +189,8 @@ not install JS workspaces or rewrite launchers and shell configuration. `deactiv
 Use the [PM developer workflow](../reference/package-management.md#developer-workflow) to prepare Python 3.14 first.
 Run these commands from that checkout with its prepared Python. Keep the same
 development `HERMES_HOME`. PM must be able to start before it can build another
-environment. On Windows, initialize the native C++ build environment for your
-architecture before building source dependencies.
+environment. On Windows hosts, do all development inside WSL: this fork does not
+support native Windows (see PLATFORMS.md).
 
 Build an independent interpreter for tests and editor tools:
 
@@ -250,7 +250,7 @@ scripts/run_tests.sh
 scripts/run_tests.sh tests/agent/ -v
 ```
 
-On Windows, run the script through Bash. When no local `.venv` or `venv`
+When no local `.venv` or `venv`
 contains pytest, the runner accepts the explicit `HERMES_PYTHON` above. It
 clears credentials, isolates `HERMES_HOME`, and runs each test file in a separate
 subprocess through `scripts/run_tests_parallel.py`. It does not use xdist.
@@ -274,13 +274,10 @@ See [Package management](../reference/package-management.md) for PM commands and
 
 ## Cross-Platform Compatibility
 
-See **[Platform Support](../getting-started/platform-support.md)**. Native Windows uses Git Bash (from [Git for Windows](https://git-scm.com/download/win)) for shell commands. The dashboard uses POSIX PTYs on Unix and the `pywinpty`/ConPTY bridge on Windows. Availability depends on that host's native dependency support. If you're doing Windows-heavy dev, run the Windows-footgun lint (`scripts/check-windows-footguns.py`) before pushing.
+See **[Platform Support](../getting-started/platform-support.md)**. The dashboard uses POSIX PTYs. On Windows hosts, run everything inside WSL — this fork does not support native Windows (see PLATFORMS.md).
 
 When contributing code, keep these rules in mind:
 
-- **Don't add unguarded `signal.SIGKILL` references.** It's not defined on Windows. Either route through `gateway.status.terminate_pid(pid, force=True)` (the centralized primitive that does `taskkill /T /F` on Windows and SIGKILL on POSIX), or fall back with `getattr(signal, "SIGKILL", signal.SIGTERM)`.
-- **Use `psutil.pid_exists()` for process liveness.** Do not use `os.kill(pid, 0)` on Windows; it is not a safe probe.
-- **Don't force the terminal to POSIX semantics.** `os.setsid`, `os.killpg`, `os.getpgid`, `os.fork` all raise on Windows — gate them with `if sys.platform != "win32":` or `if os.name != "nt":`.
 - **Use explicit text encodings.** User-authored UTF-8 reads use `utf-8-sig` to accept a leading BOM. Writes use `utf-8` without adding a BOM.
 - **Use `pathlib.Path` / `os.path.join` — never manually concat with `/`.** This matters less for strings the OS gives us back and more for strings we construct to hand to subprocesses.
 
@@ -297,15 +294,6 @@ except UnicodeDecodeError:
     load_dotenv(env_path, encoding="latin-1")
 ```
 
-### 2. Process management
-
-`os.setsid()`, `os.killpg()`, and signal handling differ across platforms:
-
-```python
-import platform
-if platform.system() != "Windows":
-    kwargs["preexec_fn"] = os.setsid
-```
 
 ### 3. Path separators
 
@@ -351,7 +339,7 @@ refactor/description   # Code restructuring
 
 1. **Run tests**: `scripts/run_tests.sh` for CI-parity. Use direct `python -m pytest ...` only when the wrapper is unavailable or you are intentionally debugging outside the wrapper.
 2. **Test manually**: Run `hermes` and exercise the code path you changed
-3. **Check cross-platform impact**: Consider macOS, Linux, WSL2, and native Windows. If you touch file I/O, process management, terminal handling, subprocesses, or signals, run `scripts/check-windows-footguns.py`.
+3. **Check cross-platform impact**: Consider macOS and Linux (Windows hosts run through WSL2). If you touch file I/O, process management, terminal handling, subprocesses, or signals, prefer the centralized POSIX primitives.
 4. **Keep PRs focused**: One logical change per PR
 5. **Prompt or tool-schema changes**: if `tests/ci/test_prompt_surface.py` fails, your change alters the system prompt or a tool schema that every session sends. Regenerate with `scripts/run-in-hermes-env python scripts/ci/prompt_surface.py render` and commit the snapshot. Changes there need a maintainer approval (see [Prompt Assembly](./prompt-assembly.md#reviewing-changes-to-the-prompt-surface)).
 6. **New config keys or slash commands**: if `tests/ci/test_docs_drift.py` fails, a `DEFAULT_CONFIG` key or slash command you added has no docs. Mention the dotted key (`agent.max_turns`) or show it in a YAML example under `website/docs/` (usually `user-guide/configuration.md`), and add slash commands to `reference/slash-commands.md`. If a key really should stay undocumented, `python scripts/ci/check_docs_drift.py --update` adds it to `scripts/ci/docs_drift_baseline.json` where reviewers see it. Keys that were undocumented when the check landed are already baselined; documenting one never fails.

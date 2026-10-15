@@ -16,7 +16,6 @@
 
 import { expandRemotePath, shq } from './remote-lifecycle'
 import { REMOTE_MARKER_JUDGE_PY } from './remote-update-marker-programs'
-import { encodedPowerShell, powerShellCommand, psLiteral } from './windows-remote-lifecycle'
 
 const UPDATE_EXIT_INDEPENDENT_HANDOFF = 75
 const DEFAULT_REMOTE_UPDATE_TIMEOUT_MS = 60 * 60 * 1000
@@ -272,62 +271,6 @@ function buildPosixManagedUpdateLaunch(target: RemoteUpdateTarget, correlationId
 }
 
 /** Windows equivalent of buildPosixManagedUpdateLaunch. */
-function buildWindowsManagedUpdateLaunch(target: RemoteUpdateTarget, correlationId: string): string {
-  const correlation = validateCorrelationId(correlationId)
-  const home = validateRemoteValue(target.hermesHome, 'Hermes home')
-  const hermesPath = validateRemoteValue(target.hermesPath, 'launcher path')
-  const statusPath = windowsChildPath(home, `.update_exit_code.${correlation}`)
-  const readyPath = windowsChildPath(home, `.update_coordinator_ready.${correlation}`)
-  const intentPath = windowsChildPath(home, `.update_launch_intent.${correlation}`)
-  const outputPath = windowsChildPath(home, `logs\\desktop-update-${correlation}.log`)
-
-  const wrapper = [
-    '$ErrorActionPreference="Continue"',
-    `$env:HERMES_HOME=${psLiteral(home)}`,
-    `$env:HERMES_UPDATE_CORRELATION_ID=${psLiteral(correlation)}`,
-    '$env:HERMES_UPDATE_ORIGIN_PROFILE="default"',
-    `$env:HERMES_UPDATE_ORIGIN_HOME=${psLiteral(home)}`,
-    `$env:HERMES_UPDATE_OUTPUT_PATH=${psLiteral(outputPath)}`,
-    // The copied Windows coordinator verifies this correlation AND its actual
-    // breakaway state before accepting it; the string alone grants nothing.
-    `$env:HERMES_UPDATE_WINDOWS_DETACHED=${psLiteral(correlation)}`,
-    `$env:HERMES_UPDATE_TAURI_OUTCOME_PATH=${psLiteral(statusPath)}`,
-    `$env:HERMES_UPDATE_TAURI_READY_PATH=${psLiteral(readyPath)}`,
-    `$intentTmp=${psLiteral(intentPath)}+"."+$PID+".tmp"`,
-    '$intentCreation="windows:"+[string]([Diagnostics.Process]::GetCurrentProcess().StartTime.ToUniversalTime().ToFileTimeUtc())',
-    `$intentPayload=[ordered]@{correlation=${psLiteral(correlation)};pid=$PID;creation=$intentCreation}|ConvertTo-Json -Compress`,
-    '[IO.File]::WriteAllText($intentTmp,$intentPayload,[Text.UTF8Encoding]::new($false))',
-    `Move-Item -LiteralPath $intentTmp -Destination ${psLiteral(intentPath)} -Force`,
-    `& ${psLiteral(hermesPath)} update --yes *>> ${psLiteral(outputPath)}`,
-    '$rc=$LASTEXITCODE',
-    // A non-gateway Windows coordinator parent returns 0 once its copied
-    // child owns the marker. That is acceptance, not completion: suppress the
-    // wrapper status when the correlated readiness proof exists and let the
-    // durable child receipt + released marker provide terminal truth.
-    `$handoffAccepted=($rc -eq 0 -and (Test-Path -LiteralPath ${psLiteral(readyPath)}))`,
-    `if($rc -ne ${UPDATE_EXIT_INDEPENDENT_HANDOFF} -and -not $handoffAccepted -and -not (Test-Path -LiteralPath ${psLiteral(statusPath)})){`,
-    `  $tmp=${psLiteral(statusPath)}+"."+$PID+".tmp"`,
-    '  [IO.File]::WriteAllText($tmp,[string]$rc,[Text.UTF8Encoding]::new($false))',
-    `  Move-Item -LiteralPath $tmp -Destination ${psLiteral(statusPath)} -Force`,
-    '}',
-    'exit $rc'
-  ].join(';')
-
-  const outer = [
-    '$ErrorActionPreference="Stop"',
-    `$output=${psLiteral(outputPath)}`,
-    'New-Item -ItemType Directory -Force -Path (Split-Path -Parent $output)|Out-Null',
-    `Remove-Item -LiteralPath ${psLiteral(statusPath)},${psLiteral(readyPath)},${psLiteral(intentPath)} -Force -ErrorAction SilentlyContinue`,
-    `$args=@("-NoProfile","-NonInteractive","-ExecutionPolicy","Bypass","-EncodedCommand",${psLiteral(encodedPowerShell(wrapper))})`,
-    '$child=Start-Process -FilePath "powershell.exe" -ArgumentList $args -WindowStyle Hidden -PassThru',
-    'if(-not $child){throw "managed update launcher did not start"}',
-    '$deadline=[DateTime]::UtcNow.AddSeconds(10)',
-    `while(-not [IO.File]::Exists(${psLiteral(intentPath)})){if($child.HasExited){throw "managed update launcher exited before intent proof"};if([DateTime]::UtcNow -ge $deadline){throw "managed update launcher intent timed out"};Start-Sleep -Milliseconds 50}`,
-    '[ordered]@{started=$true;pid=$child.Id}|ConvertTo-Json -Compress'
-  ].join(';')
-
-  return powerShellCommand(outer)
-}
 
 const OBSERVATION_SCRIPT = String.raw`
 import ctypes,json,os,re,sys
@@ -475,19 +418,7 @@ function buildRemoteUpdateObservationCommand(target: RemoteUpdateTarget, correla
   const correlation = validateCorrelationId(correlationId)
   const home = validateRemoteValue(target.hermesHome, 'Hermes home')
 
-  if (target.platform === 'Windows') {
-    const python = validateRemoteValue(target.pythonPath || '', 'Python path')
-
-    const script = [
-      '$ErrorActionPreference="Stop"',
-      `& ${psLiteral(python)} -c ${psLiteral(OBSERVATION_SCRIPT)} ${psLiteral(home)} ${psLiteral(correlation)}`,
-      'if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}'
-    ].join(';')
-
-    return powerShellCommand(script)
-  }
-
-  return `python3 -c ${shq(OBSERVATION_SCRIPT)} ${shq(home)} ${shq(correlation)}`
+  return `python3 -c ${shq(OBSERVATION_SCRIPT)} ${shq(home)} ${shq(correlation)}` // fork: Windows arm removed
 }
 
 function owedStep(value: any): ManagedUpdateOwedStep | null {
@@ -648,10 +579,7 @@ async function assertManagedUpdatePreflightClear(target: RemoteUpdateTarget, cor
 }
 
 async function launchManagedRemoteUpdate(target: RemoteUpdateTarget, correlationId: string): Promise<void> {
-  const command =
-    target.platform === 'Windows'
-      ? buildWindowsManagedUpdateLaunch(target, correlationId)
-      : buildPosixManagedUpdateLaunch(target, correlationId)
+  const command = buildPosixManagedUpdateLaunch(target, correlationId) // fork: Windows remotes removed
 
   const output = await target.ssh.exec(command, { timeoutMs: 30_000 })
 
@@ -1272,7 +1200,6 @@ export {
   assertManagedUpdatePreflightClear,
   buildPosixManagedUpdateLaunch,
   buildRemoteUpdateObservationCommand,
-  buildWindowsManagedUpdateLaunch,
   DEFAULT_REMOTE_CLEARANCE_TIMEOUT_MS,
   DEFAULT_REMOTE_UPDATE_POLL_MS,
   DEFAULT_REMOTE_UPDATE_TIMEOUT_MS,

@@ -169,80 +169,20 @@ def _api_key_provider(
 # row is ``_api_key_provider(id, name, inference_base_url, api_key_env_vars[, base_url_env_var
 # [, auth_type]])``; OAuth / bespoke rows are full ``ProviderConfig`` objects.
 _REGISTRY_ROWS: tuple[Any, ...] = (
-    ProviderConfig(
-        "nous", "Nous Portal", "oauth_device_code", portal_base_url=DEFAULT_NOUS_PORTAL_URL,
-        inference_base_url=DEFAULT_NOUS_INFERENCE_URL, client_id=DEFAULT_NOUS_CLIENT_ID,
-        scope=DEFAULT_NOUS_SCOPE),
     ProviderConfig("openai-codex", "OpenAI Codex", "oauth_external", inference_base_url=DEFAULT_CODEX_BASE_URL),
     ("openai-api", "OpenAI API", "https://api.openai.com/v1", ("OPENAI_API_KEY",), "OPENAI_BASE_URL"),
     ProviderConfig(
-        "xai-oauth", "xAI Grok OAuth (SuperGrok / Premium+)", "oauth_external",
-        inference_base_url=DEFAULT_XAI_OAUTH_BASE_URL),
-    ProviderConfig("qwen-oauth", "Qwen OAuth", "oauth_external", inference_base_url=DEFAULT_QWEN_BASE_URL),
-    ("lmstudio", "LM Studio", "http://127.0.0.1:1234/v1", ("LM_API_KEY",), "LM_BASE_URL"),
-    ("copilot", "GitHub Copilot", DEFAULT_GITHUB_MODELS_BASE_URL,
-     ("COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"), "COPILOT_API_BASE_URL"),
-    ProviderConfig(
-        "copilot-acp", "GitHub Copilot ACP", "external_process",
-        inference_base_url=DEFAULT_COPILOT_ACP_BASE_URL, base_url_env_var="COPILOT_ACP_BASE_URL"),
-    ("gemini", "Google AI Studio", "https://generativelanguage.googleapis.com/v1beta",
-     ("GOOGLE_API_KEY", "GEMINI_API_KEY"), "GEMINI_BASE_URL"),
+            "xai-oauth", "xAI Grok OAuth (SuperGrok / Premium+)", "oauth_external",
+            inference_base_url=DEFAULT_XAI_OAUTH_BASE_URL),
     ("zai", "Z.AI / GLM", "https://api.z.ai/api/paas/v4",
-     ("GLM_API_KEY", "ZAI_API_KEY", "Z_AI_API_KEY"), "GLM_BASE_URL"),
-    # Legacy platform.moonshot.ai keys use this endpoint (OpenAI-compat); sk-kimi- (Kimi Code)
-    # keys are auto-redirected to api.kimi.com/coding by _resolve_kimi_base_url().
-    ("kimi-coding", "Kimi / Moonshot", "https://api.moonshot.ai/v1",
-     ("KIMI_API_KEY", "KIMI_CODING_API_KEY"), "KIMI_BASE_URL"),
-    ("kimi-coding-cn", "Kimi / Moonshot (China)", "https://api.moonshot.cn/v1", ("KIMI_CN_API_KEY",)),
-    ("stepfun", "StepFun Step Plan", STEPFUN_STEP_PLAN_INTL_BASE_URL, ("STEPFUN_API_KEY",), "STEPFUN_BASE_URL"),
-    ("arcee", "Arcee AI", "https://api.arcee.ai/api/v1", ("ARCEEAI_API_KEY",), "ARCEE_BASE_URL"),
-    ("gmi", "GMI Cloud", "https://api.gmi-serving.com/v1", ("GMI_API_KEY",), "GMI_BASE_URL"),
-    ("actual", "Actual Computer", DEFAULT_ACTUAL_BASE_URL, ("ACTUAL_API_KEY",), "ACTUAL_BASE_URL"),
-    ("minimax", "MiniMax", "https://api.minimax.io/anthropic", ("MINIMAX_API_KEY",), "MINIMAX_BASE_URL"),
-    ProviderConfig(
-        "minimax-oauth", "MiniMax (OAuth \u00b7 minimax.io)", "oauth_minimax",
-        portal_base_url=MINIMAX_OAUTH_GLOBAL_BASE, inference_base_url=MINIMAX_OAUTH_GLOBAL_INFERENCE,
-        client_id=MINIMAX_OAUTH_CLIENT_ID, scope=MINIMAX_OAUTH_SCOPE,
-        extra={"region": "global", "cn_portal_base_url": MINIMAX_OAUTH_CN_BASE,
-               "cn_inference_base_url": MINIMAX_OAUTH_CN_INFERENCE}),
-    # CLAUDE_CODE_OAUTH_TOKEN is NOT an API key despite auth_type="api_key": `claude setup-token`
-    # yields an `sk-ant-oat01…` OAuth token (401s as x-api-key, 429s as bare Bearer). It stays in
-    # this tuple because the tuple doubles as the credential-DISCOVERY list
-    # (agent/credential_pool.py builds its env scan from it); the adapter routes it down the OAuth
-    # path by prefix. Only ANTHROPIC_API_KEY and ANTHROPIC_TOKEN are usable as literal API keys.
+         ("GLM_API_KEY", "ZAI_API_KEY", "Z_AI_API_KEY"), "GLM_BASE_URL"),
     ("anthropic", "Anthropic", "https://api.anthropic.com",
-     ("ANTHROPIC_API_KEY", "ANTHROPIC_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"), "ANTHROPIC_BASE_URL"),
-    ("alibaba", "Qwen Cloud", "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
-     ("DASHSCOPE_API_KEY",), "DASHSCOPE_BASE_URL"),
-    ("alibaba-coding-plan", "Alibaba Cloud (Coding Plan)", "https://coding-intl.dashscope.aliyuncs.com/v1",
-     ("ALIBABA_CODING_PLAN_API_KEY", "DASHSCOPE_API_KEY"), "ALIBABA_CODING_PLAN_BASE_URL"),
-    ("minimax-cn", "MiniMax (China)", "https://api.minimaxi.com/anthropic", ("MINIMAX_CN_API_KEY",),
-     "MINIMAX_CN_BASE_URL"),
-    ("deepseek", "DeepSeek", "https://api.deepseek.com/v1", ("DEEPSEEK_API_KEY",), "DEEPSEEK_BASE_URL"),
+         ("ANTHROPIC_API_KEY", "ANTHROPIC_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"), "ANTHROPIC_BASE_URL"),
     ("xai", "xAI", "https://api.x.ai/v1", ("XAI_API_KEY",), "XAI_BASE_URL"),
-    ("nvidia", "NVIDIA NIM", "https://integrate.api.nvidia.com/v1", ("NVIDIA_API_KEY",), "NVIDIA_BASE_URL"),
     ("ai-gateway", "Vercel AI Gateway", "https://ai-gateway.vercel.sh/v1", ("AI_GATEWAY_API_KEY",),
-     "AI_GATEWAY_BASE_URL"),
-    ("opencode-zen", "OpenCode Zen", "https://opencode.ai/zen/v1", ("OPENCODE_ZEN_API_KEY",),
-     "OPENCODE_ZEN_BASE_URL"),
-    # OpenCode Go mixes API surfaces by model (GLM/Kimi: OpenAI chat under /v1; MiniMax and
-    # Qwen 3.7: Anthropic Messages under /v1/messages). Keep the base at /v1; api_mode is per-model.
-    ("opencode-go", "OpenCode Go", "https://opencode.ai/zen/go/v1", ("OPENCODE_GO_API_KEY",),
-     "OPENCODE_GO_BASE_URL"),
-    ("kilocode", "Kilo Code", "https://api.kilo.ai/api/gateway", ("KILOCODE_API_KEY",), "KILOCODE_BASE_URL"),
-    ("huggingface", "Hugging Face", "https://router.huggingface.co/v1", ("HF_TOKEN",), "HF_BASE_URL"),
-    ("xiaomi", "Xiaomi MiMo", "https://api.xiaomimimo.com/v1", ("XIAOMI_API_KEY",), "XIAOMI_BASE_URL"),
-    ("tencent-tokenhub", "Tencent TokenHub", "https://tokenhub.tencentmaas.com/v1", ("TOKENHUB_API_KEY",),
-     "TOKENHUB_BASE_URL"),
-    ("tencent-tokenplan", "Tencent TokenPlan", "https://api.lkeap.cloud.tencent.com/plan/anthropic",
-     ("TOKENPLAN_API_KEY",), "TOKENPLAN_BASE_URL"),
-    ("ollama-cloud", "Ollama Cloud", DEFAULT_OLLAMA_CLOUD_BASE_URL, ("OLLAMA_API_KEY",), "OLLAMA_BASE_URL"),
-    ("bedrock", "AWS Bedrock", "https://bedrock-runtime.us-east-1.amazonaws.com", (), "BEDROCK_BASE_URL",
-     "aws_sdk"),
-    # No static inference_base_url: Vertex's endpoint is computed per request from project_id +
-    # region (agent/vertex_adapter.py build_vertex_base_url), not a fixed host.
-    ("vertex", "Google Vertex AI", "", (), "", "vertex"),
-    ("azure-foundry", "Azure Foundry", "", ("AZURE_FOUNDRY_API_KEY",), "AZURE_FOUNDRY_BASE_URL"))
+         "AI_GATEWAY_BASE_URL"),
+    ("litellm", "LiteLLM gateway", "", ("LITELLM_API_KEY", "ML_GATEWAY_API_KEY")),
+)
 PROVIDER_REGISTRY: dict[str, ProviderConfig] = {
     p.id: p for p in (r if isinstance(r, ProviderConfig) else _api_key_provider(*r) for r in _REGISTRY_ROWS)
 }
@@ -960,7 +900,7 @@ def is_runtime_provider_routable(provider_id: str) -> bool:
     normalized = (provider_id or "").strip().lower()
     if not normalized:
         return False
-    if normalized in {"auto", "openrouter", "custom", "moa"} or normalized.startswith("custom:"):
+    if normalized in {"auto", "custom", "moa"} or normalized.startswith("custom:"):
         return True
     try:
         resolve_provider(normalized)
@@ -1466,43 +1406,33 @@ def _refuse_env_adoption_if_config_corrupt() -> None:
 # (plugins/model-providers/<name>/) are layered on at call time; this hardcoded
 # table remains authoritative for existing names.
 _PROVIDER_ALIASES: dict[str, str] = {
-    "glm": "zai", "z-ai": "zai", "z.ai": "zai", "zhipu": "zai",
-    "google": "gemini", "google-gemini": "gemini", "google-ai-studio": "gemini",
-    "x-ai": "xai", "x.ai": "xai", "grok": "xai",
-    "xai-oauth": "xai-oauth", "x-ai-oauth": "xai-oauth",
-    "grok-oauth": "xai-oauth", "xai-grok-oauth": "xai-oauth",
-    "kimi": "kimi-coding", "kimi-for-coding": "kimi-coding", "moonshot": "kimi-coding",
-    "kimi-cn": "kimi-coding-cn", "moonshot-cn": "kimi-coding-cn",
-    "step": "stepfun", "stepfun-coding-plan": "stepfun",
-    "arcee-ai": "arcee", "arceeai": "arcee",
-    "gmi-cloud": "gmi", "gmicloud": "gmi",
-    "actual-computer": "actual", "actualcomputer": "actual", "aci": "actual",
-    "minimax-china": "minimax-cn", "minimax_cn": "minimax-cn",
-    "minimax-portal": "minimax-oauth", "minimax-global": "minimax-oauth", "minimax_oauth": "minimax-oauth",
-    "alibaba_coding": "alibaba-coding-plan", "alibaba-coding": "alibaba-coding-plan",
-    "alibaba_coding_plan": "alibaba-coding-plan",
-    "claude": "anthropic", "claude-code": "anthropic",
-    "github": "copilot", "github-copilot": "copilot",
-    "github-models": "copilot", "github-model": "copilot",
-    "github-copilot-acp": "copilot-acp", "copilot-acp-agent": "copilot-acp",
-    "aigateway": "ai-gateway", "vercel": "ai-gateway", "vercel-ai-gateway": "ai-gateway",
-    "opencode": "opencode-zen", "zen": "opencode-zen",
-    "qwen-portal": "qwen-oauth", "qwen-cli": "qwen-oauth", "qwen-oauth": "qwen-oauth",
-    "hf": "huggingface", "hugging-face": "huggingface", "huggingface-hub": "huggingface",
-    "mimo": "xiaomi", "xiaomi-mimo": "xiaomi",
-    "tencent": "tencent-tokenhub", "tokenhub": "tencent-tokenhub",
-    "tencent-cloud": "tencent-tokenhub", "tencentmaas": "tencent-tokenhub",
-    "tokenplan": "tencent-tokenplan", "tencent-lkeap": "tencent-tokenplan",
-    "aws": "bedrock", "aws-bedrock": "bedrock", "amazon-bedrock": "bedrock", "amazon": "bedrock",
-    "go": "opencode-go", "opencode-go-sub": "opencode-go",
-    "kilo": "kilocode", "kilo-code": "kilocode", "kilo-gateway": "kilocode",
-    "lmstudio": "lmstudio", "lm-studio": "lmstudio", "lm_studio": "lmstudio",
-    "chatgpt": "openai-codex", "chatgpt-codex": "openai-codex",
-    # Local server aliases — route through the generic custom provider
-    "local": "custom",
-    "ollama": "custom", "ollama_cloud": "ollama-cloud",
-    "vllm": "custom", "llamacpp": "custom",
-    "llama.cpp": "custom", "llama-cpp": "custom"}
+    'glm': 'zai',
+    'z-ai': 'zai',
+    'z.ai': 'zai',
+    'zhipu': 'zai',
+    'x-ai': 'xai',
+    'x.ai': 'xai',
+    'grok': 'xai',
+    'xai-oauth': 'xai-oauth',
+    'x-ai-oauth': 'xai-oauth',
+    'grok-oauth': 'xai-oauth',
+    'xai-grok-oauth': 'xai-oauth',
+    'claude': 'anthropic',
+    'claude-code': 'anthropic',
+    'aigateway': 'ai-gateway',
+    'vercel': 'ai-gateway',
+    'vercel-ai-gateway': 'ai-gateway',
+    'chatgpt': 'openai-codex',
+    'chatgpt-codex': 'openai-codex',
+    'local': 'custom',
+    'ollama': 'custom',
+    'vllm': 'custom',
+    'llamacpp': 'custom',
+    'llama.cpp': 'custom',
+    'llama-cpp': 'custom',
+    'openai': 'openai-api',
+    'litellm-proxy': 'litellm',
+}
 
 
 def _plugin_aliases() -> dict[str, str]:
@@ -1656,25 +1586,15 @@ def resolve_provider(
     explicit_api_key: Optional[str] = None,
     explicit_base_url: Optional[str] = None,
     skip_free_tier: bool = False) -> str:
-    """Determine which inference provider to use.
+    """Resolve explicit config first, then supported credentials and the active login.
 
-    "auto" priority (explicit intent beats a stale OAuth login): 1. CLI api_key/base_url ->
-    "openrouter"; 2. config.yaml ``model.provider``; 3. OPENROUTER_API_KEY (or an sk-or- key in
-    OPENAI_API_KEY) -> "openrouter"; 4. OpenRouter pool; 5. provider env keys; 6. auth.json ``active_provider``;
-    7. Nous free tier when a claimed guest exists on the desktop's local backend (never created here);
-    8. AWS Bedrock chain; 9. AuthError(no_provider_configured).
-
-    ``skip_free_tier`` hides rungs 6-for-a-free-tier-identity and 7: the boot bootstrap asks
-    "what would carry inference if the free tier did not exist?" to decide whether a fresh identity
-    may become ``active_provider``.
-
-    1. 3. 4. 5. Provider-specific API keys (GLM, Kimi, MiniMax, ...) -> that provider 7. 8. Error (no
-    provider configured) See #29285.
+    Never adopt an unrelated host credential or silently switch to a removed provider.
+    ``skip_free_tier`` remains accepted for callers checking setup readiness.
     """
     normalized = (requested or "auto").strip().lower()
     normalized = _plugin_aliases().get(normalized, normalized)
 
-    if normalized in ("openrouter", "custom") or _registry_lookup(normalized) is not None:
+    if normalized == "custom" or normalized.startswith("custom:") or _registry_lookup(normalized) is not None:
         return normalized
     if normalized != "auto":
         hint = _get_config_hint_for_unknown_provider(normalized)
@@ -1682,18 +1602,14 @@ def resolve_provider(
                 "or run 'hermes doctor' to diagnose config issues.")
         raise AuthError(f"Unknown provider '{normalized}'." + tail, code="invalid_provider")
 
-    if explicit_api_key or explicit_base_url:  # one-off CLI creds always mean openrouter/custom
-        return "openrouter"
+    if explicit_api_key or explicit_base_url:
+        return "custom" if explicit_base_url else "openai-api"
 
     _model_cfg, cfg_provider = _config_model_provider()
     if cfg_provider:
-        return cfg_provider
+        return resolve_provider(cfg_provider)
 
     _scoped_key_env = _scoped_key_env_reader()
-    if _openrouter_auto_detected(_scoped_key_env):
-        _refuse_env_adoption_if_config_corrupt()
-        return "openrouter"
-
     # Determined up front so the env-key tier can warn when an exported key preempts it; the actual
     # OAuth fallback still happens after the env-key tier.
     _oauth_active = _logged_in_oauth_active_provider(skip_free_tier=skip_free_tier)
@@ -1714,32 +1630,10 @@ def resolve_provider(
                 _oauth_active)
         return _oauth_active
 
-    # Nous free tier, when this guest claimed the welcome trial and this is the desktop's local
-    # backend (``anon_auth.free_inference_active``). This rung sits ABOVE the Bedrock
-    # chain on purpose: every rung above this line is explicit user intent (CLI creds, config, env
-    # keys, a sign-in); the boto chain below is implicit host state, and a leftover ~/.aws profile
-    # used to win the first turn of a fresh install (NS-829). The rung never CREATES the identity:
-    # only the desktop's trial claim does (welcome_trial), so provider resolution stays free of network.
-    if not skip_free_tier:
-        try:
-            from hermes_cli.anon_auth import free_inference_active
-            if free_inference_active():
-                return "nous"
-        except Exception as exc:
-            logger.debug("free tier check during provider resolution skipped: %s", exc)
-    # AWS Bedrock via the boto3 credential chain (IAM roles, SSO, env vars): implicit host state,
-    # below explicit keys and below the free tier.
-    try:
-        from agent.bedrock_adapter import has_aws_credentials
-        from hermes_cli.anon_auth import on_local_desktop_backend  # a laptop: no EC2 metadata lookup
-        if has_aws_credentials(instance_metadata=not on_local_desktop_backend()):
-            return "bedrock"
-    except ImportError:
-        pass  # boto3 not installed
     from hermes_constants import display_hermes_home
     raise AuthError(
         "Hermes is not connected to any AI provider yet. Run `hermes model` to pick one, type `/login` in chat, "
-        f"or add a key with `hermes auth add <provider>`. (Advanced: put an API key such as OPENROUTER_API_KEY in "
+        f"or add a key with `hermes auth add <provider>`. (Advanced: put an API key such as ANTHROPIC_API_KEY in "
         f"{display_hermes_home()}/.env.)",
         code="no_provider_configured")
 

@@ -10,7 +10,6 @@ import { test } from 'vitest'
 import {
   buildPosixManagedUpdateLaunch,
   buildRemoteUpdateObservationCommand,
-  buildWindowsManagedUpdateLaunch,
   fenceManagedSshBootstrapPublication,
   joinManagedUpdatesForApply,
   ManagedConnectionUpdateGate,
@@ -417,38 +416,6 @@ test.runIf(process.platform !== 'win32').each([0, 23])(
     }
   }
 )
-test('Windows managed launcher starts a hidden child and leaves exit 75 to the external coordinator', () => {
-  const command = buildWindowsManagedUpdateLaunch(
-    {
-      ssh: { exec: async () => '' },
-      platform: 'Windows',
-      hermesPath: 'C:\\Hermes\\hermes.exe',
-      hermesHome: 'C:\\Users\\alice\\.hermes',
-      pythonPath: 'C:\\Hermes\\python.exe'
-    },
-    CORRELATION
-  )
-
-  const outer = Buffer.from(command.split(' ').at(-1) || '', 'base64').toString('utf16le')
-  const wrapperBase64 = outer.match(/"-EncodedCommand",'([^']+)'/)?.[1]
-
-  assert.match(outer, /Start-Process/)
-  assert.match(outer, /WindowStyle Hidden/)
-  assert.ok(wrapperBase64, 'outer launcher carries a separately encoded detached wrapper')
-  const wrapper = Buffer.from(wrapperBase64!, 'base64').toString('utf16le')
-
-  assert.match(wrapper, /update --yes/)
-  assert.doesNotMatch(wrapper, /update --yes --gateway/)
-  assert.match(wrapper, /HERMES_UPDATE_WINDOWS_DETACHED/)
-  assert.match(wrapper, /HERMES_UPDATE_TAURI_READY_PATH/)
-  assert.match(wrapper, /HERMES_UPDATE_TAURI_OUTCOME_PATH/)
-  assert.match(wrapper, /\$rc -ne 75/)
-  assert.match(wrapper, /\$handoffAccepted=/)
-  assert.match(wrapper, new RegExp(`update_launch_intent\\.${CORRELATION}`))
-  assert.ok(wrapper.indexOf('update_launch_intent') < wrapper.indexOf('update --yes'))
-  assert.match(outer, /launcher intent timed out/)
-})
-
 test('remote observation rejects a receipt for another correlation', () => {
   assert.throws(
     () =>
@@ -699,53 +666,6 @@ test.runIf(process.platform !== 'win32')(
     }
   }
 )
-
-test('Windows coordinator handoff is pending until its marker clears and correlated receipt is durable', async () => {
-  const replies = [
-    observation({ marker: 'live', markerPid: 44 }),
-    observation({
-      marker: 'live',
-      markerPid: 88,
-      coordinatorReady: { correlationId: CORRELATION, pid: 88 }
-    }),
-    observation({
-      marker: 'absent',
-      exitCode: null,
-      receipt: {
-        correlationId: CORRELATION,
-        outcome: 'success',
-        finishedAt: '2026-08-23T00:00:00Z'
-      },
-      coordinatorReady: { correlationId: CORRELATION, pid: 88 }
-    })
-  ]
-
-  let calls = 0
-
-  const target = {
-    platform: 'Windows' as const,
-    hermesPath: 'C:\\Hermes\\hermes.exe',
-    hermesHome: 'C:\\Users\\alice\\.hermes',
-    pythonPath: 'C:\\Hermes\\python.exe',
-    ssh: {
-      exec: async () => {
-        const reply = replies[Math.min(calls, replies.length - 1)]
-        calls += 1
-
-        return reply
-      }
-    }
-  }
-
-  const proof = await waitForManagedRemoteUpdate(target, CORRELATION, {
-    pollMs: 0,
-    sleep: async () => {}
-  })
-
-  assert.equal(calls, 3)
-  assert.equal(proof.exitCode, 0)
-  assert.equal(proof.receipt.correlationId, CORRELATION)
-})
 
 test('terminal status without its durable receipt fails instead of claiming success', async () => {
   let now = 0

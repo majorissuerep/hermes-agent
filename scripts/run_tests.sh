@@ -139,7 +139,7 @@ _pf86="$(env | sed -n 's/^ProgramFiles(x86)=//p' | head -n1)"
 #   * CI / GITHUB_ACTIONS tell suites they run on a disposable runner (e.g.
 #     tests/e2e/core/upgrade runs the real updater unsandboxed only there).
 #   * HERMES_E2E_WINDOWS_INSTALL opts tests/e2e/core/windows_update into running
-#     the real install.ps1 (it writes HKCU PATH); HERMES_E2E_MACHINE_ROOT,
+#     (removed: native Windows install tests); HERMES_E2E_MACHINE_ROOT,
 #     HERMES_E2E_PROFILES_ROOT and HERMES_E2E_ARTIFACTS place its fake machines,
 #     their user profiles and the transcripts CI uploads.
 #   * HERMES_E2E_STRICT_ACCEPTANCE makes tests/e2e/core/_pending_fixes.py's

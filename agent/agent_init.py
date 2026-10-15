@@ -44,7 +44,7 @@ from hermes_cli.config import DEFAULT_CONFIG, cfg_get
 from hermes_cli.route_identity import normalize_route_base_url
 from hermes_cli.timeouts import get_provider_request_timeout
 from hermes_constants import get_hermes_home
-from hermes_state.ids import new_session_id
+from agent.session_ids import new_session_id
 from utils import base_url_host_matches, is_truthy_value
 
 # Same logger name as run_agent so caplog/patches on "run_agent" see our records.
@@ -1189,6 +1189,8 @@ def _init_session_state(agent, session_id, session_db, parent_session_id, reason
     agent.session_start = datetime.now()
     agent.session_id = session_id or new_session_id(agent.session_start)
     _publish_session_id(agent.session_id)
+    from hermes_security.session_authority import start_session_authority
+    agent._vault_session_authority = start_session_authority(get_hermes_home(), agent.session_id)
 
     # ~/.hermes/sessions/ — kept unconditionally for request_dump_*.json debug breadcrumbs.
     agent.logs_dir = get_hermes_home() / "sessions"
