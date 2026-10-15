@@ -189,7 +189,7 @@ class TestSkipConfiguredSection:
 
     def test_returns_true_when_user_skips(self):
         def env_side(key):
-            return "sk-xxx" if key == "OPENROUTER_API_KEY" else ""
+            return "sk-xxx" if key == "OPENAI_API_KEY" else ""
 
         with (
             patch.object(setup_mod, "get_env_value", side_effect=env_side),

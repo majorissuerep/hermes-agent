@@ -94,7 +94,7 @@ def print_noninteractive_setup_guidance(reason: str | None = None) -> None:
           "  hermes config set model.provider custom",
           "  hermes config set model.base_url http://localhost:8080/v1",
           "  hermes config set model.default your-model-name", None,
-          "Or set OPENROUTER_API_KEY (OpenRouter) / OPENAI_API_KEY (OpenAI) in your environment.",
+          "Use 'hermes model' to enter an OpenAI, Anthropic, or another supported credential.",
           "Run 'hermes setup' in an interactive terminal to use the full wizard.", None)
 
 
@@ -661,9 +661,8 @@ def _run_setup_wizard_impl(args):
         return
 
     # Existing installation == a provider is configured
-    from hermes_cli.auth import get_active_provider
-    is_existing = bool(get_env_value("OPENROUTER_API_KEY") or get_env_value("OPENAI_BASE_URL")
-                       or get_active_provider() is not None)
+    from hermes_cli.setup_migration import _model_section_has_credentials
+    is_existing = bool(_model_section_has_credentials(config) or get_env_value("OPENAI_BASE_URL"))
     _print_banner("│             ☤ Hermes Agent Setup Wizard                │",
                   "├─────────────────────────────────────────────────────────┤",
                   "│  Let's configure your Hermes Agent installation.       │",

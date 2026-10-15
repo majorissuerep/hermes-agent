@@ -1068,47 +1068,8 @@ def _termux_should_prefetch_update_check() -> bool:
     return os.environ.get("HERMES_TERMUX_PREFETCH_UPDATES") == "1"
 
 
-def _dotenv_has_provider_key(env_file: Path, provider_env_vars: set) -> bool:
-    """True if ~/.hermes/.env assigns a non-empty value to any provider key."""
-    if not env_file.exists():
-        return False
-    try:
-        for line in env_file.read_text(encoding="utf-8-sig").splitlines():
-            line = line.strip()
-            if line.startswith("#") or "=" not in line:
-                continue
-            line = line.removeprefix("export ")
-            key, _, val = line.partition("=")
-            if key.strip() in provider_env_vars and val.strip().strip("'\""):
-                return True
-    except Exception:
-        pass
-    return False
-
-
-def _auth_store_logged_in(auth_file: Path, registry, strict_profile_scope: bool) -> bool:
-    """True if auth.json's active provider is logged in (api_key providers ignored under strict scope)."""
-    from hermes_cli.auth import get_auth_status
-
-    if not auth_file.exists():
-        return False
-    try:
-        auth = json.loads(auth_file.read_text(encoding="utf-8-sig"))
-        active = auth.get("active_provider")
-        active_config = registry.get(str(active or "").strip().lower())
-        if active and not (
-            strict_profile_scope and active_config and active_config.auth_type == "api_key"
-        ):
-            return bool(get_auth_status(active).get("logged_in"))
-    except Exception:
-        pass
-    return False
-
-
 def _has_any_provider_configured(*, strict_profile_scope: bool = False) -> bool:
-    """Check if at least one inference provider is usable. Never creates one: the Nous free tier
-    counts only once its identity exists, and the boot bootstrap (``hermes_cli.free_tier_bootstrap``)
-    creates it at boot (a first connector use can too); ``cmd_chat`` runs the bootstrap before asking.
+    """Check whether inference is configured without creating credentials or provider state.
 
     ``strict_profile_scope``: the caller has bound a NAMED profile's home and
     secret scope and wants an answer for that profile only — launch-process
@@ -1117,6 +1078,8 @@ def _has_any_provider_configured(*, strict_profile_scope: bool = False) -> bool:
     """
     from hermes_cli.config import DEFAULT_CONFIG, get_env_path, get_hermes_home, load_config
     from hermes_cli.auth import PROVIDER_REGISTRY, get_auth_status
+
+    from hermes_cli.main_provider_state import _dotenv_has_provider_key, _auth_store_logged_in
 
     cfg = load_config()
     model_cfg = cfg.get("model")
@@ -1134,7 +1097,6 @@ def _has_any_provider_configured(*, strict_profile_scope: bool = False) -> bool:
     # Env vars (.env or shell). OPENAI_BASE_URL alone counts — local models
     # (vLLM, llama.cpp) often need no API key.
     provider_env_vars = {
-        "OPENROUTER_API_KEY",
         "OPENAI_API_KEY",
         "ANTHROPIC_API_KEY",
         "ANTHROPIC_TOKEN",

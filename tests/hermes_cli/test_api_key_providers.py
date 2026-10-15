@@ -53,9 +53,12 @@ PROVIDER_ENV_VARS = tuple(
 
 @pytest.fixture(autouse=True)
 def _clear_provider_env(monkeypatch):
+    from hermes_cli.auth import _load_auth_store
+
     for key in PROVIDER_ENV_VARS:
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setattr("hermes_cli.auth._load_auth_store", dict)
+    return _load_auth_store
 
 
 class TestResolveProvider:
@@ -293,14 +296,16 @@ class TestHasAnyProviderConfigured:
             f"provider registry sweep ran before config short-circuit: {sweep_calls}"
         )
 
-    def test_auth_json_skips_registry_sweep(self, monkeypatch, tmp_path):
+    def test_auth_json_skips_registry_sweep(self, monkeypatch, tmp_path, _clear_provider_env):
         """auth.json with a logged-in active provider must short-circuit before
         the registry sweep. get_auth_status may be called ONLY for the active
         provider from auth.json — any other provider id means the sweep ran.
         """
         hermes_home = self._setup_home(monkeypatch, tmp_path)
+        monkeypatch.setattr("hermes_cli.auth._load_auth_store", _clear_provider_env)
         (hermes_home / "auth.json").write_text(json_module.dumps({
             "active_provider": "openai-codex",
+            "providers": {"openai-codex": {}},
         }))
         calls = []
 
