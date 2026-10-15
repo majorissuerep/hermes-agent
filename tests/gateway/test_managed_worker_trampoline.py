@@ -5,6 +5,8 @@ real interpreter is its child. The owner reserves with the handle pid, the worke
 own pid/birth, and the OWNER proves that pid is alive, has that birth, and descends from the
 reserved handle before binding the adoption digest to the real worker.
 """
+from hermes_cli.config_defaults import DEFAULT_CONFIG
+
 import asyncio
 from contextlib import closing
 import json
@@ -103,12 +105,12 @@ def test_managed_worker_completes_through_interpreter_trampoline(tmp_path):
         '    f.write(json.dumps({"launcher": os.getpid(), "child": child.pid, "argv": sys.argv[1:]}) + "\\n")\n'
         'sys.exit(child.wait())\n', encoding='utf-8')
     trampoline.chmod(0o755)
-    (home / 'config.yaml').write_text(json.dumps({
+    (home / 'config.yaml').write_text(json.dumps({"_config_version": DEFAULT_CONFIG["_config_version"],
         'gateway': {'multiplex_profiles': False, 'managed_workers': True},
         'model': {'provider': 'custom', 'default': 'managed-model', 'base_url': url},
         'auxiliary': {'title_generation': {'enabled': False}}, 'platform_toolsets': {'cli': []}}), encoding='utf-8')
     env = child_env()
-    env.update(HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home), PYTHONPATH=str(root),
+    env.update(HERMES_ALLOW_NO_VAULT="1", HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home), PYTHONPATH=str(root),
                OPENAI_API_KEY='loopback-only', OPENAI_BASE_URL=url, PYTHONUNBUFFERED='1', UGW_TRAMPOLINE=str(trampoline))
 
     def query(sql, args=()):

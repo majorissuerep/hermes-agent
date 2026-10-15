@@ -1,4 +1,6 @@
 """Private native grants authenticate HTTP, never another purpose or profile."""
+from hermes_cli.config_defaults import DEFAULT_CONFIG
+
 import asyncio
 from contextlib import contextmanager
 import json
@@ -25,9 +27,9 @@ def daemon(tmp_path):
     for name in ('other', 'current'):
         sibling = home / 'profiles' / name
         sibling.mkdir(parents=True, exist_ok=True)
-        (sibling / 'config.yaml').write_text(json.dumps({
+        (sibling / 'config.yaml').write_text(json.dumps({"_config_version": DEFAULT_CONFIG["_config_version"],
             'model': {'provider': 'custom', 'default': 'sibling-' + name}}))
-    (home / 'config.yaml').write_text(json.dumps({
+    (home / 'config.yaml').write_text(json.dumps({"_config_version": DEFAULT_CONFIG["_config_version"],
         'gateway': {'multiplex_profiles': False},
         'model': {'provider': 'custom', 'default': 'native-http-fixture',
                   'base_url': 'http://127.0.0.1:1/v1'},
@@ -35,7 +37,7 @@ def daemon(tmp_path):
     }))
     root = Path(__file__).resolve().parents[2]
     env = {k: os.environ[k] for k in ('PATH', 'LANG', 'TZ', 'TIRITH_ENABLED') if k in os.environ}
-    env.update(HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home),
+    env.update(HERMES_ALLOW_NO_VAULT="1", HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home),
                PYTHONPATH=str(root), PYTHONUNBUFFERED='1',
                HERMES_DASHBOARD_SESSION_TOKEN='normal-http-owner')
     with (tmp_path / 'gateway.log').open('w+') as log:
@@ -181,7 +183,7 @@ async def test_native_http_preserves_gated_auth_and_actual_socket_boundary(tmp_p
     from tests.hermes_cli.conftest_dashboard_auth import StubAuthProvider
 
     home = get_hermes_home()
-    (home / 'config.yaml').write_text('dashboard:\n  public_url: https://gateway.example.test\n')
+    (home / 'config.yaml').write_text(f"_config_version: {DEFAULT_CONFIG['_config_version']}\n" + ('dashboard:\n  public_url: https://gateway.example.test\n'))
     provider = StubAuthProvider()
     register_provider(provider)
     login = provider.start_login(redirect_uri='http://127.0.0.1/callback')

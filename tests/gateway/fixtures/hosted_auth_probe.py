@@ -1,4 +1,6 @@
 """Loopback OIDC/model boundaries; daemon, auth, tickets and room controls are real."""
+from hermes_cli.config_defaults import DEFAULT_CONFIG
+
 import asyncio
 import base64
 from contextlib import ExitStack
@@ -157,7 +159,7 @@ def probe(tmp_path):
     for thread in threads:
         thread.start()
     base = f'http://127.0.0.1:{model.server_port}/v1'
-    cfg = {'gateway': {'multiplex_profiles': False},
+    cfg = {"_config_version": DEFAULT_CONFIG["_config_version"], 'gateway': {'multiplex_profiles': False},
         'hosted_rooms': {'profiles': {'two': str(target)}},
         'dashboard': {'public_url': 'http://rooms.invalid', 'oauth': {'self_hosted': {
             'issuer': oidc.issuer, 'client_id': 'room-fixture'}}},
@@ -252,7 +254,7 @@ def probe(tmp_path):
                     'cross_actor_denials': denials, 'owner_stops': 2}
 
     try:
-        with daemon(root, target, env | {'HERMES_HOME': str(target)}, barrier=False), daemon(
+        with daemon(root, target, env | {"HERMES_ALLOW_NO_VAULT": "1", 'HERMES_HOME': str(target)}, barrier=False), daemon(
                 root, home, env, barrier=False) as (_, desc), ExitStack() as stack:
             clients = [stack.enter_context(httpx.Client(base_url=desc['api_origin'],
                 follow_redirects=False, trust_env=False, timeout=20)) for _ in range(2)]

@@ -1,4 +1,6 @@
 """Real invitation/grant HTTP inference and hidden room restoration."""
+from hermes_cli.config_defaults import DEFAULT_CONFIG
+
 import asyncio
 import hashlib
 from http.server import ThreadingHTTPServer
@@ -25,13 +27,13 @@ def test_hosted_grant_inference_survives_owner_restart(tmp_path):
     with socket.socket() as sock:
         sock.bind(('127.0.0.1', 0)); port = sock.getsockname()[1]
     base = f'http://127.0.0.1:{peer.server_port}/v1'
-    cfg = {'model': {'provider': 'custom', 'default': 'local-wire-stub', 'base_url': base},
+    cfg = {"_config_version": DEFAULT_CONFIG["_config_version"], 'model': {'provider': 'custom', 'default': 'local-wire-stub', 'base_url': base},
            'gateway': {'platforms': {'api_server': {'enabled': True, 'port': port, 'host': '127.0.0.1'}}, 'multiplex_profiles': False},
            'auxiliary': {'title_generation': {'enabled': False}}, 'terminal': {'cwd': str(home)},
            'platform_toolsets': {'api_server': []}, 'approvals': {'mode': 'manual'}}
     (home / 'config.yaml').write_text(json.dumps(cfg))
     env = {k: os.environ[k] for k in ('PATH', 'LANG', 'TZ', 'TIRITH_ENABLED') if k in os.environ}
-    env.update(HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home), PYTHONPATH=str(root),
+    env.update(HERMES_ALLOW_NO_VAULT="1", HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home), PYTHONPATH=str(root),
                OPENAI_API_KEY='loopback-only', OPENAI_BASE_URL=base, API_SERVER_KEY='ordinary-daemon-owned-secret',
                API_SERVER_ENABLED='true', API_SERVER_PORT=str(port), PYTHONUNBUFFERED='1')
     url = f'http://127.0.0.1:{port}/v1'

@@ -1,5 +1,7 @@
 """Launch flags on the classic CLI (main's HermesCLI, gateway-backed): bare -c, --resume latest, --list-tools,
 resume footer. Expectations are main's (git archive 3b63f7b0a4c, lanes/pushready/probe_oneshot.py)."""
+from hermes_cli.config_defaults import DEFAULT_CONFIG
+
 import json
 from http.server import ThreadingHTTPServer
 import os
@@ -31,12 +33,12 @@ def test_continue_latest_footer_and_tool_listing(tmp_path):
     peer.blocked, peer.release = threading.Event(), threading.Event()
     threading.Thread(target=peer.serve_forever, daemon=True).start()
     url = f"http://127.0.0.1:{peer.server_port}/v1"
-    (home / "config.yaml").write_text(json.dumps({
+    (home / "config.yaml").write_text(json.dumps({"_config_version": DEFAULT_CONFIG["_config_version"],
         "gateway": {"multiplex_profiles": False},
         "model": {"provider": "custom", "default": "flags-model", "base_url": url},
         "auxiliary": {"title_generation": {"enabled": False}}}))
     env = {k: os.environ[k] for k in ("PATH", "LANG", "TZ") if k in os.environ}
-    env.update(HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home), PYTHONPATH=str(root),
+    env.update(HERMES_ALLOW_NO_VAULT="1", HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home), PYTHONPATH=str(root),
                PYTHONUNBUFFERED="1", OPENAI_API_KEY="loopback-only", OPENAI_BASE_URL=url)
 
     def hermes(*args, cwd, module="hermes_cli.main"):

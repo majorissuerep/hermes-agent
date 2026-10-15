@@ -1,4 +1,6 @@
 """The ordinary no-platform process must earn its bootstrap readiness."""
+from hermes_cli.config_defaults import DEFAULT_CONFIG
+
 import asyncio
 import json
 import os
@@ -132,14 +134,14 @@ def test_normal_entrypoint_earns_authenticated_authority_readiness(tmp_path, mod
     user = tmp_path / 'user'
     user.mkdir()
     model_url = f'http://127.0.0.1:{model_peer.server_port}/v1'
-    (home / 'config.yaml').write_text(json.dumps({
+    (home / 'config.yaml').write_text(json.dumps({"_config_version": DEFAULT_CONFIG["_config_version"],
         'gateway': {'multiplex_profiles': False},
         'model': {'provider': 'custom', 'default': 'local-wire-stub', 'base_url': model_url},
         'auxiliary': {'title_generation': {'enabled': False}},
     }))
     root = Path(__file__).resolve().parents[2]
     env = {k: os.environ[k] for k in ('PATH', 'LANG', 'TZ', 'TIRITH_ENABLED') if k in os.environ}
-    env.update(HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home),
+    env.update(HERMES_ALLOW_NO_VAULT="1", HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home),
                PYTHONPATH=str(root), PYTHONUNBUFFERED='1',
                OPENAI_API_KEY='loopback-only', OPENAI_BASE_URL=model_url)
     with (tmp_path / 'gateway.log').open('w+') as log:

@@ -1,4 +1,6 @@
 """Real native socket and canonical room member inference in a disposable daemon."""
+from hermes_cli.config_defaults import DEFAULT_CONFIG
+
 import asyncio
 import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -48,7 +50,7 @@ def test_native_room_service_local_member_and_restart(tmp_path):
     model.requests = []
     threading.Thread(target=model.serve_forever, daemon=True).start()
     base = f'http://127.0.0.1:{model.server_port}/v1'
-    (home / 'config.yaml').write_text(json.dumps({
+    (home / 'config.yaml').write_text(json.dumps({"_config_version": DEFAULT_CONFIG["_config_version"],
         'gateway': {'multiplex_profiles': False}, 'hosted_rooms': {'profiles': {'two': str(target)}},
         'model': {'provider': 'custom', 'default': 'gpt-4o', 'base_url': base, 'supports_vision': True},
         'agent': {'image_input_mode': 'native'},
@@ -107,7 +109,7 @@ def test_native_room_service_local_member_and_restart(tmp_path):
                 assert base64.b64decode(images[0]['image_url']['url'].split(',')[1]) == image
     try:
         for restart in (False, True):
-            with daemon(root, target, env | {'HERMES_HOME': str(target)}, barrier=False), daemon(root, home, env, barrier=False) as (_, desc):
+            with daemon(root, target, env | {"HERMES_ALLOW_NO_VAULT": "1", 'HERMES_HOME': str(target)}, barrier=False), daemon(root, home, env, barrier=False) as (_, desc):
                 asyncio.run(probe(desc, restart))
     finally:
         model.shutdown(); model.server_close()
@@ -125,7 +127,7 @@ def test_room_unknown_discard_releases_only_its_followers(tmp_path):
     model.blocked, model.release = threading.Event(), threading.Event()
     threading.Thread(target=model.serve_forever, daemon=True).start()
     base = f'http://127.0.0.1:{model.server_port}/v1'
-    (home / 'config.yaml').write_text(json.dumps({
+    (home / 'config.yaml').write_text(json.dumps({"_config_version": DEFAULT_CONFIG["_config_version"],
         'gateway': {'multiplex_profiles': False}, 'hosted_rooms': {'profiles': {'two': str(target)}},
         'model': {'provider': 'custom', 'default': 'gpt-4o', 'base_url': base, 'supports_vision': True},
         'agent': {'image_input_mode': 'native'},
@@ -207,10 +209,10 @@ def test_room_unknown_discard_releases_only_its_followers(tmp_path):
             assert snapshot['counts'].get('cancelled') == 1, snapshot
             assert len(model.requests) == 3, model.requests
     try:
-        with daemon(root, target, env | {'HERMES_HOME': str(target)}, barrier=False), daemon(root, home, env, barrier=False) as (proc, desc):
+        with daemon(root, target, env | {"HERMES_ALLOW_NO_VAULT": "1", 'HERMES_HOME': str(target)}, barrier=False), daemon(root, home, env, barrier=False) as (proc, desc):
             asyncio.run(first(proc, desc))
         model.release.set()
-        with daemon(root, target, env | {'HERMES_HOME': str(target)}, barrier=False), daemon(root, home, env, barrier=False) as (_, desc):
+        with daemon(root, target, env | {"HERMES_ALLOW_NO_VAULT": "1", 'HERMES_HOME': str(target)}, barrier=False), daemon(root, home, env, barrier=False) as (_, desc):
             asyncio.run(recovered(desc))
     finally:
         model.release.set()

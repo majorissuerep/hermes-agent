@@ -1,4 +1,6 @@
 """Explicit model changes cross the real provider wire, not profile defaults."""
+from hermes_cli.config_defaults import DEFAULT_CONFIG
+
 import asyncio
 from http.server import ThreadingHTTPServer
 import json
@@ -35,7 +37,7 @@ def test_model_receipt_changes_next_wire_and_branch_keeps_independent_history(tm
     thread = threading.Thread(target=peer.serve_forever, daemon=True)
     thread.start()
     url = f'http://127.0.0.1:{peer.server_port}/v1'
-    cfg = {'gateway': {'multiplex_profiles': False},
+    cfg = {"_config_version": DEFAULT_CONFIG["_config_version"], 'gateway': {'multiplex_profiles': False},
            'model': {'provider': 'custom', 'default': 'original', 'base_url': url},
            'auxiliary': {'title_generation': {'enabled': False}}, 'platform_toolsets': {'cli': []}}
     (home / 'config.yaml').write_text(json.dumps(cfg))
@@ -43,7 +45,7 @@ def test_model_receipt_changes_next_wire_and_branch_keeps_independent_history(tm
         name: {'id': name, 'name': name, 'limit': {'context': 100000, 'output': 4000}}
         for name in ('original', 'switched')}}}))
     env = {k: os.environ[k] for k in ('PATH', 'LANG', 'TZ', 'TIRITH_ENABLED') if k in os.environ}
-    env.update(HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home), PYTHONPATH=str(root),
+    env.update(HERMES_ALLOW_NO_VAULT="1", HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home), PYTHONPATH=str(root),
                OPENAI_API_KEY='loopback-only', OPENAI_BASE_URL=url, PYTHONUNBUFFERED='1')
 
     async def run(desc):

@@ -1,4 +1,6 @@
 """Real owner parity: stable admission IDs, physical history and terminal publication."""
+from hermes_cli.config_defaults import DEFAULT_CONFIG
+
 import asyncio
 from contextlib import closing
 from http.server import ThreadingHTTPServer
@@ -28,7 +30,7 @@ def test_worker_lineage_and_settlement(tmp_path, mode, invariant):
     thread = threading.Thread(target=peer.serve_forever, daemon=True)
     thread.start()
     url = f'http://127.0.0.1:{peer.server_port}/v1'
-    (home / 'config.yaml').write_text(json.dumps({
+    (home / 'config.yaml').write_text(json.dumps({"_config_version": DEFAULT_CONFIG["_config_version"],
         'gateway': {'multiplex_profiles': False, 'managed_workers': mode == 'managed'},
         'model': {'provider': 'custom', 'default': 'lineage', 'base_url': url},
         'auxiliary': {'title_generation': {'enabled': False}}, 'platform_toolsets': {'cli': []}}))
@@ -37,7 +39,7 @@ def test_worker_lineage_and_settlement(tmp_path, mode, invariant):
         config['model']['context_length'] = 32000
         (home / 'config.yaml').write_text(json.dumps(config))
     env = child_env()
-    env.update(HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home),
+    env.update(HERMES_ALLOW_NO_VAULT="1", HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home),
                PYTHONPATH=str(root), OPENAI_API_KEY='loopback-only', OPENAI_BASE_URL=url)
 
     def query(sql, args=()):

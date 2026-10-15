@@ -1,5 +1,7 @@
 """A managed worker builds its agent with the session's frozen checkpoint limits, not only the
 enable flag (andrexibiza 27 / P3.b, kshitijk4poor): ``max_snapshots`` reaches the store's trim."""
+from hermes_cli.config_defaults import DEFAULT_CONFIG
+
 import asyncio
 from contextlib import closing
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -58,13 +60,13 @@ def test_managed_worker_trims_checkpoints_to_the_configured_max_snapshots(tmp_pa
     peer.project = project
     threading.Thread(target=peer.serve_forever, daemon=True).start()
     url = f'http://127.0.0.1:{peer.server_port}/v1'
-    (home / 'config.yaml').write_text(json.dumps({
+    (home / 'config.yaml').write_text(json.dumps({"_config_version": DEFAULT_CONFIG["_config_version"],
         'gateway': {'multiplex_profiles': False, 'managed_workers': True},
         'model': {'provider': 'custom', 'default': 'cp-model', 'base_url': url},
         'auxiliary': {'title_generation': {'enabled': False}}, 'platform_toolsets': {'cli': ['file']},
         'checkpoints': {'enabled': True, 'max_snapshots': 1}}))
     env = {**child_env(), **{k: os.environ[k] for k in ('TIRITH_ENABLED',) if k in os.environ}}
-    env.update(HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home), PYTHONPATH=str(root),
+    env.update(HERMES_ALLOW_NO_VAULT="1", HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home), PYTHONPATH=str(root),
                OPENAI_API_KEY='loopback-only', OPENAI_BASE_URL=url)
 
     def status(request_id):

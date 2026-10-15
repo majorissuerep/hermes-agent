@@ -1,4 +1,6 @@
 """Real daemon restart driver; model and preclaim crash barriers are owned fixtures."""
+from hermes_cli.config_defaults import DEFAULT_CONFIG
+
 import asyncio
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -52,7 +54,9 @@ CHILD_ENV_KEYS = ('PATH', 'LANG', 'TZ', 'SYSTEMROOT', 'SYSTEMDRIVE', 'WINDIR', '
 
 
 def child_env():
-    return {k: os.environ[k] for k in CHILD_ENV_KEYS if k in os.environ}
+    # These loopback fixtures inspect state with stdlib sqlite, not a real vault.
+    return {"HERMES_ALLOW_NO_VAULT": "1",
+            **{k: os.environ[k] for k in CHILD_ENV_KEYS if k in os.environ}}
 
 
 async def rpc(ws, method, **params):
@@ -107,11 +111,11 @@ def probe(tmp_path):
     thread = threading.Thread(target=peer.serve_forever, daemon=True)
     thread.start()
     url = f'http://127.0.0.1:{peer.server_port}/v1'
-    cfg = {'gateway': {'multiplex_profiles': False}, 'model': {'provider': 'custom', 'default': 'old-default', 'base_url': url},
+    cfg = {"_config_version": DEFAULT_CONFIG["_config_version"], 'gateway': {'multiplex_profiles': False}, 'model': {'provider': 'custom', 'default': 'old-default', 'base_url': url},
            'auxiliary': {'title_generation': {'enabled': False}}, 'platform_toolsets': {'cli': []}}
     (home / 'config.yaml').write_text(json.dumps(cfg))
     env = child_env()
-    env.update(HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home), PYTHONPATH=str(root),
+    env.update(HERMES_ALLOW_NO_VAULT="1", HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home), PYTHONPATH=str(root),
                OPENAI_API_KEY='loopback-only', OPENAI_BASE_URL=url, PYTHONUNBUFFERED='1')
     sessions, params, pids, epochs = {}, {}, [], []
     def rows():

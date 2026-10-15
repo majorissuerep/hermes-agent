@@ -4,6 +4,8 @@ One ordinary daemon with the API server: the locked primary answers 429 ``insuff
 and ``fallback_providers`` names a healthy backup. Main builds the locked agent with
 ``fallback_model=None`` and fails a turn served by another runtime; the shared owner must too.
 """
+from hermes_cli.config_defaults import DEFAULT_CONFIG
+
 import asyncio
 import json
 import os
@@ -29,7 +31,7 @@ def test_locked_session_chat_does_not_fall_back_to_the_profile_chain(tmp_path):
     with socket.socket() as sock:
         sock.bind(('127.0.0.1', 0))
         api_port = sock.getsockname()[1]
-    config = {'model': {'provider': 'custom', 'default': 'primary-model', 'base_url': purl},
+    config = {"_config_version": DEFAULT_CONFIG["_config_version"], 'model': {'provider': 'custom', 'default': 'primary-model', 'base_url': purl},
               'gateway': {'multiplex_profiles': False,
                           'platforms': {'api_server': {'enabled': True, 'port': api_port, 'host': '127.0.0.1'}}},
               'auxiliary': {'title_generation': {'enabled': False}}, 'terminal': {'cwd': str(home)},
@@ -38,7 +40,7 @@ def test_locked_session_chat_does_not_fall_back_to_the_profile_chain(tmp_path):
                                       'api_key': 'loopback-only'}]}
     (home / 'config.yaml').write_text(json.dumps(config))
     env = {**child_env(), **{k: os.environ[k] for k in ('TIRITH_ENABLED',) if k in os.environ}}
-    env.update(HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home), PYTHONPATH=str(root),
+    env.update(HERMES_ALLOW_NO_VAULT="1", HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home), PYTHONPATH=str(root),
                OPENAI_API_KEY='loopback-only', OPENAI_BASE_URL=purl, API_SERVER_KEY='lock-owned-secret',
                API_SERVER_ENABLED='true', API_SERVER_PORT=str(api_port), PYTHONUNBUFFERED='1')
 

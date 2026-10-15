@@ -5,6 +5,8 @@ child's first write after the worker exits raised SIGPIPE (``broken_pipe``) and 
 was gone; the next worker adopted only a PID. Under a worker the child writes to a
 profile-scoped log and records its exit, so whoever adopts the checkpoint reads both.
 """
+from hermes_cli.config_defaults import DEFAULT_CONFIG
+
 import asyncio
 from contextlib import closing
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -31,7 +33,7 @@ def test_worker_spawned_process_output_and_exit_survive_the_spawner(tmp_path):
     home = tmp_path / 'home'
     home.mkdir()
     env = {k: v for k, v in os.environ.items() if k not in ('HERMES_HOME', 'PYTHONPATH')}
-    env.update(HERMES_HOME=str(home), PYTHONPATH=str(ROOT))
+    env.update(HERMES_ALLOW_NO_VAULT="1", HERMES_HOME=str(home), PYTHONPATH=str(ROOT))
     # The spawner marks itself a registered worker, starts the process and dies at once.
     spawner = textwrap.dedent(f'''
         import json, os
@@ -100,13 +102,13 @@ def test_next_managed_turn_reads_the_previous_workers_background_output(tmp_path
     peer = ThreadingHTTPServer(('127.0.0.1', 0), Model)
     threading.Thread(target=peer.serve_forever, daemon=True).start()
     url = f'http://127.0.0.1:{peer.server_port}/v1'
-    (home / 'config.yaml').write_text(json.dumps({
+    (home / 'config.yaml').write_text(json.dumps({"_config_version": DEFAULT_CONFIG["_config_version"],
         'gateway': {'multiplex_profiles': False, 'managed_workers': True},
         'model': {'provider': 'custom', 'default': 'm', 'base_url': url},
         'auxiliary': {'title_generation': {'enabled': False}}, 'approvals': {'mode': 'off'},
         'platform_toolsets': {'cli': ['terminal']}}))
     env = {k: os.environ[k] for k in ('PATH', 'LANG', 'TZ') if k in os.environ}
-    env.update(HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home), PYTHONPATH=str(ROOT),
+    env.update(HERMES_ALLOW_NO_VAULT="1", HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home), PYTHONPATH=str(ROOT),
                OPENAI_API_KEY='loopback-only', OPENAI_BASE_URL=url)
 
     def settled(request_id):

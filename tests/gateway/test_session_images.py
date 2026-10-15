@@ -1,4 +1,6 @@
 """Canonical uploads stage bytes only after viewer and owner authorization."""
+from hermes_cli.config_defaults import DEFAULT_CONFIG
+
 import base64
 from pathlib import Path
 from types import SimpleNamespace
@@ -86,12 +88,12 @@ def test_authenticated_daemon_upload_retains_exact_admitted_bytes(tmp_path):
     home, user = tmp_path / 'state', tmp_path / 'user'
     home.mkdir(mode=0o700)
     user.mkdir()
-    config = {'gateway': {'multiplex_profiles': False},
+    config = {"_config_version": DEFAULT_CONFIG["_config_version"], 'gateway': {'multiplex_profiles': False},
               'model': {'provider': 'custom', 'default': 'fixture', 'base_url': 'http://127.0.0.1:1/v1'},
               'auxiliary': {'title_generation': {'enabled': False}}, 'platform_toolsets': {'cli': []}}
     (home / 'config.yaml').write_text(json.dumps(config))
     env = child_env()
-    env.update(HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home), PYTHONPATH=str(root),
+    env.update(HERMES_ALLOW_NO_VAULT="1", HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home), PYTHONPATH=str(root),
                OPENAI_API_KEY='loopback-only', PYTHONUNBUFFERED='1')
 
     async def exercise(desc):

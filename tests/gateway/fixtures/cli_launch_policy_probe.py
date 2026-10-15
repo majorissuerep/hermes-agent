@@ -91,7 +91,7 @@ def probe(tmp_path):
     before = config.read_bytes()
     (home / 'SOUL.md').write_text('SOUL_LAUNCH_MARKER')
     env = {k: os.environ[k] for k in ('PATH', 'LANG', 'TZ', 'SYSTEMROOT') if k in os.environ}
-    env.update(HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home), PYTHONPATH=str(root))
+    env.update(HERMES_ALLOW_NO_VAULT="1", HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home), PYTHONPATH=str(root))
     sessions, pids = {}, []
     keys = {'left': 'private-left-launch-token', 'right': 'private-right-launch-token'}
 

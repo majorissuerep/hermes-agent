@@ -11,6 +11,8 @@ change 3): `/new` rebinds only the invoking view; A keeps its FIFO. Asserted:
 - ``restart``: the owner crashes after `/new`; A's in-flight turn is unknown and holds only A's
   followers (B keeps working); discarding it releases them on A, exactly once.
 """
+from hermes_cli.config_defaults import DEFAULT_CONFIG
+
 import asyncio
 from contextlib import closing
 from http.server import ThreadingHTTPServer
@@ -44,7 +46,7 @@ def test_new_session_never_absorbs_or_drops_earlier_queued_work(tmp_path, restar
     thread = threading.Thread(target=peer.serve_forever, daemon=True)
     thread.start()
     url = f'http://127.0.0.1:{peer.server_port}/v1'
-    (home / 'config.yaml').write_text(json.dumps({
+    (home / 'config.yaml').write_text(json.dumps({"_config_version": DEFAULT_CONFIG["_config_version"],
         'gateway': {'multiplex_profiles': False},
         'model': {'provider': 'custom', 'default': 'view-model', 'base_url': url},
         'auxiliary': {'title_generation': {'enabled': False}}, 'platform_toolsets': {'cli': []}}))

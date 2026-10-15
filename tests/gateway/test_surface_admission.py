@@ -1,4 +1,6 @@
 """HUD / live-voice submit fields survive canonical admission and reach the model as a per-turn note."""
+from hermes_cli.config_defaults import DEFAULT_CONFIG
+
 import asyncio
 from contextlib import closing
 from http.server import ThreadingHTTPServer
@@ -133,7 +135,7 @@ def test_real_daemon_accepts_hud_and_voice_live_submits_and_notes_the_model(tmp_
     thread = threading.Thread(target=model.serve_forever, daemon=True)
     thread.start()
     base = f'http://127.0.0.1:{model.server_port}/v1'
-    (home / 'config.yaml').write_text(json.dumps({
+    (home / 'config.yaml').write_text(json.dumps({"_config_version": DEFAULT_CONFIG["_config_version"],
         'gateway': {'multiplex_profiles': False},
         'model': {'provider': 'custom', 'default': 'local-wire-stub', 'base_url': base},
         'auxiliary': {'title_generation': {'enabled': False}},
@@ -197,7 +199,7 @@ def test_managed_worker_turn_carries_the_committed_surface_to_the_model(tmp_path
     thread = threading.Thread(target=model.serve_forever, daemon=True)
     thread.start()
     base = f'http://127.0.0.1:{model.server_port}/v1'
-    (home / 'config.yaml').write_text(json.dumps({
+    (home / 'config.yaml').write_text(json.dumps({"_config_version": DEFAULT_CONFIG["_config_version"],
         'gateway': {'multiplex_profiles': False, 'managed_workers': True},
         'model': {'provider': 'custom', 'default': 'main-model', 'base_url': base},
         'auxiliary': {'title_generation': {'enabled': False}, 'voice_chat': {

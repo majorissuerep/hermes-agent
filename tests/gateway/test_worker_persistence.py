@@ -1,4 +1,6 @@
 """Separate worker, ordinary daemon, production private control and authenticated WS."""
+from hermes_cli.config_defaults import DEFAULT_CONFIG
+
 import asyncio
 import json
 import os
@@ -18,11 +20,11 @@ def test_worker_survives_owner_restart_without_repeating_tool(tmp_path):
     home, user = tmp_path / 'state', tmp_path / 'user'
     home.mkdir(mode=0o700)
     user.mkdir()
-    (home / 'config.yaml').write_text(json.dumps({'gateway': {'multiplex_profiles': False},
+    (home / 'config.yaml').write_text(json.dumps({"_config_version": DEFAULT_CONFIG["_config_version"], 'gateway': {'multiplex_profiles': False},
         'model': {'provider': 'custom', 'default': 'inert', 'base_url': 'http://127.0.0.1:9/v1'},
         'auxiliary': {'title_generation': {'enabled': False}}}))
     env = {k: os.environ[k] for k in ('PATH', 'LANG', 'TZ', 'TIRITH_ENABLED') if k in os.environ}
-    env.update(HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home), PYTHONPATH=str(root), OPENAI_API_KEY='loopback-only', OPENAI_BASE_URL='http://127.0.0.1:9/v1')
+    env.update(HERMES_ALLOW_NO_VAULT="1", HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home), PYTHONPATH=str(root), OPENAI_API_KEY='loopback-only', OPENAI_BASE_URL='http://127.0.0.1:9/v1')
     async def create(desc):
         async with websocket(home, desc) as ws:
             response = await rpc(ws, 'session.create', request_id='worker-session', source='cli')

@@ -1,4 +1,6 @@
 """The ordinary daemon, not a fixture launcher, owns the real tool worker."""
+from hermes_cli.config_defaults import DEFAULT_CONFIG
+
 import asyncio
 from contextlib import closing
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -113,7 +115,7 @@ def test_ordinary_owner_launches_tool_worker_and_detach_does_not_cancel(tmp_path
     thread = threading.Thread(target=peer.serve_forever, daemon=True)
     thread.start()
     url = f'http://127.0.0.1:{peer.server_port}/v1'
-    config = {
+    config = {"_config_version": DEFAULT_CONFIG["_config_version"],
         'gateway': {'multiplex_profiles': False, 'managed_workers': True},
         'model': {'provider': 'custom', 'default': 'managed-model', 'base_url': url},
         'auxiliary': {'title_generation': {'enabled': False}},
@@ -135,7 +137,7 @@ def test_ordinary_owner_launches_tool_worker_and_detach_does_not_cancel(tmp_path
         f"        with open({str(audit)!r}, 'a', encoding='utf-8') as f:\n"
         "            f.write(json.dumps({'pid': os.getpid(), 'path': str(args[0])}) + '\\n')\n"
         "sys.addaudithook(witness)\n")
-    env.update(HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home), PYTHONPATH=os.pathsep.join([str(site), str(root)]),
+    env.update(HERMES_ALLOW_NO_VAULT="1", HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home), PYTHONPATH=os.pathsep.join([str(site), str(root)]),
                OPENAI_API_KEY='loopback-only', OPENAI_BASE_URL=url)
 
     def query(sql, args=()):

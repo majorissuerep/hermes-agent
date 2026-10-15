@@ -1,5 +1,7 @@
 """Title-keyed resume on the classic CLI (main's HermesCLI, gateway-backed) against an ordinary daemon.
 The CLI process may read state.db but never writes it: the gateway is the single writer."""
+from hermes_cli.config_defaults import DEFAULT_CONFIG
+
 import json
 import os
 from pathlib import Path
@@ -21,13 +23,13 @@ def test_title_create_if_missing_then_resume_by_title_is_deterministic(tmp_path,
     user.mkdir()
     root = Path(__file__).resolve().parents[2]
     model_url = f"http://127.0.0.1:{model_peer.server_port}/v1"
-    (home / "config.yaml").write_text(json.dumps({
+    (home / "config.yaml").write_text(json.dumps({"_config_version": DEFAULT_CONFIG["_config_version"],
         "gateway": {"multiplex_profiles": False},
         "model": {"provider": "custom", "default": "local-wire-stub", "base_url": model_url},
         "auxiliary": {"title_generation": {"enabled": False}},
     }), encoding="utf-8")
     env = {k: os.environ[k] for k in ("PATH", "LANG", "TZ") if k in os.environ}
-    env.update(HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home), PYTHONPATH=str(root),
+    env.update(HERMES_ALLOW_NO_VAULT="1", HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home), PYTHONPATH=str(root),
                PYTHONUNBUFFERED="1", OPENAI_API_KEY="loopback-only", OPENAI_BASE_URL=model_url)
     witness = tmp_path / "client-owner.json"
     wrapper = tmp_path / "client.py"

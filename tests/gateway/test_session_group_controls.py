@@ -1,4 +1,6 @@
 """Canonical group management is profile-bound and never starts inference."""
+from hermes_cli.config_defaults import DEFAULT_CONFIG
+
 import asyncio
 import json
 from pathlib import Path
@@ -19,7 +21,7 @@ def test_group_management_on_ordinary_authenticated_socket(tmp_path):
     home.mkdir(mode=0o700)
     user.mkdir()
     (home / 'profiles' / 'helper').mkdir(parents=True)
-    (home / 'config.yaml').write_text(json.dumps({
+    (home / 'config.yaml').write_text(json.dumps({"_config_version": DEFAULT_CONFIG["_config_version"],
         'gateway': {'multiplex_profiles': False},
         'hosted_rooms': {'profiles': {'helper': str(home / 'profiles' / 'helper')}},
         'model': {'provider': 'custom', 'default': 'no-inference',
@@ -70,7 +72,7 @@ def test_profile_discovery_and_group_controls_enforce_actor_scope(tmp_path, monk
     home.mkdir()
     monkeypatch.setenv('HERMES_HOME', str(home))
     monkeypatch.setenv('HOME', str(tmp_path / 'user'))
-    (home / 'config.yaml').write_text('model:\n  default: fixture-model\n  provider: custom\n')
+    (home / 'config.yaml').write_text(f"_config_version: {DEFAULT_CONFIG['_config_version']}\n" + ('model:\n  default: fixture-model\n  provider: custom\n'))
     (home / 'profile.yaml').write_text('display_name: Fixture\nui_meta:\n  hermes-bots:\n    color: blue\n')
     with SessionDB(home / 'state.db') as db:
         db.create_session('private', source='cli', user_id='another')

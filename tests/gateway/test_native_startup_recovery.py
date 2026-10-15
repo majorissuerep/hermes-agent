@@ -37,7 +37,7 @@ def test_native_queue_recovers_only_after_current_adapter_publication(tmp_path):
     config = home / 'config.yaml'
     config.write_text(json.dumps(cfg))
     env = child_env()
-    env.update(HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home), PYTHONPATH=str(root),
+    env.update(HERMES_ALLOW_NO_VAULT="1", HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home), PYTHONPATH=str(root),
                OPENAI_API_KEY='loopback-only', OPENAI_BASE_URL=base, PYTHONUNBUFFERED='1')
     def rows():
         with closing(sqlite3.connect(f'file:{home / "state.db"}?mode=ro', uri=True)) as db:

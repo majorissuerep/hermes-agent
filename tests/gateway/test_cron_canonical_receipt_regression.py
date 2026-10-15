@@ -1,4 +1,6 @@
 """Cron consumes the real Bot Chat receipt over an owned daemon's WebSocket."""
+from hermes_cli.config_defaults import DEFAULT_CONFIG
+
 import asyncio
 from contextlib import closing
 from http.server import ThreadingHTTPServer
@@ -44,7 +46,7 @@ def canonical_bot(tmp_path, monkeypatch):
     thread = threading.Thread(target=model.serve_forever, daemon=True)
     thread.start()
     base = f'http://127.0.0.1:{model.server_port}/v1'
-    (home / 'config.yaml').write_text(json.dumps({
+    (home / 'config.yaml').write_text(json.dumps({"_config_version": DEFAULT_CONFIG["_config_version"],
         'gateway': {'multiplex_profiles': False},
         'model': {'provider': 'custom', 'default': 'local-wire-stub', 'base_url': base},
         'auxiliary': {'title_generation': {'enabled': False}},

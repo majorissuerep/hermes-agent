@@ -5,6 +5,8 @@ session can receive the completion later; a worker process cannot (nobody drains
 after ``finished``, and recovery turns the orphaned ``running`` row into ``unknown``). The
 work runs inline and its outcome lands in the same turn.
 """
+from hermes_cli.config_defaults import DEFAULT_CONFIG
+
 import asyncio
 from contextlib import closing
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -74,12 +76,12 @@ def test_managed_turn_runs_detachable_work_inline_and_leaves_no_orphan(tmp_path)
     peer.child_calls = 0
     threading.Thread(target=peer.serve_forever, daemon=True).start()
     url = f'http://127.0.0.1:{peer.server_port}/v1'
-    (home / 'config.yaml').write_text(json.dumps({
+    (home / 'config.yaml').write_text(json.dumps({"_config_version": DEFAULT_CONFIG["_config_version"],
         'gateway': {'multiplex_profiles': False, 'managed_workers': True},
         'model': {'provider': 'custom', 'default': 'm', 'base_url': url},
         'auxiliary': {'title_generation': {'enabled': False}}, 'platform_toolsets': {'cli': ['cronjob']}}))
     env = {k: os.environ[k] for k in ('PATH', 'LANG', 'TZ') if k in os.environ}
-    env.update(HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home), PYTHONPATH=str(root),
+    env.update(HERMES_ALLOW_NO_VAULT="1", HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home), PYTHONPATH=str(root),
                OPENAI_API_KEY='loopback-only', OPENAI_BASE_URL=url)
     created = subprocess.run([sys.executable, '-c', 'import json; from cron.jobs import create_job; '
                               'print(json.dumps(create_job("CRON_CHILD_GOAL", "every 1h", name="inline", deliver="local")["id"]))'],

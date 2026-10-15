@@ -6,6 +6,8 @@ One ordinary daemon, two sessions: in-process and ``gateway.managed_workers``. T
 primary refuses with 429 ``insufficient_quota``; a healthy loopback backup is configured in
 ``fallback_providers``. Both turns must reach the backup and complete.
 """
+from hermes_cli.config_defaults import DEFAULT_CONFIG
+
 import asyncio
 from contextlib import closing
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -83,14 +85,14 @@ def run_pair(tmp_path, extra_config, turn, **create_params):
     user.mkdir()
     primary, backup = _serve(Primary), _serve(Backup)
     purl, burl = (f'http://127.0.0.1:{s.server_port}/v1' for s in (primary, backup))
-    config = {'gateway': {'multiplex_profiles': False, 'managed_workers': False},
+    config = {"_config_version": DEFAULT_CONFIG["_config_version"], 'gateway': {'multiplex_profiles': False, 'managed_workers': False},
               'model': {'provider': 'custom', 'default': 'primary-model', 'base_url': purl},
               'auxiliary': {'title_generation': {'enabled': False}}, 'platform_toolsets': {'cli': []},
               'fallback_providers': [{'provider': 'custom', 'model': 'backup-model', 'base_url': burl,
                                       'api_key': 'loopback-only'}], **extra_config(home)}
     (home / 'config.yaml').write_text(json.dumps(config))
     env = {**child_env(), **{k: os.environ[k] for k in ('TIRITH_ENABLED',) if k in os.environ}}
-    env.update(HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home), PYTHONPATH=str(root),
+    env.update(HERMES_ALLOW_NO_VAULT="1", HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home), PYTHONPATH=str(root),
                OPENAI_API_KEY='loopback-only', OPENAI_BASE_URL=purl)
 
     def query(sql, args=()):

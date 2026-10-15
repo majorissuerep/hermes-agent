@@ -1,4 +1,6 @@
 """A managed assignment preserves the image bytes committed at admission."""
+from hermes_cli.config_defaults import DEFAULT_CONFIG
+
 import asyncio
 import json
 from http.server import ThreadingHTTPServer
@@ -24,14 +26,14 @@ def test_admitted_images_reach_managed_worker(tmp_path, mode, model):
     thread = threading.Thread(target=peer.serve_forever, daemon=True)
     thread.start()
     url = f'http://127.0.0.1:{peer.server_port}/v1'
-    (home / 'config.yaml').write_text(json.dumps({
+    (home / 'config.yaml').write_text(json.dumps({"_config_version": DEFAULT_CONFIG["_config_version"],
         'gateway': {'multiplex_profiles': False, 'managed_workers': mode == 'managed'},
         'model': {'provider': 'custom', 'default': model, 'base_url': url},
         'agent': {'image_input_mode': 'native'}, 'platform_toolsets': {'cli': []},
         'auxiliary': {'title_generation': {'enabled': False}},
     }))
     env = child_env()
-    env.update(HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home), PYTHONPATH=str(root),
+    env.update(HERMES_ALLOW_NO_VAULT="1", HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home), PYTHONPATH=str(root),
                OPENAI_API_KEY='loopback-only', OPENAI_BASE_URL=url)
 
     async def exercise(desc):

@@ -1,5 +1,7 @@
 """A managed worker applies the same per-turn approval facts as the in-process turn: the admission's
 one-shot flags (``chat -q`` / ``-z``) and the route's current YOLO bypass, including its revocation."""
+from hermes_cli.config_defaults import DEFAULT_CONFIG
+
 import asyncio
 from contextlib import closing
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -57,13 +59,13 @@ def _run(tmp_path, scenario):
     peer.command = 'rm -rf ' + str(target)
     threading.Thread(target=peer.serve_forever, daemon=True).start()
     url = f'http://127.0.0.1:{peer.server_port}/v1'
-    (home / 'config.yaml').write_text(json.dumps({
+    (home / 'config.yaml').write_text(json.dumps({"_config_version": DEFAULT_CONFIG["_config_version"],
         'gateway': {'multiplex_profiles': False, 'managed_workers': True},
         'model': {'provider': 'custom', 'default': 'flags-model', 'base_url': url},
         'auxiliary': {'title_generation': {'enabled': False}},
         'approvals': {'mode': 'manual', 'single_query_mode': 'deny'}, 'platform_toolsets': {'cli': ['terminal']}}))
     env = {k: os.environ[k] for k in ('PATH', 'LANG', 'TZ', 'TIRITH_ENABLED') if k in os.environ}
-    env.update(HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home), PYTHONPATH=str(root),
+    env.update(HERMES_ALLOW_NO_VAULT="1", HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home), PYTHONPATH=str(root),
                OPENAI_API_KEY='loopback-only', OPENAI_BASE_URL=url)
 
     def status(request_id):

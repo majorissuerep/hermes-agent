@@ -10,7 +10,7 @@ def test_cli_readers_observe_committed_state_during_writer_transaction(tmp_path)
     home = tmp_path / 'profile'
     home.mkdir()
     env = {k: os.environ[k] for k in ('PATH', 'SYSTEMROOT', 'LANG', 'TZ') if k in os.environ}
-    env.update(HOME=str(tmp_path), USERPROFILE=str(tmp_path), HERMES_HOME=str(home), PYTHONPATH=str(repo))
+    env.update(HERMES_ALLOW_NO_VAULT="1", HOME=str(tmp_path), USERPROFILE=str(tmp_path), HERMES_HOME=str(home), PYTHONPATH=str(repo))
     code = '''
 import os, subprocess, sys
 from pathlib import Path

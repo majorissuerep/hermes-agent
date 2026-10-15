@@ -5,6 +5,8 @@ Contract recipe D-F: sentinels seeded in a disposable profile fire on an ordinar
 a managed worker that opened no plugin, profile YAML, rules or skill file and fired no sentinel;
 a malformed profile does not block it; config-only keeps plugin discovery.
 """
+from hermes_cli.config_defaults import DEFAULT_CONFIG
+
 import asyncio
 from contextlib import closing
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -110,7 +112,7 @@ def test_canonical_safe_launch_is_frozen_policy_executed_in_isolated_worker(tmp_
     skill = home / 'skills' / 'probe'
     skill.mkdir(parents=True)
     (skill / 'SKILL.md').write_text('---\nname: probe\ndescription: SKILL_SENTINEL probe skill\n---\nSKILL_SENTINEL body\n', encoding='utf-8')
-    config = {'gateway': {'multiplex_profiles': False},
+    config = {"_config_version": DEFAULT_CONFIG["_config_version"], 'gateway': {'multiplex_profiles': False},
               'model': {'provider': 'custom', 'default': 'owner-model', 'base_url': url},
               'auxiliary': {'title_generation': {'enabled': False}},
               'plugins': {'enabled': ['sentinel']}, 'hooks_auto_accept': True,
@@ -151,7 +153,7 @@ def test_canonical_safe_launch_is_frozen_policy_executed_in_isolated_worker(tmp_
         "        _busy.on = False\n"
         "sys.addaudithook(witness)\n", encoding='utf-8')
     env = {k: os.environ[k] for k in ('PATH', 'LANG', 'TZ', 'TIRITH_ENABLED') if k in os.environ}
-    env.update(HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home), TERM='xterm',
+    env.update(HERMES_ALLOW_NO_VAULT="1", HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home), TERM='xterm',
                PYTHONPATH=os.pathsep.join([str(site), str(root)]), OPENAI_API_KEY='loopback-only', OPENAI_BASE_URL=url)
 
     def query(sql, args=()):

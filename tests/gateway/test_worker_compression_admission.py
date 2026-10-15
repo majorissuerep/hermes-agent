@@ -1,4 +1,6 @@
 """Admission-backed automatic compression over the ordinary owner and HTTP model."""
+from hermes_cli.config_defaults import DEFAULT_CONFIG
+
 import asyncio
 from contextlib import closing
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -83,7 +85,7 @@ def test_automatic_worker_rotation_retains_retry_identity_and_fifo(tmp_path, end
     thread = threading.Thread(target=peer.serve_forever, daemon=True)
     thread.start()
     url = f'http://127.0.0.1:{peer.server_port}/v1'
-    (home / 'config.yaml').write_text(json.dumps({
+    (home / 'config.yaml').write_text(json.dumps({"_config_version": DEFAULT_CONFIG["_config_version"],
         'gateway': {'multiplex_profiles': False, 'managed_workers': True},
         'model': {'provider': 'custom', 'default': 'original', 'base_url': url, 'context_length': 64000},
         'auxiliary': {'title_generation': {'enabled': False},
@@ -95,7 +97,7 @@ def test_automatic_worker_rotation_retains_retry_identity_and_fifo(tmp_path, end
                                                  'output': 1000}}
         for name in ('original', 'summary')}}}))
     env = child_env()
-    env.update(HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home), PYTHONPATH=str(root),
+    env.update(HERMES_ALLOW_NO_VAULT="1", HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home), PYTHONPATH=str(root),
                OPENAI_API_KEY='loopback-only', OPENAI_BASE_URL=url)
 
     def rows(sql, args=()):

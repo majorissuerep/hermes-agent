@@ -6,6 +6,8 @@ lists the new home, a ticket minted for it opens a session owned by this process
 owner instead of spawning a stray per-profile daemon that would later collide with the
 multiplexer's all-or-nothing reserve. A secondary whose ``state.db`` is unusable parks only itself.
 """
+from hermes_cli.config_defaults import DEFAULT_CONFIG
+
 import asyncio
 import contextlib
 import json
@@ -71,7 +73,7 @@ def mux(tmp_path, peer):
     root = tmp_path / 'state'
     root.mkdir(mode=0o700)
     url = f'http://127.0.0.1:{peer.server_port}/v1'
-    config = {'gateway': {'multiplex_profiles': True},
+    config = {"_config_version": DEFAULT_CONFIG["_config_version"], 'gateway': {'multiplex_profiles': True},
               'model': {'provider': 'custom', 'default': 'local-wire-stub', 'base_url': url},
               'auxiliary': {'title_generation': {'enabled': False}}}
     (root / 'config.yaml').write_text(json.dumps(config))
@@ -79,7 +81,7 @@ def mux(tmp_path, peer):
     boot.mkdir(parents=True, mode=0o700)
     (boot / 'config.yaml').write_text(json.dumps(config))
     env = {k: os.environ[k] for k in ('PATH', 'LANG', 'TZ') if k in os.environ}
-    env.update(HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(root), PYTHONPATH=str(ROOT),
+    env.update(HERMES_ALLOW_NO_VAULT="1", HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(root), PYTHONPATH=str(ROOT),
                PYTHONUNBUFFERED='1', OPENAI_API_KEY='loopback-only', OPENAI_BASE_URL=url)
     return {'root': root, 'boot': boot, 'env': env, 'config': config, 'log': tmp_path / 'gateway.log'}
 

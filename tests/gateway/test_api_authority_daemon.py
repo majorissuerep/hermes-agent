@@ -1,4 +1,6 @@
 """Ordinary daemon/API listener and private authenticated WS share execution."""
+from hermes_cli.config_defaults import DEFAULT_CONFIG
+
 import asyncio
 from http.server import ThreadingHTTPServer
 import json
@@ -28,12 +30,12 @@ def test_ordinary_daemon_api_ws_fifo_retry(tmp_path):
         sock.bind(('127.0.0.1', 0))
         api_port = sock.getsockname()[1]
     base = f'http://127.0.0.1:{peer.server_port}/v1'
-    cfg = {'model': {'provider': 'custom', 'default': 'local-wire-stub', 'base_url': base},
+    cfg = {"_config_version": DEFAULT_CONFIG["_config_version"], 'model': {'provider': 'custom', 'default': 'local-wire-stub', 'base_url': base},
            'gateway': {'platforms': {'api_server': {'enabled': True, 'port': api_port, 'host': '127.0.0.1'}}, 'multiplex_profiles': False},
            'auxiliary': {'title_generation': {'enabled': False}}, 'terminal': {'cwd': str(home)}}
     (home / 'config.yaml').write_text(json.dumps(cfg))
     env = {k: os.environ[k] for k in ('PATH', 'LANG', 'TZ', 'TIRITH_ENABLED') if k in os.environ}
-    env.update(HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home), PYTHONPATH=str(root),
+    env.update(HERMES_ALLOW_NO_VAULT="1", HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home), PYTHONPATH=str(root),
                OPENAI_API_KEY='loopback-only', OPENAI_BASE_URL=base, API_SERVER_KEY='ordinary-daemon-owned-secret',
                API_SERVER_ENABLED='true', API_SERVER_PORT=str(api_port), PYTHONUNBUFFERED='1')
 

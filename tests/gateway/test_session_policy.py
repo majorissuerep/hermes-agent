@@ -1,4 +1,6 @@
 """Fresh local policy is frozen and scoped, not process launcher state."""
+from hermes_cli.config_defaults import DEFAULT_CONFIG
+
 import os
 from concurrent.futures import ThreadPoolExecutor
 
@@ -114,7 +116,7 @@ def test_launch_policy_reaches_real_turn_runner(tmp_path):
     state.mkdir()
     from tests.gateway.fixtures.local_recovery_probe import child_env
     env = child_env()
-    env.update(HOME=str(home), USERPROFILE=str(home), HERMES_HOME=str(state), PYTHONPATH=str(repo))
+    env.update(HERMES_ALLOW_NO_VAULT="1", HOME=str(home), USERPROFILE=str(home), HERMES_HOME=str(state), PYTHONPATH=str(repo))
     result = subprocess.run([sys.executable, str(Path(__file__).parent / 'fixtures' / 'session_policy_peer.py')],
                             cwd=repo, env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=130, check=False)
     assert result.returncode == 0, result.stdout + '\n' + result.stderr
@@ -234,7 +236,7 @@ def test_frozen_route_keeps_its_endpoint_after_live_config_edit(tmp_path, monkey
 
     def write(url, key):
         (home / 'config.yaml').write_text(json.dumps(
-            {'model': {'provider': 'custom', 'base_url': url, 'api_key': key, 'default': 'm'}}))
+            {"_config_version": DEFAULT_CONFIG["_config_version"], 'model': {'provider': 'custom', 'base_url': url, 'api_key': key, 'default': 'm'}}))
     write('http://127.0.0.1:1/v1', 'sk-frozen-endpoint-one')
     private = {}
     policy = build_policy({'cwd': str(tmp_path), 'model': 'm'}, load_user_config_effective(home / 'config.yaml'),
@@ -261,7 +263,7 @@ def test_frozen_bare_custom_route_keeps_its_endpoint_pool_and_launch_key_wins(tm
     monkeypatch.setenv('HERMES_HOME', str(home))
     url = 'http://127.0.0.1:1/v1'
     (home / 'config.yaml').write_text(json.dumps(
-        {'model': {'provider': 'custom', 'base_url': url, 'api_key': 'sk-frozen-config', 'default': 'm'}}))
+        {"_config_version": DEFAULT_CONFIG["_config_version"], 'model': {'provider': 'custom', 'base_url': url, 'api_key': 'sk-frozen-config', 'default': 'm'}}))
     pool = object()
     monkeypatch.setattr('hermes_cli.runtime_provider._try_resolve_from_custom_pool', lambda base_url, *a, **k: {
         'provider': 'custom', 'api_mode': 'chat_completions', 'base_url': base_url, 'api_key': 'sk-pooled',
@@ -293,7 +295,7 @@ def _frozen_fixture_routes(tmp_path, monkeypatch, *launches):
     monkeypatch.setenv('HERMES_HOME', str(home))
 
     def write(url):
-        (home / 'config.yaml').write_text(json.dumps({'model': {'provider': 'fixture', 'default': 'm'},
+        (home / 'config.yaml').write_text(json.dumps({"_config_version": DEFAULT_CONFIG["_config_version"], 'model': {'provider': 'fixture', 'default': 'm'},
                                                       'custom_providers': [{'name': 'Fixture', 'base_url': url}]}))
     write('https://a.fixture.example/v1')
     (home / 'auth.json').write_text(json.dumps({'version': 1, 'providers': {}, 'credential_pool': {'custom:fixture': [

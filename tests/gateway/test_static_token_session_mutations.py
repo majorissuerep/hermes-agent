@@ -1,4 +1,6 @@
 """The same verified static token owns the same session on HTTP and WebSocket."""
+from hermes_cli.config_defaults import DEFAULT_CONFIG
+
 import asyncio
 import json
 from pathlib import Path
@@ -14,14 +16,14 @@ def test_static_token_http_mutations_reuse_ws_owner(tmp_path):
     home, user = tmp_path / 'state', tmp_path / 'user'
     home.mkdir(mode=0o700)
     user.mkdir()
-    (home / 'config.yaml').write_text(json.dumps({
+    (home / 'config.yaml').write_text(json.dumps({"_config_version": DEFAULT_CONFIG["_config_version"],
         'gateway': {'multiplex_profiles': False},
         'model': {'provider': 'custom', 'default': 'no-inference'},
         'platform_toolsets': {'cli': []},
         'auxiliary': {'title_generation': {'enabled': False}},
     }))
     env = child_env()
-    env.update(HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home),
+    env.update(HERMES_ALLOW_NO_VAULT="1", HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home),
                PYTHONPATH=str(root), HERMES_DASHBOARD_SESSION_TOKEN='owned-static-token')
     params = dict(request_id='same-create', source='cli', cwd=str(home),
                   model='no-inference', toolsets=[])

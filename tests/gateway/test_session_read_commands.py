@@ -35,7 +35,7 @@ def test_local_session_reads_report_this_session_and_refuse_their_write_forms(tm
                          'auxiliary': {'title_generation': {'enabled': False}}})
     (home / 'config.yaml').write_text(config)
     env = child_env()
-    env.update(HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home), PYTHONPATH=str(root),
+    env.update(HERMES_ALLOW_NO_VAULT="1", HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home), PYTHONPATH=str(root),
                OPENAI_API_KEY='loopback-only', OPENAI_BASE_URL=url, PYTHONUNBUFFERED='1')
     out = {}
 

@@ -1,4 +1,6 @@
 """A real managed child persists its final receipt while the ordinary daemon drains."""
+from hermes_cli.config_defaults import DEFAULT_CONFIG
+
 import asyncio
 from contextlib import closing
 from http.server import ThreadingHTTPServer
@@ -23,13 +25,13 @@ def test_managed_turn_finishes_inside_configured_restart_drain(tmp_path):
     thread = threading.Thread(target=peer.serve_forever, daemon=True)
     thread.start()
     url = f'http://127.0.0.1:{peer.server_port}/v1'
-    (home / 'config.yaml').write_text(json.dumps({
+    (home / 'config.yaml').write_text(json.dumps({"_config_version": DEFAULT_CONFIG["_config_version"],
         'gateway': {'managed_workers': True},
         'agent': {'restart_after_turn_timeout': 0, 'restart_drain_timeout': 20},
         'model': {'provider': 'custom', 'default': 'drain-fixture', 'base_url': url},
         'platform_toolsets': {'cli': []}, 'auxiliary': {'title_generation': {'enabled': False}}}))
     env = child_env()
-    env.update(HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home), PYTHONPATH=str(root),
+    env.update(HERMES_ALLOW_NO_VAULT="1", HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home), PYTHONPATH=str(root),
                OPENAI_API_KEY='loopback-only', OPENAI_BASE_URL=url)
     admission_id = None
     async def exercise(process, descriptor):

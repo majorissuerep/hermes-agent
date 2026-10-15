@@ -4,6 +4,8 @@ The owner hydrates the creation-time snapshot into the bootstrap; the child bind
 config import, so an edit to an already-selected MCP server's transport after creation reaches
 only sessions created after the edit (andrexibiza N1). Plugins, MCP and hooks stay ordinary.
 """
+from hermes_cli.config_defaults import DEFAULT_CONFIG
+
 import asyncio
 from contextlib import closing
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -71,14 +73,14 @@ def test_existing_session_keeps_frozen_mcp_transport_after_profile_edit(tmp_path
     threading.Thread(target=peer.serve_forever, daemon=True).start()
     url = f'http://127.0.0.1:{peer.server_port}/v1'
     (home / 'peer.py').write_text(PEER)
-    config = {'gateway': {'multiplex_profiles': False, 'managed_workers': True},
+    config = {"_config_version": DEFAULT_CONFIG["_config_version"], 'gateway': {'multiplex_profiles': False, 'managed_workers': True},
               'model': {'provider': 'custom', 'default': 'frozen-model', 'base_url': url},
               'auxiliary': {'title_generation': {'enabled': False}},
               'mcp_servers': {'owned': {'command': sys.executable, 'args': [str(home / 'peer.py'), 'FROZEN_A']}},
               'platform_toolsets': {'cli': ['owned']}}
     (home / 'config.yaml').write_text(json.dumps(config))
     env = {**child_env(), **{k: os.environ[k] for k in ('TIRITH_ENABLED',) if k in os.environ}}
-    env.update(HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home), PYTHONPATH=str(root),
+    env.update(HERMES_ALLOW_NO_VAULT="1", HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home), PYTHONPATH=str(root),
                OPENAI_API_KEY='loopback-only', OPENAI_BASE_URL=url)
 
     def status(request_id):
@@ -128,7 +130,7 @@ def test_ordinary_worker_binding_freezes_readers_but_keeps_customizations(tmp_pa
     (plugin / '__init__.py').write_text("import os; from pathlib import Path\nPath(os.environ['HERMES_HOME'], 'plugin-executed').touch()\ndef register(ctx): pass\n", encoding='utf-8')
     frozen = {'plugins': {'enabled': ['sentinel']}, 'agent': {'max_turns': 7}, 'command_allowlist': ['echo *'],
               'mcp_servers': {'x': {'command': 'FROZEN_A'}}}
-    live = {**frozen, 'agent': {'max_turns': 99}, 'mcp_servers': {'x': {'command': 'LIVE_B'}},
+    live = {"_config_version": DEFAULT_CONFIG["_config_version"], **frozen, 'agent': {'max_turns': 99}, 'mcp_servers': {'x': {'command': 'LIVE_B'}},
             'display': {'personality': 'EDITED_AFTER_CREATE'}}
     (home / 'config.yaml').write_text(json.dumps(live), encoding='utf-8')
     script = tmp_path / 'probe.py'
@@ -152,7 +154,7 @@ def test_ordinary_worker_binding_freezes_readers_but_keeps_customizations(tmp_pa
             'plugin': os.path.exists(os.path.join(os.environ['HERMES_HOME'], 'plugin-executed'))}}))
     '''), encoding='utf-8')
     env = {**child_env(), **{k: os.environ[k] for k in ('TIRITH_ENABLED',) if k in os.environ}}
-    env.update(HOME=str(tmp_path), USERPROFILE=str(tmp_path), HERMES_HOME=str(home), PYTHONPATH=str(root))
+    env.update(HERMES_ALLOW_NO_VAULT="1", HOME=str(tmp_path), USERPROFILE=str(tmp_path), HERMES_HOME=str(home), PYTHONPATH=str(root))
     result = subprocess.run([sys.executable, str(script)], cwd=root, env=env, stdin=subprocess.DEVNULL,
                             capture_output=True, text=True, timeout=90, check=False)
     assert result.returncode == 0, result.stdout + result.stderr
