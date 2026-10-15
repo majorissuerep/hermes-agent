@@ -373,13 +373,16 @@ def is_foreign_provider_endpoint(provider: Optional[str], base_url: Optional[str
 
     A persisted session route that pairs one provider with another's endpoint is left over from a
     switch that kept the old URL (openai-codex + the Nous Portal URL sent the Codex slug to the Portal).
-    Only registered providers are judged: a custom or proxy URL is never another provider's canonical one.
+    Only registered targets are judged; retired endpoints remain migration tombstones.
+    An explicit custom provider or an unknown proxy URL keeps its configured route.
     """
     pconfig = PROVIDER_REGISTRY.get(str(provider or "").strip().lower())
     url = str(base_url or "").strip().rstrip("/")
     if pconfig is None or not url or url == (pconfig.inference_base_url or "").rstrip("/"):
         return False
-    return any(url == (other.inference_base_url or "").rstrip("/") for other in PROVIDER_REGISTRY.values())
+    from hermes_cli.runtime_provider_legacy_endpoints import RETIRED_INFERENCE_ENDPOINTS
+    return url in RETIRED_INFERENCE_ENDPOINTS or any(
+        url == (other.inference_base_url or "").rstrip("/") for other in PROVIDER_REGISTRY.values())
 
 
 def _anthropic_base_url_override_ok(base_url: str) -> bool:
