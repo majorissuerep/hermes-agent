@@ -31,7 +31,11 @@ def _skins(peer):
 
 
 def _write_skin(home, name):
-    (home / "config.yaml").write_text(f"display:\n  skin: {name}\n", encoding="utf-8")
+    from hermes_cli.config import atomic_config_replace
+
+    # Match real config edits: same-size in-place writes can share a filesystem
+    # timestamp and leave the effective-config cache with its previous signature.
+    atomic_config_replace(home / "config.yaml", {"display": {"skin": name}})
 
 
 @pytest.fixture

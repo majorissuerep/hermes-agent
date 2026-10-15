@@ -472,7 +472,11 @@ def test_a_git_elsewhere_exiting_mid_scan_is_gone_not_a_hidden_holder(repo: Path
     from tests.waiting import wait_until
 
     other = tmp_path / "other"
-    shutil.copytree(repo, other)
+    # A live .git tree contains transient maintenance locks. Use Git's transport
+    # rather than copying files that a detached maintenance process can remove.
+    _run_git("clone", "-q", "--no-local", str(repo), str(other), cwd=tmp_path)
+    _run_git("config", "user.name", "Test", cwd=other)
+    _run_git("config", "user.email", "test@example.com", cwd=other)
     lock = repo / ".git" / "index.lock"
     lock.write_bytes(b"")  # a killed git's: nothing holds it
     marker = "hermes.test=exits-mid-scan"
