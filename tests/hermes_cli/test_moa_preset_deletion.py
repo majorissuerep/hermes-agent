@@ -269,16 +269,17 @@ def test_moa_save_refuses_transient_read_failure_without_losing_config(tmp_path,
     _seed(tmp_path, monkeypatch, _three_presets(), operator_settings={"keep": None})
     config_path = tmp_path / "config.yaml"
     before = config_path.read_bytes()
-    real_load = config_mod.fast_safe_load
+    state_io = config_mod._hermes_io()
+    real_read = state_io.read_text
     failed_reads = []
 
-    def fail_once(stream):
-        if getattr(stream, "name", None) == str(config_path) and not failed_reads:
+    def fail_once(path, **kwargs):
+        if Path(path) == config_path and not failed_reads:
             failed_reads.append(str(config_path))
             raise OSError(errno.EMFILE, "Too many open files")
-        return real_load(stream)
+        return real_read(path, **kwargs)
 
-    monkeypatch.setattr(config_mod, "fast_safe_load", fail_once)
+    monkeypatch.setattr(state_io, "read_text", fail_once)
     payload = (
         _preset("gpt-5.8").model_dump()
         if legacy else

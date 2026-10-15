@@ -99,6 +99,10 @@ def _claimed_trial_with_aws(monkeypatch):
     from tests.hermes_cli.anon_portal import claimed_trial
     _clear_provider_env(monkeypatch)
     claimed_trial(monkeypatch)
+    from hermes_cli.auth import _load_auth_store, _save_auth_store
+    store = _load_auth_store()
+    store.pop("active_provider", None)  # a claim is not an explicit provider selection
+    _save_auth_store(store)
     _never_mint(monkeypatch)
     monkeypatch.setattr("agent.bedrock_adapter.has_aws_credentials", lambda *_a, **_kw: True)
 
