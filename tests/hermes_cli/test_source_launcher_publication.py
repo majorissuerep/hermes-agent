@@ -294,9 +294,6 @@ def _command_survives_generation_collection(tmp_path, monkeypatch, surface):
             if surface == "legacy":
                 command = [sys.executable, "-I", str(repo / "scripts/hermes-gateway"), "--help"]
                 args = ["gateway", "--help"]
-            elif surface == "ssh":
-                from hermes_cli.windows_ssh_runtime import _resolve_direct_command
-                command = [*_resolve_direct_command(str(launcher)), *args]
             elif surface == "published":
                 result = subprocess.run([str(launcher), "--print-runtime-command", "--", *args],
                                         capture_output=True, text=True, timeout=30, encoding="utf-8", check=False)
@@ -332,16 +329,10 @@ def _command_survives_generation_collection(tmp_path, monkeypatch, surface):
     assert json.loads(receipt)["argv"] == args
 
 
-@pytest.mark.parametrize("surface", ["published", "systemd", "launchd", "ssh", "legacy"])
+@pytest.mark.parametrize("surface", ["published", "systemd", "launchd", "legacy"])
 @pytest.mark.platforms("posix")
 @pytest.mark.spawns_gateway_lookalike
 def test_posix_commands_survive_generation_collection(tmp_path, monkeypatch, surface):
-    _command_survives_generation_collection(tmp_path, monkeypatch, surface)
-
-
-@pytest.mark.parametrize("surface", ["published", "ssh"])
-@pytest.mark.platforms("windows")
-def test_windows_commands_survive_generation_collection(tmp_path, monkeypatch, surface):
     _command_survives_generation_collection(tmp_path, monkeypatch, surface)
 
 
@@ -397,28 +388,6 @@ def test_repin_without_distlib_retires_stale_native_launcher(tmp_path, monkeypat
     assert result == local / "hermes.cmd"
     assert not original.exists()  # cmd.exe must not run the old exe first
     assert result is not None and str(new_python) in result.read_text(encoding="utf-8-sig")
-
-
-@pytest.mark.platforms("windows")
-def test_windows_repair_upgrades_healthy_old_pm_external_launchers(tmp_path, monkeypatch):
-    from hermes_cli._install_repair import ensure_windows_bin_launchers
-
-    repo, home, interpreter = fixture_tree(tmp_path, monkeypatch)
-    managed = home / "hermes-agent"
-    shutil.move(repo, managed)
-    external = home / "bin"
-    external.mkdir()
-    for name in _launchers.ENTRY_POINTS:
-        (external / f"{name}.exe").write_bytes(b"old PM launcher without a venv binding")
-    assert ensure_windows_bin_launchers(managed, user_path_entries=[])
-    local = managed / ".hermes" / "bin"
-    launcher = local / "hermes.exe"
-    if not launcher.exists():
-        launcher = local / "hermes.cmd"
-    result = subprocess.run([str(launcher), "--print-runtime-command"], capture_output=True,
-                            text=True, timeout=30, encoding="utf-8", check=False)
-    assert result.returncode == 0, result.stderr
-    assert Path(json.loads(result.stdout)[0]).samefile(interpreter)
 
 
 def test_dashboard_action_boots_selected_dependencies(tmp_path, monkeypatch):

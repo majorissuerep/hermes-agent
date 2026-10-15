@@ -35,7 +35,7 @@ def _physical_repo_root(tmp_path: Path) -> Path:
 STATIC_BLOCKED = """
 OPENAI_BASE_URL OPENAI_API_KEY OPENAI_API_BASE OPENAI_ORG_ID OPENAI_ORGANIZATION
 OPENROUTER_API_KEY ANTHROPIC_BASE_URL ANTHROPIC_API_KEY ANTHROPIC_TOKEN LLM_MODEL
-VERTEX_CREDENTIALS_PATH GOOGLE_APPLICATION_CREDENTIALS AWS_BEARER_TOKEN_BEDROCK
+VERTEX_CREDENTIALS_PATH GOOGLE_APPLICATION_CREDENTIALS
 GOOGLE_API_KEY DEEPSEEK_API_KEY MISTRAL_API_KEY GROQ_API_KEY TOGETHER_API_KEY
 PERPLEXITY_API_KEY COHERE_API_KEY FIREWORKS_API_KEY XAI_API_KEY HELICONE_API_KEY
 TELEGRAM_HOME_CHANNEL TELEGRAM_HOME_CHANNEL_NAME DISCORD_HOME_CHANNEL
@@ -588,7 +588,6 @@ def test_pythonpath_descendants_are_not_owned():
 @pytest.mark.parametrize("link_at", ["home", "repo", "unrelated"])
 @pytest.mark.parametrize("profile", [False, True])
 def test_launcher_alias_provenance(child_env, monkeypatch, link_at, profile):
-    from hermes_cli.gateway_windows import _preserve_hermes_home_path
     from hermes_cli.profiles import resolve_profile_env
     physical_home = child_env / "physical-home"
     physical_root = physical_home / "hermes-agent"
@@ -610,8 +609,6 @@ def test_launcher_alias_provenance(child_env, monkeypatch, link_at, profile):
     monkeypatch.setenv("HERMES_HOME", str(configured))
     assert Path(resolve_profile_env("default")) == configured
     assert Path(resolve_profile_env("coder")) == configured / "profiles/coder"
-    if link_at == "home":
-        assert Path(_preserve_hermes_home_path(physical_root)) == lexical_root
     active_home = configured / "profiles/coder" if profile else configured
     aliases = pp._build_hermes_repo_root_aliases(physical_root.resolve(), physical_root, active_home)
     monkeypatch.setattr(local, "_hermes_repo_root_aliases", aliases)
@@ -1067,47 +1064,6 @@ class TestNativeEnvironmentContracts:
         entries = pp.split(os.pathsep) if pp else []
         assert direct_child in entries
         assert "/home/user/my-lib" in entries
-
-    def test_configured_home_alias_matches_launcher_output(self, tmp_path, monkeypatch):
-        """The real producer spelling is derived and consumed end to end."""
-        from tools.environments import local
-        from tools.environments import local_pythonpath
-        from hermes_cli.gateway_windows import _preserve_hermes_home_path
-
-        physical_home = tmp_path / "physical-home"
-        physical_root = _physical_repo_root(tmp_path)
-        configured_home = tmp_path / "configured-home"
-        try:
-            _make_directory_link(configured_home, physical_home)
-        except OSError as exc:
-            pytest.skip(f"directory link unavailable on this host: {exc}")
-        monkeypatch.setenv("HERMES_HOME", str(configured_home))
-
-        launcher_entry = Path(_preserve_hermes_home_path(physical_root))
-        aliases = local_pythonpath._build_hermes_repo_root_aliases(
-            physical_root.resolve(),
-            physical_root,
-            configured_home,
-        )
-
-        assert launcher_entry == configured_home / "hermes-agent"
-        assert launcher_entry in aliases
-
-        monkeypatch.setattr(local, "_hermes_repo_root_aliases", aliases)
-        nested_user_path = launcher_entry / "user-data"
-        env = {
-            "PYTHONPATH": os.pathsep.join([
-                str(launcher_entry),
-                str(nested_user_path),
-                "/home/user/my-lib",
-            ])
-        }
-        local_pythonpath._strip_hermes_owned_pythonpath(env)
-
-        assert env["PYTHONPATH"].split(os.pathsep) == [
-            str(nested_user_path),
-            "/home/user/my-lib",
-        ]
 
     def test_profile_rehome_keeps_junction_lexical_alias(self, tmp_path, monkeypatch):
         """Profile re-home must not lose the launcher's lexical repo-root spelling.

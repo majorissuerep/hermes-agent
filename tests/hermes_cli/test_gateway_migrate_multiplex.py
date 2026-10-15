@@ -948,32 +948,6 @@ def test_plan_names_every_process_it_will_sigterm_before_it_signals_anything(fle
 
 
 
-def test_windows_task_detection_reads_both_the_task_and_the_startup_fallback(monkeypatch):
-    """`hermes gateway install` falls back to a Startup-folder entry when it cannot register a
-    task; a migration that removed only the task would leave that entry launching a second
-    gateway at the next logon."""
-    from hermes_cli import gateway_windows as gww
-    for task, startup, expected in ((True, False, True), (False, True, True), (False, False, False)):
-        monkeypatch.setattr(gww, "is_task_registered", lambda t=task: t)
-        monkeypatch.setattr(gww, "is_startup_entry_installed", lambda s=startup: s)
-        assert gm._windows_task_installed() is expected
-    # A schtasks failure is not evidence of a second gateway: fail closed to "not installed".
-    monkeypatch.setattr(gww, "is_task_registered", lambda: (_ for _ in ()).throw(OSError("schtasks")))
-    assert gm._windows_task_installed() is False
-
-
-def test_windows_is_migratable_and_only_s6_is_refused(monkeypatch):
-    """The host predicate: Windows used to be a flat refusal with hand-migration instructions.
-    s6 stays refused -- its per-profile gateways are slots the container's own boot registers."""
-    from hermes_cli import gateway as gw
-    monkeypatch.setattr(gw, "_running_under_s6", lambda: False)
-    assert gm._host_supports_migration() is None
-
-    monkeypatch.setattr(gw, "_running_under_s6", lambda: True)
-    reason = gm._host_supports_migration()
-    assert reason is not None
-
-
 def test_standalone_profile_is_listed_left_alone_and_not_a_fold_target(fleet):
     """A profile that opts itself out via `gateway.standalone: true` keeps its own gateway: it is
     neither a blocker nor a fold target — the plan names it under standalone_by_config instead."""

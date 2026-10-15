@@ -248,18 +248,17 @@ def _registry_home() -> Iterable[Path]:
 
 
 def _service_homes() -> Iterable[Path]:
-    """The ``HERMES_HOME`` of every gateway service this OS user runs: its own definitions, the
-    machine-wide units that run as it, and the launchers its Scheduled Tasks start. Another account's
-    gateway is that account's install."""
-    from hermes_cli import gateway_windows
+    """Homes of this OS user's service definitions and machine-wide units.
+
+    Another account's gateway is that account's install. Legacy definitions
+    remain readable without importing a retired native Windows runtime.
+    """
     from hermes_platform.resolver import known_dirs
 
     for machine_wide, globs in ((False, known_dirs.gateway_service_definition_globs()),
                                 (True, known_dirs.system_gateway_service_definition_globs())):
         for definition in _expand_all(globs):
             yield from _definition_homes(definition, machine_wide=machine_wide)
-    for launcher in gateway_windows.registered_task_launchers():
-        yield from _definition_homes(Path(launcher), machine_wide=False, follow=False)
 
 
 def _definition_homes(definition: Path, *, machine_wide: bool, follow: bool = True) -> Iterator[Path]:

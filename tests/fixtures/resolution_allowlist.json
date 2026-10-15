@@ -199,11 +199,6 @@
   },
   {
     "path": "hermes_cli/gateway.py",
-    "symbol": "_windows_scheduled_task_state",
-    "kind": "bare_which"
-  },
-  {
-    "path": "hermes_cli/gateway.py",
     "symbol": "get_systemd_linger_status",
     "kind": "bare_which"
   },
@@ -215,11 +210,6 @@
   {
     "path": "hermes_cli/gateway_setup_wizard.py",
     "symbol": "_setup_signal",
-    "kind": "bare_which"
-  },
-  {
-    "path": "hermes_cli/gateway_windows.py",
-    "symbol": "_exec_schtasks",
     "kind": "bare_which"
   },
   {

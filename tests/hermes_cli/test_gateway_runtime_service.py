@@ -136,55 +136,6 @@ def test_loaded_launchd_identity_is_independent_of_disk(configured, command, rea
         verify_launchd_loaded(output, home, uid=123, username="owner")
 
 
-@pytest.mark.parametrize("case,reason", [
-    ("bound", None), ("utf16", None), ("wrong_home", "profile_mismatch"),
-    ("wrong_user", "service_account_mismatch"), ("missing_user", "service_identity_unverified"),
-    ("extra_action", "service_identity_unverified"), ("disabled", "service_disabled"),
-    ("unknown_script", "service_identity_unverified"), ("malformed_xml", "service_identity_unverified"),
-])
-def test_task_xml_binds_actual_action_and_principal(case, reason, tmp_path):
-    from hermes_cli.gateway_runtime_service_identity import verify_windows_task
-    from hermes_cli.gateway_windows import _build_scheduled_task_xml
-    home = tmp_path / 'requested'
-    home.mkdir()
-    script = home / 'gateway.vbs'
-    configured = str(home if case != 'wrong_home' else tmp_path / 'other')
-    # The current installed launcher grammar; no script is executed.
-    script.write_text("\n".join([
-        "' Hermes Agent Gateway", "Option Explicit", "Dim sh, env, existing_pp",
-        'Set sh = CreateObject("WScript.Shell")', 'Set env = sh.Environment("PROCESS")',
-        f'env.Item("HERMES_HOME") = "{configured}"',
-        'env.Item("HERMES_SUPERVISED_CHILD") = "1"',
-        'env.Item("VIRTUAL_ENV") = "C:\\Hermes"',
-        'existing_pp = env.Item("PYTHONPATH")', 'If Len(existing_pp) > 0 Then',
-        '  env.Item("PYTHONPATH") = "C:\\Hermes;" & existing_pp', 'Else',
-        '  env.Item("PYTHONPATH") = "C:\\Hermes"', 'End If',
-        f'sh.CurrentDirectory = "{home}"',
-        f'sh.Run "{sys.executable} -m hermes_cli.main gateway run", 0, False',
-    ]) + "\n", encoding='utf-8')
-    user = 'DOMAIN\\owner'
-    xml = _build_scheduled_task_xml('Hermes_Gateway', script, user)
-    if case == 'wrong_user':
-        xml = xml.replace(user, 'DOMAIN\\other')
-    if case == 'missing_user':
-        xml = xml.replace(f'<UserId>{user}</UserId>', '')
-    if case == 'extra_action':
-        xml = xml.replace('</Actions>', '<Exec><Command>other.exe</Command></Exec></Actions>')
-    if case == 'disabled':
-        xml = xml.replace('<Enabled>true</Enabled>', '<Enabled>false</Enabled>')
-    if case == 'utf16':
-        xml = xml.encode('utf-16')
-    if case == 'malformed_xml':
-        xml = '<Task>'
-    if case == 'unknown_script':
-        script.write_text('MsgBox "not a gateway"', encoding='utf-8')
-    if reason:
-        with pytest.raises(ValueError, match=reason):
-            verify_windows_task(xml, home, user, 'S-1-5-21-123')
-    else:
-        verify_windows_task(xml, home, user, 'S-1-5-21-123')
-
-
 @pytest.mark.platforms("macos")
 @pytest.mark.parametrize("case,reason", [("loaded_good_disk_wrong", None), ("loaded_wrong_disk_good", "profile_mismatch"), ("bootstrap", None)])
 def test_native_launchd_checks_loaded_job_before_disk(case, reason, tmp_path, monkeypatch):
@@ -228,53 +179,6 @@ def test_native_launchd_checks_loaded_job_before_disk(case, reason, tmp_path, mo
     assert plist.read_bytes() == original
 
 
-@pytest.mark.platforms("windows")
-@pytest.mark.parametrize("wrong", [False, True])
-def test_native_task_query_uses_installed_xml_and_vendor_launcher(wrong, tmp_path, monkeypatch):
-    from hermes_cli import gateway_runtime_service as service
-    from hermes_cli.gateway_windows import _build_gateway_vbs_script, _build_scheduled_task_xml
-    home = tmp_path / 'profile'
-    home.mkdir()
-    monkeypatch.setenv('HERMES_HOME', str(home))
-    script = home / 'gateway.vbs'
-    # newline='' mirrors the installer's _atomic_write: the template is already CRLF and
-    # Windows text mode would otherwise double it to \r\r\n, which is not the vendor template.
-    script.write_text(_build_gateway_vbs_script(sys.executable, str(home), str(home), ''), encoding='utf-8', newline='')
-    original = script.read_bytes()
-    # whoami is read-only native account evidence; no task-manager mutation.
-    identity = subprocess.run(['whoami.exe', '/USER', '/FO', 'CSV', '/NH'], stdin=subprocess.DEVNULL, capture_output=True, timeout=5, check=False)
-    from hermes_cli.gateway_windows import _schtasks_encoding
-    import csv
-    _account, sid = next(csv.reader(identity.stdout.decode(_schtasks_encoding()).splitlines()))
-    suffix = service.service_suffix(home)
-    name = 'Hermes_Gateway' + ('_' + suffix if suffix else '')
-    xml = _build_scheduled_task_xml(name, script, 'S-1-5-18' if wrong else sid)
-    peer = tmp_path / 'supervisor.py'
-    row = f'"\\{name}","N/A","Ready"'
-    peer.write_text('import sys\n' + f'xml={xml!r}\n' +
-        'if "/XML" in sys.argv: sys.stdout.buffer.write(xml.encode("utf-16"))\n'
-        + f'elif "/Query" in sys.argv: print({row!r})\n', encoding='utf-8')
-    actual = subprocess.run
-    calls = []
-    def boundary(argv, **kw):
-        if argv[0] == 'whoami.exe':
-            return actual(argv, **kw)
-        assert argv[0] == 'schtasks.exe'
-        calls.append(argv)
-        return actual([sys.executable, str(peer), *argv[1:]], **kw)
-    monkeypatch.setattr(subprocess, 'run', boundary)
-    if wrong:
-        with pytest.raises(service.RuntimeStartError, match='service_account_mismatch'):
-            service.discover_existing_gateway_service(home, deadline=time.monotonic()+5)
-        assert not any('/Run' in a for a in calls)
-    else:
-        found = service.discover_existing_gateway_service(home, deadline=time.monotonic()+5)
-        assert found is not None
-        service.start_existing_gateway_service(found, deadline=time.monotonic()+5)
-        assert sum('/Run' in a for a in calls) == 1
-    assert script.read_bytes() == original
-
-
 @pytest.mark.platforms("linux")
 def test_service_definition_reads_reject_fifo_without_waiting(tmp_path):
     from hermes_cli.gateway_runtime_service_identity import read_definition
@@ -313,28 +217,3 @@ def test_android_python_reaches_the_unmanaged_start(tmp_path, monkeypatch):
     result = runtime.ensure_gateway_runtime(home, timeout=0.3)
     assert result.reason_code != "unsupported_supervisor_platform"
     assert spawned == [home.resolve()]
-
-
-def test_windows_startup_folder_entry_still_restarts_a_stopped_owner(tmp_path, monkeypatch):
-    """The Startup-folder fallback is login persistence only (no start verb, no identity): with it
-    present and no Scheduled Task registered, ensure takes the same detached direct spawn manual
-    `hermes gateway start` uses instead of refusing until the next login."""
-    from types import SimpleNamespace
-    from hermes_cli import gateway_runtime as runtime, gateway_runtime_service as service, gateway_runtime_start as start
-    from hermes_cli import gateway_windows
-
-    home = tmp_path / "profile"
-    home.mkdir(mode=0o700)
-    startup = tmp_path / "Startup"
-    startup.mkdir()
-    (startup / f"Hermes_Gateway_{service.service_suffix(home)}.vbs").write_text("' fallback\r\n")
-    monkeypatch.setattr(gateway_windows, "_startup_dir", lambda: startup)
-    queries, spawned = [], []
-    monkeypatch.setattr(service, "_run", lambda argv, *a, **k: queries.append(argv) or SimpleNamespace(returncode=0, stdout=""))
-    monkeypatch.setattr(service.sys, "platform", "win32")
-    monkeypatch.setattr(runtime, "discover_gateway_endpoint", lambda *a, **k: runtime.GatewayDiscovery("absent"))
-    monkeypatch.setattr(start, "spawn_unmanaged_gateway", lambda target, **k: spawned.append(Path(target)))
-    result = runtime.ensure_gateway_runtime(home, timeout=0.3)
-    assert result.reason_code != "startup_service_requires_login"
-    assert spawned == [home.resolve()]
-    assert all(argv[:2] == ["schtasks.exe", "/Query"] for argv in queries)  # nothing installed or run
