@@ -586,6 +586,9 @@ def build_listener_server(served_app, host: str, port: int, *, auth_required: bo
             _ws_ping_setting("ws_ping_interval"), _ws_ping_setting("ws_ping_timeout"))
     config = uvicorn.Config(
         served_app, host=host, port=port, log_level="warning",
+        # Hermes owns the process-wide queue/profile handlers. dictConfig shuts
+        # them down and can deadlock against a listener lazily creating a file handler.
+        log_config=None,
         # Off by default so _ws_client_is_allowed sees the real peer, not
         # X-Forwarded-For. Gated mode runs behind a TLS terminator and needs
         # X-Forwarded-Proto for cookie Secure flags.

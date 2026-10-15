@@ -1011,6 +1011,9 @@ def _build_uvicorn_server(host: str, port: int, *, ssh_isolated: bool = False):
 
     config = uvicorn.Config(
         served_app, host=host, port=port, log_level="warning",
+        # A listener does not own logging: reconfiguration can deadlock with
+        # Hermes' queue listener while it constructs a profile file handler.
+        log_config=None,
         # Off by default so _ws_client_is_allowed sees the real peer, not
         # X-Forwarded-For. Gated mode runs behind a TLS terminator and needs
         # X-Forwarded-Proto for cookie Secure flags.
