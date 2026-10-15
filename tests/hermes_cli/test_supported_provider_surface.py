@@ -9,6 +9,8 @@ def test_removed_bundled_providers_cannot_return_through_metadata_or_runtime(tmp
     from hermes_cli.providers import get_provider
     from hermes_cli.models_catalog_static import listed_canonical_providers
     from hermes_cli.runtime_provider import resolve_runtime_provider
+    from hermes_cli.auth_commands import auth_add_command
+    from types import SimpleNamespace
 
     supported = {"openai-codex", "openai-api", "anthropic", "litellm", "custom",
                  "zai", "xai", "xai-oauth", "ai-gateway"}
@@ -20,6 +22,9 @@ def test_removed_bundled_providers_cannot_return_through_metadata_or_runtime(tmp
             resolve_provider(name)
         with pytest.raises(AuthError):
             resolve_runtime_provider(requested=name)
+        with pytest.raises(SystemExit, match="Unknown provider"):
+            auth_add_command(SimpleNamespace(provider=name, auth_type="api_key",
+                                              api_key="synthetic-unused-provider-key"))
     assert resolve_provider("chatgpt") == "openai-codex"
     assert resolve_provider("grok") == "xai"
     assert resolve_provider("vercel") == "ai-gateway"

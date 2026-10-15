@@ -23,15 +23,12 @@ import hermes_cli.auth as auth_mod
 from hermes_cli.auth import PROVIDER_REGISTRY
 from hermes_cli.auth_plugin_providers import (
     dispatch_plugin_auth, is_refreshable_oauth_provider, plugin_missing_auth_handler_error)
-from hermes_constants import OPENROUTER_BASE_URL
 from hermes_cli.secret_prompt import masked_secret_prompt
 
 
 # Providers that support OAuth login in addition to API keys.
-_OAUTH_CAPABLE_PROVIDERS = {"anthropic", "nous", "openai-codex", "xai-oauth", "qwen-oauth", "minimax-oauth", "openrouter"}
-# ...and default to it when ``--type`` is omitted. OpenRouter stays API-key-first: the documented
-# ``hermes auth add openrouter --api-key sk-or-...`` must keep working with no ``--type``.
-_OAUTH_DEFAULT_PROVIDERS = _OAUTH_CAPABLE_PROVIDERS - {"openrouter"}
+_OAUTH_CAPABLE_PROVIDERS = {"anthropic", "openai-codex", "xai-oauth"}
+_OAUTH_DEFAULT_PROVIDERS = _OAUTH_CAPABLE_PROVIDERS
 # Providers whose sibling CLI login Hermes may borrow (``auth.adopt_external_logins``).
 EXTERNAL_LOGIN_PROVIDERS = {"anthropic", "openai-codex"}
 
@@ -81,7 +78,7 @@ def _resolve_custom_provider_input(raw: str) -> str | None:
 
 
 _PROVIDER_ALIASES = {
-    "or": "openrouter", "open-router": "openrouter", "grok-oauth": "xai-oauth",
+    "grok-oauth": "xai-oauth",
     "xai-oauth": "xai-oauth", "x-ai-oauth": "xai-oauth", "xai-grok-oauth": "xai-oauth"}
 
 
@@ -121,8 +118,6 @@ def _migrate_legacy_custom_pool_key(provider: str, legacy_key: str) -> None:
 
 
 def _provider_base_url(provider: str) -> str:
-    if provider == "openrouter":
-        return OPENROUTER_BASE_URL
     if provider.startswith(CUSTOM_POOL_PREFIX):
         from agent.credential_pool import _get_custom_provider_config
         return str((_get_custom_provider_config(provider) or {}).get("base_url") or "").strip()
@@ -134,14 +129,14 @@ def _provider_base_url(provider: str) -> str:
 
 
 def _is_known_provider(provider: str, configured_provider: dict | None) -> bool:
-    return (provider in PROVIDER_REGISTRY or provider == "openrouter"
+    return (provider in PROVIDER_REGISTRY
             or provider.startswith(CUSTOM_POOL_PREFIX) or configured_provider is not None)
 
 
 def _unknown_provider_exit(provider: str) -> SystemExit:
     """Did-you-mean over the known provider ids plus the two commands that list/pick them."""
     import difflib
-    known = sorted(set(PROVIDER_REGISTRY) | {"openrouter"}
+    known = sorted(set(PROVIDER_REGISTRY)
                    | {entry["name"] for entry in _get_custom_provider_entries()})
     close = difflib.get_close_matches(provider, known, n=3, cutoff=0.5)
     hint = f" Did you mean {', '.join(close)}?" if close else ""

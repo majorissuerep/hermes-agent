@@ -52,7 +52,7 @@ def test_genuinely_different_upstream_still_strips_overlaps():
     # A user proxy that is NOT the same upstream must still re-route picks away from aggregators
     # (the dedup's original intent).
     rows = [
-        _builtin_openrouter_row(["openai/gpt-6", "deepseek/deepseek-v4.1-flash"]),
+        _builtin_gateway_row(["openai/gpt-6", "deepseek/deepseek-v4.1-flash"]),
         _user_row("custom:proxy", "https://my-proxy.example.com/v1", ["openai/gpt-6"]),
     ]
     inventory._strip_aggregator_overlaps(rows)
