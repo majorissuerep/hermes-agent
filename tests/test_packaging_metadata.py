@@ -53,8 +53,8 @@ def test_starlette_server_pins_and_lock_exclude_cve_2026_48710():
     assert versions and all(version >= floor for version in versions)
 
 
-def test_every_dependency_is_held_to_one_three_day_release_age():
-    """Hermes's deps must be >= 3 days old when locked, exact pins included (Teknium ruling).
+def test_every_dependency_is_held_to_one_fourteen_day_release_age():
+    """Hermes's deps must be >= 14 days old when locked, exact pins included (Teknium ruling).
 
     A per-package exemption or date would quietly let a fresh release into the lock; the
     check runs at lock time only, so users never need a mirror that serves upload times.
@@ -62,9 +62,9 @@ def test_every_dependency_is_held_to_one_three_day_release_age():
     manifest = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     uv = manifest["tool"]["uv"]
     lock = tomllib.loads((REPO_ROOT / "uv.lock").read_text(encoding="utf-8"))
-    assert uv["exclude-newer"] == "3 days"
+    assert uv["exclude-newer"] == "14 days"
     assert "exclude-newer-package" not in uv
-    assert lock["options"].get("exclude-newer-span") == "P3D"
+    assert lock["options"].get("exclude-newer-span") == "P14D"
     assert "exclude-newer-package" not in lock["options"]
 
 
