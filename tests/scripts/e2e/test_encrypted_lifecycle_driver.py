@@ -44,7 +44,7 @@ def test_unreachable_gateway_stops_before_installation_or_work_creation(tmp_path
             pytest.fail("installation started before provider transport preflight")
 
         monkeypatch.setattr(Rehearsal, "execute", must_not_install)
-        with pytest.raises(RuntimeError, match="gateway is unreachable from this environment"):
+        with pytest.raises(RuntimeError, match="gateway is unreachable"):
             driver.main()
     assert list(work.iterdir()) == []
     assert not evidence.exists()

@@ -17,10 +17,14 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import urllib.request
 
 SCENARIOS = ("fresh", "update", "broken-files", "dirty-install")
 IMAGE = "ubuntu:24.04@sha256:f610ab94648195aa356059f5b41d6085c9d4d903c072430cdd1af7bdb646106b"
 SNAPSHOT = "20261001T000000Z"
+CA_PACKAGE_URL = ("https://snapshot.ubuntu.com/ubuntu/20261001T000000Z/pool/main/c/ca-certificates/"
+                  "ca-certificates_20260601~24.04.1_all.deb")
+CA_PACKAGE_SHA256 = "6bac2a01979e210d9eac1d4d56747ec709ea60654744d66705dc3c36e7629e50"
 
 
 def command(argv, *, stdin=None, data=None, timeout=120):
@@ -41,7 +45,8 @@ def export_source(source: Path, baseline: str, candidate: str, output: Path) -> 
         root = Path(directory)
         bare = root / "source.git"
         command(["git", "init", "--bare", str(bare)])
-        command(["git", "--git-dir", str(bare), "fetch", "--no-tags",
+        command(["git", "-c", "pack.threads=2", "-c", "pack.windowMemory=64m",
+                 "--git-dir", str(bare), "fetch", "--no-tags",
                  source.resolve().as_uri(), refs["candidate"] + ":refs/heads/main",
                  refs["baseline"] + ":refs/heads/baseline"], timeout=600)
         command(["git", "--git-dir", str(bare), "symbolic-ref", "HEAD", "refs/heads/main"])
@@ -110,9 +115,9 @@ class Container:
     def shell(self, argv, **kwargs):
         return command([*self.exec_prefix(), *argv], **kwargs)
 
-    def put(self, archive: Path):
+    def put(self, archive: Path, target="/inputs/source.tar"):
         with archive.open("rb") as stream:
-            self.shell(["sh", "-c", "umask 077; mkdir -p /inputs; cat > /inputs/source.tar"],
+            self.shell(["sh", "-c", 'umask 077; mkdir -p /inputs; cat > "$1"', "sh", target],
                        stdin=stream, timeout=600)
 
     def evidence(self, output: Path):
@@ -182,7 +187,7 @@ class Kubernetes(Container):
                  "--timeout=120s"], timeout=130)
 
 
-def run_scenario(args, scenario, archive, provenance, credential):
+def run_scenario(args, scenario, archive, ca_package, provenance, credential):
     output = args.evidence / scenario
     output.mkdir()
     container = {"docker": Docker, "kubernetes": Kubernetes}[args.backend](
@@ -199,8 +204,9 @@ def run_scenario(args, scenario, archive, provenance, credential):
         if actual != provenance["source_archive_sha256"]:
             raise ValueError("source archive changed during container transport")
         container.shell(["tar", "-xf", "/inputs/source.tar", "-C", "/inputs"])
+        container.put(ca_package, "/inputs/bootstrap-ca.deb")
         # Bootstrap has no LLM credentials; only the final driver receives them over stdin.
-        bootstrap = container.shell(["bash", "/inputs/bootstrap.sh"], timeout=900)
+        bootstrap = container.shell(["bash", "/inputs/bootstrap.sh", CA_PACKAGE_SHA256], timeout=900)
         (output / "bootstrap.log").write_bytes(bootstrap)
         argv = ["runuser", "-u", "rehearsal", "--", "python3", "-u",
                 "/source/scripts/e2e/encrypted_lifecycle.py", "--scenario", scenario,
@@ -272,12 +278,20 @@ def main():
             namespace_created = True
         with tempfile.TemporaryDirectory(prefix="hermes-container-source-") as directory:
             archive = Path(directory) / "source.tar"
+            print("[source] exporting committed Git objects and verifying complete history", flush=True)
             provenance = export_source(args.source, args.baseline, args.candidate, archive)
             if hashlib.sha256(Path(__file__).read_bytes()).hexdigest() != provenance["orchestrator_sha256"]:
                 raise ValueError("run the container orchestrator from the exact committed candidate")
+            ca_package = Path(directory) / "bootstrap-ca.deb"
+            with urllib.request.urlopen(CA_PACKAGE_URL, timeout=60) as response:
+                ca_package.write_bytes(response.read())
+            if hashlib.sha256(ca_package.read_bytes()).hexdigest() != CA_PACKAGE_SHA256:
+                raise ValueError("bootstrap CA package differs from its pinned checksum")
+            provenance.update(ca_package_url=CA_PACKAGE_URL, ca_package_sha256=CA_PACKAGE_SHA256)
+            print("[source] source/archive and bootstrap certificate checksums verified", flush=True)
             scenarios = SCENARIOS if args.scenario == "all" else (args.scenario,)
             with ThreadPoolExecutor(max_workers=args.max_parallel) as pool:
-                futures = [pool.submit(run_scenario, args, scenario, archive, provenance, credential)
+                futures = [pool.submit(run_scenario, args, scenario, archive, ca_package, provenance, credential)
                            for scenario in scenarios]
                 # Inspect every result; an early failure must not hide another running case.
                 results, failures = [], []

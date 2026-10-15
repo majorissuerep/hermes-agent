@@ -55,7 +55,9 @@ gateway publicly just for testing.
 
 - Ubuntu's OCI digest and the immutable APT snapshot are pinned in
   `container_lifecycle.py` / `container_bootstrap.sh`. Evidence includes the
-  resolved image ID and installed OS package versions.
+  resolved image ID and installed OS package versions. The minimal image's CA
+  bootstrap uses a checksum-pinned Ubuntu package, not host certificates or
+  disabled TLS checks; subsequent APT access uses HTTPS and signed metadata.
 - The source archive contains an independent, fsck-verified Git object store,
   not a live checkout, alternates, host Git configuration or untracked files.
   It retains complete baseline→candidate ancestry. Both ends must differ.
