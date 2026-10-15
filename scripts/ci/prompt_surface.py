@@ -111,10 +111,16 @@ class _ImportFailures(logging.Handler):
 
 def _scrub(text: str, home: Path) -> str:
     import platform as _platform
+    from agent.prompt_builder import WSL_ENVIRONMENT_HINT
+
+    # Runtime host facts are not prompt-source changes. Normalize the WSL-only
+    # description just like the native OS/version, without faking OS detection.
+    text = text.replace("\n\n" + WSL_ENVIRONMENT_HINT, "")
     for raw, token in sorted({
         str(home / ".hermes"): "<HERMES_HOME>",
         str(home): "<HOME>",
         f"{_platform.system()} ({_platform.release()})": "<HOST_OS>",
+        "WSL (Windows Subsystem for Linux)": "<HOST_OS>",
     }.items(), key=lambda kv: -len(kv[0])):
         text = text.replace(raw, token)
     return text

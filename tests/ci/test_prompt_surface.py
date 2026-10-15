@@ -70,3 +70,14 @@ def test_summary_names_the_surface_and_tool_that_changed(tmp_path):
     assert "| cli.claude |" in summary and "+# Finish every job" in summary
     assert "`write_file`: description +" in summary
     assert prompt_surface.summarize(base, base) == ""
+
+
+def test_host_description_is_not_a_prompt_source_change(tmp_path):
+    import platform
+
+    from agent.prompt_builder import WSL_ENVIRONMENT_HINT
+
+    native = f"Host: {platform.system()} ({platform.release()})\nUser home directory: {tmp_path}"
+    wsl = f"Host: WSL (Windows Subsystem for Linux)\nUser home directory: {tmp_path}\n\n{WSL_ENVIRONMENT_HINT}"
+
+    assert prompt_surface._scrub(native, tmp_path) == prompt_surface._scrub(wsl, tmp_path)

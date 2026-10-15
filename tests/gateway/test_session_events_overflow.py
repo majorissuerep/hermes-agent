@@ -11,8 +11,10 @@ class Peer:
     def __init__(self, gate=None):
         self.frames = queue.Queue()
         self.gate = gate
+        self.write_started = threading.Event()
 
     def write(self, frame):
+        self.write_started.set()
         if self.gate is not None:
             self.gate.wait()
         self.frames.put(frame)
@@ -50,6 +52,10 @@ async def test_overflowed_subscriber_is_detached_and_told_to_resume(tmp_path):
                 live.event_stream.publish('s', {'n': n}, event_type='message.delta')
                 # Pace the healthy reader by receipt so only the stalled peer's backlog grows.
                 delivered.append(await asyncio.to_thread(healthy.frames.get, True, 5))
+                if n == 0:
+                    # Pin one slow frame in flight before filling its bounded queue. Otherwise
+                    # a late-starting writer can take a whole batch and never reach overflow.
+                    assert await asyncio.to_thread(slow.write_started.wait, 5), 'slow writer never started'
             # The healthy viewer saw the whole turn; the stalled one lost its subscription
             # while its socket stayed open, and its next frame says so.
             assert [frame['params']['payload']['n'] for frame in delivered] == list(range(total))
@@ -69,8 +75,8 @@ async def test_overflowed_subscriber_is_detached_and_told_to_resume(tmp_path):
             # Nothing else reaches the retired subscription until it resumes for a snapshot.
             live.event_stream.publish('s', {'n': 'after'}, event_type='message.delta')
             assert (await asyncio.to_thread(healthy.frames.get, True, 5))['params']['payload'] == {'n': 'after'}
-            with pytest.raises(queue.Empty):
-                slow.frames.get(timeout=0.5)
+            assert not live.event_stream.fanout.contains(slow)
+            assert slow.frames.empty()
             await stalled.resume(ref, {})
             assert len(live.subscribers) == 2
             live.event_stream.publish('s', {'n': 'resumed'}, event_type='message.delta')
