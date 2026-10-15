@@ -177,7 +177,7 @@ def _build_record(*, other: bool) -> SetupRecord:
     # installed provider plugin may opt back into the legacy account flow.
     free_tier_account = anon_auth.free_inference_active(state)
     return SetupRecord(
-        provider_configured=other,
+        provider_configured=other or free_tier_account,
         inference_provider=_resolve_inference(),
         free_tier_account=free_tier_account,
         has_identity=bool(state),
@@ -206,6 +206,10 @@ def run_bootstrap(*, announce: bool = True) -> SetupRecord:
         from hermes_cli.onboarding_run import latch_first_install
         if anon_auth.on_local_desktop_backend():
             latch_first_install()
+            if anon_auth.welcome_provider_available():
+                from hermes_cli.welcome_trial import settle_interrupted_claim, grandfather_existing_guest
+                settle_interrupted_claim()
+                grandfather_existing_guest()
     except Exception:  # the next boot tries again; onboarding.state still answers live
         logger.warning("onboarding: could not record the first-install decision", exc_info=True)
     record = _build_record(other=_inventory_other_providers())

@@ -41,7 +41,7 @@ BLOCKED = {
     "an SSH backend": lambda mp, home: (mp.setenv("HERMES_DESKTOP", "1"), mp.delenv("HERMES_DASHBOARD_SESSION_TOKEN", raising=False)),
     "guests switched off": lambda mp, home: (as_local_desktop_backend(mp),
                                               (home / "config.yaml").write_text("nous:\n  guest: false\n", encoding="utf-8")),
-    "a provider key": lambda mp, home: (as_local_desktop_backend(mp), mp.setenv("OPENROUTER_API_KEY", "sk-or-test")),
+    "a provider key": lambda mp, home: (as_local_desktop_backend(mp), mp.setenv("AI_GATEWAY_API_KEY", "sk-or-test")),
     "a used machine": lambda mp, home: (as_local_desktop_backend(mp), install_state.mark_machine_used()),
 }
 

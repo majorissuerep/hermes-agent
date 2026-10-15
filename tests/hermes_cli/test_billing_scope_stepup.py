@@ -50,6 +50,8 @@ class TestNousTokenHasBillingScope:
 @pytest.fixture
 def _stub_persist(monkeypatch):
     """Neutralize the persistence side-effects so step-up tests are pure."""
+    from tests.hermes_cli.anon_portal import install_optional_portal_provider
+    install_optional_portal_provider(monkeypatch)
     monkeypatch.setattr(auth, "_auth_store_lock", lambda: _NullCtx())
     monkeypatch.setattr(auth, "_load_auth_store", dict)
     monkeypatch.setattr(auth, "_save_provider_state", lambda *a, **kw: None)
@@ -108,6 +110,8 @@ def test_step_up_requests_billing_scope_and_reuses_prior_urls(monkeypatch, _stub
 def test_device_login_fires_on_verification_before_polling(monkeypatch):
     """on_verification(url, code) must fire BEFORE _poll_for_token (so the TUI
     can render the link while the flow blocks waiting for approval)."""
+    from tests.hermes_cli.anon_portal import install_optional_portal_provider
+    install_optional_portal_provider(monkeypatch)
     order: list[str] = []
 
     monkeypatch.setattr(

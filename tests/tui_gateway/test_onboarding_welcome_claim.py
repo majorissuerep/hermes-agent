@@ -99,7 +99,7 @@ def test_a_trial_another_install_took_first_opens_no_chat_it_cannot_run(portal, 
     state = _call("onboarding.state")["result"]
     assert (state["run"], state["eligible"], state["session_id"]) == (True, False, None)
     assert portal.creates() == 0
-    (root / ".env").write_text("OPENROUTER_API_KEY=sk-or-test\n", encoding="utf-8")
+    (root / ".env").write_text("AI_GATEWAY_API_KEY=sk-or-test\n", encoding="utf-8")
     assert "result" in _call("onboarding.start", {"fresh_launch": True})
 
 
@@ -128,7 +128,7 @@ def test_only_the_local_desktop_backend_opens_onboarding_by_itself(portal, root,
     install_state.mark_machine_used()
     assert _call("onboarding.state")["result"] == {"run": False, "eligible": False, "session_id": None, "run_id": None}
 
-    (root / ".env").write_text("OPENROUTER_API_KEY=sk-or-test\n", encoding="utf-8")  # a key saved later
+    (root / ".env").write_text("AI_GATEWAY_API_KEY=sk-or-test\n", encoding="utf-8")  # a key saved later
     assert _call("onboarding.state")["result"]["eligible"] is True
 
 
@@ -137,8 +137,8 @@ def test_eligible_follows_the_default_profile_not_the_launch_profile(portal, roo
     work = profiles.create_profile("work", no_alias=True)
     monkeypatch.setenv("HERMES_HOME", str(work))
     monkeypatch.setattr(server, "_hermes_home", str(work))
-    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
-    (root / ".env").write_text("OPENROUTER_API_KEY=sk-or-test\n", encoding="utf-8")
+    monkeypatch.delenv("AI_GATEWAY_API_KEY", raising=False)
+    (root / ".env").write_text("AI_GATEWAY_API_KEY=sk-or-test\n", encoding="utf-8")
     as_local_desktop_backend(monkeypatch)
     install_state.mark_machine_used()
 

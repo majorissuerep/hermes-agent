@@ -112,14 +112,38 @@ class FakePortal:
         return httpx.Response(500, json={"error": f"unexpected {path}"})
 
 
-def install_portal(monkeypatch, tmp_path, fake: FakePortal | None = None) -> FakePortal:
-    """Route every Nous HTTP client at *fake*, isolate the stores, and reset the per-process memos.
+def install_optional_portal_provider(monkeypatch) -> None:
+    """Explicitly enable the legacy provider for account/plugin wire contracts."""
+    from hermes_cli import anon_auth
+    from hermes_cli import auth as auth_mod
+    import providers
+    from providers.base import ProviderProfile
+    from hermes_cli import models, models_catalog_static as catalog
 
-    One transport seam: ``httpx.Client`` itself, which ``auth_nous._nous_http_client`` and
-    ``resolve_nous_access_token`` both construct."""
+    # These are opt-in legacy-provider/plugin wire tests, not declarations of
+    # the bundled provider surface. Keep the default product catalog bounded.
+    monkeypatch.setitem(providers._REGISTRY, "nous", ProviderProfile(
+        name="nous", display_name="Nous Portal", auth_type="oauth_device_code",
+        base_url=WELCOME, fallback_models=(anon_auth.GUEST_MODEL,)))
+    monkeypatch.setattr(providers, "_PROVIDER_LIST_CACHE", None)
+    monkeypatch.setitem(auth_mod.PROVIDER_REGISTRY, "nous", auth_mod.ProviderConfig(
+        "nous", "Nous Portal", "oauth_device_code", portal_base_url=PORTAL,
+        inference_base_url=WELCOME, client_id=auth_mod.DEFAULT_NOUS_CLIENT_ID,
+        scope=auth_mod.DEFAULT_NOUS_SCOPE))
+    entries = list(catalog.CANONICAL_PROVIDERS)
+    monkeypatch.setattr(catalog, "CANONICAL_PROVIDERS", entries)
+    monkeypatch.setattr(models, "CANONICAL_PROVIDERS", entries)
+    monkeypatch.setattr(catalog, "_canonical_slugs", set(catalog._canonical_slugs))
+    monkeypatch.setattr(catalog, "_PROVIDER_LABELS", dict(catalog._PROVIDER_LABELS))
+    catalog.sync_plugin_provider_catalog()
+
+
+def install_portal(monkeypatch, tmp_path, fake: FakePortal | None = None) -> FakePortal:
+    """Route the explicitly enabled legacy provider through a synthetic account service."""
     from hermes_cli import anon_auth, free_tier_bootstrap
     from hermes_cli import auth as auth_mod
 
+    install_optional_portal_provider(monkeypatch)
     fake = fake or FakePortal()
     monkeypatch.setenv("HERMES_PORTAL_BASE_URL", PORTAL)
     monkeypatch.setenv("HERMES_ANON_API_SECRET", "test-secret")
@@ -161,4 +185,10 @@ def claimed_trial(monkeypatch) -> dict:
     as_local_desktop_backend(monkeypatch)
     state = welcome_trial.claim_desktop_free_tier()
     assert state is not None, welcome_trial.claim_blocker()
+    # This fixture explicitly selected an optional provider; the product's
+    # bundled auto resolver must never adopt a retired provider implicitly.
+    from hermes_cli.auth import _load_auth_store, _save_auth_store
+    store = _load_auth_store()
+    store["active_provider"] = "nous"
+    _save_auth_store(store)
     return state

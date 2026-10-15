@@ -149,8 +149,8 @@ class TestResolverIsUnchanged:
     def test_guest_is_last_resort_and_explicit_key_wins(self, portal, monkeypatch):
         claimed_trial(monkeypatch)
         assert resolve_provider("auto") == "nous"
-        monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
-        assert resolve_provider("auto") == "openrouter"
+        monkeypatch.setenv("AI_GATEWAY_API_KEY", "sk-or-test")
+        assert resolve_provider("auto") == "ai-gateway"
 
     def test_runtime_routes_to_welcome_host(self, portal, monkeypatch):
         claimed_trial(monkeypatch)
@@ -346,11 +346,11 @@ class TestBootstrapNeverCreates:
 
     def test_own_key_keeps_inference_and_a_connector_guest_stays_off_active_provider(self, portal, monkeypatch):
         anon_auth.ensure_portal_identity(explicit=True)
-        monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-own-key")
+        monkeypatch.setenv("AI_GATEWAY_API_KEY", "sk-or-own-key")
         record = self._fresh().run_bootstrap(announce=False)
         assert record.other_providers is True and record.has_identity is True
         assert record.free_tier_account is False, "a connector guest does not carry inference"
-        assert record.inference_provider == "openrouter"
+        assert record.inference_provider == "ai-gateway"
         assert _load_auth_store().get("active_provider") != "nous"
         assert portal.minted == 1
 

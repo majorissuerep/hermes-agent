@@ -32,6 +32,8 @@ GUEST_STATE = {
 def guest_home(monkeypatch, tmp_path):
     """Seed a guest that claimed the welcome trial, read on the desktop's local backend, as the only
     Nous state, and keep every row builder offline."""
+    from tests.hermes_cli.anon_portal import install_optional_portal_provider
+    install_optional_portal_provider(monkeypatch)
     monkeypatch.setenv("HERMES_SHARED_AUTH_DIR", str(tmp_path / "shared-store"))
     as_local_desktop_backend(monkeypatch)
     for var in ("OPENROUTER_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "NOUS_API_KEY", "LM_API_KEY", "LM_BASE_URL"):

@@ -95,6 +95,8 @@ class FakePortal:
 
 @pytest.fixture
 def portal(monkeypatch, tmp_path):
+    from tests.hermes_cli.anon_portal import install_optional_portal_provider
+    install_optional_portal_provider(monkeypatch)
     fake = FakePortal()
     monkeypatch.setenv("HERMES_PORTAL_BASE_URL", PORTAL)
     monkeypatch.setenv("HERMES_ANON_API_SECRET", "test-secret")
