@@ -126,8 +126,8 @@ def _resolve_bare_custom_runtime(
         requested == "auto" and cfg_provider in {"", "auto"}
         or rp._config_base_url_trustworthy_for_bare_custom(cfg_url, cfg_provider)
     )
-    base_url = (str(explicit_base_url or "").strip() or (cfg_url if trusted else "")
-                or get_secret_str("CUSTOM_BASE_URL", "").strip()).rstrip("/")
+    base_url = (str(explicit_base_url or "").strip() or get_secret_str("CUSTOM_BASE_URL", "").strip()
+                or (cfg_url if trusted else "")).rstrip("/")
     if not base_url:
         raise rp.AuthError(f"Provider '{requested_provider}' needs a configured custom endpoint. Run `hermes model`.",
                            provider=requested_provider, code="no_provider_configured")
