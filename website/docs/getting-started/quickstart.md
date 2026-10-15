@@ -85,72 +85,35 @@ The single most important setup step. Use `hermes model` to walk through the cho
 hermes model
 ```
 
-:::tip Easiest path: Nous Portal
-One subscription covers 300+ models plus the [Tool Gateway](../user-guide/features/tool-gateway.md) (web search, image generation, TTS, cloud browser). On a fresh install:
-
-```bash
-hermes setup --portal
-```
-
-That logs you in, sets Nous as your provider, and turns on the Tool Gateway in one command.
-:::
-
 :::info Setup modes
-On a fresh install, `hermes setup` offers three modes:
+On a fresh install, `hermes setup` offers two modes:
 
-- **Quick Setup (Nous Portal)** — OAuth login, no API keys to manage; sets up a model plus the Tool Gateway tools, billed to your [Nous Portal subscription](../integrations/nous-portal.md). The recommended fast path.
-- **Full Setup** — walk through every provider, tool, and option yourself (bring your own keys).
-- **Blank Slate** — everything starts **off** except the bare minimum needed to run an agent: **provider & model, the File Operations toolset, and the Terminal toolset**. No web, browser, code execution, vision, memory, delegation, cron, skills, plugins, or MCP servers — and compression, checkpoints, smart routing, and memory capture are all disabled. After the minimal baseline is applied, you choose one of two paths: **start with everything disabled** (finish now with the minimal agent), or **walk through all configurations** (opt in to tools, skills, plugins, MCP, and messaging). Pick this when you want a minimal, fully-controlled agent and intend to enable only exactly what you need.
+- **Setup** — choose an explicit provider and configure your tools.
+- **Blank Slate** — start with only provider/model, file operations, terminal, vision,
+  and the essential Hermes skill. Memory, delegation, cron, optional plugins, MCP,
+  compression, checkpoints, and smart routing stay off until you enable them.
 
-Blank Slate writes an explicit `platform_toolsets.cli` list plus `agent.disabled_toolsets`, so nothing you didn't choose ever loads — not even after `hermes update`. Re-enable anything later with `hermes tools`, seed skills with `hermes skills opt-in --sync`, or tune settings with `hermes setup agent`.
+Use `hermes tools` to enable delegation or other toolsets later. The bundled
+Hermes skill remains available to help configure the encrypted installation.
 :::
 
-Good defaults:
+This fork bundles these connections only:
 
-| Provider | What it is | How to set up |
-|----------|-----------|---------------|
-| **Nous Portal** | Subscription-based, zero-config | OAuth login via `hermes model` |
-| **OpenAI Codex** | ChatGPT or Codex subscription, uses Codex models | Device code auth via `hermes model` → **ChatGPT or Codex Subscription** |
-| **Anthropic** | Claude models directly — Max plan + extra usage credits (OAuth), or API key for pay-per-token | `hermes model` → OAuth login (requires Max + extra credits), or an Anthropic API key |
-| **OpenRouter** | Multi-provider routing across many models | Enter your API key |
-| **Fireworks AI** | Direct OpenAI-compatible model API | Set `FIREWORKS_API_KEY` |
-| **Z.AI** | GLM / Zhipu-hosted models | Set `GLM_API_KEY` / `ZAI_API_KEY` (also accepts `Z_AI_API_KEY`) |
-| **Kimi / Moonshot** | Moonshot-hosted coding and chat models | Set `KIMI_API_KEY` (or the Kimi-Coding-specific `KIMI_CODING_API_KEY`) |
-| **Kimi / Moonshot China** | China-region Moonshot endpoint | Set `KIMI_CN_API_KEY` |
-| **Arcee AI** | Trinity models | Set `ARCEEAI_API_KEY` |
-| **GMI Cloud** | Multi-model direct API | Set `GMI_API_KEY` |
-| **Actual Computer** | Your own hardware as a private inference cluster — hosted relay or local daemon | Set `ACTUAL_API_KEY` (relay) or `ACTUAL_BASE_URL=http://127.0.0.1:8080` (local, no key) |
-| **MiniMax (OAuth)** | MiniMax frontier model via browser OAuth — no API key needed (model name in `hermes_cli/models.py` may change between releases) | `hermes model` → MiniMax (OAuth) |
-| **MiniMax** | International MiniMax endpoint | Set `MINIMAX_API_KEY` |
-| **MiniMax China** | China-region MiniMax endpoint | Set `MINIMAX_CN_API_KEY` |
-| **Alibaba Cloud** | Qwen models via DashScope | Set `DASHSCOPE_API_KEY` (Qwen Coding Plan also accepts `ALIBABA_CODING_PLAN_API_KEY`) |
-| **Hugging Face** | 20+ open models via unified router (Qwen, DeepSeek, Kimi, etc.) | Set `HF_TOKEN` |
-| **AWS Bedrock** | Claude, Nova, Llama, DeepSeek via native Converse API | IAM role or `aws configure` ([guide](../guides/aws-bedrock.md)) |
-| **Azure Foundry** | Azure AI Foundry-hosted models | Set `AZURE_FOUNDRY_API_KEY` + `AZURE_FOUNDRY_BASE_URL` |
-| **Google AI Studio** | Gemini models via direct API | Set `GOOGLE_API_KEY` / `GEMINI_API_KEY` |
-| **xAI** | Grok models via direct API | Set `XAI_API_KEY` |
-| **xAI Grok OAuth** | SuperGrok / Premium+ subscription, no API key needed | `hermes model` → xAI Grok OAuth |
-| **NovitaAI** | Multi-model API gateway | Set `NOVITA_API_KEY` |
-| **Ramp Router** | Responses-native LLM gateway routing across OpenAI/Anthropic/xAI/... | Set `RAMP_ROUTER_API_KEY` |
-| **Nebius Token Factory** | Open models on Nebius AI cloud | Set `NEBIUS_API_KEY` |
-| **StepFun** | Step Plan models | Set `STEPFUN_API_KEY` |
-| **Xiaomi MiMo** | Xiaomi-hosted models | Set `XIAOMI_API_KEY` |
-| **Tencent TokenHub** | Tencent-hosted models | Set `TOKENHUB_API_KEY` |
-| **Tencent TokenPlan** | Tencent Hy models via Anthropic-style endpoint | Set `TOKENPLAN_API_KEY` |
-| **Ollama Cloud** | Managed Ollama-hosted models | Set `OLLAMA_API_KEY` |
-| **LM Studio** | Local desktop app exposing an OpenAI-compatible API | Set `LM_API_KEY` (and `LM_BASE_URL` if non-default) |
-| **Qwen OAuth** | Qwen Portal browser OAuth — no API key needed | `hermes model` → Qwen OAuth |
-| **Kilo Code** | KiloCode-hosted models | Set `KILOCODE_API_KEY` |
-| **OpenCode Zen** | Pay-as-you-go access to curated models | Set `OPENCODE_ZEN_API_KEY` |
-| **OpenCode Go** | $10/month subscription for open models | Set `OPENCODE_GO_API_KEY` |
-| **DeepSeek** | Direct DeepSeek API access | Set `DEEPSEEK_API_KEY` |
-| **NVIDIA NIM** | Nemotron models via build.nvidia.com or local NIM | Set `NVIDIA_API_KEY` (optional: `NVIDIA_BASE_URL`) |
-| **GitHub Copilot** | GitHub Copilot subscription (GPT-5.x, Claude, Gemini, etc.) | OAuth via `hermes model`, or `COPILOT_GITHUB_TOKEN` / `GH_TOKEN` |
-| **GitHub Copilot ACP** | Copilot ACP agent backend (spawns local `copilot` CLI) | `hermes model` (requires `copilot` CLI + `copilot login`) |
-| **Vercel AI Gateway** | Vercel AI Gateway routing | Set `AI_GATEWAY_API_KEY` |
-| **Custom Endpoint** | VLLM, SGLang, Ollama, or any OpenAI-compatible API | Set base URL + API key |
+| Connection | Setup |
+|---|---|
+| **ChatGPT / Codex** | Subscription sign-in through `hermes model` |
+| **Anthropic / Claude** | Anthropic API key or supported Claude authentication |
+| **OpenAI API** | OpenAI API key through `hermes model` |
+| **LiteLLM** | Your gateway URL and key |
+| **Custom OpenAI / Anthropic** | Explicit endpoint, wire protocol, and credential |
+| **Z.AI / GLM** | Z.AI API key |
+| **Grok** | xAI API key or subscription OAuth |
+| **Vercel AI Gateway** | Vercel gateway key |
 
-For most first-time users: choose a provider, accept the defaults unless you know why you're changing them. The full provider catalog with env vars and setup steps lives on the [Providers](../integrations/providers.md) page.
+Fireworks and other direct providers are not bundled. Existing credentials survive
+updates, but retired providers require an explicit supported route or provider plugin.
+Models from other vendors can still run through your chosen gateway or custom endpoint.
+See [AI Providers](../integrations/providers.md) for provider IDs and configuration.
 
 :::caution Minimum context: 64K tokens
 Hermes Agent requires a model with at least **64,000 tokens** of context. Models with smaller windows cannot maintain enough working memory for multi-step tool-calling workflows and will be rejected at startup. Most hosted models (Claude, GPT, Gemini, Qwen, DeepSeek) meet this easily. If you're running a local model, set its context size to at least 64K (e.g. `--ctx-size 65536` for llama.cpp or `-c 65536` for Ollama).
@@ -162,7 +125,7 @@ You can switch providers at any time with `hermes model` — no lock-in. For a f
 
 ### How settings are stored
 
-Hermes separates secrets from normal config:
+Hermes separates secrets from settings; both files are encrypted at rest in this fork:
 
 - **Secrets and tokens** → `~/.hermes/.env`
 - **Non-secret settings** → `~/.hermes/config.yaml`
@@ -170,12 +133,14 @@ Hermes separates secrets from normal config:
 The easiest way to set values correctly is through the CLI:
 
 ```bash
-hermes config set model anthropic/claude-opus-4.6
+hermes config set model.default claude-opus-4.6
 hermes config set terminal.backend docker
-hermes config set OPENROUTER_API_KEY sk-or-...
+hermes model  # Enter credentials through the interactive secret prompt
 ```
 
-The right value goes to the right file automatically.
+The right value goes through its encrypted writer automatically. Never overwrite these
+files as plaintext. Unlock once at startup; local commands and delegated agents reuse
+that session authority without another passphrase. A standalone update asks once.
 
 ## 3. Run Your First Chat
 

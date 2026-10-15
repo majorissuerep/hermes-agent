@@ -161,14 +161,13 @@ hermes config get     # Inspect individual config values
 hermes setup          # Or run the full setup wizard to configure everything at once
 ```
 
-:::tip Fastest path: Nous Portal
-One subscription covers 300+ models plus the [Tool Gateway](../user-guide/features/tool-gateway.md) (web search, image generation, TTS, cloud browser). Skip the per-tool key juggling:
+:::tip Connect your model
+Run `hermes model` to choose ChatGPT/Codex, Anthropic, OpenAI API, LiteLLM,
+a custom OpenAI/Anthropic endpoint, Z.AI, Grok, or Vercel AI Gateway.
+There is no anonymous provider fallback. See [AI Providers](../integrations/providers.md).
 
-```bash
-hermes setup --portal
-```
-
-That logs you in, sets Nous as your provider, and turns on the Tool Gateway in one command.
+Unlock the encrypted home once at startup. Local self-management commands and
+subagents reuse the session's temporary authority; never copy keys or passphrases.
 :::
 
 :::tip Already running Hermes on another machine?
