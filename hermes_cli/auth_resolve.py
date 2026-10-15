@@ -18,7 +18,7 @@ def resolve_provider(
     from hermes_cli.auth import (
         AuthError, _plugin_aliases, _registry_lookup, _get_config_hint_for_unknown_provider,
         _config_model_provider, _scoped_key_env_reader, _logged_in_oauth_active_provider,
-        _env_key_auto_detected, logger,
+        _env_key_auto_detected, _refuse_env_adoption_if_config_corrupt, logger,
     )
 
     normalized = (requested or "auto").strip().lower()
@@ -36,6 +36,7 @@ def resolve_provider(
         return "custom" if explicit_base_url else "openai-api"
 
     _model_cfg, cfg_provider = _config_model_provider()
+    _refuse_env_adoption_if_config_corrupt()
     if cfg_provider:
         return resolve_provider(cfg_provider)
 
@@ -46,6 +47,9 @@ def resolve_provider(
     env_pid = _env_key_auto_detected(_scoped_key_env, _oauth_active)
     if env_pid:
         return env_pid
+
+    if pooled := _available_key_pool_provider():
+        return pooled
 
     # Logged-in OAuth provider is a LAST-RESORT fallback (it used to sit above the env/config
     # checks, so a stale login silently overrode explicit intent).
@@ -66,4 +70,20 @@ def resolve_provider(
         f"or add a key with `hermes auth add <provider>`. (Advanced: put an API key such as ANTHROPIC_API_KEY in "
         f"{display_hermes_home()}/.env.)",
         code="no_provider_configured")
+
+
+def _available_key_pool_provider() -> str | None:
+    """Manual credentials are explicit intent even without a matching .env key.
+
+    Only registered, auto-detectable providers participate. Retained credentials
+    for removed vendors remain recoverable but cannot silently route inference.
+    """
+    from agent.credential_pool import load_pool
+    from hermes_cli.auth import PROVIDER_REGISTRY, _NO_AUTO_DETECT_PROVIDERS
+
+    for provider, config in PROVIDER_REGISTRY.items():
+        if config.auth_type == "api_key" and provider not in _NO_AUTO_DETECT_PROVIDERS:
+            if load_pool(provider).has_available():
+                return provider
+    return None
 

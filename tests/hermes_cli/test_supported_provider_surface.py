@@ -66,3 +66,39 @@ def test_encrypted_gateway_and_custom_protocol_config_survive_a_b_a(tmp_path, mo
                 reset_secret_scope(scope)
     finally:
         vault.clear_vault_cache()
+
+
+def test_auto_uses_each_homes_manual_pool_but_never_retired_credentials(tmp_path, monkeypatch):
+    from hermes_security import vault
+    from hermes_cli.auth import AuthError, resolve_provider, write_credential_pool
+    from hermes_cli.config import save_config
+    from agent.secret_scope import (build_profile_secret_scope, set_secret_scope, reset_secret_scope,
+                                    set_multiplex_context, reset_multiplex_context)
+
+    homes = [tmp_path / name for name in ("A", "B")]
+    try:
+        for home in homes:
+            monkeypatch.setenv("HERMES_HOME", str(home))
+            vault.init_vault(home, "synthetic-auto-pool-password")
+            vault.unlock(home, "synthetic-auto-pool-password")
+            save_config({"model": {"provider": "auto"}}, merge_existing=True)
+            for provider in ("openrouter", "ai-gateway"):
+                write_credential_pool(provider, [{"id": home.name, "source": "manual", "auth_type": "api_key",
+                    "access_token": "synthetic-" + home.name, "base_url": "https://ai-gateway.vercel.sh/v1"}])
+        for home in (homes[0], homes[1], homes[0]):
+            monkeypatch.setenv("HERMES_HOME", str(home))
+            scope = set_secret_scope(build_profile_secret_scope(home), profile_home=str(home))
+            multiplex = set_multiplex_context(True)
+            try:
+                assert resolve_provider("auto") == "ai-gateway"
+                write_credential_pool("ai-gateway", [], removed_ids={home.name})
+                with pytest.raises(AuthError, match="not connected"):
+                    resolve_provider("auto")
+                write_credential_pool("ai-gateway", [{"id": home.name, "source": "manual", "auth_type": "api_key",
+                    "access_token": "synthetic-" + home.name, "base_url": "https://ai-gateway.vercel.sh/v1"}])
+                assert (home / "auth.json").read_bytes().startswith(b"HRMVAULT")
+            finally:
+                reset_multiplex_context(multiplex)
+                reset_secret_scope(scope)
+    finally:
+        vault.clear_vault_cache()

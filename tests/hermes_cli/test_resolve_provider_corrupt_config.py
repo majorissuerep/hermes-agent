@@ -1,10 +1,10 @@
-"""Regression tests for issue #81952 (silent OpenRouter paid-default class fix).
+"""Regression tests for issue #81952 (silent Vercel AI Gateway paid-default class fix).
 
 When ``~/.hermes/config.yaml`` EXISTS but fails to parse, ``load_config()``
 falls back to ``DEFAULT_CONFIG`` — so ``resolve_provider('auto')``'s tier-2
 config check finds no ``model.provider`` and the tier-3 env sniff
-(OPENROUTER_API_KEY / OPENAI_API_KEY) or tier-4 pool probe silently adopts the
-PAID openrouter provider, even though the user's real (broken) config may name
+(AI_GATEWAY_API_KEY / OPENAI_API_KEY) or tier-4 pool probe silently adopts the
+PAID ai-gateway provider, even though the user's real (broken) config may name
 a completely different provider (e.g. ``openai-codex``). Real money, zero
 consent.
 
@@ -23,7 +23,7 @@ import pytest
 @pytest.fixture(autouse=True)
 def _clean_inference_env(monkeypatch):
     for key in (
-        "OPENROUTER_API_KEY",
+        "AI_GATEWAY_API_KEY",
         "OPENAI_API_KEY",
         "ANTHROPIC_API_KEY",
         "ANTHROPIC_TOKEN",
@@ -85,9 +85,9 @@ class TestParseFailureProbe:
 
 class TestResolveProviderCorruptConfig:
     def test_corrupt_config_blocks_env_sniff_adoption(self, tmp_path, monkeypatch):
-        """Corrupt config + OPENROUTER_API_KEY must NOT resolve to openrouter."""
+        """Corrupt config + AI_GATEWAY_API_KEY must NOT resolve to ai-gateway."""
         _setup_home(tmp_path, monkeypatch, CORRUPT_YAML)
-        monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-FAKE1234567890")
+        monkeypatch.setenv("AI_GATEWAY_API_KEY", "sk-or-FAKE1234567890")
         _load_config_fresh()
 
         from hermes_cli.auth import AuthError, resolve_provider
@@ -98,7 +98,7 @@ class TestResolveProviderCorruptConfig:
         assert "config.yaml" in str(excinfo.value)
 
     def test_corrupt_config_blocks_pool_probe_adoption(self, tmp_path, monkeypatch):
-        """Corrupt config + pool-only credential must NOT resolve to openrouter."""
+        """Corrupt config + pool-only credential must NOT resolve to ai-gateway."""
         _setup_home(tmp_path, monkeypatch, CORRUPT_YAML)
         _load_config_fresh()
 
@@ -109,17 +109,17 @@ class TestResolveProviderCorruptConfig:
             load_pool,
         )
 
-        pool = load_pool("openrouter")
+        pool = load_pool("ai-gateway")
         pool.add_entry(
             PooledCredential(
-                provider="openrouter",
+                provider="ai-gateway",
                 id=uuid.uuid4().hex[:6],
                 label="api-key-1",
                 auth_type=AUTH_TYPE_API_KEY,
                 priority=0,
                 source=SOURCE_MANUAL,
                 access_token="sk-or-FAKEKEY123",
-                base_url="https://openrouter.ai/api/v1",
+                base_url="https://ai-gateway.vercel.sh/v1",
             )
         )
 
@@ -132,17 +132,17 @@ class TestResolveProviderCorruptConfig:
     def test_valid_config_env_sniff_keep_path_unbroken(self, tmp_path, monkeypatch):
         """KEEP: valid config that names no provider + env key still resolves."""
         _setup_home(tmp_path, monkeypatch, VALID_YAML)
-        monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-FAKE1234567890")
+        monkeypatch.setenv("AI_GATEWAY_API_KEY", "sk-or-FAKE1234567890")
         _load_config_fresh()
 
         from hermes_cli.auth import resolve_provider
 
-        assert resolve_provider("auto") == "openrouter"
+        assert resolve_provider("auto") == "ai-gateway"
 
     def test_fixed_config_clears_block(self, tmp_path, monkeypatch):
         """Rewriting the corrupt file valid clears the refusal immediately."""
         _home, cfg = _setup_home(tmp_path, monkeypatch, CORRUPT_YAML)
-        monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-FAKE1234567890")
+        monkeypatch.setenv("AI_GATEWAY_API_KEY", "sk-or-FAKE1234567890")
         _load_config_fresh()
 
         from hermes_cli.auth import AuthError, resolve_provider
@@ -151,14 +151,14 @@ class TestResolveProviderCorruptConfig:
             resolve_provider("auto")
 
         cfg.write_text(VALID_YAML)
-        assert resolve_provider("auto") == "openrouter"
+        assert resolve_provider("auto") == "ai-gateway"
 
     def test_explicit_provider_request_untouched(self, tmp_path, monkeypatch):
         """Explicit user intent (requested != auto) resolves even with corrupt config."""
         _setup_home(tmp_path, monkeypatch, CORRUPT_YAML)
-        monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-FAKE1234567890")
+        monkeypatch.setenv("AI_GATEWAY_API_KEY", "sk-or-FAKE1234567890")
         _load_config_fresh()
 
         from hermes_cli.auth import resolve_provider
 
-        assert resolve_provider("openrouter") == "openrouter"
+        assert resolve_provider("ai-gateway") == "ai-gateway"
