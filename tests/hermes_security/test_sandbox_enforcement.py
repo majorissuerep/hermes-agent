@@ -50,7 +50,7 @@ def _sandbox(command):
 
 
 def test_terminal_and_file_tools_see_only_session_grants_and_changes_apply_next_command(sandbox_home):
-    ws, outside, task = sandbox_home
+    _ws, outside, task = sandbox_home
     secret = outside / "secret.txt"
     assert _call("terminal", task, command="cat readme.txt")["output"].strip() == "workspace"
     denied = _call("terminal", task, command=f"cat {secret}")
@@ -67,7 +67,7 @@ def test_terminal_and_file_tools_see_only_session_grants_and_changes_apply_next_
 
 
 def test_single_file_rw_grant_is_writable_without_opening_its_directory(sandbox_home):
-    ws, outside, task = sandbox_home
+    _ws, outside, task = sandbox_home
     rc = outside / ".zshrc"
     rc.write_text("old\n", encoding="utf-8")
     _sandbox(f"grant {rc}:rw --force")

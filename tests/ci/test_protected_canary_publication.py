@@ -185,7 +185,7 @@ def stage_canary(clone, identity, env, run):
 
 def test_published_canary_workflow_advances_only_after_every_gate(canary, r2_server, monkeypatch, tmp_path):
     clone, identity, env, run = canary
-    bundle = stage_canary(clone, identity, env, run)
+    stage_canary(clone, identity, env, run)
     publisher = canary_job()
     script = step_script(publisher, "Publish the admitted canary and advance its protected head")
     before = dict(r2_server.store)

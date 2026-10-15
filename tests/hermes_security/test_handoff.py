@@ -36,7 +36,7 @@ def test_child_reads_parent_sealed_state_via_inherited_fd(tmp_path, monkeypatch)
     try:
         env = {**os.environ, **extra_env}
         assert "correct horse" not in "".join(env.values())
-        out = subprocess.run([sys.executable, "-c", _CHILD, str(home)], env=env, pass_fds=(read_fd,),
+        out = subprocess.run([sys.executable, "-c", _CHILD, str(home)], check=False, env=env, pass_fds=(read_fd,),
                              capture_output=True, text=True, timeout=60)
     finally:
         os.close(read_fd)

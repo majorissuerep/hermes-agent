@@ -26,7 +26,7 @@ def vaulted_cli(tmp_path, monkeypatch):
     monkeypatch.setenv("HERMES_VAULT_PRIVATE_KEY", str(key))
 
     def run(*args):
-        return subprocess.run([sys.executable, "-m", "hermes_cli.main", "model", "sidecars", *args],
+        return subprocess.run([sys.executable, "-m", "hermes_cli.main", "model", "sidecars", *args], check=False,
                               capture_output=True, text=True, timeout=30)
     return home, run
 

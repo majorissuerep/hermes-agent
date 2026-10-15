@@ -26,7 +26,7 @@ if sys.argv[1] == 'write':
     save_config({'agent': {'max_turns': 73}}, merge_existing=True)
 print(json.dumps(read_raw_config()))
 """
-    return subprocess.run([sys.executable, "-c", script, action], cwd=ROOT, env=env,
+    return subprocess.run([sys.executable, "-c", script, action], check=False, cwd=ROOT, env=env,
                           stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=20)
 
 

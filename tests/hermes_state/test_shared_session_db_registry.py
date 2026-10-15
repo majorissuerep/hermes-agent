@@ -25,7 +25,7 @@ from pathlib import Path
 
 import pytest
 
-import hermes_state.registry as registry
+from hermes_state import registry
 
 
 @pytest.fixture(autouse=True)

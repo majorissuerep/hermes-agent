@@ -71,7 +71,7 @@ def native_legs(accepted: dict | None) -> tuple[str, ...]:
 def _leg_targets(legs: tuple[str, ...]) -> list[tuple[str, str]]:
     targets = []
     for name in legs:  # fork: darwin legs only
-        platform, arch = name.split("-")
+        _platform, arch = name.split("-")
         targets.append(("macos", arch))
     return targets
 

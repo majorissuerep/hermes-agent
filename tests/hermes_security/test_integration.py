@@ -76,7 +76,6 @@ def test_state_db_is_sqlcipher_via_sessiondb(vaulted_home):
     sys.modules.setdefault("tests", type(sys)("tests"))
     from hermes_state import SessionDB
 
-    db = SessionDB.__new__(SessionDB)
     db_path = vaulted_home / "state.db"
     from hermes_state.dbfile import _connect_tracked_db
 

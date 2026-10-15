@@ -567,7 +567,7 @@ class ProcessSession:
     wsl_chain: bool = False                     # spawned via wsl[.exe]: the host PID is the short-lived
                                                 # launcher; Linux-side workers outlive it (#120546)
     handoff_note: str = ""                      # why a subagent handed this process to its parent (rides the notice)
-    _sandbox_env: Dict[str, Optional[str]] = field(default_factory=dict, repr=False)  # private TMPDIR when sandboxed
+    _sandbox_env: dict[str, Optional[str]] = field(default_factory=dict, repr=False)  # private TMPDIR when sandboxed
     persist_on_release: bool = False           # opt out of agent-lifecycle cleanup (release()/turn-abandon kill
                                                 # sweeps), per terminal(background=true, persist_on_release=true) (#41225)
     output_log: str = ""                        # file the process writes to (worker spawns; no pipe to lose)

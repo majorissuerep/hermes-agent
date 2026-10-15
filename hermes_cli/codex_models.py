@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 # ("not supported when using Codex with a ChatGPT account"), so listing them leaked dead picker
 # choices (#52492). If OpenAI re-enables any, live discovery (_fetch_models_from_api) picks them
 # up automatically.
-DEFAULT_CODEX_MODELS: List[str] = [
+DEFAULT_CODEX_MODELS: list[str] = [
     # gpt-6.1 (2026-10): published by the Codex backend ahead of most catalogs; OpenRouter already
     # relists openai/gpt-6.1-sol. Curated here so an offline first run still offers the current
     # workhorse; the account catalog remains the authoritative live list.
@@ -46,7 +46,7 @@ DEFAULT_CODEX_MODELS: List[str] = [
 # paths below intentionally do not filter on it. PR #12994 removed this entry on the assumption it was
 # unsupported — that was wrong; restored here. Keep it in the curated fallback so Pro users still see Spark
 # in `/model` when live discovery is unavailable (offline first run, transient API failure).
-_FORWARD_COMPAT_TEMPLATE_MODELS: List[tuple[str, tuple[str, ...]]] = [
+_FORWARD_COMPAT_TEMPLATE_MODELS: list[tuple[str, tuple[str, ...]]] = [
     ("gpt-6.1-sol", ("gpt-6-sol", "gpt-5.6-sol", "gpt-5.5")),
     ("gpt-6-sol", ("gpt-5.6-sol", "gpt-5.5")),
     ("gpt-6-luna", ("gpt-5.6-luna", "gpt-5.5")),

@@ -7,7 +7,7 @@ from agent.message_metadata import CANONICAL_ROW, DB_ROW_SNAPSHOT
 
 
 def test_structured_worker_receipts_are_atomic_and_scoped(tmp_path):
-    import hermes_state.runtime as runtime
+    from hermes_state import runtime
     assert callable(getattr(runtime, 'mutate_worker_execution', None))
     db = SessionDB(tmp_path / 'state.db')
     try:

@@ -157,7 +157,7 @@ def _rpc_server_loop(server_sock: socket.socket, task_id: str, tool_call_log: li
             return
         _serve_rpc_connection(conn, task_id, tool_call_log, tool_call_counter, max_tool_calls,
                               allowed_tools, rpc_token, dispatch=dispatch, idle_timeout=300)
-    except socket.timeout:
+    except TimeoutError:
         logger.debug("RPC listener socket timeout")
     except OSError as e:
         logger.debug("RPC listener socket error: %s", e, exc_info=True)

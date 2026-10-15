@@ -60,7 +60,7 @@ class SessionDeckMixin:
             " opened_at, last_seen_at) VALUES (?, ?, ?, ?, ?, 'idle', ?, ?)",
             (root, surface, cwd or "", group or "", parent_handle, now, now)).lastrowid
 
-    def deck_snapshot(self, states: Iterable[Tuple[str, str]]) -> int:
+    def deck_snapshot(self, states: Iterable[tuple[str, str]]) -> int:
         """Record the runtime state of open sessions: ``(session_id, state)`` pairs, any lineage id.
         One write transaction for the whole batch; closed rows are never touched. Returns rows updated."""
         pairs = [(self.deck_lineage_root(sid), state) for sid, state in states if sid and state in DECK_STATES]
@@ -86,7 +86,7 @@ class SessionDeckMixin:
             " WHERE handle = ? AND closed_at IS NULL",
             (time.time(), reason, closed_by, int(handle))).rowcount > 0
 
-    def _deck_project(self, row) -> Dict[str, Any]:
+    def _deck_project(self, row) -> dict[str, Any]:
         entry = dict(row)
         root = entry["session_id"]
         tip = self.get_compression_tip(root) or root
@@ -103,17 +103,17 @@ class SessionDeckMixin:
         )
         return entry
 
-    def deck_rows(self, *, include_closed: bool = False) -> List[Dict[str, Any]]:
+    def deck_rows(self, *, include_closed: bool = False) -> list[dict[str, Any]]:
         """Open rows (optionally closed ones too), handle order, each projected with its live tip."""
         where = "" if include_closed else " WHERE closed_at IS NULL"
         rows = self._read_all(f"SELECT {_ROW_COLUMNS} FROM deck_sessions{where} ORDER BY handle")
         return [self._deck_project(r) for r in rows]
 
-    def deck_row(self, handle: int) -> Optional[Dict[str, Any]]:
+    def deck_row(self, handle: int) -> Optional[dict[str, Any]]:
         row = self._read_one(f"SELECT {_ROW_COLUMNS} FROM deck_sessions WHERE handle = ?", (int(handle),))
         return self._deck_project(row) if row is not None else None
 
-    def deck_row_for_session(self, session_id: str) -> Optional[Dict[str, Any]]:
+    def deck_row_for_session(self, session_id: str) -> Optional[dict[str, Any]]:
         """The row owning ``session_id``'s conversation (any id along its compression lineage)."""
         row = self._read_one(f"SELECT {_ROW_COLUMNS} FROM deck_sessions WHERE session_id = ?",
                              (self.deck_lineage_root(session_id),))
@@ -123,7 +123,7 @@ class SessionDeckMixin:
         row = self._read_one("SELECT COUNT(*) FROM deck_sessions WHERE closed_at IS NULL")
         return int(row[0]) if row else 0
 
-    def deck_prune_unused(self, *, older_than_s: float, keep: Iterable[str] = ()) -> List[int]:
+    def deck_prune_unused(self, *, older_than_s: float, keep: Iterable[str] = ()) -> list[int]:
         """Drop open rows whose conversation never produced a stored session (opened, never prompted)
         and has not been seen for ``older_than_s``. ``keep`` = roots a live process still holds."""
         cutoff = time.time() - older_than_s

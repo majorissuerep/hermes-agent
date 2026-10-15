@@ -964,7 +964,7 @@ def _lock_bytes(fd: int, offset: int, count: int = 1) -> bool:
 
 def _unlock(fd: int, offset: int = _WINDOWS_LOCK_OFFSET, count: int = 1) -> None:
     """No-op: native Windows locking removed from this fork (WSL is the Windows answer)."""
-    return None
+    return
 
 
 def _take_lease(fd: int) -> int | None:

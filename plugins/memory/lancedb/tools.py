@@ -11,7 +11,7 @@ import json
 import re
 import time
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 from typing import Any, Callable, Dict, List, Optional
 
 from tools.registry import tool_error
@@ -99,17 +99,17 @@ def parse_time(value: Any) -> Optional[float]:
     if m := _RELATIVE_RE.match(text):
         return time.time() - float(m.group(1)) * _UNIT_SECONDS[m.group(2).lower()]
     try:
-        dt = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        dt = datetime.fromisoformat(text)
     except ValueError as exc:
         raise ValueError(f"unrecognized time {value!r}: use ISO (2026-09-01) or relative (7d, 12h)") from exc
-    return (dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)).timestamp()
+    return (dt if dt.tzinfo else dt.replace(tzinfo=UTC)).timestamp()
 
 
 def _when(ts: Optional[float]) -> str:
-    return datetime.fromtimestamp(ts or 0, tz=timezone.utc).strftime("%Y-%m-%d %H:%MZ")
+    return datetime.fromtimestamp(ts or 0, tz=UTC).strftime("%Y-%m-%d %H:%MZ")
 
 
-def present(rec: Dict[str, Any], *, full: bool = False) -> Dict[str, Any]:
+def present(rec: dict[str, Any], *, full: bool = False) -> dict[str, Any]:
     text = rec.get("text") or ""
     out = {"id": rec["id"], "kind": rec["kind"], "when": _when(rec.get("created_at")),
            "text": text if full or len(text) <= _LIST_TEXT_CHARS else text[:_LIST_TEXT_CHARS] + "…"}
@@ -126,22 +126,22 @@ def present(rec: Dict[str, Any], *, full: bool = False) -> Dict[str, Any]:
     return out
 
 
-def _limit(args: Dict[str, Any], default: int = 8) -> int:
+def _limit(args: dict[str, Any], default: int = 8) -> int:
     return max(1, min(int(args.get("limit") or default), _MAX_LIMIT))
 
 
-def _offset(args: Dict[str, Any]) -> int:
+def _offset(args: dict[str, Any]) -> int:
     return max(0, int(args.get("offset") or 0))
 
 
-def _filters(args: Dict[str, Any]) -> Dict[str, Any]:
+def _filters(args: dict[str, Any]) -> dict[str, Any]:
     kinds = [k for k in (args.get("kinds") or []) if k in KINDS]
     return {"kinds": kinds, "session_id": str(args.get("session_id") or ""),
             "since": parse_time(args.get("since")), "until": parse_time(args.get("until")),
             "tags": [str(t) for t in (args.get("tags") or []) if str(t).strip()]}
 
 
-def _matches(rec: Dict[str, Any], f: Dict[str, Any]) -> bool:
+def _matches(rec: dict[str, Any], f: dict[str, Any]) -> bool:
     ts = rec.get("created_at") or 0
     return ((not f["kinds"] or rec["kind"] in f["kinds"])
             and (not f["session_id"] or rec.get("session_id") == f["session_id"])
@@ -150,7 +150,7 @@ def _matches(rec: Dict[str, Any], f: Dict[str, Any]) -> bool:
             and all(t in (rec.get("tags") or []) for t in f["tags"]))
 
 
-def _page(items: List[Any], args: Dict[str, Any], key: str, *, default_limit: int = 8, full: bool = False) -> str:
+def _page(items: list[Any], args: dict[str, Any], key: str, *, default_limit: int = 8, full: bool = False) -> str:
     offset, limit = _offset(args), _limit(args, default_limit)
     page = items[offset:offset + limit]
     body = {key: [present(r, full=full) if isinstance(r, dict) and "kind" in r else r for r in page],
@@ -163,13 +163,13 @@ def _page(items: List[Any], args: Dict[str, Any], key: str, *, default_limit: in
 # -- handlers: (store, args, ctx) -> JSON string; ctx = {"session_id", "platform"} ---------
 
 
-def recall(store: MemoryStore, args: Dict[str, Any], ctx: Dict[str, Any]) -> str:
+def recall(store: MemoryStore, args: dict[str, Any], ctx: dict[str, Any]) -> str:
     query = str(args.get("query") or "").strip()
     if not query:
         return tool_error("Missing required parameter: query")
     mode = args.get("mode") if args.get("mode") in ("hybrid", "semantic", "keyword") else "hybrid"
     results = store.search(query, mode=mode, limit=_limit(args), where=store.build_where(**_filters(args)))
-    body: Dict[str, Any] = {"results": [present(r) for r in results], "count": len(results)}
+    body: dict[str, Any] = {"results": [present(r) for r in results], "count": len(results)}
     if mode != "keyword" and not store.embedder.ready:
         body["note"] = "embedding model not loaded yet: results are keyword-only"
     return json.dumps(body, ensure_ascii=False)
@@ -202,7 +202,7 @@ def _forget(store, args, ctx):
     return json.dumps({"erased": erased, "not_found": [i for i in ids if i not in erased]})
 
 
-def _session_records(store: MemoryStore, session_id: str) -> List[Dict[str, Any]]:
+def _session_records(store: MemoryStore, session_id: str) -> list[dict[str, Any]]:
     return sorted((r for r in store.records() if r.get("session_id") == session_id), key=lambda r: r["created_at"])
 
 
@@ -210,7 +210,7 @@ def _get(store, args, ctx):
     rec = store.get(str(args.get("id") or ""))
     if rec is None:
         return tool_error(f"Memory not found: {args.get('id')}")
-    body: Dict[str, Any] = {"memory": present(rec, full=True)}
+    body: dict[str, Any] = {"memory": present(rec, full=True)}
     if rec.get("session_id"):
         turns = [r for r in _session_records(store, rec["session_id"]) if r["kind"] == "turn"]
         ids = [r["id"] for r in turns]
@@ -242,7 +242,7 @@ def _timeline(store, args, ctx):
 
 def _sessions(store, args, ctx):
     f = _filters(args)
-    groups: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for rec in store.records():
         if rec.get("session_id") and _matches(rec, {**f, "kinds": [], "session_id": ""}):
             groups[rec["session_id"]].append(rec)
@@ -270,11 +270,11 @@ def _session(store, args, ctx):
 
 def _stats(store, args, ctx):
     recs = store.records()
-    by_kind: Dict[str, int] = defaultdict(int)
+    by_kind: dict[str, int] = defaultdict(int)
     for r in recs:
         by_kind[r["kind"]] += 1
     stamps = [r["created_at"] for r in recs]
-    tags: Dict[str, int] = defaultdict(int)
+    tags: dict[str, int] = defaultdict(int)
     for r in recs:
         for t in r.get("tags") or []:
             tags[t] += 1
@@ -290,13 +290,13 @@ def _stats(store, args, ctx):
     }, ensure_ascii=False)
 
 
-_MEMORY_ACTIONS: Dict[str, Callable[[MemoryStore, Dict[str, Any], Dict[str, Any]], str]] = {
+_MEMORY_ACTIONS: dict[str, Callable[[MemoryStore, dict[str, Any], dict[str, Any]], str]] = {
     "remember": _remember, "update": _update, "forget": _forget, "get": _get, "related": _related,
     "timeline": _timeline, "sessions": _sessions, "session": _session, "stats": _stats,
 }
 
 
-def memory(store: MemoryStore, args: Dict[str, Any], ctx: Dict[str, Any]) -> str:
+def memory(store: MemoryStore, args: dict[str, Any], ctx: dict[str, Any]) -> str:
     action = args.get("action")
     if action not in _MEMORY_ACTIONS:
         return tool_error(f"Unknown action: {action}")

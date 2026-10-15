@@ -155,7 +155,7 @@ class TestDeletedProfileTombstone:
         assert "worker" in _named_homes(profile_env)
 
     def test_delete_releases_this_process_session_db(self, profile_env):
-        import hermes_state.registry as registry
+        from hermes_state import registry
 
         profile_dir = create_profile("worker", no_alias=True, no_skills=True)
         held = registry.acquire(profile_dir / "state.db")

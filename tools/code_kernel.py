@@ -594,7 +594,7 @@ def _bind_rpc_socket(kernel: SessionKernel) -> str:
     return rpc_endpoint
 
 
-def _inherited_rpc_socket(kernel: SessionKernel) -> Tuple[str, socket.socket]:
+def _inherited_rpc_socket(kernel: SessionKernel) -> tuple[str, socket.socket]:
     """Sandboxed kernels: a connected socketpair; the child end is inherited as ``fd://N``
     (the sandbox forbids creating AF_UNIX sockets, which would otherwise reach the Docker
     socket or the session bus)."""
@@ -603,14 +603,14 @@ def _inherited_rpc_socket(kernel: SessionKernel) -> Tuple[str, socket.socket]:
     return f"fd://{child_end.fileno()}", child_end
 
 
-def _python_runtime_dirs(child_python: str) -> List[str]:
+def _python_runtime_dirs(child_python: str) -> list[str]:
     """Read-only dirs the kernel interpreter needs: its venv and the base installation."""
     real = os.path.realpath(child_python)
     dirs = {sys.prefix, sys.base_prefix, sys.exec_prefix, os.path.dirname(os.path.dirname(real))}
     return sorted(d for d in dirs if d and d != "/")
 
 
-def _parent_process_handle(child_env: Dict[str, str]):
+def _parent_process_handle(child_env: dict[str, str]):
     """Windows: open an inheritable SYNCHRONIZE handle to this process for the kernel's parent-death
     watchdog. Returns (handle, CloseHandle, startupinfo) or (None, None, None); fails open."""
     handle = close = startupinfo = None

@@ -163,7 +163,7 @@ runpy.run_module("hermes_cli.main", run_name="__main__", alter_sys=True)
     env = dict(os.environ, HOME=str(tmp_path), HERMES_HOME=str(home), HERMES_VAULT_PRIVATE_KEY=str(key))
     for name in ("HERMES_MASTER_PASSWORD", "HERMES_VAULT_KEY_FD", "HERMES_UPDATE_VAULT_CHANNEL"):
         env.pop(name, None)
-    result = subprocess.run([sys.executable, "-I", str(probe), str(source)],
+    result = subprocess.run([sys.executable, "-I", str(probe), str(source)], check=False,
                             env=env, cwd=tmp_path, stdin=subprocess.DEVNULL,
                             capture_output=True, text=True, encoding="utf-8", timeout=45,
                             **({"start_new_session": True} if os.name == "posix" else {}))

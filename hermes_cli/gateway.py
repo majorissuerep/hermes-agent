@@ -1951,7 +1951,7 @@ _WINDOWS_TASK_SUPERVISOR_STATES = frozenset({"Running", "Ready", "Queued"})
 
 def _windows_scheduled_task_state(*args, **kwargs):
     """No-op: native Windows support removed from this fork (WSL is the Windows answer)."""
-    return None
+    return
 
 
 def _windows_scheduled_task_supervises(task_name: str) -> bool:

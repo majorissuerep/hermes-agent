@@ -25,7 +25,7 @@ def test_real_state_oracle_survives_snapshot_mutation_and_restore(tmp_path, monk
 
     def probe(action, **extra):
         result = subprocess.run(
-            [sys.executable, "-c", boot], cwd=root, text=True, capture_output=True,
+            [sys.executable, "-c", boot], check=False, cwd=root, text=True, capture_output=True,
             input=json.dumps({"action": action, "password": password, **extra}), timeout=60,
         )
         assert result.returncode == 0, result.stderr

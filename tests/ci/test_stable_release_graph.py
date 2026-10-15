@@ -271,7 +271,6 @@ def test_docker_dev_stamp_checkout_has_release_history():
 
 
 def test_release_gates_extract_consumer_facing_versions():
-    release_jobs = workflow("stable-release.yml")["jobs"]
     docker = workflow("docker.yml")["jobs"]
     image_check = next(
         step["run"] for step in docker["build"]["steps"]

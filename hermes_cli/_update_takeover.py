@@ -140,7 +140,7 @@ def main() -> int:
         with child_vault(env) as vault_kwargs:
             return subprocess.run(
                 [str(python), "-I", "-B", "-X", "utf8", str(root / "hermes_cli/update_serve_resume.py"),
-                 str(context), str(result)], cwd=root, env=env, **vault_kwargs,
+                 str(context), str(result)], check=False, cwd=root, env=env, **vault_kwargs,
             ).returncode
     from hermes_cli import update_receipt
     from hermes_cli.update_lock import UpdateLock, describe_holder

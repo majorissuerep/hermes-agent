@@ -562,7 +562,7 @@ def test_no_read_connection_is_opened_without_descriptor_headroom(db, monkeypatc
     subprocess pipes, and EMFILE lands on whoever asks next -- which in the
     report was terminal_tool, not SQLite.
     """
-    import hermes_state.readpool as readpool
+    from hermes_state import readpool
 
     # Drain the pool so the next read must OPEN rather than reuse.
     while True:
@@ -591,7 +591,7 @@ def test_no_read_connection_is_opened_without_descriptor_headroom(db, monkeypatc
 
 def test_fd_headroom_guard_fails_open_where_it_cannot_measure(monkeypatch):
     """No RLIMIT_NOFILE (Windows) means unmeasurable, not tight."""
-    import hermes_state.readpool as readpool
+    from hermes_state import readpool
 
     monkeypatch.setattr(readpool, "_fd_soft_limit", lambda: None)
     assert readpool._fd_headroom_ok() is True

@@ -95,7 +95,7 @@ def test_full_migration(tmp_path, monkeypatch):
     # vault now exists and unlocks
     assert hv.vault_exists(home)
     hv.clear_vault_cache()
-    v = hv.unlock(home, PW)
+    hv.unlock(home, PW)
 
     # 1. zero plaintext anywhere in the home (except code trees)
     offenders = []

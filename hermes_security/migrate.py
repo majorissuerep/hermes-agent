@@ -112,7 +112,7 @@ def repair_clobbered_state(home: Path | str) -> dict:
                 _repair_frames(vault, path, rel, report)
             else:
                 _repair_envelope(vault, home_path, path, rel, head, report)
-        except Exception as exc:  # noqa: BLE001 - one file must not stop the sweep
+        except Exception as exc:
             report["unrecoverable"].append(f"{rel.as_posix()}: {type(exc).__name__}: {exc}")
     report["code_files"] = _restore_code_trees(vault, home_path, report)
     return report
@@ -329,7 +329,7 @@ def _restore_code_trees(vault, home: Path, report: dict) -> int:
                     if data != raw:
                         vault_mod._atomic_write(path, data, mode=path.stat().st_mode & 0o777)
                         restored += 1
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:
                     report["unrecoverable"].append(f"{rel.as_posix()}: {type(exc).__name__}: {exc}")
     return restored
 
@@ -625,7 +625,7 @@ def migrate_home(home: Path | str, password: str | bytes, *, dry_run: bool = Fal
             # vanished mid-migration (e.g. a sidecar consumed by its parent
             # DB conversion) — nothing to convert
             report.skipped.append(rel.as_posix() + " (vanished)")
-        except Exception as exc:  # noqa: BLE001 - one file must not kill the run
+        except Exception as exc:
             report.failures.append(f"{rel.as_posix()}: {exc}")
 
     return report

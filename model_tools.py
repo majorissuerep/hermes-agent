@@ -832,7 +832,7 @@ def _execute_tool(function_name: str, function_args: dict[str, Any], original_ar
     else:
         dispatch_kwargs["user_task"] = user_task
 
-    def _dispatch(next_args: Dict[str, Any]) -> Any:
+    def _dispatch(next_args: dict[str, Any]) -> Any:
         from agent.tool_policy import review_current_call
         blocked = review_current_call(function_name, next_args)
         if blocked is not None:

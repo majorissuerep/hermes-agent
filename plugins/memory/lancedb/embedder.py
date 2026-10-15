@@ -76,7 +76,7 @@ class Embedder:
         finally:
             self._ready.set()
 
-    def _normalize(self, vectors) -> List[np.ndarray]:
+    def _normalize(self, vectors) -> list[np.ndarray]:
         out = []
         for vec in vectors:
             vec = np.asarray(vec, dtype=np.float32)
@@ -84,7 +84,7 @@ class Embedder:
             out.append(vec / norm if norm else vec)
         return out
 
-    def embed_documents(self, texts: List[str]) -> List[np.ndarray]:
+    def embed_documents(self, texts: list[str]) -> list[np.ndarray]:
         if not self.ready:
             raise RuntimeError(f"embedding model not ready: {self._error or 'loading'}")
         return self._normalize(self._model.embed(texts))
@@ -106,7 +106,7 @@ def model_dim(model_name: str) -> int:
     raise ValueError(f"unknown fastembed model {model_name!r}")
 
 
-_EMBEDDERS: Dict[Tuple[str, str], Embedder] = {}
+_EMBEDDERS: dict[tuple[str, str], Embedder] = {}
 _EMBEDDERS_LOCK = threading.Lock()
 
 

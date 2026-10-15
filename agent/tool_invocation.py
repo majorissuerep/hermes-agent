@@ -11,10 +11,10 @@ logger = logging.getLogger(__name__)
 
 
 def invoke_tool(agent, function_name: str, function_args: dict, effective_task_id: str,
-                 tool_call_id: Optional[str] = None, messages: list = None,
+                 tool_call_id: Optional[str] = None, messages: list | None = None,
                  pre_tool_block_checked: bool = False,
                  skip_tool_request_middleware: bool = False,
-                 tool_request_middleware_trace: Optional[List[Dict[str, Any]]] = None,
+                 tool_request_middleware_trace: Optional[list[dict[str, Any]]] = None,
                  skip_tool_execution_middleware: bool = False) -> str:
     """Invoke a single tool (agent-level or registry-dispatched) and return the result string;
     no display logic. Used by the concurrent path; the sequential path keeps its own inline

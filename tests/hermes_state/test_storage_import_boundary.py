@@ -12,7 +12,7 @@ def test_runtime_storage_modules_import_without_loading_gateway():
 
 
 def test_gateway_names_are_the_storage_definitions():
-    import hermes_state.keys as keys
+    from hermes_state import keys
     from gateway.session import SessionStore, profile_from_session_key_namespace
     from gateway.session_admission import admission_fingerprint
     from gateway.session_local_recovery import local_identity

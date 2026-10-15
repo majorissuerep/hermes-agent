@@ -382,7 +382,7 @@ def _sync_with_upstream_if_needed(git_cmd: list[str], cwd: Path, *, assume_yes: 
 
 def _push_synced_fork(git_cmd: list[str], cwd: Path) -> None:
     """Fork updates never publish upstream snapshots over the fork branch."""
-    return None
+    return
 
 
 

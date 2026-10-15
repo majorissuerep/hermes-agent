@@ -27,7 +27,7 @@ def test_project_graph_reuses_documents_and_refreshes_changed_sources(tmp_path, 
 
     def run(action, *args, success=True):
         result = subprocess.run(
-            [sys.executable, str(SKILL / "scripts" / "project_graph.py"), action, str(project), *args],
+            [sys.executable, str(SKILL / "scripts" / "project_graph.py"), action, str(project), *args], check=False,
             cwd=tmp_path, env={**os.environ, "PYTHONPATH": str(REPO)},
             capture_output=True, text=True, timeout=60)
         assert (result.returncode == 0) == success, result.stdout + result.stderr

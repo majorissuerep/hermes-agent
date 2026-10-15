@@ -43,7 +43,7 @@ else:
     raise AssertionError('a second process acquired the held inode')
 finally:
     owner.close()
-""", str(home)], env=dict(os.environ, HERMES_HOME=str(home)),
+""", str(home)], check=False, env=dict(os.environ, HERMES_HOME=str(home)),
                 stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=20)
             assert child.returncode == 0 and child.stdout.strip() == "excluded", child.stderr
             owner.reserve([home])

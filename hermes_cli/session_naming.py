@@ -36,7 +36,7 @@ def rename_session(db, session_id: str, messages: list[dict], *, main_runtime: d
 def terminal_label(title: str) -> str:
     # Strip whole ANSI/OSC frames before controls, so a model cannot set a clipboard or inject
     # extra terminal commands. Unicode names remain usable on Linux, macOS and WSL terminals.
-    clean = re.sub(r"\x1b\].*?(?:\x07|\x1b\\)|\x1b\[[0-?]*[ -/]*[@-~]", "", str(title), flags=re.S)
+    clean = re.sub(r"\x1b\].*?(?:\x07|\x1b\\)|\x1b\[[0-?]*[ -/]*[@-~]", "", str(title), flags=re.DOTALL)
     clean = "".join(c for c in clean if not unicodedata.category(c).startswith("C"))
     return " ".join(clean.split())[:120]
 

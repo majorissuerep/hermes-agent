@@ -503,7 +503,7 @@ class SessionPersistenceMixin:
                 for key in [k for k, (rev, _) in fast_persisted.items() if rev <= generation]:
                     del fast_persisted[key]
 
-    def _save_sessions_json(self, data: Dict[str, Any]) -> None:
+    def _save_sessions_json(self, data: dict[str, Any]) -> None:
         """Write the legacy sessions.json mirror of the routing index (atomic + fsync).
         Fork: envelope-aware inside a vaulted home."""
         _target = self.sessions_dir / "sessions.json"

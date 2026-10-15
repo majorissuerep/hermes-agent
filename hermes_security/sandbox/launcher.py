@@ -71,7 +71,7 @@ def _die(message):
 def landlock_abi():
     """Highest Landlock ABI the running kernel supports (0 = unavailable)."""
     abi = _libc.syscall(_SYS_CREATE_RULESET, None, ctypes.c_size_t(0), ctypes.c_uint32(_CREATE_RULESET_VERSION))
-    return abi if abi > 0 else 0
+    return max(0, abi)
 
 
 def _fs_rights(abi):

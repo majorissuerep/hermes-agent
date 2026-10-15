@@ -19,7 +19,7 @@ def deck_host_enabled() -> bool:
     with contextlib.suppress(Exception):
         from hermes_cli.config import load_config
 
-        return bool(((load_config().get("sessions") or {}).get("host", True)))
+        return bool((load_config().get("sessions") or {}).get("host", True))
     return True
 
 

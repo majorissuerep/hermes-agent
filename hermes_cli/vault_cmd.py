@@ -159,7 +159,7 @@ def cmd_vault(args: Any) -> int:
         print("→ Backing up and migrating (this can take a minute)...")
         report = mig.migrate_home(home, password)
         if not report.ok:
-            print(f"✗ Migration finished WITH FAILURES (backup kept):")
+            print("✗ Migration finished WITH FAILURES (backup kept):")
             for failure in report.failures:
                 print(f"    {failure}")
             if report.backup_path:
@@ -230,7 +230,7 @@ def cmd_vault(args: Any) -> int:
         envelopes, dbs, frames = status["encrypted_files"]
         print(f"  Encrypted files  : {envelopes} envelope(s), {dbs} database(s), {frames} frame stream(s)")
         if not status["unlocked"]:
-            print(f"  (use 'hermes secure-vault unlock', or HERMES_VAULT_PRIVATE_KEY=<key-file path>, to unlock)")
+            print("  (use 'hermes secure-vault unlock', or HERMES_VAULT_PRIVATE_KEY=<key-file path>, to unlock)")
         return 0
 
     if command == "unlock":
@@ -415,7 +415,7 @@ def gate_locked_vault(args: Any, home) -> None:
 
         try:
             load_hermes_dotenv()
-        except Exception as exc:  # noqa: BLE001 - a bad .env must not block 'secure-vault repair' advice
+        except Exception as exc:
             print(
                 f"⚠ hermes: sealed .env not loaded ({type(exc).__name__}); "
                 "run 'hermes secure-vault repair'",

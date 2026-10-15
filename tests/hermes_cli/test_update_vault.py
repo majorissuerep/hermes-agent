@@ -94,7 +94,7 @@ assert result.returncode == 0
     # PM already held this lock, then could not import cryptography under -S.
     with child_vault(env) as kwargs:
         result = subprocess.run([sys.executable, "-I", "-S", str(preparation), str(source),
-                                 str(selected), str(home), str(sibling)],
+                                 str(selected), str(home), str(sibling)], check=False,
                                 env=env, capture_output=True, text=True, timeout=45, **kwargs)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "dependency lock still held" not in result.stderr
@@ -137,7 +137,7 @@ for operation, target, purpose in (
     script.write_text(program, encoding="utf-8")
     env = dict(os.environ)
     with child_vault(env) as kwargs:
-        result = subprocess.run([sys.executable, "-I", "-S", str(script), str(source), str(home / ".env")],
+        result = subprocess.run([sys.executable, "-I", "-S", str(script), str(source), str(home / ".env")], check=False,
                                 env=env, capture_output=True, text=True, timeout=30, **kwargs)
     assert result.returncode == 0, result.stdout + result.stderr
     assert (home / ".env").read_bytes() == before

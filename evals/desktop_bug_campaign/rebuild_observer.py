@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 
 from tui_gateway import server
-import hermes_state.registry as registry
+from hermes_state import registry
 
 
 original_target = server._config_model_target

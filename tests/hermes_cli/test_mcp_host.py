@@ -84,7 +84,7 @@ def host(tmp_path, monkeypatch):
         ):
             env.pop(key, None)
         result = subprocess.run(
-            [sys.executable, "-m", "hermes_cli.main", "-p", profile, "mcp", *argv],
+            [sys.executable, "-m", "hermes_cli.main", "-p", profile, "mcp", *argv], check=False,
             input=stdin or "",
             env=env,
             capture_output=True,
@@ -250,7 +250,7 @@ def test_host_failures_never_fall_back_to_direct_writes_or_report_success(
     from gateway import host_rendezvous as hr
     from hermes_security import vault
 
-    root, work, cli = host
+    _root, work, cli = host
     original = (work / "config.yaml").read_bytes()
     direct = cli("add", "direct", "--command", "npx", profile="work", expected=2)
     assert "vault is locked" in direct.stderr

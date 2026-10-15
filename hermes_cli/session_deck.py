@@ -59,7 +59,7 @@ def current_profile() -> str:
     return "default"
 
 
-def deck_profiles() -> List[str]:
+def deck_profiles() -> list[str]:
     """Every profile that has a state.db to hold deck rows."""
     from hermes_cli.profiles import list_profile_names
 
@@ -68,7 +68,7 @@ def deck_profiles() -> List[str]:
 
 # One handle per state.db for the life of the process: the host's snapshot loop and every open deck view
 # poll these every few seconds, and opening a SessionDB runs its schema pass. SessionDB is thread-safe.
-_DB_CACHE: Dict[Path, Any] = {}
+_DB_CACHE: dict[Path, Any] = {}
 _DB_CACHE_LOCK = threading.Lock()
 
 
@@ -84,12 +84,12 @@ def open_db(profile: str) -> Iterator[Any]:
     yield db
 
 
-def live_owner(profile: str, tip_session_id: str) -> Optional[Dict[str, Any]]:
+def live_owner(profile: str, tip_session_id: str) -> Optional[dict[str, Any]]:
     """The active-session lease of whatever process runs this conversation now, or None (dormant)."""
     return _owners(profile).get(tip_session_id)
 
 
-def _owners(profile: str) -> Dict[str, Dict[str, Any]]:
+def _owners(profile: str) -> dict[str, dict[str, Any]]:
     """Every live lease in ``profile``, by stored session id — one registry read for a whole listing."""
     from hermes_cli.active_sessions import active_session_registry_snapshot
 
@@ -98,7 +98,7 @@ def _owners(profile: str) -> Dict[str, Dict[str, Any]]:
             for entry in active_session_registry_snapshot(registry_home=home)}
 
 
-def _project(profile: str, row: Dict[str, Any], owners: Optional[Dict[str, Dict[str, Any]]] = None) -> Dict[str, Any]:
+def _project(profile: str, row: dict[str, Any], owners: Optional[dict[str, dict[str, Any]]] = None) -> dict[str, Any]:
     owner = (owners if owners is not None else _owners(profile)).get(row["tip_session_id"])
     state = row["state"] if owner is not None else "dormant"
     if owner is not None and state == "dormant":
@@ -107,9 +107,9 @@ def _project(profile: str, row: Dict[str, Any], owners: Optional[Dict[str, Dict[
             "owner_surface": (owner or {}).get("surface") or "", "owner_pid": (owner or {}).get("pid")}
 
 
-def list_deck(profiles: Optional[List[str]] = None, *, include_closed: bool = False) -> List[Dict[str, Any]]:
+def list_deck(profiles: Optional[list[str]] = None, *, include_closed: bool = False) -> list[dict[str, Any]]:
     """Open sessions across ``profiles`` (default: all), most recently active first."""
-    rows: List[Dict[str, Any]] = []
+    rows: list[dict[str, Any]] = []
     for profile in profiles if profiles is not None else deck_profiles():
         owners = _owners(profile)
         with open_db(profile) as db:
@@ -117,7 +117,7 @@ def list_deck(profiles: Optional[List[str]] = None, *, include_closed: bool = Fa
     return sorted(rows, key=lambda r: r["last_active"], reverse=True)
 
 
-def resolve(ref: DeckRef) -> Dict[str, Any]:
+def resolve(ref: DeckRef) -> dict[str, Any]:
     """The projected open row for ``ref``; LookupError when unknown or already closed."""
     try:
         home = profile_home(ref.profile)
@@ -146,11 +146,11 @@ def close_row(ref: DeckRef, *, closed_by: str) -> bool:
     return True
 
 
-def tail(profile: str, tip_session_id: str, limit: int = 12) -> List[Dict[str, str]]:
+def tail(profile: str, tip_session_id: str, limit: int = 12) -> list[dict[str, str]]:
     """Last ``limit`` user/assistant messages as plain text (tool traffic elided)."""
     with open_db(profile) as db:
         messages = db.get_messages(tip_session_id)
-    out: List[Dict[str, str]] = []
+    out: list[dict[str, str]] = []
     for message in messages:
         role = message.get("role")
         content = message.get("content")
@@ -163,7 +163,7 @@ def tail(profile: str, tip_session_id: str, limit: int = 12) -> List[Dict[str, s
     return out[-limit:]
 
 
-def sender_label(sender: Dict[str, Any]) -> str:
+def sender_label(sender: dict[str, Any]) -> str:
     """Human label for a message's origin: ``session #3 "title"`` or the free-form actor name."""
     if sender.get("ref"):
         title = sender.get("title") or ""
@@ -171,13 +171,13 @@ def sender_label(sender: Dict[str, Any]) -> str:
     return str(sender.get("name") or "the user")
 
 
-def frame_message(message: str, sender: Dict[str, Any]) -> str:
+def frame_message(message: str, sender: dict[str, Any]) -> str:
     """The text the TARGET model sees: one provenance line, then the message verbatim. A visible header
     (not just turn_author, which only reaches memory providers) so the recipient can tell a relayed
     request from its own user and reply through the deck if it needs to."""
     return f"[Session deck — message from {sender_label(sender)}]\n{message}"
 
 
-def sender_author(sender: Dict[str, Any]) -> Dict[str, Any]:
+def sender_author(sender: dict[str, Any]) -> dict[str, Any]:
     ident = f"deck:{sender['ref']}" if sender.get("ref") else "deck:user"
     return {"id": ident, "name": sender_label(sender), "is_bot": bool(sender.get("ref"))}

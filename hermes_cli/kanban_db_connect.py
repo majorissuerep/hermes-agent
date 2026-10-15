@@ -662,7 +662,7 @@ def _schema_is_present(conn: sqlite3.Connection) -> bool:
     return row is not None
 
 
-def _vaulted_row_factory(db_path) -> "sqlite3.Row":
+def _vaulted_row_factory(db_path) -> sqlite3.Row:
     """Fork: SQLCipher's Row for vaulted-home boards (stdlib Row rejects
     sqlcipher3 cursors); stdlib Row otherwise."""
     try:

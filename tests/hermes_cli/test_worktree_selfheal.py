@@ -22,7 +22,7 @@ from hermes_cli._subprocess_compat import noninteractive_git_env
 
 def _git(cwd, *args, check=True):
     result = subprocess.run(
-        ["git", *args], cwd=str(cwd), capture_output=True, encoding="utf-8",
+        ["git", *args], check=False, cwd=str(cwd), capture_output=True, encoding="utf-8",
         stdin=subprocess.DEVNULL, env=noninteractive_git_env(),
     )
     if check:

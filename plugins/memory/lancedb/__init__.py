@@ -50,7 +50,7 @@ def _truthy(value: Any) -> bool:
     return value if isinstance(value, bool) else str(value).strip().lower() in ("1", "true", "yes", "on")
 
 
-def _load_plugin_config() -> Dict[str, Any]:
+def _load_plugin_config() -> dict[str, Any]:
     try:
         from hermes_cli.config import cfg_get, load_config_readonly
 
@@ -66,7 +66,7 @@ def _clip(text: str, limit: int) -> str:
 
 
 class LanceMemoryProvider(MemoryProvider):
-    def __init__(self, config: Optional[Dict[str, Any]] = None) -> None:
+    def __init__(self, config: Optional[dict[str, Any]] = None) -> None:
         self._config = dict(config or _DEFAULTS)
         self._store = None
         self._error = ""
@@ -91,7 +91,7 @@ class LanceMemoryProvider(MemoryProvider):
         return ("LanceDB memory keeps everything encrypted with the Hermes vault, and this home has none: "
                 "run `hermes secure-vault migrate` first.")
 
-    def get_config_schema(self) -> List[Dict[str, Any]]:
+    def get_config_schema(self) -> list[dict[str, Any]]:
         return [
             {"key": "embedding_model", "description": "Local fastembed model (multilingual default; changing it re-embeds in the background)",
              "default": _DEFAULTS["embedding_model"]},
@@ -105,7 +105,7 @@ class LanceMemoryProvider(MemoryProvider):
              "minimum": 0, "maximum": 1, "step": 0.05},
         ]
 
-    def save_config(self, values: Dict[str, Any], hermes_home: str) -> None:
+    def save_config(self, values: dict[str, Any], hermes_home: str) -> None:
         from hermes_cli.config import save_config
 
         save_config({"plugins": {CONFIG_KEY: dict(values)}}, merge_existing=True)
@@ -188,7 +188,7 @@ class LanceMemoryProvider(MemoryProvider):
                           rewound: bool = False, **kwargs) -> None:
         self._session_id = new_session_id or self._session_id
 
-    def on_memory_write(self, action: str, target: str, content: str, metadata: Optional[Dict[str, Any]] = None) -> None:
+    def on_memory_write(self, action: str, target: str, content: str, metadata: Optional[dict[str, Any]] = None) -> None:
         """Mirror the built-in MEMORY.md / USER.md tool so those facts are searchable here too."""
         if self._store is None or not self._writes_enabled or not _truthy(self._config.get("mirror_builtin", True)):
             return
@@ -214,12 +214,12 @@ class LanceMemoryProvider(MemoryProvider):
 
     # -- tools ----------------------------------------------------------------------------
 
-    def get_tool_schemas(self) -> List[Dict[str, Any]]:
+    def get_tool_schemas(self) -> list[dict[str, Any]]:
         from .tools import TOOL_SCHEMAS
 
         return list(TOOL_SCHEMAS)
 
-    def handle_tool_call(self, tool_name: str, args: Dict[str, Any], **kwargs) -> str:
+    def handle_tool_call(self, tool_name: str, args: dict[str, Any], **kwargs) -> str:
         from .tools import HANDLERS
 
         if tool_name not in HANDLERS:

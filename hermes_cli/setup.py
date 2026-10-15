@@ -527,12 +527,12 @@ _SEND_CONSENT_EXPLAINER = (
 def setup_telemetry(config: dict):
     """Fork: telemetry removed. This section no longer exists; kept as a no-op
     shim so old call sites (tools_config) stay functional without prompting."""
-    return None
+    return
 
 
 def _record_send_consent_change(*, enabled: bool) -> None:
     """Fork: telemetry removed — nothing to record."""
-    return None
+    return
 
 
 # Extracted sections, re-exported so callers and test patches keep resolving through

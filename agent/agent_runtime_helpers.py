@@ -3687,7 +3687,6 @@ __all__ = [
     "extract_api_error_context",
     "extract_reasoning",
     "force_close_tcp_sockets",
-    "invoke_tool",
     "looks_like_codex_intermediate_ack",
     "plan_cache_sections_for_destination",
     "prompt_caching_disabled_from_config",
@@ -3698,6 +3697,5 @@ __all__ = [
     "sanitize_api_messages",
     "sanitize_tool_call_arguments",
     "strip_think_blocks",
-    "switch_model",
     "try_recover_primary_transport",
 ]

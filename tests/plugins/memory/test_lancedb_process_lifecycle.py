@@ -71,7 +71,7 @@ record = store.put(kind='fact', text='child record')
 store.erase([{first['id']!r}])
 print(json.dumps({{'id': record['id'], 'pid': os.getpid()}}))
 """
-    result = subprocess.run([sys.executable, "-c", code], cwd=ROOT,
+    result = subprocess.run([sys.executable, "-c", code], check=False, cwd=ROOT,
                             env=dict(os.environ, HERMES_HOME=str(home)),
                             capture_output=True, text=True, timeout=60)
     assert result.returncode == 0, result.stderr

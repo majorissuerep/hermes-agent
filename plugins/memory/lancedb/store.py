@@ -73,10 +73,10 @@ def _op_id(payload: bytes) -> Optional[str]:
     return op.get("id") or (op.get("rec") or {}).get("id")
 
 
-def compact_payloads(payloads: List[bytes], *, erase: Iterable[str] = ()) -> List[bytes]:
+def compact_payloads(payloads: list[bytes], *, erase: Iterable[str] = ()) -> list[bytes]:
     """Keep only the latest ``put`` per live id; drop tombstones and every frame of *erase*."""
     erase = set(erase)
-    latest: Dict[str, bytes] = {}
+    latest: dict[str, bytes] = {}
     for payload in payloads:
         try:
             op = json.loads(payload)
@@ -98,7 +98,7 @@ class MemoryStore:
         self.embedder = embedder
         self.dim = dim
         self._lock = threading.RLock()
-        self._records: Dict[str, Dict[str, Any]] = {}
+        self._records: dict[str, dict[str, Any]] = {}
         self._table = None
         self._offset = 0
         self._inode: Optional[int] = None
@@ -114,13 +114,13 @@ class MemoryStore:
 
         return get_vault(find_vault_home(self.path))
 
-    def _append(self, op: Dict[str, Any]) -> None:
+    def _append(self, op: dict[str, Any]) -> None:
         from hermes_security import frames
 
         op["v"] = _OP_VERSION
         frames.append(self.path, json.dumps(op, ensure_ascii=False).encode("utf-8"), purpose=FRAME_PURPOSE)
 
-    def _rewrite(self, transform: Callable[[List[bytes]], List[bytes]]) -> None:
+    def _rewrite(self, transform: Callable[[list[bytes]], list[bytes]]) -> None:
         from hermes_security import frames
 
         frames.rewrite(self.path, transform, purpose=FRAME_PURPOSE)
@@ -174,8 +174,8 @@ class MemoryStore:
             self._frames_seen += len(payloads)
             self._apply(payloads)
 
-    def _apply(self, payloads: List[bytes]) -> None:
-        puts: Dict[str, Dict[str, Any]] = {}
+    def _apply(self, payloads: list[bytes]) -> None:
+        puts: dict[str, dict[str, Any]] = {}
         touched: set[str] = set()
         for payload in payloads:
             try:
@@ -230,7 +230,7 @@ class MemoryStore:
             return None
 
     def put(self, *, kind: str, text: str, session_id: str = "", platform: str = "", source: str = "",
-            tags: Optional[List[str]] = None, record_id: str = "") -> Dict[str, Any]:
+            tags: Optional[list[str]] = None, record_id: str = "") -> dict[str, Any]:
         now = time.time()
         with self._lock:
             self.refresh()
@@ -253,7 +253,7 @@ class MemoryStore:
         self._maybe_compact()
         return self.get(rec["id"]) or rec
 
-    def erase(self, record_ids: Iterable[str]) -> List[str]:
+    def erase(self, record_ids: Iterable[str]) -> list[str]:
         """Delete AND scrub: the log is rewritten without any frame of these ids."""
         with self._lock:
             self.refresh()
@@ -296,13 +296,13 @@ class MemoryStore:
 
     # -- reads -----------------------------------------------------------------------
 
-    def get(self, record_id: str) -> Optional[Dict[str, Any]]:
+    def get(self, record_id: str) -> Optional[dict[str, Any]]:
         with self._lock:
             self.refresh()
             rec = self._records.get(record_id)
             return dict(rec) if rec else None
 
-    def records(self) -> List[Dict[str, Any]]:
+    def records(self) -> list[dict[str, Any]]:
         with self._lock:
             self.refresh()
             return [dict(r) for r in self._records.values()]
@@ -316,9 +316,9 @@ class MemoryStore:
         return np.asarray(rows[0]["vector"], dtype=np.float32) if rows else None
 
     @staticmethod
-    def build_where(*, kinds: Optional[List[str]] = None, session_id: str = "", exclude_session_id: str = "",
+    def build_where(*, kinds: Optional[list[str]] = None, session_id: str = "", exclude_session_id: str = "",
                     since: Optional[float] = None, until: Optional[float] = None,
-                    tags: Optional[List[str]] = None, exclude_ids: Iterable[str] = ()) -> str:
+                    tags: Optional[list[str]] = None, exclude_ids: Iterable[str] = ()) -> str:
         clauses = []
         if kinds:
             clauses.append("kind IN (" + ", ".join(_sql_str(k) for k in kinds) + ")")
@@ -338,7 +338,7 @@ class MemoryStore:
             clauses.append("id NOT IN (" + ", ".join(_sql_str(i) for i in exclude_ids) + ")")
         return " AND ".join(clauses)
 
-    def vector_search(self, vector: np.ndarray, *, limit: int, where: str = "") -> List[Dict[str, Any]]:
+    def vector_search(self, vector: np.ndarray, *, limit: int, where: str = "") -> list[dict[str, Any]]:
         clause = "has_vector = true" + (f" AND ({where})" if where else "")
         with self._lock:
             self.refresh()
@@ -350,7 +350,7 @@ class MemoryStore:
             row["similarity"] = round(1.0 - float(row.pop("_distance")), 4)
         return rows
 
-    def keyword_search(self, query: str, *, limit: int, where: str = "") -> List[Dict[str, Any]]:
+    def keyword_search(self, query: str, *, limit: int, where: str = "") -> list[dict[str, Any]]:
         with self._lock:
             self.refresh()
             if not self._records or not query.strip():
@@ -369,15 +369,15 @@ class MemoryStore:
         return rows
 
     def search(self, query: str, *, mode: str = "hybrid", limit: int = 8, where: str = "",
-               min_similarity: Optional[float] = None) -> List[Dict[str, Any]]:
+               min_similarity: Optional[float] = None) -> list[dict[str, Any]]:
         """Hybrid = reciprocal-rank fusion of vector and BM25 results. ``min_similarity`` gates on
         cosine (auto-recall only): a keyword-only candidate has no similarity and is dropped then."""
         pool = max(limit * 3, 20)
-        vector_rows: List[Dict[str, Any]] = []
+        vector_rows: list[dict[str, Any]] = []
         if mode in ("hybrid", "semantic") and self.embedder.ready:
             vector_rows = self.vector_search(self.embedder.embed_query(query), limit=pool, where=where)
         keyword_rows = self.keyword_search(query, limit=pool, where=where) if mode in ("hybrid", "keyword") else []
-        fused: Dict[str, Dict[str, Any]] = {}
+        fused: dict[str, dict[str, Any]] = {}
         for rows in (vector_rows, keyword_rows):
             for rank, row in enumerate(rows):
                 entry = fused.setdefault(row["id"], {**row, "score": 0.0})
@@ -394,7 +394,7 @@ class MemoryStore:
         return results[:limit]
 
 
-_STORES: Dict[tuple, MemoryStore] = {}
+_STORES: dict[tuple, MemoryStore] = {}
 _STORES_LOCK = threading.Lock()
 
 

@@ -15,7 +15,7 @@ import pytest
 from hermes_cli import config
 from hermes_state.wal import apply_wal_with_fallback
 from utils import atomic_yaml_write
-import hermes_state.wal as wal
+from hermes_state import wal
 
 
 def test_partial_config_import_cannot_invert_config_and_module_locks(tmp_path):

@@ -928,7 +928,7 @@ class GatewaySlashCommandsMixin(
         # system prompt/tool schema (prompt-cache prefix is sacred).
         return run_approval_mode_command(requested).message
 
-    async def _handle_sandbox_command(self, event: MessageEvent) -> Union[str, EphemeralReply]:
+    async def _handle_sandbox_command(self, event: MessageEvent) -> str | EphemeralReply:
         """Handle /sandbox — this session's OS sandbox. Grants reach the host filesystem, so
         anything beyond viewing needs a gateway admin (unconfigured policies: unrestricted)."""
         from gateway.slash_access import policy_for_source
