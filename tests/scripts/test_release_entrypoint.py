@@ -100,7 +100,7 @@ def test_release_claims_the_first_attempt_creates_a_draft_and_dispatches(source)
         return ""
 
     result = _release(source, commit, execute=execute, autopublish=True,
-                     lanes=lane_set.select(only=["docker", "ci"], with_=["windows"]))
+                     lanes=lane_set.select(only=["docker", "ci"], with_=["macos-intel"]))
 
     assert result["version"] == "0.21.5"
     assert result["tag"] == "rc.1-v0.21.5"
@@ -117,11 +117,11 @@ def test_release_claims_the_first_attempt_creates_a_draft_and_dispatches(source)
         "autopublish": True,
         "commit": commit,
         "schema": 1,
-        "lanes": ["ci", "docker", "windows"],
+        "lanes": ["ci", "docker", "macos-intel"],
         "lanesRevision": lane_set.LANES_REVISION,
         "version": "0.21.5",
     }
-    assert result["lanes"] == frozenset({"ci", "docker", "windows"})
+    assert result["lanes"] == frozenset({"ci", "docker", "macos-intel"})
     create = calls[0]
     assert create[:4] == ["gh", "release", "create", "rc.1-v0.21.5"]
     assert "--verify-tag" in create and "--draft" in create
@@ -189,10 +189,10 @@ def test_release_output_names_the_ci_run_and_the_publish_step():
     assert "Autopublish is on" in automatic
     assert "publish --version" not in automatic
 
-    # --only windows,docker: no tests, no macOS, and a partial desktop set never moves the channel.
-    windows = next_steps({**result, "lanes": lane_set.select(only=["windows", "docker"])})
-    assert "Not built: windows-store, macos-arm64, macos-intel, termux." in windows
-    assert "Not tested: ci, nix, docker-tests, pm-bundle, windows-live, install-e2e, bootstrap-version, smoke, upgrade" in windows
+    # --only macos-intel,docker: no tests, no macOS, and a partial desktop set never moves the channel.
+    windows = next_steps({**result, "lanes": lane_set.select(only=["macos-intel", "docker"])})
+    assert "Not built: macos-arm64, termux." in windows
+    assert "Not tested: ci, nix, docker-tests, pm-bundle, install-e2e, smoke, upgrade" in windows
     assert "partial desktop release" in windows
     assert "\033[" not in windows
     assert "\033[1mNot tested" in next_steps({**result, "lanes": lane_set.select(without=["ci"])}, bold=True)

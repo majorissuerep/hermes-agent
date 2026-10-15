@@ -516,7 +516,7 @@ def test_accepted_release_receipts_feed_the_protected_head_without_rebuilding(tm
         def no_intel(rows, key):
             return [row for row in rows if (row[key], row["arch"]) not in (("darwin", "x64"), ("macos", "x64"))]
         lean = dict(accepted, packages=no_intel(accepted["packages"], "platform"))
-        assert channel_releases.native_legs(lean) == ("darwin-arm64", "win32-arm64", "win32-x64", "windows-universal")
+        assert channel_releases.native_legs(lean) == ("darwin-arm64",)
         assert channel_releases.native_legs(accepted) == channel_releases.NATIVE_LEGS
         channel_releases.match_accepted_packages(dict(manifest, packages=no_intel(manifest["packages"], "platform")), lean)
         with pytest.raises(ChannelError, match="every native"):
@@ -556,7 +556,7 @@ def test_accepted_release_receipts_feed_the_protected_head_without_rebuilding(tm
         before = dict(objects)
         assert channel_releases.publish_release("stable-release", {"GITHUB_REPOSITORY": pub.repository}, tmp_path / "retry") == result
         assert objects == before
-        (tmp_path / bundle_name).write_bytes(b"corrupt")
+        (tmp_path / "metadata-macos-arm64.json").write_bytes(b"corrupt")
         with pytest.raises(ChannelError, match="receipt"):
             channel_releases.read_native_receipts(tmp_path, tag, commit)
 
@@ -641,7 +641,7 @@ def test_accepted_stable_reads_the_release_archive_by_tag(monkeypatch):
                      "archive": attempt,
                      "smoke_results": {job: {"result": "success"} for job in channel_releases.stable.SMOKE_JOBS},
                      "packages": []}
-        for platform in ("macos", "windows"):
+        for platform in ("macos",):
             for arch in ("arm64", "x64"):
                 candidate["packages"].append({"platform": platform, "arch": arch, "tag": tag, "commit": commit,
                     "version": "2.0.0" if platform == "macos" else "2026.5761.123.0", "identity": "fixture.identity",
@@ -678,10 +678,7 @@ def test_request_inputs_are_rejected_before_allocating():
         assert objects == before
 
 
-def test_canary_native_version_is_derived_from_the_current_tag():
-    from scripts.releases.channel_releases import canary_windows_version
 
-    assert canary_windows_version("v0.27.1+canary.20260829T010203Z") == "26.829.1.203"
 
 
 def test_stable_requests_name_the_attempt_archive_only_when_given():
@@ -714,7 +711,7 @@ def test_stable_receipts_bind_the_attempt_ref_while_metadata_binds_the_payload_t
     from scripts.releases.handoff import receipt_name
     from hermes_cli.release_channels import ChannelError, canonical_json
     attempt, payload, commit = "rc.15-v2.0.0", "v2.0.0", "e" * 40
-    legs = ("darwin-arm64", "win32-arm64", "win32-x64")
+    legs = ("darwin-arm64", "darwin-x64")
 
     def stage(metadata_tag):
         for leg in legs:

@@ -588,35 +588,7 @@ def test_a_fresh_flip_advances_the_head_with_the_receipt_it_just_wrote():
     assert releases[0]["tag_name"] == "v0.21.5" and releases[0]["draft"] is False
 
 
-def test_the_store_check_joins_the_pass_after_the_aliases_move(monkeypatch):
-    from scripts.releases import channel_releases, docker, sequencer, store
 
-    manifest_digest = hashlib.sha256(b"m").hexdigest()
-    _tags, _releases, run = _sequencer_fixture(
-        "0.21.5", manifest_digest=manifest_digest, drafts_on_claim_tag=True)
-    events = []
-    head = ["0.21.4"]
-    monkeypatch.setattr(
-        channel_releases, "advance_stable",
-        lambda env, record, root: (head.append(record["version"]),
-                                   events.append(("feed", record["version"]))))
-    monkeypatch.setattr(
-        docker, "promote_stable",
-        lambda claim_tag, digest, release_tag: events.append(("aliases", claim_tag, release_tag)))
-    seen_env = []
-    monkeypatch.setattr(
-        store, "check_from_env",
-        lambda env: seen_env.append(env) or events.append(("store",)))
-
-    steps = sequencer.reconcile(
-        {"GITHUB_REPOSITORY": "example/project", "MS_STORE_PRODUCT_ID": "9NTEST"},
-        run=run, read_head=lambda: head[-1], advance_head=None,
-        read_archive=lambda _key: b"m",
-    )
-
-    assert steps == [{"advance": "0.21.5"}]
-    assert events == [("feed", "0.21.5"), ("aliases", "rc.1-v0.21.5", "v0.21.5"), ("store",)]
-    assert seen_env[0]["MS_STORE_PRODUCT_ID"] == "9NTEST"
 
 
 def test_a_publish_that_died_before_the_retarget_is_repaired():
@@ -683,11 +655,11 @@ def test_a_release_that_skipped_bundles_ships_only_its_tag_release_and_docker_al
 
 @pytest.mark.parametrize("lanes,docker,store_checked", [
     # --only windows,docker: a partial desktop set. Only the aliases move; the channel stays.
-    (["windows", "docker"], True, True),
+    (["macos-intel", "docker"], True, False),
     # --only windows: no channel moves at all, so the release is finished once public.
-    (["windows"], False, True),
+    (["macos-intel"], False, False),
     # --only macos-arm64,docker: no Store, no channel.
-    (["macos-arm64", "docker"], True, False),
+    (["termux", "docker"], True, False),
 ])
 def test_a_partial_desktop_release_moves_only_what_it_built(monkeypatch, lanes, docker, store_checked):
     from scripts.releases import channel_releases, docker as docker_module, sequencer, store

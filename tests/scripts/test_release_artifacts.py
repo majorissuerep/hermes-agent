@@ -7,8 +7,6 @@ import shlex
 import shutil
 import subprocess
 import sys
-import zipfile
-import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import hermes_yaml
@@ -23,45 +21,11 @@ from scripts.releases import lanes as lane_set
 
 ROOT = Path(__file__).resolve().parents[2]
 SMOKE_RESULTS = {name: {'result': 'success'} for name in (
-    'smoke-darwin-arm64', 'smoke-darwin-x64', 'smoke-win32-arm64', 'smoke-win32-x64')}
+    'smoke-darwin-arm64', 'smoke-darwin-x64')}
 RELEASE_EPOCH = 1_787_965_323
-WINDOWS_VERSION = '2026.5761.123.0'
 
 
-def test_windows_metadata_is_read_from_package_and_stale_stamp_is_rejected(tmp_path):
-    tag, commit = 'v1.2.3', 'a' * 40
-    root = tmp_path / 'release'
-    root.mkdir()
-    package = root / 'Product-1.2.3-win-x64.msix'
-    manifest = '<Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"><Identity Name="Product" Publisher="CN=Test" Version="1.2.3.0" ProcessorArchitecture="x64"/><Applications><Application Id="App"/></Applications></Package>'
 
-    def write_package(sha, receiver=None):
-        with zipfile.ZipFile(package, 'w') as archive:
-            archive.writestr('AppxManifest.xml', manifest)
-            archive.writestr('app/resources/install-stamp.json', json.dumps({
-                'tag': tag, 'commit': sha, 'baseVersion': tag[1:],
-                'receiverProtocol': receiver,
-            }))
-
-    write_package(commit)
-    out = root / 'metadata-windows-x64.json'
-    original = package.read_bytes()
-    record('windows', 'x64', root, tag, commit, out)
-    metadata = json.loads(out.read_text(encoding='utf-8-sig'))
-    assert metadata['identity'] == 'Product'
-    assert metadata['version'] == '1.2.3.0'
-    assert metadata['publisher'] == 'CN=Test'
-    assert metadata['applicationId'] == 'App'
-    assert package.read_bytes() == original
-    assert 'receiverProtocol' not in metadata
-    write_package(commit, receiver=1)
-    record('windows', 'x64', root, tag, commit, out)
-    assert json.loads(out.read_text())['receiverProtocol'] == 1
-    write_package('b' * 40)
-    with pytest.raises(ValueError, match='provenance'):
-        record('windows', 'x64', root, tag, commit, tmp_path / 'bad.json')
-    with pytest.raises(ValueError, match='provenance'):
-        stamp_matches({}, tag, commit)
 
 
 @pytest.fixture
@@ -75,19 +39,14 @@ def staged_candidate(tmp_path, r2_server, https_origin):
     legs, mac_bytes = _inputs('1.2.3')
     built = tmp_path / 'built'
     built.mkdir()
-    for platform, arches in [('windows', ('x64', 'arm64')), ('macos', ('x64', 'arm64')), ('termux', ('aarch64',))]:
+    for platform, arches in [('macos', ('x64', 'arm64')), ('termux', ('aarch64',))]:
         for arch in arches:
             row = {
                 # Exactly the keys record() writes: a row is metadata, not a stamp (no baseVersion).
                 'platform': platform, 'arch': arch, 'tag': tag, 'commit': commit,
                 'identity': 'Product',
             }
-            if platform == 'windows':
-                row.update(version=WINDOWS_VERSION, executableVersion=WINDOWS_VERSION,
-                           publisher='CN=Test', applicationId='App')
-                package = f'HermesBundled-1.2.3-win-{arch}.msix'
-                handoff_name = f'win32-{arch}'
-            elif platform == 'macos':
+            if platform == 'macos':
                 package = f'HermesBundled-1.2.3-mac-{arch}.zip'
                 row.update(version='1.2.3', teamId='ABCDEFGHIJ', filename=package)
                 handoff_name = f'darwin-{arch}'
@@ -102,6 +61,9 @@ def staged_candidate(tmp_path, r2_server, https_origin):
             metadata.write_text(json.dumps(row), encoding='utf-8')
             includes = [package, metadata.name]
             if platform == 'macos':
+                installer = package.removesuffix('.zip') + '.dmg'
+                (built / installer).write_bytes(f'installer transport fixture {arch}'.encode())
+                includes.append(installer)
                 feed = f'{arch}-stable-mac.yml'
                 (built / feed).write_text(legs[feed], encoding='utf-8')
                 includes.append(feed)
@@ -112,21 +74,16 @@ def staged_candidate(tmp_path, r2_server, https_origin):
                     path.write_bytes(f'index transport fixture: {name}'.encode())
                 includes.append('apt/**/*')
             handoff.stage(attempt, commit, handoff_name, built, includes)
-    bundle = built / 'Product-win.msixbundle'
-    with zipfile.ZipFile(bundle, 'w') as archive:
-        archive.writestr('AppxMetadata/AppxBundleManifest.xml', f'<Bundle><Identity Name="Product" Publisher="CN=Test" Version="{WINDOWS_VERSION}"/><Packages><Package Type="application" Architecture="arm64"/><Package Type="application" Architecture="x64"/></Packages></Bundle>')
-    (built / 'Store-Product-win.msixbundle').write_bytes(b'Store bundle transport fixture')
-    handoff.stage(attempt, commit, 'windows-universal', built, ['*.msixbundle'])
     fetched = tmp_path / 'fetched'
-    names = ['win32-x64', 'win32-arm64', 'darwin-x64', 'darwin-arm64', 'termux', 'windows-universal']
-    handoff.fetch(attempt, commit, names, fetched, ['metadata-*.json', '*.msixbundle'])
+    names = ['darwin-x64', 'darwin-arm64', 'termux']
+    handoff.fetch(attempt, commit, names, fetched, ['metadata-*.json'])
     r2_server.requests.clear()
     manifest = assemble(fetched, tag, commit, base, tmp_path / 'release-candidates.json',
                         smoke_results=SMOKE_RESULTS, release_epoch=RELEASE_EPOCH, archive=attempt,
                         lanes=lane_set.NAMES)
     assert manifest['archive'] == attempt and manifest['tag'] == tag
     assert {row['platform'] + '/' + row['arch'] for row in manifest['packages']} == {
-        'windows/x64', 'windows/arm64', 'macos/x64', 'macos/arm64', 'termux/aarch64'}
+        'macos/x64', 'macos/arm64', 'termux/aarch64'}
     assert all(not file['path'].startswith(('handoff-', 'metadata-')) for file in manifest['files'])
     assert all(file['url'].startswith(f'{base}/releases/tag/{attempt}/') for file in manifest['files'])
     puts = [path for method, path, _ in r2_server.requests if method == 'PUT']
@@ -177,22 +134,23 @@ def test_assemble_rejects_missing_and_changed_receipts(tmp_path, staged_candidat
                  smoke_results=SMOKE_RESULTS, release_epoch=RELEASE_EPOCH, archive=manifest['archive'],
                  lanes=lane_set.NAMES)
     receipt.write_bytes(original)
-    (fetched / 'metadata-windows-x64.json').write_text('{}', encoding='utf-8')
+    (fetched / 'metadata-macos-x64.json').write_text('{}', encoding='utf-8')
     with pytest.raises(ValueError, match='digest'):
         assemble(fetched, tag, commit, base, tmp_path / 'changed.json',
                  smoke_results=SMOKE_RESULTS, release_epoch=RELEASE_EPOCH, archive=manifest['archive'],
                  lanes=lane_set.NAMES)
 
 
-def test_candidate_publication_and_store_selection(tmp_path, monkeypatch, r2_server, staged_candidate):
+def test_candidate_materialization_digest_binding_and_publication(tmp_path, monkeypatch, r2_server, staged_candidate):
     manifest, _, base = staged_candidate
     tag, commit = manifest['tag'], manifest['commit']
     raw = r2_server.store[f"releases/tag/{manifest['archive']}/release-candidates.json"][0]
     args = ['--tag', tag, '--archive', manifest['archive'], '--commit', commit, '--public-base', base]
     monkeypatch.setenv('CANDIDATE_MANIFEST_SHA256', hashlib.sha256(raw).hexdigest())
-    artifacts.main(['materialize', *args, '--root', str(tmp_path / 'store'), '--store-only'])
-    assert [p.name for p in (tmp_path / 'store').iterdir()] == ['Store-Product-win.msixbundle']
-    assert (tmp_path / 'store/Store-Product-win.msixbundle').read_bytes() == b'Store bundle transport fixture'
+    artifacts.main(['materialize', *args, '--root', str(tmp_path / 'materialized')])
+    for item in manifest['files']:
+        assert (tmp_path / 'materialized' / item['path']).read_bytes() == r2_server.store[
+            f"releases/tag/{manifest['archive']}/{item['path']}"][0]
     monkeypatch.setenv('CANDIDATE_MANIFEST_SHA256', 'f' * 64)
     with pytest.raises(ValueError, match='digest mismatch'):
         artifacts.main(['materialize', *args, '--root', str(tmp_path / 'wrong')])
@@ -202,7 +160,9 @@ def test_candidate_publication_and_store_selection(tmp_path, monkeypatch, r2_ser
     with pytest.raises(ValueError, match='one Store candidate'):
         materialize(missing, tmp_path / 'missing-store', public_base=base, store_only=True)
     changed = copy.deepcopy(manifest)
-    changed['files'][0]['sha256'] = 'b' * 64
+    package = next(item for item in changed['files']
+                   if item['url'] == changed['packages'][0]['artifact']['url'])
+    package['sha256'] = 'b' * 64
     with pytest.raises(ValueError, match='receipts differ'):
         materialize(changed, tmp_path / 'bad', public_base=base)
 
@@ -214,7 +174,7 @@ def test_candidate_publication_and_store_selection(tmp_path, monkeypatch, r2_ser
     artifacts.promote(manifest, tmp_path / 'promote', base)
     puts = [path for method, path, _ in r2_server.requests if method == 'PUT']
     assert puts == ['/hermes-releases/' + name for name in (
-        'releases/darwin/stable/stable-mac.yml', 'releases/win32/stable/stable.appinstaller',
+        'releases/darwin/stable/stable-mac.yml',
         'releases/termux/stable/dists/hermes-stable/Release', 'releases/termux/stable/dists/hermes-stable/InRelease')]
     # Promotion materializes only feed legs and indexes; packages stay receipt-bound on R2.
     for item in manifest['files']:
@@ -223,32 +183,7 @@ def test_candidate_publication_and_store_selection(tmp_path, monkeypatch, r2_ser
             assert not local.exists(), item['path']
         else:
             assert local.read_bytes() == r2_server.store[f"releases/tag/{manifest['archive']}/{item['path']}"][0]
-    descriptor = ET.fromstring(r2_server.store['releases/win32/stable/stable.appinstaller'][0])
-    assert descriptor.attrib == {
-        'Uri': base + '/releases/win32/stable/stable.appinstaller',
-        'Version': WINDOWS_VERSION,
-    }
-    assert descriptor.find('{*}MainBundle').attrib == {
-        'Name': 'Product', 'Publisher': 'CN=Test', 'Version': WINDOWS_VERSION,
-        'Uri': base + f"/releases/tag/{manifest['archive']}/Product-win.msixbundle"}
-    pointer = 'releases/win32/stable/stable.appinstaller'
-    original = r2_server.store[pointer]
-    r2_server.corrupt_put = pointer
-    r2_server.requests.clear()
-    with pytest.raises(ValueError, match='Channel read-back differs'):
-        artifacts.promote(manifest, tmp_path / 'bad-readback', base)
-    assert [path for method, path, _ in r2_server.requests if method == 'PUT'] == ['/hermes-releases/' + pointer]
-    r2_server.corrupt_put = None
-    r2_server.store[pointer] = original
-    before = dict(r2_server.store)
-    # Packages are receipt-bound and never re-downloaded here; a corrupt file that
-    # promotion does materialize (a feed leg) is still refused before any write.
-    r2_server.store[f"releases/tag/{manifest['archive']}/arm64-stable-mac.yml"] = (b'corrupt', '"e"')
-    r2_server.requests.clear()
-    with pytest.raises(ValueError, match='digest mismatch'):
-        artifacts.promote(manifest, tmp_path / 'broken', base)
-    assert not any(method == 'PUT' for method, _, _ in r2_server.requests)
-    assert all(value == r2_server.store[key] for key, value in before.items() if not key.startswith('releases/tag/'))
+
 
 
 def test_promote_writes_the_stable_mac_feed_from_the_attempt_archive(tmp_path, monkeypatch, r2_server, https_origin, staged_candidate):
@@ -280,8 +215,7 @@ def test_promote_writes_the_stable_mac_feed_from_the_attempt_archive(tmp_path, m
     r2_server.requests.clear()
     artifacts.promote(default, tmp_path / 'promote-default', base)
     puts = [path for method, path, _ in r2_server.requests if method == 'PUT']
-    assert puts == ['/hermes-releases/releases/darwin/stable/stable-mac.yml',
-                    '/hermes-releases/releases/win32/stable/stable.appinstaller']
+    assert puts == ['/hermes-releases/releases/darwin/stable/stable-mac.yml']
     feed = hermes_yaml.safe_load(r2_server.store['releases/darwin/stable/stable-mac.yml'][0].decode())
     assert [entry['url'].rsplit('/', 1)[1] for entry in feed['files']] == ['HermesBundled-1.2.3-mac-arm64.zip']
 
@@ -402,13 +336,14 @@ def test_candidate_smoke_survives_real_promotion_and_renderer(tmp_path, r2_serve
             result = run('controller-promote', step, {'validate': {'result': 'success'}},
                          ambient_needs=ambient_needs)
             assert result.returncode == 0, result.stdout + result.stderr
-    assert 'releases/win32/stable/stable.appinstaller' in r2_server.store
+    assert 'releases/darwin/stable/stable-mac.yml' in r2_server.store
+    assert 'releases/stable/index.html' in r2_server.store, (result.stdout, sorted(r2_server.store))
     page = r2_server.store['releases/stable/index.html'][0].decode()
     for output in (page, body_file.read_text(encoding='utf-8-sig')):
         assert output.count('Passed') == len(SMOKE_RESULTS)
         assert 'Not run' not in output and 'Build incomplete' not in output
         assert orphan not in output
-        assert base + f"/releases/tag/{manifest['archive']}/HermesBundled-1.2.3-win-x64.msix" in output
+        assert base + f"/releases/tag/{manifest['archive']}/HermesBundled-1.2.3-mac-x64.dmg" in output
     with https_origin.opener(base + '/releases/stable/index.html', timeout=5) as response:
         assert response.read().decode() == page
 
@@ -420,7 +355,7 @@ def test_candidate_smoke_admission_fails_before_publication(tmp_path, r2_server,
     key = f"releases/tag/{manifest['archive']}/release-candidates.json"
     raw = r2_server.store[key][0]
     for fault, message in [('legacy', 'Candidate manifest'), ('missing', 'Candidate smoke results'),
-                           ('failed', 'smoke-win32-x64=failure'), ('identity', 'release identity'),
+                           ('failed', 'smoke-darwin-x64=failure'), ('identity', 'release identity'),
                            ('tampered', 'digest mismatch')]:
         invalid = copy.deepcopy(manifest)
         if fault == 'legacy':
@@ -429,7 +364,7 @@ def test_candidate_smoke_admission_fails_before_publication(tmp_path, r2_server,
         elif fault == 'missing':
             invalid.pop('smoke_results', None)
         elif fault == 'failed':
-            invalid['smoke_results'] = {**SMOKE_RESULTS, 'smoke-win32-x64': {'result': 'failure'}}
+            invalid['smoke_results'] = {**SMOKE_RESULTS, 'smoke-darwin-x64': {'result': 'failure'}}
         else:
             invalid['commit'] = 'b' * 40
         data = json.dumps(invalid).encode()

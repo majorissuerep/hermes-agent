@@ -5,6 +5,7 @@ import argparse
 import hashlib
 import json
 import os
+import posixpath
 from pathlib import Path
 import subprocess
 import tempfile
@@ -113,7 +114,8 @@ def match_accepted_packages(manifest: dict, accepted: dict) -> None:
     # is there only when the claim opted into it.
     accepted_targets = {("darwin", arch)
                         for platform, arch in by_target if platform == "macos"}  # fork: darwin-only
-    required = {("darwin", "arm64"), ("darwin", "x64")}  # fork: darwin-only
+    required = {("darwin", target.split("/")[1])
+                for target in lane_set.targets(lane_set.CHANNEL_DESKTOP) if target.startswith("macos/")}
     if (not required <= accepted_targets
             or {(row["platform"], row["arch"]) for row in manifest["packages"]} != accepted_targets):
         raise ChannelError("Protected manifest must include every native target")
@@ -292,7 +294,9 @@ def verify_bootstrap(request: dict, manifest: dict, base: str, repository: str) 
         # The archive prefix is the attempt path the manifest itself names; a
         # releaseTag that is already the attempt ref must agree with it.
         keys = [package["artifact"]["key"] for package in manifest["packages"]]
-        archive = os.path.commonprefix(keys)
+        if not keys:
+            raise ChannelError("Bootstrap archive has no packages")
+        archive = posixpath.commonpath([posixpath.dirname(key) for key in keys]) + "/"
         parsed = parse_attempt_ref(tag)
         payload_tag = f"v{parsed[0]}" if parsed else tag
         if parsed is not None and archive != f"releases/tag/{tag}/":
