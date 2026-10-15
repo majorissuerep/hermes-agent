@@ -8,6 +8,11 @@ METADATA_FIELDS = {'title': str, 'archived': bool, 'hidden': bool, 'pinned': boo
 def validate_action(operation, payload):
     if not isinstance(payload, dict) or not isinstance(operation, str):
         raise RuntimeStoreError('invalid_params')
+    if operation == 'deck':
+        from hermes_state.mutation_deck import valid_deck_payload
+        if not valid_deck_payload(payload):
+            raise RuntimeStoreError('invalid_params')
+        return
     # ``confirm``: the owner's selection-guard token for this exact resolved target (session_mutation_model).
     if (operation == 'model' and 'model' in payload and not set(payload) - {'model', 'provider', 'confirm'}
             and all(isinstance(v, str) and v.strip() for v in payload.values())):
@@ -75,8 +80,9 @@ def apply_action(db, conn, session_id, operation, payload, *, prepared=None):
         return POLICY_HANDLERS[operation](db, conn, session_id, payload, prepared)
     from hermes_state.mutation_reset import reset_in_transaction
     from hermes_state.mutation_branch import branch_in_transaction
+    from hermes_state.mutation_deck import deck_in_transaction
     handlers = {'delete': _delete, 'import': _import, 'rewind': _rewind, 'reset': reset_in_transaction,
-                'branch': branch_in_transaction}
+                'branch': branch_in_transaction, 'deck': deck_in_transaction}
     if operation in handlers:
         return handlers[operation](db, conn, session_id, payload)
     affected = set()

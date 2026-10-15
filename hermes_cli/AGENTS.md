@@ -226,6 +226,15 @@ change to install/restart/status regenerates and diffs every kind; both user and
 recorded when both exist. Process liveness is `(pid, start_time)` or the canonical matchers
 (`gateway.status.live_gateway_pid_for_home`), never bare PID existence.
 
+## Native CLI deck writes
+
+The classic REPL is a gateway client, not a second state.db writer. `cli_deck_mixin.py` uses
+`GatewaySessionStore.deck_open` / `deck_close`, translated to authorized, revision-fenced
+`session.mutate` deck receipts. Deck polling uses the facade's read-only reader. Do not open
+`session_deck.open_db()` in an interactive native frontend; standalone deck commands and the
+session host have their own ownership paths. The store shares transaction-level deck SQL with
+the legacy host, so registration remains idempotent across compaction and retries.
+
 ## Legacy Nous accounts (`hermes_cli/anon_auth.py`)
 
 Nous is not bundled as an inference provider. First-run setup selects from the

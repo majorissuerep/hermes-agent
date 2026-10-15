@@ -22,34 +22,43 @@ class SessionDeckMixin:
 
     def deck_lineage_root(self, session_id: str) -> str:
         """Compression-lineage root of ``session_id`` (itself when it has no row yet)."""
-        if not session_id:
-            return session_id
-        lineage = self.get_compression_lineage(session_id)
-        return lineage[0] if lineage else session_id
+        with self._read_ctx() as conn:
+            return self._deck_lineage_root_on(conn, session_id)
+
+    def _deck_lineage_root_on(self, conn, session_id: str) -> str:
+        root, seen = session_id, {session_id}
+        row = conn.execute("SELECT * FROM sessions WHERE id = ?", (root,)).fetchone()
+        while row is not None and not self._is_explicit_fork_child_row(dict(row), include_reset=True):
+            parent = conn.execute("SELECT * FROM sessions WHERE id = ?", (row["parent_session_id"],)).fetchone()
+            if parent is None or parent["end_reason"] != "compression" or parent["id"] in seen:
+                break
+            root, row = parent["id"], parent
+            seen.add(root)
+        return root
 
     def deck_open(self, session_id: str, *, surface: str, cwd: str = "", group: str = "",
                   parent_handle: Optional[int] = None) -> int:
         """Register ``session_id`` as open and return its handle. Idempotent per conversation: a
         compression continuation or a re-open of a closed row keeps the original handle."""
-        root = self.deck_lineage_root(session_id)
-        now = time.time()
+        return int(self._execute_write(lambda conn: self._deck_open_on(
+            conn, self._deck_lineage_root_on(conn, session_id), surface=surface, cwd=cwd,
+            group=group, parent_handle=parent_handle)))
 
+    def _deck_open_on(self, conn, root, *, surface, cwd="", group="", parent_handle=None):
+        now = time.time()
         # Select-then-write, not an upsert: ON CONFLICT still burns an AUTOINCREMENT value, which
         # would leave gaps in the human-facing handle sequence on every re-open.
-        def _do(conn):
-            row = conn.execute("SELECT handle FROM deck_sessions WHERE session_id = ?", (root,)).fetchone()
-            if row is not None:
-                conn.execute(
-                    "UPDATE deck_sessions SET surface = ?, cwd = CASE WHEN ? != '' THEN ? ELSE cwd END,"
-                    " last_seen_at = ?, closed_at = NULL, close_reason = NULL, closed_by = NULL WHERE handle = ?",
-                    (surface, cwd or "", cwd or "", now, row[0]))
-                return row[0]
-            return conn.execute(
-                "INSERT INTO deck_sessions (session_id, surface, cwd, group_name, parent_handle, state,"
-                " opened_at, last_seen_at) VALUES (?, ?, ?, ?, ?, 'idle', ?, ?)",
-                (root, surface, cwd or "", group or "", parent_handle, now, now)).lastrowid
-
-        return int(self._execute_write(_do))
+        row = conn.execute("SELECT handle FROM deck_sessions WHERE session_id = ?", (root,)).fetchone()
+        if row is not None:
+            conn.execute(
+                "UPDATE deck_sessions SET surface = ?, cwd = CASE WHEN ? != '' THEN ? ELSE cwd END,"
+                " last_seen_at = ?, closed_at = NULL, close_reason = NULL, closed_by = NULL WHERE handle = ?",
+                (surface, cwd or "", cwd or "", now, row[0]))
+            return row[0]
+        return conn.execute(
+            "INSERT INTO deck_sessions (session_id, surface, cwd, group_name, parent_handle, state,"
+            " opened_at, last_seen_at) VALUES (?, ?, ?, ?, ?, 'idle', ?, ?)",
+            (root, surface, cwd or "", group or "", parent_handle, now, now)).lastrowid
 
     def deck_snapshot(self, states: Iterable[Tuple[str, str]]) -> int:
         """Record the runtime state of open sessions: ``(session_id, state)`` pairs, any lineage id.
@@ -68,10 +77,14 @@ class SessionDeckMixin:
 
     def deck_close(self, handle: int, *, reason: str, closed_by: str = "") -> bool:
         """Close an open row; False when it is unknown or already closed (first close wins)."""
-        return self._write_rowcount(
+        return bool(self._execute_write(lambda conn: self._deck_close_on(
+            conn, handle, reason=reason, closed_by=closed_by)))
+
+    def _deck_close_on(self, conn, handle: int, *, reason: str, closed_by: str = "") -> bool:
+        return conn.execute(
             "UPDATE deck_sessions SET closed_at = ?, close_reason = ?, closed_by = ?, state = 'dormant'"
             " WHERE handle = ? AND closed_at IS NULL",
-            (time.time(), reason, closed_by, int(handle))) > 0
+            (time.time(), reason, closed_by, int(handle))).rowcount > 0
 
     def _deck_project(self, row) -> Dict[str, Any]:
         entry = dict(row)

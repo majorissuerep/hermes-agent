@@ -133,6 +133,10 @@ finally:
             sid = next(line.split("Session ID: ", 1)[1].strip() for line in shown.splitlines() if "Session ID: " in line)
             type_line("/quit")
             detached = until("CLI_RC=0")
+            from hermes_state import SessionDB
+            with SessionDB(db_path=home / "state.db", read_only=True) as db:
+                deck = db.deck_row_for_session(sid)
+                assert deck is not None and deck["closed_at"] is None
             assert json.loads(witness.read_text()) == [], witness.read_text()
             assert daemon.poll() is None
             tmux("kill-session", "-t", "chat")

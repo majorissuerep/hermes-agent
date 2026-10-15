@@ -32,7 +32,7 @@ _READS = frozenset({
     "get_messages_as_conversation", "get_resume_conversations", "assert_resume_safe",
     "is_kanban_owned_session", "list_sessions_rich", "search_sessions", "get_next_title_in_lineage",
     "get_handoff_state", "get_meta", "get_compression_tip", "resolve_session_by_title", "get_messages",
-    "session_count", "sanitize_title", "session_yolo_enabled",
+    "session_count", "sanitize_title", "session_yolo_enabled", "deck_row", "deck_row_for_session",
 })
 # Writes the gateway already performs itself (persistence, accounting, maintenance).
 _GATEWAY_OWNED = frozenset({
@@ -189,6 +189,18 @@ class GatewaySessionStore:
         if session_id in self.snapshots:
             self.connection.state(session_id).title = title
         return True
+
+    def deck_open(self, session_id, *, surface, cwd=""):
+        receipt = self._mutate(session_id, "deck", {"action": "open", "surface": surface, "cwd": cwd})
+        return receipt["handle"]
+
+    def deck_close(self, handle, *, reason, closed_by=""):
+        row = self.deck_row(handle)
+        if row is None:
+            return False
+        receipt = self._mutate(row["session_id"], "deck", {
+            "action": "close", "reason": reason, "closed_by": closed_by})
+        return receipt["closed"]
 
     def rewind_user_turn(self, session_id, user_ordinal, *, warm_history=None, require_retryable=False, **_kw):
         """Main's ``SessionDB.rewind_user_turn`` (``/undo N``, ``/retry``) as ``session.mutate rewind``.

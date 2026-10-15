@@ -1387,6 +1387,7 @@ class HermesCLI(CLIInitMixin, CLITuiRuntimeMixin, CLIProcessNotificationsMixin, 
 
     def run(self):
         """Run the interactive CLI loop with persistent input at bottom."""
+        self._ensure_gateway_session()
         if not self._claim_active_session("cli", deck=True):
             return
         self._deck_register()

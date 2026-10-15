@@ -9,7 +9,7 @@ from contextlib import nullcontext
 
 from hermes_state.runtime import RuntimeStoreError, mutate_runtime_session
 
-_METADATA = frozenset({'rename', 'archive', 'sidebar'})
+_METADATA = frozenset({'rename', 'archive', 'sidebar', 'deck'})
 # Prepared off the commit like model, then published as a new frozen policy.
 _POLICY = frozenset({'model', 'reasoning', 'workspace'})
 _FIELDS = frozenset({'session_id', 'request_id', 'expected_revision', 'operation', 'payload'})
