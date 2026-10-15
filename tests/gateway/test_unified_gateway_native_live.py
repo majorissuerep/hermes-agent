@@ -10,6 +10,8 @@ opens no writable canonical SQLite; refuse a second owner while the first holds
 ``gateway.lock``; and release lock, control channel and API port on planned stop.
 No POSIX-only primitive is used (no AF_UNIX at import, no SIGKILL, no pty).
 """
+
+from hermes_cli.config_defaults import DEFAULT_CONFIG
 import asyncio
 from contextlib import closing, contextmanager
 from datetime import datetime, timezone, UTC
@@ -248,7 +250,7 @@ def harness(tmp_path, peer):
     home, user, work = tmp_path / 'state', tmp_path / 'user', tmp_path / 'work'
     home.mkdir(mode=0o700); user.mkdir(); work.mkdir()
     url = f'http://127.0.0.1:{peer.server_port}/v1'
-    (home / 'config.yaml').write_text(json.dumps({
+    (home / 'config.yaml').write_text(json.dumps({"_config_version": DEFAULT_CONFIG["_config_version"], 
         'gateway': {'multiplex_profiles': False},
         'model': {'provider': 'custom', 'default': 'native-model', 'base_url': url},
         'auxiliary': {'title_generation': {'enabled': False}},
@@ -286,7 +288,7 @@ def harness(tmp_path, peer):
         "    return _dumps(obj, *a, **kw)\n"
         "_json.dumps = _dumps_witness\n", encoding='utf-8')
     env = {k: os.environ[k] for k in _CHILD_ENV_KEYS if k in os.environ}
-    env.update(HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home), PYTHONUNBUFFERED='1',
+    env.update(HERMES_ALLOW_NO_VAULT="1", HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home), PYTHONUNBUFFERED='1',
                PYTHONPATH=os.pathsep.join([str(site), str(ROOT)]),
                OPENAI_API_KEY='loopback-only', OPENAI_BASE_URL=url)
     return {'home': home, 'work': work, 'env': env, 'url': url, 'audit': audit, 'peer': peer}

@@ -1,4 +1,6 @@
 """A secondary-profile native ticket binds every implicit profile selector to its own home."""
+
+from hermes_cli.config_defaults import DEFAULT_CONFIG
 import json
 import os
 from pathlib import Path
@@ -24,8 +26,8 @@ def test_secondary_native_ticket_implicit_selectors_touch_only_the_secondary_hom
     user.mkdir()
     beta = home / 'profiles' / 'beta'
     beta.mkdir(parents=True)
-    (beta / 'config.yaml').write_text(json.dumps({'model': {'provider': 'custom', 'default': 'beta-model'}}))
-    (home / 'config.yaml').write_text(json.dumps({
+    (beta / 'config.yaml').write_text(json.dumps({"_config_version": DEFAULT_CONFIG["_config_version"], 'model': {'provider': 'custom', 'default': 'beta-model'}}))
+    (home / 'config.yaml').write_text(json.dumps({"_config_version": DEFAULT_CONFIG["_config_version"], 
         'gateway': {'multiplex_profiles': True},
         'model': {'provider': 'custom', 'default': 'launch-model', 'base_url': 'http://127.0.0.1:1/v1'},
         'auxiliary': {'title_generation': {'enabled': False}},
@@ -33,7 +35,7 @@ def test_secondary_native_ticket_implicit_selectors_touch_only_the_secondary_hom
     launch_before = (home / 'config.yaml').read_bytes()
     root = Path(__file__).resolve().parents[2]
     env = {k: os.environ[k] for k in ('PATH', 'LANG', 'TZ', 'TIRITH_ENABLED') if k in os.environ}
-    env.update(HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home), PYTHONPATH=str(root),
+    env.update(HERMES_ALLOW_NO_VAULT="1", HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home), PYTHONPATH=str(root),
                PYTHONUNBUFFERED='1', HERMES_DASHBOARD_SESSION_TOKEN='normal-http-owner')
     with (tmp_path / 'gateway.log').open('w+') as log:
         process = subprocess.Popen([sys.executable, '-m', 'gateway.run'], cwd=root, env=env,

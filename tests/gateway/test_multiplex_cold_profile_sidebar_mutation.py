@@ -13,6 +13,8 @@ The Desktop's endpoint for a served secondary comes from ``hermes -p <name> gate
 and its ticket is minted through the endpoint's ``control_home`` (the multiplexer root),
 so this test uses that exact discovery + mint path rather than a hand-built socket call.
 """
+
+from hermes_cli.config_defaults import DEFAULT_CONFIG
 import asyncio
 from contextlib import contextmanager
 import json
@@ -41,16 +43,16 @@ def multiplex_daemon(tmp_path, profiles=('warm', 'cold')):
     for name in profiles:
         secondary = home / 'profiles' / name
         secondary.mkdir(parents=True)
-        (secondary / 'config.yaml').write_text(json.dumps({
+        (secondary / 'config.yaml').write_text(json.dumps({"_config_version": DEFAULT_CONFIG["_config_version"], 
             'model': {'provider': 'custom', 'default': name + '-model', 'base_url': 'http://127.0.0.1:1/v1'}}))
-    (home / 'config.yaml').write_text(json.dumps({
+    (home / 'config.yaml').write_text(json.dumps({"_config_version": DEFAULT_CONFIG["_config_version"], 
         'gateway': {'multiplex_profiles': True},
         'model': {'provider': 'custom', 'default': 'launch-model', 'base_url': 'http://127.0.0.1:1/v1'},
         'auxiliary': {'title_generation': {'enabled': False}},
     }))
     root = Path(__file__).resolve().parents[2]
     env = {k: os.environ[k] for k in ('PATH', 'LANG', 'TZ', 'TIRITH_ENABLED') if k in os.environ}
-    env.update(HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home), PYTHONPATH=str(root),
+    env.update(HERMES_ALLOW_NO_VAULT="1", HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home), PYTHONPATH=str(root),
                PYTHONUNBUFFERED='1')
     with (tmp_path / 'gateway.log').open('w+') as log:
         process = subprocess.Popen([sys.executable, '-m', 'gateway.run'], cwd=root, env=env,

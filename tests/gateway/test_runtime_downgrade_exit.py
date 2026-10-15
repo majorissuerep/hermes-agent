@@ -64,6 +64,7 @@ def test_the_tree_probe_reads_the_checkout_on_disk(tmp_path):
     git("init", "-b", "main")
     git("config", "user.email", "t@example.invalid")
     git("config", "user.name", "T")
+    (tmp_path / "hermes_state").mkdir()
     (tmp_path / "hermes_state/common.py").write_text("SCHEMA = 'CREATE TABLE IF NOT EXISTS sessions'\n")
     git("add", ".")
     git("commit", "-m", "old release")

@@ -1,4 +1,6 @@
 """Authenticated production WebSockets and loopback-only inference."""
+
+from hermes_cli.config_defaults import DEFAULT_CONFIG
 import asyncio
 from http.server import ThreadingHTTPServer
 import json
@@ -22,11 +24,11 @@ def probe(base):
     model.blocked, model.release = threading.Event(), threading.Event()
     threading.Thread(target=model.serve_forever, daemon=True).start()
     url = f'http://127.0.0.1:{model.server_port}/v1'
-    (home / 'config.yaml').write_text(json.dumps({'gateway': {'multiplex_profiles': False},
+    (home / 'config.yaml').write_text(json.dumps({"_config_version": DEFAULT_CONFIG["_config_version"], 'gateway': {'multiplex_profiles': False},
         'model': {'provider': 'custom', 'default': 'local-fixture', 'base_url': url},
         'auxiliary': {'title_generation': {'enabled': False}}}))
     env = {k: os.environ[k] for k in ('PATH', 'LANG', 'TZ', 'TIRITH_ENABLED') if k in os.environ}
-    env.update(HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home), PYTHONPATH=str(root),
+    env.update(HERMES_ALLOW_NO_VAULT="1", HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home), PYTHONPATH=str(root),
                OPENAI_API_KEY='loopback-only', OPENAI_BASE_URL=url)
 
     def rows():

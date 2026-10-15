@@ -4,6 +4,8 @@
 always holds, so every Desktop boot logged a 409 "Exclusive maintenance refused". With a composed
 gateway the idempotent stamp runs on the owner's own store instead.
 """
+
+from hermes_cli.config_defaults import DEFAULT_CONFIG
 import json
 import os
 from pathlib import Path
@@ -25,13 +27,13 @@ def test_owner_backfill_runs_on_the_live_owner(tmp_path):
     user.mkdir()
     model = {'model': {'provider': 'custom', 'default': 'm', 'base_url': 'http://127.0.0.1:1/v1'},
              'auxiliary': {'title_generation': {'enabled': False}}}
-    (home / 'config.yaml').write_text(json.dumps({'gateway': {'multiplex_profiles': True}, **model}))
+    (home / 'config.yaml').write_text(json.dumps({"_config_version": DEFAULT_CONFIG["_config_version"], 'gateway': {'multiplex_profiles': True}, **model}))
     work = home / 'profiles' / 'work'
     work.mkdir(parents=True)
     (work / 'config.yaml').write_text(json.dumps(model))
     root = Path(__file__).resolve().parents[2]
     env = {k: os.environ[k] for k in ('PATH', 'LANG', 'TZ', 'TIRITH_ENABLED') if k in os.environ}
-    env.update(HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home), PYTHONPATH=str(root),
+    env.update(HERMES_ALLOW_NO_VAULT="1", HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home), PYTHONPATH=str(root),
                PYTHONUNBUFFERED='1')
     with (tmp_path / 'gateway.log').open('w+') as log:
         process = subprocess.Popen([sys.executable, '-m', 'gateway.run'], cwd=root, env=env,

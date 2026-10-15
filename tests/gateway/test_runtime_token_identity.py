@@ -1,4 +1,6 @@
 """Legacy token authentication must become an explicit authority principal."""
+
+from hermes_cli.config_defaults import DEFAULT_CONFIG
 import asyncio
 import json
 import os
@@ -27,7 +29,7 @@ async def test_authenticated_token_can_create_without_identityless_permissions(t
     from hermes_cli import web_server as web
 
     # Session creation persists a restorable model policy, even without a turn.
-    (get_hermes_home() / 'config.yaml').write_text(json.dumps({
+    (get_hermes_home() / 'config.yaml').write_text(json.dumps({"_config_version": DEFAULT_CONFIG["_config_version"], 
         'model': {'provider': 'custom', 'default': 'local-wire-stub',
                   'base_url': 'http://127.0.0.1:1/v1'},
         'platform_toolsets': {'cli': []},
@@ -101,7 +103,7 @@ def test_ordinary_daemon_keeps_control_auth_and_loop_witness(tmp_path, layout):
         home.mkdir(mode=0o700, exist_ok=True)
         user = tmp_path / 'user'
         user.mkdir()
-        (home / 'config.yaml').write_text(json.dumps({
+        (home / 'config.yaml').write_text(json.dumps({"_config_version": DEFAULT_CONFIG["_config_version"], 
             'gateway': {'multiplex_profiles': False},
             'model': {'provider': 'custom', 'default': 'local-wire-stub',
                       'base_url': 'http://127.0.0.1:1/v1'},
@@ -112,7 +114,7 @@ def test_ordinary_daemon_keeps_control_auth_and_loop_witness(tmp_path, layout):
         root = Path(__file__).resolve().parents[2]
         token = secrets.token_urlsafe(32)
         env = {key: os.environ[key] for key in ('PATH', 'LANG', 'TZ') if key in os.environ}
-        env.update(HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home),
+        env.update(HERMES_ALLOW_NO_VAULT="1", HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home),
                    PYTHONPATH=str(root), PYTHONUNBUFFERED='1', HERMES_DASHBOARD_SESSION_TOKEN=token)
         if layout == 'long-temp':
             temp = tmp_path / ('t' * 120)

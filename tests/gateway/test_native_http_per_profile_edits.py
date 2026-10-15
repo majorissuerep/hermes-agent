@@ -6,6 +6,8 @@ names, but the REST actor was a shared ``'http'`` transport, never a native lega
 ``require_history_claim`` refused every unclaimed pre-upgrade row (403 permission_denied), and
 ``authorize_history`` did not count ``desktop``/``oneshot`` rows as local history at all.
 """
+
+from hermes_cli.config_defaults import DEFAULT_CONFIG
 import asyncio
 import json
 import os
@@ -43,7 +45,7 @@ def test_per_profile_grants_edit_old_local_rows_of_their_own_profile(tmp_path):
     user.mkdir()
     model = {'model': {'provider': 'custom', 'default': 'm', 'base_url': 'http://127.0.0.1:1/v1'},
              'auxiliary': {'title_generation': {'enabled': False}}}
-    (home / 'config.yaml').write_text(json.dumps({'gateway': {'multiplex_profiles': True}, **model}))
+    (home / 'config.yaml').write_text(json.dumps({"_config_version": DEFAULT_CONFIG["_config_version"], 'gateway': {'multiplex_profiles': True}, **model}))
     beta = home / 'profiles' / 'beta'
     beta.mkdir(parents=True)
     (beta / 'config.yaml').write_text(json.dumps(model))
@@ -52,7 +54,7 @@ def test_per_profile_grants_edit_old_local_rows_of_their_own_profile(tmp_path):
                  ('old-desktop-nous', 'desktop', 'nous:account'), ('old-desktop-foreign', 'desktop', 'telegram:42')])
     root = Path(__file__).resolve().parents[2]
     env = {k: os.environ[k] for k in ('PATH', 'LANG', 'TZ', 'TIRITH_ENABLED') if k in os.environ}
-    env.update(HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home), PYTHONPATH=str(root),
+    env.update(HERMES_ALLOW_NO_VAULT="1", HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home), PYTHONPATH=str(root),
                PYTHONUNBUFFERED='1')
     with (tmp_path / 'gateway.log').open('w+') as log:
         process = subprocess.Popen([sys.executable, '-m', 'gateway.run'], cwd=root, env=env,

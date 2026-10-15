@@ -1,4 +1,6 @@
 """Discovery stays transport-independent and cannot select another profile."""
+
+from hermes_cli.config_defaults import DEFAULT_CONFIG
 import asyncio
 import json
 import os
@@ -78,7 +80,7 @@ def test_ordinary_daemon_discovery_matches_legacy_extensions(tmp_path):
     home, user = tmp_path / 'state', tmp_path / 'user'
     home.mkdir(mode=0o700)
     user.mkdir()
-    (home / 'config.yaml').write_text(json.dumps({
+    (home / 'config.yaml').write_text(json.dumps({"_config_version": DEFAULT_CONFIG["_config_version"], 
         'gateway': {'multiplex_profiles': False},
         'model': {'provider': 'custom', 'default': 'discovery-fixture',
                   'base_url': 'http://127.0.0.1:1/v1'},
@@ -96,7 +98,7 @@ def test_ordinary_daemon_discovery_matches_legacy_extensions(tmp_path):
     (plugin / '__init__.py').write_text(
         "def register(ctx):\n    ctx.register_command('probe-plugin', lambda args: args, description='Disposable plugin discovery')\n")
     env = {k: os.environ[k] for k in ('PATH', 'LANG', 'TZ', 'TIRITH_ENABLED') if k in os.environ}
-    env.update(HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home),
+    env.update(HERMES_ALLOW_NO_VAULT="1", HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home),
                PYTHONPATH=str(root), PYTHONUNBUFFERED='1')
     requests = [('commands.catalog', {}), *[('complete.slash', {'text': text})
         for text in ('/', '/probe', '/probe-quick', '/help', '/details c', 'plain')]]
