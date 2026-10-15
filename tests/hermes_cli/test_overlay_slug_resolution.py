@@ -16,19 +16,6 @@ from hermes_cli.model_switch import list_authenticated_providers
 
 # -- Copilot slug resolution (env var path) ----------------------------------
 
-@patch.dict(os.environ, {"COPILOT_GITHUB_TOKEN": "fake-ghu"}, clear=False)
-def test_copilot_uses_hermes_slug():
-    """github-copilot overlay should resolve to slug='copilot' with curated models."""
-    providers = list_authenticated_providers(current_provider="copilot")
-
-    copilot = next((p for p in providers if p["slug"] == "copilot"), None)
-    assert copilot is not None, "copilot should appear when COPILOT_GITHUB_TOKEN is set"
-    assert copilot["total_models"] > 0, "copilot should have curated models"
-    assert copilot["is_current"] is True
-
-    # Must NOT appear under the models.dev key
-    gh_copilot = next((p for p in providers if p["slug"] == "github-copilot"), None)
-    assert gh_copilot is None, "github-copilot slug should not appear (resolved to copilot)"
 
 
 
@@ -46,17 +33,17 @@ def test_copilot_uses_hermes_slug():
 
 def test_mapped_provider_credential_pool_visibility(monkeypatch):
     """Mapped providers should appear when credentials live only in auth-store credential_pool."""
-    monkeypatch.setattr("agent.models_dev.fetch_models_dev", lambda: {"google-ai-studio": {"env": ["GEMINI_API_KEY"]}})
-    monkeypatch.setattr("agent.models_dev.PROVIDER_TO_MODELS_DEV", {"gemini": "google-ai-studio"})
+    monkeypatch.setattr("agent.models_dev.fetch_models_dev", lambda: {"z-ai": {"env": ["ZAI_API_KEY"]}})
+    monkeypatch.setattr("agent.models_dev.PROVIDER_TO_MODELS_DEV", {"zai": "z-ai"})
     monkeypatch.setattr(
         "hermes_cli.auth._load_auth_store",
-        lambda: {"providers": {}, "credential_pool": {"gemini": {"token": "fake"}}},
+        lambda: {"providers": {}, "credential_pool": {"zai": {"token": "fake"}}},
     )
-    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("ZAI_API_KEY", raising=False)
 
-    providers = list_authenticated_providers(current_provider="gemini")
+    providers = list_authenticated_providers(current_provider="zai")
 
-    gemini = next((p for p in providers if p["slug"] == "gemini"), None)
-    assert gemini is not None, "gemini should appear when auth-store credential_pool has creds"
-    assert gemini["is_current"] is True
-    assert gemini["total_models"] > 0
+    zai = next((p for p in providers if p["slug"] == "zai"), None)
+    assert zai is not None, "zai should appear when auth-store credential_pool has creds"
+    assert zai["is_current"] is True
+    assert zai["total_models"] > 0

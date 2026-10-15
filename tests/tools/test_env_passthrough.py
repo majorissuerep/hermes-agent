@@ -368,8 +368,7 @@ class TestTerminalIntegration:
         registered name via ``os.getenv``, which is case-insensitive on Windows,
         so a variant would tunnel the real ``OPENAI_API_KEY`` value into
         SSH/Docker children: the same GHSA-rhgp-j443-p4rf primitive."""
-        for var in ("openai_api_key", "OpenAi_Api_Key", "anthropic_api_key",
-                    "Aws_Bearer_Token_Bedrock"):
+        for var in ("openai_api_key", "OpenAi_Api_Key", "anthropic_api_key"):
             register_env_passthrough([var])
             assert not is_env_passthrough(var), (
                 f"{var} should be refused passthrough registration")

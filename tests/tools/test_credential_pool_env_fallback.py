@@ -15,10 +15,10 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 
-def _make_pconfig(provider_id="deepseek", env_vars=None):
+def _make_pconfig(provider_id="zai", env_vars=None):
     """Create a minimal ProviderConfig for testing.
 
-    Default provider_id is 'deepseek' because it's a real api_key provider
+    Default provider_id is 'zai' because it's a real api_key provider
     in PROVIDER_REGISTRY (needed for _seed_from_env's generic path).
     """
     from hermes_cli.auth import ProviderConfig
@@ -36,7 +36,7 @@ def isolated_hermes_home(tmp_path, monkeypatch):
 
     Also invalidates any cached get_env_value state by patching Path.home().
     """
-    home = tmp_path / ".hermes"
+    home = tmp_path / "isolated-hermes"
     home.mkdir()
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     monkeypatch.setenv("HERMES_HOME", str(home))
@@ -44,7 +44,7 @@ def isolated_hermes_home(tmp_path, monkeypatch):
     # Clear all known API key env vars so get_env_value falls through to .env
     for key in [
         "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "OPENROUTER_API_KEY",
-        "ZAI_API_KEY", "DEEPSEEK_API_KEY", "ANTHROPIC_TOKEN",
+        "GLM_API_KEY", "ZAI_API_KEY", "ANTHROPIC_TOKEN",
         "CLAUDE_CODE_OAUTH_TOKEN", "OPENAI_BASE_URL",
     ]:
         monkeypatch.delenv(key, raising=False)
@@ -66,20 +66,20 @@ class TestCredentialPoolSeedsFromDotEnv:
     load_hermes_dotenv, the credential pool must still discover it.
     """
 
-    def test_deepseek_key_from_dotenv_only(self, isolated_hermes_home):
+    def test_zai_key_from_dotenv_only(self, isolated_hermes_home):
         """Key in .env but not os.environ → _seed_from_env adds a pool entry."""
-        _write_env_file(isolated_hermes_home, DEEPSEEK_API_KEY="sk-dotenv-only-12345")
-        assert "DEEPSEEK_API_KEY" not in os.environ
+        _write_env_file(isolated_hermes_home, ZAI_API_KEY="sk-dotenv-only-12345")
+        assert "ZAI_API_KEY" not in os.environ
 
         from agent.credential_pool import _seed_from_env
         entries = []
-        changed, active_sources = _seed_from_env("deepseek", entries)
+        changed, active_sources = _seed_from_env("zai", entries)
 
         assert changed is True
-        assert "env:DEEPSEEK_API_KEY" in active_sources
+        assert "env:ZAI_API_KEY" in active_sources
         assert any(
             e.access_token == "sk-dotenv-only-12345"
-            and e.source == "env:DEEPSEEK_API_KEY"
+            and e.source == "env:ZAI_API_KEY"
             for e in entries
         ), f"Expected seeded entry with dotenv key, got: {[(e.source, e.access_token) for e in entries]}"
 
@@ -88,7 +88,7 @@ class TestCredentialPoolSeedsFromDotEnv:
         """No .env file, no env vars → no entries seeded (and no crash)."""
         from agent.credential_pool import _seed_from_env
         entries = []
-        changed, active_sources = _seed_from_env("deepseek", entries)
+        changed, active_sources = _seed_from_env("zai", entries)
         assert changed is False
         assert active_sources == set()
         assert entries == []
@@ -99,15 +99,15 @@ class TestCredentialPoolSeedsFromDotEnv:
         from Codex CLI, test runner, login profile, etc.). Without this, key
         rotation produces persistent 401s.
         """
-        _write_env_file(isolated_hermes_home, DEEPSEEK_API_KEY="sk-dotenv-fresh")
-        monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-env-stale-xyz")
+        _write_env_file(isolated_hermes_home, ZAI_API_KEY="sk-dotenv-fresh")
+        monkeypatch.setenv("ZAI_API_KEY", "sk-env-stale-xyz")
 
         from agent.credential_pool import _seed_from_env
         entries = []
-        changed, _ = _seed_from_env("deepseek", entries)
+        changed, _ = _seed_from_env("zai", entries)
 
         assert changed is True
-        seeded = [e for e in entries if e.source == "env:DEEPSEEK_API_KEY"]
+        seeded = [e for e in entries if e.source == "env:ZAI_API_KEY"]
         assert len(seeded) == 1
         assert seeded[0].access_token == "sk-dotenv-fresh"
 
@@ -117,16 +117,16 @@ class TestAuthResolvesFromDotEnv:
 
     def test_key_from_dotenv_only(self, isolated_hermes_home):
         """Key in .env but not os.environ → _resolve returns it with the env var source."""
-        _write_env_file(isolated_hermes_home, DEEPSEEK_API_KEY="sk-dotenv-resolve-789")
-        assert "DEEPSEEK_API_KEY" not in os.environ
+        _write_env_file(isolated_hermes_home, ZAI_API_KEY="sk-dotenv-resolve-789")
+        assert "ZAI_API_KEY" not in os.environ
 
         from hermes_cli.auth import _resolve_api_key_provider_secret
         key, source = _resolve_api_key_provider_secret(
-            provider_id="deepseek",
+            provider_id="zai",
             pconfig=_make_pconfig(),
         )
         assert key == "sk-dotenv-resolve-789"
-        assert source == "DEEPSEEK_API_KEY"
+        assert source == "ZAI_API_KEY"
 
     def test_dotenv_wins_over_stale_os_environ_on_resolve(
         self, isolated_hermes_home, monkeypatch
@@ -137,16 +137,16 @@ class TestAuthResolvesFromDotEnv:
         live request path keeps returning the stale shell export, producing
         persistent 401s after rotation.
         """
-        _write_env_file(isolated_hermes_home, DEEPSEEK_API_KEY="dotenv-fresh-deepseek")
-        monkeypatch.setenv("DEEPSEEK_API_KEY", "stale-shell-deepseek")
+        _write_env_file(isolated_hermes_home, ZAI_API_KEY="dotenv-fresh-zai")
+        monkeypatch.setenv("ZAI_API_KEY", "stale-shell-zai")
 
         from hermes_cli.auth import _resolve_api_key_provider_secret
         key, source = _resolve_api_key_provider_secret(
-            provider_id="deepseek",
+            provider_id="zai",
             pconfig=_make_pconfig(),
         )
-        assert key == "dotenv-fresh-deepseek"
-        assert source == "DEEPSEEK_API_KEY"
+        assert key == "dotenv-fresh-zai"
+        assert source == "ZAI_API_KEY"
 
     def test_get_anthropic_key_prefers_dotenv_over_stale_os_environ(
         self, isolated_hermes_home, monkeypatch
@@ -180,7 +180,7 @@ class TestAuthCredentialPoolFallback:
         from hermes_cli.auth import _resolve_api_key_provider_secret
         with patch("agent.credential_pool.load_pool", return_value=mock_pool):
             key, source = _resolve_api_key_provider_secret(
-                provider_id="deepseek",
+                provider_id="zai",
                 pconfig=_make_pconfig(),
             )
         assert "test-pool-key-12345" in key
@@ -194,14 +194,14 @@ class TestAuthCredentialPoolFallback:
         from hermes_cli.auth import _resolve_api_key_provider_secret
         with patch("agent.credential_pool.load_pool", return_value=mock_pool):
             key, _source = _resolve_api_key_provider_secret(
-                provider_id="deepseek",
+                provider_id="zai",
                 pconfig=_make_pconfig(),
             )
         assert key == ""
 
     def test_env_var_takes_priority_over_pool(self, isolated_hermes_home, monkeypatch):
         """os.environ key wins — credential pool is NEVER consulted."""
-        monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-env-key-first-abc123")
+        monkeypatch.setenv("ZAI_API_KEY", "sk-env-key-first-abc123")
 
         mock_pool = MagicMock()
         mock_pool.has_credentials.return_value = True
@@ -209,18 +209,18 @@ class TestAuthCredentialPoolFallback:
         from hermes_cli.auth import _resolve_api_key_provider_secret
         with patch("agent.credential_pool.load_pool", return_value=mock_pool) as mp:
             key, source = _resolve_api_key_provider_secret(
-                provider_id="deepseek",
+                provider_id="zai",
                 pconfig=_make_pconfig(),
             )
         assert key == "sk-env-key-first-abc123"
-        assert source == "DEEPSEEK_API_KEY"
+        assert source == "ZAI_API_KEY"
         # Pool should not even have been loaded — env var satisfied the request first
         mp.assert_not_called()
 
     def test_dotenv_takes_priority_over_pool(self, isolated_hermes_home):
         """Key in .env beats credential pool — pool only fires when both env sources are empty."""
-        _write_env_file(isolated_hermes_home, DEEPSEEK_API_KEY="sk-dotenv-priority-xyz")
-        assert "DEEPSEEK_API_KEY" not in os.environ
+        _write_env_file(isolated_hermes_home, ZAI_API_KEY="sk-dotenv-priority-xyz")
+        assert "ZAI_API_KEY" not in os.environ
 
         mock_pool = MagicMock()
         mock_pool.has_credentials.return_value = True
@@ -228,11 +228,11 @@ class TestAuthCredentialPoolFallback:
         from hermes_cli.auth import _resolve_api_key_provider_secret
         with patch("agent.credential_pool.load_pool", return_value=mock_pool) as mp:
             key, source = _resolve_api_key_provider_secret(
-                provider_id="deepseek",
+                provider_id="zai",
                 pconfig=_make_pconfig(),
             )
         assert key == "sk-dotenv-priority-xyz"
-        assert source == "DEEPSEEK_API_KEY"
+        assert source == "ZAI_API_KEY"
         mp.assert_not_called()
 
 

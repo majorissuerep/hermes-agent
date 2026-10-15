@@ -4188,10 +4188,10 @@ def test_openrouter_session_resume_restores_provider():
     # for sessions that never used /model): billing_provider="openrouter" should
     # be restored as the provider override.
     ov = server._stored_session_runtime_overrides(
-        {"model": "anthropic/claude-opus-4.8", "billing_provider": "openrouter"}
+        {"model": "anthropic/claude-opus-4.8", "billing_provider": 'ai-gateway'}
     )
-    assert ov["provider_override"] == "openrouter"
-    assert ov["model_override"]["provider"] == "openrouter"
+    assert ov["provider_override"] == 'ai-gateway'
+    assert ov["model_override"]["provider"] == 'ai-gateway'
     assert ov["model_override"]["model"] == "anthropic/claude-opus-4.8"
 
     # When an explicit model_config.provider exists, it takes precedence over
@@ -4199,11 +4199,11 @@ def test_openrouter_session_resume_restores_provider():
     ov = server._stored_session_runtime_overrides(
         {
             "model": "anthropic/claude-opus-4.8",
-            "billing_provider": "openrouter",
-            "model_config": {"provider": "openrouter", "base_url": "https://openrouter.ai/api/v1"},
+            "billing_provider": 'ai-gateway',
+            "model_config": {"provider": 'ai-gateway', "base_url": 'https://ai-gateway.vercel.sh/v1'},
         }
     )
-    assert ov["provider_override"] == "openrouter"
+    assert ov["provider_override"] == 'ai-gateway'
 
 
 def test_persist_live_session_runtime_preserves_resume_metadata(monkeypatch):
@@ -4336,8 +4336,8 @@ def _patch_config_model(monkeypatch, model, provider=""):
 
 
 def test_config_sync_switches_unpinned_session(monkeypatch):
-    _patch_config_model(monkeypatch, "new/model", provider="nous")
-    session = _sync_test_session(config_model_seen=("old/model", "nous"))
+    _patch_config_model(monkeypatch, "new/model", provider='zai')
+    session = _sync_test_session(config_model_seen=("old/model", 'zai'))
     calls = []
     monkeypatch.setattr(
         server,
@@ -4350,7 +4350,7 @@ def test_config_sync_switches_unpinned_session(monkeypatch):
     assert calls == [
         (
             "sid",
-            "new/model --provider nous",
+            "new/model --provider zai",
             {
                 "confirm_expensive_model": True,
                 "pin_session_override": False,
@@ -4359,7 +4359,7 @@ def test_config_sync_switches_unpinned_session(monkeypatch):
             },
         )
     ]
-    assert session["config_model_seen"] == ("new/model", "nous")
+    assert session["config_model_seen"] == ("new/model", 'zai')
 
 
 def test_config_sync_treats_auto_provider_as_unset(monkeypatch):
@@ -4421,7 +4421,7 @@ def test_config_sync_adopts_baseline_when_agent_already_on_target(monkeypatch):
 
 
 def test_config_sync_switches_when_only_provider_differs(monkeypatch):
-    _patch_config_model(monkeypatch, "old/model", provider="nous")
+    _patch_config_model(monkeypatch, "old/model", provider='zai')
     session = _sync_test_session(config_model_seen=("old/model", ""))
     calls = []
     monkeypatch.setattr(
@@ -4432,7 +4432,7 @@ def test_config_sync_switches_when_only_provider_differs(monkeypatch):
 
     server._sync_agent_model_with_config("sid", session)
 
-    assert calls == ["old/model --provider nous"]
+    assert calls == ["old/model --provider zai"]
 
 
 def test_config_sync_failure_emits_error_once_per_edit(monkeypatch):
@@ -4507,7 +4507,7 @@ def test_apply_model_switch_persist_override_false_never_persists(monkeypatch):
     result = _types.SimpleNamespace(
         success=True,
         new_model="new/model",
-        target_provider="nous",
+        target_provider='zai',
         base_url="",
         api_key="key",
         api_mode="chat_completions",
@@ -4533,7 +4533,7 @@ def test_apply_model_switch_persist_override_false_never_persists(monkeypatch):
     session = {"agent": None}
 
     out = server._apply_model_switch(
-        "sid", session, "new/model --provider nous", persist_override=False
+        "sid", session, "new/model --provider zai", persist_override=False
     )
 
     assert out["value"] == "new/model"
@@ -4542,16 +4542,16 @@ def test_apply_model_switch_persist_override_false_never_persists(monkeypatch):
 
 def test_startup_runtime_uses_tui_provider_env(monkeypatch):
     monkeypatch.setenv("HERMES_MODEL", "nous/hermes-test")
-    monkeypatch.setenv("HERMES_TUI_PROVIDER", "nous")
+    monkeypatch.setenv("HERMES_TUI_PROVIDER", 'zai')
     monkeypatch.delenv("HERMES_INFERENCE_PROVIDER", raising=False)
 
-    assert server._resolve_startup_runtime() == ("nous/hermes-test", "nous")
+    assert server._resolve_startup_runtime() == ("nous/hermes-test", 'zai')
 
 
 def test_startup_runtime_does_not_treat_inference_provider_as_explicit(monkeypatch):
     monkeypatch.setenv("HERMES_MODEL", "nous/hermes-test")
     monkeypatch.delenv("HERMES_TUI_PROVIDER", raising=False)
-    monkeypatch.setenv("HERMES_INFERENCE_PROVIDER", "nous")
+    monkeypatch.setenv("HERMES_INFERENCE_PROVIDER", 'zai')
     monkeypatch.setattr(
         "hermes_cli.models.detect_static_provider_for_model",
         lambda model, provider: None,
@@ -4565,7 +4565,7 @@ def test_load_fallback_model_merges_chain_providers_first(monkeypatch):
     # its order, with any distinct legacy fallback_model entry merged in after
     # (deduped on provider/model/base_url).
     fallback_chain = [
-        {"provider": "openrouter", "model": "openai/gpt-5.5"},
+        {"provider": 'ai-gateway', "model": "openai/gpt-5.5"},
         {"provider": "anthropic", "model": "claude-sonnet-4-6"},
     ]
     monkeypatch.setattr(
@@ -4578,7 +4578,7 @@ def test_load_fallback_model_merges_chain_providers_first(monkeypatch):
     )
 
     assert server._load_fallback_model() == [
-        {"provider": "openrouter", "model": "openai/gpt-5.5"},
+        {"provider": 'ai-gateway', "model": "openai/gpt-5.5"},
         {"provider": "anthropic", "model": "claude-sonnet-4-6"},
         {"provider": "legacy", "model": "legacy-model"},
     ]
@@ -4587,7 +4587,7 @@ def test_load_fallback_model_merges_chain_providers_first(monkeypatch):
 def test_make_agent_passes_configured_fallback_chain(monkeypatch):
     captured = {}
     fallback_chain = [
-        {"provider": "openrouter", "model": "openai/gpt-5.5"},
+        {"provider": 'ai-gateway', "model": "openai/gpt-5.5"},
     ]
 
     def fake_agent(**kwargs):
@@ -4790,7 +4790,7 @@ def test_attaching_a_different_login_keeps_the_creator_and_warns_once(monkeypatc
 
 def test_background_agent_kwargs_preserves_full_fallback_chain(monkeypatch):
     chain = [
-        {"provider": "openrouter", "model": "openai/gpt-5.5"},
+        {"provider": 'ai-gateway', "model": "openai/gpt-5.5"},
         {"provider": "anthropic", "model": "claude-sonnet-4-6"},
     ]
     agent = types.SimpleNamespace(
@@ -4819,7 +4819,7 @@ def test_background_agent_kwargs_preserves_empty_fallback_chain(monkeypatch):
         lambda: {
             "max_turns": 25,
             "fallback_providers": [
-                {"provider": "openrouter", "model": "openai/gpt-5.5"},
+                {"provider": 'ai-gateway', "model": "openai/gpt-5.5"},
             ],
         },
     )
@@ -8348,7 +8348,7 @@ def test_ensure_session_db_row_persists_session_model_override(monkeypatch):
     server._ensure_session_db_row(
         {
             "session_key": "k1",
-            "model_override": {"model": "openai/gpt-5.5", "provider": "openrouter"},
+            "model_override": {"model": "openai/gpt-5.5", "provider": 'ai-gateway'},
             "create_reasoning_override": {"effort": "high"},
             "create_service_tier_override": "priority",
         }
@@ -8358,7 +8358,7 @@ def test_ensure_session_db_row_persists_session_model_override(monkeypatch):
     row = created[0]
     assert row["model"] == "openai/gpt-5.5"
     assert row["model_config"]["model"] == "openai/gpt-5.5"
-    assert row["model_config"]["provider"] == "openrouter"
+    assert row["model_config"]["provider"] == 'ai-gateway'
     assert row["model_config"]["reasoning_config"] == {"effort": "high"}
     assert row["model_config"]["service_tier"] == "priority"
 
@@ -8661,7 +8661,7 @@ def test_session_create_drops_pending_title_on_valueerror(monkeypatch):
     class _Agent:
         session_id = "test-session"
         model = "x"
-        provider = "openrouter"
+        provider = 'ai-gateway'
         base_url = ""
         api_key = ""
         _cached_system_prompt = ""
@@ -9430,7 +9430,7 @@ def test_setup_status_answers_from_the_bootstrap_record_once_it_exists(monkeypat
     def slow_bootstrap():
         release.wait(5)
         with fb._lock:
-            fb._record = fb.SetupRecord(provider_configured=True, inference_provider="nous", free_tier_account=True,
+            fb._record = fb.SetupRecord(provider_configured=True, inference_provider='zai', free_tier_account=True,
                                         has_identity=True, other_providers=False)
             fb._done.set()
     with fb._lock:
@@ -9441,7 +9441,7 @@ def test_setup_status_answers_from_the_bootstrap_record_once_it_exists(monkeypat
         resp = server.handle_request({"id": "1", "method": "setup.status", "params": {}})
         assert resp["result"]["provider_configured"] is True
         assert resp["result"]["ready"] is True and resp["result"]["free_tier_account"] is True
-        assert resp["result"]["inference_provider"] == "nous"
+        assert resp["result"]["inference_provider"] == 'zai'
     finally:
         fb.reset_for_tests()
 
@@ -9459,10 +9459,10 @@ def test_invalid_params_and_unknown_method_name_the_version_skew_fix():
 
 
 def test_probe_credentials_emits_exact_empty_key_warning():
-    agent = types.SimpleNamespace(api_key="", provider="openrouter")
+    agent = types.SimpleNamespace(api_key="", provider='ai-gateway')
 
     warning = server._probe_credentials(agent)
-    assert warning and "openrouter" in warning
+    assert warning and 'ai-gateway' in warning
 
 
 def test_probe_credentials_allows_keyless_custom_runtime():
@@ -9480,7 +9480,7 @@ def test_setup_runtime_check_rejects_empty_runtime_key(monkeypatch):
     monkeypatch.setattr(
         "hermes_cli.runtime_provider.resolve_runtime_provider",
         lambda requested=None, **_kw: {
-            "provider": "openrouter",
+            "provider": 'ai-gateway',
             "api_key": "",
             "source": "env/config",
         },
@@ -9491,7 +9491,7 @@ def test_setup_runtime_check_rejects_empty_runtime_key(monkeypatch):
     result = resp["result"]
     assert result["ok"] is False
     assert (result["provider"], result["model"], result["source"]) == (
-        "openrouter", "openrouter/test-model", "env/config"
+        'ai-gateway', "openrouter/test-model", "env/config"
     )
     assert result["error"]
 
@@ -9507,7 +9507,7 @@ def test_setup_runtime_check_failure_names_the_configured_pin_not_the_chain_tail
     monkeypatch.setattr(
         "hermes_cli.runtime_provider.resolve_runtime_provider",
         lambda requested=None, **_kw: {
-            "provider": "openrouter",  # the chain tail that "resolved"
+            "provider": 'ai-gateway',  # the chain tail that "resolved"
             "api_key": "",
             "source": "pool",
         },
@@ -9519,7 +9519,7 @@ def test_setup_runtime_check_failure_names_the_configured_pin_not_the_chain_tail
     assert result["ok"] is False
     assert result["provider"] == "zai"
     assert result["error"] == "No usable credentials found for zai."
-    assert "openrouter" not in result["error"]
+    assert 'ai-gateway' not in result["error"]
 
 
 def test_setup_runtime_check_failure_names_startup_env_pin(monkeypatch):
@@ -9530,7 +9530,7 @@ def test_setup_runtime_check_failure_names_startup_env_pin(monkeypatch):
     monkeypatch.setattr(
         "hermes_cli.runtime_provider.resolve_runtime_provider",
         lambda requested=None, **_kw: {
-            "provider": "openrouter",
+            "provider": 'ai-gateway',
             "api_key": "",
             "source": "pool",
         },
@@ -9584,9 +9584,9 @@ def test_setup_runtime_check_honors_requested_provider(monkeypatch):
     monkeypatch.setattr(server, "_load_cfg", dict)
 
     def fake_resolve(requested=None, **kwargs):
-        if requested == "nous":
+        if requested == 'zai':
             return {
-                "provider": "nous",
+                "provider": 'zai',
                 "api_key": "invoke-jwt",
                 "source": "portal",
             }
@@ -9602,10 +9602,10 @@ def test_setup_runtime_check_honors_requested_provider(monkeypatch):
     )
 
     scoped = server.handle_request(
-        {"id": "1", "method": "setup.runtime_check", "params": {"provider": "nous"}}
+        {"id": "1", "method": "setup.runtime_check", "params": {"provider": 'zai'}}
     )
     assert scoped["result"]["ok"] is True
-    assert scoped["result"]["provider"] == "nous"
+    assert scoped["result"]["provider"] == 'zai'
 
     default = server.handle_request({"id": "1", "method": "setup.runtime_check", "params": {}})
     assert default["result"]["ok"] is False
@@ -9620,18 +9620,18 @@ def test_setup_runtime_check_agrees_with_session_fallback_chain(monkeypatch):
     monkeypatch.setattr("hermes_cli.main._has_any_provider_configured", lambda **_kw: True)
     monkeypatch.setattr(server, "_resolve_startup_runtime", lambda: ("claude-sonnet-4-5", None))
     monkeypatch.setattr(server, "_load_fallback_model",
-                        lambda: [{"provider": "openrouter", "model": "openai/gpt-4.1-mini", "api_key": "sk-or-fb"}])
+                        lambda: [{"provider": 'ai-gateway', "model": "openai/gpt-4.1-mini", "api_key": "sk-or-fb"}])
 
     def fake_resolve(*, requested=None, target_model=None, explicit_api_key=None, **_kw):
-        if requested == "openrouter":
-            return {"provider": "openrouter", "api_key": explicit_api_key, "source": "explicit"}
+        if requested == 'ai-gateway':
+            return {"provider": 'ai-gateway', "api_key": explicit_api_key, "source": "explicit"}
         raise AuthError("No Anthropic credentials found.", provider="anthropic")
 
     monkeypatch.setattr("hermes_cli.runtime_provider.resolve_runtime_provider", fake_resolve)
 
     default = server.handle_request({"id": "1", "method": "setup.runtime_check", "params": {}})
     assert default["result"]["ok"] is True
-    assert (default["result"]["provider"], default["result"]["model"]) == ("openrouter", "openai/gpt-4.1-mini")
+    assert (default["result"]["provider"], default["result"]["model"]) == ('ai-gateway', "openai/gpt-4.1-mini")
 
     strict = server.handle_request(
         {"id": "2", "method": "setup.runtime_check", "params": {"provider": "anthropic"}})
@@ -9705,15 +9705,15 @@ def test_setup_readiness_scopes_to_requested_profile(monkeypatch, tmp_path):
 
     bot_home = tmp_path / "profiles" / "bot"
     bot_home.mkdir(parents=True)
-    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-launch-profile-secret-0000")
+    monkeypatch.setenv('AI_GATEWAY_API_KEY', "sk-or-launch-profile-secret-0000")
     monkeypatch.setattr("hermes_cli.profiles.profile_exists", lambda name: name == "bot")
     monkeypatch.setattr(server, "_profile_home", lambda profile: bot_home if profile == "bot" else None)
     seen = {}
 
     def fake_resolve(requested=None, **kwargs):
         seen["home"] = Path(str(get_hermes_home())).resolve()
-        seen["secret"] = secret_scope.get_secret("OPENROUTER_API_KEY")
-        return {"provider": "openrouter", "api_key": seen["secret"] or "", "source": "env"}
+        seen["secret"] = secret_scope.get_secret('AI_GATEWAY_API_KEY')
+        return {"provider": 'ai-gateway', "api_key": seen["secret"] or "", "source": "env"}
 
     monkeypatch.setattr("hermes_cli.runtime_provider.resolve_runtime_provider", fake_resolve)
 
@@ -9724,7 +9724,7 @@ def test_setup_readiness_scopes_to_requested_profile(monkeypatch, tmp_path):
         )
         assert status["result"] == {"provider_configured": False, "profile": "bot"}
 
-        (bot_home / ".env").write_text("OPENROUTER_API_KEY=sk-or-bot-profile-secret-00001\n", encoding="utf-8")
+        (bot_home / ".env").write_text("AI_GATEWAY_API_KEY=sk-or-bot-profile-secret-00001\n", encoding="utf-8")
         status = server.handle_request(
             {"id": "2", "method": "setup.status", "params": {"profile": "bot"}}
         )
@@ -9745,7 +9745,7 @@ def test_setup_readiness_unknown_profile_never_answers_for_launch_profile(monkey
     monkeypatch.setattr("hermes_cli.main._has_any_provider_configured", lambda **_kw: True)
     monkeypatch.setattr(
         "hermes_cli.runtime_provider.resolve_runtime_provider",
-        lambda requested=None, **kw: {"provider": "openrouter", "api_key": "sk-or-launch-0000000000", "source": "env"},
+        lambda requested=None, **kw: {"provider": 'ai-gateway', "api_key": "sk-or-launch-0000000000", "source": "env"},
     )
     monkeypatch.setattr("hermes_cli.profiles.profile_exists", lambda name: False)
 
@@ -10085,7 +10085,7 @@ def test_config_set_model_waits_for_lazy_agent_before_switch(monkeypatch):
 
 def test_config_set_model_requires_confirmation_for_expensive_model(monkeypatch):
     class _Agent:
-        provider = "openrouter"
+        provider = 'ai-gateway'
         model = "old/model"
         base_url = ""
         api_key = "sk-or"
@@ -10097,9 +10097,9 @@ def test_config_set_model_requires_confirmation_for_expensive_model(monkeypatch)
     result = types.SimpleNamespace(
         success=True,
         new_model="openai/gpt-5.5-pro",
-        target_provider="openrouter",
+        target_provider='ai-gateway',
         api_key="sk-or",
-        base_url="https://openrouter.ai/api/v1",
+        base_url='https://ai-gateway.vercel.sh/v1',
         api_mode="chat_completions",
         warning_message="",
         model_info=types.SimpleNamespace(
@@ -10152,7 +10152,7 @@ def test_config_set_model_requires_confirmation_for_expensive_model(monkeypatch)
 
 def test_config_set_model_global_persists(monkeypatch):
     class _Agent:
-        provider = "openrouter"
+        provider = 'ai-gateway'
         model = "old/model"
         base_url = ""
         api_key = "sk-old"
@@ -10208,7 +10208,7 @@ def test_config_set_model_explicit_provider_skips_broken_default_init(monkeypatc
     session = _session()
     session["agent"] = None
     server._sessions["sid"] = session
-    monkeypatch.setattr(server, "_load_cfg", lambda: {"model": {"default": "broken/model", "provider": "openrouter"}})
+    monkeypatch.setattr(server, "_load_cfg", lambda: {"model": {"default": "broken/model", "provider": 'ai-gateway'}})
     monkeypatch.setattr(server, "_start_agent_build", lambda *_args: seen.__setitem__("build", seen["build"] + 1))
     monkeypatch.setattr(server, "_wait_agent", lambda *_args: seen.__setitem__("wait", seen["wait"] + 1))
     monkeypatch.setattr(server, "_emit", lambda *args, **kwargs: None)
@@ -10526,7 +10526,7 @@ def test_config_set_model_explicit_provider_surfaces_selected_provider_errors(mo
     session = _session()
     session["agent"] = None
     server._sessions["sid"] = session
-    monkeypatch.setattr(server, "_load_cfg", lambda: {"model": {"default": "broken/model", "provider": "openrouter"}})
+    monkeypatch.setattr(server, "_load_cfg", lambda: {"model": {"default": "broken/model", "provider": 'ai-gateway'}})
     monkeypatch.setattr(server, "_start_agent_build", lambda *_args: seen.__setitem__("build", seen["build"] + 1))
     monkeypatch.setattr(server, "_wait_agent", lambda *_args: seen.__setitem__("wait", seen["wait"] + 1))
 
@@ -10573,7 +10573,7 @@ def test_config_set_model_does_not_leak_inference_provider_env(monkeypatch):
     """
 
     class _Agent:
-        provider = "openrouter"
+        provider = 'ai-gateway'
         model = "old/model"
         base_url = ""
         api_key = "sk-or"
@@ -10593,7 +10593,7 @@ def test_config_set_model_does_not_leak_inference_provider_env(monkeypatch):
 
     session = _session(agent=_Agent())
     server._sessions["sid"] = session
-    monkeypatch.setenv("HERMES_INFERENCE_PROVIDER", "openrouter")
+    monkeypatch.setenv("HERMES_INFERENCE_PROVIDER", 'ai-gateway')
     monkeypatch.setattr(
         "hermes_cli.model_switch.switch_model", lambda **_kwargs: result
     )
@@ -10614,7 +10614,7 @@ def test_config_set_model_does_not_leak_inference_provider_env(monkeypatch):
         )
 
         # Shared process env is UNCHANGED (the contamination vector is gone).
-        assert os.environ["HERMES_INFERENCE_PROVIDER"] == "openrouter"
+        assert os.environ["HERMES_INFERENCE_PROVIDER"] == 'ai-gateway'
         # The switch was recorded as a per-session override instead.
         assert session["model_override"]["provider"] == "anthropic"
         assert session["model_override"]["model"] == "claude-sonnet-4.6"
@@ -10633,7 +10633,7 @@ def test_config_set_model_records_per_session_override_not_env(monkeypatch):
     """
 
     class _Agent:
-        provider = "openrouter"
+        provider = 'ai-gateway'
         model = "old/model"
         base_url = ""
         api_key = "sk-or"
@@ -10808,8 +10808,8 @@ def test_config_set_model_switches_agent_without_touching_env(monkeypatch):
 def test_config_set_model_once_keeps_env_and_records_restore(monkeypatch):
     class Agent:
         model = "old/model"
-        provider = "openrouter"
-        base_url = "https://openrouter.ai/api/v1"
+        provider = 'ai-gateway'
+        base_url = 'https://ai-gateway.vercel.sh/v1'
         api_key = "sk-old"
         api_mode = "chat_completions"
 
@@ -10833,7 +10833,7 @@ def test_config_set_model_once_keeps_env_and_records_restore(monkeypatch):
     agent = Agent()
     session = _session(agent=agent)
     server._sessions["sid"] = session
-    monkeypatch.setenv("HERMES_INFERENCE_PROVIDER", "openrouter")
+    monkeypatch.setenv("HERMES_INFERENCE_PROVIDER", 'ai-gateway')
     monkeypatch.setenv("HERMES_MODEL", "old/model")
     monkeypatch.setattr(
         "hermes_cli.model_switch.switch_model",
@@ -10859,7 +10859,7 @@ def test_config_set_model_once_keeps_env_and_records_restore(monkeypatch):
         assert seen["is_global"] is False
         assert agent.model == "claude-sonnet-4.6"
         assert session["one_turn_model_restore"]["model"] == "old/model"
-        assert os.environ["HERMES_INFERENCE_PROVIDER"] == "openrouter"
+        assert os.environ["HERMES_INFERENCE_PROVIDER"] == 'ai-gateway'
         assert os.environ["HERMES_MODEL"] == "old/model"
     finally:
         server._sessions.clear()
@@ -10958,9 +10958,9 @@ def test_config_set_model_session_switch_clears_pending_once_restore(monkeypatch
     result = types.SimpleNamespace(
         success=True,
         new_model="new/model",
-        target_provider="openrouter",
+        target_provider='ai-gateway',
         api_key="sk-new",
-        base_url="https://openrouter.ai/api/v1",
+        base_url='https://ai-gateway.vercel.sh/v1',
         api_mode="chat_completions",
         warning_message="",
     )
@@ -11011,16 +11011,16 @@ def test_restore_agent_model_runtime_falls_back_to_switch_model():
         agent,
         {
             "model": "old/model",
-            "provider": "openrouter",
+            "provider": 'ai-gateway',
             "api_key": "sk-old",
-            "base_url": "https://openrouter.ai/api/v1",
+            "base_url": 'https://ai-gateway.vercel.sh/v1',
             "api_mode": "chat_completions",
         },
     )
 
     assert agent.model == "old/model"
-    assert agent.provider == "openrouter"
-    assert agent.base_url == "https://openrouter.ai/api/v1"
+    assert agent.provider == 'ai-gateway'
+    assert agent.base_url == 'https://ai-gateway.vercel.sh/v1'
 
 
 def test_config_set_personality_rejects_unknown_name(monkeypatch):
@@ -15404,7 +15404,7 @@ def test_session_create_close_race_does_not_orphan_resources(monkeypatch):
     class _FakeAgent:
         def __init__(self):
             self.model = "x"
-            self.provider = "openrouter"
+            self.provider = 'ai-gateway'
             self.base_url = ""
             self.api_key = ""
 
@@ -15544,7 +15544,7 @@ def test_session_create_no_race_keeps_worker_alive(monkeypatch):
     class _FakeAgent:
         def __init__(self):
             self.model = "x"
-            self.provider = "openrouter"
+            self.provider = 'ai-gateway'
             self.base_url = ""
             self.api_key = ""
 
@@ -15722,7 +15722,7 @@ def test_session_create_continues_when_state_db_is_unavailable(monkeypatch):
     class _FakeAgent:
         def __init__(self):
             self.model = "x"
-            self.provider = "openrouter"
+            self.provider = 'ai-gateway'
             self.base_url = ""
             self.api_key = ""
 
@@ -17009,7 +17009,7 @@ def test_model_options_does_not_overwrite_curated_models(monkeypatch):
     """
     curated_providers = [
         {
-            "slug": "nous",
+            "slug": 'zai',
             "name": "Nous",
             "models": ["moonshotai/kimi-k2.5", "anthropic/claude-opus-4.7"],
             "total_models": 30,
@@ -17037,7 +17037,7 @@ def test_model_options_does_not_overwrite_curated_models(monkeypatch):
 
     assert "result" in resp, resp
     providers = resp["result"]["providers"]
-    nous = next((p for p in providers if p.get("slug") == "nous"), None)
+    nous = next((p for p in providers if p.get("slug") == 'zai'), None)
     assert nous is not None
     assert nous["models"] == [
         "moonshotai/kimi-k2.5",
@@ -20604,7 +20604,7 @@ class TestResolveRuntimeWithFallback:
         from hermes_cli.auth import AuthError
 
         requested = []
-        fallback_runtime = {"provider": "openrouter", "api_key": "fb-tok"}
+        fallback_runtime = {"provider": 'ai-gateway', "api_key": "fb-tok"}
 
         def fake_resolve(**kwargs):
             requested.append(kwargs.get("requested"))
@@ -20621,7 +20621,7 @@ class TestResolveRuntimeWithFallback:
             "_load_fallback_model",
             lambda: [
                 {"provider": "anthropic"},
-                {"provider": "openrouter", "model": "z-ai/glm-5.2"},
+                {"provider": 'ai-gateway', "model": "z-ai/glm-5.2"},
             ],
         )
 
@@ -20629,7 +20629,7 @@ class TestResolveRuntimeWithFallback:
             {"requested": "openai-codex"}
         )
 
-        assert requested == ["openai-codex", "openrouter"]
+        assert requested == ["openai-codex", 'ai-gateway']
         assert resolution.runtime == fallback_runtime
         assert resolution.selected_model == "z-ai/glm-5.2"
         assert resolution.used_fallback is True
@@ -20641,7 +20641,7 @@ class TestResolveRuntimeWithFallback:
 
         monkeypatch.setenv("FB_TEST_KEY", "env-resolved-key")
         captured = {}
-        fallback_runtime = {"provider": "openrouter", "api_key": "x"}
+        fallback_runtime = {"provider": 'ai-gateway', "api_key": "x"}
 
         def fake_resolve(**kwargs):
             if kwargs.get("requested") == "openai-codex":
@@ -20658,7 +20658,7 @@ class TestResolveRuntimeWithFallback:
             "_load_fallback_model",
             lambda: [
                 {
-                    "provider": "openrouter",
+                    "provider": 'ai-gateway',
                     "model": "z-ai/glm-5.2",
                     "key_env": "FB_TEST_KEY",
                 }

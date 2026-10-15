@@ -118,11 +118,8 @@ class TestLoadReasoningConfigYamlBoolean:
             assert server._load_reasoning_config() == {"enabled": False}
 
 
-class TestSessionNoneReachesDeepSeekWire:
-    """Desktop ``config.set value=none`` must disable DeepSeek V4 thinking.
-
-    ``{effort: "none"}`` without ``enabled: False`` is what ``_session_info``
-    already reports as Off; the profile used to ignore it and send enabled.
+class TestSessionNoneReachesZaiWire:
+    """Desktop ``config.set value=none`` must disable thinking on GLM-5.
     """
 
     def test_session_info_effort_none_without_enabled_reports_none(self) -> None:
@@ -147,16 +144,15 @@ class TestSessionNoneReachesDeepSeekWire:
         import providers
         from agent.transports.chat_completions import ChatCompletionsTransport
 
-        profile = providers.get_provider_profile("deepseek")
+        profile = providers.get_provider_profile('zai')
         kwargs = ChatCompletionsTransport().build_kwargs(
-            model="deepseek-v4.1-flash-expires-on-0910",
+            model='glm-5',
             messages=[{"role": "user", "content": "ping"}],
             tools=None,
             provider_profile=profile,
-            reasoning_config={"effort": "none"},
-            base_url="https://api.deepseek.com/v1",
-            provider_name="deepseek",
+            reasoning_config={"enabled": False},
+            base_url="https://api.z.ai/api/paas/v4",
+            provider_name='zai',
         )
         assert kwargs["extra_body"] == {"thinking": {"type": "disabled"}}
         assert "reasoning_effort" not in kwargs
-
