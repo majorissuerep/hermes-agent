@@ -2,6 +2,8 @@
 from argparse import Namespace
 from pathlib import Path
 import sys
+import shlex
+import subprocess
 
 import pytest
 
@@ -29,6 +31,28 @@ def test_actual_pty_prompt_budget_is_enforced_and_credentials_are_redacted(tmp_p
         assert rehearsal.password not in log
         assert "synthetic-provider-secret" not in log
         assert prompt.strip() in log
+    finally:
+        rehearsal.close()
+
+
+@pytest.mark.platforms("linux")
+def test_git_inspection_never_enters_an_interactive_pager(tmp_path):
+    rehearsal = Rehearsal(Namespace(
+        work_dir=tmp_path, evidence=tmp_path / "evidence", keep_work=False,
+        baseline="old", candidate="new", scenario="broken-files", tool_cache=None,
+    ), {"provider": "litellm", "model": "fixture", "api_key": "synthetic-provider-secret"})
+    marker = tmp_path / "pager-entered"
+    pager = shlex.join([sys.executable, "-c", f"from pathlib import Path; Path({str(marker)!r}).touch()"])
+    try:
+        expected = "retain local work\n" * 100
+        (rehearsal.workspace / "note").write_text(expected)
+        for args in (["init"], ["add", "note"],
+                     ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-m", "fixture"]):
+            subprocess.run(["git", *args], cwd=rehearsal.workspace, env=rehearsal.env,
+                           capture_output=True, check=True)
+        actual = rehearsal.run("inspect", ["git", "-c", "core.pager=" + pager, "show", "HEAD:note"], timeout=10)
+        assert actual.replace("\r", "").strip() == expected.strip()
+        assert not marker.exists()
     finally:
         rehearsal.close()
 

@@ -16,6 +16,7 @@ from pathlib import Path
 import pty
 import re
 import secrets
+import shlex
 import select
 import shutil
 import signal
@@ -50,6 +51,7 @@ class Rehearsal:
         self.env.update(HOME=str(self.root / "user"), HERMES_HOME=str(self.home),
                         HERMES_RUNTIME_DIR=str(args.tool_cache.resolve() if args.tool_cache else self.root / "runtime"),
                         GIT_CONFIG_GLOBAL=str(self.root / "gitconfig"), GIT_CONFIG_NOSYSTEM="1",
+                        GIT_PAGER="cat",
                         TZ="UTC", LANG="C.UTF-8", TERM="dumb")
         Path(self.env["HOME"]).mkdir()
         self.env["PATH"] = str(Path(self.env["HOME"]) / ".local" / "bin") + os.pathsep + self.env["PATH"]
@@ -228,7 +230,8 @@ class Rehearsal:
             (self.home / "memories" / "legacy.md").write_text("preserve previous install")
             old = Path(self.env["HOME"]) / ".local" / "bin" / "hermes"
             old.parent.mkdir(parents=True)
-            old.write_text("#!/bin/sh\nexec /removed/old/hermes/venv/bin/python \"$@\"\n")
+            old.write_text("#!/bin/sh\nexec " + shlex.quote(str(self.code / "venv/bin/python")) +
+                           " -m hermes_cli.main \"$@\"\n")
             old.chmod(0o755)
         self.install(initial)
         self.run("baseline-branch", ["git", "-C", str(self.code), "checkout", "-B", "main", initial])
