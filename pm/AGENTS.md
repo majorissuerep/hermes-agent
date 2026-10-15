@@ -19,7 +19,7 @@ isolated tool environments. Callers receive an interpreter or tool path, not uv.
 Nix's declarative uv2nix builds and unrelated user projects remain independently owned.
 
 The `[tool.uv] exclude-newer = "14 days"` release-age check covers **Hermes's own dependencies
-only**, exact pins included, with no per-package exemptions, and it runs when Hermes LOCKS
+only**, exact pins included, and it runs when Hermes LOCKS
 (`hermes pm lock`, CI's lock check), never on users' machines: every generated workspace drops the
 cutoff (`pm/workspace.py::_without_release_age`), so a mirror without upload times cannot break an
 install (#135589). Plugin resolution is unchanged by this: core's exact pins stay put, and a plugin
@@ -27,3 +27,10 @@ may move a transitive core package within core's declared ranges
 (`tests/pm/test_workspace_build_inputs.py::test_plugin_can_move_compatible_transitive_but_not_exact_requirement`).
 Plugin `python_dependencies` follow the plugin's own policy. Teknium's rulings: "plugins dont have to abide by our 14 day rule … Only hermes'
 dependencies themselves have to"; dates are checked by us, not users.
+
+The owner approved one temporary exception to preserve the synced native ABI:
+`nemo-relay==0.10.0`, with an upload cutoff ending immediately after that release.
+Remove its timestamp override after 2026-10-23 UTC. No floating or blanket exemptions
+are authorized; every other dependency retains the fourteen-day rule. Generated
+installation workspaces strip both the global cutoff and this package-specific
+table, since release-age verification belongs to locking, not user installation.

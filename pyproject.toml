@@ -225,7 +225,7 @@ dependencies = [
   # 738 CPython reports sys_platform == 'android' and never matched.) Pre-GKI
   # devices can still slip through; they get the same resolution failure as
   # before, worked around by installing with `--no-deps` or an older release.
-  "nemo-relay>=0.9.3,<0.10; ((sys_platform == 'darwin' and platform_machine == 'arm64') or (sys_platform == 'linux' and platform_machine == 'x86_64' and 'android' not in platform_release) or (sys_platform == 'linux' and platform_machine == 'aarch64' and 'android' not in platform_release)) and python_version >= '3.14'",]
+  "nemo-relay==0.10.0; ((sys_platform == 'darwin' and platform_machine == 'arm64') or (sys_platform == 'linux' and platform_machine == 'x86_64' and 'android' not in platform_release) or (sys_platform == 'linux' and platform_machine == 'aarch64' and 'android' not in platform_release)) and python_version >= '3.14'",]
 
 [project.optional-dependencies]
 # The fork's local memory provider encrypts its store through the vault.
@@ -645,6 +645,12 @@ override-dependencies = [
 exclude-newer = "14 days"
 # Applied only when Hermes locks its own dependencies. Install workspaces
 # use the reviewed lock without requiring mirror upload timestamps.
+
+[tool.uv.exclude-newer-package]
+# Owner-approved preservation of the synced Relay ABI, not a floating exemption.
+# Includes only the exact 0.10.0 release's uploads. Remove after 2026-10-23 UTC,
+# when the entire release has completed the ordinary fourteen-day quarantine.
+nemo-relay = "2026-10-08T22:01:43Z"
 
 [tool.setuptools]
 # Root single-file modules are derived by setup.py at build time from the

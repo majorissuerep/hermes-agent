@@ -1,5 +1,6 @@
 """Independent core/optional dependency and reviewed CVE policies."""
 import tomllib
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from packaging.requirements import Requirement
@@ -53,19 +54,31 @@ def test_starlette_server_pins_and_lock_exclude_cve_2026_48710():
     assert versions and all(version >= floor for version in versions)
 
 
-def test_every_dependency_is_held_to_one_fourteen_day_release_age():
-    """Hermes's deps must be >= 14 days old when locked, exact pins included (Teknium ruling).
+def test_release_age_policy_allows_only_the_exact_upload_bounded_exception():
+    """Ordinary dependencies age fourteen days; the approved native ABI exception cannot float.
 
-    A per-package exemption or date would quietly let a fresh release into the lock; the
-    check runs at lock time only, so users never need a mirror that serves upload times.
+    The one preserved release has an exact requirement and an upload-bounded cutoff,
+    never a blanket ``false`` exemption. Users install the already reviewed lock.
     """
     manifest = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     uv = manifest["tool"]["uv"]
     lock = tomllib.loads((REPO_ROOT / "uv.lock").read_text(encoding="utf-8"))
     assert uv["exclude-newer"] == "14 days"
-    assert "exclude-newer-package" not in uv
     assert lock["options"].get("exclude-newer-span") == "P14D"
-    assert "exclude-newer-package" not in lock["options"]
+    approved = uv["exclude-newer-package"]
+    assert set(approved) == {"nemo-relay"}
+    locked = lock["options"]["exclude-newer-package"]
+    assert set(locked) == set(approved)
+    cutoff = datetime.fromisoformat(str(approved["nemo-relay"]).replace("Z", "+00:00"))
+    assert datetime.fromisoformat(str(locked["nemo-relay"]).replace("Z", "+00:00")) == cutoff
+    relay = next(row for row in lock["package"] if row["name"] == "nemo-relay")
+    requirement = next(req for req in map(Requirement, manifest["project"]["dependencies"])
+                       if req.name == relay["name"])
+    pins = list(requirement.specifier)
+    assert len(pins) == 1 and pins[0].operator == "==" and pins[0].version == relay["version"]
+    artifacts = [*relay.get("wheels", []), *([relay["sdist"]] if "sdist" in relay else [])]
+    last_upload = max(datetime.fromisoformat(row["upload-time"].replace("Z", "+00:00")) for row in artifacts)
+    assert last_upload <= cutoff < last_upload + timedelta(minutes=1)
 
 
 def test_httpx2_pins_and_lock_exclude_ghsa_7mj9_2mp8_4m2p_family():

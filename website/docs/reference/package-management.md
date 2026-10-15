@@ -588,7 +588,7 @@ remain under uv and npm's own retry policies.
 
 ## Release age and package mirrors
 
-Every Python package Hermes itself depends on must be at least three days old
+Every ordinary Python package Hermes itself depends on must be at least fourteen days old
 when Hermes locks it (uv's `exclude-newer`, enforced by CI's lock check), so a
 freshly published, possibly compromised release cannot reach `uv.lock`. Users
 install from that lock, and installing or enabling a plugin never re-checks
@@ -598,6 +598,13 @@ which Hermes passes to uv, or with `UV_INDEX_URL`.
 `hermes pm lock` is the one step that applies the check. Run against a mirror
 without upload times, it stops with `has no publish time`; use
 `https://pypi.org/simple` for that step.
+
+The encrypted fork temporarily preserves the synced native runtime with
+`nemo-relay==0.10.0`. Its owner-approved exception ends immediately after that
+release's upload timestamps, not after an open-ended date or a floating version.
+Remove the override after October 23, 2026 UTC, once the entire release has aged
+fourteen days. All other packages retain the normal quarantine. Generated user
+installation workspaces strip both forms of release-age policy and trust the lock.
 
 ## Diagnostics
 

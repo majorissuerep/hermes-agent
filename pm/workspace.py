@@ -154,6 +154,7 @@ def _without_release_age(text: str) -> str:
     """
     import re
 
+    text = re.sub(r"(?ms)^\[tool\.uv\.exclude-newer-package\][^\n]*\n.*?(?=^\[|\Z)", "", text)
     return re.sub(r"(?m)^exclude-newer\s*=.*\n", "", text)
 
 
