@@ -169,7 +169,8 @@ def claim_pending_deck_delivery(
         pending = []
         for path in root.glob("*.json"):
             record = _scan_read(path)
-            if record is not None and record["status"] == "queued" and _matches(profile_home, record, current):
+            if (record is not None and record.get("deck") is True and record["status"] == "queued"
+                    and _matches(profile_home, record, current)):
                 pending.append(record)
         if not pending:
             return None

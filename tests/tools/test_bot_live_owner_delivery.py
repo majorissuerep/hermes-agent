@@ -37,6 +37,26 @@ def _owner(home):
                 lease_id="authority-1", live_session_id="local-bot")
 
 
+def test_deck_claims_never_consume_canonical_receipts_across_homes(tmp_path):
+    homes = (tmp_path / "A", tmp_path / "B")
+    for home in homes:
+        owner = _owner(home)
+        legacy_id = "1" * 32
+        with mailbox._locked(home) as root:
+            mailbox._write(root / f"{legacy_id}.json", dict(
+                delivery_id=legacy_id, id=legacy_id, status="queued", message="authority only",
+                created_at=1, sequence=1, owner=owner, **owner))
+        mailbox._deliver_to_deck_owner(home, owner, "deck turn", delivery_id="2" * 32)
+    for index, home in enumerate((homes[0], homes[1], homes[0])):
+        claimed = mailbox.claim_pending_deck_delivery(home, _owner(home))
+        if index == 2:
+            assert claimed is None
+        else:
+            assert claimed["delivery_id"] == "2" * 32
+        assert mailbox.read_delivery_result(home, "1" * 32)["status"] == "queued"
+    assert mailbox.claim_pending_delivery(homes[0], _owner(homes[0])) is None
+
+
 def test_same_envelope_id_admits_once_and_conflicts_on_changed_payload(tmp_path, monkeypatch):
     authority = _FakeAuthority()
     monkeypatch.setattr(mailbox, "authority_delivery", authority)

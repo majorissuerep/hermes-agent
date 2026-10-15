@@ -119,6 +119,10 @@ def _deck_mark(sid: str, session: dict, profile: str, handle: int) -> str | None
     session["deck"] = {"profile": profile, "handle": int(handle)}
     _cancel_ws_orphan_reap(sid)
     refusal = _ensure_active_session_slot(sid, session)
+    if refusal is None and (lease := session.get("active_session_lease")) is not None:
+        from hermes_cli.active_sessions import transfer_active_session
+        if not transfer_active_session(lease, session_id=session["session_key"], metadata=_lease_metadata(sid)):
+            return "could not publish the deck session's live lease"
     _deck_ensure_snapshot_loop()
     return str(refusal) if refusal else None
 

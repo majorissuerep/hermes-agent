@@ -63,7 +63,10 @@ _AUTOMATIC_SESSION_END_REASONS = frozenset({"ws_orphan_reap", "ws_disconnect", "
 def _lease_metadata(live_session_id: str) -> dict:
     """Writer identity for a lease: ``live_session_id`` is half of ``_is_same_writer``. Bot Chat delivery is
     admitted by the session authority (gateway/session_bot), never gated on a lease flag."""
-    return {"live_session_id": live_session_id}
+    metadata = {"live_session_id": live_session_id}
+    if (_sessions.get(live_session_id) or {}).get("deck"):
+        metadata["bot_live_delivery_consumer"] = True
+    return metadata
 
 
 def _claim_active_session_slot(

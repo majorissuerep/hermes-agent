@@ -101,7 +101,7 @@ class CLIDeckMixin:
         lease = getattr(self, "_active_session_lease", None)
         if lease is None or getattr(lease, "released", False):
             return
-        from tools.bot_live_delivery import claim_pending_delivery, has_mailbox
+        from tools.bot_live_delivery import claim_pending_deck_delivery, has_mailbox
 
         home = self._deck_home()
         if not has_mailbox(home):
@@ -109,7 +109,7 @@ class CLIDeckMixin:
         owner = {"profile_home": str(home), "session_id": str(self.session_id), "lease_id": lease.lease_id,
                  "live_session_id": str(self.session_id)}
         try:
-            claimed = claim_pending_delivery(home, owner)
+            claimed = claim_pending_deck_delivery(home, owner)
         except Exception:
             logger.debug("deck mailbox claim failed", exc_info=True)
             return
