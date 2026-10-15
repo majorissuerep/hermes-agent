@@ -596,7 +596,20 @@ if not _pm_repair:
                 import subprocess
 
                 raise RelaunchExit(subprocess.call(_command))
-            os.execv(str(_launch_python), _command)
+            # PM may have consumed the launcher's one-shot pipe while reading
+            # config. Re-key the trusted exec, or selection loses the unlock.
+            _key_handoff = None
+            if "hermes_security.vault" in sys.modules:
+                from hermes_security.handoff import prepare_child_key
+
+                _key_handoff = prepare_child_key()
+                if _key_handoff is not None:
+                    os.environ.update(_key_handoff[1])
+            try:
+                os.execv(str(_launch_python), _command)
+            finally:
+                if _key_handoff is not None:
+                    os.close(_key_handoff[0])
     except Exception as exc:
         if isinstance(exc, PermissionError) and (message := install_state_permission_message(_root, exc)):
             print(f"hermes: {message}", file=sys.stderr)

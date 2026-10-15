@@ -62,15 +62,29 @@ def spawn_unmanaged_gateway(profile_home: Path, *, deadline: float, idle_exit: b
     remaining(deadline)
     logs = home / "logs"
     logs.mkdir(parents=True, exist_ok=True)
+    # Chat unlocks before it has an agent/session. The detached authority must
+    # inherit that unlock before PM or its vault gate can read encrypted state.
+    handoff = None
+    inherited = {}
+    if os.name != "nt":
+        from hermes_security.handoff import prepare_child_key
+
+        handoff = prepare_child_key()
+        if handoff is not None:
+            env.update(handoff[1])
+            inherited["pass_fds"] = (handoff[0],)
     try:
         with (logs / "gateway-stdio.log").open("ab", buffering=0) as output:
             remaining(deadline)
             return subprocess.Popen(command, cwd=root, env=env, close_fds=True,
                                     stdin=subprocess.DEVNULL, stdout=output, stderr=output,
-                                    **windows_detach_popen_kwargs())
+                                    **inherited, **windows_detach_popen_kwargs())
     except OSError as exc:
         reason = "windows_breakaway_unavailable" if sys.platform == "win32" else "spawn_failed"
         raise RuntimeStartError(reason) from exc
+    finally:
+        if handoff is not None:
+            os.close(handoff[0])
 
 
 def stdio_log_path(profile_home: Path) -> Path:

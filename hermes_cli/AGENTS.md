@@ -79,6 +79,8 @@ children through `hermes_security/session_authority.py`. The passphrase is never
 retained or exported. Local subprocess builders select the active session's grant,
 strip wrong-profile grants, and PM build workers strip authority entirely. Closing
 the owning agent revokes its grant; closing a subagent must preserve its parent's.
+Before an agent exists, detached chat gateways inherit the launcher's unlock through
+the existing one-shot kernel pipe; interpreter selection must renew that pipe across exec.
 Use ordinary CLI config writers for self-management, never plaintext state edits.
 MCP's `hermes mcp <action> --via-host` remains an alternative through existing
 `mcp.servers.*` RPCs, scoped to the same authenticated home. Credentials enter
