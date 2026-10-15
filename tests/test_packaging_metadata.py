@@ -69,15 +69,15 @@ def test_release_age_policy_allows_only_the_exact_upload_bounded_exception():
     assert set(approved) == {"nemo-relay"}
     locked = lock["options"]["exclude-newer-package"]
     assert set(locked) == set(approved)
-    cutoff = datetime.fromisoformat(str(approved["nemo-relay"]).replace("Z", "+00:00"))
-    assert datetime.fromisoformat(str(locked["nemo-relay"]).replace("Z", "+00:00")) == cutoff
+    cutoff = datetime.fromisoformat(str(approved["nemo-relay"]))
+    assert datetime.fromisoformat(str(locked["nemo-relay"])) == cutoff
     relay = next(row for row in lock["package"] if row["name"] == "nemo-relay")
     requirement = next(req for req in map(Requirement, manifest["project"]["dependencies"])
                        if req.name == relay["name"])
     pins = list(requirement.specifier)
     assert len(pins) == 1 and pins[0].operator == "==" and pins[0].version == relay["version"]
     artifacts = [*relay.get("wheels", []), *([relay["sdist"]] if "sdist" in relay else [])]
-    last_upload = max(datetime.fromisoformat(row["upload-time"].replace("Z", "+00:00")) for row in artifacts)
+    last_upload = max(datetime.fromisoformat(row["upload-time"]) for row in artifacts)
     assert last_upload <= cutoff < last_upload + timedelta(minutes=1)
 
 
