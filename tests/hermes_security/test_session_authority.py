@@ -31,15 +31,18 @@ print(json.dumps(read_raw_config()))
 
 
 @pytest.mark.platforms("posix")
-def test_session_and_delegated_children_reuse_unlock_and_keep_state_encrypted(tmp_path, monkeypatch):
+@pytest.mark.parametrize("nested_profile", [False, True])
+def test_session_and_delegated_children_reuse_unlock_and_keep_state_encrypted(tmp_path, monkeypatch, nested_profile):
     from hermes_security.session_authority import start_session_authority
     from hermes_cli.config import save_config, read_raw_config
 
-    home = tmp_path / "home"
+    owner = tmp_path / "home"
+    home = owner / "profiles" / "work" if nested_profile else owner
     password = "synthetic-session-password"
     monkeypatch.setenv("HERMES_HOME", str(home))
-    vault.init_vault(home, password)
-    vault.unlock(home, password)
+    vault.init_vault(owner, password)
+    vault.unlock(owner, password)
+    home.mkdir(parents=True, exist_ok=True)
     save_config({'agent': {'max_turns': 19}}, merge_existing=True)
     parent = start_session_authority(home, "parent")
     try:

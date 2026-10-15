@@ -48,7 +48,13 @@ _HOST_ONLY_DECK_VERBS = frozenset({"ls", "list", "send", "peek", "close", "inter
 
 def vault_exists_light(home) -> bool:
     """Cheap vault probe without importing the crypto stack."""
-    return (Path(home) / _META_FILENAME).is_file()
+    return _owning_vault_home(home) is not None
+
+
+def _owning_vault_home(home) -> Path | None:
+    path = Path(home).expanduser().resolve()
+    return next((parent for parent in (path, *path.parents)
+                 if (parent / _META_FILENAME).is_file()), None)
 
 
 def _is_read_only(args: Any, command: Any) -> bool:
@@ -131,11 +137,14 @@ def gate_startup(args: Any) -> None:
     from hermes_constants import get_hermes_home
 
     home = get_hermes_home()
-    if not vault_exists_light(home):
+    owner = _owning_vault_home(home)
+    if owner is None:
         if os.environ.get("HERMES_ALLOW_NO_VAULT") == "1":
             return  # documented CI/embedded harness escape (tests/conftest.py)
         _refuse_no_vault(home)
         return
     from hermes_cli.vault_cmd import gate_locked_vault
 
-    gate_locked_vault(args, home)
+    # Profiles beneath a machine vault are already sealed by that vault. Their
+    # grant stays profile-scoped, but its derived key belongs to the ancestor.
+    gate_locked_vault(args, owner)
