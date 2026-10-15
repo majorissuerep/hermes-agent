@@ -67,7 +67,7 @@ def _tail_root(tmp_path: Path, monkeypatch) -> tuple[Path, Path]:
     (root / "hermes_cli" / "source_completion.py").write_text(child, encoding="utf-8")
     monkeypatch.setenv("HERMES_HOME", str(tmp_path / "home"))
     monkeypatch.setattr(venv_sync, "_tree_matches_completed_stamp", lambda root: False)
-    monkeypatch.setattr(pm.environments, "activation_environment", lambda root: None)
+    monkeypatch.setattr(pm.environments, "activation_environment", lambda root: {})
     return root, started
 
 

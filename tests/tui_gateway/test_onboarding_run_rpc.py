@@ -16,7 +16,7 @@ from tests.hermes_cli.anon_portal import as_local_desktop_backend
 
 @pytest.fixture
 def launched_under_work(tmp_path, monkeypatch) -> tuple[Path, Path]:
-    root = tmp_path / ".hermes"
+    root = tmp_path / "hermes-home"
     root.mkdir()
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     monkeypatch.setenv("HERMES_HOME", str(root))
@@ -38,12 +38,12 @@ def test_state_answers_run_and_eligible(launched_under_work, monkeypatch):
     # The user's own "work" profile is install history, so an unset flag is not due, and on the
     # desktop's local backend nothing carries a first chat: the trial is never claimed on a used machine.
     as_local_desktop_backend(monkeypatch)
-    for var in ("OPENROUTER_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "NOUS_API_KEY"):
+    for var in ("AI_GATEWAY_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "NOUS_API_KEY"):
         monkeypatch.delenv(var, raising=False)
     assert _call("onboarding.state")["result"] == {"run": False, "eligible": False, "session_id": None, "run_id": None}
 
     # Onboarding runs in the default profile, so its key is what makes the run eligible.
-    (root / ".env").write_text("OPENROUTER_API_KEY=sk-or-test\n", encoding="utf-8")
+    (root / ".env").write_text("AI_GATEWAY_API_KEY=sk-or-test\n", encoding="utf-8")
     assert _call("onboarding.state")["result"]["eligible"] is True
 
 

@@ -18,6 +18,7 @@ CLEAN = {"completed": True, "final_response": "Here is your plan.", "user_interv
 @pytest.fixture(autouse=True)
 def free_tier(tmp_path, monkeypatch):
     monkeypatch.setenv("HERMES_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("AI_GATEWAY_API_KEY", "fixture-route-no-network")
     monkeypatch.setattr(anon_auth, "free_inference_active", lambda state=None: True)
     monkeypatch.setattr(anon_auth, "is_anonymous_agent", lambda agent: getattr(agent, "anonymous", True))
     monkeypatch.setattr(free_tier_offer, "_clock", lambda: 5_000.0)

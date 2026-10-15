@@ -631,10 +631,8 @@ def test_run_doctor_flags_missing_credentials_for_active_openrouter_provider(mon
     ("provider", "default_model"),
     [
         ("ai-gateway", "anthropic/claude-sonnet-4.6"),
-        ("opencode-zen", "anthropic/claude-sonnet-4.6"),
-        ("kilocode", "anthropic/claude-sonnet-4.6"),
-        ("kimi-coding", "kimi-k2"),
-        ("nvidia", "qwen/qwen3.5-122b-a10b"),
+        ("zai", "glm-5"),
+        ("openai-codex", "gpt-5.3-codex"),
         ("moa", "anthropic/claude-sonnet-4.6"),
     ],
 )
@@ -676,7 +674,7 @@ def test_run_doctor_accepts_hermes_provider_ids_that_catalog_aliases(
     out = buf.getvalue()
     assert f"model.provider '{provider}' is not a recognised provider" not in out
     assert f"model.provider '{provider}' is unknown" not in out
-    if provider in {"ai-gateway", "opencode-zen", "kilocode", "nvidia"}:
+    if provider == "ai-gateway":
         assert (
             f"model.default '{default_model}' uses a vendor/model slug but provider is '{provider}'"
             not in out
@@ -785,43 +783,6 @@ def test_run_doctor_vendor_slug_policy_for_openai_api_endpoint(
 
 
 
-def test_run_doctor_accepts_kimi_coding_cn_provider(monkeypatch, tmp_path):
-    home = tmp_path / ".hermes"
-    home.mkdir(parents=True, exist_ok=True)
-    (home / ".env").write_text("KIMI_CN_API_KEY=***\n", encoding="utf-8")
-    (home / "config.yaml").write_text(
-        "model:\n"
-        "  provider: kimi-coding-cn\n"
-        "  default: kimi-k2.6\n",
-        encoding="utf-8",
-    )
-
-    monkeypatch.setattr(doctor_mod, "HERMES_HOME", home)
-    monkeypatch.setattr(doctor_mod, "PROJECT_ROOT", tmp_path / "project")
-    monkeypatch.setattr(doctor_mod, "_DHH", str(home))
-    (tmp_path / "project").mkdir(exist_ok=True)
-
-    fake_model_tools = types.SimpleNamespace(
-        check_tool_availability=lambda *a, **kw: ([], []),
-        TOOLSET_REQUIREMENTS={},
-    )
-    monkeypatch.setitem(sys.modules, "model_tools", fake_model_tools)
-
-    try:
-        from hermes_cli import auth as _auth_mod
-        monkeypatch.setattr(_auth_mod, "get_nous_auth_status_local", dict)
-        monkeypatch.setattr(_auth_mod, "get_codex_auth_status", dict)
-        monkeypatch.setattr(_auth_mod, "get_auth_status", lambda provider: {"logged_in": True})
-        monkeypatch.setattr(_auth_mod, "get_xai_oauth_auth_status", dict)
-    except Exception:
-        pass
-
-    buf = io.StringIO()
-    with contextlib.redirect_stdout(buf):
-        doctor_mod.run_doctor(Namespace(fix=False))
-
-    out = buf.getvalue()
-    assert "model.provider 'kimi-coding-cn' is not a recognised provider" not in out
 
 
 def _doctor_env_for_agent_browser(monkeypatch, tmp_path):

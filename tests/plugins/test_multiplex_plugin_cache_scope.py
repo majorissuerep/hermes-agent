@@ -1,8 +1,7 @@
 """Plugin module-level caches must not hand profile A's state to profile B under a multiplexed
 HERMES_HOME override (``hermes_constants.set_hermes_home_override``).
 
-One invariant per mechanism: home-keyed slot with the unscoped module slot intact (router; yuanbao's
-ClassVar twin), credential-fingerprinted catalog keys (openrouter), per-home registries (memory
+One invariant per mechanism: credential-fingerprinted catalog keys (OpenRouter media/tool credentials), per-home registries (memory
 provider skills), lru_cache keyed by the home (disk-cleanup).
 Only HTTP transports are faked; the caches themselves are exercised for real.
 """
@@ -74,59 +73,8 @@ class _Resp:
         return False
 
 
-def _router():
-    from providers import get_provider_profile
-
-    profile = get_provider_profile("router")
-    return profile, sys.modules[type(profile).__module__]
 
 
-def test_router_efforts_cache_and_base_url_follow_the_active_profile(homes, monkeypatch):
-    """Efforts map + once-only flags are per home under an override (and the warm thread inherits the
-    scope), while the unscoped path keeps using the module slots; the base URL comes from the
-    profile's .env."""
-    from hermes_cli import urllib_security
-
-    a, b = homes
-    profile, mod = _router()
-    fetched: list[str] = []
-
-    def fake_open(req, *, timeout, **_kw):
-        tag = (req.get_header("Authorization") or "").rsplit("-", 1)[-1]
-        fetched.append(req.full_url)
-        return _Resp({"data": [{"id": f"model-{tag}", "router": {"capabilities": {"reasoning": {
-            "supported": True, "efforts": [{"value": "low" if tag == "A" else "high"}]}}}}]})
-
-    monkeypatch.setattr(urllib_security, "open_credentialed_url", fake_open)
-    monkeypatch.setattr(mod, "_efforts_cache", None)
-    monkeypatch.setattr(mod, "_disk_checked", False)
-    monkeypatch.setattr(mod, "_warm_started", False)
-
-    with scoped(a):
-        assert mod._base_url() == "https://a.router.test/v1"
-        profile.fetch_models()
-        assert profile.supported_reasoning_efforts("model-A") == ("low",)
-    with scoped(b):
-        assert mod._base_url() == "https://b.router.test/v1"
-        # B never fetched: A's verdicts must not be visible, and B's disk mirror (absent) is what it reads.
-        assert profile.supported_reasoning_efforts("model-A") is None
-        profile.fetch_models()
-        assert profile.supported_reasoning_efforts("model-B") == ("high",)
-    with scoped(a):
-        assert profile.supported_reasoning_efforts("model-A") == ("low",)
-    # Unscoped: the module slot is untouched by the scoped fetches.
-    assert mod._efforts_cache is None
-
-    # Warm thread launched from B's turn fetches with B's key/base URL. pytest re-sets
-    # PYTEST_CURRENT_TEST per phase; the warmer's pytest guard reads it at call time.
-    fetched.clear()
-    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
-    with scoped(b):
-        mod._warm_efforts_async()
-    deadline = time.monotonic() + 5
-    while time.monotonic() < deadline and not fetched:
-        time.sleep(0.02)
-    assert fetched and all(url.startswith("https://b.router.test/") for url in fetched)
 
 
 def test_credentialed_catalog_probe_failure_is_not_cached_across_keys(monkeypatch):

@@ -943,6 +943,7 @@ def test_relaunchable_fixup_legacy_adhoc_success_still_verifies_and_never_delete
     assert not any("delete-generic-password" in c for c in calls)
 
 
+@pytest.mark.platforms("macos")
 def test_relaunchable_fixup_failed_identity_uses_pinned_adhoc_before_legacy(tmp_path, monkeypatch):
     """A locked keychain must not skip identifier-pinned ad-hoc for cdhash-only.
 
@@ -957,7 +958,6 @@ def test_relaunchable_fixup_failed_identity_uses_pinned_adhoc_before_legacy(tmp_
     exe.parent.mkdir(parents=True)
     exe.write_text("", encoding="utf-8")
 
-    monkeypatch.setattr(sys, "platform", "darwin")
     monkeypatch.delenv("CSC_LINK", raising=False)
     monkeypatch.delenv("APPLE_SIGNING_IDENTITY", raising=False)
     monkeypatch.setattr(main_desktop, "_desktop_macos_has_valid_real_signature", lambda _app: False)
@@ -991,6 +991,7 @@ def test_relaunchable_fixup_failed_identity_uses_pinned_adhoc_before_legacy(tmp_
     assert not any(cmd[:5] == ["/usr/bin/codesign", "--force", "--deep", "--sign", "-"] for cmd in calls)
 
 
+@pytest.mark.platforms("macos")
 def test_relaunchable_fixup_legacy_when_pinned_adhoc_also_fails(tmp_path, monkeypatch):
     """Legacy deep ad-hoc still runs when identifier-pinned signing fails too."""
     root = _make_desktop_tree(tmp_path)
@@ -1000,7 +1001,6 @@ def test_relaunchable_fixup_legacy_when_pinned_adhoc_also_fails(tmp_path, monkey
     exe.write_text("", encoding="utf-8")
     app = exe.parents[2]
 
-    monkeypatch.setattr(sys, "platform", "darwin")
     monkeypatch.delenv("CSC_LINK", raising=False)
     monkeypatch.delenv("APPLE_SIGNING_IDENTITY", raising=False)
     monkeypatch.setattr(main_desktop, "_desktop_macos_has_valid_real_signature", lambda _app: False)

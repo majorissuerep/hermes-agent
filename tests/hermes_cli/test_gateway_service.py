@@ -457,6 +457,8 @@ class TestGatewayStopCleanup:
         ``is_macos → False`` stub is gone).
         """
         unit_path = tmp_path / "hermes-gateway.service"
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes-home"))
         unit_path.write_text("unit\n", encoding="utf-8")
 
         monkeypatch.setattr(gateway_cli, "supports_systemd_services", lambda: True)
@@ -466,6 +468,7 @@ class TestGatewayStopCleanup:
         kill_calls = []
 
         monkeypatch.setattr(gateway_cli, "systemd_stop", lambda system=False: service_calls.append("stop"))
+        monkeypatch.setattr(gateway_cli, "find_gateway_pids", lambda **_kw: [])
         monkeypatch.setattr(
             gateway_cli,
             "kill_gateway_processes",
@@ -1427,10 +1430,10 @@ class TestSystemUnitHermesHome:
         monkeypatch.setattr(gateway_cli, "get_hermes_home", lambda: root_hermes)
         monkeypatch.setattr(gateway_cli, "_build_service_path_dirs", list)
 
-        monkeypatch.setattr(gateway_cli.shutil, "which", lambda name: "/root/bin/node")
+        monkeypatch.setattr(gateway_cli.shutil, "which", lambda name: "/root/bin/node" if name == "node" else None)
         root_unit = gateway_cli.generate_systemd_unit(system=True, run_as_user="alice")
 
-        monkeypatch.setattr(gateway_cli.shutil, "which", lambda name: "/home/alice/.local/bin/node")
+        monkeypatch.setattr(gateway_cli.shutil, "which", lambda name: "/home/alice/.local/bin/node" if name == "node" else None)
         user_unit = gateway_cli.generate_systemd_unit(system=True, run_as_user="alice")
 
         assert root_unit == user_unit

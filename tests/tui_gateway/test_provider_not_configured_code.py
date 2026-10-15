@@ -89,10 +89,10 @@ class TestAgentInitRaisesTheNamedError:
         from agent.agent_init import _routed_client_kwargs
 
         monkeypatch.setenv("HERMES_HOME", str(tmp_path))
-        agent = SimpleNamespace(provider="minimax-oauth", model="m", base_url=None, api_key=None,
-                                _fallback_activated=False, _explicit_provider="minimax-oauth")
+        agent = SimpleNamespace(provider="xai-oauth", model="m", base_url=None, api_key=None,
+                                _fallback_activated=False, _explicit_provider="xai-oauth")
 
-        with pytest.raises(ProviderNotConfiguredError, match=r"hermes auth add minimax-oauth"):
+        with pytest.raises(ProviderNotConfiguredError, match=r"hermes auth add xai-oauth"):
             _routed_client_kwargs(agent, None, 60)
 
     def test_the_type_is_a_runtime_error(self):
