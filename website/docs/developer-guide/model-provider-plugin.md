@@ -13,6 +13,11 @@ is deliberately limited. Third-party providers belong in standalone plugins unde
 describes the extension API, including compatibility seams; it does not qualify
 additional vendors or protocols as supported product features.
 
+Saved settings survive provider retirement. For an explicitly installed OpenRouter
+provider plugin, `openrouter.min_coding_score` sets its Pareto-code router threshold
+(0–1; default 0.65). It does not enable that provider or affect built-in inference
+routes or media-tool credentials.
+
 :::tip
 Model provider plugins are the third kind of **provider plugin**. The others are [Memory Provider Plugins](./memory-provider-plugin.md) (cross-session knowledge) and [Context Engine Plugins](./context-engine-plugin.md) (context compression strategies). All three follow the same "drop a directory, declare a profile, no repo edits" pattern.
 :::
