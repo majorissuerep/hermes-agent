@@ -19,7 +19,7 @@ import tarfile
 import tempfile
 import urllib.request
 
-SCENARIOS = ("fresh", "update", "broken-files", "dirty-install")
+SCENARIOS = ("fresh", "update", "broken-files", "dirty-install", "reinstall", "upstream-install")
 IMAGE = "docker.io/library/ubuntu:24.04@sha256:f610ab94648195aa356059f5b41d6085c9d4d903c072430cdd1af7bdb646106b"
 SNAPSHOT = "20261001T000000Z"
 CA_PACKAGE_URL = ("https://snapshot.ubuntu.com/ubuntu/20261001T000000Z/pool/main/c/ca-certificates/"
@@ -86,7 +86,8 @@ def verify_receipt(receipt: dict, scenario: str, provenance: dict) -> None:
     if (receipt.get("status") != "passed" or receipt.get("scenario") != scenario
             or any(receipt.get(key) != provenance[key] for key in ("baseline", "candidate", "harness_sha256"))
             or receipt.get("tool_cache_reused") is not False
-            or receipt.get("restore_verified") is not True or receipt.get("cleanup_verified") is not True):
+            or receipt.get("restore_verified") is not True or receipt.get("cleanup_verified") is not True
+            or receipt.get("vault_repair_verified") is not True or receipt.get("bulk_export_verified") is not True):
         raise ValueError("lifecycle receipt is incomplete, failed, cached or for another revision")
     live = receipt.get("checks", {}).get("live-candidate", {})
     if (live.get("passphrase_prompts") != 1 or live.get("child_sessions", 0) < 1
@@ -103,9 +104,14 @@ def verify_receipt(receipt: dict, scenario: str, provenance: dict) -> None:
     if (resumed.get("passphrase_prompts") != 1 or not resumed.get("history_verified")
             or not resumed.get("artifact_verified") or receipt.get("independent_locked_cli_rejected") is not True):
         raise ValueError("resumed history and closed-session isolation were not proven")
-    if scenario == "dirty-install" and (receipt.get("legacy_state_verified") is not True
+    if scenario in {"dirty-install", "upstream-install"} and (receipt.get("legacy_state_verified") is not True
                                        or not receipt.get("legacy_state_hashes")):
         raise ValueError("dirty install must preserve pre-install config, memory and credentials")
+    if scenario == "reinstall" and receipt.get("installer_repair_verified") is not True:
+        raise ValueError("installer must repair damaged source and a missing runtime")
+    if scenario == "upstream-install" and (not receipt.get("upstream_baseline")
+            or not receipt.get("upstream_session_hash") or receipt.get("upstream_restore_verified") is not True):
+        raise ValueError("upstream migration must preserve its original conversation and recovery point")
 
 
 class Container:

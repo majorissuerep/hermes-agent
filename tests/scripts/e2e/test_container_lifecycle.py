@@ -55,6 +55,9 @@ def test_claimed_green_receipts_require_real_update_delegation_restore_and_revoc
     provenance = {"baseline": "old", "candidate": "new", "harness_sha256": "exact-harness"}
     receipt = {**provenance, "status": "passed", "scenario": scenario, "tool_cache_reused": False,
                "restore_verified": True, "cleanup_verified": True, "independent_locked_cli_rejected": True,
+               "vault_repair_verified": True, "bulk_export_verified": True, "installer_repair_verified": True,
+               "upstream_baseline": "unmodified-upstream", "upstream_session_hash": {"messages": "retained"},
+               "upstream_restore_verified": True,
                "legacy_state_verified": True, "legacy_state_hashes": {"memory": "retained"},
                "checks": {"live-candidate": {"passphrase_prompts": 1, "child_sessions": 1,
                    "verified_hermes_calls": 3, "complete": True, "artifact_verified": True,
@@ -64,9 +67,15 @@ def test_claimed_green_receipts_require_real_update_delegation_restore_and_revoc
                "update_status": {"outcome": "success", "followups": []}}
     verify_receipt(receipt, scenario, provenance)
     mutations = [("candidate", "another-head"), ("restore_verified", False), ("cleanup_verified", False),
+                 ("vault_repair_verified", False), ("bulk_export_verified", False),
                  ("tool_cache_reused", True), ("independent_locked_cli_rejected", False), ("checks", {})]
-    if scenario == "dirty-install":
+    if scenario in {"dirty-install", "upstream-install"}:
         mutations.append(("legacy_state_verified", False))
+    if scenario == "reinstall":
+        mutations.append(("installer_repair_verified", False))
+    if scenario == "upstream-install":
+        mutations.append(("upstream_session_hash", None))
+        mutations.append(("upstream_restore_verified", False))
     if scenario in {"update", "broken-files"}:
         mutations.append(("update_status", {"outcome": "success", "followups": ["unfinished"]}))
     for key, value in mutations:

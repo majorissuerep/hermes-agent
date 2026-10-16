@@ -74,7 +74,7 @@ def test_failed_runtime_cleanup_cannot_publish_green_or_delete_its_work(tmp_path
     assert rehearsal.root.is_dir()
 
 
-@pytest.mark.platforms("linux")
+@pytest.mark.platforms("posix")
 @pytest.mark.parametrize("actual_prompts", [1, 2])
 @pytest.mark.parametrize("prompt", ["Master password: ", "Unlock master password: "])
 def test_actual_pty_prompt_budget_is_enforced_and_credentials_are_redacted(tmp_path, actual_prompts, prompt):
@@ -99,7 +99,7 @@ def test_actual_pty_prompt_budget_is_enforced_and_credentials_are_redacted(tmp_p
         rehearsal.close()
 
 
-@pytest.mark.platforms("linux")
+@pytest.mark.platforms("posix")
 def test_git_inspection_never_enters_an_interactive_pager(tmp_path):
     rehearsal = Rehearsal(Namespace(
         work_dir=tmp_path, evidence=tmp_path / "evidence", keep_work=False,
@@ -121,7 +121,7 @@ def test_git_inspection_never_enters_an_interactive_pager(tmp_path):
         rehearsal.close()
 
 
-@pytest.mark.platforms("linux")
+@pytest.mark.platforms("posix")
 def test_interactive_driver_detaches_only_after_independent_completion(tmp_path):
     rehearsal = Rehearsal(Namespace(
         work_dir=tmp_path, evidence=tmp_path / "evidence", keep_work=False,

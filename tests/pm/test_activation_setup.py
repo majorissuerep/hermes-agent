@@ -79,7 +79,7 @@ def test_activation_real_setup_pm_lifecycle(tmp_path, served):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("user-owned fixture\n", encoding="utf-8")
     (hermes_home / "skills").chmod(0o755)
-    (core / ".env.example").write_text("FIXTURE_ONLY=example\n", encoding="utf-8")
+    (core / "hermes_cli/data/env.example").write_text("FIXTURE_ONLY=example\n", encoding="utf-8")
     (core / "skills").mkdir()
     (core / "skills" / "bundled.md").write_text("must not be seeded\n", encoding="utf-8")
     untouched = _snapshot(protected)

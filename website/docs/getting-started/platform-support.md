@@ -1,75 +1,42 @@
 ---
 sidebar_position: 2.5
 title: "Platform Support"
-description: "Which operating systems, distribution methods, and features Hermes Agent supports."
+description: "Supported operating systems and installation methods for this fork."
 ---
 
-# Platform Support
+# Platform support
 
-:::info Fork installation
-Start with the [fork installation guide](./installation.md). This fork supports
-Linux, macOS, and WSL only — native Windows (including MSIX packages) is not
-supported (see PLATFORMS.md). The Docker images and Termux APT packages referenced
-below are upstream distributions; they do not include this fork's encrypted vault
-or other fork changes. Their support tiers describe upstream's release policy.
-:::
+This fork targets **Linux and macOS**. On Windows hardware, run it inside a
+WSL2 Linux distribution; native Windows, MSIX, and Windows services are not supported.
 
-Hermes Agent maintains support for many platforms and distribution methods, but we can't support every possible install method.
+| Platform | Installation | Updates |
+| --- | --- | --- |
+| Linux (x86_64, aarch64) | [Source installer](./installation.md) | `hermes update`; rerun the installer for source/runtime repair |
+| macOS (Apple Silicon and Intel) | [Source installer](./installation.md) | `hermes update`; rerun the installer for source/runtime repair |
+| Linux container | [Build this fork's Dockerfile](../user-guide/docker.md) | Replace the image; retain the encrypted state volume |
+| Linux/macOS with Nix | [Flake and modules](./nix-setup.md) | Nix owns the immutable runtime; update the flake |
 
----
+The CLI, TUI, desktop source app, and messaging gateway share the same agent core.
+Actual feature availability depends on the host, selected tools, and installed
+extras. Linux services use systemd; macOS uses launchd.
 
-## Tier 1
+## Qualification
 
-We strive to never break installations and updates for these. Issues & regressions in Tier 1 are our first priority and take precedence over other platforms.
+[Install/update acceptance](../developer-guide/reliability.md) uses disposable
+containers and native macOS CI machines with isolated homes. Native tests run on
+their actual OS, never by pretending a Linux interpreter is macOS. A check on one
+architecture does not qualify another architecture by implication.
 
-| OS / Architecture                                                             | Installation methods                                                                                                           | Notes                                                                                                                                                     |
-| ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **macOS** (Apple Silicon)                                                     | [Hermes Desktop](https://hermes-agent.nousresearch.com/), [`install.sh`](./installation.md) |
-| **Linux / WSL2** (x86_64, aarch64) | [`install.sh`](./installation.md)                                                           | We test on the latest Ubuntu and WSL2. If your distro has glibc, systemd, and follows the Filesystem Hierarchy Standard, it's likely to work pretty well. |
-| [**Docker Container**](../user-guide/docker.md) (x86_64, aarch64) | [`docker pull`](../user-guide/docker.md)                                                                           | Docker installs do not support `hermes update`. Updating is done by running a new image.                                                                  |
+## Upstream distributions
 
----
+Nous Research's published desktop DMGs, Docker images, Homebrew/PyPI packages,
+and Termux packages are **not this fork**. They do not qualify this fork's vault
+or updates. Use the fork's source installer or build this repository. Retained
+upstream packaging guides are reference material, not fork release promises.
 
-## Tier 2
+## Maintenance policy
 
-These platforms are maintained in-tree only as a best effort.
-Releases may break them, and we can't promise we'll fix them promptly when they break.
-
-PRs will be accepted to fix issues with them, but they will take precedence below fixing issues with Tier 1 platforms.
-
-| OS / Architecture              | Installation methods                                                 | Notes                                                                        |
-| ------------------------------ | -------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| **Nix** (macOS, Linux, NixOS) | [Nix flake and modules](./nix-setup.md) | Nix owns runtime installation and updates. |
-| **Android / [Termux](./termux.md)** (aarch64) | [Signed APT repository](./termux.md), then `pkg install hermes-agent` | Prerelease package with Python, Node, and TUI. Not built by default: only releases cut with `--with termux` (and `windows` and `macos-arm64`) update the APT channel. Run the gateway in a Termux session; Android can terminate background processes. |
-
-### Build targets and support priority
-
-Stable releases build the macOS desktop bundle for Apple Silicon (`arm64`) only.
-The Intel macOS (`x64`) bundle and the Termux APT package are **not built by
-default**: a release includes them only when it is cut with
-`release.py release --with macos-intel` or `--with termux`. A release
-without macOS Intel replaces the one shared macOS stable update feed with an
-arm64-only feed, so Intel Macs installed from a desktop bundle get no update
-until a release is cut with `--with macos-intel`. A release without Termux
-leaves the Termux APT channel on its previous release.
-The `Hermes-Setup.dmg` bootstrap installer is built for Apple Silicon only, so
-on an Intel Mac it reports "not supported on this Mac". Intel Macs can install
-the [CLI](./installation.md#quick-install) and run
-`hermes desktop`, or use a `darwin-x64` bundle from a release that included it.
-Linux desktop packaging is disabled in the release workflow, although local
-AppImage builds and native Linux PM bundle checks exist.
-
-## Unsupported
-
-These platforms and distribution methods are **not** supported.
-We suggest that you migrate to a supported distribution method or platform.
-They may be broken right now, they may break more in the future.
-PRs to fix them will _not_ be accepted, and any code that keeps compatibility with them may be removed at any point.
-
-- Android / Termux on non-aarch64 devices (aarch64 is [supported](./termux.md) via our APT package)
-- installs via the AUR (we might upstream patches if it helps out &lt;3)
-- 32-bit x86 macOS. Intel x86_64 desktop bundles are built only for releases cut with `--with macos-intel`.
-- installs via `pypi` (e.g. `uv tool install hermes-agent`, `pip install hermes-agent`, etc.)
-- installs via `brew` (`brew install hermes-agent`)
-
-If you are using an unsupported distribution method, please read the [the installation guide](./installation.md) to learn how to switch to a supported one.
+Do not add native Windows dependencies, installers, services, or release lanes.
+When syncing upstream, retain shared portable behavior and omit Windows-only
+surface. Frozen compatibility seams needed by old updaters stay until their
+migration contract can be retired; they are not supported Windows features.

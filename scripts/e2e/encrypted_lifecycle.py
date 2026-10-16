@@ -1,4 +1,4 @@
-"""Run one bounded install/update scenario in an isolated disposable Linux environment.
+"""Run one bounded install/update scenario in a disposable Linux or macOS environment.
 
 The real source installer, PM, public CLI, live LLM, delegation and encrypted
 readers/writers run unchanged. A local bare Git transport pins OLD -> NEW without
@@ -29,7 +29,8 @@ import termios
 import time
 from urllib.parse import urlsplit
 
-SCENARIOS = ("fresh", "update", "broken-files", "dirty-install")
+SCENARIOS = ("fresh", "update", "broken-files", "dirty-install", "reinstall", "upstream-install")
+UPSTREAM_BASELINE = "eb75627faf532fa6ffbdae59a0d14b0b385fc780"
 _PROMPT = re.compile(rb"(?:Create master password|Repeat master password|Master password):\s*", re.IGNORECASE)
 
 
@@ -173,18 +174,18 @@ class Rehearsal:
                                                    "seconds": round(time.monotonic() - started, 2)}
         return output.decode(errors="replace")
 
-    def probe(self, action, **extra):
+    def probe(self, action, *, timeout=60, **extra):
         # The probe is from the candidate harness, against each install's REAL imports.
         script = Path(__file__).with_name("state_probe.py").resolve()
         # A late application import may select/re-exec the PM generation. Finish
         # that boot BEFORE consuming stdin, just as the public launcher does.
         boot = "import hermes_bootstrap, runpy; runpy.run_path(" + repr(str(script)) + ", run_name='__main__')"
         text = self.run(action, [str(self.python), "-c", boot], cwd=self.code,
-                        data={"action": action, "password": self.password, **extra}, timeout=60)
+                        data={"action": action, "password": self.password, **extra}, timeout=timeout)
         return json.loads(text.strip().splitlines()[-1])
 
-    def install(self, sha):
-        self.run("install", ["bash", str(self.args.source / "scripts" / "install.sh"),
+    def install(self, sha, *, name="install"):
+        self.run(name, ["bash", str(self.args.source / "scripts" / "install.sh"),
                              "--dir", str(self.code), "--hermes-home", str(self.home),
                              "--branch", "main", "--commit", sha,
                              "--non-interactive", "--skip-browser", "--skip-computer-use"], timeout=2400)
@@ -259,76 +260,143 @@ class Rehearsal:
             raise RuntimeError("independent CLI failed for something other than the expected locked-vault gate")
         self.receipt["independent_locked_cli_rejected"] = True
 
-    def execute(self):
-        remote = self.root / "remote.git"
-        initial = self.args.candidate if self.args.scenario in {"fresh", "dirty-install"} else self.args.baseline
+    def prepare_transport(self):
         if self.args.transport_url:
             url = self.args.transport_url
         else:
+            remote = self.root / "remote.git"
             self.run("prepare-transport", ["git", "clone", "--bare", "--shared", str(self.args.source), str(remote)])
             self.run("enable-filtered-clone", ["git", "--git-dir", str(remote), "config", "uploadpack.allowFilter", "true"])
             self.run("pin-candidate", ["git", "--git-dir", str(remote), "update-ref", "refs/heads/main", self.args.candidate])
             url = remote.as_uri()
         config = (f'[url "{url}"]\n\tinsteadOf = https://github.com/majorissuerep/hermes-agent.git\n'
-                  f'\tinsteadOf = https://github.com/majorissuerep/hermes-agent\n')
+                  f'\tinsteadOf = https://github.com/majorissuerep/hermes-agent\n'
+                  f'\tinsteadOf = https://github.com/NousResearch/hermes-agent.git\n')
         Path(self.env["GIT_CONFIG_GLOBAL"]).write_text(config)
+
+    def seed_legacy(self):
+        self.home.mkdir(parents=True, exist_ok=True)
+        (self.home / "config.yaml").write_text("# preserved legacy install\nagent:\n  max_turns: 37\n")
+        (self.home / "memories").mkdir(exist_ok=True)
+        (self.home / "memories" / "legacy.md").write_text(self.legacy_nonce)
+        (self.home / ".env").write_text("E2E_LEGACY_SECRET=" + self.legacy_nonce + "\n")
         if self.args.scenario == "dirty-install":
-            self.home.mkdir(parents=True)
-            defaults = (self.args.source / "hermes_cli" / "config_defaults.py").read_text()
-            version = re.search(r'["\']_config_version["\']:\s*(\d+)', defaults)
-            if version is None:
-                raise RuntimeError("candidate config schema is missing")
-            (self.home / "config.yaml").write_text(
-                f"# preserved legacy install\n_config_version: {version[1]}\nagent:\n  max_turns: 37\n")
-            (self.home / "memories").mkdir()
-            (self.home / "memories" / "legacy.md").write_text(self.legacy_nonce)
-            (self.home / ".env").write_text("E2E_LEGACY_SECRET=" + self.legacy_nonce + "\n")
             old = Path(self.env["HOME"]) / ".local" / "bin" / "hermes"
             old.parent.mkdir(parents=True)
             old.write_text("#!/bin/sh\nexec " + shlex.quote(str(self.code / "venv/bin/python")) +
                            " -m hermes_cli.main \"$@\"\n")
             old.chmod(0o755)
+
+    def prepare_install(self):
+        scenario = self.args.scenario
+        if scenario == "dirty-install":
+            self.seed_legacy()
+        initial = self.args.candidate if scenario in {"fresh", "dirty-install"} else self.args.baseline
+        if scenario == "upstream-install":
+            self.run("verify-upstream-ancestry", ["git", "-C", str(self.args.source), "merge-base",
+                                                "--is-ancestor", UPSTREAM_BASELINE, self.args.candidate])
+            self.install(UPSTREAM_BASELINE, name="install-upstream")
+            self.seed_legacy()
+            script = ("import hermes_bootstrap, json, sys; from hermes_state import SessionDB; "
+                      "r=json.load(sys.stdin); db=SessionDB(); db.create_session('e2e-upstream', 'cli'); "
+                      "db.append_message('e2e-upstream', 'user', r['nonce']); "
+                      "db.append_message('e2e-upstream', 'assistant', 'retained upstream answer'); db.close(); "
+                      "from hermes_cli.backup import create_quick_snapshot; "
+                      "print(json.dumps({'snapshot': create_quick_snapshot(label='upstream-retained')}))")
+            seeded = self.run("seed-upstream-session", [str(self.python), "-c", script],
+                              cwd=self.code, data={"nonce": self.legacy_nonce})
+            self.receipt["upstream_snapshot"] = json.loads(seeded.strip().splitlines()[-1])["snapshot"]
+            if not self.receipt["upstream_snapshot"]:
+                raise RuntimeError("unmodified upstream failed to create its recovery point")
+            self.run("mark-upstream-origin", ["git", "-C", str(self.code), "remote", "set-url", "origin",
+                                             "https://github.com/NousResearch/hermes-agent.git"])
+            self.receipt["upstream_baseline"] = UPSTREAM_BASELINE
+            initial = self.args.candidate
         self.install(initial)
         self.run("baseline-branch", ["git", "-C", str(self.code), "checkout", "-B", "main", initial])
         self.run("initialize-vault", [str(self.launcher), "secure-vault", "migrate", "--yes"], prompts=2)
-        if self.args.scenario == "dirty-install":
+        if scenario in {"dirty-install", "upstream-install"}:
             self.receipt["legacy_state_hashes"] = self.probe("legacy-proof", nonce=self.legacy_nonce, max_turns=37)
+        if scenario == "upstream-install":
+            self.receipt["upstream_session_hash"] = self.probe("upstream-proof", nonce=self.legacy_nonce)
+            restored = self.probe("restore-upstream", snapshot=self.receipt["upstream_snapshot"],
+                                  nonce=self.legacy_nonce, max_turns=37)
+            if (restored["legacy"] != self.receipt["legacy_state_hashes"]
+                    or restored["session"] != self.receipt["upstream_session_hash"]):
+                raise RuntimeError("pre-encryption upstream recovery point changed retained state")
+            self.receipt["upstream_restore_verified"] = True
         self.probe("seed", credential=self.credential, workspace=str(self.workspace), resume_token=self.resume_token)
-        # OLD may lack session self-management; the live delegation contract is NEW's gate.
-        before = self.probe("manifest")
-        if self.args.scenario in {"update", "broken-files"}:
-            if initial == self.args.candidate:
-                raise RuntimeError("an update must cross two distinct commits")
-            if self.args.scenario == "broken-files":
+
+    def advance_install(self):
+        scenario = self.args.scenario
+        if scenario in {"update", "broken-files", "reinstall"} and self.args.baseline == self.args.candidate:
+            raise RuntimeError("update and repair must cross distinct commits")
+        if scenario in {"update", "broken-files"}:
+            if scenario == "broken-files":
                 (self.code / "cli.py").write_text("# deliberately damaged tracked source\n")
                 (self.code / "rehearsal-untracked.txt").write_text("retain local work")
-            self.run("update", [str(self.launcher), "update", "--yes", "--keep-stash", "--backup"], prompts=1, timeout=2400)
-            actual = self.run("verify-sha", ["git", "-C", str(self.code), "rev-parse", "HEAD"]).strip()
-            if actual != self.args.candidate:
-                raise RuntimeError("updater did not reach the exact candidate commit")
+            self.run("update", [str(self.launcher), "update", "--yes", "--keep-stash", "--backup"],
+                     prompts=1, timeout=2400)
             self.resolve_python()
             self.receipt["update_status"] = self.probe("update-status")
-            if self.args.scenario == "broken-files" and "AIAgent" not in (self.code / "cli.py").read_text():
-                raise RuntimeError("damaged source file was not repaired")
-            if self.args.scenario == "broken-files":
+            if scenario == "broken-files":
                 retained = self.run("verify-local-work", ["git", "-C", str(self.code), "show",
                     "refs/stash^3:rehearsal-untracked.txt"]).strip()
                 if retained != "retain local work":
-                    raise RuntimeError("repair did not preserve unrelated local work in the requested stash")
+                    raise RuntimeError("repair lost the unrelated local work requested in the stash")
+        elif scenario == "reinstall":
+            (self.code / "hermes_cli" / "main.py").unlink()
+            (self.code / "reinstall-untracked.txt").write_text("retain reinstall work")
+            if not self.python.is_relative_to(self.root):
+                raise RuntimeError("refusing to damage a runtime outside the disposable installation")
+            self.python.unlink()
+            self.install(self.args.candidate, name="reinstall-source-and-runtime")
+            retained = self.run("verify-reinstall-work", ["git", "-C", str(self.code), "show",
+                "refs/stash^3:reinstall-untracked.txt"]).strip()
+            if retained != "retain reinstall work":
+                raise RuntimeError("installer repair lost unrelated local work")
+            self.receipt["installer_repair_verified"] = True
+        actual = self.run("verify-sha", ["git", "-C", str(self.code), "rev-parse", "HEAD"]).strip()
+        if actual != self.args.candidate:
+            raise RuntimeError("installed source did not reach the exact candidate commit")
+        self.run("candidate-version", [str(self.launcher), "--version"])
+
+    def recover_state(self, expected):
+        snapshot = self.probe("snapshot")["snapshot"]
+        if self.probe("restore", snapshot=snapshot) != expected:
+            raise RuntimeError("snapshot restore changed semantic state")
+        self.probe("clobber-state")
+        self.run("repair-encrypted-state", [str(self.launcher), "secure-vault", "repair"], prompts=1)
+        if self.probe("manifest") != expected:
+            raise RuntimeError("encrypted-state repair changed retained data")
+        self.receipt["vault_repair_verified"] = True
+        archive = self.workspace / "plaintext-recovery.tar"
+        self.run("export-recovery", [str(self.launcher), "secure-vault", "export", "--output", str(archive)], prompts=1)
+        proof = self.probe("export-proof", archive=str(archive), recovered=str(self.workspace / "recovered"), timeout=180)
+        if proof != expected:
+            raise RuntimeError("bulk decryption/re-encryption changed retained state")
+        self.receipt["bulk_export_verified"] = True
+
+    def execute(self):
+        self.prepare_transport()
+        self.prepare_install()
+        before = self.probe("manifest")
+        self.advance_install()
+        self.receipt["host"] = self.probe("host-facts")
         after = self.probe("manifest")
         if after != before:
-            raise RuntimeError("update changed retained state: " + ", ".join(k for k in before if before[k] != after.get(k)))
-        snapshot = self.probe("snapshot")["snapshot"]
-        restored = self.probe("restore", snapshot=snapshot)
-        if restored != after:
-            raise RuntimeError("snapshot restore did not preserve semantic state")
+            raise RuntimeError("installation changed retained state: " + ", ".join(k for k in before if before[k] != after.get(k)))
+        self.recover_state(after)
         self.live("candidate")
         self.resume()
         self.reject_independent_cli()
         self.probe("manifest")
-        if self.args.scenario == "dirty-install":
+        if self.args.scenario in {"dirty-install", "upstream-install"}:
             self.probe("legacy-proof", nonce=self.legacy_nonce, max_turns=23)
             self.receipt["legacy_state_verified"] = True
+        if self.args.scenario == "upstream-install":
+            if self.probe("upstream-proof", nonce=self.legacy_nonce) != self.receipt["upstream_session_hash"]:
+                raise RuntimeError("original upstream conversation changed after migration")
         self.receipt.update(status="passed", state_hashes=after, restore_verified=True)
 
     def close(self):

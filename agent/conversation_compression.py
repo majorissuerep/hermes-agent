@@ -40,6 +40,7 @@ from agent.memory_provider import PRE_COMPRESS_CHECKPOINT_API_VERSION
 from agent.model_metadata import estimate_messages_tokens_rough, estimate_request_tokens_rough
 from agent.session_activity import ActivityProvenance, normalize_activity_provenance
 from agent.usage_anchor import set_usage_anchor
+from agent.compression_growth_recovery import record_growth_baseline
 from agent.session_ids import new_session_id as mint_session_id
 from hermes_platform.process_identity import holder_namespace_token
 
@@ -3239,13 +3240,10 @@ def _salvage_or_refuse_grown_transcript(
             )
         _existing_sp = _existing_system_prompt(agent, system_message)
         _emit_aborted_attempt_telemetry(agent, attempt.started_at, "would_grow", attempt.seed)
-        # Count the refusal as an ineffective-compaction strike so the anti-thrash
-        # breaker latches; otherwise auto-compress retries the same summary every turn.
+        # Keep the anti-thrash latch, but bind its growth probation to this exact prefix.
         with _swallow('could not record rejected-compaction strike', exc_info=True):
-            # Without this, the unchanged transcript stays over the compression threshold and automatic
-            # compression retries the identical summary request on every turn (#88568). Manual /compress
-            # keeps bypassing the latch (force=True skips the guards).
             agent.context_compressor.record_rejected_compaction()
+            record_growth_baseline(agent.context_compressor, original_messages)
         _restore_prune_rearm_tokens(agent.context_compressor, attempt.snapshot)
         return None, _existing_sp
     return compressed, None
@@ -4342,6 +4340,7 @@ def compress_context(
         rewritten = commit.compacted_in_place or compressed is not messages
         if rewritten or lifecycle.commit_status == "committed":
             _record_committed_attempt_effect(agent, effect_messages_before, compressed, verbatim_tail, split_status)
+            record_growth_baseline(agent.context_compressor, compressed)
         _emit_compression_attempt_telemetry(
             agent, started_at=attempt.started_at, commit_status=lifecycle.commit_status, split_status=split_status,
             failure_class=("session_split_failed" if split_status in {"failed_not_indexed", "aborted"} else None),

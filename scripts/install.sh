@@ -955,11 +955,11 @@ stage_config() {
         "$HERMES_HOME"/pairing "$HERMES_HOME"/hooks "$HERMES_HOME"/image_cache \
         "$HERMES_HOME"/audio_cache "$HERMES_HOME"/memories "$HERMES_HOME"/skills
     if [ ! -f "$HERMES_HOME/.env" ]; then
-        cp "$INSTALL_DIR/.env.example" "$HERMES_HOME/.env" 2>/dev/null || touch "$HERMES_HOME/.env"
+        cp "$INSTALL_DIR/hermes_cli/data/env.example" "$HERMES_HOME/.env" 2>/dev/null || touch "$HERMES_HOME/.env"
     fi
     chmod 600 "$HERMES_HOME/.env"
-    if [ ! -f "$HERMES_HOME/config.yaml" ] && [ -f "$INSTALL_DIR/cli-config.yaml.example" ]; then
-        cp "$INSTALL_DIR/cli-config.yaml.example" "$HERMES_HOME/config.yaml"
+    if [ ! -f "$HERMES_HOME/config.yaml" ] && [ -f "$INSTALL_DIR/hermes_cli/data/config.yaml.example" ]; then
+        cp "$INSTALL_DIR/hermes_cli/data/config.yaml.example" "$HERMES_HOME/config.yaml"
     fi
     log_success "config prepared in $HERMES_HOME"
 }

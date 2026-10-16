@@ -16,7 +16,7 @@ Usage::
 
 Output: ``website/static/api/model-catalog.json``
 
-Live URL (after ``deploy-site.yml`` runs on merge to main):
+Upstream reference URL (this fork does not publish a docs site):
 ``https://hermes-agent.nousresearch.com/docs/api/model-catalog.json``
 """
 

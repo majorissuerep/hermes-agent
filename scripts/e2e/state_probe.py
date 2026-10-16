@@ -99,9 +99,9 @@ def main() -> None:
         return manifest()
 
 
-    def manifest():
+    def manifest(home=home):
         config = read_raw_config()
-        db = SessionDB()
+        db = SessionDB(home / "state.db")
         try:
             messages = [(row["role"], row["content"]) for row in db.get_messages("e2e-retained")]
             check = db._conn.execute("PRAGMA integrity_check").fetchone()[0]
@@ -161,6 +161,69 @@ def main() -> None:
                     "retained_secret": load_env()["E2E_RETAINED_SECRET"]}
         return {key: digest(value) for key, value in manifest.items()}
 
+
+    def clobber_state():
+        # Reproduce old plaintext writers and the class-blind repair on synthetic state.
+        config = io.read_bytes(home / "config.yaml", purpose="config")
+        env = io.read_bytes(home / ".env", purpose="env")
+        (home / "config.yaml").write_bytes(config)
+        (home / ".env").write_bytes(env)
+        io.write_bytes(home / "state.db", (home / "state.db").read_bytes(), purpose="state")
+        from hermes_security import frames
+        path = home / "logs" / "e2e-repair.log"
+        frames.append(path, b"retained repair line", purpose="log")
+        io.write_bytes(path, path.read_bytes() + b"old plaintext writer\n", purpose="state")
+        return {"clobbered": True}
+
+    def export_proof():
+        import tarfile
+        from hermes_constants import set_hermes_home_override, reset_hermes_home_override
+        from agent.secret_scope import reset_secret_scope
+        from hermes_security.migrate import migrate_home
+
+        recovered = Path(request["recovered"])
+        recovered.mkdir(mode=0o700)
+        with tarfile.open(request["archive"]) as archive:
+            if any(not entry.isfile() for entry in archive):
+                raise RuntimeError("export contains a non-regular member")
+            archive.extractall(recovered, filter="data")
+        if (recovered / ".hermes-vault").exists():
+            raise RuntimeError("plaintext export retained vault metadata")
+        if not (recovered / "state.db").read_bytes().startswith(b"SQLite format 3"):
+            raise RuntimeError("bulk export did not produce a plaintext database")
+        report = migrate_home(recovered, request["password"])
+        if not report.ok:
+            raise RuntimeError("bulk recovery could not be re-encrypted")
+        home_token = set_hermes_home_override(recovered)
+        secret_token = set_secret_scope(build_profile_secret_scope(recovered), profile_home=str(recovered))
+        try:
+            return manifest(home=recovered)
+        finally:
+            reset_secret_scope(secret_token)
+            reset_hermes_home_override(home_token)
+
+    def upstream_proof():
+        with SessionDB() as db:
+            rows = [(row["role"], row["content"]) for row in db.get_messages("e2e-upstream")]
+        expected = [("user", request["nonce"]), ("assistant", "retained upstream answer")]
+        if rows != expected:
+            raise RuntimeError("unmodified upstream session did not survive migration")
+        return {"messages": digest(rows)}
+
+    def restore_upstream():
+        from hermes_cli.backup import restore_quick_snapshot
+
+        save_config({"agent": {"max_turns": 3}}, merge_existing=True)
+        save_env_value("E2E_LEGACY_SECRET", "deliberate-mutation")
+        if not restore_quick_snapshot(request["snapshot"], hermes_home=home):
+            raise RuntimeError("pre-encryption upstream snapshot could not be restored")
+        return {"legacy": legacy_proof(), "session": upstream_proof()}
+
+    def host_facts():
+        from hermes_platform.host.facts import os_family, native_arch, process_arch
+        from importlib.metadata import version
+        return {"os": os_family(), "native_arch": native_arch(), "process_arch": process_arch(),
+                "python": sys.version.split()[0], "nemo_relay": version("nemo-relay")}
 
     def update_status():
         from hermes_cli.update_receipt import read_latest_receipt
@@ -244,6 +307,8 @@ def main() -> None:
 
     handlers = {"seed": seed, "manifest": manifest, "snapshot": snapshot, "restore": restore,
                 "legacy-proof": legacy_proof, "resume-proof": resume_proof,
+                "clobber-state": clobber_state, "export-proof": export_proof,
+                "upstream-proof": upstream_proof, "restore-upstream": restore_upstream, "host-facts": host_facts,
                 "update-status": update_status, "live-proof": live_proof, "diagnostics": diagnostics,
                 "stop-runtime": stop_runtime}
     print(json.dumps(handlers[request["action"]](), sort_keys=True))

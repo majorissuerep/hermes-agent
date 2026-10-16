@@ -19,7 +19,6 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 STAGE2_HOOK = REPO_ROOT / "docker" / "stage2-hook.sh"
-DOCKERIGNORE = REPO_ROOT / ".dockerignore"
 
 KEY_LINE_RE = re.compile(r"^API_SERVER_KEY=[0-9a-f]{64}$", re.MULTILINE)
 
@@ -261,35 +260,3 @@ def test_keygen_weak_env_key_warning_suppressed_when_env_file_key_wins(
     out = result.stdout + result.stderr
     assert "shorter than 16 characters" not in out
     assert "the .env value wins" in out
-
-
-def test_dockerignore_keeps_env_example_template() -> None:
-    """The first-boot seed copies /opt/hermes/.env.example -> $HERMES_HOME/.env.
-
-    ``.env.*`` in .dockerignore matches the template, so an explicit
-    ``!.env.example`` re-include must appear AFTER it (last match wins), and
-    no later rule may exclude it again (OOF-285).
-    """
-    if not DOCKERIGNORE.exists():
-        pytest.skip(".dockerignore not present in this checkout")
-    lines = [ln.strip() for ln in DOCKERIGNORE.read_text().splitlines()]
-    rules = [ln for ln in lines if ln and not ln.startswith("#")]
-    verdict = "excluded"  # default: not matched -> included
-    for rule in rules:
-        negate = rule.startswith("!")
-        pattern = rule.lstrip("!")
-        if pattern in (".env.example",) or _dockerignore_match(pattern):
-            verdict = "included" if negate else "excluded"
-    assert verdict == "included", (
-        ".env.example must survive .dockerignore — docker/stage2-hook.sh "
-        "seeds $HERMES_HOME/.env from it on first boot"
-    )
-
-
-def _dockerignore_match(pattern: str) -> bool:
-    """Minimal dockerignore glob match of ``pattern`` against '.env.example'."""
-    import fnmatch
-
-    if pattern.endswith("/"):
-        return False
-    return fnmatch.fnmatch(".env.example", pattern)

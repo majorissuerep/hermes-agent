@@ -58,6 +58,19 @@ for vault recovery. Repair never grants permission to discard unreadable secrets
 Inspect the reported failure before retrying. A revoked grant means the owning
 session ended; it is not a reason to write plaintext or disable the vault.
 
+For damaged dependencies use `hermes pm repair`; for supported plaintext-writer
+or wrapped-database damage use `hermes secure-vault repair`. A nonzero repair
+result means data still needs recovery, not permission to reset it. Saved
+snapshots and other profiles must remain untouched.
+
+For an explicitly requested bulk recovery/migration, use
+`hermes secure-vault export --output /path/outside-hermes/recovery.tar` through
+the native `terminal` tool. It writes a verified plaintext copy, including
+secrets, outside the encrypted home; it never decrypts the original in place.
+Keep that archive private, exclude it from logs/artifacts, and re-encrypt a
+recovered home before normal use. Do not export as a workaround for ordinary
+config writes or a missing session grant.
+
 ## Subagents
 
 Use `delegate_task` normally; do not add key/passphrase parameters. Children share

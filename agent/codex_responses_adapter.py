@@ -424,11 +424,17 @@ def _normalize_responses_message_status(value: Any, *, default: str = "completed
     return status if status in _RESPONSE_MESSAGE_STATUSES else default
 
 
+def _output_text_annotations(content: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    # Output-text parts require annotations even when the model emitted none.
+    return [{"annotations": [], **part} if part.get("type") == "output_text" else part for part in content]
+
+
 def _message_item(
     content: list[dict[str, Any]], *, status: str, item_id: Optional[str] = None, phase: Optional[str] = None,
 ) -> dict[str, Any]:
     """Assistant ``message`` item; ``id``/``phase`` are added only when non-empty."""
-    item: dict[str, Any] = {"type": "message", "role": "assistant", "status": status, "content": content}
+    item: dict[str, Any] = {"type": "message", "role": "assistant", "status": status,
+                            "content": _output_text_annotations(content)}
     item.update({k: v for k, v in (("id", item_id), ("phase", phase)) if v})
     return item
 
@@ -441,6 +447,10 @@ def _role_message_item(role: str, content: Any, phase: Any = None) -> dict[str, 
     parser rejects a typeless assistant item ("Cannot determine type of 'item'"). Assistant ``phase``
     is forwarded only for values the API accepts on input messages; others would 400."""
     item = {"type": "message", "role": role, "content": content}
+    # Typed assistant output also needs status, including derived summaries.
+    if role == "assistant" and isinstance(content, list):
+        item["status"] = "completed"
+        item["content"] = _output_text_annotations(content)
     if role == "assistant" and (cleaned := _lower_or_none(phase)) in _ROLE_MESSAGE_PHASES:
         item["phase"] = cleaned
     return item
@@ -881,7 +891,8 @@ def _preflight_encrypted(item: dict[str, Any], idx: int, ctx: _PreflightCtx) -> 
 def _preflight_message(item: dict[str, Any], idx: int, ctx: _PreflightCtx) -> dict[str, Any]:
     # Only replayed assistant output (a list-content item carrying id/status) takes the strict path
     # below. Phase alone is no replay marker: the converter's plain role items carry it too, and
-    # preflight must not synthesize a status or reject user image parts for them.
+    # User inputs and string shorthand stay inputs; typed assistant output is
+    # normalized separately with its required status and text annotations.
     content = item.get("content")
     is_replayed_assistant = (
         item.get("role") == "assistant" and isinstance(content, list)

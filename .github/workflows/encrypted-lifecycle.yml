@@ -1,4 +1,4 @@
-name: Encrypted lifecycle container acceptance
+name: Encrypted lifecycle acceptance
 
 # Every leg gets a cold, digest-pinned container, never a live Hermes installation.
 # Private gateways use one-job coordinators that create isolated Kubernetes pods.
@@ -20,6 +20,11 @@ on:
         description: 'Use private Kubernetes coordinators labelled hermes-encrypted-container'
         type: boolean
         default: false
+      platform:
+        description: 'Qualification target (all is required for cross-platform acceptance)'
+        type: choice
+        options: [all, linux, macos]
+        default: all
   workflow_call:
     inputs:
       baseline:
@@ -31,6 +36,9 @@ on:
       private_runner:
         type: boolean
         default: false
+      platform:
+        type: string
+        default: all
     secrets:
       E2E_LLM_API_KEY:
         required: true
@@ -44,6 +52,7 @@ concurrency:
 
 jobs:
   lifecycle:
+    if: inputs.platform != 'macos'
     name: Encrypted ${{ matrix.scenario }} (cold container, live LLM)
     runs-on: ${{ fromJSON((inputs.private_runner || startsWith(github.ref, 'refs/heads/e2e/encrypted/private/')) && '["self-hosted","linux","hermes-encrypted-container"]' || '["ubuntu-24.04"]') }}
     timeout-minutes: 60
@@ -51,7 +60,7 @@ jobs:
       fail-fast: false
       max-parallel: 2
       matrix:
-        scenario: [fresh, update, broken-files, dirty-install]
+        scenario: [fresh, update, broken-files, dirty-install, reinstall, upstream-install]
     steps:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a # v7.0.1
         with:
@@ -96,15 +105,91 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+  macos:
+    name: Encrypted ${{ matrix.scenario }} (${{ matrix.runner }}, fresh VM, live LLM)
+    if: inputs.platform != 'linux'
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        runner: [macos-15, macos-15-intel]
+        scenario: [fresh, update, broken-files, dirty-install, reinstall, upstream-install]
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a # v7.0.1
+        with:
+          ref: ${{ inputs.commit || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Pin both source revisions
+        id: refs
+        env:
+          BASELINE: ${{ inputs.baseline || 'origin/main' }}
+        run: |
+          set -euo pipefail
+          echo "baseline=$(git rev-parse --verify "$BASELINE^{commit}")" >> "$GITHUB_OUTPUT"
+          echo "candidate=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Cold native installer, update, recovery and live delegation
+        env:
+          E2E_LLM_API_KEY: ${{ secrets.E2E_LLM_API_KEY }}
+          E2E_LLM_BASE_URL: ${{ vars.E2E_LLM_BASE_URL }}
+          E2E_LLM_MODEL: ${{ vars.E2E_LLM_MODEL }}
+          E2E_LLM_PROVIDER: litellm
+          SCENARIO: ${{ matrix.scenario }}
+          BASELINE_SHA: ${{ steps.refs.outputs.baseline }}
+          CANDIDATE_SHA: ${{ steps.refs.outputs.candidate }}
+        run: |
+          set -euo pipefail
+          python3 scripts/e2e/encrypted_lifecycle.py --scenario "$SCENARIO" \
+            --baseline "$BASELINE_SHA" --candidate "$CANDIDATE_SHA" \
+            --evidence "$RUNNER_TEMP/lifecycle-evidence"
+      - name: Verify native receipt and exact harness
+        env:
+          SCENARIO: ${{ matrix.scenario }}
+          BASELINE_SHA: ${{ steps.refs.outputs.baseline }}
+          CANDIDATE_SHA: ${{ steps.refs.outputs.candidate }}
+          EXPECTED_ARCH: ${{ matrix.runner == 'macos-15-intel' && 'amd64' || 'arm64' }}
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, os
+          from pathlib import Path
+          from scripts.e2e.container_lifecycle import verify_receipt
+          receipt = json.loads((Path(os.environ["RUNNER_TEMP"]) / "lifecycle-evidence/receipt.json").read_text())
+          harness = b"".join(Path("scripts/e2e", name).read_bytes()
+                             for name in ("encrypted_lifecycle.py", "state_probe.py"))
+          provenance = {"baseline": os.environ["BASELINE_SHA"], "candidate": os.environ["CANDIDATE_SHA"],
+                        "harness_sha256": hashlib.sha256(harness).hexdigest()}
+          verify_receipt(receipt, os.environ["SCENARIO"], provenance)
+          assert receipt["host"]["os"] == "darwin", receipt["host"]
+          assert receipt["host"]["native_arch"] == os.environ["EXPECTED_ARCH"], receipt["host"]
+          PY
+      - name: Upload sanitized native-VM evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: encrypted-${{ matrix.runner }}-${{ matrix.scenario }}-${{ github.sha }}
+          path: ${{ runner.temp }}/lifecycle-evidence/
+          if-no-files-found: warn
+          retention-days: 14
+
   acceptance:
     name: Encrypted lifecycle gate
     if: always()
-    needs: lifecycle
+    needs: [lifecycle, macos]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - name: Require executed success from all four cold containers
+      - name: Require every selected native-VM and container scenario
         env:
-          RESULT: ${{ needs.lifecycle.result }}
+          PLATFORM: ${{ inputs.platform || 'all' }}
+          LINUX_RESULT: ${{ needs.lifecycle.result }}
+          MACOS_RESULT: ${{ needs.macos.result }}
         run: |
-          test "$RESULT" = success || { echo "::error::Encrypted container acceptance did not fully pass ($RESULT)"; exit 1; }
+          set -euo pipefail
+          if [ "$PLATFORM" != macos ]; then
+            test "$LINUX_RESULT" = success || { echo "::error::Linux lifecycle did not fully pass ($LINUX_RESULT)"; exit 1; }
+          fi
+          if [ "$PLATFORM" != linux ]; then
+            test "$MACOS_RESULT" = success || { echo "::error::macOS lifecycle did not fully pass ($MACOS_RESULT)"; exit 1; }
+          fi

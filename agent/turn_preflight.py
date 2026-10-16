@@ -9,6 +9,8 @@ overflow warnings. Nothing here imports ``agent.conversation_loop`` at module le
 
 from __future__ import annotations
 
+from agent.compression_growth_recovery import maybe_rearm_after_growth
+
 import logging
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
@@ -82,6 +84,7 @@ def run_preflight_compression(
             max_compression_attempts,
         )
 
+    maybe_rearm_after_growth(compressor, v.messages)
     _compression_cooldown = getattr(
         compressor, "get_active_compression_failure_cooldown", lambda: None
     )()

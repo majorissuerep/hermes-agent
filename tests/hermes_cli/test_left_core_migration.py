@@ -33,7 +33,7 @@ def _home(tmp_path: Path, name: str = "home", *, env: str = "", config: str = ""
     return home
 
 
-# The uncommented platform_toolsets block cli-config.yaml.example carried (the homeassistant row from
+# The uncommented platform_toolsets block hermes_cli/data/config.yaml.example carried (the homeassistant row from
 # 1aa7badb3c until fb9fc8a3dd). The installers (install.sh, install.ps1, the Docker hook) and
 # `hermes doctor` seed config.yaml from that file, so the block alone says nothing about use.
 _EXAMPLE_PLATFORM_TOOLSETS = (

@@ -349,8 +349,8 @@ def _check_config_file(should_fix: bool, f: Finding) -> None:
         check_ok("cli-config.yaml exists (in project directory)")
     elif should_fix:
         from hermes_cli.config import seed_config_file
-        from_template = seed_config_file(config_path, PROJECT_ROOT / 'cli-config.yaml.example')
-        check_ok(f"Created {_DHH}/config.yaml from {'cli-config.yaml.example' if from_template else 'defaults'}")
+        from_template = seed_config_file(config_path, PROJECT_ROOT / 'hermes_cli/data/config.yaml.example')
+        check_ok(f"Created {_DHH}/config.yaml from {'hermes_cli/data/config.yaml.example' if from_template else 'defaults'}")
         f.fixed += 1
     else:
         check_warn("config.yaml not found", "(using defaults)")

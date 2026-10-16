@@ -172,10 +172,10 @@ source ./activate
 hermes --version
 ```
 
-PowerShell:
+fish:
 
-```powershell
-. .\activate.ps1
+```fish
+source ./activate.fish
 hermes --version
 ```
 
@@ -190,7 +190,7 @@ Use the [PM developer workflow](../reference/package-management.md#developer-wor
 Run these commands from that checkout with its prepared Python. Keep the same
 development `HERMES_HOME`. PM must be able to start before it can build another
 environment. On Windows hosts, do all development inside WSL: this fork does not
-support native Windows (see PLATFORMS.md).
+support native Windows (see the platform-support guide).
 
 Build an independent interpreter for tests and editor tools:
 
@@ -212,7 +212,6 @@ To keep the test environment outside the checkout, replace `.venv` with a fresh 
 path. Set `HERMES_PYTHON` to that environment's interpreter:
 
 - POSIX: `export HERMES_PYTHON="/absolute/path/to/hermes-dev/bin/python"`
-- PowerShell: `$env:HERMES_PYTHON = 'C:\absolute\path\to\hermes-dev\Scripts\python.exe'`
 
 The canonical runner discovers repository `.venv` automatically. It clears
 `PYTHONPATH`, so pytest must be installed in the interpreter's own environment.
@@ -274,7 +273,7 @@ See [Package management](../reference/package-management.md) for PM commands and
 
 ## Cross-Platform Compatibility
 
-See **[Platform Support](../getting-started/platform-support.md)**. The dashboard uses POSIX PTYs. On Windows hosts, run everything inside WSL — this fork does not support native Windows (see PLATFORMS.md).
+See **[Platform Support](../getting-started/platform-support.md)**. The dashboard uses POSIX PTYs. On Windows hosts, run everything inside WSL — this fork does not support native Windows (see the platform-support guide).
 
 When contributing code, keep these rules in mind:
 

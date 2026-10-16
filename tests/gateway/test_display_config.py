@@ -148,7 +148,7 @@ def assert_keeps_platform_display_defaults(cfg):
 
 
 class TestInstallerSeededConfigThroughGatewayResolver:
-    """Regression for #121230: a fresh install copies cli-config.yaml.example to config.yaml, and the
+    """Regression for #121230: a fresh install copies hermes_cli/data/config.yaml.example to config.yaml, and the
     gateway then rendered reasoning into QQBot/Telegram/... because the template pinned a global
     ``display.show_reasoning: true`` over every platform's ``False`` default.
     """
@@ -158,13 +158,13 @@ class TestInstallerSeededConfigThroughGatewayResolver:
         import shutil
         from pathlib import Path
 
-        template = Path(__file__).resolve().parents[2] / "cli-config.yaml.example"
+        template = Path(__file__).resolve().parents[2] / "hermes_cli/data/config.yaml.example"
         home.mkdir(parents=True, exist_ok=True)
         shutil.copy(template, home / "config.yaml")
         return home / "config.yaml"
 
     def test_shipped_template_keeps_every_platform_default(self, tmp_path):
-        """The installers, the Docker first boot and ``doctor --fix`` copy cli-config.yaml.example
+        """The installers, the Docker first boot and ``doctor --fix`` copy hermes_cli/data/config.yaml.example
         verbatim, so an uncommented ``display.<key>`` there becomes an explicit global value."""
         from gateway.config import Platform
         from gateway.run import _load_gateway_config, _resolve_gateway_display_bool

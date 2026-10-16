@@ -27,6 +27,25 @@ def _accepts_keyword_argument(callable_obj: Any, name: str) -> bool:
 
 
 class SummaryDispatchMixin:
+    def _empty_handoff_result(self, messages, canonical, telemetry, n_messages, spare_pending_images, pruned_count):
+        """An empty summary window must not discard useful, already-approved tool pruning."""
+        from agent.context_compressor import _COMPACTION_TAIL_MARKER, _fresh_compaction_message_copy
+        from agent.model_metadata import estimate_messages_tokens_rough
+
+        if pruned_count and estimate_messages_tokens_rough(messages) < estimate_messages_tokens_rough(canonical):
+            # Keep every user/assistant row and the existing handoff. Only old tool
+            # bodies changed; mark carried rows so durable history supersedes them.
+            candidate = [_fresh_compaction_message_copy(message) for message in messages]
+            for message in candidate:
+                message[_COMPACTION_TAIL_MARKER] = True
+            result = self._finalize_compressed(candidate, canonical, n_messages, spare_pending_images, pruned_count)
+            telemetry.update(method="tool_result_prune", failure_class=None)
+            return result
+        self._structural_no_op_result(
+            telemetry, "empty_post_handoff_window", "window holds only already-summarized handoffs", n_messages,
+        )
+        return canonical
+
     def _apply_summary_route(self, call_kwargs: dict, pinned: Optional[dict[str, Any]] = None) -> None:
         """Pin the summary route onto ``call_kwargs`` for both compression entry points.
 

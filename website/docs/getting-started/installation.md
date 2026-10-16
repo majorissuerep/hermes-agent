@@ -130,7 +130,7 @@ directory; a failed step prints its last lines and the log path. CI (`CI` or
 | Termux APT | `$PREFIX/lib/hermes-agent/` | Symlinks in `$PREFIX/bin/` | `~/.hermes/` |
 
 This fork does not support native Windows. On Windows, run the POSIX script
-inside WSL (see PLATFORMS.md).
+inside WSL (see the platform-support guide).
 
 `HERMES_HOME` selects user data. The POSIX script's `--dir` selects its source
 checkout independently. Running the POSIX script as root does not select an

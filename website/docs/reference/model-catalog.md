@@ -16,7 +16,7 @@ When the manifest is unreachable (offline, network blocked, hosting failure), He
 https://hermes-agent.nousresearch.com/docs/api/model-catalog.json
 ```
 
-Published on every merge to `main` via the existing `deploy-site.yml` GitHub Pages pipeline. The source of truth lives in the repo at `website/static/api/model-catalog.json`.
+The upstream project publishes this reference catalog. This fork does not publish a docs site; its built-in provider support is narrower. The checked-in artifact lives at `website/static/api/model-catalog.json`; rebuild it with `scripts/build_model_catalog.py` when needed.
 
 ## Schema
 

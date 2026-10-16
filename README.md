@@ -1,192 +1,66 @@
-<p align="center">
-  <img src="assets/banner.png" alt="Hermes Agent" width="100%">
-</p>
+# Hermes Agent
 
-# Hermes Agent ☤ — unofficial fork
+A personal AI agent for **Linux and macOS**: terminal and desktop interfaces,
+remote messaging, tools, memory, skills, scheduled work, and delegated agents.
+This is an unofficial fork of [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent),
+maintained by [@majorissuerep](https://github.com/majorissuerep), with mandatory
+at-rest encryption. Report fork issues [here](https://github.com/majorissuerep/hermes-agent/issues).
 
-> [!IMPORTANT]
-> **This is an unofficial fork** of [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent), maintained by [@majorissuerep](https://github.com/majorissuerep) for personal infrastructure.
-> It is **not** built, supported, or endorsed by Nous Research. It diverges from upstream — encrypted state at rest (vault), different security defaults, fork-only integrations — and its behavior is only tested on the maintainer's machines.
-> **Be cautious:** review the [differences vs upstream](https://github.com/NousResearch/hermes-agent/compare/main...majorissuerep:hermes-agent:main) before installing, inspect the installer before piping it to a shell, and report fork problems to [the fork maintainer](https://github.com/majorissuerep) — never upstream. If you are looking for the original project, use [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent).
+## Install
 
-<p align="center">
-  Upstream: <a href="https://github.com/NousResearch/hermes-agent">NousResearch/hermes-agent</a>
-</p>
-<p align="center">
-  <a href="website/docs/getting-started/quickstart.md"><img src="https://img.shields.io/badge/Docs-in%20repo-yellow?style=for-the-badge" alt="Documentation (in repo)"></a>
-  <a href="https://github.com/majorissuerep/hermes-agent/issues"><img src="https://img.shields.io/badge/Issues-fork-8B0000?style=for-the-badge&logo=github" alt="Fork issues"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge" alt="License: MIT"></a>
-  <a href="https://github.com/NousResearch/hermes-agent"><img src="https://img.shields.io/badge/Fork%20of-Hermes%20Agent-blueviolet?style=for-the-badge" alt="Fork of Hermes Agent (Nous Research)"></a>
-  <a href="README.zh-CN.md"><img src="https://img.shields.io/badge/Lang-中文-red?style=for-the-badge" alt="中文"></a>
-  <a href="README.ur-pk.md"><img src="https://img.shields.io/badge/Lang-اردو-green?style=for-the-badge" alt="اردو"></a>
-  <a href="README.es.md"><img src="https://img.shields.io/badge/Lang-Español-orange?style=for-the-badge" alt="Español"></a>
-</p>
-
-**A fork of the self-improving AI agent built by [Nous Research](https://nousresearch.com) (upstream).** Same learning loop — skills from experience, agent-curated memory, cross-session recall — plus fork-only hardening: encrypted state at rest under a master-password/key-file vault, a configurable switch to disable all external messaging adapters, and profile-scoped secrets. It runs on a $5 VPS, a GPU cluster, or serverless infrastructure. Not tied to your laptop — talk to it from a messaging platform while it works on a cloud VM.
-
-Supported connections: ChatGPT/Codex, Anthropic, LiteLLM, custom OpenAI/Anthropic endpoints, Z.AI, Grok, and Vercel AI Gateway. Direct OpenAI API access is also available. Choose with `hermes model`; see the [provider guide](website/docs/integrations/providers.md).
-
-<table>
-<tr><td><b>A real terminal interface</b></td><td>Full TUI with multiline editing, slash-command autocomplete, conversation history, interrupt-and-redirect, and streaming tool output.</td></tr>
-<tr><td><b>Lives where you do</b></td><td>Telegram, Discord, Slack, WhatsApp, Signal, and CLI — all from a single gateway process. Voice memo transcription, cross-platform conversation continuity.</td></tr>
-<tr><td><b>A closed learning loop</b></td><td>Agent-curated memory with periodic nudges. Autonomous skill creation after complex tasks. Skills self-improve during use. FTS5 session search with LLM summarization for cross-session recall. <a href="https://github.com/plastic-labs/honcho">Honcho</a> dialectic user modeling. Compatible with the <a href="https://agentskills.io">agentskills.io</a> open standard.</td></tr>
-<tr><td><b>Reusable project knowledge</b></td><td><a href="website/docs/user-guide/skills/bundled/software-development/software-development-graphify.md">Graphify</a> ships with Hermes. For repeated questions or planned follow-up work on codebases and documents, the agent builds a local project graph, queries it first, and verifies findings against the source. Code parsing is local; document extraction uses the current Hermes session.</td></tr>
-<tr><td><b>Scheduled automations</b></td><td>Built-in cron scheduler with delivery to any platform. Daily reports, nightly backups, weekly audits — all in natural language, running unattended.</td></tr>
-<tr><td><b>Delegates and parallelizes</b></td><td>Spawn isolated subagents for parallel workstreams. Write Python scripts that call tools via RPC, collapsing multi-step pipelines into zero-context-cost turns.</td></tr>
-<tr><td><b>Runs anywhere, not just your laptop</b></td><td>Seven terminal backends — local, Docker, SSH, Singularity, Modal, Daytona, and Vercel Sandbox. Daytona and Modal offer serverless persistence — your agent's environment hibernates when idle and wakes on demand, costing nearly nothing between sessions. Run it on a $5 VPS or a GPU cluster.</td></tr>
-<tr><td><b>Research-ready</b></td><td>Batch trajectory generation, trajectory compression for training the next generation of tool-calling models.</td></tr>
-</table>
-
----
-
-## Quick Install
-
-> [!WARNING]
-> **This installs the FORK** (this repository), not the original Hermes Agent. The one-liners below fetch the installer **from this fork's git history** — always [read it first](https://github.com/majorissuerep/hermes-agent/blob/main/scripts/install.sh) before piping anything into a shell. For the original, supported product use [the upstream installer](https://github.com/NousResearch/hermes-agent).
-
-### Linux, macOS, WSL2
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/majorissuerep/hermes-agent/main/scripts/install.sh | bash
-```
-
-### Troubleshooting
----
-
-## Getting Started
-
-```bash
-hermes              # Interactive CLI — start a conversation
-hermes model        # Choose your LLM provider and model
-hermes tools        # Configure which tools are enabled
-hermes config set   # Set individual config values
-hermes config get   # Print individual config values
-hermes gateway      # Start the messaging gateway (Telegram, Discord, etc.)
-hermes setup        # Run the full setup wizard (configures everything at once)
-hermes claw migrate # Migrate from OpenClaw (if coming from OpenClaw)
-hermes update       # Update to the latest version
-hermes doctor       # Diagnose any issues
-```
-
-📖 **[Full documentation →](website/docs/getting-started/quickstart.md)** (in this repository; rendered upstream docs: [hermes-agent.nousresearch.com/docs](https://hermes-agent.nousresearch.com/docs) — upstream content, not fork-specific)
-
----
-
-## Encrypted self-management
-
-Unlock once when starting a session. Local CLI calls and delegated agents reuse
-that session's temporary authority for config changes and self-management, without
-another passphrase. A standalone update asks once and preserves encrypted state.
-The passphrase is never exported or saved.
+Review the [installer](scripts/install.sh), then run:
 
 ```sh
-hermes config set delegation.max_concurrent_children 4
-hermes update
+curl -fsSL https://raw.githubusercontent.com/majorissuerep/hermes-agent/main/scripts/install.sh | bash
+hermes model
+hermes
+```
+
+Use the [installation guide](website/docs/getting-started/installation.md) for
+prerequisites, existing installations, and recovery. Windows hosts use WSL2;
+native Windows is not supported. [Platform policy](website/docs/getting-started/platform-support.md).
+
+## Providers
+
+ChatGPT/Codex subscription, Anthropic, OpenAI API, LiteLLM, custom OpenAI
+(Chat Completions or Responses) and Anthropic endpoints, Z.AI, Grok, and Vercel AI
+Gateway. Configure with `hermes model`; see [connections and credentials](website/docs/integrations/providers.md).
+Other providers are not part of the supported built-in catalog.
+
+Conversations grow incrementally. Hermes tracks request usage and context limits,
+compacts history when needed, and preserves resumable sessions. See
+[context management](website/docs/developer-guide/context-compression-and-caching.md)
+and the [reliability contract](website/docs/developer-guide/reliability.md) for
+qualification, failure recovery, and the distinction between protocol and live tests.
+
+## Everyday commands
+
+```sh
+hermes                    # Start a conversation
+hermes setup              # Configure tools, providers, and messaging
+hermes gateway setup      # Configure a messaging gateway
+hermes update             # Update the owning installation
+hermes doctor             # Diagnose installation and configuration
 hermes secure-vault status
 ```
 
-Use the CLI writers; never overwrite encrypted config, auth or databases as plaintext.
-The supported desktop/CLI platforms are Linux and macOS. See the [encrypted lifecycle
-VM suite](scripts/e2e/README.md) for the install, update, repair and restore contracts.
+Unlock once per session. Local Hermes commands and delegated agents reuse temporary,
+home-scoped session authority without another passphrase. A standalone update
+unlocks once. Passphrases are never exported or saved. Use `hermes config` writers,
+not plaintext edits of encrypted files. See [encrypted self-management](skills/autonomous-ai-agents/hermes-agent/references/encrypted-self-management.md).
 
----
+## Guides
 
-## CLI vs Messaging Quick Reference
+- [Quickstart](website/docs/getting-started/quickstart.md) · [Configuration](website/docs/user-guide/configuration.md) · [CLI](website/docs/user-guide/cli.md)
+- [Messaging](website/docs/user-guide/messaging/index.md) · [Desktop](website/docs/user-guide/desktop.md)
+- [Tools](website/docs/user-guide/features/tools.md) · [Skills](website/docs/user-guide/features/skills.md) · [Memory](website/docs/user-guide/features/memory.md) · [MCP](website/docs/user-guide/features/mcp.md)
+- [Install/update acceptance](scripts/e2e/README.md) · [Development](CONTRIBUTING.md) · [Security](SECURITY.md)
 
-Hermes has two entry points: start the terminal UI with `hermes`, or run the gateway and talk to it from Telegram, Discord, Slack, WhatsApp, Signal, or Email. Once you're in a conversation, many slash commands are shared across both interfaces.
-
-| Action                         | CLI                                           | Messaging platforms                                                              |
-| ------------------------------ | --------------------------------------------- | -------------------------------------------------------------------------------- |
-| Start chatting                 | `hermes`                                      | Run `hermes gateway setup` + `hermes gateway start`, then send the bot a message |
-| Start fresh conversation       | `/new` or `/reset`                            | `/new` or `/reset`                                                               |
-| Change model                   | `/model [provider:model]`                     | `/model [provider:model]`                                                        |
-| Set a personality              | `/personality [name]`                         | `/personality [name]`                                                            |
-| Retry or undo the last turn    | `/retry`, `/undo`                             | `/retry`, `/undo`                                                                |
-| Compress context / check usage | `/compress`, `/usage`, `/insights [--days N]` | `/compress`, `/usage`, `/insights [days]`                                        |
-| Browse skills                  | `/skills` or `/<skill-name>`                  | `/<skill-name>`                                                                  |
-| Interrupt current work         | `Ctrl+C` or send a new message                | `/stop` or send a new message                                                    |
-| Platform-specific status       | `/platforms`                                  | `/status`, `/sethome`                                                            |
-
-For the full command lists, see the [CLI guide](website/docs/user-guide/cli.md) and the [Messaging Gateway guide](website/docs/user-guide/messaging/index.md).
-
----
-
-## Documentation
-
-Documentation lives in this repository under **[website/docs](website/docs/getting-started/quickstart.md)** (the fork does not publish a docs site):
-
-| Section                                                                                             | What's Covered                                             |
-| --------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
-| [Quickstart](website/docs/getting-started/quickstart.md)                 | Install → setup → first conversation in 2 minutes          |
-| [CLI Usage](website/docs/user-guide/cli.md)                              | Commands, keybindings, personalities, sessions             |
-| [Configuration](website/docs/user-guide/configuration.md)                | Config file, providers, models, all options                |
-| [Messaging Gateway](website/docs/user-guide/messaging/index.md)                | Telegram, Discord, Slack, WhatsApp, Signal, Home Assistant |
-| [Security](website/docs/user-guide/security.md)                          | Command approval, DM pairing, container isolation          |
-| [Tools & Toolsets](website/docs/user-guide/features/tools.md)            | 40+ tools, toolset system, terminal backends               |
-| [Skills System](website/docs/user-guide/features/skills.md)              | Procedural memory, Skills Hub, creating skills             |
-| [Memory](website/docs/user-guide/features/memory.md)                     | Persistent memory, user profiles, best practices           |
-| [MCP Integration](website/docs/user-guide/features/mcp.md)               | Connect any MCP server for extended capabilities           |
-| [Cron Scheduling](website/docs/user-guide/features/cron.md)              | Scheduled tasks with platform delivery                     |
-| [Context Files](website/docs/user-guide/features/context-files.md)       | Project context that shapes every conversation             |
-| [Architecture](website/docs/developer-guide/architecture.md)             | Project structure, agent loop, key classes                 |
-| [Contributing](website/docs/developer-guide/contributing.md)             | Development setup, PR process, code style                  |
-| [CLI Reference](website/docs/reference/cli-commands.md)                  | All commands and flags                                     |
-| [Environment Variables](website/docs/reference/environment-variables.md) | Complete env var reference                                 |
-
----
-
-## Migrating from OpenClaw
-
-If you're coming from OpenClaw, Hermes can automatically import your settings, memories, skills, and API keys.
-
-**During first-time setup:** The setup wizard (`hermes setup`) automatically detects `~/.openclaw` and offers to migrate before configuration begins.
-
-**Anytime after install:**
-
-```bash
-hermes claw migrate              # Interactive migration (full preset)
-hermes claw migrate --dry-run    # Preview what would be migrated
-hermes claw migrate --preset user-data   # Migrate without secrets
-hermes claw migrate --overwrite  # Overwrite existing conflicts
-```
-
-What gets imported:
-
-- **SOUL.md** — persona file
-- **Memories** — MEMORY.md and USER.md entries
-- **Skills** — user-created skills → `~/.hermes/skills/openclaw-imports/`
-- **Command allowlist** — approval patterns
-- **Messaging settings** — platform configs, allowed users, working directory
-- **API keys** — allowlisted secrets (Telegram, OpenRouter, OpenAI, Anthropic, ElevenLabs)
-- **TTS assets** — workspace audio files
-- **Workspace instructions** — AGENTS.md (with `--workspace-target`)
-
-See `hermes claw migrate --help` for all options, or use the `openclaw-migration` skill for an interactive agent-guided migration with dry-run previews.
-
----
-
-## Contributing
-
-We welcome contributions! See the [Contributing Guide](website/docs/developer-guide/contributing.md) for development setup, code style, and PR process.
-
-Start with the [PM developer workflow](website/docs/reference/package-management.md#developer-workflow)
-for activation, daily use, dependency changes, and leaving the environment.
-[Development Setup](CONTRIBUTING.md#development-setup) covers the separate test environment and verification commands.
-
----
-
-## Community
-
-- 🐛 [Fork issues](https://github.com/majorissuerep/hermes-agent/issues) — report fork problems here, not upstream
-- 💬 [Upstream Discord](https://discord.gg/NousResearch) — Hermes Agent community (original product; fork-specific questions are off-topic there)
-- 📚 [Skills Hub](https://agentskills.io)
-- 🔌 [computer-use-linux](https://github.com/avifenesh/computer-use-linux) — Linux desktop-control MCP server for Hermes and other MCP hosts, with AT-SPI accessibility trees, Wayland/X11 input, screenshots, and compositor window targeting.
-- 🔌 [HermesClaw](https://github.com/AaronWong1999/hermesclaw) — Community WeChat bridge: Run Hermes Agent and OpenClaw on the same WeChat account.
-
----
+Documentation lives in [website/docs](website/docs/index.mdx). Upstream's published
+site describes upstream releases, not this fork. Product translations remain in
+`locales/`; the English repository guides are the maintained source of truth.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
-
-Hermes Agent is built by [Nous Research](https://nousresearch.com). This fork is maintained by [@majorissuerep](https://github.com/majorissuerep) and is not affiliated with or endorsed by Nous Research.
+[MIT](LICENSE). Original project by Nous Research; this fork is not affiliated with
+or endorsed by Nous Research.
