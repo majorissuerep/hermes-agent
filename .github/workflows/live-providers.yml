@@ -50,7 +50,8 @@ jobs:
         id: matrix
         shell: python
         run: |
-          import json, os
+          import json, os, sys
+          sys.path.insert(0, os.environ["GITHUB_WORKSPACE"])
           if os.environ["HAS_KEY"] != "true" or not os.environ["BASE_URL"] or not os.environ["MODEL"]:
               raise SystemExit("Configure a dedicated LIVE_<connection>_API_KEY secret and matching BASE_URL/MODEL variables. LiteLLM may use E2E_LLM_*.")
           from scripts.e2e.provider_matrix import CONNECTIONS
