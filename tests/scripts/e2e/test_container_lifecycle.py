@@ -66,6 +66,7 @@ def test_claimed_green_receipts_require_real_update_delegation_restore_and_revoc
                    "verified_hermes_calls": 3, "complete": True, "artifact_verified": True,
                    "executed_in_child": {"hermes config get agent.max_turns": True}},
                    "update": {"passphrase_prompts": 1},
+                   "reinstall-source-and-runtime": {"passphrase_prompts": 1},
                    "resume-candidate": {"passphrase_prompts": 1, "history_verified": True, "artifact_verified": True}},
                "update_status": {"outcome": "success", "followups": []}}
     receipt["provider_conversations"] = {mode: {"status": "passed", "kind": "live", "candidate": "new",

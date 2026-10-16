@@ -112,8 +112,9 @@ def verify_receipt(receipt: dict, scenario: str, provenance: dict) -> None:
     if scenario in {"dirty-install", "upstream-install"} and (receipt.get("legacy_state_verified") is not True
                                        or not receipt.get("legacy_state_hashes")):
         raise ValueError("dirty install must preserve pre-install config, memory and credentials")
-    if scenario == "reinstall" and receipt.get("installer_repair_verified") is not True:
-        raise ValueError("installer must repair damaged source and a missing runtime")
+    if scenario == "reinstall" and (receipt.get("installer_repair_verified") is not True
+            or receipt.get("checks", {}).get("reinstall-source-and-runtime", {}).get("passphrase_prompts") != 1):
+        raise ValueError("installer must repair damaged source and a missing runtime with exactly one unlock")
     if scenario == "upstream-install" and (not receipt.get("upstream_baseline")
             or not receipt.get("upstream_session_hash") or receipt.get("upstream_restore_verified") is not True
             or receipt.get("upstream_backup_verified") is not True):

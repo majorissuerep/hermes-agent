@@ -184,11 +184,11 @@ class Rehearsal:
                         data={"action": action, "password": self.password, **extra}, timeout=timeout)
         return json.loads(text.strip().splitlines()[-1])
 
-    def install(self, sha, *, name="install"):
+    def install(self, sha, *, name="install", prompts=0):
         self.run(name, ["bash", str(self.args.source / "scripts" / "install.sh"),
                              "--dir", str(self.code), "--hermes-home", str(self.home),
                              "--branch", "main", "--commit", sha,
-                             "--non-interactive", "--skip-browser", "--skip-computer-use"], timeout=2400)
+                             "--non-interactive", "--skip-browser", "--skip-computer-use"], prompts=prompts, timeout=2400)
         self.launcher = Path(self.env["HOME"]) / ".local" / "bin" / "hermes"
         if not self.launcher.is_file():
             raise RuntimeError("installer did not publish its launcher")
@@ -373,7 +373,7 @@ class Rehearsal:
             if not self.python.is_relative_to(self.root):
                 raise RuntimeError("refusing to damage a runtime outside the disposable installation")
             self.python.unlink()
-            self.install(self.args.candidate, name="reinstall-source-and-runtime")
+            self.install(self.args.candidate, name="reinstall-source-and-runtime", prompts=1)
             retained = self.run("verify-reinstall-work", ["git", "-C", str(self.code), "show",
                 "refs/stash^3:reinstall-untracked.txt"]).strip()
             if retained != "retain reinstall work":

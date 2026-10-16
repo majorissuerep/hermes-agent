@@ -74,7 +74,7 @@ gateway publicly just for testing.
 - Every leg provisions its own pinned Python/dependencies/tools through PM. No
   application runtime or state is preseeded in the OS image or reused across legs.
 - The public installer/updater uses exact-SHA local Git transport. No fake release
-  is published. Standalone updates must prompt exactly once; delegated local
+  is published. Standalone updates and encrypted reinstalls unlock exactly once; delegated local
   commands must not prompt. A new independent resumed session unlocks once.
 - Dirty-install checks compare actual pre-existing values before fixture seeding,
   and again after restoration and live config changes; mere file existence fails.
