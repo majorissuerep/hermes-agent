@@ -394,6 +394,12 @@ class Rehearsal:
         backup = self.workspace / "retained-backup.zip"
         self.run("full-backup", [str(self.launcher), "backup", "--output", str(backup)], prompts=1, timeout=180)
         self.probe("mutate-retained")
+        if self.args.scenario == "reinstall":
+            for name in ("config.yaml", ".env"):
+                (self.home / name).unlink()
+            self.install(self.args.candidate, name="reseed-missing-state", prompts=1)
+            self.probe("seeded-state-proof")
+            self.receipt["installer_state_reseed_verified"] = True
         self.run("import-full-backup", [str(self.launcher), "import", str(backup), "--force"], prompts=1, timeout=180)
         if self.probe("manifest") != expected:
             raise RuntimeError("encrypted full backup import changed semantic state")

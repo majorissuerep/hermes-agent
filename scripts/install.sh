@@ -196,6 +196,11 @@ quiet_output() {
         return 1
     fi
     # Before the Python owner unlocks, only console diagnostics are writable.
+    vaulted_install_home && return 1
+    [ -t 1 ]
+}
+
+vaulted_install_home() {
     local probe
     probe="$HERMES_HOME"
     while [ ! -d "$probe" ]; do
@@ -203,12 +208,12 @@ quiet_output() {
     done
     probe="$(cd "$probe" 2>/dev/null && pwd -P)" || probe=""
     while [ -n "$probe" ]; do
-        [ ! -f "$probe/.hermes-vault" ] || return 1
+        [ ! -f "$probe/.hermes-vault" ] || return 0
         [ "$probe" != / ] || break
         probe="${probe%/*}"
         [ -n "$probe" ] || probe=/
     done
-    [ -t 1 ]
+    return 1
 }
 
 status_line() {
@@ -979,6 +984,14 @@ stage_config() {
     mkdir -p "$HERMES_HOME"/cron "$HERMES_HOME"/sessions "$HERMES_HOME"/logs \
         "$HERMES_HOME"/pairing "$HERMES_HOME"/hooks "$HERMES_HOME"/image_cache \
         "$HERMES_HOME"/audio_cache "$HERMES_HOME"/memories "$HERMES_HOME"/skills
+    if vaulted_install_home; then
+        local boot_py
+        bootstrap_python
+        "$boot_py" -I -B "$INSTALL_DIR/hermes_cli/source_install_seed.py" "$HERMES_HOME" \
+            || fail "cannot seed encrypted config; existing state was retained" configuration_failed
+        log_success "config prepared in $HERMES_HOME"
+        return 0
+    fi
     if [ ! -f "$HERMES_HOME/.env" ]; then
         cp "$INSTALL_DIR/hermes_cli/data/env.example" "$HERMES_HOME/.env" 2>/dev/null || touch "$HERMES_HOME/.env"
     fi

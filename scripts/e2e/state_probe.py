@@ -321,13 +321,26 @@ def main() -> None:
             raise RuntimeError("resumed conversation did not persist its new tool activity")
         return {"history_verified": verified}
 
+    def seeded_state_proof():
+        import yaml
+
+        data = Path(__file__).resolve().parents[2] / "hermes_cli/data"
+        if read_raw_config() != yaml.safe_load((data / "config.yaml.example").read_text(encoding="utf-8")):
+            raise RuntimeError("missing config did not receive the packaged defaults")
+        if io.read_text(home / ".env", purpose="env") != (data / "env.example").read_text(encoding="utf-8"):
+            raise RuntimeError("missing secrets file did not receive the empty packaged seed")
+        for name in ("config.yaml", ".env"):
+            if not (home / name).read_bytes().startswith(b"HRMVAULT\x00"):
+                raise RuntimeError("installer seeded plaintext inside an encrypted home")
+        return {"encrypted_defaults_verified": True}
+
     handlers = {"seed": seed, "manifest": manifest, "snapshot": snapshot, "restore": restore,
                 "legacy-proof": legacy_proof, "resume-proof": resume_proof,
                 "clobber-state": clobber_state, "export-proof": export_proof,
                 "mutate-retained": mutate_retained, "mutate-legacy": mutate_legacy,
                 "upstream-proof": upstream_proof, "restore-upstream": restore_upstream, "host-facts": host_facts,
                 "update-status": update_status, "live-proof": live_proof, "diagnostics": diagnostics,
-                "stop-runtime": stop_runtime}
+                "stop-runtime": stop_runtime, "seeded-state-proof": seeded_state_proof}
     print(json.dumps(handlers[request["action"]](), sort_keys=True))
 
 

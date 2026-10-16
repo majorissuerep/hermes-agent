@@ -59,6 +59,7 @@ def test_claimed_green_receipts_require_real_update_delegation_restore_and_revoc
                "restore_verified": True, "cleanup_verified": True, "independent_locked_cli_rejected": True,
                "vault_repair_verified": True, "bulk_export_verified": True, "full_backup_verified": True,
                "installer_repair_verified": True,
+               "installer_state_reseed_verified": True,
                "upstream_baseline": "unmodified-upstream", "upstream_session_hash": {"messages": "retained"},
                "upstream_restore_verified": True, "upstream_backup_verified": True,
                "legacy_state_verified": True, "legacy_state_hashes": {"memory": "retained"},
@@ -67,6 +68,7 @@ def test_claimed_green_receipts_require_real_update_delegation_restore_and_revoc
                    "executed_in_child": {"hermes config get agent.max_turns": True}},
                    "update": {"passphrase_prompts": 1},
                    "reinstall-source-and-runtime": {"passphrase_prompts": 1},
+                   "reseed-missing-state": {"passphrase_prompts": 1},
                    "enable-provider-dialects": {"passphrase_prompts": 1},
                    "resume-candidate": {"passphrase_prompts": 1, "history_verified": True, "artifact_verified": True}},
                "update_status": {"outcome": "success", "followups": []}}
@@ -83,6 +85,8 @@ def test_claimed_green_receipts_require_real_update_delegation_restore_and_revoc
         mutations.append(("legacy_state_verified", False))
     if scenario == "reinstall":
         mutations.append(("installer_repair_verified", False))
+        mutations.append(("installer_state_reseed_verified", False))
+        mutations.append(("checks", {k: v for k, v in receipt["checks"].items() if k != "reseed-missing-state"}))
     if scenario == "fresh":
         mutations.append(("provider_conversations", {}))
         mutations.append(("checks", {k: v for k, v in receipt["checks"].items()

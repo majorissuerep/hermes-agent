@@ -62,6 +62,9 @@ For damaged dependencies use `hermes pm repair`; for supported plaintext-writer
 or wrapped-database damage use `hermes secure-vault repair`. A nonzero repair
 result means data still needs recovery, not permission to reset it. Saved
 snapshots and other profiles must remain untouched.
+Rerunning the source installer can recreate missing config/secrets files as
+encrypted defaults, but cannot recover their deleted contents. Restore those
+values from a retained backup; never overwrite an existing unreadable file.
 
 For an explicitly requested bulk recovery/migration, use
 `hermes secure-vault export --output /path/outside-hermes/recovery.tar` through

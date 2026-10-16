@@ -12,7 +12,7 @@ runs Hermes, unlocks a real home, or mounts personal files into a test.
 | `update` | OLD fork commit → exact candidate, one update unlock, retained state |
 | `broken-files` | Damaged tracked source repaired; unrelated untracked work preserved |
 | `dirty-install` | Existing plaintext settings, secret, memory and obsolete launcher survive reinstall and encryption |
-| `reinstall` | Rerun the source installer after deleting a CLI module and its runtime interpreter; preserve unrelated local work |
+| `reinstall` | Repair a deleted CLI module/runtime interpreter; reseed missing config/secrets as ciphertext, then restore their original values from backup; preserve unrelated local work |
 | `upstream-install` | Install an actual pinned upstream Hermes first; preserve its settings, credentials, conversation and pre-encryption snapshot when moving to this fork |
 
 Each case exercises real encrypted settings, credential resolution, session DB

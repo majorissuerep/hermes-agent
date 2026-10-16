@@ -47,6 +47,9 @@ and restore a known-good snapshot through `/snapshot` in the CLI.
 If source or the interpreter is missing, rerun this fork's source installer
 against the **same** installation/home. The installer retains local work in Git
 recovery refs/stashes. Do not delete the state home to make installation succeed.
+Missing config/secrets files receive encrypted, empty defaults after the unlock;
+existing files are never replaced. Defaults cannot reconstruct deleted values:
+restore their original settings and credentials from a retained backup.
 
 ## Restore a retained backup
 

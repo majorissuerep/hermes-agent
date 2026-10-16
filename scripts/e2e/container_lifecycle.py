@@ -115,6 +115,9 @@ def verify_receipt(receipt: dict, scenario: str, provenance: dict) -> None:
     if scenario == "reinstall" and (receipt.get("installer_repair_verified") is not True
             or receipt.get("checks", {}).get("reinstall-source-and-runtime", {}).get("passphrase_prompts") != 1):
         raise ValueError("installer must repair damaged source and a missing runtime with exactly one unlock")
+    if scenario == "reinstall" and (receipt.get("installer_state_reseed_verified") is not True
+            or receipt.get("checks", {}).get("reseed-missing-state", {}).get("passphrase_prompts") != 1):
+        raise ValueError("installer must seed missing encrypted state with one unlock before backup restoration")
     if scenario == "upstream-install" and (not receipt.get("upstream_baseline")
             or not receipt.get("upstream_session_hash") or receipt.get("upstream_restore_verified") is not True
             or receipt.get("upstream_backup_verified") is not True):

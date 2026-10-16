@@ -521,15 +521,15 @@ def _secure_file(path):
 
 
 def seed_config_file(config_path: Path, template: Optional[Path] = None) -> bool:
-    """Create a missing config.yaml the way the installers do: copy hermes_cli/data/config.yaml.example (the display keys
-    there are commented out), else write stripped DEFAULT_CONFIG. Never DEFAULT_CONFIG verbatim -- the gateway
-    merges no defaults, so every written display key becomes a global that beats each platform's own default
-    (#121230). Shared by ``hermes config edit`` and ``hermes doctor --fix`` so the seeders cannot drift.
-    Returns True when the template was copied (the fallback, like save_config, writes get_config_path())."""
+    """Seed a missing config without imposing global display overrides (#121230).
+    Returns True for the template; the fallback writes get_config_path()."""
     template = template or get_project_root() / "hermes_cli/data/config.yaml.example"
     config_path.parent.mkdir(parents=True, exist_ok=True)
     if template.exists():
-        shutil.copy2(template, config_path)
+        if _hermes_io()._home_for(config_path) is not None:
+            atomic_config_write(config_path, yaml.safe_load(template.read_text(encoding="utf-8")))
+        else:
+            shutil.copy2(template, config_path)
         _secure_file(config_path)
         return True
     save_config(DEFAULT_CONFIG)
