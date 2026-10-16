@@ -57,11 +57,16 @@ def envelope_operation(operation: str, path: str, payload: str, purpose: str) ->
 
 def adopt_keys() -> None:
     """Called after activating the selected interpreter, before state readers."""
-    if has_owner():
-        from hermes_security.vault import adopt_unlocked_key
+    if not has_owner():
+        if os.environ.get("HERMES_VAULT_KEY_FD") or os.environ.get("HERMES_SESSION_VAULT"):
+            from hermes_security.handoff import adopt_inherited_key
 
-        for entry in _keys:
-            adopt_unlocked_key(entry["home"], base64.b64decode(entry["key"], validate=True))
+            adopt_inherited_key()
+        return
+    from hermes_security.vault import adopt_unlocked_key
+
+    for entry in _keys:
+        adopt_unlocked_key(entry["home"], base64.b64decode(entry["key"], validate=True))
 
 
 def _serve(connection, keys, vault_module, inherited):

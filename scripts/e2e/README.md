@@ -147,7 +147,9 @@ OS/architecture, compaction, token totals, resume and disposable-home cleanup.
 One gateway/model does not qualify another vendor or a subscription account.
 
 The cold `fresh` lifecycle leg also runs all three LiteLLM conversation formats
-when LiteLLM is selected. Its strict receipt must include every live dialect,
+when LiteLLM is selected. It enables the optional Anthropic SDK through public
+`hermes pm install --extra anthropic` and reselects the managed interpreter first.
+Its strict receipt must include that provisioning step and every live dialect,
 compaction, encrypted persistence and resume result. This permits real gateway
 qualification inside private-network pods without exposing the gateway publicly.
 

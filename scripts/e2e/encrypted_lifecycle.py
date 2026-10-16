@@ -264,6 +264,9 @@ class Rehearsal:
         """Qualify every promised gateway dialect inside the same isolated OS environment."""
         from scripts.e2e.provider_matrix import CONNECTIONS
 
+        self.run("enable-provider-dialects", [str(self.launcher), "pm", "install", "--extra", "anthropic"],
+                 prompts=1, timeout=900)
+        self.resolve_python()
         proofs = {}
         for mode in CONNECTIONS["litellm"].modes:
             evidence = self.workspace / ("provider-" + mode)

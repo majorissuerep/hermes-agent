@@ -67,6 +67,7 @@ def test_claimed_green_receipts_require_real_update_delegation_restore_and_revoc
                    "executed_in_child": {"hermes config get agent.max_turns": True}},
                    "update": {"passphrase_prompts": 1},
                    "reinstall-source-and-runtime": {"passphrase_prompts": 1},
+                   "enable-provider-dialects": {"passphrase_prompts": 1},
                    "resume-candidate": {"passphrase_prompts": 1, "history_verified": True, "artifact_verified": True}},
                "update_status": {"outcome": "success", "followups": []}}
     receipt["provider_conversations"] = {mode: {"status": "passed", "kind": "live", "candidate": "new",
@@ -84,6 +85,8 @@ def test_claimed_green_receipts_require_real_update_delegation_restore_and_revoc
         mutations.append(("installer_repair_verified", False))
     if scenario == "fresh":
         mutations.append(("provider_conversations", {}))
+        mutations.append(("checks", {k: v for k, v in receipt["checks"].items()
+                                      if k != "enable-provider-dialects"}))
     if scenario == "upstream-install":
         mutations.append(("upstream_session_hash", None))
         mutations.append(("upstream_restore_verified", False))

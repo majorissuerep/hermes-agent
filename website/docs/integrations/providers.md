@@ -80,6 +80,10 @@ Use `anthropic_messages` for a custom Anthropic Messages endpoint,
 that actually supports OpenAI Responses. A provider URL is not an API credential.
 Local OpenAI-compatible servers are custom endpoints, not separate bundled vendors.
 
+Before first use of an Anthropic Messages route, prepare its optional SDK with
+`hermes pm install --extra anthropic`, then start a new session. This applies to
+Anthropic, custom Anthropic endpoints, and gateways using `anthropic_messages`.
+
 ## Context length detection
 
 Hermes resolves context capacity from the selected provider/model catalog and

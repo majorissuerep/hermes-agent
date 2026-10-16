@@ -1051,6 +1051,69 @@ run_stage() (
     esac
 )
 
+run_install_session() {
+    local boot_py
+    local args=(--dir "$INSTALL_DIR" --hermes-home "$HERMES_HOME" --branch "$BRANCH")
+    [ -z "$INSTALL_COMMIT" ] || args+=(--commit "$INSTALL_COMMIT")
+    [ "$NON_INTERACTIVE" != true ] || args+=(--non-interactive)
+    [ "$INCLUDE_DESKTOP" != true ] || args+=(--include-desktop)
+    [ "$SKIP_BROWSER" != true ] || args+=(--skip-browser)
+    [ "$SKIP_COMPUTER_USE" != true ] || args+=(--skip-computer-use)
+    [ "$VERBOSE" != true ] || args+=(--verbose)
+    [ "$JSON" != true ] || args+=(--json)
+    bootstrap_python
+    "$boot_py" -I -B "$INSTALL_DIR/hermes_cli/source_install_session.py" \
+        bash -c 'source "$1" --manifest "${@:4}"
+            INSTALL_RUN_ID="$2"
+            INSTALL_STARTED="$3"
+            run_install_ladder python-deps' hermes-install-session \
+        "$INSTALL_DIR/scripts/install.sh" "$INSTALL_RUN_ID" "$INSTALL_STARTED" "${args[@]}"
+}
+
+run_install_ladder() {
+    local first="${1:-prerequisites}" started=false delegated=false s rc
+    INSTALL_LADDER=true
+    trap 'install_signal INT' INT
+    trap 'install_signal TERM' TERM
+    trap 'install_signal HUP' HUP
+    for s in $(stage_names); do
+        [ "$s" != "$first" ] || started=true
+        [ "$started" = true ] || continue
+        [ -z "$INSTALL_SIGNAL" ] || install_interrupted
+        INSTALL_IN_STAGE=true
+        # Old --commit targets predate this owner. Keep their staged protocol.
+        if [ "$first" = prerequisites ] && [ "$s" = python-deps ] \
+            && [ -f "$INSTALL_DIR/hermes_cli/source_install_session.py" ]; then
+            delegated=true
+            run_install_session
+        else
+            run_stage "$s"
+        fi
+        rc=$?
+        INSTALL_IN_STAGE=false
+        if [ "$rc" -eq 0 ]; then
+            [ "$INSTALL_SIGNAL" != INT ] || INSTALL_SIGNAL=""
+            if [ "$delegated" = true ]; then
+                [ -z "$INSTALL_SIGNAL" ] || install_interrupted
+                return 0
+            fi
+            continue
+        fi
+        case "$rc" in
+            129) INSTALL_SIGNAL="${INSTALL_SIGNAL:-HUP}" ;;
+            130) INSTALL_SIGNAL="${INSTALL_SIGNAL:-INT}" ;;
+            143) INSTALL_SIGNAL="${INSTALL_SIGNAL:-TERM}" ;;
+        esac
+        [ -z "$INSTALL_SIGNAL" ] || install_interrupted
+        write_install_receipt failed "${s//-/_}" other
+        return "$rc"
+    done
+    write_install_receipt success none none
+    [ -z "$INSTALL_SIGNAL" ] || install_interrupted
+    trap - INT TERM HUP
+    print_path_reload_hint
+}
+
 # Main. Guarded so the script can be SOURCED for its functions (the
 # installer-test harness sources it with --manifest, which must define
 # the functions and stop before main). Under `curl | bash` BASH_SOURCE is
@@ -1087,31 +1150,6 @@ if [ "${BASH_SOURCE[0]:-$0}" = "$0" ]; then
     # No --stage: run the whole ladder — the same authoritative list the
     # manifest prints, so --include-desktop inserts desktop here too.
     print_banner
-    for s in $(stage_names); do
-        # A TERM/HUP noted while the previous stage ran stops the run before this one.
-        [ -z "$INSTALL_SIGNAL" ] || install_interrupted
-        INSTALL_IN_STAGE=true
-        run_stage "$s"
-        rc=$?
-        INSTALL_IN_STAGE=false
-        if [ "$rc" -eq 0 ]; then
-            # The stage succeeded, so a Ctrl-C it saw was handled there: carry on.
-            [ "$INSTALL_SIGNAL" != INT ] || INSTALL_SIGNAL=""
-            continue
-        fi
-        case "$rc" in
-            129) INSTALL_SIGNAL="${INSTALL_SIGNAL:-HUP}" ;;
-            130) INSTALL_SIGNAL="${INSTALL_SIGNAL:-INT}" ;;
-            143) INSTALL_SIGNAL="${INSTALL_SIGNAL:-TERM}" ;;
-        esac
-        [ -z "$INSTALL_SIGNAL" ] || install_interrupted
-        # The stage normally wrote its receipt; one killed outright (SIGKILL, OOM) did not.
-        write_install_receipt failed "${s//-/_}" other
-        exit "$rc"
-    done
-    write_install_receipt success none none
-    # Every stage finished: the receipt says success, and a pending TERM/HUP still ends the run.
-    [ -z "$INSTALL_SIGNAL" ] || install_interrupted
-    trap - INT TERM HUP
-    print_path_reload_hint
+    run_install_ladder
+    exit "$?"
 fi

@@ -125,6 +125,8 @@ def verify_provider_conversations(receipt):
     from scripts.e2e.provider_matrix import CONNECTIONS
     from scripts.e2e.provider_conversation import TURNS
 
+    if receipt.get("checks", {}).get("enable-provider-dialects", {}).get("passphrase_prompts") != 1:
+        raise ValueError("gateway dialect dependencies were not enabled through the public encrypted CLI")
     proofs = receipt.get("provider_conversations", {})
     for mode in CONNECTIONS["litellm"].modes:
         proof = proofs.get(mode, {})
