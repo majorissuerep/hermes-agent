@@ -81,6 +81,16 @@ jobs:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a # v7.0.1
         with:
           persist-credentials: false
+      - name: Check endpoint DNS and TLS before provisioning a runtime
+        env:
+          BASE_URL: ${{ vars[format('LIVE_{0}_BASE_URL', inputs.connection)] || (inputs.connection == 'litellm' && vars.E2E_LLM_BASE_URL) || '' }}
+          PROVIDER: ${{ needs.select.outputs.provider }}
+        run: |
+          python3 - <<'PY'
+          import os
+          from scripts.e2e.encrypted_lifecycle import ensure_gateway_reachable
+          ensure_gateway_reachable({"provider": os.environ["PROVIDER"], "base_url": os.environ["BASE_URL"]})
+          PY
       - name: Install locked runtime before exposing the test credential
         uses: ./.github/actions/setup-pm
         with:

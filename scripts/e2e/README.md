@@ -146,4 +146,9 @@ receipts identify the exact commit, harness, endpoint host, model, protocol, nat
 OS/architecture, compaction, token totals, resume and disposable-home cleanup.
 One gateway/model does not qualify another vendor or a subscription account.
 
+The cold `fresh` lifecycle leg also runs all three LiteLLM conversation formats
+when LiteLLM is selected. Its strict receipt must include every live dialect,
+compaction, encrypted persistence and resume result. This permits real gateway
+qualification inside private-network pods without exposing the gateway publicly.
+
 See the [reliability contract](../../website/docs/developer-guide/reliability.md).

@@ -16,6 +16,18 @@ def digest(value) -> str:
     return hashlib.sha256(json.dumps(value, sort_keys=True, default=str).encode()).hexdigest()
 
 
+def host_facts():
+    from hermes_platform.host.facts import os_family, native_arch, process_arch
+    from importlib.metadata import PackageNotFoundError, version
+
+    try:
+        relay = version("nemo-relay")
+    except PackageNotFoundError:
+        relay = None  # no NeMo wheel on Intel macOS; the supported Python runtime owns this path
+    return {"os": os_family(), "native_arch": native_arch(), "process_arch": process_arch(),
+            "python": sys.version.split()[0], "nemo_relay": relay}
+
+
 def main() -> None:
     request = json.load(sys.stdin)
     from hermes_constants import get_hermes_home
@@ -228,12 +240,6 @@ def main() -> None:
         if not restore_quick_snapshot(request["snapshot"], hermes_home=home):
             raise RuntimeError("pre-encryption upstream snapshot could not be restored")
         return {"legacy": legacy_proof(), "session": upstream_proof()}
-
-    def host_facts():
-        from hermes_platform.host.facts import os_family, native_arch, process_arch
-        from importlib.metadata import version
-        return {"os": os_family(), "native_arch": native_arch(), "process_arch": process_arch(),
-                "python": sys.version.split()[0], "nemo_relay": version("nemo-relay")}
 
     def update_status():
         from hermes_cli.update_receipt import read_latest_receipt

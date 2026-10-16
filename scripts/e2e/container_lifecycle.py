@@ -90,6 +90,10 @@ def verify_receipt(receipt: dict, scenario: str, provenance: dict) -> None:
             or receipt.get("vault_repair_verified") is not True or receipt.get("bulk_export_verified") is not True
             or receipt.get("full_backup_verified") is not True):
         raise ValueError("lifecycle receipt is incomplete, failed, cached or for another revision")
+    if not receipt.get("live_provider"):
+        raise ValueError("lifecycle receipt must identify the live connection")
+    if scenario == "fresh" and receipt["live_provider"] == "litellm":
+        verify_provider_conversations(receipt)
     live = receipt.get("checks", {}).get("live-candidate", {})
     if (live.get("passphrase_prompts") != 1 or live.get("child_sessions", 0) < 1
             or live.get("verified_hermes_calls") != 3 or not live.get("complete")
@@ -114,6 +118,22 @@ def verify_receipt(receipt: dict, scenario: str, provenance: dict) -> None:
             or not receipt.get("upstream_session_hash") or receipt.get("upstream_restore_verified") is not True
             or receipt.get("upstream_backup_verified") is not True):
         raise ValueError("upstream migration must preserve its original conversation and recovery point")
+
+
+def verify_provider_conversations(receipt):
+    from scripts.e2e.provider_matrix import CONNECTIONS
+    from scripts.e2e.provider_conversation import TURNS
+
+    proofs = receipt.get("provider_conversations", {})
+    for mode in CONNECTIONS["litellm"].modes:
+        proof = proofs.get(mode, {})
+        if (proof.get("status") != "passed" or proof.get("kind") != "live"
+                or proof.get("candidate") != receipt["candidate"] or proof.get("api_mode") != mode
+                or proof.get("provider") != "litellm" or proof.get("model") != receipt["model"]
+                or proof.get("turns") != TURNS or proof.get("archived_rows", 0) <= 0
+                or any(proof.get(key) is not True for key in (
+                    "resume_verified", "encrypted_state_verified", "cleanup_verified"))):
+            raise ValueError("gateway conversation qualification is incomplete or for another connection/revision")
 
 
 class Container:
@@ -331,4 +351,5 @@ def main():
 
 
 if __name__ == "__main__":
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
     main()

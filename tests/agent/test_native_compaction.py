@@ -601,7 +601,7 @@ class TestPrunePreCheckpointItems:
 
 
 # The ChatGPT Codex backend route sends text as typed parts (#51512); the checks below only care that history survives.
-_CODEX_ON_IT = [{"type": "output_text", "text": "on it"}]
+_CODEX_ON_IT = [{"type": "output_text", "text": "on it", "annotations": []}]
 
 
 class TestCheckpointGatedOnCurrentEligibility:
@@ -653,7 +653,7 @@ class TestCheckpointGatedOnCurrentEligibility:
         assert items == pre_feature
         # Specifically: no checkpoint on the wire, no deleted history.
         assert all(i.get("type") != "compaction" for i in items)
-        assert {"type": "message", "role": "assistant", "content": _CODEX_ON_IT} in items
+        assert {"type": "message", "role": "assistant", "status": "completed", "content": _CODEX_ON_IT} in items
 
     def test_eligible_request_still_restructures(self):
         from agent.codex_responses_adapter import _chat_messages_to_responses_input
@@ -664,7 +664,7 @@ class TestCheckpointGatedOnCurrentEligibility:
             native_compaction_eligible=True,
         )
         assert items[0]["type"] == "compaction"
-        assert {"role": "assistant", "content": "on it"} not in items
+        assert {"type": "message", "role": "assistant", "status": "completed", "content": _CODEX_ON_IT} not in items
 
     def test_converter_defaults_to_ineligible(self):
         from agent.codex_responses_adapter import _chat_messages_to_responses_input
@@ -697,7 +697,7 @@ class TestCheckpointGatedOnCurrentEligibility:
             context_management=[{"type": "compaction", "compact_threshold": 4000}],
         )
         assert kwargs["input"][0]["type"] == "compaction"
-        assert {"role": "assistant", "content": "on it"} not in kwargs["input"]
+        assert {"type": "message", "role": "assistant", "status": "completed", "content": _CODEX_ON_IT} not in kwargs["input"]
 
     def test_convert_messages_defaults_to_ineligible(self):
         from agent.transports.codex import ResponsesApiTransport
@@ -706,7 +706,7 @@ class TestCheckpointGatedOnCurrentEligibility:
             self._history(), is_codex_backend=True
         )
         assert all(i.get("type") != "compaction" for i in items)
-        assert {"type": "message", "role": "assistant", "content": _CODEX_ON_IT} in items
+        assert {"type": "message", "role": "assistant", "status": "completed", "content": _CODEX_ON_IT} in items
 
     def test_auxiliary_responses_adapter_never_prunes(self, monkeypatch):
         """Auxiliary calls (compression, flush_memories, MoA) replay real
@@ -744,4 +744,4 @@ class TestCheckpointGatedOnCurrentEligibility:
 
         assert seen.get("native_compaction_eligible") is False
         assert all(i.get("type") != "compaction" for i in seen["input"])
-        assert {"type": "message", "role": "assistant", "content": _CODEX_ON_IT} in seen["input"]
+        assert {"type": "message", "role": "assistant", "status": "completed", "content": _CODEX_ON_IT} in seen["input"]

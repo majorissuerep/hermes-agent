@@ -187,10 +187,8 @@ def main():
         receipt["cleanup_verified"] = True
         receipt["candidate"] = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True, timeout=15).strip()
         receipt["harness_sha256"] = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
-        from hermes_platform.host.facts import os_family, native_arch, process_arch
-        from importlib.metadata import version
-        receipt["host"] = {"os": os_family(), "native_arch": native_arch(), "process_arch": process_arch(),
-                           "python": sys.version.split()[0], "nemo_relay": version("nemo-relay")}
+        from scripts.e2e.state_probe import host_facts
+        receipt["host"] = host_facts()
     finally:
         (args.evidence / "receipt.json").write_text(json.dumps(receipt, indent=2) + "\n")
     print(json.dumps(receipt, sort_keys=True))

@@ -260,6 +260,19 @@ class Rehearsal:
             raise RuntimeError("independent CLI failed for something other than the expected locked-vault gate")
         self.receipt["independent_locked_cli_rejected"] = True
 
+    def provider_conversations(self):
+        """Qualify every promised gateway dialect inside the same isolated OS environment."""
+        from scripts.e2e.provider_matrix import CONNECTIONS
+
+        proofs = {}
+        for mode in CONNECTIONS["litellm"].modes:
+            evidence = self.workspace / ("provider-" + mode)
+            self.run("conversation-" + mode, [str(self.python), "-m", "scripts.e2e.provider_conversation",
+                     "--evidence", str(evidence)], cwd=self.code,
+                     data={**self.credential, "api_mode": mode}, timeout=900)
+            proofs[mode] = json.loads((evidence / "receipt.json").read_text())
+        self.receipt["provider_conversations"] = proofs
+
     def prepare_transport(self):
         if self.args.transport_url:
             url = self.args.transport_url
@@ -407,6 +420,8 @@ class Rehearsal:
         self.live("candidate")
         self.resume()
         self.reject_independent_cli()
+        if self.args.scenario == "fresh" and self.credential["provider"] == "litellm":
+            self.provider_conversations()
         self.probe("manifest")
         if self.args.scenario in {"dirty-install", "upstream-install"}:
             self.probe("legacy-proof", nonce=self.legacy_nonce, max_turns=23)
@@ -488,4 +503,5 @@ def main():
 
 
 if __name__ == "__main__":
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
     main()

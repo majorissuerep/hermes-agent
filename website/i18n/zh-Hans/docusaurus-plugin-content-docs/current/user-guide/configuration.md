@@ -74,7 +74,7 @@ delegation:
 
 单个值中可以有多个引用：`url: "${HOST}:${PORT}"`。如果引用的变量未设置，占位符将保持原样（`${UNDEFINED_VAR}` 保持不变）。仅支持 `${VAR}` 语法 —— 裸 `$VAR` 不会被展开。
 
-关于 AI provider 设置（OpenRouter、Anthropic、Copilot、自定义端点、自托管 LLM、回退模型等），请参阅 [AI Providers](../integrations/providers.md)。
+关于支持的 ChatGPT、Anthropic、OpenAI、LiteLLM、自定义端点、Z.AI、Grok 和 Vercel 连接，请参阅 [AI Providers](../integrations/providers.md)。
 
 ### Provider 超时
 
@@ -82,7 +82,7 @@ delegation:
 
 还可以设置 `providers.<id>.stale_timeout_seconds` 用于非流式陈旧调用检测器，以及 `providers.<id>.models.<model>.stale_timeout_seconds` 作为特定模型的覆盖值。此值优先于旧版 `HERMES_API_CALL_STALE_TIMEOUT` 环境变量。
 
-不设置这些值将保持旧版默认值（`HERMES_API_TIMEOUT=1800`s、`HERMES_API_CALL_STALE_TIMEOUT=90`s、原生 Anthropic 900s）。隐式的非流式 stale 检测会在本地端点上自动禁用，并且会在超大上下文下自动放宽。目前不适用于 AWS Bedrock（`bedrock_converse` 和 AnthropicBedrock SDK 路径均使用 boto3 及其自身的超时配置）。请参阅 [`hermes_cli/data/config.yaml.example`](https://github.com/majorissuerep/hermes-agent/blob/main/hermes_cli/data/config.yaml.example) 中的注释示例。
+不设置这些值将保持旧版默认值（`HERMES_API_TIMEOUT=1800`s、`HERMES_API_CALL_STALE_TIMEOUT=90`s、原生 Anthropic 900s）。隐式的非流式 stale 检测会在本地端点上自动禁用，并且会在超大上下文下自动放宽。使用 `hermes config set providers.<id>.request_timeout_seconds <seconds>` 设置覆盖值。[初始配置](https://github.com/majorissuerep/hermes-agent/blob/main/hermes_cli/data/config.yaml.example) 刻意省略高级默认值。
 
 ## 终端后端配置
 

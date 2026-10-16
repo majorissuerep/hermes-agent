@@ -8,6 +8,7 @@ import tarfile
 import pytest
 
 from scripts.e2e.container_lifecycle import SCENARIOS, export_source, verify_receipt
+from scripts.e2e.provider_matrix import CONNECTIONS
 
 
 def test_source_export_is_self_contained_and_excludes_host_files_and_configuration(tmp_path):
@@ -54,6 +55,7 @@ def test_source_export_is_self_contained_and_excludes_host_files_and_configurati
 def test_claimed_green_receipts_require_real_update_delegation_restore_and_revocation(scenario):
     provenance = {"baseline": "old", "candidate": "new", "harness_sha256": "exact-harness"}
     receipt = {**provenance, "status": "passed", "scenario": scenario, "tool_cache_reused": False,
+               "live_provider": "litellm", "model": "selected-model",
                "restore_verified": True, "cleanup_verified": True, "independent_locked_cli_rejected": True,
                "vault_repair_verified": True, "bulk_export_verified": True, "full_backup_verified": True,
                "installer_repair_verified": True,
@@ -66,14 +68,21 @@ def test_claimed_green_receipts_require_real_update_delegation_restore_and_revoc
                    "update": {"passphrase_prompts": 1},
                    "resume-candidate": {"passphrase_prompts": 1, "history_verified": True, "artifact_verified": True}},
                "update_status": {"outcome": "success", "followups": []}}
+    receipt["provider_conversations"] = {mode: {"status": "passed", "kind": "live", "candidate": "new",
+        "api_mode": mode, "provider": "litellm", "model": "selected-model", "turns": 8, "archived_rows": 1,
+        "resume_verified": True, "encrypted_state_verified": True, "cleanup_verified": True}
+        for mode in CONNECTIONS["litellm"].modes}
     verify_receipt(receipt, scenario, provenance)
     mutations = [("candidate", "another-head"), ("restore_verified", False), ("cleanup_verified", False),
+                 ("live_provider", None),
                  ("vault_repair_verified", False), ("bulk_export_verified", False), ("full_backup_verified", False),
                  ("tool_cache_reused", True), ("independent_locked_cli_rejected", False), ("checks", {})]
     if scenario in {"dirty-install", "upstream-install"}:
         mutations.append(("legacy_state_verified", False))
     if scenario == "reinstall":
         mutations.append(("installer_repair_verified", False))
+    if scenario == "fresh":
+        mutations.append(("provider_conversations", {}))
     if scenario == "upstream-install":
         mutations.append(("upstream_session_hash", None))
         mutations.append(("upstream_restore_verified", False))
