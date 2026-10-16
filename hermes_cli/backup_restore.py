@@ -558,6 +558,9 @@ def _extract_member_atomically(
                 shutil.copyfileobj(src, dst)
             dst.flush()
             os.fsync(dst.fileno())
+        from hermes_cli.backup_vault_import import prepare_import_file
+
+        prepare_import_file(Path(tmp_name), target)
         real_path = Path(atomic_replace(tmp_name, target))
         # Owner first, mode second — the ordering ``atomic_yaml_write`` uses,
         # because chown drops setuid/setgid and a mode restore that ran first
@@ -670,6 +673,9 @@ def _import_db_member_exclusive(
                 shutil.copyfileobj(src, dst)
             dst.flush()
             os.fsync(dst.fileno())
+        from hermes_cli.backup_vault_import import prepare_import_file
+
+        prepare_import_file(Path(tmp_name), target)
         if not _safe_restore_db(Path(tmp_name), target):
             from hermes_cli.backup import verify_sqlite_integrity
 

@@ -48,6 +48,26 @@ If source or the interpreter is missing, rerun this fork's source installer
 against the **same** installation/home. The installer retains local work in Git
 recovery refs/stashes. Do not delete the state home to make installation succeed.
 
+## Restore a retained backup
+
+Quick snapshots and full ZIP backups created before enabling encryption remain
+restorable in that same home. A legacy ZIP stored inside the home may itself be
+encrypted; Hermes reads it through the unlocked vault without rewriting it.
+
+```sh
+hermes import /path/to/retained.zip --force
+```
+
+Plaintext legacy settings, secrets and databases are authenticated/converted in
+private staging before publication; restored state remains encrypted. SQLCipher
+database contents and header metadata are verified, and complete log streams are
+retained. Existing encrypted backups for the same vault work too. An import that
+cannot restore a file returns failure instead of reporting complete recovery.
+
+Import refuses different vault metadata before replacing any files. Do not overlay
+another vault on a live home. For cross-vault migration, use the verified plaintext
+export below and re-encrypt a separate copy with its own credential.
+
 ## Bulk decryption for recovery or migration
 
 Close chats and stop the profile's gateway before making an offline recovery

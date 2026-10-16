@@ -175,6 +175,16 @@ def main() -> None:
         io.write_bytes(path, path.read_bytes() + b"old plaintext writer\n", purpose="state")
         return {"clobbered": True}
 
+    def mutate_retained():
+        save_config({"agent": {"max_turns": 3}}, merge_existing=True)
+        save_env_value("E2E_RETAINED_SECRET", "deliberate-mutation")
+        return {"mutated": True}
+
+    def mutate_legacy():
+        save_config({"agent": {"max_turns": 3}}, merge_existing=True)
+        save_env_value("E2E_LEGACY_SECRET", "deliberate-mutation")
+        return {"mutated": True}
+
     def export_proof():
         import tarfile
         from hermes_constants import set_hermes_home_override, reset_hermes_home_override
@@ -308,6 +318,7 @@ def main() -> None:
     handlers = {"seed": seed, "manifest": manifest, "snapshot": snapshot, "restore": restore,
                 "legacy-proof": legacy_proof, "resume-proof": resume_proof,
                 "clobber-state": clobber_state, "export-proof": export_proof,
+                "mutate-retained": mutate_retained, "mutate-legacy": mutate_legacy,
                 "upstream-proof": upstream_proof, "restore-upstream": restore_upstream, "host-facts": host_facts,
                 "update-status": update_status, "live-proof": live_proof, "diagnostics": diagnostics,
                 "stop-runtime": stop_runtime}

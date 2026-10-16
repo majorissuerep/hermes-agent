@@ -302,6 +302,9 @@ class Rehearsal:
                       "db.append_message('e2e-upstream', 'user', r['nonce']); "
                       "db.append_message('e2e-upstream', 'assistant', 'retained upstream answer'); db.close(); "
                       "from hermes_cli.backup import create_quick_snapshot; "
+                      "from hermes_cli.backup import run_backup; from argparse import Namespace; "
+                      "from hermes_constants import get_hermes_home; "
+                      "run_backup(Namespace(output=str(get_hermes_home()/'backups'/'upstream-retained.zip'))); "
                       "print(json.dumps({'snapshot': create_quick_snapshot(label='upstream-retained')}))")
             seeded = self.run("seed-upstream-session", [str(self.python), "-c", script],
                               cwd=self.code, data={"nonce": self.legacy_nonce})
@@ -325,6 +328,13 @@ class Rehearsal:
                     or restored["session"] != self.receipt["upstream_session_hash"]):
                 raise RuntimeError("pre-encryption upstream recovery point changed retained state")
             self.receipt["upstream_restore_verified"] = True
+            self.probe("mutate-legacy")
+            self.run("import-upstream-backup", [str(self.launcher), "import",
+                     str(self.home / "backups" / "upstream-retained.zip"), "--force"], prompts=1, timeout=180)
+            if (self.probe("legacy-proof", nonce=self.legacy_nonce, max_turns=37) != self.receipt["legacy_state_hashes"]
+                    or self.probe("upstream-proof", nonce=self.legacy_nonce) != self.receipt["upstream_session_hash"]):
+                raise RuntimeError("pre-encryption upstream full backup changed retained state")
+            self.receipt["upstream_backup_verified"] = True
         self.probe("seed", credential=self.credential, workspace=str(self.workspace), resume_token=self.resume_token)
 
     def advance_install(self):
@@ -365,6 +375,13 @@ class Rehearsal:
         snapshot = self.probe("snapshot")["snapshot"]
         if self.probe("restore", snapshot=snapshot) != expected:
             raise RuntimeError("snapshot restore changed semantic state")
+        backup = self.workspace / "retained-backup.zip"
+        self.run("full-backup", [str(self.launcher), "backup", "--output", str(backup)], prompts=1, timeout=180)
+        self.probe("mutate-retained")
+        self.run("import-full-backup", [str(self.launcher), "import", str(backup), "--force"], prompts=1, timeout=180)
+        if self.probe("manifest") != expected:
+            raise RuntimeError("encrypted full backup import changed semantic state")
+        self.receipt["full_backup_verified"] = True
         self.probe("clobber-state")
         self.run("repair-encrypted-state", [str(self.launcher), "secure-vault", "repair"], prompts=1)
         if self.probe("manifest") != expected:

@@ -17,7 +17,9 @@ runs Hermes, unlocks a real home, or mounts personal files into a test.
 
 Each case exercises real encrypted settings, credential resolution, session DB
 integrity, memory, skills, cron and attachments. It mutates state and restores a
-real snapshot. It reproduces supported clobbered-file shapes, runs public vault
+real snapshot and full ZIP backup, mutates settings, and restores through public
+`hermes import`. Upstream migration must restore both pre-encryption backup forms.
+It reproduces supported clobbered-file shapes, runs public vault
 repair, exports a verified plaintext recovery archive, re-encrypts a copy, and
 compares semantic state. Pre-encryption upstream snapshots must also restore.
 A real LLM delegates a config read, checks updates and writes

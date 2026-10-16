@@ -28,6 +28,7 @@ from agent.provider_media import GENERATED_SUBDIR
 from hermes_cli.archive_safe import normalize_archive_parts
 from hermes_cli.backup_sqlite import _close_quietly, _safe_copy_db
 from hermes_cli.backup_snapshot_io import read_snapshot_manifest, snapshot_source
+from hermes_cli.backup_vault_import import open_backup_zip
 from hermes_security.errors import VaultError
 from hermes_cli.home_data_layout import PM_RUNTIME_ROOT_DIRS, profile_root_entry
 from hermes_cli.sizefmt import format_bytes as _format_size
@@ -747,10 +748,6 @@ def run_import(args) -> Optional[int]:
         print(f"Error: File not found: {zip_path}")
         sys.exit(1)
 
-    if not zipfile.is_zipfile(zip_path):
-        print(f"Error: Not a valid zip file: {zip_path}")
-        sys.exit(1)
-
     # The restore target must be the home the command operates under — the
     # same path printed as "Target:" via display_hermes_home(). Resolving
     # through get_default_hermes_root() instead maps a profile home
@@ -758,7 +755,7 @@ def run_import(args) -> Optional[int]:
     # restore at the live root while the profile directory stays empty.
     hermes_root = get_hermes_home()
 
-    with zipfile.ZipFile(zip_path, "r") as zf:
+    with open_backup_zip(zip_path, hermes_root) as zf:
         # Validate
         ok, reason = _validate_backup_zip(zf)
         if not ok:

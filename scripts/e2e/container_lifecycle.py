@@ -87,7 +87,8 @@ def verify_receipt(receipt: dict, scenario: str, provenance: dict) -> None:
             or any(receipt.get(key) != provenance[key] for key in ("baseline", "candidate", "harness_sha256"))
             or receipt.get("tool_cache_reused") is not False
             or receipt.get("restore_verified") is not True or receipt.get("cleanup_verified") is not True
-            or receipt.get("vault_repair_verified") is not True or receipt.get("bulk_export_verified") is not True):
+            or receipt.get("vault_repair_verified") is not True or receipt.get("bulk_export_verified") is not True
+            or receipt.get("full_backup_verified") is not True):
         raise ValueError("lifecycle receipt is incomplete, failed, cached or for another revision")
     live = receipt.get("checks", {}).get("live-candidate", {})
     if (live.get("passphrase_prompts") != 1 or live.get("child_sessions", 0) < 1
@@ -110,7 +111,8 @@ def verify_receipt(receipt: dict, scenario: str, provenance: dict) -> None:
     if scenario == "reinstall" and receipt.get("installer_repair_verified") is not True:
         raise ValueError("installer must repair damaged source and a missing runtime")
     if scenario == "upstream-install" and (not receipt.get("upstream_baseline")
-            or not receipt.get("upstream_session_hash") or receipt.get("upstream_restore_verified") is not True):
+            or not receipt.get("upstream_session_hash") or receipt.get("upstream_restore_verified") is not True
+            or receipt.get("upstream_backup_verified") is not True):
         raise ValueError("upstream migration must preserve its original conversation and recovery point")
 
 
