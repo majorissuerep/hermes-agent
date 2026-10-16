@@ -197,7 +197,11 @@ quiet_output() {
     fi
     # Before the Python owner unlocks, only console diagnostics are writable.
     local probe
-    probe="$(cd "$HERMES_HOME" 2>/dev/null && pwd -P)" || probe=""
+    probe="$HERMES_HOME"
+    while [ ! -d "$probe" ]; do
+        probe="$(dirname "$probe")"
+    done
+    probe="$(cd "$probe" 2>/dev/null && pwd -P)" || probe=""
     while [ -n "$probe" ]; do
         [ ! -f "$probe/.hermes-vault" ] || return 1
         [ "$probe" != / ] || break

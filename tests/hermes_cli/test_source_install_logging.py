@@ -66,14 +66,18 @@ def _terminal(command):
         process.wait(timeout=5)
 
 
-def test_pre_unlock_terminal_diagnostics_never_append_plaintext_to_ciphertext(tmp_path, monkeypatch):
+@pytest.mark.parametrize("new_nested_home", [False, True])
+def test_pre_unlock_terminal_diagnostics_never_append_plaintext_to_ciphertext(tmp_path, monkeypatch, new_nested_home):
     home = _home(tmp_path, monkeypatch)
     log = home / "logs/install.log"
     before = log.read_bytes()
+    target = home / "profiles/new-home" if new_nested_home else home
     try:
-        result, output = _terminal(_command(home))
+        result, output = _terminal(_command(target))
         assert result == 0 and "stdout marker" in output and "stderr marker" in output
         assert log.read_bytes() == before
+        if new_nested_home:
+            assert not (target / "logs/install.log").exists()
     finally:
         vault.lock_now(home)
 
