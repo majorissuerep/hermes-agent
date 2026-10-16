@@ -195,6 +195,15 @@ quiet_output() {
     if [ -n "${CI:-}" ] || [ -n "${GITHUB_ACTIONS:-}" ] || [ -n "${HERMES_INSTALL_VERBOSE:-}" ]; then
         return 1
     fi
+    # Before the Python owner unlocks, only console diagnostics are writable.
+    local probe
+    probe="$(cd "$HERMES_HOME" 2>/dev/null && pwd -P)" || probe=""
+    while [ -n "$probe" ]; do
+        [ ! -f "$probe/.hermes-vault" ] || return 1
+        [ "$probe" != / ] || break
+        probe="${probe%/*}"
+        [ -n "$probe" ] || probe=/
+    done
     [ -t 1 ]
 }
 
@@ -214,6 +223,18 @@ run_logged() {
     if [ "$1" = --may-fail ]; then may_fail=true; shift; fi
     local label="$1"; shift
     RUN_LOGGED_ERROR=""
+    if [ -n "${__HERMES_INSTALL_LOG_FD:-}" ]; then
+        case "$__HERMES_INSTALL_LOG_FD" in *[!0-9]*) return 2 ;; esac
+        log "$label"
+        printf '==> %s (%s)\n' "$label" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >&"$__HERMES_INSTALL_LOG_FD"
+        "$@" </dev/null 2>&1 | tee "/dev/fd/$__HERMES_INSTALL_LOG_FD"
+        local statuses=("${PIPESTATUS[@]}")
+        if [ "${statuses[0]}" -ne 0 ]; then
+            RUN_LOGGED_ERROR="$label failed (exit ${statuses[0]})"
+            return "${statuses[0]}"
+        fi
+        return "${statuses[1]}"
+    fi
     if ! quiet_output || ! { mkdir -p "${INSTALL_LOG%/*}" && : >> "$INSTALL_LOG"; } 2>/dev/null; then
         log "$label"
         local err rc

@@ -13,11 +13,13 @@ if __name__ == "__main__":
 
 def run_install_session(command: list[str]) -> int:
     from hermes_constants import get_hermes_home
+    from hermes_cli.source_install_log import LOG_FD_ENV, encrypted_install_log
     from pm.state_io import prepare_owner, vault_home
 
     home = get_hermes_home().resolve()
     if vault_home(home / "config.yaml") is None:
-        return subprocess.call(command, timeout=7200)
+        env = {key: value for key, value in os.environ.items() if key != LOG_FD_ENV}
+        return subprocess.call(command, env=env, timeout=7200)
 
     # The PM owner can load crypto without the damaged venv's interpreter.
     # Keep its temporary authority alive until every installer stage exits.
@@ -30,7 +32,8 @@ def run_install_session(command: list[str]) -> int:
         raise RuntimeError("encrypted install has no unlocked vault owner")
     env = {**os.environ, "HERMES_SESSION_ID": session_id, **authority.environment()}
     try:
-        return subprocess.call(command, env=env, timeout=7200)
+        with encrypted_install_log(home, env) as pass_fds:
+            return subprocess.call(command, env=env, timeout=7200, pass_fds=pass_fds)
     finally:
         authority.close()
 

@@ -30,7 +30,7 @@ def runtime_environment() -> dict[str, str]:
     # Envelope callbacks keep unlock authority in the owner, including when it
     # was launched with an unattended key file or an inherited key pipe.
     for name in ("HERMES_MASTER_PASSWORD", "HERMES_VAULT_PRIVATE_KEY", "HERMES_VAULT_KEY_FD",
-                 "HERMES_UPDATE_VAULT_CHANNEL", "HERMES_SESSION_VAULT"):
+                 "HERMES_UPDATE_VAULT_CHANNEL", "HERMES_SESSION_VAULT", "__HERMES_INSTALL_LOG_FD"):
         env.pop(name, None)
     env["HERMES_HOME"] = str(get_hermes_home())
     env["HERMES_RUNTIME_DIR"] = native(store_root())
