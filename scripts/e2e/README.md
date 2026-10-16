@@ -128,7 +128,7 @@ no host mounts or inherited model credential, and actual container removal.
 
 ## Provider conversation qualification
 
-`test_provider_conversation.py` uses the real agent, tool execution, compaction,
+`test_provider_conversation_{chat,responses,anthropic}.py` uses the real agent, tool execution, compaction,
 SQLCipher persistence and resumed history against strict local HTTP protocol
 oracles. The shared `provider_matrix.py` maps every bundled provider identity to
 its supported Chat Completions, Responses, or Anthropic Messages formats. Every

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+from importlib import import_module
 import json
 from pathlib import Path
 import secrets
@@ -176,6 +177,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--evidence", type=Path, required=True)
     args = parser.parse_args()
+    # PM may exec into the selected interpreter. Settle it before consuming
+    # credential stdin or binding the disposable conversation's profile home.
+    import_module("hermes_bootstrap")
     credential = json.load(sys.stdin)
     _require(all(credential.get(key) for key in ("provider", "model", "base_url", "api_key", "api_mode")),
              "complete dedicated live credentials on stdin are required")
