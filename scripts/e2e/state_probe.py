@@ -322,7 +322,7 @@ def main() -> None:
         return {"history_verified": verified}
 
     def seeded_state_proof():
-        import yaml
+        import hermes_yaml as yaml
 
         data = Path(__file__).resolve().parents[2] / "hermes_cli/data"
         if read_raw_config() != yaml.safe_load((data / "config.yaml.example").read_text(encoding="utf-8")):
