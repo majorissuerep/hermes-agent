@@ -64,7 +64,7 @@ def test_sync_venv_allows_frozen_extras_when_lazy_off(rooted, monkeypatch):
 
     from pm import paths
     from pm.lock import Facts
-    from pm.environments import install_state_dir, runtime_facts_path
+    from pm.environments import install_state_dir, runtime_facts_path, venv_python
 
     import pm.install as ensure_mod
 
@@ -76,6 +76,9 @@ def test_sync_venv_allows_frozen_extras_when_lazy_off(rooted, monkeypatch):
     environment = install_state_dir(repo) / "environments" / "frozen" / "venv"
     environment.mkdir(parents=True)
     (environment / "pyvenv.cfg").write_text("home = fixture\n")
+    interpreter = venv_python(environment)
+    interpreter.parent.mkdir(parents=True)
+    interpreter.touch()
     Facts(runtime_facts_path(repo)).record_state("venv", "stamp", ["web"], environment=environment)
     monkeypatch.setattr(ensure_mod, "lazy_installs_allowed", lambda: False)
     venv_pkg = ensure_mod.get_package("venv")
