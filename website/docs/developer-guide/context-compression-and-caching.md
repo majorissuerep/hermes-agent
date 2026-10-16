@@ -226,6 +226,26 @@ attempt anyway:
   the next failure would extend the ladder (#100661). If that attempt fails,
   the cooldown is recorded normally.
 
+#### Recovery after ineffective compression
+
+Repeated candidates that do not shrink the transcript still arm the ineffective
+compression guard. Re-estimating the same history, restarting Hermes, or changing
+routes does not reset it. The guard records a content fingerprint, session and
+route in the existing session metadata, without saving a second transcript.
+
+After at least four genuinely appended messages and a substantial new token
+delta (half the configured threshold, bounded to 1,024–8,192 tokens), Hermes may
+try one probationary compaction. It consumes that permission durably before the
+attempt. A rewritten prefix or unreadable metadata keeps the guard armed. This
+allows a growing conversation to recover without repeatedly summarizing the same
+uncompressible history; the usual admission, cooldown and overflow limits remain.
+
+If an existing handoff is the only row in the summary window, Hermes does not
+call a summarizer with empty input. Useful old-tool-output pruning can still
+commit through the normal durable compaction boundary, retaining every user and
+assistant turn, tool pair and the existing handoff. Telemetry labels this method
+`tool_result_prune`; a genuinely unchanged transcript remains a structural no-op.
+
 #### Attempt telemetry
 
 Every `compress_context` call that returns logs one content-free INFO line,
@@ -255,6 +275,7 @@ text, the focus topic or error messages.
   `method: none` and no token counts, never an earlier attempt's numbers.
 - `method` says how the summary was produced: `llm_summary`,
   `aux_fallback_main` (the summary model failed and the main model wrote it),
+  `tool_result_prune` (old tool bodies shrank without a new summary),
   `deterministic_fallback` (static anchors summary; `items_dropped` counts the
   replaced messages), `provider` (Codex) or `none`.
 - `messages_before` / `messages_after` and `tokens_before` / `tokens_after` /

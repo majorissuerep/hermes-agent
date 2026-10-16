@@ -1313,7 +1313,7 @@ def test_copilot_final_preflight_sanitizes_both_middleware_layers(monkeypatch):
     assert message_item["status"] == "in_progress"
     assert message_item["phase"] == "final_answer"
     assert message_item["content"] == [
-        {"type": "output_text", "text": "execution-layer"}
+        {"type": "output_text", "text": "execution-layer", "annotations": []}
     ]
 
 

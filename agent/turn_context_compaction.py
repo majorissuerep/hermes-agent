@@ -9,6 +9,8 @@ did and returns a ``CompactionOutcome``. Predicates/estimators that tests patch 
 
 from __future__ import annotations
 
+from agent.compression_growth_recovery import maybe_rearm_after_growth
+
 import logging
 import time
 from dataclasses import dataclass
@@ -255,6 +257,7 @@ def _preflight_compression(
     _preflight_tokens = _tc._preflight_request_tokens(
         agent, out.messages, out.active_system_prompt or ""
     )
+    maybe_rearm_after_growth(_compressor, out.messages)
     # getattr guard: compressor doubles and plugin engines lack this method — absence
     # means no snapshot and the finalizer's rollback stays disarmed.
     _snapshot_fn = getattr(_compressor, "snapshot_preflight_display_tokens", None)

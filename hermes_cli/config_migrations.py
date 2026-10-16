@@ -853,7 +853,7 @@ MIGRATIONS: tuple[tuple[int, Callable[[dict[str, Any], bool], None]], ...] = (
 #: toolset, the plugin-era SOUL.md section): they carry its setting to where the runtime reads it
 #: or drop what nothing reads, which is right however old the file is. A config.yaml with no
 #: ``_config_version`` is current-schema content that was never stamped (installers seed it from
-#: cli-config.yaml.example; targeted writers never stamp), so it gets only these: every other step
+#: hermes_cli/data/config.yaml.example; targeted writers never stamp), so it gets only these: every other step
 #: decides by a value or an absence that, in such a file, is the user's own choice. v13 is left
 #: out: it clears OPENAI_MODEL from .env, a generic name Hermes never reads but the user's tools may.
 #: v41 is left out too: it rewrites profile SOUL.md on a heading match, an artifact whose

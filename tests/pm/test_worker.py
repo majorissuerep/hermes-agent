@@ -53,7 +53,7 @@ def test_refused_or_already_paused_install_does_not_acquire_runtime(client, monk
 
 
 def _current_environment(tmp_path, monkeypatch, members):
-    from pm.environments import install_state_dir
+    from pm.environments import install_state_dir, venv_python
     from pm.lock import Facts
     from pm.packages import Venv
 
@@ -64,6 +64,9 @@ def _current_environment(tmp_path, monkeypatch, members):
     environment = install_state_dir(repo) / "environments" / "existing" / "venv"
     environment.mkdir(parents=True)
     (environment / "pyvenv.cfg").write_text("home = test\n")
+    interpreter = venv_python(environment)
+    interpreter.parent.mkdir(parents=True)
+    interpreter.touch()
     Facts(paths.runtime_facts_path()).record_state(
         "venv", Venv().expected_stamp([], plugin_dirs=members), [], environment=environment,
     )
@@ -75,7 +78,7 @@ def _current_environment(tmp_path, monkeypatch, members):
 def test_currency_probe_preserves_union_and_candidate_inputs(client, tmp_path, monkeypatch, isolated_python,
                                                             member_shape, route):
     import json
-    from pm.environments import runtime_facts_path, selected_venv
+    from pm.environments import runtime_facts_path, selected_venv, venv_python
     from pm.lock import Facts
     from pm.packages import Venv
 
@@ -144,6 +147,15 @@ def test_currency_probe_preserves_union_and_candidate_inputs(client, tmp_path, m
     assert not client.venv_is_current(plugins=Members(members), **root_args)
     assert snapshot() == changed
     marker.write_bytes(contents)
+    assert client.venv_is_current(plugins=Members(members), **root_args)
+
+    interpreter = venv_python(environment)
+    contents = interpreter.read_bytes()
+    interpreter.unlink()
+    changed = snapshot()
+    assert not client.venv_is_current(plugins=Members(members), **root_args)
+    assert snapshot() == changed
+    interpreter.write_bytes(contents)
     assert client.venv_is_current(plugins=Members(members), **root_args)
 
     manifest.write_text('name: candidate\npython_dependencies: ["candidate-dep==2"]\n')

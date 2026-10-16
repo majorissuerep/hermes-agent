@@ -3574,7 +3574,7 @@ class TestCodexAdapterGithubResponsesMessageIdDrop:
         assert "id" not in message_item
         assert message_item["phase"] == "final_answer"
         assert message_item["status"] == "in_progress"
-        assert message_item["content"] == [{"type": "output_text", "text": "pong"}]
+        assert message_item["content"] == [{"type": "output_text", "text": "pong", "annotations": []}]
 
     def test_keeps_message_id_for_codex_backend_host(self):
         adapter, captured = self._build_adapter(

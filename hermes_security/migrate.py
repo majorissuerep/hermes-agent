@@ -99,7 +99,9 @@ def repair_clobbered_state(home: Path | str) -> dict:
 
     report: dict = {"sealed": [], "unwrapped": [], "reframed": [], "restored": [],
                     "unrecoverable": [], "skipped_dbs": [], "code_files": 0}
-    for path, rel in _iter_files(home_path):
+    # Snapshots retain their ORIGINAL path-bound ciphertext and inventory hashes.
+    # Re-sealing them in their storage location makes the restore point unusable.
+    for path, rel in _iter_files(home_path, exclude_roots={"backups", "state-snapshots", "profiles"}):
         kind = _classify(path)
         if kind == "skip" or path.is_symlink():
             continue  # never repair through a link (it may point outside the home)
@@ -334,7 +336,7 @@ def _restore_code_trees(vault, home: Path, report: dict) -> int:
     return restored
 
 
-def _iter_files(home: Path, *, onerror=None):
+def _iter_files(home: Path, *, onerror=None, exclude_roots=()):
     def failed(exc):
         if onerror is None:
             # A first-run home has nothing to migrate yet. Scanners still report it.
@@ -348,6 +350,7 @@ def _iter_files(home: Path, *, onerror=None):
         parent = Path(root)
         links = [name for name in directories if (parent / name).is_symlink()]
         directories[:] = sorted(name for name in directories if name not in links
+                                and not (parent == home and name in exclude_roots)
                                 and not vault_mod._is_in_skip_dir((parent / name).relative_to(home)))
         for name in sorted(files + links):
             path = parent / name

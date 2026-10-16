@@ -52,7 +52,7 @@ Every new or modernised skill — bundled, optional, or contributed — meets al
    non-trivial logic every call — ship a helper script and reference it by skill-relative path.
 7. **Tests at `tests/skills/test_<skill>_skill.py`**, stdlib + pytest + `unittest.mock` only, no
    live network. Run `scripts/run_tests.sh tests/skills/test_<skill>_skill.py -q`.
-8. **`.env.example` additions sit in a clearly delimited block.** Contributor copies of the file are
+8. **`hermes_cli/data/env.example` secret additions sit in a clearly delimited block.** Contributor copies are
    usually stale; edits outside the skill's own block are dropped during salvage.
 
 No `offset`/`limit` pagination on skill-loading tools — the agent must read a skill fully (root).

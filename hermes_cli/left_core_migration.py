@@ -75,7 +75,7 @@ def _toolset_listed(config: dict, names: frozenset[str], *, own_platform: str = 
     """A toolset in *names* is selected in ``platform_toolsets`` or the top-level ``toolsets`` list.
 
     *own_platform*'s row is skipped: it scopes that platform's own sessions, which only exist once the
-    platform is on (:func:`platform_configured_on`). The installers copy cli-config.yaml.example into
+    platform is on (:func:`platform_configured_on`). The installers copy hermes_cli/data/config.yaml.example into
     config.yaml, and it carried ``homeassistant: [hermes-homeassistant]`` until Home Assistant left core,
     so that row alone is not use."""
     rows = config.get("platform_toolsets")

@@ -58,8 +58,6 @@ Pick the row that matches your goal:
 
 The commands below install this fork's `main` branch. For an existing upstream installation, follow [the migration instructions](./installation.md#switch-existing-installation). Desktop downloads from the upstream website install upstream Hermes; use the fork's CLI installer here first.
 
-For aarch64 Android devices, use the separate [Termux APT guide](./termux.md).
-
 #### Linux / macOS / WSL2
 ```bash
 curl -fsSL https://raw.githubusercontent.com/majorissuerep/hermes-agent/main/scripts/install.sh | bash

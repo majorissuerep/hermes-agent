@@ -256,7 +256,7 @@ class TestCodexBuildKwargs:
         assert "id" not in message_item
         assert message_item["phase"] == "final_answer"
         assert message_item["status"] == "in_progress"
-        assert message_item["content"] == [{"type": "output_text", "text": "pong"}]
+        assert message_item["content"] == [{"type": "output_text", "text": "pong", "annotations": []}]
 
 
 
@@ -314,7 +314,7 @@ class TestCodexBuildKwargs:
         assert message_item["phase"] == "final_answer"
 
     @pytest.mark.parametrize(("is_codex_backend", "expected_user", "expected_assistant"), [
-        (True, [{"type": "input_text", "text": "hi"}], [{"type": "output_text", "text": "pong"}]),
+        (True, [{"type": "input_text", "text": "hi"}], [{"type": "output_text", "text": "pong", "annotations": []}]),
         (False, "hi", "pong"),  # other Responses routes keep the string shorthand they always sent
     ], ids=["codex-typed-parts", "other-route-string"])
     def test_codex_backend_sends_typed_text_parts_for_string_content(
@@ -1676,7 +1676,7 @@ class TestCodexNormalizeResponse:
                 "type": "message",
                 "role": "assistant",
                 "status": "completed",
-                "content": [{"type": "output_text", "text": "Hello world"}],
+                "content": [{"type": "output_text", "text": "Hello world", "annotations": []}],
                 "id": "msg_abc",
                 "phase": "final_answer",
             }

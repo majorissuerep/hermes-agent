@@ -16,7 +16,7 @@ Use, configure, theme, extend, and orchestrate Hermes Agent.
 |---|---|
 | Source | Bundled (installed by default) |
 | Path | `skills/autonomous-ai-agents/hermes-agent` |
-| Version | `3.4.1` |
+| Version | `3.4.2` |
 | Author | Teknium + Hermes Agent |
 | License | MIT |
 | Platforms | linux, macos |

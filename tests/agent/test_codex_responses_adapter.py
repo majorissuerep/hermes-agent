@@ -182,9 +182,11 @@ def test_preflight_rewrites_raw_assistant_images_to_text_markers():
     assert _preflight_codex_input_items(raw) == [{
         "type": "message",
         "role": "assistant",
+        "status": "completed",
         "content": [{
             "type": "output_text",
             "text": "[Assistant image omitted during replay]",
+            "annotations": [],
         }],
     }]
 
@@ -689,7 +691,7 @@ def test_preflight_codex_input_items_drops_short_id_for_github_responses():
     assert "id" not in items[0]
     assert items[0]["status"] == "in_progress"
     assert items[0]["phase"] == "final_answer"
-    assert items[0]["content"] == [{"type": "output_text", "text": "pong"}]
+    assert items[0]["content"] == [{"type": "output_text", "text": "pong", "annotations": []}]
 
 
 def test_chat_messages_to_responses_input_drops_foreign_id_for_codex_backend():
@@ -744,7 +746,7 @@ def test_message_id_is_dropped_when_its_turn_replays_reasoning_without_id():
 
     reasoning, linked, alone = (i for i in items if i.get("type") in {"reasoning", "message"})
     assert "id" not in reasoning and "id" not in linked
-    assert linked["phase"] == "final_answer" and linked["content"] == [{"type": "output_text", "text": "linked"}]
+    assert linked["phase"] == "final_answer" and linked["content"] == [{"type": "output_text", "text": "linked", "annotations": []}]
     assert alone["id"] == "msg_alone"
 
 

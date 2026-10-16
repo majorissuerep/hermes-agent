@@ -706,13 +706,14 @@ def test_explicit_workspace_preserves_seed_and_replays_copied_members(locked_pro
     assert (recorded / "uv.lock").read_bytes() == recorded_lock
 
 
-@pytest.mark.parametrize("failure", ["facts", "missing-cfg", "restart"])
+@pytest.mark.platforms("posix")
+@pytest.mark.parametrize("failure", ["facts", "missing-cfg", "missing-python", "restart"])
 def test_real_sync_retains_selection_until_commit(locked_project, tmp_path, monkeypatch, failure):
     import importlib
     from pm import extras
     from pm import paths
     from pm.lock import Facts
-    from pm.environments import selected_venv
+    from pm.environments import selected_venv, venv_python
 
     source, uv, _env = locked_project
     monkeypatch.setattr(paths, "repo_root", lambda: source)
@@ -735,11 +736,15 @@ def test_real_sync_retains_selection_until_commit(locked_project, tmp_path, monk
                 engine.sync_venv(["other"], plugins=Members([]), explicit=True)
         assert selected_venv(source) == old
         assert paths.runtime_facts_path().read_bytes() == facts
-    elif failure == "missing-cfg":
-        (old / "pyvenv.cfg").unlink()
+    elif failure in {"missing-cfg", "missing-python"}:
+        damaged = old / "pyvenv.cfg" if failure == "missing-cfg" else venv_python(old)
+        damaged.unlink()
         engine.sync_venv(["chosen"], plugins=Members([]), explicit=True)
-        assert selected_venv(source) != old
-        assert (selected_venv(source) / "pyvenv.cfg").is_file()
+        repaired = selected_venv(source)
+        assert repaired != old
+        assert (repaired / "pyvenv.cfg").is_file()
+        assert _run([str(venv_python(repaired)), "-I", "-c", "import base_dep, chosen_dep; print('restored')"],
+                    cwd=tmp_path, env=_env) == "restored"
     else:
         monkeypatch.setattr("pm.client.sync_venv", engine.sync_venv)
         monkeypatch.setattr(extras, "available", lambda _: False)

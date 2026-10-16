@@ -5613,14 +5613,9 @@ Write only the summary body. Do not include any preamble or prefix."""
         )
         telemetry["chunk_count"] = 1 if turns_to_summarize else 0
         if not turns_to_summarize:
-            # Window is only handoff rows (#59496): skip the aux call; _previous_summary is KEPT —
-            # it came from this transcript.
-            self._structural_no_op_result(
-                telemetry, "empty_post_handoff_window",
-                f"window {compress_start}-{compress_end} holds only already-summarized handoffs",
-                n_messages,
+            return self._empty_handoff_result(
+                messages, canonical_messages, telemetry, n_messages, spare_pending_images, pruned_count,
             )
-            return canonical_messages
         if not self.quiet_mode:
             self._log_compression_start(
                 display_tokens, compress_start, compress_end, len(turns_to_summarize), n_messages - scan.tail_start,

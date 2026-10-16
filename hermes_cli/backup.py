@@ -27,6 +27,9 @@ from hermes_state.holders import read_only_db_uri
 from agent.provider_media import GENERATED_SUBDIR
 from hermes_cli.archive_safe import normalize_archive_parts
 from hermes_cli.backup_sqlite import _close_quietly, _safe_copy_db
+from hermes_cli.backup_snapshot_io import read_snapshot_manifest, snapshot_source
+from hermes_cli.backup_vault_import import open_backup_zip
+from hermes_security.errors import VaultError
 from hermes_cli.home_data_layout import PM_RUNTIME_ROOT_DIRS, profile_root_entry
 from hermes_cli.sizefmt import format_bytes as _format_size
 
@@ -745,10 +748,6 @@ def run_import(args) -> Optional[int]:
         print(f"Error: File not found: {zip_path}")
         sys.exit(1)
 
-    if not zipfile.is_zipfile(zip_path):
-        print(f"Error: Not a valid zip file: {zip_path}")
-        sys.exit(1)
-
     # The restore target must be the home the command operates under — the
     # same path printed as "Target:" via display_hermes_home(). Resolving
     # through get_default_hermes_root() instead maps a profile home
@@ -756,7 +755,7 @@ def run_import(args) -> Optional[int]:
     # restore at the live root while the profile directory stays empty.
     hermes_root = get_hermes_home()
 
-    with zipfile.ZipFile(zip_path, "r") as zf:
+    with open_backup_zip(zip_path, hermes_root) as zf:
         # Validate
         ok, reason = _validate_backup_zip(zf)
         if not ok:
@@ -1513,9 +1512,8 @@ def list_quick_snapshots(
         manifest_path = d / "manifest.json"
         if manifest_path.exists():
             try:
-                with open(manifest_path, encoding="utf-8-sig") as f:
-                    results.append(json.load(f))
-            except (json.JSONDecodeError, OSError):
+                results.append(read_snapshot_manifest(manifest_path))
+            except (ValueError, OSError, VaultError):
                 results.append({"id": d.name, "file_count": 0, "total_size": 0})
         if len(results) >= limit:
             break
@@ -1553,7 +1551,7 @@ def restore_quick_snapshot(
     try:
         with exclusive_maintenance([home]):
             return _restore_quick_snapshot_exclusive(snapshot_id, home)
-    except OwnershipConflict as exc:
+    except (OwnershipConflict, OSError, ValueError, VaultError) as exc:
         logger.error("%s", exc)
         return False
 
@@ -1574,31 +1572,28 @@ def _snapshot_epochs_restorable(files, entry_paths) -> bool:
 def _restore_snapshot_entry(rel: str, src: Path, dst: Path) -> bool:
     """Publish one quick-snapshot file over ``dst``; False (logged) when refused or failed."""
     try:
-        if dst.suffix == ".db":
-            # Restore through SQLite backup API so live connections
-            # (gateway, dashboard, another CLI session) see the
-            # restored data instead of continuing to serve stale
-            # cached pages from a replaced inode (issue #65942).
-            if not _safe_restore_db(src, dst):
-                # Refused, failed, or source failed its integrity check:
-                # dst left as it was. Count as a failure, not a restore.
-                logger.error("Failed to restore %s: refused or source integrity check failed (see previous log)", rel)
-                return False
-        elif rel == "auth.json":
-            # Refresh tokens for these OAuth providers rotate on use. A historical
-            # snapshot can therefore contain a spent pair even though the current
-            # auth.json has the live successor. Restore the historical auth state
-            # while retaining that live single-use grant under the auth-store lock.
-            if not _restore_auth_json(src, dst):
-                logger.error("Failed to restore %s safely", rel)
-                return False
-        else:
-            shutil.copy2(src, dst)
-        return True
-    except (OSError, PermissionError) as exc:
+        with snapshot_source(src, dst) as src:
+            if dst.suffix == ".db":
+                # Use the backup API: live readers must not keep serving a replaced inode.
+                if not _safe_restore_db(src, dst):
+                    # Refused, failed, or source failed its integrity check:
+                    # dst left as it was. Count as a failure, not a restore.
+                    logger.error("Failed to restore %s: refused or source integrity check failed (see previous log)", rel)
+                    return False
+            elif rel == "auth.json":
+                # Refresh tokens for these OAuth providers rotate on use. A historical
+                # snapshot can therefore contain a spent pair even though the current
+                # auth.json has the live successor. Restore the historical auth state
+                # while retaining that live single-use grant under the auth-store lock.
+                if not _restore_auth_json(src, dst):
+                    logger.error("Failed to restore %s safely", rel)
+                    return False
+            else:
+                shutil.copy2(src, dst)
+            return True
+    except (OSError, ValueError, VaultError) as exc:
         logger.error("Failed to restore %s: %s", rel, exc)
         return False
-
 
 def _restore_quick_snapshot_exclusive(snapshot_id: str, home: Path) -> bool:
     """Restore state from a quick snapshot while ``home`` is reserved."""
@@ -1627,8 +1622,7 @@ def _restore_quick_snapshot_exclusive(snapshot_id: str, home: Path) -> bool:
     if not manifest_path.exists():
         return False
 
-    with open(manifest_path, encoding="utf-8-sig") as f:
-        meta = json.load(f)
+    meta = read_snapshot_manifest(manifest_path)
 
     snap_res, home_res = snap_dir.resolve(), home.resolve()
 

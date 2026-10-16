@@ -57,10 +57,12 @@ def _transcript():
     ]
 
 
-def _stalling_call_llm(compressor, calls, *, fail_when_pinned=False):
+def _stalling_call_llm(compressor, calls, *, fail_when_pinned=False, entered=None):
     """Summary call that never streams: hangs until the host cancels the fence, like a held-open socket."""
     def _call(**kwargs):
         calls.append(kwargs.get("provider") or "primary")
+        if entered is not None:
+            entered.set()
         if fail_when_pinned and "provider" in kwargs:
             raise RuntimeError("fallback route exploded")
         cancelled = getattr(compressor, "_compression_cancelled_check", None)
@@ -282,7 +284,10 @@ def test_admitted_unchanged_commit_at_deadline_retries_without_overlap():
     assert timeout_callbacks == []
 
 
-def test_over_window_request_commits_the_deterministic_fallback_on_the_first_stall(tmp_path, fast_timeouts):
+@pytest.mark.parametrize("settled_at_deadline", [False, True])
+def test_over_window_request_commits_the_deterministic_fallback_on_the_first_stall(
+    tmp_path, fast_timeouts, settled_at_deadline,
+):
     """A request above the model's context window cannot be sent unchanged, so waiting for a SECOND stall
     (which on the messaging gateway never comes — the first one auto-reset the session) is a dead end:
     the deterministic rung runs on the first stall and the transcript is committed (#114594)."""
@@ -291,7 +296,24 @@ def test_over_window_request_commits_the_deterministic_fallback_on_the_first_sta
     compressor.context_length = 64_000
     calls = []
     live = _transcript()
-    with patch("agent.context_compressor.call_llm", side_effect=_stalling_call_llm(compressor, calls)), \
+    entered = threading.Event()
+    real_await = cc._await_worker_within_budget
+    primary = True
+
+    def await_dispatched_summary(future, fence, **kwargs):
+        nonlocal primary
+        if not primary:
+            return real_await(future, fence, **kwargs)
+        primary = False
+        assert entered.wait(timeout=10), "primary summary never dispatched"
+        # Exercise both deadline observations after cooperative teardown. Orphan
+        # lease retention is tested separately; scheduler speed is not this contract.
+        fence._deadline = time.monotonic() - 1
+        result = future.result(timeout=10)
+        return settled_at_deadline, result if settled_at_deadline else None
+
+    with patch("agent.context_compressor.call_llm", side_effect=_stalling_call_llm(compressor, calls, entered=entered)), \
+            patch.object(cc, "_await_worker_within_budget", side_effect=await_dispatched_summary), \
             patch("agent.auxiliary_client._get_auxiliary_task_config", return_value={"fallback_chain": []}):
         out, _ = agent._compress_context(live, "sys", approx_tokens=70_000)
 

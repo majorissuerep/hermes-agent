@@ -125,7 +125,7 @@ root, store, node, deps = map(Path, sys.argv[1:])
 sys.path.insert(0, str(root))
 from pm.lock import Facts, Lockfile
 from pm.packages import Venv
-from pm.environments import install_state_dir, runtime_facts_path, site_packages
+from pm.environments import install_state_dir, runtime_facts_path, site_packages, venv_python
 from hermes_cli._launchers import ensure_install_launchers
 lock = Lockfile(root / 'pm/lock.json')
 lock.set_pin('node', 'fixture', {})
@@ -138,6 +138,9 @@ for name, executable in [('python', Path(sys.executable)), ('node', node)]:
 selected = install_state_dir(root) / 'environments/fixture/venv'
 selected.mkdir(parents=True)
 (selected / 'pyvenv.cfg').write_text('home = fixture')
+interpreter = venv_python(selected)
+interpreter.parent.mkdir(parents=True)
+interpreter.symlink_to(sys.executable)
 site = site_packages(selected)
 site.parent.mkdir(parents=True)
 site.symlink_to(deps, target_is_directory=True)

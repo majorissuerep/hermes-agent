@@ -26,7 +26,7 @@ Aliases include `chatgpt`, `claude`, `glm`, `grok` and `vercel`. `openai` means 
 OpenAI API, never OpenRouter. Fireworks and other direct providers are not bundled.
 Previously saved credentials are preserved, but a removed provider must be replaced
 with an explicit supported route. An explicitly installed provider plugin can add an
-edge capability without expanding the default product menu.
+edge capability without expanding the default product menu or its support commitment.
 
 A model's author is not its transport provider. LiteLLM, Vercel and custom endpoints
 can serve models from other vendors; their model families and wire compatibility
@@ -80,6 +80,10 @@ Use `anthropic_messages` for a custom Anthropic Messages endpoint,
 that actually supports OpenAI Responses. A provider URL is not an API credential.
 Local OpenAI-compatible servers are custom endpoints, not separate bundled vendors.
 
+Before first use of an Anthropic Messages route, prepare its optional SDK with
+`hermes pm install --extra anthropic`, then start a new session. This applies to
+Anthropic, custom Anthropic endpoints, and gateways using `anthropic_messages`.
+
 ## Context length detection
 
 Hermes resolves context capacity from the selected provider/model catalog and
@@ -129,10 +133,3 @@ Use `hermes fallback add`, `hermes fallback list` and `hermes fallback remove` t
 manage deliberate fallback routes. Only supported or explicitly configured custom
 routes may be selected. A missing credential, invalid config or unavailable primary
 must not silently send a request to an unrelated provider.
-
-## Legacy plugin configuration
-
-Updates preserve legacy settings without enabling retired providers. For an
-explicitly installed OpenRouter provider plugin, `openrouter.min_coding_score`
-controls its Pareto-code router threshold (0–1; default 0.65). It has no effect on
-the bundled providers or on OpenRouter media-tool credentials.

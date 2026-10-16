@@ -441,8 +441,8 @@ seed_one() {
         fi
     fi
 }
-seed_one ".env" ".env.example"
-seed_one "config.yaml" "cli-config.yaml.example"
+seed_one ".env" "hermes_cli/data/env.example"
+seed_one "config.yaml" "hermes_cli/data/config.yaml.example"
 seed_one "SOUL.md" "docker/SOUL.md"
 
 # --- Ensure a gateway api_server key exists (loopback control plane) ---
@@ -458,7 +458,7 @@ seed_one "SOUL.md" "docker/SOUL.md"
 # dashboard's port, so this listener is never publicly reachable.
 #
 # CREATE .env when it is missing rather than requiring it to exist (OOF-285):
-# the first-boot seed above depends on /opt/hermes/.env.example being present
+# the first-boot seed above depends on /opt/hermes/hermes_cli/data/env.example being present
 # in the image, and when it isn't (the .dockerignore excluded it for a long
 # stretch of releases) seed_one is a silent no-op, no .env ever exists, this
 # keygen never ran, the api_server never started, and every scheduled cron

@@ -44,3 +44,19 @@ def test_real_state_oracle_survives_snapshot_mutation_and_restore(tmp_path, monk
     snapshot = probe("snapshot")["snapshot"]
     assert probe("restore", snapshot=snapshot) == seeded
     assert probe("manifest") == seeded
+    probe("clobber-state")
+    vault.unlock(home, password)
+    from argparse import ArgumentParser
+    from hermes_cli.subcommands.secure_vault import build_secure_vault_parser
+
+    parser = ArgumentParser()
+    build_secure_vault_parser(parser.add_subparsers())
+    repair = parser.parse_args(["secure-vault", "repair"])
+    assert repair.func(repair) == 0
+    assert probe("manifest") == seeded
+    assert probe("restore", snapshot=snapshot) == seeded
+    archive = tmp_path / "plaintext-recovery.tar"
+    export = parser.parse_args(["secure-vault", "export", "--output", str(archive)])
+    assert export.func(export) == 0
+    assert probe("export-proof", archive=str(archive), recovered=str(tmp_path / "recovered")) == seeded
+    assert probe("manifest") == seeded

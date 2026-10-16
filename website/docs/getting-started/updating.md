@@ -486,7 +486,7 @@ What this means outside `hermes update`:
 - `pip install .`, `uv pip install .`, `pip install -e .`, or a Homebrew/PyPI
   package built on Python 3.11–3.13 installs `hermes-agent` with **no
   dependencies** and the package does not import. These install methods are
-  [unsupported](./platform-support.md#unsupported); use the source installer or
+  [not this fork's distributions](./platform-support.md#upstream-distributions); use the source installer or
   a packaged build.
 - A Nix build outside the repo flake sees the same marker-gated dependency set
   and needs a 3.14 interpreter.

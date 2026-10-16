@@ -195,7 +195,25 @@ quiet_output() {
     if [ -n "${CI:-}" ] || [ -n "${GITHUB_ACTIONS:-}" ] || [ -n "${HERMES_INSTALL_VERBOSE:-}" ]; then
         return 1
     fi
+    # Before the Python owner unlocks, only console diagnostics are writable.
+    vaulted_install_home && return 1
     [ -t 1 ]
+}
+
+vaulted_install_home() {
+    local probe
+    probe="$HERMES_HOME"
+    while [ ! -d "$probe" ]; do
+        probe="$(dirname "$probe")"
+    done
+    probe="$(cd "$probe" 2>/dev/null && pwd -P)" || probe=""
+    while [ -n "$probe" ]; do
+        [ ! -f "$probe/.hermes-vault" ] || return 0
+        [ "$probe" != / ] || break
+        probe="${probe%/*}"
+        [ -n "$probe" ] || probe=/
+    done
+    return 1
 }
 
 status_line() {
@@ -214,6 +232,18 @@ run_logged() {
     if [ "$1" = --may-fail ]; then may_fail=true; shift; fi
     local label="$1"; shift
     RUN_LOGGED_ERROR=""
+    if [ -n "${__HERMES_INSTALL_LOG_FD:-}" ]; then
+        case "$__HERMES_INSTALL_LOG_FD" in *[!0-9]*) return 2 ;; esac
+        log "$label"
+        printf '==> %s (%s)\n' "$label" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >&"$__HERMES_INSTALL_LOG_FD"
+        "$@" </dev/null 2>&1 | tee "/dev/fd/$__HERMES_INSTALL_LOG_FD"
+        local statuses=("${PIPESTATUS[@]}")
+        if [ "${statuses[0]}" -ne 0 ]; then
+            RUN_LOGGED_ERROR="$label failed (exit ${statuses[0]})"
+            return "${statuses[0]}"
+        fi
+        return "${statuses[1]}"
+    fi
     if ! quiet_output || ! { mkdir -p "${INSTALL_LOG%/*}" && : >> "$INSTALL_LOG"; } 2>/dev/null; then
         log "$label"
         local err rc
@@ -954,12 +984,20 @@ stage_config() {
     mkdir -p "$HERMES_HOME"/cron "$HERMES_HOME"/sessions "$HERMES_HOME"/logs \
         "$HERMES_HOME"/pairing "$HERMES_HOME"/hooks "$HERMES_HOME"/image_cache \
         "$HERMES_HOME"/audio_cache "$HERMES_HOME"/memories "$HERMES_HOME"/skills
+    if vaulted_install_home; then
+        local boot_py
+        bootstrap_python
+        "$boot_py" -I -B "$INSTALL_DIR/hermes_cli/source_install_seed.py" "$HERMES_HOME" \
+            || fail "cannot seed encrypted config; existing state was retained" configuration_failed
+        log_success "config prepared in $HERMES_HOME"
+        return 0
+    fi
     if [ ! -f "$HERMES_HOME/.env" ]; then
-        cp "$INSTALL_DIR/.env.example" "$HERMES_HOME/.env" 2>/dev/null || touch "$HERMES_HOME/.env"
+        cp "$INSTALL_DIR/hermes_cli/data/env.example" "$HERMES_HOME/.env" 2>/dev/null || touch "$HERMES_HOME/.env"
     fi
     chmod 600 "$HERMES_HOME/.env"
-    if [ ! -f "$HERMES_HOME/config.yaml" ] && [ -f "$INSTALL_DIR/cli-config.yaml.example" ]; then
-        cp "$INSTALL_DIR/cli-config.yaml.example" "$HERMES_HOME/config.yaml"
+    if [ ! -f "$HERMES_HOME/config.yaml" ] && [ -f "$INSTALL_DIR/hermes_cli/data/config.yaml.example" ]; then
+        cp "$INSTALL_DIR/hermes_cli/data/config.yaml.example" "$HERMES_HOME/config.yaml"
     fi
     log_success "config prepared in $HERMES_HOME"
 }
@@ -1051,6 +1089,69 @@ run_stage() (
     esac
 )
 
+run_install_session() {
+    local boot_py
+    local args=(--dir "$INSTALL_DIR" --hermes-home "$HERMES_HOME" --branch "$BRANCH")
+    [ -z "$INSTALL_COMMIT" ] || args+=(--commit "$INSTALL_COMMIT")
+    [ "$NON_INTERACTIVE" != true ] || args+=(--non-interactive)
+    [ "$INCLUDE_DESKTOP" != true ] || args+=(--include-desktop)
+    [ "$SKIP_BROWSER" != true ] || args+=(--skip-browser)
+    [ "$SKIP_COMPUTER_USE" != true ] || args+=(--skip-computer-use)
+    [ "$VERBOSE" != true ] || args+=(--verbose)
+    [ "$JSON" != true ] || args+=(--json)
+    bootstrap_python
+    "$boot_py" -I -B "$INSTALL_DIR/hermes_cli/source_install_session.py" \
+        bash -c 'source "$1" --manifest "${@:4}"
+            INSTALL_RUN_ID="$2"
+            INSTALL_STARTED="$3"
+            run_install_ladder python-deps' hermes-install-session \
+        "$INSTALL_DIR/scripts/install.sh" "$INSTALL_RUN_ID" "$INSTALL_STARTED" "${args[@]}"
+}
+
+run_install_ladder() {
+    local first="${1:-prerequisites}" started=false delegated=false s rc
+    INSTALL_LADDER=true
+    trap 'install_signal INT' INT
+    trap 'install_signal TERM' TERM
+    trap 'install_signal HUP' HUP
+    for s in $(stage_names); do
+        [ "$s" != "$first" ] || started=true
+        [ "$started" = true ] || continue
+        [ -z "$INSTALL_SIGNAL" ] || install_interrupted
+        INSTALL_IN_STAGE=true
+        # Old --commit targets predate this owner. Keep their staged protocol.
+        if [ "$first" = prerequisites ] && [ "$s" = python-deps ] \
+            && [ -f "$INSTALL_DIR/hermes_cli/source_install_session.py" ]; then
+            delegated=true
+            run_install_session
+        else
+            run_stage "$s"
+        fi
+        rc=$?
+        INSTALL_IN_STAGE=false
+        if [ "$rc" -eq 0 ]; then
+            [ "$INSTALL_SIGNAL" != INT ] || INSTALL_SIGNAL=""
+            if [ "$delegated" = true ]; then
+                [ -z "$INSTALL_SIGNAL" ] || install_interrupted
+                return 0
+            fi
+            continue
+        fi
+        case "$rc" in
+            129) INSTALL_SIGNAL="${INSTALL_SIGNAL:-HUP}" ;;
+            130) INSTALL_SIGNAL="${INSTALL_SIGNAL:-INT}" ;;
+            143) INSTALL_SIGNAL="${INSTALL_SIGNAL:-TERM}" ;;
+        esac
+        [ -z "$INSTALL_SIGNAL" ] || install_interrupted
+        write_install_receipt failed "${s//-/_}" other
+        return "$rc"
+    done
+    write_install_receipt success none none
+    [ -z "$INSTALL_SIGNAL" ] || install_interrupted
+    trap - INT TERM HUP
+    print_path_reload_hint
+}
+
 # Main. Guarded so the script can be SOURCED for its functions (the
 # installer-test harness sources it with --manifest, which must define
 # the functions and stop before main). Under `curl | bash` BASH_SOURCE is
@@ -1087,31 +1188,6 @@ if [ "${BASH_SOURCE[0]:-$0}" = "$0" ]; then
     # No --stage: run the whole ladder — the same authoritative list the
     # manifest prints, so --include-desktop inserts desktop here too.
     print_banner
-    for s in $(stage_names); do
-        # A TERM/HUP noted while the previous stage ran stops the run before this one.
-        [ -z "$INSTALL_SIGNAL" ] || install_interrupted
-        INSTALL_IN_STAGE=true
-        run_stage "$s"
-        rc=$?
-        INSTALL_IN_STAGE=false
-        if [ "$rc" -eq 0 ]; then
-            # The stage succeeded, so a Ctrl-C it saw was handled there: carry on.
-            [ "$INSTALL_SIGNAL" != INT ] || INSTALL_SIGNAL=""
-            continue
-        fi
-        case "$rc" in
-            129) INSTALL_SIGNAL="${INSTALL_SIGNAL:-HUP}" ;;
-            130) INSTALL_SIGNAL="${INSTALL_SIGNAL:-INT}" ;;
-            143) INSTALL_SIGNAL="${INSTALL_SIGNAL:-TERM}" ;;
-        esac
-        [ -z "$INSTALL_SIGNAL" ] || install_interrupted
-        # The stage normally wrote its receipt; one killed outright (SIGKILL, OOM) did not.
-        write_install_receipt failed "${s//-/_}" other
-        exit "$rc"
-    done
-    write_install_receipt success none none
-    # Every stage finished: the receipt says success, and a pending TERM/HUP still ends the run.
-    [ -z "$INSTALL_SIGNAL" ] || install_interrupted
-    trap - INT TERM HUP
-    print_path_reload_hint
+    run_install_ladder
+    exit "$?"
 fi

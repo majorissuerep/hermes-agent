@@ -354,7 +354,7 @@ def cmd_vault(args: Any) -> int:
             print(f"✓ Restored {report['code_files']} file(s) in hermes-agent.* code trees to plaintext (public code)")
         if not any(report[key] for key, _ in sections) and not report["code_files"]:
             print("○ Nothing to repair (every state file is in its canonical sealed form)")
-        if report["unrecoverable"]:
+        if report["unrecoverable"] or report["skipped_dbs"]:
             return 1
         return 0
 

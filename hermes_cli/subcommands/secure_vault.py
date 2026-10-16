@@ -22,16 +22,18 @@ def build_secure_vault_parser(subparsers) -> None:
         "vault_command",
         nargs="?",
         default="status",
-        choices=["init", "migrate", "unlock", "status", "lock", "keygen", "add-key", "remove-key", "slots", "repair"],
+        choices=["init", "migrate", "unlock", "status", "lock", "keygen", "add-key", "remove-key", "slots", "repair", "export"],
         help="init = create vault on a fresh home; migrate = convert an existing plaintext home "
         "in place (full tar backup first, every file verified, sessions/config preserved); "
         "unlock = unlock for this process; status = show state; lock = drop this process's keys; "
         "keygen = generate an X25519 keypair (private key shown ONCE, store it yourself — "
         "the system never holds it); add-key = seal the vault to a public key (key slot); "
         "remove-key = drop a key slot (rotation); slots = list key slots; "
-        "repair = re-seal plaintext files that an old-venv process clobbered after migration",
+        "repair = re-seal plaintext files that an old-venv process clobbered after migration; "
+        "export = bulk-decrypt a verified recovery copy without changing encrypted originals",
     )
     parser.add_argument("--yes", action="store_true", help="migrate: skip the confirmation prompt")
+    parser.add_argument("--output", help="export: new plaintext .tar outside every encrypted home (never overwritten)")
     parser.add_argument(
         "--key-only", action="store_true",
         help="migrate: non-interactive creation for daemons/scripts — generate an X25519 pair, "
@@ -58,7 +60,8 @@ def build_secure_vault_parser(subparsers) -> None:
 
     def _run(args):
         from hermes_cli.vault_cmd import cmd_vault
+        from hermes_cli.vault_export import export_command
 
-        return cmd_vault(args)
+        return {"export": export_command}.get(args.vault_command, cmd_vault)(args)
 
     parser.set_defaults(func=_run)

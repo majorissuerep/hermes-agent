@@ -9,7 +9,7 @@ description: "Install and deploy Hermes Agent with Nix — from quick `nix run` 
 The flake references below target this fork. After installing, complete [encrypted-state setup](./installation.md#initialize-encrypted-state) before configuring Hermes or starting a service; the Nix service also needs an authorized vault private key.
 
 :::warning Tier 2 platform
-Nix and NixOS are [Tier 2 platforms](./platform-support.md#tier-2). The flake and NixOS module documented here are maintained on a best-effort basis only. Commits to `main` may break these packages at any point in time.
+Nix and NixOS are [alternative installation methods](./platform-support.md). The flake and NixOS module documented here are maintained on a best-effort basis; source-installer acceptance does not qualify Nix packages.
 
 For a supported setup, use one of the standard [installation](./installation.md) paths - either Docker or an FHS environment.
 :::

@@ -8,36 +8,34 @@ description: "How to contribute to Hermes Agent — dev setup, code style, PR pr
 
 This guide is for the unofficial [majorissuerep/hermes-agent fork](https://github.com/majorissuerep/hermes-agent). Submit fork contributions to its `main` branch through a PR and wait for the fork's CI checks before merging. Upstream contributions belong in [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent).
 
-Thank you for contributing to Hermes Agent! This guide covers setting up your dev environment, understanding the codebase, and getting your PR merged.
-
 ## Contribution Priorities
 
 We value contributions in this order:
 
-1. **Bug fixes** — crashes, incorrect behavior, data loss
-2. **Cross-platform compatibility** — macOS, different Linux distros, WSL2
-3. **Security hardening** — shell injection, prompt injection, path traversal
-4. **Performance and robustness** — retry logic, error handling, graceful degradation
-5. **New skills** — broadly useful ones (see [Creating Skills](creating-skills.md))
-6. **New tools** — rarely needed; most capabilities should be skills
-7. **Documentation** — fixes, clarifications, new examples
+1. **Correctness and recovery** — conversations, encrypted state, install, update, repair
+2. **Reliability on Linux and macOS** — bounded retries, performance, native acceptance
+3. **Simplification and documentation** — remove obsolete surface and make supported paths clear
+4. **Security hardening** — preserve useful features and profile isolation
+5. **Opt-in extensions** — useful skills and plugins without growing default support
+
+The [product scope and qualification contract](./reliability.md#product-scope)
+governs new default integrations. Feature count is not a contribution goal.
 
 ## Contribution rubric
 
-The project's intent layer, summarised in the root `AGENTS.md`; this is the long form with the
-examples. Hermes ships a lot: most merges are bug fixes and the product surface (platforms,
-providers, models, desktop/TUI features) expands on purpose. The restraint targets the core agent
-and the model tool schema, where every addition is paid for on every API call: expansive at the
-edges, conservative at the waist.
+The project's intent layer, summarised in the root `AGENTS.md`; this is the long form
+with examples. This fork maintains a deliberately bounded product, including at its
+edges. A feature available upstream is not automatically part of this fork's support
+commitment. Keep both the agent core and the default product surface small.
 
 ### What we want
 
 - **Fix real bugs, well.** Reproduce the symptom on current `main`, point to the exact line
   where it manifests, and fix the whole bug class — sibling call paths included.
-- **Expand reach at the edges.** New adapters, channels, providers, models, desktop/TUI/
-  dashboard features land routinely, including large ones — as long as they integrate with
-  the existing setup/config UX (`hermes tools`, `hermes setup`, auto-install) rather than
-  bolting on a raw env var.
+- **Finish the supported paths.** Auth, setup, tools, auxiliary calls, context budgeting,
+  compaction, resume, and recovery must work together. Prefer a complete existing
+  integration to another partial one. New capabilities use the footprint ladder and
+  integrate with the existing setup/config UX rather than bolting on a raw env var.
 - **Refactor god-files into clean modules.** Huge mechanical `+N/-N` extraction PRs are
   wanted work. "Every line traces to the request" applies to *feature* PRs; a declared
   refactor's request IS the extraction.
@@ -172,10 +170,10 @@ source ./activate
 hermes --version
 ```
 
-PowerShell:
+fish:
 
-```powershell
-. .\activate.ps1
+```fish
+source ./activate.fish
 hermes --version
 ```
 
@@ -190,7 +188,7 @@ Use the [PM developer workflow](../reference/package-management.md#developer-wor
 Run these commands from that checkout with its prepared Python. Keep the same
 development `HERMES_HOME`. PM must be able to start before it can build another
 environment. On Windows hosts, do all development inside WSL: this fork does not
-support native Windows (see PLATFORMS.md).
+support native Windows (see the platform-support guide).
 
 Build an independent interpreter for tests and editor tools:
 
@@ -212,7 +210,6 @@ To keep the test environment outside the checkout, replace `.venv` with a fresh 
 path. Set `HERMES_PYTHON` to that environment's interpreter:
 
 - POSIX: `export HERMES_PYTHON="/absolute/path/to/hermes-dev/bin/python"`
-- PowerShell: `$env:HERMES_PYTHON = 'C:\absolute\path\to\hermes-dev\Scripts\python.exe'`
 
 The canonical runner discovers repository `.venv` automatically. It clears
 `PYTHONPATH`, so pytest must be installed in the interpreter's own environment.
@@ -274,7 +271,7 @@ See [Package management](../reference/package-management.md) for PM commands and
 
 ## Cross-Platform Compatibility
 
-See **[Platform Support](../getting-started/platform-support.md)**. The dashboard uses POSIX PTYs. On Windows hosts, run everything inside WSL — this fork does not support native Windows (see PLATFORMS.md).
+See **[Platform Support](../getting-started/platform-support.md)**. The dashboard uses POSIX PTYs. On Windows hosts, run everything inside WSL — this fork does not support native Windows (see the platform-support guide).
 
 When contributing code, keep these rules in mind:
 

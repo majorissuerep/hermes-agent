@@ -599,7 +599,7 @@ def env_for(*names: str, base_env: Optional[dict] = None) -> dict[str, str]:
 def _runtime_state_matches(fact: dict, stamp: str, *, project_root: Path | None = None) -> bool:
     if not isinstance(fact, dict) or fact.get("stamp") != stamp:
         return False
-    from pm.environments import selected_venv
+    from pm.environments import selected_venv, venv_python
 
     try:
         environment = selected_venv(paths.repo_root() if project_root is None else project_root)
@@ -608,7 +608,7 @@ def _runtime_state_matches(fact: dict, stamp: str, *, project_root: Path | None 
     recorded = fact.get("environment")
     if recorded is not None and (not isinstance(recorded, str) or Path(recorded).resolve() != environment):
         return False
-    return (environment / "pyvenv.cfg").is_file()
+    return (environment / "pyvenv.cfg").is_file() and venv_python(environment).is_file()
 
 
 def _member_inputs(plugins: PluginInput | None) -> dict:

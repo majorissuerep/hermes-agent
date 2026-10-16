@@ -1,7 +1,8 @@
 # Reproducible encrypted lifecycle acceptance
 
-Every scenario starts in a new **digest-pinned Ubuntu 24.04 container** with an
-empty Hermes home and PM tool store. The host only exports committed Git objects,
+Linux scenarios start in a new **digest-pinned Ubuntu 24.04 container**; macOS
+scenarios use fresh hosted macOS 15 VMs on Apple Silicon and Intel. Each has an
+empty Hermes home and cold PM tool store. The Linux host only exports committed Git objects,
 controls Docker/Kubernetes and collects sanitized evidence. It never installs or
 runs Hermes, unlocks a real home, or mounts personal files into a test.
 
@@ -11,10 +12,17 @@ runs Hermes, unlocks a real home, or mounts personal files into a test.
 | `update` | OLD fork commit → exact candidate, one update unlock, retained state |
 | `broken-files` | Damaged tracked source repaired; unrelated untracked work preserved |
 | `dirty-install` | Existing plaintext settings, secret, memory and obsolete launcher survive reinstall and encryption |
+| `reinstall` | Repair a deleted CLI module/runtime interpreter; reseed missing config/secrets as ciphertext, then restore their original values from backup; preserve unrelated local work |
+| `upstream-install` | Install an actual pinned upstream Hermes first; preserve its settings, credentials, conversation and pre-encryption snapshot when moving to this fork |
 
 Each case exercises real encrypted settings, credential resolution, session DB
 integrity, memory, skills, cron and attachments. It mutates state and restores a
-real snapshot. A real LLM delegates a config read, checks updates and writes
+real snapshot and full ZIP backup, mutates settings, and restores through public
+`hermes import`. Upstream migration must restore both pre-encryption backup forms.
+It reproduces supported clobbered-file shapes, runs public vault
+repair, exports a verified plaintext recovery archive, re-encrypts a copy, and
+compares semantic state. Pre-encryption upstream snapshots must also restore.
+A real LLM delegates a config read, checks updates and writes
 settings without another passphrase. A second session resumes the restored
 conversation and recovers a random marker from its history. An independent CLI
 without authority must remain locked. No API or application imports are mocked.
@@ -66,7 +74,7 @@ gateway publicly just for testing.
 - Every leg provisions its own pinned Python/dependencies/tools through PM. No
   application runtime or state is preseeded in the OS image or reused across legs.
 - The public installer/updater uses exact-SHA local Git transport. No fake release
-  is published. Standalone updates must prompt exactly once; delegated local
+  is published. Standalone updates and encrypted reinstalls unlock exactly once; delegated local
   commands must not prompt. A new independent resumed session unlocks once.
 - Dirty-install checks compare actual pre-existing values before fixture seeding,
   and again after restoration and live config changes; mere file existence fails.
@@ -76,8 +84,11 @@ gateway publicly just for testing.
 
 ## GitHub Actions
 
-`.github/workflows/encrypted-lifecycle.yml` runs four separate matrix legs with
-`fail-fast: false`, maximum parallelism two, and a fail-closed aggregate gate.
+`.github/workflows/encrypted-lifecycle.yml` runs six Linux container legs and
+twelve native macOS VM legs (six scenarios × two architectures), with
+`fail-fast: false`, maximum parallelism two per platform job, and a fail-closed
+aggregate gate. Select `platform: all` for cross-platform qualification;
+Linux-only or macOS-only runs qualify only that subset.
 There is no schedule. Trigger manually or push to `e2e/encrypted/**`.
 
 Configure:
@@ -109,8 +120,37 @@ scripts/run_tests.sh tests/scripts/e2e/
 
 These fast regression tests exercise real subprocess/PTY/state paths, source
 export and negative receipt controls. They have no live credentials and are not
-a substitute for the four cold container/live-LLM receipts.
+a substitute for the selected cold container/native-VM/live-LLM receipts.
 
 The remote-backends CI lane additionally runs `test_container_docker_live.py`
 against a real Docker daemon with `--fail-on-skip`. It verifies source transport,
 no host mounts or inherited model credential, and actual container removal.
+
+## Provider conversation qualification
+
+`test_provider_conversation_{chat,responses,anthropic}.py` uses the real agent, tool execution, compaction,
+SQLCipher persistence and resumed history against strict local HTTP protocol
+oracles. The shared `provider_matrix.py` maps every bundled provider identity to
+its supported Chat Completions, Responses, or Anthropic Messages formats. Every
+route runs normally and with an initial rate limit plus a summary-backend outage.
+System-prompt stability, complete tool pairs, bounded tokens/calls, preserved
+user turns, committed compaction and a random continuity anchor are required.
+
+`.github/workflows/live-providers.yml` runs that same conversation probe against
+one explicitly selected real connection across Linux and both macOS architectures.
+Choose all supported API modes for that connection. Configure a dedicated
+`LIVE_<connection>_API_KEY` secret and `LIVE_<connection>_BASE_URL` / `MODEL`
+variables; LiteLLM can reuse the dedicated `E2E_LLM_*` settings. Missing credentials
+fail before the matrix; never upload personal subscription tokens. Qualification
+receipts identify the exact commit, harness, endpoint host, model, protocol, native
+OS/architecture, compaction, token totals, resume and disposable-home cleanup.
+One gateway/model does not qualify another vendor or a subscription account.
+
+The cold `fresh` lifecycle leg also runs all three LiteLLM conversation formats
+when LiteLLM is selected. It enables the optional Anthropic SDK through public
+`hermes pm install --extra anthropic` and reselects the managed interpreter first.
+Its strict receipt must include that provisioning step and every live dialect,
+compaction, encrypted persistence and resume result. This permits real gateway
+qualification inside private-network pods without exposing the gateway publicly.
+
+See the [reliability contract](../../website/docs/developer-guide/reliability.md).

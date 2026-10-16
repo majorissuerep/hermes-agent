@@ -1,0 +1,50 @@
+# Hermes configuration seed. Unspecified options use the maintained defaults.
+# The installer copies this file before encryption. After unlocking, change
+# settings with `hermes config set <key> <value>`, not plaintext file edits.
+# Full reference: website/docs/user-guide/configuration.md
+
+# Hermes manages this stamp; do not change it manually.
+_config_version: 51
+
+# Choose a connection and model with `hermes model`. A fresh installation has
+# no vendor, endpoint, anonymous access, or cross-vendor fallback preselected.
+model:
+  provider: ""
+  default: ""
+
+# Supported connections: openai-codex (ChatGPT sign-in), anthropic, openai-api,
+# litellm, custom / custom:<name>, zai, xai / xai-oauth, and ai-gateway (Vercel).
+# See website/docs/integrations/providers.md for credentials and API formats.
+# API keys belong in the encrypted secrets store, never inline in this file.
+# Example named routes (configure only the ones you use):
+# providers:
+#   litellm:
+#     base_url: https://gateway.example.com/v1
+#     key_env: LITELLM_API_KEY
+#     api_mode: chat_completions
+#   private-openai:
+#     base_url: https://openai.example.com/v1
+#     key_env: PRIVATE_OPENAI_API_KEY
+#     api_mode: codex_responses
+#   private-anthropic:
+#     base_url: https://claude.example.com
+#     key_env: PRIVATE_CLAUDE_API_KEY
+#     api_mode: anthropic_messages
+
+# Optional examples, not an exhaustive defaults snapshot:
+# agent:
+#   max_turns: 90
+# delegation:
+#   max_concurrent_children: 3
+#   max_iterations: 50
+# compression:
+#   enabled: true
+#   threshold: 0.50
+# terminal:
+#   backend: local
+
+# Keep display overrides absent unless intentionally changing behavior:
+# CLI, TUI and each messaging platform have their own defaults.
+display: {}
+# Tool, memory, skills, scheduling, messaging and desktop options remain
+# available through `hermes setup`, `hermes config`, and their focused guides.

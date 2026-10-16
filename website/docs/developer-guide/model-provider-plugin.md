@@ -6,7 +6,17 @@ description: "How to build a model provider (inference backend) plugin for Herme
 
 # Building a Model Provider Plugin
 
-Model provider plugins declare an inference backend — an OpenAI-compatible endpoint, an Anthropic Messages server, a Codex-style Responses API, or a Bedrock-native surface — that Hermes can route `AIAgent` calls through. Every built-in provider (OpenRouter, Anthropic, GMI, DeepSeek, Nvidia, …) ships as one of these plugins. Third parties can add their own by dropping a directory under `$HERMES_HOME/plugins/model-providers/` with zero changes to the repo.
+Model provider plugins declare an inference backend that Hermes can route `AIAgent`
+calls through. This fork's [default provider catalog](../integrations/providers.md)
+is deliberately limited. Third-party providers belong in standalone plugins under
+`$HERMES_HOME/plugins/model-providers/`, not in the bundled catalog. This reference
+describes the extension API, including compatibility seams; it does not qualify
+additional vendors or protocols as supported product features.
+
+Saved settings survive provider retirement. For an explicitly installed OpenRouter
+provider plugin, `openrouter.min_coding_score` sets its Pareto-code router threshold
+(0–1; default 0.65). It does not enable that provider or affect built-in inference
+routes or media-tool credentials.
 
 :::tip
 Model provider plugins are the third kind of **provider plugin**. The others are [Memory Provider Plugins](./memory-provider-plugin.md) (cross-session knowledge) and [Context Engine Plugins](./context-engine-plugin.md) (context compression strategies). All three follow the same "drop a directory, declare a profile, no repo edits" pattern.
@@ -23,7 +33,9 @@ Model provider plugins are the third kind of **provider plugin**. The others are
 
 Steps 2 and 3 are **per profile home**: one process that serves several profiles (the multiplex gateway a local Desktop attaches to, a `hermes serve` backend) resolves the plugins of whichever profile's `$HERMES_HOME` is bound at lookup time, and a plugin installed in one profile is not visible from another. Install the plugin in every profile that should use it (`hermes -p <profile> plugins install ...`).
 
-**User plugins override bundled plugins of the same name** because `register_provider()` is last-writer-wins. Drop a `$HERMES_HOME/plugins/model-providers/gmi/` directory to replace the built-in GMI profile without touching the repo.
+**User plugins override bundled plugins of the same name** because `register_provider()`
+is last-writer-wins. A user profile named `zai`, for example, replaces that home's
+bundled Z.AI profile without touching the repo.
 
 ## Directory structure
 
