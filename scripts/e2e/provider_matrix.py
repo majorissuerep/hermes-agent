@@ -23,7 +23,7 @@ CONNECTIONS = {
     "openai": Connection("openai-api", "openai", (CHAT, RESPONSES)),
     "chatgpt": Connection("openai-codex", "openai-codex", (RESPONSES,)),
     "zai": Connection("zai", "zai", (CHAT,)),
-    "grok": Connection("xai", "xai", (CHAT,)),
+    "grok": Connection("xai", "xai", (CHAT, RESPONSES)),
     "grok_subscription": Connection("xai-oauth", "xai-oauth", (RESPONSES,)),
     "vercel": Connection("ai-gateway", "ai-gateway", (CHAT,)),
 }
