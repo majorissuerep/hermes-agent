@@ -54,7 +54,7 @@ def _contents(home):
 
 
 def test_export_round_trips_sqlcipher_wal_envelopes_streams_and_user_skills(tmp_path, monkeypatch):
-    from hermes_security.export import export_home
+    from hermes_security.recovery_export import export_home
 
     home = _home(tmp_path, monkeypatch)
     connection = encrypted_sqlite.connect(home / "state.db")
@@ -94,7 +94,7 @@ def test_export_round_trips_sqlcipher_wal_envelopes_streams_and_user_skills(tmp_
 
 @pytest.mark.parametrize("fault", ["corrupt-envelope", "truncated-stream", "existing-target", "inside-home"])
 def test_export_refuses_incomplete_or_unsafe_output_without_mutating_source(tmp_path, monkeypatch, fault):
-    from hermes_security.export import export_home
+    from hermes_security.recovery_export import export_home
 
     home = _home(tmp_path, monkeypatch)
     archive = tmp_path / "recovery.tar"
@@ -120,7 +120,7 @@ def test_export_refuses_incomplete_or_unsafe_output_without_mutating_source(tmp_
 
 @pytest.mark.skipif(os.geteuid() == 0, reason="root bypasses directory permissions")
 def test_export_fails_closed_on_an_unreadable_state_directory(tmp_path, monkeypatch):
-    from hermes_security.export import export_home
+    from hermes_security.recovery_export import export_home
 
     home = _home(tmp_path, monkeypatch)
     hidden = home / "unreadable"

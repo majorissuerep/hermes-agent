@@ -7,7 +7,7 @@ def export_command(args) -> int:
     from hermes_constants import get_hermes_home
     from hermes_cli.vault_cmd import gate_locked_vault
     from hermes_security.errors import VaultError
-    from hermes_security.export import export_home
+    from hermes_security.recovery_export import export_home
 
     if not args.output:
         print("secure-vault export requires --output /outside/home/recovery.tar")
