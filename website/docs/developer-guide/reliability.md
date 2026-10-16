@@ -9,6 +9,23 @@ The supported product is Linux/macOS with the [built-in provider catalog](../int
 A provider is a connection and protocol, not merely a model name. A gateway passing
 Chat Completions does not qualify its Responses or Anthropic endpoint.
 
+## Product scope
+
+Hermes is a focused personal agent, not a catalog of every available integration.
+Reliable conversations, encrypted self-management, and installation/update/recovery
+take priority over expanding the feature count.
+
+- The provider catalog and platform policy define the default support boundary.
+  An upstream merge, model catalog entry, or working custom URL does not expand it.
+- A new default integration needs a concrete use case, an identified maintainer,
+  and acceptance evidence for its actual protocols and operating systems, including
+  conversation recovery and install/update compatibility. A login smoke test is not enough.
+- Plugins and custom endpoints remain opt-in extension paths. Compatibility with
+  an extension is not a promise to maintain every vendor or service behind it.
+- Remove obsolete default choices, guides, and workflow lanes together. Preserve
+  user state and explicit migration paths; do not silently delete saved credentials
+  or redirect requests when narrowing support.
+
 ## Conversation contract
 
 - Append turns and tool results; keep the cached system/tool/history prefix stable

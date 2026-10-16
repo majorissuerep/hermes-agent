@@ -2,6 +2,9 @@
 
 A personal AI agent for **Linux and macOS**: terminal and desktop interfaces,
 remote messaging, tools, memory, skills, scheduled work, and delegated agents.
+The priority is a small, dependable product: reliable conversations, encrypted
+state, and safe install/update/recovery. New integrations are not a goal in
+themselves; see the [product scope](website/docs/developer-guide/reliability.md#product-scope).
 This is an unofficial fork of [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent),
 maintained by [@majorissuerep](https://github.com/majorissuerep), with mandatory
 at-rest encryption. Report fork issues [here](https://github.com/majorissuerep/hermes-agent/issues).

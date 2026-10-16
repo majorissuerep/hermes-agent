@@ -9,11 +9,13 @@ and every root-to-area chain at 30k, so it loads whole on 128k+ models: long for
 
 ## What Hermes Is
 
-Hermes is a personal AI agent that runs the same agent core across a CLI, a messaging
-gateway (Telegram, Discord, Slack, ~20 platforms), a TUI, and an Electron desktop app. It
-learns across sessions (memory + skills), delegates to subagents, runs scheduled jobs, and
+Hermes runs one personal-agent core across a CLI, messaging gateway, TUI, and Electron desktop.
+It learns across sessions (memory + skills), delegates to subagents, runs scheduled jobs, and
 drives a real terminal and browser. It is extended primarily through **plugins and skills**,
 not by growing the core.
+
+This fork prioritizes Linux/macOS reliability and a bounded provider catalog, not integration count.
+Upstream additions must meet `website/docs/developer-guide/reliability.md` § Product scope.
 
 Two invariants shape almost every design decision and are the lens for reviewing any change:
 
@@ -33,7 +35,7 @@ call, and when in doubt a PR stays open). Long form with examples:
 `website/docs/developer-guide/contributing.md` § Contribution rubric.
 
 **Wanted:** real bug fixes (repro on `main`, the exact line, the whole class incl. sibling paths);
-reach at the edges (adapters, providers, models, UI features) wired into the existing setup UX;
+complete supported integrations wired into the existing setup UX, not expansion for its own sake;
 god-file → module refactors; extending before duplicating (3+ PRs in one category → an ABC +
 orchestrator); behaviour-contract tests; E2E with real imports against a temp `HERMES_HOME` for
 resolution, config, security and I/O changes; salvage by cherry-pick so authorship survives.

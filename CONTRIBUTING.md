@@ -6,6 +6,10 @@ is the maintained reference for architecture, contribution scope, code style,
 and review. Use [fork issues](https://github.com/majorissuerep/hermes-agent/issues)
 for this fork; security reports follow [SECURITY.md](SECURITY.md).
 
+Prioritize repair, simplification, and reliability within the existing product.
+New default integrations must meet the [scope and qualification contract](website/docs/developer-guide/reliability.md#product-scope);
+upstream availability alone is not a reason to ship them.
+
 ## Development setup
 
 Select an isolated `HERMES_HOME` and `HERMES_RUNTIME_DIR` before starting Hermes.
