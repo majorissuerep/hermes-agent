@@ -5,7 +5,7 @@ import secrets
 import pytest
 
 
-def test_completed_result_is_encrypted_and_only_owner_can_recover(tmp_path, monkeypatch):
+def test_completed_result_is_encrypted_and_owner_can_recover(tmp_path, monkeypatch):
     from agent.session_context import scoped_current_session_id
     from hermes_security import vault
     from hermes_security.errors import PlaintextStateError

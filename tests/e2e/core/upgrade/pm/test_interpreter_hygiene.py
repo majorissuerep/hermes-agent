@@ -114,22 +114,25 @@ def _stray_hits(logs: dict[str, Path], since: dict[str, int] | None = None) -> d
 def test_native_runtime_after_update_never_touches_a_stray_venv(updated):
     sb, logs = updated["sb"], updated["logs"]
     mark = _marks(logs)
-    gw = P.NativeRuntime(sb, P.lazy_env(sb), sb.root / "hygiene-gateway.log")
+    gw = P.NativeRuntime(sb, P.lazy_env(sb), sb.root / "hygiene-native-runtime.log")
     seen: dict[int, tuple[str, list[str], dict[str, str]]] = {}
     try:
         gw.wait_running()
-        deadline = time.monotonic() + 8  # supervised workers start right after "running"
-        while time.monotonic() < deadline:
+        from tests.waiting import wait_until
+
+        def observe_native_python():
             for pid in gw.pids():
                 info = P.process_files(pid)
                 if info[0]:
                     seen[pid] = info
-            time.sleep(0.5)
+            return any("python" in Path(info[0]).name and info[1] for info in seen.values())
+
+        wait_until(observe_native_python, timeout=30, what="native runtime Python mapped files")
     finally:
         gw.stop()
     strays = [str(sb.checkout / n) + "/" for n in STRAY]
     pythons = {pid: exe for pid, (exe, _, _) in seen.items() if "python" in Path(exe).name}
-    assert pythons, f"harness: saw no Python process in the gateway tree: {seen.keys()}\n{gw.output()[-3000:]}"
+    assert pythons, f"harness: saw no Python process in the native runtime tree: {seen.keys()}\n{gw.output()[-3000:]}"
     mapped = {pid: [m for m in maps if any(m.startswith(s) for s in strays)] for pid, (_, maps, _) in seen.items()}
     mapped = {pid: m for pid, m in mapped.items() if m}
     env_refs = {pid: {k: v for k, v in env.items() if k in ("PYTHONPATH", "VIRTUAL_ENV", "PYTHONHOME")
@@ -138,9 +141,9 @@ def test_native_runtime_after_update_never_touches_a_stray_venv(updated):
     stray_exes = {pid: exe for pid, exe in pythons.items() if any(exe.startswith(s) for s in strays)}
     hits = _stray_hits(logs, mark)
     assert not (hits or mapped or env_refs or stray_exes), (
-        "the gateway put a stray in-tree venv on an interpreter's path after `hermes update`:\n"
+        "the native runtime put a stray in-tree venv on an interpreter's path after `hermes update`:\n"
         f"hooks fired: {hits}\nmapped files: {mapped}\nenvironment: {env_refs}\nexecutables: {stray_exes}\n"
-        f"--- gateway output ---\n{gw.output()[-4000:]}\n" + P.diagnostics(sb))
+        f"--- native runtime output ---\n{gw.output()[-4000:]}\n" + P.diagnostics(sb))
 
 
 def _turn_with_tool(sb: I.Sandbox, provider: FakeLLMServer, prompt: str, call: ToolCall) -> tuple[str, str]:

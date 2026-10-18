@@ -15,6 +15,7 @@ import fcntl
 import os
 import re
 import signal
+import shutil
 import sqlite3
 import struct
 import subprocess
@@ -127,6 +128,10 @@ class PtyHermes:
             PYTHONUNBUFFERED="1", HERMES_STATE_DB_GUARD_BYPASS="1",
         )
         master, slave = os.openpty()
+        env["HERMES_NODE"] = shutil.which("node")
+        for tool_env in ("HERMES_PYTHON", "HERMES_RUNTIME_DIR"):
+            if tool_env in os.environ:
+                env[tool_env] = os.environ[tool_env]
         self._set_winsize(master, rows, cols)
         self.master = master
         self.pts = os.ttyname(slave)

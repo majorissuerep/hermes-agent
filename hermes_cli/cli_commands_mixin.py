@@ -1490,6 +1490,7 @@ class CLICommandsMixin(CLICommandsSessionToolsMixin):
         runtime = turn_route["runtime"]
 
         def produce():
+            from cli import set_approval_callback, set_secret_capture_callback, set_sudo_password_callback
             from agent.vault_backends.unlock import set_code_prompt_callback, set_save_login_prompt_callback, set_unlock_prompt_callback
             set_sudo_password_callback(self._sudo_password_callback)
             set_approval_callback(self._approval_callback)

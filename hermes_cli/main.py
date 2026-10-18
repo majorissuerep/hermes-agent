@@ -167,7 +167,7 @@ def _run_and_exit_oneshot(
             if not emit_partial_update_hint(exc):
                 traceback.print_exc()
         except Exception:
-            pass
+            traceback.print_exc()
         rc = 1
     try:
         _cleanup_oneshot_runtime()

@@ -23,7 +23,7 @@ import hermes_yaml as yaml
 
 from tests.e2e.core._pending_fixes import known_gate
 
-from tests.e2e.vault_home import connect_state, run_unlocked, seal_fixture_home, spawn_unlocked
+from tests.e2e.vault_home import connect_state, run_unlocked, seal_fixture_home
 from hermes_security import io as state_io
 
 REPO_ROOT = Path(__file__).resolve().parents[4]

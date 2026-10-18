@@ -13,6 +13,8 @@ from typing import Any, cast
 
 import pytest
 
+from tests.tools.process_receipt_fixtures import encrypted_process_home as _encrypted_process_home
+
 import tools.process_registry as module
 from tools.process_registry import ProcessRegistry, ProcessSession
 

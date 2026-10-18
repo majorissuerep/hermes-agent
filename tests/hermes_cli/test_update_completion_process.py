@@ -98,7 +98,7 @@ def transition(tmp_path):
     )
     (package / "source_build.py").write_text(
         "from hermes_cli.probe import event\n"
-        "def build_update_products(root, *, desktop): event('build', desktop=desktop)\n"
+        "def build_update_products(root): event('build')\n"
     )
     (package / "source_stamp.py").write_text(
         "from hermes_cli.probe import event\n"
@@ -238,7 +238,7 @@ def test_old_process_new_git_tree_completes_in_fresh_python(transition, tmp_path
     response = json.loads(result.stdout.split("RESULT=")[1])
     assert response["exit_code"] == 0
     assert response["receipt"]["update_id"] == request["receipt"]["update_id"]
-    assert response["windows_resume"]["resume_needed"] is False
+    assert not response["receipt"].get("followups"), response
     assert not (Path(request["home"]) / "completion-pending").exists()
     events = [json.loads(line) for line in (root / "events.jsonl").read_text().splitlines()]
     by_name = {event["name"]: event for event in events}
@@ -249,12 +249,10 @@ def test_old_process_new_git_tree_completes_in_fresh_python(transition, tmp_path
     names = [e["name"] for e in events]
     assert by_name["convert"]["pid"] == by_name["prepare"]["pid"] and names.index("convert") < names.index("tools")
     assert Path(by_name["build"]["python"]).is_relative_to(root.parent / "selected-python")
-    assert by_name["build"]["pid"] == by_name["maintenance"]["pid"] == by_name["restart"]["pid"]
+    assert by_name["build"]["pid"] == by_name["maintenance"]["pid"]
     assert by_name["maintenance"]["snapshots"] == {"work": "work-before"}
     assert by_name["maintenance"]["pre_update_snapshot_id"] == "active-before"
     assert by_name["maintenance"]["pre_update_version"] == "日本 café"
-    assert by_name["restart"]["profiles"] == ["work"]
-    assert [e["name"] for e in events].index("exit_marker") < [e["name"] for e in events].index("restart")
 
 
 def _run_cmd_update(monkeypatch, request, capsys):
@@ -302,10 +300,7 @@ def test_missing_child_result_is_an_owed_completion_and_releases_lock(transition
     assert [row["step"] for row in receipt["followups"]] == ["completion"]
     assert "Update failed" not in out
     # The Desktop hand-off scripts must not read this as a plain "Update complete." (review P4).
-    assert "Desktop app build owed: the update completion did not finish" in out
     # This process resumes what the lost child never did, and the gateway watcher hears success.
-    assert request["windows_resume"]["resume_needed"] is False
-    assert (Path(request["home"]) / ".update_exit_code").read_text(encoding="utf-8-sig").strip() == "0"
     lock = update_lock.UpdateLock()
     assert lock.acquire()
     lock.release()
@@ -327,7 +322,6 @@ def test_completion_spawn_failure_after_commit_is_owed(transition, monkeypatch, 
     assert receipt["outcome"] == "success"
     assert [row["step"] for row in receipt["followups"]] == ["completion"]
     assert "No usable temporary directory" in receipt["followups"][0]["reason"]
-    assert (Path(request["home"]) / ".update_exit_code").read_text(encoding="utf-8-sig").strip() == "0"
 
 
 def test_lost_completion_with_parked_local_changes_stays_partial(transition, monkeypatch, capsys):
@@ -345,37 +339,6 @@ def test_lost_completion_with_parked_local_changes_stays_partial(transition, mon
     assert notice in out
 
 
-@pytest.mark.platforms("posix")
-@pytest.mark.parametrize("never_built", ["dependencies", "refused", "died"])
-@pytest.mark.parametrize("desktop", [True, False])
-def test_desktop_build_that_never_ran_is_named_for_the_handoff(transition, capsys, never_built, desktop):
-    """Review P4 (F6): the hand-off scripts read ``Desktop app build owed:`` to tell the user the app is
-    stale. The builder prints it only when the build fails; a run whose build never ran (dependency
-    sync failed, the tail refused by the update lock, the prepared child died) must print it too."""
-    scripts = Path(update_completion.__file__).parents[1] / "scripts/desktop-update"
-    for script in ("posix.sh",):  # the exact prefix the supported hand-off script matches
-        assert "Desktop app build owed: " in (scripts / script).read_text(encoding="utf-8-sig")
-    assert update_completion.DESKTOP_BUILD_OWED == "Desktop app build owed:"
-    root, _git, _old, _new, request = transition
-    request["desktop"] = desktop
-    shutil.copy2(update_completion.__file__, root / "hermes_cli/update_completion.py")
-    if never_built == "dependencies":
-        (root / "pm/__init__.py").write_text("def sync_venv(**kw): raise RuntimeError('dependency refused')\n",
-                                            encoding="utf-8")
-    elif never_built == "refused":
-        (root / "hermes_cli/source_completion.py").write_text(
-            "def complete_source_checkout(*args, **kwargs):\n"
-            "    raise RuntimeError('an update is still running (pid 1); wait for it to exit')\n", encoding="utf-8")
-    else:
-        (root / "hermes_cli/source_completion.py").write_text(
-            "import os\n"
-            "def complete_source_checkout(*args, **kwargs): os.kill(os.getpid(), 9)  # posix-only test\n",
-            encoding="utf-8")
-    result = update_completion.run_completion(request)
-    out = capsys.readouterr().out
-    assert result["exit_code"] == 0, out
-    owed = [line.strip() for line in out.splitlines() if line.strip().startswith("Desktop app build owed: ")]
-    assert len(owed) == (1 if desktop else 0), out
 
 
 def test_unwritable_gateway_status_never_fails_a_settled_commit(tmp_path, monkeypatch):
@@ -397,7 +360,7 @@ def test_unwritable_gateway_status_never_fails_a_settled_commit(tmp_path, monkey
 
 
 @pytest.mark.parametrize("cleanup_failure", [None, "kill", "wait"])
-def test_interrupt_after_child_success_demotes_gateway_marker_at_boundary(transition, monkeypatch, cleanup_failure):
+def test_interrupt_after_child_success_retains_receipt_and_reaps_child(transition, monkeypatch, cleanup_failure):
     import io
     from types import SimpleNamespace
     from hermes_cli import main, update_cmd, update_lock, update_receipt
@@ -485,7 +448,6 @@ def test_interrupt_after_child_success_demotes_gateway_marker_at_boundary(transi
     assert receipt["exit_code"] == 130
     assert receipt["stop_reason"].startswith("KeyboardInterrupt:")
     # The gateway watcher still hears the interrupt (a non-zero exit is fine for Ctrl-C).
-    assert marker.read_text().strip() == "1"
     lock = update_lock.UpdateLock()
     assert lock.acquire()
     lock.release()
@@ -532,14 +494,8 @@ def test_failed_build_after_commit_is_a_followup_and_later_steps_still_run(trans
     events = [json.loads(line)["name"] for line in (root / "events.jsonl").read_text().splitlines()]
     # Was "not in": the failed build no longer skips maintenance (config migration) ...
     assert "maintenance" in events
-    # ... nor the gateway restart and its verification.
-    assert "restart" in events and "verify" in events
     # The tail was not complete, so the install stamp is not written.
     assert "stamp" not in events
-    # The gateway watcher hears success: the code it runs is the committed code.
-    assert {"name": "exit_marker", "ok": True}.items() <= next(
-        json.loads(line) for line in (root / "events.jsonl").read_text().splitlines()
-        if json.loads(line)["name"] == "exit_marker").items()
 
 
 def test_prepare_failure_preserves_correlated_pm_receipt(transition):

@@ -23,7 +23,7 @@ import hermes_yaml as yaml
 
 from tests.fakes.providers.anthropic_messages import ApiError, AnthropicMessagesServer, Reply, Response, Text, ToolUse
 
-from tests.e2e.vault_home import connect_state, run_unlocked, seal_fixture_home, spawn_unlocked
+from tests.e2e.vault_home import run_unlocked, seal_fixture_home, spawn_unlocked
 from hermes_security import io as state_io
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -59,7 +59,7 @@ class FakeHome:
             "HOME": str(self.home), "HERMES_HOME": str(self.hermes_home),
             "PYTHONPATH": str(REPO_ROOT), "PYTHONUNBUFFERED": "1", "NO_COLOR": "1", "TERM": "dumb",
             TAG_VAR: self.tag,
-            # The child's ~/.hermes/state.db IS the tmp home's db; see parity/_helpers.py.
+            # The child's state database is the synthetic fixture's database.
             "HERMES_STATE_DB_GUARD_BYPASS": "1",
         })
         env.update(extra or {})
@@ -222,8 +222,7 @@ def start_anthropic_rig(root: Path, decide: Callable[[dict[str, Any]], Any], *,
     from tests.e2e.core.providers._anthropic_helpers import become_subreaper
     from tests.fakes.providers.oauth_token_server import OAuthTokenServer, TLSInterceptProxy, make_test_ca
 
-    # The child's first connect spawns the profile's gateway daemon (detached, reparented to init);
-    # as subreaper it stays in this test's tree so ``kill_tagged`` passes the live-system guard.
+    # Reap only this fixture's tagged native children, including orphaned tool processes.
     become_subreaper()
     ca = make_test_ca(root / "ca", ANTHROPIC_TOKEN_HOSTS)
     tokens = OAuthTokenServer().start()

@@ -74,12 +74,10 @@ def _close_session_authority(session: dict) -> None:
         authority = session.pop("_vault_authority", None)
         if authority is not None:
             authority.close()
-_AUTOMATIC_SESSION_END_REASONS = frozenset({"ws_orphan_reap", "ws_disconnect", "idle_timeout", "lru_evict", "tui_shutdown"})
 
 
 def _lease_metadata(live_session_id: str) -> dict:
-    """Writer identity for a lease: ``live_session_id`` is half of ``_is_same_writer``. Bot Chat delivery is
-    admitted by the session authority (gateway/session_bot), never gated on a lease flag."""
+    """Writer identity for a lease: ``live_session_id`` is half of ``_is_same_writer``."""
     return {"live_session_id": live_session_id}
 
 
@@ -127,7 +125,6 @@ def _ensure_active_session_slot(sid: str, session: dict) -> str | None:
 
 def _attach_lease(session: dict, lease) -> None:
     session["active_session_lease"] = lease
-    session.pop("_lease_taken_over", None)  # owning again: its finalize ends the row like any owner
 
 
 
@@ -241,13 +238,6 @@ def _transfer_active_session_slot(sid: str, session: dict, *, new_session_id: st
     return True
 
 
-# Sources this backend must never end in state.db: the messaging gateway owns those sessions and the TUI is only
-# a viewer (ending one causes the Groundhog Day loop, see _finalize_session). Self-created/CLI sources are NOT gateway-owned.
-# Sources the TUI backend itself creates ("tui", plus whatever a client passes as its own ``source``) and
-# the CLI's own sessions are NOT gateway-owned. See #60609.
-_NON_GATEWAY_SOURCES = frozenset({
-    "", "tui", "cli", "webui", "desktop", "cron", "kanban", "subagent", "test",
-    "local", "acp", "webhook", "api_server", "msgraph_webhook"})
 
 
 
@@ -318,7 +308,8 @@ def _finalize_session(session: dict | None, end_reason: str = "tui_close") -> No
     # End the state.db row so it doesn't linger as a ghost in /resume. Use session_id (agent.session_id), not
     # session_key: after compression the key may be the stale ended parent while session_id is the live continuation.
     # Fix for #20001.
-    _lifecycle_guard = contextlib.nullcontext(bool(session.get("_lease_taken_over")))
+    _lifecycle_guard = (_other_runtime_lease_guard(session_id, session)
+                        if session_id else contextlib.nullcontext(False))
     with _lifecycle_guard as _other_runtime_owns_lifecycle:
         _tui_owns_lifecycle = not _other_runtime_owns_lifecycle
         if _other_runtime_owns_lifecycle:
@@ -392,7 +383,7 @@ def _announce_session_reclaimed(session: dict, end_reason: str) -> None:
         logger.debug("session.reclaimed broadcast failed", exc_info=True)
 
 
-def _announce_cancelled_gateway_approvals(session: dict, reason: str, *, session_id: str = "") -> None:
+def _announce_cancelled_session_approvals(session: dict, reason: str, *, session_id: str = "") -> None:
     """Tell connected clients pending gateway approvals are being dropped (interrupt/reap/teardown, #106678).
 
     Broadcast, not session-targeted: reap/interrupt run on timer threads with no live transport or contextvar,
@@ -434,11 +425,10 @@ def _teardown_session(session: dict | None, *, end_reason: str = "tui_close") ->
     with contextlib.suppress(Exception):
         # Same user-visible hole as the interrupt's deny-resolve (#106678): a pending prompt
         # popped by unregister must not just vanish from every surface without a notice.
-        _announce_cancelled_gateway_approvals(session, end_reason)
+        _announce_cancelled_session_approvals(session, end_reason)
     with contextlib.suppress(Exception):
         from tools.approval import unregister_session_notify
-        # One approval callback per key: after a takeover it is the new runtime's registration.
-        if (key := session.get("session_key")) and not session.get("_lease_taken_over"):
+        if key := session.get("session_key"):
             unregister_session_notify(key)
     # agent.close() → shutdown_memory_provider reads the provider's config/credentials at call time; same
     # scope rule as _finalize_session (every caller here is an unscoped reaper/atexit/pool thread).
@@ -638,7 +628,7 @@ def _interrupt_session_turn(
         # approval.pending and the prompt looks lost rather than cancelled (#106678).
         # Announce BEFORE the queue is drained, or there is nothing left to name.
         reason = "ws_orphan_reap" if orphan else "interrupt"
-        _announce_cancelled_gateway_approvals(session, reason, session_id=sid)
+        _announce_cancelled_session_approvals(session, reason, session_id=sid)
         from tools.approval import resolve_session_approval
         resolve_session_approval(session["session_key"], "deny", resolve_all=True)
     return False

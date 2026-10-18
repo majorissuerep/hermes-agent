@@ -252,6 +252,10 @@ class TmuxTui:
                    HERMES_STATE_DB_GUARD_BYPASS="1", HERMES_TUI_INLINE="1" if inline else "0",
                    HERMES_TUI_DIR=str(tui_dir or private_tui_dir(root)))
         env.update(env_extra or {})
+        env["HERMES_NODE"] = shutil.which("node")
+        for tool_env in ("HERMES_PYTHON", "HERMES_RUNTIME_DIR"):
+            if tool_env in os.environ:
+                env[tool_env] = os.environ[tool_env]
         argv = [sys.executable, "-m", "hermes_cli.main", "--tui", *args]
         subprocess.run(["tmux", "-S", self.sock, "-f", str(conf), "new-session", "-d", "-s", "p",
                         "-x", str(cols), "-y", str(rows), "-c", str(root / "work"), *argv],

@@ -15,8 +15,8 @@ next provider request carried back to the model (the tool result the model saw):
   cache cannot store (SVG, AVIF, TIFF, HEIC, malformed base64) must degrade visibly, never vanish
   (#120227).
 
-``tests/e2e/core/parity/test_mcp_lifecycle.py`` owns process lifecycle (death mid-call, reaping);
-this file owns what crosses the wire.
+``test_mcp_streamable_http.py`` covers server loss and next-turn reconnection;
+this file owns what crosses the stdio wire.
 """
 
 from __future__ import annotations

@@ -1,14 +1,8 @@
-"""codex_app_server on an interactive viewer: a real ``hermes --tui`` attached to the gateway.
+"""A real local Ink TUI renders final Codex messages even without delta frames.
 
-The codex bridge hands every completed agentMessage (the final answer included) to the interim
-commentary path. On the gateway's local route that commentary used to reach only
-``LocalSessionAdapter.send``, which publishes nothing yet reports success, so an agentMessage that
-arrived without ``item/agentMessage/delta`` frames was recorded as delivered, the final send was
-suppressed and ``message.complete`` carried empty text: the TUI showed the tool card and no reply.
-
-Real chain: ``hermes --tui`` on a real PTY (VT-rendered grid), its gateway daemon, a real AIAgent
-on the native codex runtime, and the fake ``codex app-server`` binary
-(``tests/fakes/providers/codex_app_server.py``) completing agentMessage items with no deltas.
+The native Codex bridge emits commentary and a final agentMessage. Drive the
+actual PTY, local stdio runtime and AIAgent against a fake vendor executable;
+assert both durable final text and visible once-only commentary/final output.
 """
 
 from __future__ import annotations
@@ -27,7 +21,7 @@ from tests.fakes.providers.codex_app_server import FakeCodex
 
 pytestmark = [
     pytest.mark.skipif(not sys.platform.startswith("linux"), reason="real PTY + /proc session scan"),
-    # Cleanup SIGKILLs the PTY session's tree (TUI, gateway daemon, app-server) by session id.
+    # Cleanup signals only this fixture's PTY session tree.
     pytest.mark.live_system_guard_bypass,
 ]
 

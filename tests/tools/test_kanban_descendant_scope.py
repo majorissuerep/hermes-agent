@@ -6,6 +6,8 @@ import shlex
 import subprocess
 import sys
 
+import pytest
+
 from hermes_cli import kanban_db as kb
 from hermes_cli.kanban_db_connect import connect
 from tools import kanban_tools
@@ -13,6 +15,25 @@ from tools.environments.local import LocalEnvironment
 
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+@pytest.fixture(autouse=True)
+def _native_session_unlock(_isolate_hermes_home, monkeypatch):
+    from hermes_constants import get_hermes_home
+    from hermes_security.session_authority import start_session_authority
+    from tests.e2e.vault_home import seal_fixture_home
+
+    home = get_hermes_home()
+    seal_fixture_home(home)
+    monkeypatch.setenv("HERMES_SESSION_ID", "kanban-scope-fixture")
+    authority = start_session_authority(home, "kanban-scope-fixture")
+    assert authority is not None
+    for name, value in authority.environment().items():
+        monkeypatch.setenv(name, value)
+    try:
+        yield
+    finally:
+        authority.close()
 
 
 def _worker_board(tmp_path, monkeypatch):

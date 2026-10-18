@@ -30,6 +30,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.tools.process_receipt_fixtures import encrypted_process_home as _encrypted_process_home
+
 from tools.process_registry import ProcessRegistry, ProcessSession
 
 REPO_ROOT = Path(__file__).resolve().parents[2]

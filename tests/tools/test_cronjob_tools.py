@@ -625,20 +625,21 @@ class TestLocalDeliveryNotice:
         assert created["success"] is True
         # Omitted deliver from a session with no origin downgrades to local.
         assert created["deliver"] == "local"
-        assert "local-only cron job" in created["message"]
+        assert "Results are saved locally" in created["message"]
+        assert "hermes cron tick" in created["message"]
 
 
-    def test_gateway_origin_no_notice(self, monkeypatch):
-        # With a captured gateway origin, omitted deliver becomes origin and
-        # resolves to that chat — nothing to warn about.
+    def test_legacy_remote_origin_does_not_enable_removed_delivery(self):
+        # Historical process context cannot restore a removed delivery transport.
         from agent.session_context import set_session_vars
 
         set_session_vars(platform="telegram", chat_id="999")
         created = json.loads(
             cronjob(action="create", prompt="x", schedule="every 2m")
         )
-        assert created["deliver"] == "origin"
-        assert "local-only cron job" not in created["message"]
+        assert created["deliver"] == "local"
+        assert "Results are saved locally" in created["message"]
+        assert "hermes cron tick" in created["message"]
 
 
 class TestValidateCronBaseUrl:

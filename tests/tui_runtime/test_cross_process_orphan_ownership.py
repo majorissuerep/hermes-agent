@@ -45,7 +45,7 @@ if go_file:
         time.sleep(0.02)
 lease, message = try_acquire_active_session(
     session_id=os.environ["SESSION_ID"],
-    surface="desktop",
+    surface="tui",
     config={},
     track_liveness=True,
 )
@@ -186,7 +186,7 @@ def test_desktop_claim_fails_closed_when_registry_setup_fails(
     desktop_lease, desktop_message = server._claim_active_session_slot(
         "desktop-session",
         live_session_id="desktop-runtime",
-        surface="desktop",
+        surface="tui",
     )
     tui_lease, tui_message = server._claim_active_session_slot(
         "tui-session",
@@ -239,7 +239,7 @@ def test_automatic_cleanup_preserves_corrupt_registry_without_overwrite(
 
     class _FakeDB:
         def get_session(self, target: str) -> dict[str, str]:
-            return {"id": target, "source": "desktop"}
+            return {"id": target, "source": "tui"}
 
         def end_session(self, target: str, reason: str) -> None:
             ended.append((target, reason))
@@ -262,7 +262,7 @@ def test_automatic_cleanup_preserves_corrupt_registry_without_overwrite(
         "profile_home": str(profile_home),
         "session_key": "preserved-session",
         "slash_worker": None,
-        "source": "desktop",
+        "source": "tui",
     }
 
     server._finalize_session(session, end_reason="idle_timeout")
@@ -302,7 +302,7 @@ def test_automatic_cleanup_reclaims_own_orphan_lease_not_treated_as_sibling(
     owner_lease, message = server._claim_active_session_slot(
         session_id,
         live_session_id="vanished-runtime",
-        surface="desktop",
+        surface="tui",
         profile_home=profile_home,
     )
     assert owner_lease is not None and message is None
@@ -315,7 +315,7 @@ def test_automatic_cleanup_reclaims_own_orphan_lease_not_treated_as_sibling(
 
     class _FakeDB:
         def get_session(self, target: str) -> dict[str, str]:
-            return {"id": target, "source": "desktop"}
+            return {"id": target, "source": "tui"}
 
         def end_session(self, target: str, reason: str) -> None:
             ended.append((target, reason))
@@ -340,13 +340,12 @@ def test_automatic_cleanup_reclaims_own_orphan_lease_not_treated_as_sibling(
         "profile_home": str(profile_home),
         "session_key": session_id,
         "slash_worker": None,
-        "source": "desktop",
+        "source": "tui",
     }
 
-    server._finalize_session(session, end_reason="ws_orphan_reap")
+    server._finalize_session(session, end_reason="tui_shutdown")
 
-    # Automatic Desktop cleanup must NOT end the durable row (#105588).
-    assert ended == []
+    assert ended == [(session_id, "tui_shutdown")]
     assert active_session_registry_snapshot(registry_home=profile_home) == []
 
 
@@ -394,7 +393,7 @@ def test_liveness_guard_serializes_cross_process_acquire(tmp_path: Path) -> None
             _stop_child(child, release_file)
 
 
-def test_automatic_desktop_cleanup_preserves_sibling_and_releases_sole_owner_lease(
+def test_terminal_cleanup_preserves_sibling_and_releases_sole_owner_lease(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Every automatic cleanup reason must preserve another Desktop backend."""
@@ -412,7 +411,7 @@ def test_automatic_desktop_cleanup_preserves_sibling_and_releases_sole_owner_lea
 
     class _FakeDB:
         def get_session(self, target: str) -> dict[str, str] | None:
-            return {"id": target, "source": "desktop"}
+            return {"id": target, "source": "tui"}
 
         def end_session(self, target: str, reason: str) -> None:
             ended.append((target, reason))
@@ -440,20 +439,13 @@ def test_automatic_desktop_cleanup_preserves_sibling_and_releases_sole_owner_lea
             "profile_home": str(profile_home),
             "session_key": session_id,
             "slash_worker": None,
-            "source": "desktop",
+            "source": "tui",
         }
 
     try:
         _wait_for_child_file(child, ready_file, label="lease holder")
 
-        reasons = (
-            "ws_orphan_reap",
-            "ws_disconnect",
-            "idle_timeout",
-            "lru_evict",
-            "tui_shutdown",
-        )
-        assert set(reasons) == server._AUTOMATIC_SESSION_END_REASONS
+        reasons = ("idle_timeout", "lru_evict", "tui_shutdown")
 
         # With the per-session fence (#94595) this backend can no longer claim
         # a second lease on a session another backend owns — the exact
@@ -461,7 +453,7 @@ def test_automatic_desktop_cleanup_preserves_sibling_and_releases_sole_owner_lea
         refused_lease, refusal = server._claim_active_session_slot(
             session_id,
             live_session_id="local-runtime",
-            surface="desktop",
+            surface="tui",
             profile_home=profile_home,
         )
         assert refused_lease is None
@@ -481,9 +473,9 @@ def test_automatic_desktop_cleanup_preserves_sibling_and_releases_sole_owner_lea
             assert len(remaining) == 1
             assert remaining[0]["session_id"] == session_id
 
-        # Explicit user close retains force/end semantics even with a sibling.
+        # A local close cannot override another process's proven ownership.
         server._finalize_session(_session(None), end_reason="tui_close")
-        assert ended == [(session_id, "tui_close")]
+        assert ended == []
         ended.clear()
 
         release_file.write_text("release", encoding="utf-8")
@@ -495,7 +487,7 @@ def test_automatic_desktop_cleanup_preserves_sibling_and_releases_sole_owner_lea
             sole_lease, message = server._claim_active_session_slot(
                 session_id,
                 live_session_id=f"sole-runtime-{index}",
-                surface="desktop",
+                surface="tui",
                 profile_home=profile_home,
             )
             assert sole_lease is not None and message is None
@@ -503,10 +495,7 @@ def test_automatic_desktop_cleanup_preserves_sibling_and_releases_sole_owner_lea
             server._finalize_session(_session(sole_lease), end_reason=reason)
             assert active_session_registry_snapshot(registry_home=profile_home) == []
 
-        # Automatic Desktop cleanup must NOT end the durable row, even for
-        # sole owners — the conversation stays open until the user explicitly
-        # closes or archives it.  (#105588)
-        assert ended == []
+        assert ended == [(session_id, reason) for reason in reasons]
     finally:
         _stop_child(child, release_file)
 
@@ -528,38 +517,12 @@ def _runtime_record(session_key: str, transport, *, running: bool) -> dict:
 
     return {
         "agent": _Agent(), "agent_ready": None, "transport": transport, "running": running,
-        "last_active": time.time(), "created_at": time.time(), "source": "desktop",
+        "last_active": time.time(), "created_at": time.time(), "source": "tui",
         "session_key": session_key, "history": [], "history_lock": threading.Lock(),
         "active_session_lease": None, "profile_home": None,
     }
 
 
-def test_new_runtime_takes_over_detached_sibling_lease_in_same_process(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Desktop restores a chat under a new runtime while the old, client-less runtime (wedged turn) still holds
-    the lease: the new runtime gets the lease, the old turn is interrupted, the registry follows."""
-    key = "restored-chat"
-    old = _runtime_record(key, server._detached_ws_transport, running=True)
-    new = _runtime_record(key, object(), running=False)
-    monkeypatch.setattr(server, "_sessions", {"old": old, "new": new})
-    assert server._ensure_active_session_slot("old", old) is None
-    lease = old["active_session_lease"]
-
-    assert server._ensure_active_session_slot("new", new) is None
-
-    assert new["active_session_lease"] is lease and "active_session_lease" not in old
-    assert old["agent"].interrupted and old["_turn_cancel_requested"] is True
-    (entry,) = active_session_registry_snapshot()
-    assert entry["lease_id"] == lease.lease_id and entry["metadata"]["live_session_id"] == "new"
-
-    # The mark is not sticky: when the roles flip (new client gone, old runtime submits again) the old record
-    # owns the lease again and must finalize like any owner.
-    new["transport"] = server._detached_ws_transport
-    assert server._ensure_active_session_slot("old", old) is None
-    assert old["active_session_lease"] is lease and "_lease_taken_over" not in old
-    assert new.get("_lease_taken_over") is True and "active_session_lease" not in new
-    lease.release()
 
 
 @pytest.mark.live_system_guard_bypass
@@ -588,65 +551,3 @@ def test_new_runtime_never_takes_a_live_foreign_or_attached_lease(
         attached["active_session_lease"].release()
     finally:
         _stop_child(child, release_file)
-
-
-def test_takeover_stays_within_the_profile(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Timestamp ids collide across profiles' stores (#100029): profile B's refusal must not lift profile A's
-    detached runtime's lease — the entry that refused lives in B's registry, not A's."""
-    home_a, home_b = tmp_path / "A", tmp_path / "B"
-    key = "20260916_175430_a9e77f"
-    sibling = {**_runtime_record(key, server._detached_ws_transport, running=True), "profile_home": str(home_a)}
-    new = {**_runtime_record(key, object(), running=False), "profile_home": str(home_b)}
-    monkeypatch.setattr(server, "_sessions", {"a": sibling, "b": new})
-    assert server._ensure_active_session_slot("a", sibling) is None
-    holder_b, message = try_acquire_active_session(
-        session_id=key, surface="desktop", config={}, metadata={"live_session_id": "other-window"},
-        track_liveness=True, registry_home=home_b)
-    assert holder_b is not None and message is None
-    try:
-        refusal = server._ensure_active_session_slot("b", new)
-        assert getattr(refusal, "reason", None) == SESSION_NOT_OWNED
-        assert new.get("active_session_lease") is None
-        assert sibling["active_session_lease"] is not None and not sibling["agent"].interrupted
-    finally:
-        holder_b.release()
-        sibling["active_session_lease"].release()
-
-
-def test_taken_over_runtime_finalize_spares_the_new_owners_row(monkeypatch: pytest.MonkeyPatch) -> None:
-    """After a takeover the old record's automatic reap must not end the durable row, interrupt the key's
-    delegations or unregister the approval callback — the new runtime is driving all three now."""
-    key = "restored-tui-chat"
-    old = {**_runtime_record(key, server._detached_ws_transport, running=True), "source": "tui", "slash_worker": None}
-    new = {**_runtime_record(key, object(), running=False), "source": "tui"}
-    monkeypatch.setattr(server, "_sessions", {"old": old, "new": new})
-    assert server._ensure_active_session_slot("old", old) is None
-    assert server._ensure_active_session_slot("new", new) is None
-    lease = new["active_session_lease"]
-
-    ended: list = []
-    key_interrupts: list = []
-    unregistered: list = []
-
-    class _FakeDB:
-        def get_session(self, target):
-            return {"id": target, "source": "tui"}
-
-        def end_session(self, target, reason):
-            ended.append((target, reason))
-
-    @contextlib.contextmanager
-    def _db(_session):
-        yield _FakeDB()
-
-    monkeypatch.setattr(server, "_session_db", _db)
-    monkeypatch.setattr(server, "_notify_session_boundary", lambda *a, **k: None)
-    monkeypatch.setattr("tools.async_delegation.interrupt_for_session",
-                        lambda *a, **k: key_interrupts.append(k.get("session_key")))
-    monkeypatch.setattr("tools.approval.unregister_session_notify", lambda k: unregistered.append(k))
-    try:
-        server._teardown_session(old, end_reason="ws_orphan_reap")
-        assert ended == [] and key_interrupts == [""] and unregistered == []
-        assert lease.released is False and new["active_session_lease"] is lease
-    finally:
-        lease.release()

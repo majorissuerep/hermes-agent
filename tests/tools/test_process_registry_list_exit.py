@@ -14,6 +14,8 @@ from typing import Any, cast
 
 import pytest
 
+from tests.tools.process_receipt_fixtures import encrypted_process_home as _encrypted_process_home
+
 
 @pytest.mark.platforms("posix")
 def test_list_leaves_live_reader_as_completion_owner():

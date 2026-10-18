@@ -84,9 +84,9 @@ def test_live_running_record_is_not_reclaimed(tmp_path, monkeypatch):
     own_id = update_receipt._current.get().data["update_id"]
     for path in (tmp_path / "logs/update_receipts").glob("*.json"):
         data = json.loads(path.read_text())
-        from hermes_cli.process_identity import _process_create_time
+        from hermes_platform.child_processes import process_create_time
 
-        parent_time = _process_create_time(os.getppid())
+        parent_time = process_create_time(os.getppid())
         data.update(pid=os.getppid(), writer_pid=os.getppid(),
                     pid_create_time=parent_time, writer_create_time=parent_time)
         path.write_text(json.dumps(data))
@@ -106,14 +106,14 @@ def test_profile_process_writes_receipts_to_the_root_home(tmp_path, monkeypatch)
     assert update_receipt._receipt_dir() == root / "logs/update_receipts"
 
 
-def test_failed_web_build_does_not_skip_the_tui(tmp_path, monkeypatch, capsys):
+def test_failed_tui_build_is_reported_after_dependency_preparation(tmp_path, monkeypatch, capsys):
     from hermes_cli import source_build
 
     built = []
     monkeypatch.setattr("hermes_cli.main_install_repair._install_configured_features_missing_deps", lambda root: None)
     monkeypatch.setattr("hermes_cli.update_stage.publish_stage", lambda text: None)
     monkeypatch.setattr("hermes_cli.memory_provider_migration.migrate_all_homes", lambda: None)
-    monkeypatch.setattr(source_build, "source_frontends", lambda root: ("web", "ui-tui"))
+    monkeypatch.setattr(source_build, "source_frontends", lambda root: ("ui-tui",))
     monkeypatch.setattr(source_build, "source_build_env", lambda **kw: {"PATH": ""})
     monkeypatch.setattr(source_build, "prepare_source_dependencies", lambda *a, **kw: None)
     monkeypatch.setattr(source_build, "source_product_current", lambda *a: False)
@@ -122,11 +122,11 @@ def test_failed_web_build_does_not_skip_the_tui(tmp_path, monkeypatch, capsys):
     def broken_web(root, env):
         raise subprocess.CalledProcessError(1, ["npm", "run", "build"])
 
-    monkeypatch.setattr(source_build, "build_source_web", broken_web)
+    monkeypatch.setattr(source_build, "build_source_tui", broken_web)
     with pytest.raises(source_build.ProductBuildError) as failure:
-        source_build.build_update_products(tmp_path, desktop=False)
-    assert built == ["tui"]
-    assert [name for name, _ in failure.value.failures] == ["web UI build"]
+        source_build.build_update_products(tmp_path)
+    assert built == []
+    assert [name for name, _ in failure.value.failures] == ["TUI build"]
     assert "npm run build exited 1" in str(failure.value)
 
 
@@ -159,67 +159,13 @@ def test_failed_config_migration_is_owed_and_later_maintenance_runs(tmp_path, mo
     assert [f["step"] for f in _latest(tmp_path)["followups"]] == ["config_migration"]
 
 
-def test_owed_restart_names_its_gateways_so_a_dead_fleet_cannot_discharge_it(tmp_path, monkeypatch):
-    # A gateway that died at boot leaves no live row. An inventory-less obligation would be settled
-    # by the gateway-less discharge, silencing the warning that replaces exit 1 under C3.
-    from hermes_cli import update_cmd_fleet as fleet
-    from hermes_cli import update_cmd_fleet_verify as fleet_verify
-    from hermes_cli.update_inventory import RuntimeRecord, UpdatePlan
-
-    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
-    monkeypatch.setenv("HERMES_GATEWAY_LOCK_DIR", str(tmp_path / "locks"))
-    fleet._write_fleet_restart_pending_marker(expected_sha="a" * 40)
-    plan = UpdatePlan(runtimes=[RuntimeRecord(kind="gateway", profile="default", pid=4242),
-                                RuntimeRecord(kind="dashboard", profile="default", pid=4343)])
-    fleet_verify._record_owed_gateway_inventory(plan)
-
-    inventory = json.loads(fleet._obligation_fields()["inventory"])
-    assert [(r["kind"], r["profile"]) for r in inventory["runtimes"]] == [("gateway", "default")]
-    # HEAD still holds the pulled code, so only the fleet evidence can settle it.
-    monkeypatch.setattr(fleet, "_current_checkout_sha", lambda: "a" * 40)
-    monkeypatch.setattr("hermes_cli.update_receipt.collect_fleet_versions", list)
-    assert fleet._marker_only_restart_obsolete() is False
-    assert fleet._fleet_restart_obligation_armed()
 
 
-def test_owed_restart_rearms_a_settled_obligation_and_a_later_run_keeps_owing_it(tmp_path, monkeypatch):
-    # A pre-restart probe can settle an inventory-less record; the owed restart must re-arm it, and
-    # a later verify that finds nothing to restart must keep owing the named gateway.
-    from hermes_cli import update_cmd_fleet as fleet
-    from hermes_cli import update_cmd_fleet_verify as fleet_verify
-    from hermes_cli.update_inventory import RuntimeRecord, UpdatePlan
-
-    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
-    monkeypatch.setenv("HERMES_GATEWAY_LOCK_DIR", str(tmp_path / "locks"))
-    monkeypatch.setattr(fleet, "_current_checkout_sha", lambda: "b" * 40)
-    monkeypatch.setattr("hermes_cli.update_receipt.collect_fleet_versions", list)
-    assert not fleet._fleet_restart_obligation_armed()
-    fleet_verify._record_owed_gateway_inventory(UpdatePlan(runtimes=[RuntimeRecord(kind="gateway", profile="default")]))
-    assert fleet._obligation_fields()["expected_sha"] == "b" * 40
-    # A later verify with nothing live to restart still owes the named gateway (and keeps it armed).
-    assert fleet_verify._named_gateways_still_owed()
-    assert fleet._fleet_restart_obligation_armed()
 
 
-def test_followup_line_is_the_one_both_desktop_handoffs_parse(tmp_path, monkeypatch, capsys):
-    """The hand-offs read owed follow-ups from this printed line (review regression 1): pin the
-    producer against the exact parsers in posix.sh (sed) and windows.ps1 (.NET regex)."""
-    import re
-    from pathlib import Path
-
-    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
-    update_receipt.record_followup("gateway_restart", "x" * 900)
-    update_receipt.record_followup("windows_resume", "Windows gateway recovery failed: 'quoted' reason")
-    out = capsys.readouterr().out
-    scripts = Path(__file__).resolve().parents[2] / "scripts/desktop-update"
-    posix = (scripts / "posix.sh").read_text(encoding="utf-8")
-    function = re.search(r"^owed_followup_steps\(\) \{.*?^\}", posix, re.DOTALL | re.MULTILINE).group(0)
-    steps = subprocess.run(["bash", "-c", f"{function}\nowed_followup_steps"], env={**os.environ, "OUT": out},
-                           capture_output=True, text=True, encoding="utf-8", check=True).stdout.strip()
-    assert steps == "gateway_restart windows_resume"
 
 
-def test_interrupt_after_the_run_closed_as_success_never_tells_the_gateway_1(tmp_path, monkeypatch):
+def test_interrupt_after_closed_success_preserves_terminal_receipt(tmp_path, monkeypatch):
     """Review regression 3, the ``cmd_update`` boundary: once this run's receipt says ``success``,
     an interrupt escaping afterwards must not write 1 to the gateway /update status."""
     from types import SimpleNamespace
@@ -240,10 +186,9 @@ def test_interrupt_after_the_run_closed_as_success_never_tells_the_gateway_1(tmp
     with pytest.raises(KeyboardInterrupt):
         main.cmd_update(SimpleNamespace(gateway=True))
     assert _latest(tmp_path)["outcome"] == "success"
-    assert (tmp_path / ".update_exit_code").read_text(encoding="utf-8").strip() == "0"
 
 
-def test_a_failure_before_the_run_closed_still_tells_the_gateway_1(tmp_path, monkeypatch):
+def test_interrupt_before_run_closes_records_failure(tmp_path, monkeypatch):
     from types import SimpleNamespace
     from hermes_cli import main, update_cmd, update_owning_install
 
@@ -260,7 +205,6 @@ def test_a_failure_before_the_run_closed_still_tells_the_gateway_1(tmp_path, mon
     monkeypatch.setattr("hermes_cli.terminal_update.update_source", interrupted_while_open)
     with pytest.raises(KeyboardInterrupt):
         main.cmd_update(SimpleNamespace(gateway=True))
-    assert (tmp_path / ".update_exit_code").read_text(encoding="utf-8").strip() == "1"
 
 
 def test_completion_child_interrupted_after_verification_answers_its_success(tmp_path, monkeypatch):

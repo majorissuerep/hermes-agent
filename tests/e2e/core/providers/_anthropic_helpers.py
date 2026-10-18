@@ -29,7 +29,7 @@ import hermes_yaml as yaml
 from tests.fakes.providers.anthropic_messages import MODEL_ID, AnthropicMessagesServer, Response, Responder
 from tests.fakes.providers.oauth_token_server import TLSInterceptProxy, make_test_ca
 
-from tests.e2e.vault_home import connect_state, run_unlocked, seal_fixture_home, spawn_unlocked
+from tests.e2e.vault_home import connect_state, run_unlocked, seal_fixture_home
 from hermes_security import io as state_io
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -67,7 +67,7 @@ class Rig:
             "PYTHONUNBUFFERED": "1", "NO_COLOR": "1", "TERM": "dumb", TAG_VAR: self.tag,
             "HTTPS_PROXY": self.proxy.url, "https_proxy": self.proxy.url,
             "NO_PROXY": loopback, "no_proxy": loopback, "SSL_CERT_FILE": str(self.ca_pem),
-            # The child's ~/.hermes/state.db IS the tmp home's db (see parity/_helpers.py).
+            # The child's state database is the synthetic fixture's database.
             "HERMES_STATE_DB_GUARD_BYPASS": "1",
         })
         env.update(extra or {})

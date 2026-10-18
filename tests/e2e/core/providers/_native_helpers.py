@@ -23,8 +23,7 @@ from typing import Any, Callable
 import hermes_yaml as yaml
 from hermes_cli.config_defaults import DEFAULT_CONFIG
 
-from tests.e2e.vault_home import connect_state, run_unlocked, seal_fixture_home, spawn_unlocked
-from hermes_security import io as state_io
+from tests.e2e.vault_home import connect_state, run_unlocked, seal_fixture_home
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 TURN_TIMEOUT = 180.0

@@ -28,9 +28,8 @@ from types import SimpleNamespace
 import pytest
 
 from hermes_cli import main as hermes_main
-from hermes_cli import main_web_build
 from hermes_cli import main_install_repair
-from hermes_cli import update_cmd
+from hermes_cli import update_cmd, terminal_update
 
 
 GIT = ["git"]
@@ -360,12 +359,8 @@ def _patch_update_flow(monkeypatch, repo, run_real_git=True):
     monkeypatch.setattr(update_cmd, "_normalize_managed_eol", lambda *a, **k: None)
     monkeypatch.setattr(hermes_main, "_clear_bytecode_cache", lambda *a, **k: 0)
     monkeypatch.setattr(hermes_main, "_record_bytecode_fingerprint", lambda *a, **k: None)
-    monkeypatch.setattr(main_web_build, "_record_bytecode_fingerprint", lambda *a, **k: None)
     monkeypatch.setattr(hermes_main, "_run_pre_update_backup", lambda *a, **k: None)
-    monkeypatch.setattr(hermes_main, "_pause_windows_gateways_for_update", lambda: None)
-    monkeypatch.setattr(
-        hermes_main, "_resume_windows_gateways_after_update", lambda *a, **k: None
-    )
+    monkeypatch.setattr("hermes_cli.update_owning_install.retarget_to_owning_install", lambda root: None)
 
 
 def test_update_refuses_stopped_rebase_without_moving_head(
@@ -384,17 +379,15 @@ def test_update_refuses_stopped_rebase_without_moving_head(
     _patch_update_flow(monkeypatch, repo_pair)
     args = SimpleNamespace(branch=None, yes=True, force=False, force_venv=False)
 
-    with pytest.raises(SystemExit) as exc_info:
-        update_cmd._cmd_update_impl(args, False)
+    with pytest.raises(RuntimeError) as exc_info:
+        terminal_update.update_source(args)
 
-    assert exc_info.value.code == 1
+    assert "Finish the Git" in str(exc_info.value)
     assert _git(repo_pair, "rev-parse", "HEAD").stdout.strip() == head_before
     assert (repo_pair / ".git" / "rebase-merge").is_dir()
     assert _git(repo_pair, "stash", "list").stdout.strip() == ""
-    out = capsys.readouterr().out
-    assert "Git rebase is in progress" in out
-    assert str(repo_pair) in out
-    assert "git rebase --abort" in out
+    assert "rebase" in str(exc_info.value)
+    assert str(repo_pair) in str(exc_info.value)
 
 
 def test_update_reports_git_am_abort_for_apply_state(
@@ -416,15 +409,13 @@ def test_update_reports_git_am_abort_for_apply_state(
     _patch_update_flow(monkeypatch, repo_pair)
     args = SimpleNamespace(branch=None, yes=True, force=False, force_venv=False)
 
-    with pytest.raises(SystemExit) as exc_info:
-        update_cmd._cmd_update_impl(args, False)
+    with pytest.raises(RuntimeError) as exc_info:
+        terminal_update.update_source(args)
 
-    assert exc_info.value.code == 1
+    assert "Finish the Git" in str(exc_info.value)
     assert _git(repo_pair, "rev-parse", "HEAD").stdout.strip() == head_before
     assert (repo_pair / ".git" / "rebase-apply" / "applying").is_file()
-    out = capsys.readouterr().out
-    assert "Git am is in progress" in out
-    assert "git am --abort" in out
+    assert "am" in str(exc_info.value)
 
 
 def test_update_skips_and_warns_on_dirty_parked_branch(

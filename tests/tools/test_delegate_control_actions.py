@@ -13,6 +13,8 @@ import weakref
 
 import pytest
 
+from tests.tools.process_receipt_fixtures import encrypted_process_home as _encrypted_process_home
+
 from tools.delegate_tool import (
     _handle_control_action,
     _is_descendant_of,

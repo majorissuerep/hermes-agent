@@ -36,7 +36,7 @@ KILLED_TURN_LEFT = {
 }
 
 
-@pytest.mark.parametrize("surface", ["cli", "resume", "gateway"])
+@pytest.mark.parametrize("surface", ["cli", "resume", "durable"])
 @pytest.mark.parametrize("left", list(KILLED_TURN_LEFT))
 def test_compaction_over_an_unanswered_prompt_keeps_one_copy_of_every_row(session, surface, left):
     db, agent = session
@@ -46,7 +46,7 @@ def test_compaction_over_an_unanswered_prompt_keeps_one_copy_of_every_row(sessio
     rows, expected = KILLED_TURN_LEFT[left]
     for role, content, fields in rows:
         db.append_message("sid", role, content, **fields)
-    if surface == "cli":  # ACP and the classic CLI restore start from the repaired reload
+    if surface == "cli":  # The classic CLI starts from the repaired reload.
         cli.conversation_history = db.get_messages_as_conversation("sid", repair_alternation=True)
     elif surface == "resume":  # --resume and the TUI load the same history with row ids
         cli.conversation_history = db.get_resume_conversations("sid")[0]

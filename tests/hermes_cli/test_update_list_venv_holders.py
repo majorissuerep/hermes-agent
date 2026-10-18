@@ -32,8 +32,8 @@ def _quiet_preflight(monkeypatch):
 
 def test_list_venv_holders_json_and_exit_3_when_holders_present(monkeypatch, capsys, _quiet_preflight):
     holders = [
-        (4242, "python.exe", r"C:\hermes\venv\Scripts\python.exe -m hermes_cli.main serve --port 8642"),
-        (4343, "python.exe", r"C:\hermes\venv\Scripts\python.exe -m hermes_cli.main gateway run"),
+        (4242, "python.exe", r"C:\hermes\venv\Scripts\python.exe -m tui_runtime"),
+        (4343, "python.exe", r"C:\hermes\venv\Scripts\python.exe -m hermes_cli.main chat -q hi -Q"),
         (4444, "python.exe", r"C:\hermes\venv\Scripts\python.exe -m hermes_cli.main -p work kanban list"),
         (4545, "python.exe", r"C:\hermes\venv\Scripts\python.exe some_script.py"),
     ]
@@ -45,9 +45,9 @@ def test_list_venv_holders_json_and_exit_3_when_holders_present(monkeypatch, cap
     assert exc.value.code == update_cmd_holders.VENV_HOLDERS_EXIT == 3
     payload = json.loads(capsys.readouterr().out)
     assert [(h["pid"], h["kind"]) for h in payload] == [
-        (4242, "backend"), (4343, "gateway"), (4444, "hermes:kanban"), (4545, "python")]
+        (4242, "python"), (4343, "hermes:chat"), (4444, "hermes:kanban"), (4545, "python")]
     assert set(payload[0]) == {"pid", "exe", "argv", "kind"}
-    assert payload[0]["argv"].endswith("serve --port 8642")
+    assert payload[0]["argv"].endswith("-m tui_runtime")
 
 
 def test_list_venv_holders_empty_list_exits_zero_without_updating(monkeypatch, capsys, _quiet_preflight):

@@ -10,6 +10,8 @@ import sys
 import threading
 import time
 import pytest
+
+from tests.tools.process_receipt_fixtures import encrypted_process_home as _encrypted_process_home
 from unittest.mock import MagicMock, patch
 
 from tools.environments.local_env_policy import _HERMES_PROVIDER_ENV_FORCE_PREFIX

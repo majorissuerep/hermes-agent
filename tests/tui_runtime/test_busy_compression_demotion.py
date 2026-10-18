@@ -203,7 +203,7 @@ def test_submit_during_manual_compress_is_queued_and_reply_persists(monkeypatch)
     infos = []
     monkeypatch.setattr(server, "_emit", lambda event, sid, payload=None: event == "session.info" and infos.append(payload))
     for name in ("_status_update", "_sync_session_key_after_compress", "_persist_queued_user_row",
-                 "_replace_queued_user_row_for_turn", "_clear_pending", "_announce_cancelled_gateway_approvals"):
+                 "_replace_queued_user_row_for_turn", "_clear_pending", "_announce_cancelled_session_approvals"):
         monkeypatch.setattr(server, name, lambda *a, **k: None)
     monkeypatch.setattr(server, "_session_info", lambda agent, session: {"running": bool(session["running"])})
     agent = types.SimpleNamespace(

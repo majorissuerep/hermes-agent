@@ -92,7 +92,9 @@ def _probe(row: Row, root: Path, kind: str) -> dict:
         home = write_home(root, {"provider": row.name, "base_url": base})
         started = time.monotonic()
         try:
-            proc = subprocess.run([sys.executable, "-c", script, row.name, unique], cwd=root, capture_output=True,
+            from tests.e2e.vault_home import run_unlocked
+            probe = "from hermes_security.handoff import adopt_inherited_key; adopt_inherited_key();\n" + script
+            proc = run_unlocked([sys.executable, "-c", probe, row.name, unique], cwd=root, capture_output=True,
                                   text=True, env=hermetic_env(home, {**keys, **fake.proxy_env()}),
                                   timeout=PROBE_TIMEOUT, stdin=subprocess.DEVNULL, check=False)
             out, err = proc.stdout, proc.stderr

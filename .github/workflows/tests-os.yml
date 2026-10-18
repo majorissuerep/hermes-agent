@@ -74,7 +74,7 @@ jobs:
         uses: ./.github/actions/setup-pm
         with:
           packages: 'ripgrep'
-          extras: '["all", "telegram", "anthropic", "mistral", "fal", "modal", "daytona", "parallel-web"]'
+          extras: '["all", "anthropic", "mistral", "fal", "modal", "daytona", "parallel-web"]'
           test-environment: 'true'
           prune-python-cache: true
 

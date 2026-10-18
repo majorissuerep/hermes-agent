@@ -918,8 +918,8 @@ def describe_holder(holder: UpdateHolder | None) -> str:
         return (
             f"✗ Cannot lock this install for the update: {holder.reason}.\n"
             "\n"
-            "  Updating without the lock could let two updates corrupt the install, or run\n"
-            "  under a Desktop app, gateway or installer that cannot see it. Make that path\n"
+            "  Updating without the lock could let concurrent commands corrupt the install.\n"
+            "  Make that path\n"
             "  writable (fix its owner or permissions, or remount a read-only filesystem\n"
             "  read-write), or run `hermes update` as the user that owns the install."
         )
@@ -932,8 +932,7 @@ def describe_holder(holder: UpdateHolder | None) -> str:
         f"✗ Another Hermes update is already running (started {elapsed} ago{who}).\n"
         "\n"
         "  Running two at once would corrupt the install. Wait for it to finish\n"
-        "  (watch `hermes logs`), or close the Desktop/dashboard window that\n"
-        "  started it, then run `hermes update` again."
+        "  (watch `hermes logs`), then run `hermes update` again."
     )
 
 
@@ -1344,8 +1343,8 @@ def _publish_exclusive(path: Path, body: bytes) -> bool:
 
 def _marker_unwritable(path: Path, exc: OSError) -> str:
     """Why an unwritable marker location refuses the update, not just that it is unwritable."""
-    return (f"{path} is not writable ({exc}); the update records itself there so the Desktop app, "
-            "gateways, installers and other updaters wait for it")
+    return (f"{path} is not writable ({exc}); the update records itself there so local sessions, "
+            "installers and other updaters wait for it")
 
 
 # Per-process claim depth for each marker path: nested UpdateLocks (an update's completion run
