@@ -40,7 +40,7 @@ For repeated questions or planned follow-up work on the same codebase or documen
     - claude-code: Delegate coding to Claude Code CLI (features, PRs).
     - codex: Delegate coding to OpenAI Codex CLI (features, PRs).
     - computer-use: Drive the desktop background-first; escalate on signal.
-    - hermes-agent: Use, configure, theme, extend, and orchestrate Hermes Agent.
+    - hermes-agent: Operate encrypted, terminal-only Hermes Agent.
     - opencode: Delegate coding to OpenCode CLI (features, PR review).
     - session-deck: Message, inspect or close the user's other sessions.
   creative: Creative content generation — ASCII art, hand-drawn style diagrams, and visual design tools.
@@ -91,7 +91,6 @@ For repeated questions or planned follow-up work on the same codebase or documen
     - github: GitHub via gh CLI: PRs, issues, reviews, repos, auth.
     - graphify: Reuse knowledge graphs for code and document questions.
     - hermes-agent-skill-authoring: Author in-repo SKILL.md files: frontmatter and structure.
-    - inspecting-hermes-desktop-dom: Read the live Hermes desktop DOM/CSS over CDP.
     - node-inspect-debugger: Debug Node.js via --inspect + Chrome DevTools Protocol CLI.
     - python-debugpy: Debug Python: pdb REPL + debugpy remote (DAP).
     - requesting-code-review: Pre-commit review: security scan, quality gates, auto-fix.

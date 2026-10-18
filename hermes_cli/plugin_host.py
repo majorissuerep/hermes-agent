@@ -398,7 +398,7 @@ class PluginHost:
         kwargs = decode(params.get("kwargs") or {}, self._resolve_ref)
         result = target(*args, **kwargs)
         if asyncio.iscoroutine(result):
-            result = _run_on_gateway_loop(result)
+            result = _run_local_coroutine(result)
         return self._encode_for_host(result)
 
     def _encode_for_host(self, value: Any) -> Any:
@@ -526,18 +526,8 @@ def _holds_live_handle(value: Any) -> bool:
     return found or (isinstance(encoded, dict) and "__opaque__" in encoded)
 
 
-def _run_on_gateway_loop(coro: Any) -> Any:
-    """A facade coroutine (``platform_actions``) uses adapters bound to the gateway's event loop, so
-    it runs there when a gateway is up; otherwise on a private loop. Always called off-loop (a
-    channel thread), never from the loop itself."""
-    try:
-        from gateway.run import _gateway_runner_ref
-        runner = _gateway_runner_ref()
-    except Exception:
-        runner = None
-    loop = getattr(runner, "_gateway_loop", None)
-    if loop is not None and loop.is_running() and not loop.is_closed():
-        return asyncio.run_coroutine_threadsafe(coro, loop).result()
+def _run_local_coroutine(coro: Any) -> Any:
+    """Plugin host channels own their local event loop."""
     return asyncio.run(coro)
 
 

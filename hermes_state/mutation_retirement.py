@@ -1,24 +1,15 @@
 """Durable deletion fences outside prunable transcript rows."""
 import json
 import time
-from hermes_state.runtime import RuntimeStoreError, admission_fingerprint, _json, _text
+from hermes_state.errors import RuntimeStoreError
+from hermes_state.keys import admission_fingerprint
+from hermes_state.ledger_values import _json, _text
 
 RETIRED_PREFIX = 'gateway.retired_session.v1.'
 
 
-def retired_session(db, session_id):
-    with db._read_ctx() as conn:
-        return conn.execute('SELECT 1 FROM state_meta WHERE key=?',
-                            (RETIRED_PREFIX + session_id,)).fetchone() is not None
 
 
-def has_mutation_receipt(db, principal_id, session_id, request_id):
-    for value in (principal_id, session_id, request_id):
-        _text(value)
-    key = 'gateway.mutation.v1.' + admission_fingerprint(
-        canonical_target=session_id, payload={'principal': principal_id, 'request': request_id})
-    with db._read_ctx() as conn:
-        return conn.execute('SELECT 1 FROM state_meta WHERE key=?', (key,)).fetchone() is not None
 
 
 _TRANSCRIPT_FIELDS = frozenset({'messages', 'last_reasoning', 'tools', '_turn_user_row'})
@@ -28,7 +19,7 @@ def _compact_result(conn, admission_id):
     """A retired result keeps the exact-retry outcome (final response, flags, usage/accounting)
     but not the transcript copies a turn result carries (cumulative ``messages``, reasoning, the
     settled ``_turn_user_row``)."""
-    from hermes_state.terminal import RESULT_PREFIX
+    from hermes_state.legacy_receipts import RESULT_PREFIX
     saved = conn.execute('SELECT value FROM state_meta WHERE key=?', (RESULT_PREFIX + admission_id,)).fetchone()
     if saved is None:
         return
@@ -40,7 +31,7 @@ def _compact_result(conn, admission_id):
 
 
 def retire_terminal_receipts(conn, session_ids):
-    from hermes_state.terminal import ADMISSION_PREFIX, WORKER_PREFIX, identity_key
+    from hermes_state.legacy_receipts import ADMISSION_PREFIX, WORKER_PREFIX, identity_key
     for sid in session_ids:
         admissions = conn.execute('SELECT * FROM session_admissions WHERE target_session_id=?', (sid,)).fetchall()
         workers = conn.execute('SELECT * FROM worker_executions WHERE session_id=?', (sid,)).fetchall()
@@ -166,18 +157,6 @@ def retire_prunable(conn, session_ids):
     return quiet
 
 
-def delete_in_transaction(db, conn, session_id, payload):
-    from hermes_state.mutation_guards import require_idle, delete_targets
-    targets = delete_targets(conn, session_id)
-    require_idle(db, conn, targets)
-    retire_sessions(conn, targets)
-    for sid in targets:
-        db._bump_conversation_generation(conn, sid, 'session_reset')
-        conn.execute('UPDATE sessions SET parent_session_id=NULL, runtime_revision=runtime_revision+1 WHERE parent_session_id=?', (sid,))
-        conn.execute('DELETE FROM messages WHERE session_id=?', (sid,))
-    conn.executemany('DELETE FROM sessions WHERE id=?', [(sid,) for sid in targets])
-    db._delete_unreferenced_system_prompts(conn)
-    return set(), {'deleted_ids': targets}
 
 
 def entry_session_id(raw):
@@ -213,7 +192,7 @@ def prune_retired_tombstones(conn, older_than=RETRY_HORIZON_S):
     """Reclaim deletion tombstones retired more than *older_than* seconds ago: the terminal admission
     with its identity pointer and compacted result, terminal workers and the retired-session marker.
     Tombstones written before ``retired_at`` existed are stamped now and age from this pass."""
-    from hermes_state.terminal import ADMISSION_PREFIX, RESULT_PREFIX, WORKER_PREFIX, identity_key
+    from hermes_state.legacy_receipts import ADMISSION_PREFIX, RESULT_PREFIX, WORKER_PREFIX, identity_key
     prefixes = (ADMISSION_PREFIX, WORKER_PREFIX, RETIRED_PREFIX)
     now = time.time()
     for prefix in prefixes:

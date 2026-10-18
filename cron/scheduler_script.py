@@ -321,7 +321,7 @@ def _resolve_script_path(script_path: str) -> tuple[Optional[Path], Optional[str
 
     # Reject NUL eagerly: on Windows Path ops raise ValueError *after* expanduser so the try below
     # would not catch it. str() first so the guard itself cannot raise on a non-str script_path.
-    # Same ingestion contract as cron.lifecycle_guard._expand_candidate_path: a NUL-bearing value can never
+    # Same ingestion contract as cron.script_paths._expand_candidate_path: a NUL-bearing value can never
     # name a real script, and on Windows the Path operations raise ValueError *after* expanduser (expanduser
     # never expands "~user" there, so the try below never fires) — reject eagerly so both platforms fail
     # cleanly instead of crashing the scheduler. str() first so the guard itself can never raise TypeError
@@ -364,7 +364,7 @@ def _resolve_cron_interpreter(interpreter: str) -> tuple[Optional[str], Optional
     Python: the lifecycle guard classifies ``.py`` scripts as Python and skips its shell reference
     walk, so ``interpreter=/bin/bash`` would run an unscanned ``.py`` body as shell. ``pythonw``
     is refused because it discards captured output (an agent job would go silently quiet)."""
-    from cron.lifecycle_guard import _INTERPRETER_IMAGE_RE
+    from cron.script_paths import _INTERPRETER_IMAGE_RE
 
     raw = interpreter.strip()
     try:
@@ -439,79 +439,81 @@ def _run_job_script(
         return False, err
     script_timeout = _get_script_timeout()
     try:
-        argv, env_overlay, err = _script_argv(path, interpreter)
-        if argv is None:
-            return False, err
-        from tools.environments.local import build_subprocess_env
-        # Lossy decode only: keep the platform-default (locale) encoding — gating ``encoding=``
-        # to win32 was deliberate (#66566: unconditional UTF-8 leaked into POSIX) — but
-        # ``errors=`` must not stay 'strict': one stray non-UTF-8 byte in the script's stdout
-        # or stderr raises UnicodeDecodeError in communicate() and fails the whole run,
-        # discarding the output (#105582; the Windows branch decodes lossily per #45099).
-        popen_kwargs: dict[str, Any] = {
-            "start_new_session": True,
-            "errors": "replace",
-        }
-        # The process env is the LAUNCH profile's. For a job owned by a routed profile, drop that
-        # profile's .env residue from the base first (no-op for the launch profile's own jobs), then
-        # overlay the routed profile's own scope (which never enters os.environ under multiplex
-        # semantics) before the sanitizer, which also overlays the names the owning profile declares
-        # in terminal.env_passthrough from that scope (#114209). The factory snapshots the process
-        # env itself — no raw copy at the spawn site (test_subprocess_env_guard).
-        env = build_subprocess_env(strip_launch_profile=True)
-        env.update(env_overlay)
-        # Subprocess cwd only (default: scripts-dir parent). NEVER os.chdir() the process.
-        # Use the job's workdir as the subprocess cwd when configured, otherwise default to the scripts-dir
-        # parent (back-compat). NEVER mutate the Python process cwd — that would leak into concurrent
-        # gateway sessions (#69396).
-        proc = subprocess.Popen(
-            argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-            cwd=workdir or str(path.parent), env=env, **popen_kwargs)
-        deadline = time.monotonic() + script_timeout
-        while True:
-            # Tree-kill on cancel AND timeout: killpg misses setsid grandchildren (watchdogs,
-            # backgrounded shell jobs); kill_process_tree snapshots descendants BEFORE signalling.
-            if cancel_event is not None and cancel_event.is_set():
-                _terminate_cron_script_tree(proc)
-                _drain_script_pipes(proc)
-                return False, "Script cancelled because cron fire ownership was lost"
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                _terminate_cron_script_tree(proc)
-                _drain_script_pipes(proc)
-                # Phase 4a (#85125): a script timeout must leave ZERO living descendants. killpg only
-                # reaches the script's own process group — a grandchild that called setsid (backgrounded
-                # shell jobs, watchdogs) escapes it and keeps running after the job reports failure (#71148
-                # / #59549). agent.deadline.kill_process_tree snapshots the descendant set via psutil BEFORE
-                # signalling, so own-session grandchildren are reached too — the unified deadline layer's
-                # tree-kill (#85147, d6a5cb9725).
-                return False, f"Script timed out after {script_timeout}s: {path}"
+        from cron.scheduler_script_materialize import script_execution_path
+        with script_execution_path(path, _sched._get_hermes_home() / "scripts") as execution_path:
+            argv, env_overlay, err = _script_argv(execution_path, interpreter)
+            if argv is None:
+                return False, err
+            from tools.environments.local import build_subprocess_env
+            # Lossy decode only: keep the platform-default (locale) encoding — gating ``encoding=``
+            # to win32 was deliberate (#66566: unconditional UTF-8 leaked into POSIX) — but
+            # ``errors=`` must not stay 'strict': one stray non-UTF-8 byte in the script's stdout
+            # or stderr raises UnicodeDecodeError in communicate() and fails the whole run,
+            # discarding the output (#105582; the Windows branch decodes lossily per #45099).
+            popen_kwargs: dict[str, Any] = {
+                "start_new_session": True,
+                "errors": "replace",
+            }
+            # The process env is the LAUNCH profile's. For a job owned by a routed profile, drop that
+            # profile's .env residue from the base first (no-op for the launch profile's own jobs), then
+            # overlay the routed profile's own scope (which never enters os.environ under multiplex
+            # semantics) before the sanitizer, which also overlays the names the owning profile declares
+            # in terminal.env_passthrough from that scope (#114209). The factory snapshots the process
+            # env itself — no raw copy at the spawn site (test_subprocess_env_guard).
+            env = build_subprocess_env(strip_launch_profile=True)
+            env.update(env_overlay)
+            # Subprocess cwd only (default: scripts-dir parent). NEVER os.chdir() the process.
+            # Use the job's workdir as the subprocess cwd when configured, otherwise default to the scripts-dir
+            # parent (back-compat). NEVER mutate the Python process cwd — that would leak into concurrent
+            # gateway sessions (#69396).
+            proc = subprocess.Popen(
+                argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                cwd=workdir or str(execution_path.parent), env=env, **popen_kwargs)
+            deadline = time.monotonic() + script_timeout
+            while True:
+                # Tree-kill on cancel AND timeout: killpg misses setsid grandchildren (watchdogs,
+                # backgrounded shell jobs); kill_process_tree snapshots descendants BEFORE signalling.
+                if cancel_event is not None and cancel_event.is_set():
+                    _terminate_cron_script_tree(proc)
+                    _drain_script_pipes(proc)
+                    return False, "Script cancelled because cron fire ownership was lost"
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    _terminate_cron_script_tree(proc)
+                    _drain_script_pipes(proc)
+                    # Phase 4a (#85125): a script timeout must leave ZERO living descendants. killpg only
+                    # reaches the script's own process group — a grandchild that called setsid (backgrounded
+                    # shell jobs, watchdogs) escapes it and keeps running after the job reports failure (#71148
+                    # / #59549). agent.deadline.kill_process_tree snapshots the descendant set via psutil BEFORE
+                    # signalling, so own-session grandchildren are reached too — the unified deadline layer's
+                    # tree-kill (#85147, d6a5cb9725).
+                    return False, f"Script timed out after {script_timeout}s: {path}"
+                try:
+                    stdout_raw, stderr_raw = proc.communicate(timeout=min(0.1, remaining))
+                    break
+                except subprocess.TimeoutExpired:
+                    continue
+
+            stdout = (stdout_raw or "").strip()
+            stderr = (stderr_raw or "").strip()
+
+            # Redact secrets before ANY return path.
             try:
-                stdout_raw, stderr_raw = proc.communicate(timeout=min(0.1, remaining))
-                break
-            except subprocess.TimeoutExpired:
-                continue
+                from agent.redact import redact_sensitive_text
+                stdout = redact_sensitive_text(stdout)
+                stderr = redact_sensitive_text(stderr)
+            except Exception as e:
+                logger.warning("Failed to redact sensitive text from output: %s", e)
+                stdout = stderr = "[REDACTED - redaction failed]"
 
-        stdout = (stdout_raw or "").strip()
-        stderr = (stderr_raw or "").strip()
-
-        # Redact secrets before ANY return path.
-        try:
-            from agent.redact import redact_sensitive_text
-            stdout = redact_sensitive_text(stdout)
-            stderr = redact_sensitive_text(stderr)
-        except Exception as e:
-            logger.warning("Failed to redact sensitive text from output: %s", e)
-            stdout = stderr = "[REDACTED - redaction failed]"
-
-        if proc.returncode != 0:
-            parts = [f"Script exited with code {proc.returncode}"]
-            if stderr:
-                parts.append(f"stderr:\n{stderr}")
-            if stdout:
-                parts.append(f"stdout:\n{stdout}")
-            return False, "\n".join(parts)
-        return True, stdout
+            if proc.returncode != 0:
+                parts = [f"Script exited with code {proc.returncode}"]
+                if stderr:
+                    parts.append(f"stderr:\n{stderr}")
+                if stdout:
+                    parts.append(f"stdout:\n{stdout}")
+                return False, "\n".join(parts)
+            return True, stdout
     except Exception as exc:
         return False, f"Script execution failed: {exc}"
 

@@ -80,37 +80,19 @@ def prepare_source_dependencies(project_root: Path, workspaces: tuple[str, ...],
 
 
 def prepare_launch_dependencies(project_root: Path, *, env: dict) -> None:
-    """A launch rebuild must not prune another installed source frontend."""
-    from hermes_cli.main_desktop import _desktop_dist_exists, _desktop_packaged_executable
-
-    desktop_dir = project_root / "apps/desktop"
-    desktop = _desktop_dist_exists(desktop_dir) or _desktop_packaged_executable(desktop_dir) is not None
-    workspaces = ("ui-tui", "web") + (("apps/desktop",) if desktop else ())
-    prepare_source_dependencies(project_root, workspaces, env=env)
+    """Prepare the local terminal frontend without unrelated workspaces."""
+    prepare_source_dependencies(project_root, ("ui-tui",), env=env)
 
 
 def build_source_tui(project_root: Path, *, env: dict) -> None:
     run_source_script(project_root, "scripts/build/tui.mjs", env=env, label="Building the TUI")
 
 
-def build_source_web(project_root: Path, *, env: dict, icons: Path | None = None) -> None:
-    # Bounded build (#63338): the Vite/Rolldown dashboard build saturates small
-    # hosts; cap the V8 heap and the native bundler's rayon thread pool.
-    from hermes_cli.web_build_limits import apply_web_build_limits
-
-    apply_web_build_limits(env)
-    # Default-brand icons are committed; installs never render them.
-    icons = icons or project_root
-    run_source_script(project_root, "scripts/build/web.mjs", "--source", str(project_root),
-                      "--icons", str(icons), "--out", str(project_root / "hermes_cli/web_dist"), env=env,
-                      label="Building the web UI")
-
-
 def source_frontends(project_root: Path) -> tuple[str, ...]:
     """The frontend workspaces this checkout carries. A source slice without them
     (python-only installs, the installer's acceptance fixture) has no products
     to build; it still publishes commands and runs the maintenance tail."""
-    return tuple(name for name in ("ui-tui", "web") if (project_root / name / "package.json").is_file())
+    return tuple(name for name in ("ui-tui",) if (project_root / name / "package.json").is_file())
 
 
 class ProductBuildError(RuntimeError):
@@ -127,18 +109,8 @@ def _failure_text(exc: BaseException) -> str:
     return f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
 
 
-def _headless_linux() -> bool:
-    return sys.platform.startswith("linux") and not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
-
-
-def build_update_products(project_root: Path, *, desktop: bool) -> None:
-    """Prepare the selected union once, attempting every independent product.
-
-    A failed product never skips the next one (a broken web build must not leave the TUI or the
-    desktop app stale); the failures are raised together at the end as ``ProductBuildError``.
-    """
-    # Both current updates and historical takeover reach this in a fresh target
-    # interpreter, never in the updater's pre-sync import graph.
+def build_update_products(project_root: Path) -> None:
+    """Build the local TUI and finish independent maintenance steps."""
     from hermes_cli.main_install_repair import _install_configured_features_missing_deps
     from hermes_cli.update_stage import publish_stage
 
@@ -148,7 +120,7 @@ def build_update_products(project_root: Path, *, desktop: bool) -> None:
         try:
             step()
             return True
-        except Exception as exc:  # health: allow BLE001 -- collected and raised after the independent steps
+        except Exception as exc:  # health: allow BLE001 -- collected and raised after independent maintenance
             print(f"  ⚠ {name} failed: {_failure_text(exc)}")
             failures.append((name, exc))
             return False
@@ -156,58 +128,19 @@ def build_update_products(project_root: Path, *, desktop: bool) -> None:
     attempt("feature dependencies", lambda: _install_configured_features_missing_deps(project_root))
     frontends = source_frontends(project_root)
     if frontends:
-        desktop_built = False
         env: dict = {}
-        workspaces = frontends + (("apps/desktop",) if desktop else ())
         publish_stage("Updating Node dependencies")
 
-        def node_dependencies(selected: tuple[str, ...]) -> None:
-            # Acquiring npm is part of this step: its failure must be reported like the install's.
-            # A recorded install is trusted as at startup (re-hashing node+npm costs ~2 s per
-            # tail); a missing one is still installed explicitly.
+        def node_dependencies() -> None:
             env.update(source_build_env(explicit=True, verify=False))
-            prepare_source_dependencies(project_root, selected, env=env, explicit=True)
+            prepare_source_dependencies(project_root, frontends, env=env, explicit=True)
 
-        # Every product compiles from these node_modules: without them there is nothing to build.
-        prepared = attempt("Node dependencies", lambda: node_dependencies(workspaces))
-        desktop_skipped = False
-        if not prepared and desktop and env:
-            # Only apps/desktop brings native addons (node-pty, electron) into the union: a host
-            # whose compiler cannot build them must still get the TUI and web UI it runs.
-            print("  → Retrying Node dependencies without the desktop app")
-            failed = failures.pop()
-            prepared = desktop_skipped = attempt("Node dependencies", lambda: node_dependencies(frontends))
-            if desktop_skipped:
-                failures.append(("desktop dependencies", failed[1]))
-        desktop_reason = failures[-1][0] if failures else ""
-        if desktop and (desktop_skipped or _headless_linux()):
-            print("  ⓘ If this host never runs the desktop app, `hermes uninstall --gui` removes it "
-                  "and future updates stop building it.")
-        if prepared:
-            # An update that changed no TUI/web input reuses the receipted output, as the
-            # launch path already does; recompiling it produces the same bytes. Desktop
-            # additionally needs the packaged app to name HEAD (its baked stamp carries the
-            # commit), so it is reused only when HEAD did not move: "Already up to date",
-            # a retried tail, a takeover re-entry.
-            if "ui-tui" in frontends:
-                if source_product_current(project_root, "tui", project_root / "ui-tui/dist"):
-                    print("  ✓ TUI is up to date")
-                else:
-                    publish_stage("Building the TUI")
-                    attempt("TUI build", lambda: build_source_tui(project_root, env=env))
-            if "web" in frontends:
-                if source_product_current(project_root, "web", project_root / "hermes_cli/web_dist"):
-                    print("  ✓ Web UI is up to date")
-                else:
-                    publish_stage("Building the web UI")
-                    attempt("web UI build", lambda: build_source_web(project_root, env=env))
-            if desktop and not desktop_skipped:
-                desktop_built = attempt("desktop app build", lambda: _build_desktop_product(project_root, env, publish_stage))
-                desktop_reason = failures[-1][0] if not desktop_built else ""
-        if desktop and not desktop_built:
-            # One whole line the Desktop hand-off scripts match: the follow-up text is truncated
-            # and names whichever products failed first, so it cannot say if THIS app was rebuilt.
-            print(f"  Desktop app build owed: {desktop_reason} failed")
+        if attempt("Node dependencies", node_dependencies):
+            if source_product_current(project_root, "tui", project_root / "ui-tui/dist"):
+                print("  ✓ TUI is up to date")
+            else:
+                publish_stage("Building the TUI")
+                attempt("TUI build", lambda: build_source_tui(project_root, env=env))
     # A configured memory provider that no longer ships in core is installed from the
     # catalog for every profile home sharing this venv (config, data and tool names
     # unchanged). The update must finish even if the migration blows up.
@@ -229,41 +162,10 @@ def build_update_products(project_root: Path, *, desktop: bool) -> None:
         raise ProductBuildError(failures)
 
 
-def _build_desktop_product(project_root: Path, env: dict, publish_stage) -> None:
-    from hermes_cli.main_desktop import (
-        _packaged_desktop_current_for_head, _refresh_installed_desktop_apps, build_prepared_desktop)
-
-    desktop_dir = project_root / "apps/desktop"
-    if _packaged_desktop_current_for_head(desktop_dir, project_root):
-        print("  ✓ Desktop app is up to date")
-    else:
-        publish_stage("Building the desktop app")
-        # The desktop build mutates checkout-scoped node_modules and
-        # apps/desktop/release; serialize it against a concurrent manual
-        # `hermes desktop` (#93940). The update path waits rather than exits:
-        # the in-flight build it queues behind produces the same fresh tree
-        # this update needs.
-        from hermes_cli.desktop_build_lock import DesktopBuildLock
-
-        build_lock = DesktopBuildLock(project_root)
-        build_lock.acquire(wait=True)
-        try:
-            build_prepared_desktop(
-                desktop_dir, source_mode=False,
-                npm=shutil.which("npm", path=env["PATH"]), env=env, icons=project_root,
-            )
-        finally:
-            build_lock.release()
-    # A current release/ can still sit beside a stale installed copy (an earlier
-    # update rebuilt but never installed); healing must not wait for the next build.
-    _refresh_installed_desktop_apps(desktop_dir)
-
-
 if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="Build source-install frontends")
     parser.add_argument("--source", type=Path, required=True)
-    parser.add_argument("--desktop", action="store_true")
     args = parser.parse_args()
-    build_update_products(args.source.resolve(), desktop=args.desktop)
+    build_update_products(args.source.resolve())

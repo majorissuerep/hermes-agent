@@ -22,9 +22,7 @@ from tools.environments.base_output import _pipe_stdin
 from hermes_cli._subprocess_compat import windows_hide_flags
 from tools.environments.local_env_policy import (
     _ALWAYS_STRIP_FOLDED, _ALWAYS_STRIP_KEYS, _HERMES_PROVIDER_ENV_BLOCKLIST, _HERMES_PROVIDER_ENV_FORCE_PREFIX,
-    _is_hermes_internal_secret, _is_provider_env_blocklisted, _is_terminal_first_party_env,
-    _home_adapter_secret_env, _matches_terminal_first_party_prefix, _plugin_terminal_env_strip_keys,
-    _registered_adapter_secret_env, _registry_adapter_secret_env,
+    _is_hermes_internal_secret, _is_provider_env_blocklisted, _plugin_terminal_env_strip_keys,
     strip_profile_gate_env)
 from tools.environments.local_pythonpath import (
     _build_hermes_repo_root_aliases, _strip_hermes_owned_pythonpath_and_runtime_markers)
@@ -227,7 +225,7 @@ def _inject_session_context_env(env: dict) -> None:
     context is engaged ContextVars are authoritative — a bound value (incl. "") wins
     and an _UNSET var is STRIPPED, not inherited. An unengaged CLI keeps the mirror."""
     try:
-        from gateway.session_context import _UNSET, _VAR_MAP, session_context_engaged
+        from agent.session_context import _UNSET, _VAR_MAP, session_context_engaged
     except Exception:
         return
     _engaged = session_context_engaged()
@@ -252,7 +250,6 @@ def _filter_secret_env(
     except Exception:
         is_env_passthrough, resolve_passthrough_value = (lambda _: False), (lambda _n, fb: fb)
     plugin_strip_folded = frozenset(k.upper() for k in plugin_strip)
-    registered = _registered_adapter_secret_env()
     for key, value in items.items():
         if key.startswith(_HERMES_PROVIDER_ENV_FORCE_PREFIX):
             if not unwrap_force:
@@ -263,11 +260,10 @@ def _filter_secret_env(
             continue
         if _is_hermes_internal_secret(key) or key.upper() in plugin_strip_folded:
             continue
-        first_party = _is_terminal_first_party_env(key)
         passthrough = is_env_passthrough(key)
-        if _is_provider_env_blocklisted(key, registered) and not (passthrough or first_party):
+        if _is_provider_env_blocklisted(key) and not passthrough:
             continue
-        if passthrough and not first_party:
+        if passthrough:
             value = resolve_passthrough_value(key, value)
         if value is not None:
             out[key] = value
@@ -345,12 +341,10 @@ def _scrub_credentials(env: dict, *, inherit_credentials: bool) -> dict:
     """Tier 1 (always) and, unless ``inherit_credentials``, Tier 2 provider/tool credentials, in place."""
     # Credential names fold to uppercase for membership: on Windows the env block
     # itself is case-insensitive, so a lowercase-stored ``gh_token`` IS GH_TOKEN.
-    home_secrets = _home_adapter_secret_env()  # one manifest stamp per scrub
-    strip_folded = _ALWAYS_STRIP_FOLDED | {k.upper() for k in _plugin_terminal_env_strip_keys()} | home_secrets
-    registered = _registry_adapter_secret_env()  # home_secrets already strip above
+    strip_folded = _ALWAYS_STRIP_FOLDED | {k.upper() for k in _plugin_terminal_env_strip_keys()}
     for key in list(env):
         if (key.upper() in strip_folded
-                or (not inherit_credentials and _is_provider_env_blocklisted(key, registered))
+                or (not inherit_credentials and _is_provider_env_blocklisted(key))
                 or key.startswith(_HERMES_PROVIDER_ENV_FORCE_PREFIX)
                 or _is_hermes_internal_secret(key)):
             del env[key]
@@ -439,19 +433,6 @@ def served_profile_child_env(
     return env
 
 
-def host_gateway_child_env(
-    base: Mapping[str, str] | None = None,
-) -> dict[str, str]:
-    """Child env for the host gateway: the default profile's secrets, never the launcher's.
-
-    ``served_profile_child_env`` — not ``os.environ.copy()``. A profile-scoped parent
-    (desktop, fleet restart, detached watcher) must not donate its dotenv to the
-    multiplexer that owns the primary adapter map.
-    """
-    from hermes_constants import get_default_hermes_root
-    return served_profile_child_env(
-        base=base, target_home=get_default_hermes_root(), inherit_credentials=True,
-    )
 
 
 def _is_routed_home(target_home: str | Path) -> bool:
@@ -766,21 +747,6 @@ def _make_run_env(env: dict) -> dict:
         lambda p: _user_tools_first(_append_missing_sane_path_entries(p)),
     )
     ensure_shell_env_var(run_env)
-    # While this profile's Bot Desktop is running, its DISPLAY/XAUTHORITY/DBUS ride along so GUI
-    # apps the agent launches from the terminal open on the Bot Screen the user is watching, not
-    # on the user's own seat (#125830). published_env() is the pure read (no activity stamp — a
-    # plain ``ls`` must not keep the screen alive past idle_stop_minutes), and it wins over the
-    # login snapshot's seat DISPLAY; a user who wants their own seat uses an inline
-    # ``DISPLAY=:0 cmd`` prefix, which bash applies after this env. Empty (or module missing) →
-    # the seat env passes through untouched.
-    try:
-        from tools.bot_desktop.runtime import published_env
-        published = published_env()
-    except Exception:
-        published = {}
-    if published:
-        run_env.update(published)
-        run_env.pop("WAYLAND_DISPLAY", None)  # X11 desktop; a leaked Wayland socket flips GTK/Chromium backends
     return run_env
 
 
@@ -916,7 +882,7 @@ def _leader_is_ours(pgid, expected_start) -> bool:
         return False
     if expected_start is None:
         return True
-    from gateway.status import get_process_start_time, start_time_fingerprints_match
+    from hermes_platform.processes import get_process_start_time, start_time_fingerprints_match
     try:
         current = get_process_start_time(pgid)
     except Exception:
@@ -1002,7 +968,7 @@ def _kill_known_pids(proc, descendants) -> None:
 def _kill_process_windows(proc) -> None:
     """Identity-checked terminate (start time guards against PID reuse), else kill."""
     try:
-        from gateway.status import get_process_start_time, terminate_pid
+        from hermes_platform.processes import get_process_start_time, terminate_pid
         terminate_pid(proc.pid, force=True, expected_start_time=get_process_start_time(proc.pid))
     except Exception:
         proc.kill()
@@ -1021,16 +987,6 @@ class LocalEnvironment(BaseEnvironment):
     # (macOS TCC pruning, etc.) legitimately applies here.
     is_local = True
 
-    def _additional_profile_scoped_passthrough_names(self) -> tuple[str, ...]:
-        """First-party ``BUZZ_*`` names present in the env, excluded from the shared
-        session snapshot. env_passthrough can never list them (it refuses blocklisted
-        names), so under a multiplexed gateway profile A's BUZZ_PRIVATE_KEY would land
-        in the snapshot and be sourced by profile B. Prefix-only and monotonic on
-        purpose: conservative even when the context-gated carve-out is inactive."""
-        merged = dict(os.environ | self.env)
-        return tuple(sorted(
-            name for name in merged
-            if isinstance(name, str) and _matches_terminal_first_party_prefix(name)))
 
     def __init__(self, cwd: str = "", timeout: int = 60, env: dict | None = None, persistent: bool = True):
         super().__init__(cwd=_resolve_local_initial_cwd(cwd), timeout=timeout, env=env, persist_env=persistent)
@@ -1138,7 +1094,7 @@ class LocalEnvironment(BaseEnvironment):
                 # detect PID/PGID recycling before signalling the group (#43044). The
                 # psutil fallback in get_process_start_time captures a baseline on every
                 # platform, macOS included.
-                from gateway.status import get_process_start_time
+                from hermes_platform.processes import get_process_start_time
                 proc._hermes_pgid_start = get_process_start_time(proc.pid)
         if stdin_data is not None:
             _pipe_stdin(proc, stdin_data)

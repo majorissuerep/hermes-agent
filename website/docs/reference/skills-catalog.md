@@ -28,7 +28,7 @@ If a skill is missing from this list but present in the repo, the catalog is reg
 | [`claude-code`](../user-guide/skills/bundled/autonomous-ai-agents/autonomous-ai-agents-claude-code.md) | Delegate coding to Claude Code CLI (features, PRs). | `autonomous-ai-agents/claude-code` |
 | [`codex`](../user-guide/skills/bundled/autonomous-ai-agents/autonomous-ai-agents-codex.md) | Delegate coding to OpenAI Codex CLI (features, PRs). | `autonomous-ai-agents/codex` |
 | [`computer-use`](../user-guide/skills/bundled/autonomous-ai-agents/autonomous-ai-agents-computer-use.md) | Drive the desktop background-first; escalate on signal. | `autonomous-ai-agents/computer-use` |
-| [`hermes-agent`](../user-guide/skills/bundled/autonomous-ai-agents/autonomous-ai-agents-hermes-agent.md) | Use, configure, theme, extend, and orchestrate Hermes Agent. | `autonomous-ai-agents/hermes-agent` |
+| [`hermes-agent`](../user-guide/skills/bundled/autonomous-ai-agents/autonomous-ai-agents-hermes-agent.md) | Operate encrypted, terminal-only Hermes Agent. | `autonomous-ai-agents/hermes-agent` |
 | [`opencode`](../user-guide/skills/bundled/autonomous-ai-agents/autonomous-ai-agents-opencode.md) | Delegate coding to OpenCode CLI (features, PR review). | `autonomous-ai-agents/opencode` |
 | [`session-deck`](../user-guide/skills/bundled/autonomous-ai-agents/autonomous-ai-agents-session-deck.md) | Message, inspect or close the user's other sessions. | `autonomous-ai-agents/session-deck` |
 
@@ -117,7 +117,6 @@ If a skill is missing from this list but present in the repo, the catalog is reg
 | [`github`](../user-guide/skills/bundled/software-development/software-development-github.md) | GitHub via gh CLI: PRs, issues, reviews, repos, auth. | `software-development/github` |
 | [`graphify`](../user-guide/skills/bundled/software-development/software-development-graphify.md) | Reuse knowledge graphs for code and document questions. | `software-development/graphify` |
 | [`hermes-agent-skill-authoring`](../user-guide/skills/bundled/software-development/software-development-hermes-agent-skill-authoring.md) | Author in-repo SKILL.md files: frontmatter and structure. | `software-development/hermes-agent-skill-authoring` |
-| [`inspecting-hermes-desktop-dom`](../user-guide/skills/bundled/software-development/software-development-inspecting-hermes-desktop-dom.md) | Read the live Hermes desktop DOM/CSS over CDP. | `software-development/inspecting-hermes-desktop-dom` |
 | [`node-inspect-debugger`](../user-guide/skills/bundled/software-development/software-development-node-inspect-debugger.md) | Debug Node.js via --inspect + Chrome DevTools Protocol CLI. | `software-development/node-inspect-debugger` |
 | [`python-debugpy`](../user-guide/skills/bundled/software-development/software-development-python-debugpy.md) | Debug Python: pdb REPL + debugpy remote (DAP). | `software-development/python-debugpy` |
 | [`requesting-code-review`](../user-guide/skills/bundled/software-development/software-development-requesting-code-review.md) | Pre-commit review: security scan, quality gates, auto-fix. | `software-development/requesting-code-review` |

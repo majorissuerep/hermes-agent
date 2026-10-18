@@ -17,11 +17,14 @@ def test_adopted_worker_failure_is_visible(tmp_path, monkeypatch, manual, death)
     from cron import executions
     from cron import scheduler
     from cron.jobs import claim_job_for_fire, create_job, get_job, use_cron_store
-    from tools.process_registry import GatewayChildDispatch
+    from tools.process_registry import ChildDispatch
 
     print("SCHEDULER", scheduler.__file__, flush=True)
     home = tmp_path / "profile"
     home.mkdir()
+    from hermes_security import vault
+    vault.init_vault(home, "synthetic-worker-death-password")
+    vault.unlock(home, "synthetic-worker-death-password")
     monkeypatch.setenv("HERMES_HOME", str(home))
     monkeypatch.setattr(executions, "EXECUTIONS_FILE", home / "cron" / "executions.db")
     monkeypatch.setattr(scheduler, "load_config_readonly", dict)
@@ -52,9 +55,6 @@ def test_adopted_worker_failure_is_visible(tmp_path, monkeypatch, manual, death)
 
         monkeypatch.setattr(scheduler, "_wait_for_external_cron_worker_body", timeout_after_recovery)
     delivered = []
-    monkeypatch.setattr(
-        scheduler, "_deliver_result", lambda *a, **k: delivered.append(True)
-    )
     worker = tmp_path / "worker.py"
     worker.write_text(
         """
@@ -62,6 +62,9 @@ import json, os, sys, time
 from pathlib import Path
 import cron.scheduler as scheduler
 import cron.executions as executions
+from hermes_security.session_authority import adopt_session_authority
+from hermes_security.io import read_json
+adopt_session_authority()
 args = sys.argv
 payload = Path(args[args.index("--external-worker-file") + 1])
 ack = Path(args[args.index("--ack-file") + 1])
@@ -72,7 +75,7 @@ if DEATH == "payload_exception":
     scheduler.run_one_job = fail
     scheduler._run_external_worker_payload(payload, ack)
 else:
-    data = json.loads(payload.read_text())
+    data = read_json(payload, purpose="state")
     eid = data["job"]["execution_id"]
     assert executions.adopt_claimed_execution(eid)
     ack.write_text(json.dumps({"pid": os.getpid(), "execution_id": eid}))
@@ -86,10 +89,10 @@ else:
 
     def dispatch(command, **kwargs):
         flags = command[command.index("--external-worker-file") :]
-        return GatewayChildDispatch("degraded", [sys.executable, str(worker), *flags])
+        return ChildDispatch("degraded", [sys.executable, str(worker), *flags])
 
     monkeypatch.setattr(
-        "tools.process_registry.restart_safe_gateway_child_argv", dispatch
+        "tools.process_registry.restart_safe_child_argv", dispatch
     )
     with use_cron_store(home):
         # A lost worker must obey the same bounded history as normal finishes.
@@ -121,18 +124,18 @@ else:
             assert "Scheduler restarted" not in row["error"]
         assert result["claim_released"], result
         assert "worker-probe-startup-sentinel" in (result["job_error"] or ""), result
-        assert len(delivered) == 1, result
+        assert delivered == [], result
         assert len(executions.list_executions()) <= executions.MAX_TERMINAL_EXECUTIONS
         from cron.scheduler_worker_failure import record_unknown_worker_outcome
 
         # Re-observing an old terminal row cannot notify twice or erase a newer fire.
         record_unknown_worker_outcome(claimed)
-        assert len(delivered) == 1
+        assert delivered == []
         assert claim_job_for_fire(job["id"], manual=True)
         replacement = get_job(job["id"])["fire_claim"]
         record_unknown_worker_outcome(claimed)
         assert get_job(job["id"])["fire_claim"] == replacement
-        assert len(delivered) == 1
+        assert delivered == []
 
 
 def test_terminalizer_refuses_an_attempt_whose_worker_is_still_alive(

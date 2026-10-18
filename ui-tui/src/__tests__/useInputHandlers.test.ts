@@ -126,22 +126,13 @@ describe('handleIdleHotkeyExit', () => {
   it('exits in normal terminals', () => {
     const actions = { die: vi.fn(), sys: vi.fn() }
 
-    handleIdleHotkeyExit(actions, false)
+    handleIdleHotkeyExit(actions)
 
     expect(actions.die).toHaveBeenCalledTimes(1)
     expect(actions.sys).not.toHaveBeenCalled()
   })
 
-  it('asks the dashboard for a fresh chat instead of leaving a ghost session', () => {
-    const actions = { die: vi.fn(), sys: vi.fn() }
-    const requestDashboardNewSession = vi.fn()
 
-    handleIdleHotkeyExit(actions, true, requestDashboardNewSession)
-
-    expect(actions.die).not.toHaveBeenCalled()
-    expect(requestDashboardNewSession).toHaveBeenCalledTimes(1)
-    expect(actions.sys).toHaveBeenCalled()
-  })
 })
 
 describe('applyVoiceRecordResponse', () => {

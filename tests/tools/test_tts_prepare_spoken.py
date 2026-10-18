@@ -112,30 +112,3 @@ class TestSharedCleanerWiring:
         cleaned = _strip_markdown_for_tts("Temp is 14°C today\nand rising")
         assert "degrees Celsius" in cleaned
         assert "\n" not in cleaned
-
-    def test_gateway_prepare_tts_text_strips_think_blocks(self):
-        from gateway.config import Platform, PlatformConfig
-        from gateway.platforms.base import BasePlatformAdapter
-
-        class _DummyAdapter(BasePlatformAdapter):
-            def __init__(self):
-                super().__init__(
-                    PlatformConfig(enabled=True, token="test"), Platform.TELEGRAM
-                )
-
-            async def connect(self):
-                return True
-
-            async def disconnect(self):
-                pass
-
-            async def send(self, chat_id, content, **kwargs):
-                raise AssertionError("not used")
-
-            async def get_chat_info(self, chat_id):
-                return {"id": chat_id, "type": "dm"}
-
-        adapter = _DummyAdapter()
-        spoken = adapter.prepare_tts_text("<think>plan</think>Hello there")
-        assert "plan" not in spoken
-        assert "Hello there" in spoken

@@ -9,98 +9,41 @@ import pytest
 from datetime import UTC
 
 
-_FIRE = """
-import json
-import os
-from pathlib import Path
-import subprocess
-import sys
-from cron import jobs, scheduler
-from cron.scheduler_provider import InProcessCronScheduler
-if sys.argv[1] == 'builtin':
-    scheduler.tick(verbose=False, sync=True)
-else:
-    provider = InProcessCronScheduler()
-    for job in jobs.load_jobs():
-        if sys.argv[1] != 'worker':
-            provider.fire_due(job['id'], force=sys.argv[1] == 'manual')
-            continue
-        from cron.executions import mark_execution_handoff_pending
-        claim = provider.claim_fire(job['id'])
-        if claim is None:
-            continue
-        mark_execution_handoff_pending(claim['execution_id'])
-        home = Path(os.environ['HERMES_HOME'])
-        payload = home / (claim['execution_id'] + '.json')
-        ack = home / (claim['execution_id'] + '.ready')
-        payload.write_text(json.dumps({'job': claim, 'profile_home': str(home),
-                                       'multiplex_active': False}))
-        subprocess.run([sys.executable, '-m', 'cron.scheduler',
-                        '--external-worker-file', str(payload), '--ack-file', str(ack)],
-                       stdin=subprocess.DEVNULL, check=True, timeout=60)
-        assert json.loads(ack.read_text())['pid'] != os.getpid()
-"""
-
-
-def _fire(home, mode):
-    env = {k: v for k, v in os.environ.items()
-           if not k.startswith(('HERMES_', '_HERMES_'))
-           and not k.endswith(('_API_KEY', '_TOKEN'))}
-    env['HERMES_HOME'] = str(home)
-    env['PYTHONPATH'] = str(Path(__file__).resolve().parents[2])
-    result = subprocess.run([sys.executable, '-c', _FIRE, mode], env=env,
-                            stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=90, check=False)
-    assert result.returncode == 0, result.stdout + result.stderr
-
-
-@pytest.mark.parametrize('mode', ['builtin', 'provider', 'worker'])
-def test_completed_occurrence_survives_restart_and_prestamp_rollback(tmp_path, mode):
+def test_completed_occurrence_survives_job_store_rollback(tmp_path, monkeypatch):
     from datetime import timedelta
     from hermes_time import now
+    from cron import jobs, scheduler
+    from hermes_security import vault
 
-    home = tmp_path / mode
-    cron = home / 'cron'
-    cron.mkdir(parents=True)
-    effect = home / 'effects.txt'
-    (home / 'scripts').mkdir()
-    script = home / 'scripts' / 'effect.py'
-    script.write_text(f"from pathlib import Path\np = Path({str(effect)!r})\n"
-                      "with p.open('a') as f: f.write('effect\\n')\nprint('done')\n")
-    slot = (now() - timedelta(minutes=30)).isoformat()
-    job = {'id': 'occurrence', 'name': 'occurrence', 'prompt': '',
-           'schedule': {'kind': 'interval', 'minutes': 240},
-           'next_run_at': slot, 'enabled': True, 'state': 'scheduled',
-           'script': str(script), 'no_agent': True, 'deliver': 'local',
-           'repeat': {'times': None, 'completed': 0}}
-    snapshot = json.dumps({'jobs': [job]})
-    store = cron / 'jobs.json'
-    store.write_text(snapshot)
-    _fire(home, mode)
-    assert effect.read_text().splitlines() == ['effect']
-    store.write_text(snapshot)  # no last_dispatch stamp, no post-completion fields
-    _fire(home, mode)  # a fresh interpreter, same authoritative ledger
-    assert effect.read_text().splitlines() == ['effect'], 'completed occurrence executed twice'
-
-    # A different missed slot must remain runnable despite the completed row.
-    job['next_run_at'] = (now() - timedelta(minutes=10)).isoformat()
-    store.write_text(json.dumps({'jobs': [job]}))
-    _fire(home, mode)
-    assert len(effect.read_text().splitlines()) == 2
-    # Manual force is not a completion of the pending scheduled slot.
-    job['next_run_at'] = (now() - timedelta(minutes=5)).isoformat()
-    pending = json.dumps({'jobs': [job]})
-    store.write_text(pending)
-    _fire(home, 'manual')
-    store.write_text(pending)
-    _fire(home, mode)
-    assert len(effect.read_text().splitlines()) == 4
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    vault.init_vault(tmp_path, "synthetic-occurrence-password")
+    vault.unlock(tmp_path, "synthetic-occurrence-password")
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    effect = tmp_path / "effects.txt"
+    script = scripts / "effect.py"
+    from hermes_security.io import write_text
+    write_text(script, "from pathlib import Path\np=Path(" + repr(str(effect)) + ")\nwith p.open('a') as f: f.write('effect\\n')\nprint('done')\n", purpose="state")
+    jobs.create_job(prompt="", schedule="every 4h", script="effect.py", no_agent=True)
+    rows = jobs.load_jobs()
+    rows[0]["next_run_at"] = (now() - timedelta(minutes=30)).isoformat()
+    snapshot = json.loads(json.dumps(rows))
+    jobs.save_jobs(rows)
+    assert scheduler.tick(verbose=False, sync=True) == 1
+    assert effect.read_text().splitlines() == ["effect"]
+    jobs.save_jobs(snapshot)
+    assert scheduler.tick(verbose=False, sync=True) == 0
+    assert effect.read_text().splitlines() == ["effect"]
+    snapshot[0]["next_run_at"] = (now() - timedelta(minutes=10)).isoformat()
+    jobs.save_jobs(snapshot)
+    assert scheduler.tick(verbose=False, sync=True) == 1
+    assert effect.read_text().splitlines() == ["effect", "effect"]
 
 
 def test_ledger_migration_and_completion_identity(tmp_path, monkeypatch):
     import sqlite3
     from cron import executions, jobs
     from cron.occurrences import completed_occurrence
-    from cron.scheduler_provider import InProcessCronScheduler
 
     db = tmp_path / 'executions.db'
     monkeypatch.setattr(executions, 'EXECUTIONS_FILE', db)
@@ -131,20 +74,18 @@ def test_ledger_migration_and_completion_identity(tmp_path, monkeypatch):
     assert not completed_occurrence(job, '2026-01-01T00:00:01Z')
     assert not completed_occurrence({'id': 'other'}, slot)
 
-    # Provider capture is before next_run_at advances; adoption cannot lose identity.
+    # A claimed scheduled fire captures its instant before schedule advancement.
     with jobs.use_cron_store(tmp_path / 'cron'):
         stored = jobs.create_job(prompt='test', schedule='every 4h')
         rows = jobs.load_jobs()
         rows[0]['next_run_at'] = slot
         jobs.save_jobs(rows)
-        claim = InProcessCronScheduler().claim_fire(stored['id'])
-        assert claim is not None
-        assert claim['_scheduled_instant'] == slot
-        assert claim['next_run_at'] != slot
-        assert '_scheduled_instant' not in jobs.load_jobs()[0]
-        executions.mark_execution_handoff_pending(claim['execution_id'])
-        adopted = executions.adopt_claimed_execution(claim['execution_id'])
-        assert adopted is not None
+        due = jobs.get_due_jobs()[0]
+        assert due['_scheduled_instant'] == slot
+        assert jobs.claim_job_for_fire(stored['id'])
+        row = executions.create_execution(stored['id'], source='direct', scheduled_instant=due['_scheduled_instant'])
+        executions.mark_execution_handoff_pending(row['id'])
+        adopted = executions.adopt_claimed_execution(row['id'])
         assert adopted['scheduled_instant'] == slot
 
         # A runnable legacy wall-clock value cannot establish an exact UTC identity.

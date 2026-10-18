@@ -160,7 +160,7 @@ class TestExecuteCodeGuardCliApprovalSurvivesExecAskLeak:
     ):
         """The other half of the leak: a session platform marker, no ask-mode.
 
-        ``_is_gateway_approval_context()`` is true whenever
+        ``_is_session_approval_context()`` is true whenever
         ``HERMES_SESSION_PLATFORM`` is set, so the whole-script gate is
         reached with ``HERMES_EXEC_ASK`` entirely absent. That path must
         show the CLI panel too, not a silent pending approval.
@@ -221,32 +221,3 @@ class TestExecuteCodeGuardCliDenialBreakerParity:
 
         assert result.get("outcome") == "timeout"
         assert expected in (result.get("message") or "")
-
-
-class TestGatewayRunImportDoesNotSetExecAsk:
-    def test_importing_gateway_run_does_not_set_exec_ask(self, tmp_path):
-        """Incidental imports must not poison CLI ask-mode process-wide."""
-        script = rf"""
-import os, sys
-os.environ.pop("HERMES_EXEC_ASK", None)
-sys.path.insert(0, {str(REPO_ROOT)!r})
-# Avoid starting the gateway; only import the module for _gateway_runner_ref
-# style side imports.
-import gateway.run  # noqa: F401
-print("EXEC_ASK=" + repr(os.environ.get("HERMES_EXEC_ASK")))
-"""
-        hermes_home = tmp_path / "import-test-home"
-        proc = subprocess.run(
-            [sys.executable, "-c", script],
-            cwd=str(REPO_ROOT),
-            capture_output=True,
-            text=True,
-            env={
-                **os.environ,
-                "HERMES_HOME": str(hermes_home),
-            },
-            timeout=60,
-            check=False,
-        )
-        assert proc.returncode == 0, proc.stderr
-        assert "EXEC_ASK=None" in proc.stdout, proc.stdout + proc.stderr

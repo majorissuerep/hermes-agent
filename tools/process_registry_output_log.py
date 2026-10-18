@@ -28,11 +28,8 @@ def output_dir() -> Path:
     return get_hermes_home() / "logs" / "process-output"
 
 
-def worker_output_log(session_id: str) -> Optional[Path]:
+def background_output_log(session_id: str) -> Optional[Path]:
     """The log a worker-spawned process writes to; None outside a registered worker."""
-    from agent.runtime_session_store import is_worker_process
-    if not is_worker_process():
-        return None
     directory = output_dir()
     directory.mkdir(mode=0o700, parents=True, exist_ok=True)
     from tools.process_registry_results import RESULT_RETENTION_SECONDS

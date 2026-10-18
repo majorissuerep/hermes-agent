@@ -185,18 +185,3 @@ def test_busy_store_leaves_the_engine_for_a_later_call(legacy_env):
         release.set()
         holder.join()
     assert binaries.installed_engine(backend).tag == "b10964"
-
-
-def test_status_route_reports_the_moved_engine(legacy_env, monkeypatch):
-    from hermes_cli.web_routers import local_models as lm
-
-    home, _, package, target, backend, pinned = legacy_env
-    legacy = legacy_digests(package, target, pinned)
-    legacy_install(home, package, target, backend, "b10964", legacy)
-    monkeypatch.setattr(lm, "_runtime_section", lambda: {"enabled": True, "backend": backend})
-    monkeypatch.setattr(lm, "_state_endpoint", lambda: None)
-
-    status = lm.local_models_status()
-
-    assert status["runtime_installed"] and status["runtime_backend"] == backend
-    assert status["tag"] == "b10964" and status["update_available"] == (legacy != pinned)

@@ -6,7 +6,6 @@ import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import { afterEach, expect, test } from 'vitest'
 import { buildTui } from '../scripts/build/tui.mjs'
-import { buildWeb } from '../scripts/build/web.mjs'
 import { productOutput, publishDirectory, withProduct } from '../scripts/build/frontend-common.mjs'
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -29,46 +28,34 @@ function dependency(root, workspace, name) {
   mkdirSync(path.dirname(link), { recursive: true })
   symlinkSync(target, link, 'junction')
 }
-function webSource(source) {
-  put(source, 'package.json', '{"private":true,"type":"module"}')
-  put(source, 'web/package.json', '{"type":"module"}')
-  put(source, 'web/index.html', '<html><head><link rel="icon" href="/favicon.ico"></head><body><script type="module" src="/src/main.ts"></script></body></html>')
-  put(source, 'web/src/main.ts', 'import { answer } from "./value"; document.body.textContent = answer;')
-  put(source, 'web/src/value.ts', 'export const answer: string = "prepared web";')
-  put(source, 'web/tsconfig.json', JSON.stringify({ files: [], references: [{ path: './tsconfig.app.json' }] }))
-  put(source, 'web/tsconfig.app.json', JSON.stringify({ compilerOptions: { target: 'ES2022', module: 'ESNext', types: [], noEmit: true, tsBuildInfoFile: './node_modules/.tmp/app.tsbuildinfo' }, include: ['src'] }))
-  put(source, 'web/vite.config.ts', 'import { defineConfig } from "vite"; export default defineConfig({base: "/dashboard/", build: {outDir: "should-not-be-used"}});')
-  put(source, 'web/public/retained.txt', 'retained public asset')
-  put(source, 'web/public/favicon.ico', 'stale source icon')
-}
 
 test('product outputs exclude the source tree except supported generated destinations', async () => {
   const inputs = ['ui-tui', 'apps/shared', 'node_modules']
   // Only call the read-only validator on real source paths: never publish here.
-  for (const name of ['pm', 'hermes_cli', 'scripts', 'pyproject.toml', '.git', 'tools', '.build', 'apps/desktop/build/products']) {
+  for (const name of ['pm', 'hermes_cli', 'scripts', 'pyproject.toml', '.git', 'tools', '.build']) {
     expect(() => productOutput(repo, path.join(repo, name), inputs), name).toThrow(/output/i)
   }
   const base = fixture()
   const source = path.join(base, 'source')
   mkdirSync(source)
-  for (const name of ['new-source-file', 'pm/generated', 'hermes_cli/web_dist-copy', 'apps/desktop/dist-copy', 'apps/desktop/build/native-deps-copy', 'hermes_cli/web_dist/assets']) {
+  for (const name of ['new-source-file', 'pm/generated', 'ui-tui/dist-copy', 'ui-tui/dist/assets']) {
     expect(() => productOutput(source, path.join(source, name), inputs), name).toThrow(/output/i)
   }
-  for (const name of ['hermes_cli/web_dist', 'apps/desktop/dist', 'apps/desktop/build/native-deps', 'apps/desktop/build/products/tui', 'apps/desktop/build/products/web', '.build/web', '.build/termux/tui']) {
+  for (const name of ['.build/tui', '.build/termux/tui']) {
     const out = path.join(source, name)
     expect(productOutput(source, out, inputs).out).toBe(out)
     expect(existsSync(out)).toBe(false)
     await withProduct(out, product => put(product, 'built.txt', 'product'))
     expect(productOutput(source, out, inputs).out).toBe(out)
   }
-  const adjacent = path.join(base, 'web-product')
+  const adjacent = path.join(base, 'tui-product')
   expect(productOutput(source, adjacent, inputs).out).toBe(adjacent)
   // Ownership never exempts a directory from source/input protection.
   const sourceDir = path.join(source, 'pm')
   await withProduct(sourceDir, product => put(product, 'keep.txt', 'source'))
   expect(() => productOutput(source, sourceDir, inputs)).toThrow(/output/i)
-  const generatedInput = path.join(source, '.build/web')
-  expect(() => productOutput(source, generatedInput, ['.build/web'])).toThrow(/overlap/)
+  const generatedInput = path.join(source, '.build/tui')
+  expect(() => productOutput(source, generatedInput, ['.build/tui'])).toThrow(/overlap/)
   symlinkSync(sourceDir, path.join(source, '.build/redirect'), 'junction')
   symlinkSync(sourceDir, path.join(base, 'source-alias'), 'junction')
   for (const alias of [path.join(source, '.build/redirect'), path.join(base, 'source-alias')]) {
@@ -118,7 +105,7 @@ test('publication replaces only builder-owned directories and rechecks ownership
 
 test('existing npm build directories can be rebuilt without adopting arbitrary outputs', async () => {
   const source = fixture()
-  for (const name of ['ui-tui/dist', 'hermes_cli/web_dist', 'apps/desktop/dist', 'apps/desktop/build/native-deps']) {
+  for (const name of ['ui-tui/dist']) {
     const out = path.join(source, name)
     put(out, 'old-output', 'previous compiler output')
     await withProduct(out, product => put(product, 'new-output', 'rebuilt'), { source })
@@ -129,56 +116,6 @@ test('existing npm build directories can be rebuilt without adopting arbitrary o
   put(unrelated, 'keep', 'source')
   await expect(withProduct(unrelated, () => {}, { source })).rejects.toThrow(/output/i)
 })
-
-test('web compiles with prepared icons and workspace-local tools without writing source or tsbuildinfo', async () => {
-  const { readdirSync, lstatSync } = await import('node:fs')
-  function snapshot(dir) {
-    return Object.fromEntries(readdirSync(dir, { recursive: true }).sort().map(name => {
-      const file = path.join(dir, name)
-      const stat = lstatSync(file)
-      return [name, stat.isFile() ? readFileSync(file).toString('base64') : 'directory or link']
-    }))
-  }
-  const base = fixture()
-  const source = path.join(base, 'source with spaces')
-  const icons = path.join(base, 'prepared icons')
-  webSource(source)
-  dependency(source, 'web', 'typescript')
-  dependency(source, 'web', 'vite')
-  put(icons, 'web/public/favicon.ico', 'prepared icon bytes')
-  const before = snapshot(source)
-  const out = path.join(base, 'web output')
-  execFileSync(process.execPath, [path.join(repo, 'scripts/build/web.mjs'), '--source', source, '--icons', icons, '--out', out], { cwd: base })
-  expect(readFileSync(path.join(out, 'favicon.ico'), 'utf8')).toBe('prepared icon bytes')
-  expect(readFileSync(path.join(out, 'retained.txt'), 'utf8')).toBe('retained public asset')
-  expect(readFileSync(path.join(out, 'index.html'), 'utf8')).toContain('/dashboard/assets/')
-  expect(snapshot(source)).toEqual(before)
-  const second = path.join(base, 'second output')
-  await buildWeb({ source, icons, out: second })
-  expect(readFileSync(path.join(second, 'index.html'))).toEqual(readFileSync(path.join(out, 'index.html')))
-}, 30_000)
-
-test('web rejects missing icons and compiler failures without publishing stale success', async () => {
-  const base = fixture()
-  const source = path.join(base, 'source')
-  const icons = path.join(base, 'icons')
-  const out = path.join(base, 'web')
-  webSource(source)
-  dependency(source, '', 'typescript')
-  dependency(source, '', 'vite')
-  await expect(buildWeb({ source, icons, out })).rejects.toThrow(/icon/i)
-  expect(existsSync(out)).toBe(false)
-  put(icons, 'web/public/favicon.ico', 'prepared icon')
-  await buildWeb({ source, icons, out })
-  const previous = readFileSync(path.join(out, 'index.html'))
-  put(source, 'web/src/value.ts', 'export const answer: string = 42;')
-  await expect(buildWeb({ source, icons, out })).rejects.toThrow(/TypeScript/)
-  expect(readFileSync(path.join(out, 'index.html'))).toEqual(previous)
-  put(source, 'web/src/value.ts', 'export const answer: string = "valid";')
-  put(source, 'web/index.html', '<script type="module" src="/missing-entry.js"></script>')
-  await expect(buildWeb({ source, icons, out })).rejects.toThrow()
-  expect(readFileSync(path.join(out, 'index.html'))).toEqual(previous)
-}, 30_000)
 
 function tuiSource(source) {
   put(source, 'package.json', '{"private":true}')
@@ -221,49 +158,6 @@ test('TUI failure does not publish or disturb a previous product, and missing pr
   expect(existsSync(path.join(source, 'ui-tui/src/entry.tsx'))).toBe(true)
 })
 
-test('built web freshness follows shared sources and build inputs, not mtimes or generated trees', async () => {
-  const { productCurrent } = await import('../scripts/build/freshness.mjs')
-  const base = fixture()
-  const source = path.join(base, 'source')
-  const icons = path.join(base, 'icons')
-  const out = path.join(base, 'web')
-  webSource(source)
-  dependency(source, '', 'typescript')
-  dependency(source, '', 'vite')
-  put(icons, 'web/public/favicon.ico', 'icon')
-  put(source, 'apps/shared/src/client.ts', 'export const version = 1')
-  put(source, 'scripts/build/web.mjs', '// build input')
-  put(source, 'assets/logo.svg', '<svg></svg>')
-  await buildWeb({ source, icons, out })
-  expect(productCurrent({ source, product: 'web', out })).toBe(true)
-  put(source, 'web/node_modules/.tmp/tsbuildinfo', 'generated')
-  expect(productCurrent({ source, product: 'web', out })).toBe(true)
-  // macOS Finder metadata written into hashed input dirs must not invalidate the build (#122632).
-  put(source, 'web/public/.DS_Store', 'finder metadata')
-  put(source, 'apps/shared/src/._client.ts', 'apple double sidecar')
-  put(source, 'assets/.localized', '')
-  // Windows file-manager metadata is the same class of noise (#122803).
-  put(source, 'web/public/Thumbs.db', 'thumb cache')
-  put(source, 'assets/Desktop.ini', 'folder view settings')
-  expect(productCurrent({ source, product: 'web', out })).toBe(true)
-  // Install completion rewrites the runtime identity after building products.
-  put(source, 'install-stamp.json', '{"builtAt": "later"}')
-  expect(productCurrent({ source, product: 'web', out })).toBe(true)
-  put(icons, 'web/public/favicon.ico', 'changed prepared icon')
-  expect(productCurrent({ source, product: 'web', out })).toBe(false)
-  await buildWeb({ source, icons, out })
-  expect(readFileSync(path.join(out, 'favicon.ico'), 'utf8')).toBe('changed prepared icon')
-  for (const input of ['apps/shared/src/client.ts', 'scripts/build/web.mjs', 'assets/icon.svg', 'package-lock.json']) {
-    put(source, input, 'changed input')
-    expect(productCurrent({ source, product: 'web', out }), input).toBe(false)
-    await buildWeb({ source, icons, out })
-    expect(productCurrent({ source, product: 'web', out })).toBe(true)
-  }
-  expect(productCurrent({ source, product: 'desktop', out })).toBe(false)
-  rmSync(path.join(out, 'favicon.ico'))
-  expect(productCurrent({ source, product: 'web', out })).toBe(false)
-}, 30_000)
-
 test('built TUI stays current after documentation, test and unrelated recipe changes', async () => {
   const { productCurrent } = await import('../scripts/build/freshness.mjs')
   const base = fixture()
@@ -278,7 +172,7 @@ test('built TUI stays current after documentation, test and unrelated recipe cha
   for (const name of [
     'ui-tui/README.md', 'ui-tui/src/__tests__/new.test.ts', 'ui-tui/src/value.spec.ts',
     'ui-tui/packages/hermes-ink/src/value.test.ts', 'apps/shared/src/value.test.ts',
-    'apps/shared/README.md', 'scripts/build/web.mjs', 'scripts/build/desktop.mjs',
+    'apps/shared/README.md', 'scripts/build/unrelated.mjs',
     'scripts/build/README.md', 'scripts/build/node-deps.mjs',
   ]) {
     put(source, name, 'not a compiler input')

@@ -4,8 +4,8 @@
 // predates `i18n.catalog` (method not found) or has no pack for the language
 // leaves the UI in English under that locale id.
 
-import type { GatewayClient } from '../gatewayClient.js'
 import { asRpcResult } from '../lib/rpc.js'
+import type { LocalAgentClient } from '../localAgentClient.js'
 
 import { applyLocale, DEFAULT_LOCALE, getLocale } from './runtime.js'
 import type { CatalogPack } from './types.js'
@@ -46,7 +46,7 @@ let lastRequested = ''
 
 /** Apply `display.language`: no-op when it did not change; English needs no
  *  RPC. Coalesces concurrent calls (config poll + boot hydration). */
-export function syncTuiLocale(gw: Pick<GatewayClient, 'request'>, rawLanguage: unknown): Promise<void> {
+export function syncTuiLocale(gw: Pick<LocalAgentClient, 'request'>, rawLanguage: unknown): Promise<void> {
   const lang = normalizeLanguageId(rawLanguage)
 
   if (lang === lastRequested && (inFlight || lang === getLocale())) {

@@ -326,94 +326,16 @@ class CLIInitMixin:
         self._init_ui_state()
 
     def _init_session_store(self):
-        """Open the session store early (so /title works before the first message)."""
-        self._session_db = None
+        """The internal slash dispatcher shares the encrypted local TUI store."""
+        from hermes_state.registry import acquire
+        self._session_db = acquire()
         self._session_db_unavailable = False
-        try:
-            # Registry handle, not a bare SessionDB(): goals/loops/heartbeat acquire the same
-            # path a moment later from the REPL thread, and a second writer repeats the full
-            # open (the /proc-wide deleted-WAL scan, ~4k readlinks) while the render thread
-            # holds the GIL — that repeat was the post-banner freeze before the first prompt.
-            from hermes_cli.gateway_session_store import session_store
-            self._session_db = session_store()  # the gateway is the single writer
-        except Exception as e:
-            # Without a store the transcript is NOT persisted while the chat looks healthy,
-            # so surface it prominently rather than only logging.
-            # #41386: a failed session store means the transcript is NOT persisted to state.db — the live
-            # chat looks healthy but resume later shows a truncated/empty session. A buried log line is not
-            # enough; surface it prominently so the user knows persistence is off for this run and can fix
-            # the store before relying on resume.
-            self._session_db_unavailable = True
-            logger.warning("Failed to initialize SessionDB — session will NOT be indexed for search: %s", e)
-            from hermes_state.user_copy import describe_storage_failure, storage_failure_details
-            from agent.i18n import t
-            failure = describe_storage_failure(e)
-            def _present_store_warning():
-                try:
-                    Console(stderr=True).print(t(
-                        "cli.session_store.unavailable_rich",
-                        reason=failure.gloss, action=failure.action, details=storage_failure_details(e)))
-                except Exception:
-                    print(t("cli.session_store.unavailable_plain", reason=failure.gloss, action=failure.action))
-            # Same automatic diagnostic the gateway gates for its home channel (run_notifications).
-            from gateway.warning_notifications import render_notification
-            render_notification(_present_store_warning, platform="cli")
         # No state.db / checkpoint maintenance here: the gateway (the single writer) runs both.
 
-    def _ensure_gateway_session(self):
-        """Create (or resume) this CLI's gateway session and adopt the id it returns, before the banner
-        and the first turn. Idempotent; a store without the gateway facade (tests) is left alone."""
-        from hermes_cli.gateway_session_store import GatewaySessionStore
-        store = getattr(self, "_session_db", None)
-        if getattr(self, "_gateway_session_open", False) or not isinstance(store, GatewaySessionStore):
-            return
-        launch = {"model": self.model if getattr(self, "_explicit_model_override", False) else None,
-                  "provider": (self.requested_provider if getattr(self, "_explicit_model_override", False)
-                               and self.requested_provider not in {None, "", "auto"} else None),
-                  "api_key": getattr(self, "_explicit_api_key", None),
-                  "base_url": getattr(self, "_explicit_base_url", None),
-                  "toolsets": self.enabled_toolsets,
-                  # Main handed these to AIAgent; the gateway's agent gets them as creation policy.
-                  "reasoning": getattr(self, "_explicit_reasoning", None),
-                  "max_turns": getattr(self, "_explicit_max_turns", None),
-                  "checkpoints": getattr(self, "_explicit_checkpoints", False) or None,
-                  "pass_session_id": getattr(self, "pass_session_id", False) or None,
-                  "ignore_rules": getattr(self, "ignore_rules", False) or None,
-                  "run_budget": getattr(self, "_explicit_run_budget", None),
-                  "verbose": getattr(self, "verbose", False) or None}
-        # A resumed row this gateway has not imported yet (a legacy / in-process session) is imported
-        # under the active-session registry lock, which refuses while ANY live lease holds the id —
-        # including this process's own, claimed before the first turn. Hand the slot over around the
-        # attach, then re-claim it for the id the gateway returned (main's exclusivity is kept).
-        held = getattr(self, "_resumed", False) and getattr(self, "_active_session_lease", None) is not None
-        if held:
-            self._release_active_session()
-        sid = store.open_session(self, launch)
-        self._gateway_session_open = True
-        if sid and sid != self.session_id:
-            self.session_id = sid
-            getattr(self, "_write_terminal_breadcrumb", lambda: None)()
-        if held and not self._claim_active_session("cli", stderr=True):
-            raise RuntimeError("session_already_owned")
 
     def _new_session_id(self, now, *, branch_of=None, title=None):
-        """The id main mints for /new (``new_session_id``) and /branch (``mint_session_id``). On a gateway
-        store it is a session the gateway created: /new is a fresh ``session.create`` on the profile's
-        default model (an explicit -m was for the previous session only), /branch the child of
-        ``session.mutate branch``. Before this CLI opened its gateway session (or off the gateway) it is
-        main's local mint, which ``_ensure_gateway_session`` replaces on first use, as at startup."""
-        from hermes_cli.gateway_session_store import GatewaySessionStore
-        store = getattr(self, "_session_db", None)
-        if not isinstance(store, GatewaySessionStore) or not getattr(self, "_gateway_session_open", False):
-            from agent.session_ids import new_session_id
-            return new_session_id(now)
-        if branch_of:
-            return store.branch(branch_of, title)
-        sid = store.create({"toolsets": getattr(self, "enabled_toolsets", None),
-                            "pass_session_id": getattr(self, "pass_session_id", False) or None,
-                            "ignore_rules": getattr(self, "ignore_rules", False) or None}, record_cwd=False)
-        self.session_id = sid
-        return sid
+        from agent.session_ids import new_session_id
+        return new_session_id(now)
 
     def _init_ui_state(self):
         """Per-run mutable UI state; must exist before any chat() call since -q never goes through run()."""

@@ -4,34 +4,17 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createSlashHandler } from '../app/createSlashHandler.js'
 import { getOverlayState, resetOverlayState } from '../app/overlayStore.js'
 import { getUiState, patchUiState, resetUiState } from '../app/uiStore.js'
-import type * as EnvModule from '../config/env.js'
 import { TUI_SESSION_MODEL_FLAG } from '../domain/slash.js'
-import { applyLocale, resetLocale, t } from '../i18n/runtime.js'
+import { t } from '../i18n/runtime.js'
 import * as ClipboardModule from '../lib/clipboard.js'
 import * as Osc52Module from '../lib/osc52.js'
 import * as TerminalSetupModule from '../lib/terminalSetup.js'
-
-// DASHBOARD_TUI_MODE resolves once at module load from HERMES_TUI_DASHBOARD,
-// so toggling process.env in a test body can't move it. Mock just that one
-// export (everything else stays real) and flip the holder per test.
-const envState = { dashboardTuiMode: false }
-vi.mock('../config/env.js', async importActual => {
-  const actual = await importActual<typeof EnvModule>()
-
-  return {
-    ...actual,
-    get DASHBOARD_TUI_MODE() {
-      return envState.dashboardTuiMode
-    }
-  }
-})
 
 describe('createSlashHandler', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
     resetOverlayState()
     resetUiState()
-    envState.dashboardTuiMode = false
   })
 
   it('does not execute a stale fallback command after switching destinations', async () => {
@@ -130,30 +113,6 @@ describe('createSlashHandler', () => {
     expect(gatewayWork(ctx)).toEqual([])
   })
 
-  it('keeps hosted dashboard chat alive for /exit', () => {
-    envState.dashboardTuiMode = true
-    const ctx = buildCtx()
-
-    expect(createSlashHandler(ctx)('/exit')).toBe(true)
-    expect(ctx.session.die).not.toHaveBeenCalled()
-    expect(gatewayWork(ctx)).toEqual([])
-    expect(ctx.transcript.sys).toHaveBeenCalledWith(t('slashCmd.core.quit.dashboardDisabled'))
-  })
-
-  it('resolves the /exit refusal at run time so a locale swap is observed', () => {
-    envState.dashboardTuiMode = true
-    const ctx = buildCtx()
-
-    applyLocale('xx', { lang: 'xx', messages: { 'slashCmd.core.quit.dashboardDisabled': 'ZZ' }, surface: 'tui' })
-
-    try {
-      expect(createSlashHandler(ctx)('/exit')).toBe(true)
-      expect(ctx.transcript.sys).toHaveBeenCalledWith('ZZ')
-    } finally {
-      resetLocale()
-    }
-  })
-
   it('handles /update locally and exits with code 42 via dieWithCode', () => {
     vi.useFakeTimers()
     const ctx = buildCtx()
@@ -164,22 +123,6 @@ describe('createSlashHandler', () => {
     // Advance past the 100ms setTimeout
     vi.advanceTimersByTime(150)
     expect(ctx.session.dieWithCode).toHaveBeenCalledWith(42)
-
-    vi.useRealTimers()
-  })
-
-  it('refuses /update in hosted dashboard chat instead of killing the PTY', () => {
-    vi.useFakeTimers()
-    envState.dashboardTuiMode = true
-    const ctx = buildCtx()
-
-    expect(createSlashHandler(ctx)('/update')).toBe(true)
-    expect(ctx.session.dieWithCode).not.toHaveBeenCalled()
-    expect(gatewayWork(ctx)).toEqual([])
-    expect(ctx.transcript.sys).toHaveBeenCalledWith(t('slashCmd.core.update.dashboardDisabled'))
-
-    vi.advanceTimersByTime(150)
-    expect(ctx.session.dieWithCode).not.toHaveBeenCalled()
 
     vi.useRealTimers()
   })
@@ -513,18 +456,15 @@ describe('createSlashHandler', () => {
     expect(ctx.transcript.setHistoryItems).not.toHaveBeenCalled()
   })
 
-  it('only applies compression snapshots while execution authority is fresh', async () => {
+  it('does not replace a busy or different local conversation with a compression snapshot', async () => {
     const source = {
-      model: 'test', tools: {}, skills: {}, execution_epoch: 'owner', execution_generation: 2,
-      execution_state: 'idle', running: false, stored_session_id: 'stored-source'
+      model: 'test', tools: {}, skills: {}, running: false, stored_session_id: 'stored-source'
     }
 
     const flush = () => new Promise(resolve => setImmediate(resolve))
 
     for (const change of [
-      { execution_generation: 3, execution_state: 'running', running: true },
-      { execution_epoch: 'replacement', execution_generation: 0 },
-      { execution_state: 'complete' },
+      { running: true },
       { stored_session_id: 'other' }
     ]) {
       patchUiState({ sid: 'source', info: source, busy: false })
@@ -541,23 +481,13 @@ describe('createSlashHandler', () => {
       expect(ctx.transcript.setHistoryItems).not.toHaveBeenCalled()
     }
 
-    // Stale/missing snapshot versions cannot erase established authority either.
-    for (const info of [undefined, { ...source, execution_generation: 1 }, { ...source, execution_epoch: 'old' }]) {
-      patchUiState({ sid: 'source', info: source, busy: false })
-      const ctx = buildCtx({ gateway: { ...buildGateway(), rpc: vi.fn(async () => ({ info, messages: [] })) } })
-      createSlashHandler(ctx)('/compress')
-      await flush()
-      expect(getUiState().info).toEqual(source)
-      expect(ctx.transcript.setHistoryItems).not.toHaveBeenCalled()
-    }
-
     // Ordinary metadata refresh is not a new execution; fresh partial info merges.
     patchUiState({ sid: 'source', info: source, busy: false })
     let resolve!: (value: any) => void
     const ctx = buildCtx({ gateway: { ...buildGateway(), rpc: vi.fn(() => new Promise<any>(done => { resolve = done })) } })
     createSlashHandler(ctx)('/compress')
     patchUiState({ info: { ...source, model: 'refreshed' } })
-    resolve({ info: { execution_epoch: 'owner', execution_generation: 2 }, messages: [{ role: 'assistant', text: 'fresh summary' }] })
+    resolve({ info: { stored_session_id: 'stored-source' }, messages: [{ role: 'assistant', text: 'fresh summary' }] })
     await flush()
     expect(getUiState().info).toMatchObject({ ...source, model: 'refreshed' })
     expect(ctx.transcript.setHistoryItems).toHaveBeenCalledWith(expect.arrayContaining([

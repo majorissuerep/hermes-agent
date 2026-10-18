@@ -401,7 +401,7 @@ describe('createGatewayEventHandler', () => {
           'Command failed: python gateway_bootstrap.py --start\ngateway incompatible: runtime_protocol\n' +
           "gateway incompatible: another Hermes install's gateway owns this profile; stop it there: hermes gateway stop"
       },
-      type: 'gateway.start_timeout'
+      type: 'runtime.start_timeout'
     } as any)
 
     const messages = getTurnState().activity.map(a => a.text)

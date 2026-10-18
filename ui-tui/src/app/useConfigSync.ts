@@ -2,12 +2,12 @@ import type { MouseTrackingMode } from '@hermes/ink'
 import { useEffect, useRef } from 'react'
 
 import { resolveDetailsMode, resolveSections } from '../domain/details.js'
-import type { GatewayClient } from '../gatewayClient.js'
 import type { ConfigFullResponse, ConfigMtimeResponse, ReloadMcpResponse } from '../gatewayTypes.js'
 import { syncTuiLocale } from '../i18n/loader.js'
 import { t } from '../i18n/runtime.js'
 import { DEFAULT_VOICE_RECORD_KEY, type ParsedVoiceRecordKey, parseVoiceRecordKey } from '../lib/platform.js'
 import { asRpcResult } from '../lib/rpc.js'
+import type { LocalAgentClient } from '../localAgentClient.js'
 
 import { applyConfiguredTuiTheme } from './createGatewayEventHandler.js'
 import {
@@ -45,7 +45,6 @@ export const normalizeStatusBarFields = (raw: unknown): null | ReadonlySet<strin
 }
 
 const BUSY_MODES = new Set<BusyInputMode>(['interrupt', 'queue', 'steer'])
-
 // TUI defaults to `queue` even though the framework default
 // (`hermes_cli/config.py`) is `interrupt`.  Rationale: in a full-screen
 // TUI you're typically authoring the next prompt while the agent is
@@ -134,7 +133,7 @@ export const normalizeMouseTracking = (display: {
 const MTIME_POLL_MS = 5000
 
 const quietRpc = async <T extends Record<string, any> = Record<string, any>>(
-  gw: GatewayClient,
+  gw: LocalAgentClient,
   method: string,
   params: Record<string, unknown> = {}
 ): Promise<null | T> => {
@@ -156,7 +155,6 @@ const quietRpc = async <T extends Record<string, any> = Record<string, any>>(
 // to the requested rev for older gateways. Retries are decoupled from
 // mtime: every poll re-compares, so a transiently broken server heals on
 // the next tick.
-
 export interface McpRevState {
   /** Last revision the server CONFIRMED it loaded (or boot baseline). */
   accepted: string
@@ -165,7 +163,7 @@ export interface McpRevState {
 }
 
 export const syncMcpReload = async (
-  gw: GatewayClient,
+  gw: LocalAgentClient,
   sid: string,
   nextMcpRev: string,
   state: McpRevState,
@@ -188,8 +186,6 @@ export const syncMcpReload = async (
       state.accepted = String(r.loaded_rev || nextMcpRev)
       onReloaded?.()
     }
-    // Failure (null) or confirm_required: leave `accepted` unchanged so the
-    // next poll tick retries the same revision.
   } finally {
     state.inFlight = false
   }
@@ -253,28 +249,27 @@ const _pasteCollapseCharsFromConfig = (cfg: ConfigFullResponse | null): number =
  * helper, so a regression in the fetch/apply plumbing now fails the
  * useConfigSync tests instead of only being visible at runtime. */
 export async function hydrateFullConfig(
-  gw: GatewayClient,
+  gw: LocalAgentClient,
   setBell: (v: boolean) => void,
   setVoiceRecordKey?: (v: ParsedVoiceRecordKey) => void,
   setBellOnPrompt?: (v: boolean) => void,
-  scope?: { sid: string; isCurrent: () => boolean }
+  scope?: {
+    sid: string
+    isCurrent: () => boolean
+  }
 ): Promise<ConfigFullResponse | null> {
   const params = scope ? { session_id: scope.sid } : {}
 
   const [cfg, busy] = await Promise.all([
     quietRpc<ConfigFullResponse>(gw, 'config.get', { key: 'full', ...params }),
-    gw.isCanonical && scope ? quietRpc(gw, 'config.get', { key: 'busy', ...params }) : null
+    null
   ])
 
   if (scope && !scope.isCurrent()) {
     return null
   }
 
-  applyDisplay(cfg, setBell, setVoiceRecordKey, setBellOnPrompt, !gw.isCanonical)
-
-  if (gw.isCanonical && BUSY_MODES.has(busy?.value)) {
-    patchUiState({ busyInputMode: busy!.value })
-  }
+  applyDisplay(cfg, setBell, setVoiceRecordKey, setBellOnPrompt, !false)
 
   // Same fail-safe as the voice key: a null config (transient RPC failure)
   // keeps the last language rather than snapping back to English.
@@ -294,11 +289,8 @@ export const applyDisplay = (
 ) => {
   const d = cfg?.config?.display ?? {}
   const approvals = cfg?.config?.approvals
-
   setBell(!!d.bell_on_complete)
-
   setBellOnPrompt?.(!!d.bell_on_prompt)
-
   applyConfiguredTuiTheme(d.tui_theme)
 
   // Only push the voice record key when the RPC actually returned a
@@ -349,7 +341,6 @@ export function useConfigSync({
 }: UseConfigSyncOptions) {
   const mtimeRef = useRef(0)
   const mcpRevRef = useRef<McpRevState>({ accepted: '', inFlight: false })
-
   useEffect(() => {
     if (!sid) {
       return
@@ -357,14 +348,16 @@ export function useConfigSync({
 
     let active = true
     const scope = { sid, isCurrent: () => active && getUiState().sid === sid }
-
     // Keep startup cheap: voice.toggle status probes optional audio/STT deps and
     // can run long enough to delay prompt.submit on the single stdio RPC pipe.
     // Environment flags are enough to initialize the UI bit; the heavier status
     // check still runs when the user opens /voice.
     setVoiceEnabled(process.env.HERMES_VOICE === '1')
     quietRpc<ConfigMtimeResponse>(gw, 'config.get', { key: 'mtime', session_id: sid }).then(r => {
-      if (!scope.isCurrent()) {return}
+      if (!scope.isCurrent()) {
+        return
+      }
+
       mtimeRef.current = Number(r?.mtime ?? 0)
       // Seed the MCP revision baseline too: after a normal boot mtime is
       // already non-zero, so the poller's baseline branch never runs, and an
@@ -378,7 +371,6 @@ export function useConfigSync({
       active = false
     }
   }, [gw, setBellOnComplete, setBellOnPrompt, setVoiceEnabled, setVoiceRecordKey, sid])
-
   useEffect(() => {
     if (!sid) {
       return
@@ -389,7 +381,10 @@ export function useConfigSync({
 
     const id = setInterval(() => {
       quietRpc<ConfigMtimeResponse>(gw, 'config.get', { key: 'mtime', session_id: sid }).then(r => {
-        if (!scope.isCurrent()) {return}
+        if (!scope.isCurrent()) {
+          return
+        }
+
         const next = Number(r?.mtime ?? 0)
         const nextMcpRev = String(r?.mcp_rev ?? '')
 
@@ -440,7 +435,7 @@ export function useConfigSync({
 }
 
 export interface UseConfigSyncOptions {
-  gw: GatewayClient
+  gw: LocalAgentClient
   setBellOnComplete: (v: boolean) => void
   setBellOnPrompt?: (v: boolean) => void
   setVoiceEnabled: (v: boolean) => void

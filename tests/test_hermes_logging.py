@@ -79,33 +79,30 @@ def liveness_clock(monkeypatch):
     return advance
 
 
-@pytest.mark.parametrize("mode,component", [("cli", None), ("gateway", "gateway.log"), ("gui", "gui.log")])
 @pytest.mark.parametrize("configured,explicit,minimum", [(None, None, logging.INFO), ("DEBUG", "WARNING", logging.WARNING), ("DEBUG", None, logging.DEBUG)])
-def test_repeated_setup_routes_records_once(hermes_home, mode, component, configured, explicit, minimum):
+def test_repeated_setup_routes_records_once(hermes_home, configured, explicit, minimum):
     if configured:
         (hermes_home / "config.yaml").write_text(f"logging:\n  level: {configured}\n", encoding="utf-8")
     for _ in range(2):
-        assert hermes_logging.setup_logging(hermes_home=hermes_home, mode=mode, log_level=explicit) == hermes_home / "logs"
+        assert hermes_logging.setup_logging(hermes_home=hermes_home, log_level=explicit) == hermes_home / "logs"
     hermes_logging.set_session_context("routing-session")
-    sources = ["tools.terminal_tool", "agent.context_compressor", "gateway.run",
-               "plugins.platforms.telegram.adapter", "hermes_cli.web_server", "tui_gateway.ws"]
+    sources = ["tools.terminal_tool", "agent.context_compressor", "agent.turn_loop",
+               "tools.registry", "hermes_cli.config", "tui_runtime.server"]
     for index, source in enumerate(sources):
         for level in (logging.DEBUG, logging.INFO, logging.WARNING):
             logging.getLogger(source).log(level, "routing-witness-%s-%s", index, level)
     hermes_logging.flush_log_queue()
     outputs = {path.name: path.read_text(encoding="utf-8-sig") for path in (hermes_home / "logs").glob("*.log")}
-    assert set(outputs) == {"agent.log", "errors.log"} | ({component} if component else set())
+    assert set(outputs) == {"agent.log", "errors.log"}
     for filename, content in outputs.items():
         for index, source in enumerate(sources):
             for level in (logging.DEBUG, logging.INFO, logging.WARNING):
                 accepted = {
                     "agent.log": level >= minimum,
                     "errors.log": level >= logging.WARNING,
-                    "gateway.log": index in (2, 3) and level >= max(logging.INFO, minimum),
-                    "gui.log": index in (4, 5) and level >= max(logging.INFO, minimum),
                 }[filename]
                 witness = f"routing-witness-{index}-{level}"
-                assert content.count(witness) == int(accepted), (mode, filename, witness, content)
+                assert content.count(witness) == int(accepted), (filename, witness, content)
         assert "[routing-session]" in content
 
 
@@ -268,17 +265,17 @@ class TestSetupLogging:
         assert "once please" not in (hermes_home / "logs" / "agent.log").read_text()
 
     def test_a_component_log_added_after_routing_is_routed_too(self, hermes_home, tmp_path):
-        """setup_logging(mode="gateway") for an already-known home AFTER a second home turned
-        routing on: gateway.log must be a routed writer, not a bare handler taking every home."""
+        """setup_logging() for an already-known home AFTER a second home turned
+        routing on: agent.log must be a routed writer, not a bare handler taking every home."""
         from hermes_constants import reset_hermes_home_override, set_hermes_home_override
 
         profile_home = tmp_path / "profile-b"
         profile_home.mkdir()
         hermes_logging.setup_logging(hermes_home=hermes_home)
         hermes_logging.setup_logging(hermes_home=profile_home)
-        hermes_logging.setup_logging(hermes_home=hermes_home, mode="gateway")
+        hermes_logging.setup_logging(hermes_home=hermes_home)
 
-        logger = logging.getLogger("gateway.run.routed-component-test")
+        logger = logging.getLogger("agent.turn_loop.routed-component-test")
         token = set_hermes_home_override(profile_home)
         try:
             logger.info("gw-b")
@@ -287,9 +284,9 @@ class TestSetupLogging:
         logger.info("gw-a")
         hermes_logging.flush_log_queue()
 
-        a_log = (hermes_home / "logs" / "gateway.log").read_text()
+        a_log = (hermes_home / "logs" / "agent.log").read_text()
         assert "gw-a" in a_log and "gw-b" not in a_log
-        assert "gw-b" in (profile_home / "logs" / "gateway.log").read_text()
+        assert "gw-b" in (profile_home / "logs" / "agent.log").read_text()
 
     def test_profile_routing_falls_back_when_profile_home_deleted(
         self, hermes_home, tmp_path, capsys
@@ -759,7 +756,7 @@ class TestExternalRotationRecovery:
 
     def _emit(self, handler: logging.Handler, msg: str) -> None:
         record = logging.LogRecord(
-            name="gateway.run", level=logging.INFO, pathname="", lineno=0,
+            name="agent.turn_loop", level=logging.INFO, pathname="", lineno=0,
             msg=msg, args=(), exc_info=None,
         )
         # Match the record factory that hermes_logging installs at import time.
@@ -768,14 +765,14 @@ class TestExternalRotationRecovery:
         hermes_logging.flush_log_queue()
 
     def test_recovers_after_external_rename(self, tmp_path):
-        """logrotate-style external rename: ``mv gateway.log gateway.log.1``.
+        """logrotate-style external rename: ``mv agent.log agent.log.1``.
 
         Handler's fd was pinned to the renamed inode; new writes used to
-        go to ``gateway.log.1`` forever.  After fix, the handler reopens
-        ``gateway.log`` at the original path.
+        go to ``agent.log.1`` forever.  After fix, the handler reopens
+        ``agent.log`` at the original path.
         """
-        log_path = tmp_path / "gateway.log"
-        rotated = tmp_path / "gateway.log.1"
+        log_path = tmp_path / "agent.log"
+        rotated = tmp_path / "agent.log.1"
         handler = self._make_handler(log_path)
         try:
             self._emit(handler, "before rotation")
@@ -787,9 +784,9 @@ class TestExternalRotationRecovery:
 
             self._emit(handler, "after rotation")
 
-            # The new write should land in a freshly recreated gateway.log,
+            # The new write should land in a freshly recreated agent.log,
             # not appended to the rotated backup.
-            assert log_path.exists(), "handler did not recreate gateway.log"
+            assert log_path.exists(), "handler did not recreate agent.log"
             assert log_path.read_text(encoding="utf-8-sig") == "after rotation\n"
             assert rotated.read_text(encoding="utf-8-sig") == "before rotation\n"
         finally:
@@ -797,7 +794,7 @@ class TestExternalRotationRecovery:
 
 
     def test_external_truncate_does_not_force_reopen(self, tmp_path):
-        """``: > gateway.log`` keeps the same inode — no reopen needed.
+        """``: > agent.log`` keeps the same inode — no reopen needed.
 
         Truncation in place preserves the inode, so subsequent writes
         continue to the same file descriptor.  We assert the post-truncate
@@ -805,7 +802,7 @@ class TestExternalRotationRecovery:
         new writes — i.e. the handler correctly does NOT detect this as
         an inode change.
         """
-        log_path = tmp_path / "gateway.log"
+        log_path = tmp_path / "agent.log"
         handler = self._make_handler(log_path)
         try:
             self._emit(handler, "AAAA" * 32)
@@ -824,19 +821,19 @@ class TestExternalRotationRecovery:
     def test_gateway_log_attached_after_external_rotation_then_re_setup(
         self, hermes_home,
     ):
-        """End-to-end Allen-reproduction: gateway.log gets externally rotated,
-        ``setup_logging(mode='gateway')`` is re-called, the handler keeps
+        """End-to-end Allen-reproduction: agent.log gets externally rotated,
+        ``setup_logging()`` is re-called, the handler keeps
         working.
 
-        Reproduces Allen's symptom (gateway.log frozen mid-write, all gateway
+        Reproduces Allen's symptom (agent.log frozen mid-write, all gateway
         records leaking to agent.log) when something external rotates the
         file between setup_logging() calls.
         """
-        hermes_logging.setup_logging(hermes_home=hermes_home, mode="gateway")
-        gw_path = hermes_home / "logs" / "gateway.log"
-        rotated = hermes_home / "logs" / "gateway.log.1"
+        hermes_logging.setup_logging(hermes_home=hermes_home)
+        gw_path = hermes_home / "logs" / "agent.log"
+        rotated = hermes_home / "logs" / "agent.log.1"
 
-        logging.getLogger("gateway.run").info("line BEFORE rotation")
+        logging.getLogger("agent.turn_loop").info("line BEFORE rotation")
         hermes_logging.flush_log_queue()
         assert "BEFORE rotation" in gw_path.read_text(encoding="utf-8-sig")
 
@@ -847,15 +844,15 @@ class TestExternalRotationRecovery:
         # Caller (or some restart path) re-enters setup_logging.  This used
         # to silently no-op due to the per-path dedup check, leaving the
         # stale fd in place.
-        hermes_logging.setup_logging(hermes_home=hermes_home, mode="gateway")
+        hermes_logging.setup_logging(hermes_home=hermes_home)
 
-        logging.getLogger("gateway.run").info("line AFTER rotation")
+        logging.getLogger("agent.turn_loop").info("line AFTER rotation")
         hermes_logging.flush_log_queue()
 
-        # The new record must reach the live gateway.log, not the rotated
+        # The new record must reach the live agent.log, not the rotated
         # backup.  Allen's logs had everything past the rotation point
-        # going into agent.log only, never gateway.log.
-        assert gw_path.exists(), "gateway.log was never recreated"
+        # going into agent.log only, never agent.log.
+        assert gw_path.exists(), "agent.log was never recreated"
         assert "AFTER rotation" in gw_path.read_text(encoding="utf-8-sig")
         assert "AFTER rotation" not in rotated.read_text(encoding="utf-8-sig")
 

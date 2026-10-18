@@ -12,7 +12,7 @@ import os
 import pytest
 
 import cron.scheduler as cron_scheduler
-from gateway.session_context import (
+from agent.session_context import (
     clear_session_vars,
     get_session_env,
     reset_session_vars,
@@ -68,18 +68,18 @@ def _clear_approval_state(monkeypatch):
 def _register_gateway_auto_approve(session_key: str) -> None:
     def _notify(_approval_data):
         with approval_module._lock:
-            entries = approval_module._gateway_queues.get(session_key, [])
+            entries = approval_module._session_queues.get(session_key, [])
             if entries:
                 entry = entries[-1]
                 entry.result = "once"
                 entry.event.set()
 
     with approval_module._lock:
-        approval_module._gateway_notify_cbs[session_key] = _notify
+        approval_module._session_notify_cbs[session_key] = _notify
 
 
-def test_run_job_cron_execute_code_deny_does_not_pollute_later_gateway_execute_code(
-    monkeypatch, tmp_path, cron_owner
+def test_run_job_cron_execute_code_deny_does_not_pollute_later_session_execute_code(
+    monkeypatch, tmp_path
 ):
     """Cron deny stays scoped; a later gateway approval still reaches its user."""
     monkeypatch.setenv("HERMES_MODEL", "test-model")
@@ -145,10 +145,10 @@ def test_run_job_cron_execute_code_deny_does_not_pollute_later_gateway_execute_c
             "import os; print(2)", "local"
         )
         assert result["approved"] is True
-        assert result.get("user_approved") is True
+        assert result.get("approved") is True
     finally:
         clear_session_vars(session_tokens)
         approval_context.reset_current_session_key(key_token)
         with approval_module._lock:
-            approval_module._gateway_queues.pop(session_key, None)
-            approval_module._gateway_notify_cbs.pop(session_key, None)
+            approval_module._session_queues.pop(session_key, None)
+            approval_module._session_notify_cbs.pop(session_key, None)

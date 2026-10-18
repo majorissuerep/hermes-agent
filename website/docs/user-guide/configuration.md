@@ -153,7 +153,7 @@ delegation:
 
 Multiple references in a single value work: `url: "${HOST}:${PORT}"`. If a referenced variable is not set, the placeholder is kept verbatim (`${UNDEFINED_VAR}` stays as-is) and a warning is logged. Bare `$VAR` is not expanded.
 
-Under a [multiplexed multi-profile gateway](./multi-profile-gateways.md), references in a profile's `config.yaml` resolve against **that profile's** `.env` (its secret scope), not the shared process environment — a `${MATRIX_ACCESS_TOKEN}` in profile B stays unresolved (kept verbatim, warning logged) unless B defines the variable itself. This holds wherever B's config is loaded inside the multiplexer: routed gateway turns, B's adapter startup, and B's cron jobs. Single-profile runs are unchanged. See [What is isolated per profile](./multi-profile-gateways.md#what-is-isolated-per-profile) for the full list.
+Profile configuration references resolve against the owning profile's secret scope. A missing variable remains unresolved and emits a warning; another profile's secrets are not substituted.
 
 Cursor-style SecretRef syntax is also accepted: `${env:VAR_NAME}` resolves exactly like `${VAR_NAME}` (the `env:` prefix is stripped), so MCP or provider snippets copied from Cursor / Claude configs work unchanged in both `config.yaml` and the `mcp_servers` block. Other SecretRef sources (`${file:...}`, `${vault:...}`, `${bitwarden:...}`) are **not** resolved inline — external secret backends inject their values into the environment at startup via the `secrets:` block, so reference them as `${env:NAME}` instead; unknown prefixes warn once and stay verbatim.
 
@@ -1111,24 +1111,6 @@ auxiliary:
 The summary model **must** have a context window at least as large as your main agent model's. The compressor sends the full middle section of the conversation to the summary model — if that model's context window is smaller than the main model's, the summarization call will fail with a context length error. When this happens, the middle turns are **dropped without a summary**, losing conversation context silently. If you override the model, verify its context length meets or exceeds your main model's.
 :::
 
-## Gateway Turn Lease Timeout
-
-The gateway serializes turns by their resolved session ID so two routing keys
-cannot load and write the same transcript concurrently. Configure the maximum
-lease wait independently of the ordinary agent inactivity timeout:
-
-```yaml
-agent:
-  gateway_turn_lease_timeout: 5
-```
-
-If another turn still holds the session lease when this budget expires, Hermes
-fails closed: it does not load the transcript or run the model for the waiting
-message. The user receives a rejection notice and must resend. Hermes does not
-automatically requeue the message because doing so without durable ordering and
-idempotency could process it twice. Non-positive values use the 5-second
-default.
-
 ## Session Stall Watchdog
 
 The gateway runs a notify-only stall watchdog (`agent.session_stall_timeout`, default `300` seconds, `0` = disabled). When a busy session has a **pending inbound follow-up** and the agent's shared activity clock has been idle for at least this long, the gateway logs a WARNING and sends the user a one-shot notification:
@@ -1146,44 +1128,6 @@ Semantics:
 ```yaml
 agent:
   session_stall_timeout: 300   # seconds; 0 disables the watchdog
-```
-
-## Reconnect Attention Escalation
-
-When a platform adapter fails to connect (network outage, revoked bot token, broken sidecar), the gateway retries it indefinitely with capped exponential backoff — retries never stop, so a transient outage always self-heals without operator action. The downside is that a *permanent* failure (a revoked Telegram token, missing Discord privileged intents) looks identical to a blip: "retrying", forever.
-
-Two mechanisms make permanent failures visible:
-
-- **Terminal classification.** Failures whose exception *type* proves they can never self-heal — rejected/revoked tokens (`telegram_auth_error`, `discord_auth_error`, `email_auth_error`), missing privileged intents (`discord_intents_required`), a Photon sidecar whose dependencies cannot install (`SIDECAR_DEPS_MISSING`) or whose node binary is missing (`SIDECAR_NODE_MISSING`) — are marked fatal instead of entering the retry queue. Classification is strictly type-based; ambiguous errors always keep retrying.
-- **Needs-attention escalation.** A platform continuously in the retry queue past `agent.reconnect_attention_after` (default `7200` seconds = 2 hours, `0` disables) gets `needs_attention: true` and a `retrying_since` timestamp in gateway runtime status (`hermes status`), plus a WARNING log. Retries continue unchanged — this is a signal, not a circuit breaker. The flag clears on successful reconnect.
-
-```yaml
-agent:
-  reconnect_attention_after: 7200   # seconds; 0 disables the escalation flag
-```
-
-## Gateway Agent Cache
-
-The gateway keeps one agent per session so a conversation reuses its cached prompt prefix instead of rebuilding the system prompt every turn. That cached agent also holds the session's full transcript — tool output included, which is tens of megabytes on a session with a hundred tool calls. On a busy multi-platform gateway the cache is therefore the largest single consumer of memory in the process.
-
-```yaml
-agent:
-  agent_cache:
-    max_size: 128            # LRU entry cap
-    idle_ttl_secs: 3600      # evict an agent idle this long
-    memory_high_mb: auto     # anon-RSS budget; number, "auto", or 0/off
-    max_evictions_per_pass: 16
-    protect_recent: 8
-```
-
-`max_size` and `idle_ttl_secs` bound the cache by count and by time. Neither knows how many bytes it holds, so `memory_high_mb` adds a third bound: once anonymous memory crosses the budget, it sheds least-recently-used transcripts, which reload from the stored session on the next turn. Lower it if the gateway is competing for memory with other services; raise it (or set `0` to switch the pass off) if you would rather keep every prefix warm.
-
-`auto` derives the budget from the memory limit the gateway actually runs under — the cgroup limit for a container or systemd unit, total RAM otherwise — so a `MemoryMax`/`MemoryHigh` on the unit is respected without a second number to keep in sync. Under such a limit the measurement is scoped the same way: the cgroup's own anonymous charge (`memory.stat` `anon`), which includes child processes such as `execute_code` kernels and terminal commands that count against the unit's limit. Uncapped, the gateway's own anonymous RSS is measured.
-
-Sessions that are mid-turn, the `protect_recent` most recently used ones, and any session whose transcript has not finished being written to disk are never shed. Eviction is logged at WARNING with the measured RSS and the sessions dropped:
-
-```
-Agent cache pressure: anon RSS 6802MB over budget 6656MB — evicting 5 LRU session(s): ...
 ```
 
 ## Context Engine
@@ -2332,65 +2276,6 @@ Notes:
 - The same key also filters the **Ink TUI** status rule (`hermes tui`), where `cache_hit`, `latency`, and `tps` render as width-budgeted tail segments (◎ / ◷ / ↑) on terminals ≥96/104/110 columns respectively.
 - Display-only: no effect on prompt caching or request payloads. Changes take effect on the next session start.
 
-### Runtime-metadata footer (gateway only)
-
-When `display.runtime_footer.enabled: true`, Hermes appends a small runtime-context footer to the **final** message of each gateway turn. The current footer can show the model, context-window percentage, and current working directory. Off by default; opt in per-gateway if your team wants every reply to include this provenance.
-
-```yaml
-display:
-  runtime_footer:
-    enabled: true
-    fields: ["model", "context_pct", "cwd"]   # order shown; drop any to hide
-```
-
-Supported fields:
-
-| Field | Renders | Example |
-| --- | --- | --- |
-| `model` | Bare model id, vendor prefix dropped | `gpt-5.4` |
-| `context_pct` | Last-call context occupancy as a percent | `5%` |
-| `latency` | Wall-clock duration of the turn | `22s`, `1m05s` |
-| `served_model` | The model that actually answered, when it differs from the one you configured: the deployment a routing proxy reported in its `x-litellm-model-id` (or `x-litellm-model-api-base`) response header, or the fallback model Hermes switched to for the turn | `hermes-router → gpt-4o-2024-11-20` |
-| `cwd` | Home-relative working directory | `~` |
-
-The default field set is `["model", "context_pct", "cwd"]`. `latency` and `served_model` are opt-in — add them to `fields` to use them. `served_model` renders nothing when the served model is the configured one (or when the proxy sends no such header), so behind a routing proxy or an active fallback it is the field that makes the switch visible. Fields whose data is unavailable are skipped silently rather than rendering an empty slot.
-
-The `/footer` slash command toggles this at runtime in any session.
-
-Example footer appended to a Telegram/Discord/Slack reply:
-
-```
-— claude-opus-4.7 · 12 tool calls · 2m 14s · $0.042
-```
-
-Only the **final** message of a turn gets the footer; interim updates stay clean.
-
-### Per-platform progress overrides
-
-Different platforms have different verbosity needs. Use `display.platforms` to set per-platform modes:
-
-```yaml
-display:
-  tool_progress: all          # global default
-  platforms:
-    signal:
-      tool_progress: 'off'    # Signal cannot currently display tool-progress bubbles
-    telegram:
-      tool_progress: verbose  # detailed progress on Telegram
-    slack:
-      tool_progress: 'off'    # quiet in shared Slack workspace
-```
-
-From the CLI, use the canonical path — `hermes config set display.platforms.telegram.streaming false`. The shorthand `hermes config set platforms.telegram.streaming false` is accepted too: because per-platform *display* settings (`streaming`, `show_reasoning`, `tool_progress`, …) are only ever read from `display.platforms`, `config set`/`get`/`unset` redirect that shorthand to the canonical key and print a note. Connection keys under the top-level `platforms.<name>` block (`token`, `enabled`, `reply_to_mode`, `extra`) are not redirected. Writing them under the nested prefix (`hermes config set gateway.platforms.telegram.enabled true`) is redirected to the top-level `platforms.telegram.enabled` with a note: the gateway reads both blocks, but the top-level one wins on shared keys, so a nested write would be silently shadowed by an existing top-level value.
-
-Platforms without an override fall back to the global `tool_progress` value. Valid platform keys: `telegram`, `discord`, `slack`, `signal`, `whatsapp`, `matrix`, `mattermost`, `email`, `sms`, `dingtalk`, `feishu`, `wecom`, `weixin`, `bluebubbles`, `qqbot`, plus the name of any plugin platform (e.g. `homeassistant` from the Home Assistant plugin). The legacy `display.tool_progress_overrides` key still loads for backward compatibility but is deprecated and migrated into `display.platforms` on first load.
-
-Signal is listed as a valid platform key because the setting can be saved per platform, but the current Signal adapter cannot edit sent messages and does not render tool-progress bubbles. Keep Signal `tool_progress` set to `off`; use the CLI or an editing-capable messaging platform if you need to watch each tool call live.
-
-`interim_assistant_messages` is gateway-only. When enabled, Hermes sends completed mid-turn assistant updates as separate chat messages. This is independent from `tool_progress` and does not require gateway streaming.
-
-`show_commentary` (default `true`) controls Codex Responses models' commentary channel — the polished progress narration these models produce alongside their private reasoning. When enabled, each completed commentary message is delivered as a visible mid-turn update (on the gateway this also requires `interim_assistant_messages`). Set it to `false` if the extra narration annoys you: commentary then falls back to the reasoning channel and is only shown when `show_reasoning` is enabled.
-
 ## Privacy
 
 ```yaml
@@ -2546,112 +2431,15 @@ display:
 
 When enabled, responses appear token-by-token inside a streaming box. Tool calls are still captured silently. If the provider doesn't support streaming, it falls back to the normal display automatically.
 
-### Gateway Streaming (Telegram, Discord, Slack)
-
-```yaml
-streaming:
-  enabled: true           # Enable progressive message editing (default: false)
-  transport: auto         # "auto" (default) | "edit" (progressive message editing) | "off"
-  edit_interval: 0.8      # Seconds between message edits (default: 0.8)
-  buffer_threshold: 24    # Characters before forcing an edit flush (default: 24)
-  cursor: " ▉"            # Cursor shown during streaming
-  fresh_final_after_seconds: 0    # Opt in to fresh final (Telegram) when preview is this old
-```
-
-When enabled, the bot sends a message on the first token, then progressively edits it as more tokens arrive. Platforms that don't support message editing (Signal, Email, Home Assistant) are auto-detected on the first attempt — streaming is gracefully disabled for that session with no flood of messages.
-
-For separate natural mid-turn assistant updates without progressive token editing, set `display.interim_assistant_messages: true`.
-
-**Overflow handling:** If the streamed text exceeds the platform's message length limit (~4096 chars), the current message is finalized and a new one starts automatically.
-
-**Fresh final (Telegram):** Telegram's `editMessageText` preserves the original message timestamp, so a long-running streamed reply would keep the first-token timestamp even after completion. Set `fresh_final_after_seconds > 0` to opt in to delivering old previews as brand-new final messages with best-effort preview deletion. The default is `0`, which always finalizes streamed replies in place and avoids the brief duplicate-message/delete sequence on clients that show both operations.
-
-:::note Per-platform streaming defaults
-The master `streaming.enabled` switch is `false` by default — nothing streams until you flip it. Once enabled, streaming is decided **per platform**: Telegram ships with `display.platforms.telegram.streaming: true` (streams) and Discord with `display.platforms.discord.streaming: false` (does not). So after enabling streaming, Telegram streams out of the box and Discord stays on whole-message replies until you change its toggle. You can adjust these per-platform switches from the dashboard's **Channels** toggles or directly in `~/.hermes/config.yaml`.
-:::
-
-## Group Chat Session Isolation
-
-Limit how many chat sessions can actively be open across CLI, TUI/dashboard,
-and messaging gateway:
-
-```yaml
-max_concurrent_sessions: null  # null/0 = unlimited; positive integer = active session cap
-```
-
-A slot is taken when a session runs its **first turn**, not when a chat window
-is opened. Opening, resuming or reconnecting to a chat costs nothing until you
-send a message, so idle desktop tabs (and the background resumes a flaky
-websocket triggers) cannot starve the messaging gateway that shares this cap.
-
-When the cap is reached, Hermes returns a direct limit message naming which
-surfaces hold the slots. Existing active sessions keep their normal behavior.
-Run `hermes status --full` to see the current slot usage and every holder.
-
-This is the only cap on concurrent gateway turns: the gateway runs each turn body
-on its own thread, so with the default (unset) every accepted turn starts
-immediately instead of queuing behind other running turns.
-
-The canonical key is top-level `max_concurrent_sessions`. Hermes also accepts
-`gateway.max_concurrent_sessions` as a fallback, but the top-level key wins when
-both are set.
-
-The cap is enforced with a local runtime lease file and is best-effort: Hermes
-fails open if the registry cannot be read or locked so users are not stranded.
-It is intended for a single host/profile runtime, not a shared `$HERMES_HOME`
-mounted across multiple machines. A lease whose owning process exists but whose
-liveness cannot be proved (for example an unreadable `/proc` entry inside a
-container after `hermes update` restarts the backend) still counts toward the
-cap and still fences its own session id, but it no longer blocks claiming or
-releasing a different session.
-
-Control whether shared chats keep one conversation per room or one conversation per participant:
-
-```yaml
-group_sessions_per_user: true  # true = per-user isolation in groups/channels, false = one shared session per chat
-```
-
-- `true` is the default and recommended setting. In Discord channels, Telegram groups, Slack channels, and similar shared contexts, each sender gets their own session when the platform provides a user ID.
-- `false` reverts to the old shared-room behavior. That can be useful if you explicitly want Hermes to treat a channel like one collaborative conversation, but it also means users share context, token costs, and interrupt state.
-- Direct messages are unaffected. Hermes still keys DMs by chat/DM ID as usual.
-- Threads stay isolated from their parent channel either way; with `true`, each participant also gets their own session inside the thread.
-
-For the behavior details and examples, see [Sessions](./sessions.md) and the [Discord guide](./messaging/discord.md).
-
-## Unauthorized DM Behavior
-
-Control what Hermes does when an unknown user sends a direct message:
-
-```yaml
-unauthorized_dm_behavior: pair
-
-whatsapp:
-  unauthorized_dm_behavior: ignore
-```
-
-- `pair` is the default for chat-style DM platforms. Hermes denies access, but replies with a one-time pairing code in DMs.
-- `ignore` silently drops unauthorized DMs.
-- `decline` sends one short, polite decline instead of a pairing code, then stays silent toward that sender for 24 hours. Override the default text:
-
-  ```yaml
-  unauthorized_dm_behavior: decline
-  unauthorized_dm_decline_message: "Sorry, this assistant is private."
-  ```
-
-  `hermes gateway setup` offers this as "Politely decline unknown senders" when you leave the allowlist empty; it writes `platforms.<platform>.unauthorized_dm_behavior: decline`.
-
-- Email defaults to `ignore` unless `platforms.email.unauthorized_dm_behavior: pair` is set, because inboxes can contain unrelated unread mail.
-- Platform sections override the global default, so you can keep pairing enabled broadly while making one platform quieter.
-
 ## Quick Commands
 
-Define custom commands that either run shell commands without invoking the LLM, or alias one slash command to another. Exec quick commands are zero-token and useful from messaging platforms (Telegram, Discord, etc.) for quick server checks or utility scripts.
+Define custom commands that either run shell commands without invoking the LLM, or alias one slash command to another. Exec quick commands are zero-token local CLI shortcuts for server checks or utility scripts.
 
 ```yaml
 quick_commands:
   status:
     type: exec
-    command: systemctl status hermes-agent
+    command: uptime
   disk:
     type: exec
     command: df -h /
@@ -2661,33 +2449,20 @@ quick_commands:
   gpu:
     type: exec
     command: nvidia-smi --query-gpu=name,utilization.gpu,memory.used,memory.total --format=csv,noheader
-  restart:
+  fresh:
     type: alias
-    target: /gateway restart
+    target: /new
 ```
 
-Usage: type `/status`, `/disk`, `/update`, `/gpu`, or `/restart` in the CLI or any messaging platform. `exec` commands run locally on the host and return the output directly — no LLM call, no tokens consumed. `alias` commands rewrite to the configured slash command target.
+Usage: type `/status`, `/disk`, `/update`, `/gpu`, or `/fresh` in the CLI. `exec` commands run locally on the host and return the output directly — no LLM call, no tokens consumed. `alias` commands rewrite to the configured slash command target.
 
 - **30-second timeout** — long-running commands are killed with an error message
 - **Priority** — quick commands are checked before skill commands, so you can override skill names
 - **Autocomplete** — quick commands are resolved at dispatch time and are not shown in the built-in slash-command autocomplete tables
 - **Type** — supported types are `exec` and `alias`; other types show an error
-- **Works everywhere** — CLI, Telegram, Discord, Slack, WhatsApp, Signal, Email, Home Assistant
+- **Local CLI** — commands execute in the selected profile.
 
 String-only prompt shortcuts are not valid quick commands. For reusable prompt workflows, create a skill or alias to an existing slash command.
-
-## Human Delay
-
-Simulate human-like response pacing in messaging platforms:
-
-```yaml
-human_delay:
-  mode: "off"                  # off | natural | custom
-  min_ms: 800                  # Minimum delay (custom mode)
-  max_ms: 2500                 # Maximum delay (custom mode)
-```
-
-Each profile's own `config.yaml` is read, so multiplexed profiles keep independent pacing; there is no process-environment override. In `custom` mode a non-integer, negative or inverted `min_ms`/`max_ms` pair is rejected with a warning naming the key and the `natural` range (800–2500 ms) is used instead.
 
 ## Code Execution
 
@@ -2803,23 +2578,6 @@ Supported values: any IANA timezone identifier (e.g. `America/New_York`, `Europe
 `hermes doctor` (and the startup config check) reports a value the runtime cannot load — a typo such as `Asia/Tokio` would otherwise silently put the agent clock and every cron schedule on server-local time. `HERMES_TIMEZONE` overrides this key when set.
 
 The agent clock, cron schedules and time-aware tools follow this zone on every OS. Code run through `execute_code` also inherits it as `TZ` on Linux and macOS; on Windows those children keep the OS-configured zone instead (the Windows C runtime only parses POSIX-form `TZ` strings, and an IANA name there produces a wrong UTC offset), so set the Windows zone itself when child scripts must render local time in this zone.
-
-## Discord
-
-Configure Discord-specific behavior for the messaging gateway:
-
-```yaml
-discord:
-  require_mention: true          # Require @mention to respond in server channels
-  free_response_channels: ""     # Comma-separated channel IDs where bot responds without @mention
-  auto_thread: true              # Auto-create threads on @mention in channels
-  free_response_auto_thread: false  # Free-response channels also auto-thread (default: reply inline)
-```
-
-- `require_mention` — when `true` (default), the bot only responds in server channels when mentioned with `@BotName`. DMs always work without mention.
-- `free_response_channels` — comma-separated list of channel IDs where the bot responds to every message without requiring a mention.
-- `auto_thread` — when `true` (default), mentions in channels automatically create a thread for the conversation, keeping channels clean (similar to Slack threading).
-- `free_response_auto_thread` — when `true`, channels in `free_response_channels` also auto-create a thread per top-level message. Default `false`: free-response channels reply inline. Requires `auto_thread: true`.
 
 ## Security
 
@@ -3073,44 +2831,3 @@ onboarding:
 - `profile_build` — controls the offer on the first message ever, in the TUI, the desktop app and messaging direct messages (never in a group chat). `"ask"` (default) offers to build a user profile; the offer is **opt-in and consent-gated** — the agent asks before any lookup, never reads connected accounts silently, and saves confirmed facts to user memory. `"off"` stops only the offer; the agent still gives a plain intro. The offer fires at most once per profile.
 - `seen` — internal state. Hermes latches each shown hint here so it never fires again; the first-message offer is also recorded here once shown. Don't hand-edit it — wipe the whole `onboarding` section if you want to re-see all hints.
 - `run` — whether the desktop app opens its first-run onboarding chat on the next launch. Unset means only on a fresh install (no sessions and no profiles yet). Hermes writes `true` when onboarding starts and `false` when it is finished or skipped. It always lives in the default profile's `config.yaml`, whichever profile the app runs. Set `false` to never show it; managed installs can pin it in the managed config.
-
-## Dashboard
-
-Configuration for the [web dashboard](./features/web-dashboard.md) — visual theme, public URL, and authentication providers. The auth providers (OAuth, basic password, drain) are documented in detail on the web-dashboard page; this is the `config.yaml` shape.
-
-```yaml
-dashboard:
-  theme: "default"            # "default" | "midnight" | "ember" | "mono" | "cyberpunk" | "rose"
-  show_token_analytics: false # Re-enable the (local-estimate-only) token/cost analytics surfaces
-  public_url: ""              # Full public authority for OAuth redirect_uri (env: HERMES_DASHBOARD_PUBLIC_URL)
-  trusted_proxies: []         # Proxy IPs/CIDRs allowed to supply X-Forwarded-* headers
-  oauth:                      # Portal OAuth gate (engaged with --host and not --insecure)
-    client_id: ""             # agent:{instance_id} — Portal provisions this
-    portal_url: ""            # blank → plugin default (production Portal)
-  basic_auth:                 # Self-hosted username/password gate (dashboard_auth/basic plugin)
-    username: ""              # blank → plugin no-op
-    password_hash: ""         # scrypt$... (preferred — no plaintext at rest)
-    password: ""              # plaintext fallback (hashed in-memory at load)
-    secret: ""                # token-signing key; blank → random per-process
-    session_ttl_seconds: 0    # 0 → plugin default (12h)
-  drain_auth:                 # Drain-control service-credential gate (dashboard_auth/drain plugin)
-    scope: "drain"            # capability label on the verified principal
-    min_secret_chars: 43      # entropy bar (url-safe-b64 chars; 43 ≈ 256 bits)
-  ws_ping_interval: 20.0      # Non-loopback WebSocket keepalive ping interval (seconds)
-  ws_ping_timeout: 20.0       # Non-loopback WebSocket keepalive pong timeout (seconds)
-  ws_orphan_reap_grace_s: 20.0 # Grace before a WS-detached session is reaped (seconds)
-  ssh_isolated_idle_grace_s: 900.0 # Desktop-over-SSH backend exits after this long with no client and no running turn
-  ws_orphan_activity_stale_s: 600.0 # Activity idle bound before a detached RUNNING turn is interrupted (seconds)
-  startup_orphan_sweep: true  # Close session rows orphaned by a dead gateway process at boot
-```
-
-- `theme` — dashboard visual theme.
-- `show_token_analytics` — off by default. The Analytics page and token/cost figures are a **local lower-bound estimate** (they exclude auxiliary calls, retries, fallbacks, and cache writes), so they can read far below the provider bill. Set `true` only if you understand they're not billing.
-- `public_url` — when set, this is the complete authority (scheme + host + optional path prefix) the OAuth `redirect_uri` is built from. Set it for deploys behind reverse proxies that don't reliably forward `X-Forwarded-*` headers. Leave empty to use proxy-header reconstruction.
-- `trusted_proxies` — IP addresses or bounded CIDR networks allowed to supply `X-Forwarded-Proto` and `X-Forwarded-For`. Loopback remains trusted automatically. Configure this when the TLS reverse proxy connects from another container or host. Prefer the proxy's exact IP; use a small dedicated network only when its address is dynamic. Wildcards and `/0` networks are rejected.
-- `oauth` / `basic_auth` / `drain_auth` — auth provider config read by the bundled dashboard-auth plugins. The drain secret itself is **not** set here; it's provisioned via the `HERMES_DASHBOARD_DRAIN_SECRET` env var. See [Web Dashboard](./features/web-dashboard.md) for full auth setup.
-- `ws_ping_interval` / `ws_ping_timeout` — WebSocket keepalive tuning for non-loopback binds (loopback connections never ping). Raise these on high-latency links (Tailscale, distant SSH tunnels) where the 20 s defaults can manufacture spurious 1006 disconnects.
-- `ssh_isolated_idle_grace_s` (default `900`) — a Desktop-owned `hermes serve --isolated` backend reached over SSH is detached from the SSH session on purpose, so a laptop that sleeps mid-connection cannot tear it down; each dark-wake reconnect used to leave another backend holding `state.db`. The backend now retires itself once no client WebSocket has been connected for this long and no agent turn is running (a turn keeps it alive; an unreadable turn state keeps it alive too). Set high if you rely on a detached backend finishing long work after the laptop sleeps. Such backends also send a slow WebSocket ping (60 s, 10 min timeout) so a half-open tunnel is noticed. Independently of this grace, a backend retires (between turns) once the Desktop's ownership lock on the remote host names a newer spawn of the same connection, so a reconnect storm cannot stack detached backends; this covers POSIX and native Windows SSH hosts.
-- `ws_orphan_reap_grace_s` — how long a WS-detached session waits before the orphan reaper collects it. Raise alongside the keepalive values if clients reconnect slowly. Periodic session maintenance also completes cleanup for closed sockets and re-arms a missing orphan timer, so a detached chat cannot keep its ownership lease solely because its initial cleanup or timer was lost. Reconnecting cancels that timer; active delegated work and healthy running turns remain protected by the normal orphan-reaper checks. (`HERMES_TUI_WS_ORPHAN_REAP_GRACE_S` remains as an internal override.)
-- `ws_orphan_activity_stale_s` (default `600`) — how long a detached **running** turn's activity clock (the same clock the `agent.turn_liveness` watchdog samples: API waits, stream tokens, tool heartbeats) must be idle before the orphan reaper interrupts it. A client-absent turn that is still actively producing keeps running to completion detached — closing the laptop, backgrounding the mobile app, or a desktop update no longer cancels healthy long turns; only a genuinely wedged turn is interrupted. Set `0` to interrupt at the grace window regardless of activity (old behavior).
-- `startup_orphan_sweep` (default `true`) — the WS-orphan reap timer above is in-process, so a gateway restart (update, crash, systemd) before it fires leaves the session row open forever — phantom "active" work in `/resume` and dashboards. On every gateway boot — both the stdio TUI (`entry.main`) and the desktop/dashboard WebSocket sidecar (`handle_ws`) — rows with source `tui` / `desktop` / `subagent` / `unknown` (a row the token-accounting guard had to materialize itself) whose start time **and** newest message are both older than the session TTL (`HERMES_TUI_SESSION_TTL_S`, default 6 hours) are closed with `end_reason: startup_orphan_reap`. Messaging-platform sessions (Telegram, Discord, …) are never touched, live in-memory sessions (a client that already resumed) are excluded, and swept sessions remain resumable.

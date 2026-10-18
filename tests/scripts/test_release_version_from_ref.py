@@ -92,63 +92,8 @@ def test_published_head_spends_its_version():
     assert derive_next_version(published="0.21.5", bump="patch") == "0.21.6"
 
 
-def test_canary_base_comes_from_the_validated_protected_stable_head():
-    from scripts.releases.versioning import published_stable_version
-
-    class Reader:
-        def __init__(self, base, repository):
-            assert base == "https://assets.example"
-            assert repository == "example/hermes-agent"
-
-        def resolve(self, name):
-            assert name == "stable"
-            return type("Resolution", (), {
-                "terminal": {"policy": "stable-release"},
-                "manifest": {"request": {"version": "0.21.7", "commit": "a" * 40}},
-            })()
-
-    assert published_stable_version(
-        "example/hermes-agent", base_url="https://assets.example", reader_type=Reader,
-        run=lambda argv: "[[]]",
-    ) == "0.21.7"
 
 
-def test_a_newer_published_release_outranks_the_protected_head():
-    """A release that skipped bundles never moves the R2 head, but it still spends its version."""
-    from scripts.releases.versioning import published_stable_identity
-
-    class Reader:
-        def __init__(self, base, repository):
-            pass
-
-        def resolve(self, name):
-            return type("Resolution", (), {
-                "terminal": {"policy": "stable-release"},
-                "manifest": {"request": {"version": "0.21.7", "commit": "a" * 40}},
-            })()
-
-    releases = [
-        {"tag_name": "v0.21.8", "draft": False, "prerelease": False},
-        # Drafts, prereleases and CalVer labels are not published stable releases.
-        {"tag_name": "v0.21.9", "draft": True, "prerelease": False},
-        {"tag_name": "v0.21.8+canary.20260924T000000Z", "draft": False, "prerelease": True},
-        {"tag_name": "v2026.9.24", "draft": False, "prerelease": False},
-    ]
-
-    def run(argv):
-        if argv[:4] == ["gh", "api", "--paginate", "--slurp"]:
-            return json.dumps([releases])
-        assert argv[:2] == ["gh", "api"] and argv[3:] == ["--jq", ".sha"]
-        return {"repos/example/hermes-agent/commits/v0.21.8": "b" * 40,
-                "repos/example/hermes-agent/commits/v0.21.6": "c" * 40}[argv[2]]
-
-    assert published_stable_identity(
-        "example/hermes-agent", base_url="https://assets.example", reader_type=Reader, run=run,
-    ) == ("0.21.8", "b" * 40)
-    releases[0]["tag_name"] = "v0.21.6"
-    assert published_stable_identity(
-        "example/hermes-agent", base_url="https://assets.example", reader_type=Reader, run=run,
-    ) == ("0.21.7", "a" * 40)
 
 
 def test_outstanding_attempts_is_the_one_shared_predicate():

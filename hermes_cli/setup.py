@@ -540,7 +540,6 @@ def _record_send_consent_change(*, enabled: bool) -> None:
 
 from hermes_cli.setup_tts import setup_tts
 from hermes_cli.setup_terminal import setup_terminal_backend
-from hermes_cli.setup_platforms import setup_gateway
 from hermes_cli.setup_summary import _print_setup_summary
 from hermes_cli.setup_migration import _offer_openclaw_migration, _skip_configured_section
 from hermes_cli.setup_quick import _run_portal_one_shot, _run_quick_setup
@@ -552,7 +551,6 @@ SETUP_SECTIONS = [
     ("model", "Model & Provider", setup_model_provider),
     ("tts", "Text-to-Speech", setup_tts),
     ("terminal", "Terminal Backend", setup_terminal_backend),
-    ("gateway", "Messaging Platforms (Gateway)", setup_gateway),
     ("tools", "Tools", setup_tools),
     ("agent", "Agent Settings", setup_agent_settings),
 ]
@@ -601,21 +599,12 @@ def _run_full_setup(config: dict, hermes_home, *, is_existing: bool, migration_r
     def _skip(key: str, label: str) -> bool:
         return migration_ran and _skip_configured_section(config, key, label)
 
-    def _gateway_step() -> None:
-        if not _skip("gateway", "Messaging Platforms"):
-            setup_gateway(config)
-            return
-        # Migration does not imply consent to install a persistent service.
-        from hermes_cli.gateway_setup_service import ensure_gateway_service
-        ensure_gateway_service(context="setup", interactive=True, config=config)
-
     def _step(key: str, label: str, run) -> tuple:
         return label, lambda: None if _skip(key, label) else run()
 
     _run_setup_steps([
         _step("model", "Model & Provider", lambda: setup_model_provider(config)),
         _step("terminal", "Terminal Backend", lambda: setup_terminal_backend(config)),
-        ("Messaging Platforms", _gateway_step),
         _step("tools", "Tools", lambda: setup_tools(config, first_install=not is_existing))])
 
 

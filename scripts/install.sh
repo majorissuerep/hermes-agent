@@ -9,7 +9,6 @@
 #   --manifest            print the stage list as JSON
 #   --stage NAME [--json] run one stage
 #   --non-interactive     skip stages that need input
-#   --include-desktop     build the desktop app too (products stage)
 #   --verbose             stream every child command's output (the default
 #                         off a terminal and in CI)
 set -u
@@ -29,7 +28,6 @@ STAGE=""
 WANT_MANIFEST=false
 JSON=false
 NON_INTERACTIVE=false
-INCLUDE_DESKTOP=false
 VERBOSE=false
 SKIP_BROWSER=false
 SKIP_COMPUTER_USE=false
@@ -62,13 +60,11 @@ while [ $# -gt 0 ]; do
         --skip-setup) NON_INTERACTIVE=true; shift ;;
         --skip-browser|--no-playwright|-SkipBrowser) SKIP_BROWSER=true; shift ;;
         --skip-computer-use|-SkipComputerUse) SKIP_COMPUTER_USE=true; shift ;;
-        --include-desktop|-IncludeDesktop) INCLUDE_DESKTOP=true; shift ;;
         --verbose|-Verbose) VERBOSE=true; shift ;;
         -h|--help)
             echo "Usage: install.sh [--branch NAME] [--commit SHA] [--dir PATH]"
             echo "                  [--hermes-home PATH]"
             echo "                  [--manifest] [--stage NAME] [--json]"
-            echo "                  [--non-interactive] [--include-desktop] [--verbose]"
             echo "                  [--skip-browser] [--skip-computer-use]"
             echo
             echo "  --skip-browser  Do not install the browser tools (agent-browser + Chromium)."
@@ -508,20 +504,13 @@ stage_result() {
 # The single authoritative stage list: emit_manifest prints it AND the
 # no-flag ladder runs it. `products` is the shared completion tail -- the same
 # call `hermes update` makes -- so the manifest and the run cannot disagree.
-# `desktop` stays directly dispatchable via --stage for external callers, but
-# is never listed: --include-desktop selects the desktop product inside
-# `products` instead of adding a second build stage.
 stage_names() {
-    printf '%s\n' prerequisites repository venv python-deps config products setup gateway complete
+    printf '%s\n' prerequisites repository venv python-deps config products setup complete
 }
 
 # "title|category|needs_user_input".
 products_record() {
-    if [ "$INCLUDE_DESKTOP" = true ]; then
-        echo "Install command and app + desktop|runtime|false"
-    else
-        echo "Install command and app|runtime|false"
-    fi
+    echo "Install command and TUI|runtime|false"
 }
 
 # "$1" stage name -> its manifest record fields (title|category|needs_user_input).
@@ -534,8 +523,6 @@ stage_record() {
         config)        echo "Prepare config and skills|configuration|false" ;;
         products)      products_record ;;
         setup)         echo "Configure API keys and settings|configuration|true" ;;
-        gateway)       echo "Configure gateway service|configuration|true" ;;
-        desktop)       echo "Build desktop app|runtime|false" ;;
         complete)      echo "Finish install|runtime|false" ;;
     esac
 }
@@ -891,23 +878,6 @@ stage_python_deps() {
     bootstrap_pm
 }
 
-desktop_product_present() {
-    # Does this checkout already carry a built desktop app? A plain repair or
-    # upgrade rerun on a desktop install must REBUILD it rather than leave a
-    # bundle built from the previous code: the app is part of that install, and
-    # the artifacts live inside the tree (gitignored), so an update makes them
-    # stale instead of removing them.
-    # electron-builder suffixes the output dir with the arch on every non-x64
-    # target (linux-arm64-unpacked, mac-arm64, win-arm64-unpacked), so the x64
-    # names alone miss a desktop build on ARM64 Linux/Windows (#94703).
-    local release="$INSTALL_DIR/apps/desktop/release" dir
-    for dir in linux-unpacked linux-arm64-unpacked mac mac-arm64 \
-               win-unpacked win-ia32-unpacked win-arm64-unpacked; do
-        [ -d "$release/$dir" ] && return 0
-    done
-    return 1
-}
-
 # Guarded: a login shell whose ~/.bash_profile sources ~/.bashrc (Fedora, RHEL)
 # reads both files, so an unconditional prepend would put ~/.local/bin on PATH twice.
 SHELL_PATH_LINE='case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) export PATH="$HOME/.local/bin:$PATH" ;; esac'
@@ -954,7 +924,7 @@ wire_shell_path() {
 
 stage_products() {
     # The whole tail in one place, by calling the completion an update calls:
-    # publish the commands, build the products (tui/web, plus the desktop app),
+    # publish the commands, build the local TUI,
     # then run the post-build maintenance that syncs bundled skills and migrates
     # config. Node, browsers and the frontend build tools arrive through pm as
     # the build asks for them; the bootstrap interpreter itself only re-enters
@@ -962,22 +932,11 @@ stage_products() {
     local boot_py
     local args=(--source "$INSTALL_DIR")
     bootstrap_python
-    if [ "$INCLUDE_DESKTOP" = true ] || desktop_product_present; then
-        args+=(--desktop)
-    fi
-    (cd "$INSTALL_DIR" && run_logged "Building the hermes command and apps" \
+    (cd "$INSTALL_DIR" && run_logged "Building the hermes command and TUI" \
         "$boot_py" -I -B -X utf8 hermes_cli/source_completion.py "${args[@]}") \
-        || fail "app products or command publication failed" products_build_failed
+        || fail "TUI product or command publication failed" products_build_failed
     wire_shell_path
-    log_success "app products and hermes command ready"
-}
-
-stage_desktop() {
-    # External-caller contract: `--stage desktop` stays dispatchable on its own
-    # (the manifest never lists it now -- --include-desktop selects the desktop
-    # product inside `products`). Same completion call, desktop selected.
-    INCLUDE_DESKTOP=true
-    stage_products
+    log_success "TUI product and hermes command ready"
 }
 
 stage_config() {
@@ -1014,16 +973,6 @@ stage_setup() {
         return 0
     fi
     "$INSTALL_DIR/.hermes/bin/hermes" setup </dev/tty || fail "setup failed" setup_failed
-}
-
-stage_gateway() {
-    if [ "$NON_INTERACTIVE" = true ]; then return 0; fi
-    if ! has_terminal; then
-        log "gateway setup skipped (no terminal); run 'hermes gateway install' after install"
-        return 0
-    fi
-    # Setup installs the service when it handles the gateway; ask only if it did not.
-    "$INSTALL_DIR/.hermes/bin/hermes" gateway install --if-missing </dev/tty || fail "gateway installation failed" gateway_failed
 }
 
 stage_complete() {
@@ -1069,7 +1018,7 @@ run_stage() (
         trap 'stage_signal "$?" 143' TERM
         trap 'stage_signal "$?" 129' HUP
     fi
-    if [ "$NON_INTERACTIVE" = true ] && { [ "$STAGE" = setup ] || [ "$STAGE" = gateway ]; }; then
+    if [ "$NON_INTERACTIVE" = true ] && [ "$STAGE" = setup ]; then
         STAGE_SKIPPED=true
         STAGE_REASON="needs user input"
         exit 0
@@ -1082,8 +1031,6 @@ run_stage() (
         config) stage_config ;;
         products) stage_products ;;
         setup) stage_setup ;;
-        gateway) stage_gateway ;;
-        desktop) stage_desktop ;;
         complete) stage_complete ;;
         *) STAGE_REASON="unknown stage: $1"; printf '%s\n' "$STAGE_REASON" >&2; exit 2 ;;
     esac
@@ -1094,7 +1041,6 @@ run_install_session() {
     local args=(--dir "$INSTALL_DIR" --hermes-home "$HERMES_HOME" --branch "$BRANCH")
     [ -z "$INSTALL_COMMIT" ] || args+=(--commit "$INSTALL_COMMIT")
     [ "$NON_INTERACTIVE" != true ] || args+=(--non-interactive)
-    [ "$INCLUDE_DESKTOP" != true ] || args+=(--include-desktop)
     [ "$SKIP_BROWSER" != true ] || args+=(--skip-browser)
     [ "$SKIP_COMPUTER_USE" != true ] || args+=(--skip-computer-use)
     [ "$VERBOSE" != true ] || args+=(--verbose)
@@ -1186,7 +1132,6 @@ if [ "${BASH_SOURCE[0]:-$0}" = "$0" ]; then
     fi
 
     # No --stage: run the whole ladder — the same authoritative list the
-    # manifest prints, so --include-desktop inserts desktop here too.
     print_banner
     run_install_ladder
     exit "$?"

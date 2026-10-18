@@ -246,13 +246,10 @@ class TestDetection:
 
 class TestAdoption:
     def _resolve(self, db):
-        return db.find_latest_gateway_session_for_peer(
-            source=PEER["source"],
-            user_id=PEER["user_id"],
-            session_key=PEER["session_key"],
-            chat_id=PEER["chat_id"],
-            chat_type=PEER["chat_type"],
-        )
+        rows = db._read_all('SELECT * FROM sessions WHERE session_key=? AND ended_at IS NULL ORDER BY started_at DESC',
+                            (PEER['session_key'],))
+        return dict(rows[0]) if rows else None
+
 
     def test_adoption_moves_recovery_to_the_live_conversation(self, db):
         stale, orphan = _incident(db)

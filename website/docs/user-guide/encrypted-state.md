@@ -73,7 +73,7 @@ export below and re-encrypt a separate copy with its own credential.
 
 ## Bulk decryption for recovery or migration
 
-Close chats and stop the profile's gateway before making an offline recovery
+Close the profile's local terminal sessions before making an offline recovery
 copy. Choose a **new** output outside every encrypted Hermes home:
 
 ```sh

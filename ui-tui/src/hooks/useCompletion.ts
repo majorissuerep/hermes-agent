@@ -5,10 +5,10 @@ import type { CompletionItem } from '../app/interfaces.js'
 import { rankSlashItems } from '../app/slash/fuzzyScore.js'
 import { getUiState } from '../app/uiStore.js'
 import { inlineSlashTrigger } from '../domain/slash.js'
-import type { GatewayClient } from '../gatewayClient.js'
 import type { CompletionResponse } from '../gatewayTypes.js'
 import { t } from '../i18n/runtime.js'
 import { asRpcResult } from '../lib/rpc.js'
+import type { LocalAgentClient } from '../localAgentClient.js'
 import { listWidgetApps } from '../sdk/registry.js'
 
 /** Client-side widget apps live in the TUI's registry, not the gateway — so
@@ -79,7 +79,7 @@ export function completionRequestForInput(
   }
 }
 
-export function useCompletion(input: string, blocked: boolean, gw: GatewayClient) {
+export function useCompletion(input: string, blocked: boolean, gw: LocalAgentClient) {
   const [completions, setCompletions] = useState<CompletionItem[]>([])
   const [compIdx, setCompIdx] = useState(0)
   const [compReplace, setCompReplace] = useState(0)

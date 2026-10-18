@@ -1,14 +1,14 @@
 ---
-title: "Hermes Agent — Use, configure, theme, extend, and orchestrate Hermes Agent"
+title: "Hermes Agent — Operate encrypted, terminal-only Hermes Agent"
 sidebar_label: "Hermes Agent"
-description: "Use, configure, theme, extend, and orchestrate Hermes Agent"
+description: "Operate encrypted, terminal-only Hermes Agent"
 ---
 
 {/* This page is auto-generated from the skill's SKILL.md by website/scripts/generate-skill-docs.py. Edit the source SKILL.md, not this page. */}
 
 # Hermes Agent
 
-Use, configure, theme, extend, and orchestrate Hermes Agent.
+Operate encrypted, terminal-only Hermes Agent.
 
 ## Skill metadata
 
@@ -16,12 +16,11 @@ Use, configure, theme, extend, and orchestrate Hermes Agent.
 |---|---|
 | Source | Bundled (installed by default) |
 | Path | `skills/autonomous-ai-agents/hermes-agent` |
-| Version | `3.4.2` |
+| Version | `3.5.0` |
 | Author | Teknium + Hermes Agent |
 | License | MIT |
 | Platforms | linux, macos |
-| Tags | `hermes`, `setup`, `configuration`, `multi-agent`, `spawning`, `cli`, `gateway`, `bots`, `bot-mode`, `features`, `themes`, `skins`, `desktop-plugins`, `tui-widgets`, `petdex`, `development` |
-| Related skills | [`claude-code`](../../bundled/autonomous-ai-agents/autonomous-ai-agents-claude-code.md), [`codex`](../../bundled/autonomous-ai-agents/autonomous-ai-agents-codex.md), [`opencode`](../../bundled/autonomous-ai-agents/autonomous-ai-agents-opencode.md) |
+| Tags | `hermes`, `configuration`, `multi-agent`, `terminal`, `encryption`, `tui` |
 
 ## Reference: full SKILL.md
 
@@ -29,211 +28,94 @@ Use, configure, theme, extend, and orchestrate Hermes Agent.
 The following is the complete skill definition that Hermes loads when this skill is triggered. This is what the agent sees as instructions when the skill is active.
 :::
 
-# Hermes Agent
+# Hermes Agent Skill
 
-Hermes Agent is an open-source AI agent framework by Nous Research that runs in your terminal, a native desktop app, messaging platforms, and IDEs. This encrypted fork supports Linux and macOS, with ChatGPT/Codex, Anthropic, LiteLLM, custom OpenAI/Anthropic endpoints, Z.AI, Grok, and Vercel AI Gateway.
+Operate this encrypted Linux/macOS fork through its local terminal interface.
+It provides an Ink TUI, direct headless calls, tools, memory, skills, profiles,
+and local sub-agents. Desktop, messaging gateways, dashboards, IDE servers, and
+remote-management listeners are not available.
 
-What makes Hermes different:
+## When to Use
 
-- **Self-improving through skills** — Hermes learns from experience by saving reusable procedures as skills that load into future sessions.
-- **Persistent memory across sessions** — remembers who you are, your preferences, environment details, and lessons learned. Pluggable memory backends.
-- **Multi-platform gateway** — the same agent runs on Telegram, Discord, Slack, WhatsApp, iMessage, Signal, Matrix, Teams, Email, and a dozen more platforms with full tool access, not just chat.
-- **Many surfaces** — the same agent core drives the CLI, the Ink TUI, a native Electron desktop app, a web dashboard, and an ACP server for IDEs (VS Code / Zed / JetBrains).
-- **Provider-agnostic** — swap models and providers mid-workflow; credential pools rotate across multiple API keys automatically.
-- **Profiles** — run multiple independent Hermes instances with isolated configs, sessions, skills, and memory.
-- **Extensible & themeable** — plugins, MCP servers, custom tools, webhook triggers, cron scheduling, skins that theme every surface, desktop UI plugins, TUI widgets, and pet mascots.
+Use for Hermes configuration, model selection, updates, repair, session recovery,
+or local sub-agent orchestration. Before changing encrypted state, read
+[encrypted self-management](https://github.com/NousResearch/hermes-agent/blob/main/skills/autonomous-ai-agents/hermes-agent/references/encrypted-self-management.md).
 
-**This skill is a hub.** The body covers identity, quick start, spawning/orchestration, and hard invariants. Everything else lives in reference files — **load the matching reference (below) before answering**; do not answer detail questions from the body alone.
+## Prerequisites
 
-**Docs:** https://hermes-agent.nousresearch.com/docs/
+Use the native `terminal`, `read_file`, `patch`, and `delegate_task` tools.
+A human unlocks the active home once. Local authorized children inherit temporary
+session authority; never ask for the passphrase in chat or manually forward keys.
+Each profile needs its own authority.
 
-## Scope & Verification
+The maintained source is this fork, not upstream's website. Verify command syntax
+with `hermes --help` and `hermes <command> --help` through `terminal`.
+Read repository guides for the installed revision before assuming a feature exists.
 
-This skill is a concise operating guide, not the complete source of truth for every Hermes feature. If a Hermes feature, command, or setting is not mentioned here or in a reference, do not treat that absence as evidence that it does not exist. Check the live repository and official docs before giving a negative answer.
+## How to Run
 
-Good verification targets, cheapest first:
-
-- **Every shipped feature, one line each: https://hermes-agent.nousresearch.com/docs/llms.txt.** Start here for any "can Hermes do X?" or "how do I do X?" — it indexes the entire documentation set with a link to the page that answers. It is generated from the docs tree on every build, so it is never behind the product. Fetch it with `web_extract`, or `curl -s https://hermes-agent.nousresearch.com/docs/llms.txt` when web tools are off. The whole documentation set in one file is at `/docs/llms-full.txt`.
-- CLI commands: `hermes --help`, `hermes <command> --help`, and `hermes_cli/main.py`
-- Source tree: https://github.com/NousResearch/hermes-agent
-
-Never answer "Hermes can't do that" from memory. Hermes ships far more than this skill body describes, and the index exists so a negative answer is always checkable.
-
-## Quick Start
-
-```bash
-# Install (shell installer — bootstraps PM, Python, dependencies, and the launcher)
-curl -fsSL https://raw.githubusercontent.com/majorissuerep/hermes-agent/main/scripts/install.sh | bash
-
-# Interactive chat (default surface; set display.interface: tui to launch the Ink TUI instead)
-hermes
-
-# Single query
-hermes chat -q "What is the capital of France?"
-
-# Setup wizard  /  pick model+provider  /  health check
-hermes setup
-hermes model
+```sh
+hermes                         # Interactive Ink TUI
+hermes chat -q "Complete a bounded task"
+hermes model                   # Configure a supported connection
+hermes config check
 hermes doctor
-
-# Other surfaces
-hermes desktop                 # launch the native desktop app (alias: hermes gui)
-hermes dashboard               # web admin panel + embedded chat
-hermes proxy                   # OpenAI-compatible local proxy backed by your OAuth provider
+hermes update
+hermes secure-vault status
 ```
 
-## Key Paths
+## Quick Reference
 
-```
-~/.hermes/config.yaml       Main configuration (settings — never secrets)
-~/.hermes/.env              API keys and secrets ONLY (under $HERMES_HOME if set)
-$HERMES_HOME/skills/        Installed skills
-~/.hermes/skins/            Custom themes (see references/themes.md)
-~/.hermes/desktop-plugins/  Desktop app UI plugins (see references/desktop-plugins.md)
-~/.hermes/tui-widgets/      TUI widget apps (see references/tui-widgets.md)
-~/.hermes/pets/             Installed pet mascots (see references/petdex.md)
-~/.hermes/state.db          Canonical session store (SQLite + FTS5)
-~/.hermes/sessions/         Gateway routing index, request dumps, *.jsonl transcripts
-~/.hermes/logs/             Gateway and error logs
-~/.hermes/auth.json         OAuth tokens and credential pools
-~/.hermes/hermes-agent/     Source code (if git-installed)
-```
+| Need | Reference |
+| --- | --- |
+| Encrypted config, repair, update, export, child authority | [Self-management](https://github.com/NousResearch/hermes-agent/blob/main/skills/autonomous-ai-agents/hermes-agent/references/encrypted-self-management.md) |
+| Provider/model connection | [Providers and models](https://github.com/NousResearch/hermes-agent/blob/main/skills/autonomous-ai-agents/hermes-agent/references/providers-and-models.md) |
+| CLI and session options | [CLI](https://github.com/NousResearch/hermes-agent/blob/main/skills/autonomous-ai-agents/hermes-agent/references/cli-reference.md) |
+| Configuration writers and scopes | [Configuration](https://github.com/NousResearch/hermes-agent/blob/main/skills/autonomous-ai-agents/hermes-agent/references/configuration.md) |
+| Project context and cached prompts | [Context files](https://github.com/NousResearch/hermes-agent/blob/main/skills/autonomous-ai-agents/hermes-agent/references/project-context-files.md) |
+| Outgoing MCP clients | [Native MCP](https://github.com/NousResearch/hermes-agent/blob/main/skills/autonomous-ai-agents/hermes-agent/references/native-mcp.md) |
+| Delegation limits and diagnosis | [Delegation](https://github.com/NousResearch/hermes-agent/blob/main/skills/autonomous-ai-agents/hermes-agent/references/delegate-task-concurrency-diagnosis.md) |
 
-Profiles use `~/.hermes/profiles/<name>/` with the same layout. When a profile is active, resolve the real home from `$HERMES_HOME` — never hardcode `~/.hermes`.
+## Procedure
 
-In this encrypted fork, state files are encrypted on disk. Unlock once when opening
-the session: local `terminal` commands, `delegate_task` children and nested Hermes
-commands reuse that session's unlock without another passphrase. Use normal Hermes
-CLI commands for settings; do not edit encrypted config/state as plaintext. The
-passphrase is never retained, exported, or requested in chat. Session authority is
-temporary, home-scoped and revoked when its owner closes; it does not unlock a
-different profile or a remote terminal. Load `references/encrypted-self-management.md`
-for config changes, updates, repair and delegation. MCP's `--via-host` management
-commands remain available (see `references/native-mcp.md`).
+1. Inspect the active installation, home, provider, and requested operation.
+   Do not edit a different installed checkout merely because the development
+   workspace contains a newer version.
+2. Use existing local CLI writers for config, secrets, memory, and skills.
+   Runtime files are encrypted state, not ordinary text files.
+3. For quick subtasks use `delegate_task`; children have isolated conversation
+   state without another unlock. For independent bounded processes use
+   `terminal` to call `hermes chat -q ...`. Use isolated worktrees for
+   concurrent source edits and respect completion/error outcomes.
+4. For in-session switching use `/model` in the TUI. Confirm the actual next
+   request/provider behavior, retained history, and errors; a success banner
+   alone is not proof. A one-shot pick must not overwrite persistent defaults.
+5. Apply prompt/tool/memory-affecting changes next session unless the command
+   explicitly supports a deliberate immediate reload. Do not rewrite a warm
+   prompt or past transcript as part of a model/config change.
+6. Update transactionally with `hermes update`. Keep snapshots, diagnostics,
+   and retryable completion debt; never repair by deleting a user's home.
+7. Local scheduled jobs run only through explicit local cron commands. There
+   is no background gateway scheduler or remote delivery.
 
-## Routing Table — load the reference for the task
+## Pitfalls
 
-| User wants... | Load |
-|---|---|
-| **Anything not listed below — "can Hermes do X?", "how do I set up X?"** | **https://hermes-agent.nousresearch.com/docs/llms.txt** |
-| Bots that chat, run routines, or message each other; the Bots tab | docs: `/user-guide/bot-mode` |
-| CLI commands, subcommands, flags, "how do I run X" | `references/cli-reference.md` |
-| In-session slash commands | `references/slash-commands.md` |
-| Provider setup, API keys, OAuth | `references/providers-and-models.md` |
-| config.yaml sections, toolsets, voice/STT/TTS | `references/configuration.md` |
-| Encrypted config edits, self-updates, repair, no-prompt subagents | `references/encrypted-self-management.md` |
-| AGENTS.md / .hermes.md / CLAUDE.md project rules | `references/project-context-files.md` |
-| Secret redaction, PII, approval modes, "reset permissions" | `references/security-privacy.md` |
-| Delegation, cron, curator, kanban | `references/background-systems.md` |
-| MCP servers (add, catalog, `hermes mcp`) | `references/native-mcp.md` |
-| Webhook routes and event-driven runs | `references/webhooks.md` |
-| A custom theme/skin ("synthwave theme", "change the gold ●") | `references/themes.md` + `templates/skin.yaml` |
-| A desktop app UI element (pane, widget, ⌘K command, page) | `references/desktop-plugins.md` + `templates/plugin.js` |
-| A live TUI panel or modal widget (ticker, clock, dashboard) | `references/tui-widgets.md` + `templates/clock.mjs` |
-| Pet mascots — install, select, scale, diagnose | `references/petdex.md` |
-| Debugging: voice, tools missing, gateway, aux models | `references/troubleshooting.md` |
-| Contributing code: adding tools, slash commands, tests | `references/contributor-guide.md` |
-| delegate_task "capped at N" reports | `references/delegate-task-concurrency-diagnosis.md` |
-| Connecting a messaging platform (Telegram, Discord, Slack, WhatsApp, …) | docs: `/user-guide/messaging` |
+- No `hermes desktop`, `gateway`, `dashboard`, `serve`, ACP,
+  inbound proxy, or MCP `--via-host` operation exists.
+- Never print credentials, passphrases, raw keys, or session grants. Remote
+  terminal backends do not receive local vault authority.
+- Never interpret unreadable config/history as empty state. Preserve the
+  encrypted original and report repair failures.
+- ChatGPT/Codex, Anthropic, OpenAI, LiteLLM, custom OpenAI (Chat Completions
+  or Responses), custom Anthropic, Z.AI, Grok, and Vercel are the bounded
+  built-in connections. A model catalog entry is not a new supported provider.
+- Never claim a vendor/OS is qualified based on mocks, skipped tests, another
+  endpoint's success, or an older commit's receipt.
 
-The reference list above is not the feature list — it is the set of topics that
-need more than their docs page. For everything else Hermes ships, fetch
-`llms.txt` and it maps the question to the page that answers it.
+## Verification
 
-Two theming rules that hold even without loading the reference: **you apply skins yourself** (`hermes config set display.skin <name>` — every surface repaints live within ~a second; don't tell the user to run `/skin`), and **to tweak one color, edit the ACTIVE skin** (`hermes skin set <key> <hex>`) — never fork `default`, which drops the palette and resets the background.
-
-## Spawning Additional Hermes Instances
-
-Run additional Hermes processes as fully independent subprocesses — separate sessions, tools, and environments.
-
-### When to Use This vs delegate_task
-
-| | `delegate_task` | Spawning `hermes` process |
-|-|-----------------|--------------------------|
-| Isolation | Separate conversation, shared process | Fully independent process |
-| Duration | Minutes (bounded by parent loop) | Hours/days |
-| Tool access | Subset of parent's tools | Full tool access |
-| Interactive | No | Yes (PTY mode) |
-| Use case | Quick parallel subtasks | Long autonomous missions |
-
-### One-Shot Mode
-
-```
-terminal(command="hermes chat -q 'Research GRPO papers and write summary to ~/research/grpo.md'", timeout=300)
-
-# Background for long tasks:
-terminal(command="hermes chat -q 'Set up CI/CD for ~/myapp'", background=true)
-```
-
-### Interactive PTY Mode (via tmux)
-
-Hermes uses prompt_toolkit, which requires a real terminal. Use tmux for interactive spawning:
-
-```
-# Start
-terminal(command="tmux new-session -d -s agent1 -x 120 -y 40 'hermes'", timeout=10)
-
-# Wait for startup, then send a message
-terminal(command="sleep 8 && tmux send-keys -t agent1 'Build a FastAPI auth service' Enter", timeout=15)
-
-# Read output
-terminal(command="sleep 20 && tmux capture-pane -t agent1 -p", timeout=5)
-
-# Send follow-up
-terminal(command="tmux send-keys -t agent1 'Add rate limiting middleware' Enter", timeout=5)
-
-# Exit
-terminal(command="tmux send-keys -t agent1 '/exit' Enter && sleep 2 && tmux kill-session -t agent1", timeout=10)
-```
-
-### Multi-Agent Coordination
-
-```
-# Agent A: backend
-terminal(command="tmux new-session -d -s backend -x 120 -y 40 'hermes -w'", timeout=10)
-terminal(command="sleep 8 && tmux send-keys -t backend 'Build REST API for user management' Enter", timeout=15)
-
-# Agent B: frontend
-terminal(command="tmux new-session -d -s frontend -x 120 -y 40 'hermes -w'", timeout=10)
-terminal(command="sleep 8 && tmux send-keys -t frontend 'Build React dashboard for user management' Enter", timeout=15)
-
-# Check progress, relay context between them
-terminal(command="tmux capture-pane -t backend -p | tail -30", timeout=5)
-terminal(command="tmux send-keys -t frontend 'Here is the API schema from the backend agent: ...' Enter", timeout=5)
-```
-
-### Session Resume
-
-```
-# Resume most recent session
-terminal(command="tmux new-session -d -s resumed 'hermes --continue'", timeout=10)
-
-# Resume specific session
-terminal(command="tmux new-session -d -s resumed 'hermes --resume 20260225_143052_a1b2c3'", timeout=10)
-```
-
-### Tips
-
-- **Prefer `delegate_task` for quick subtasks** — less overhead than spawning a full process
-- **Use `-w` (worktree mode)** when spawning agents that edit code — prevents git conflicts
-- **Set timeouts** for one-shot mode — complex tasks can take 5-10 minutes
-- **Use `hermes chat -q` for fire-and-forget** — no PTY needed
-- **Use tmux for interactive sessions** — raw PTY mode has `\r` vs `\n` issues with prompt_toolkit
-- **For scheduled tasks**, use the `cronjob` tool instead of spawning — handles delivery and retry
-- **"delegate_task is capped at N" reports** — see `references/delegate-task-concurrency-diagnosis.md`. Three real cap paths in Hermes; if none fired, the model is self-limiting and rationalising it as "the runtime caps."
-- **"Can $external_app use my Nous Portal subscription / OAuth?"** — see `references/portal-auth-for-third-party-apps.md`. Walk the user through three layers (plugin-vs-app, what Portal actually exposes, local-broker-proxy option).
-
-## Surfaces (quick orientation)
-
-- **Desktop app** (`hermes desktop` / `hermes gui`) — native Electron app for macOS/Linux/Windows: streaming chat, session list, Cmd+K palette, drag-and-drop files, native notifications, per-profile remote-gateway login. Extend it with UI plugins — `references/desktop-plugins.md`.
-- **Web dashboard** (`hermes dashboard`) — full admin panel: messaging channels, MCP catalog, webhooks, memory, profile builder, plus an embedded `hermes --tui` chat. Secured behind an OAuth/token gate.
-- **Ink TUI** (`hermes --tui` or `display.interface: tui`) — terminal UI with docked widget apps — `references/tui-widgets.md`.
-- **OpenAI-compatible proxy** (`hermes proxy`) — a local OpenAI API backed by whichever OAuth provider you're signed into. Point Codex CLI, Aider, Cline, or any script at it — no API key.
-
-## Hard Invariants (never violate, regardless of what you loaded)
-
-- **Never break prompt caching** — don't change past context, toolsets, or the system prompt mid-conversation. The only exception is context compression.
-- **Message role alternation** — never two assistant or two user messages in a row; only `tool` results can repeat.
-- **Secrets in `.env`, settings in `config.yaml`** — never tell a user to put a non-credential setting in `.env`.
-- **Profile-safe paths** — `get_hermes_home()` in code, `$HERMES_HOME` when resolving paths in a session.
-- **Never hand-edit Hermes state** — use the capability's operational interface. Local `hermes config set`, updates and delegated children reuse the active session's unlock; do not request another passphrase. MCP changes can also use `hermes mcp ... --via-host` through the authenticated session host. Saving an MCP entry takes effect next session; do not automatically run `/reload-mcp`.
+Check the public command outcome, encrypted managed reads, preserved session
+history, and absence of extra unlock prompts in local children. After update,
+check version, `hermes config check`, vault status, and a real conversation.
+Qualification uses disposable homes and real TUI keyboard/model requests, never
+the user's real installation or saved credentials.

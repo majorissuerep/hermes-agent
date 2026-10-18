@@ -2,10 +2,6 @@
 
 
 def carry_compression_automation(agent, old_session_id):
-    from agent.runtime_session_store import RuntimeSessionStore
-    if isinstance(agent._session_db, RuntimeSessionStore):
-        # The owner moved these exact sidecars atomically with child publication.
-        return
     from agent.conversation_compression import _swallow
     with _swallow('Could not migrate goal on compression: %s'):
         from hermes_cli.goals import migrate_goal_to_session

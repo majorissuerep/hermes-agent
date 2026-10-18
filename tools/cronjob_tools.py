@@ -51,16 +51,12 @@ from tools.cronjob_job_args import (
     _canonical_skills,
     _clean_str_list,
     _format_job,
-    _gateway_liveness_notice,
-    _local_delivery_notice,
     _mode_guidance_notes,
     _normalize_deliver_param,
     _normalize_optional_job_value,
-    _origin_from_env,
     _repeat_display,
-    _resolve_cron_context_deliver,
     _split_monitor_arg,
-    _validate_bot_chat_deliver,
+    _validate_local_delivery,
     _validate_context_from_refs,
     _validate_cron_base_url,
     _validate_cron_script_path)
@@ -71,34 +67,12 @@ def _dumps(payload: dict[str, Any]) -> str:
     return json.dumps(payload, indent=2)
 
 
-def _notify_provider_jobs_changed_safe() -> None:
-    """Tell the active scheduler provider the job set changed; best-effort, never raises."""
-    try:
-        from cron.scheduler import _notify_provider_jobs_changed
-        _notify_provider_jobs_changed()
-    except Exception:
-        pass
 
 
 # ---------------------------------------------------------------------------
 # Manual run execution (claim -> run_one_job -> report)
 # ---------------------------------------------------------------------------
 
-def _relay_fronted_delivery_platforms(job: dict[str, Any]) -> set:
-    """Delivery-platform names for this job that the relay connector fronts."""
-    try:
-        from gateway.relay import relay_fronted_platforms
-    except Exception:
-        return set()
-    fronted = relay_fronted_platforms()
-    if not fronted:
-        return set()
-    try:
-        from cron.scheduler import _resolve_delivery_targets
-        targets = _resolve_delivery_targets(job) or []
-    except Exception:
-        return set()
-    return {t.get("platform") for t in targets if t.get("platform")} & fronted
 
 
 def _api_server_base_url() -> str:
@@ -123,92 +97,10 @@ def _api_server_base_url() -> str:
     return f"http://{host}:{port}"
 
 
-def _forward_relay_fronted_run(job: dict[str, Any], extra_prompt: Optional[str] = None) -> Optional[str]:
-    """Forward a manual run to the gateway when it targets a relay-fronted platform: such delivery
-    has no standalone sender — the gateway's live relay adapter is the only path, reached via
-    ``POST /api/jobs/{id}/run`` (marks the job due; ``extra_prompt`` rides in the body). Returns a
-    JSON result string when forwarding engages, else None (normal in-process run)."""
-    if not _relay_fronted_delivery_platforms(job):
-        return None
-    from agent.secret_scope import get_secret
-    key = get_secret("API_SERVER_KEY", "") or ""
-    try:
-        import httpx
-        resp = httpx.post(
-            f"{_api_server_base_url()}/api/jobs/{job['id']}/run", headers={"Authorization": f"Bearer {key}"},
-            json=({"prompt": extra_prompt} if extra_prompt else {}), timeout=10.0)
-    except Exception:
-        resp = None
-    if resp is not None and resp.status_code < 300:
-        return _dumps({
-            "success": True,
-            "forwarded_to_gateway": True,
-            "note": (
-                "This job targets a relay-fronted platform; it was dispatched "
-                "to the running gateway, whose live relay adapter owns that "
-                "delivery."),
-        })
-    return _dumps({
-        "success": False,
-        "error": (
-            "This job targets a relay-fronted platform, which has no "
-            "standalone sender. Start the gateway — its ticker will "
-            "deliver the job on schedule via the live relay adapter."),
-    })
 
 
-def _primary_routed_delivery_platforms(job: dict[str, Any]) -> set:
-    """Delivery-platform names this satellite profile reaches only through the primary gateway's
-    ``profile_routes``: routed here, with no credential of its own to send standalone."""
-    try:
-        from cron.scheduler import _resolve_delivery_targets
-        from cron.scheduler_preflight import _delivery_platform_routed_from_primary_gateway
-        routed = {t["platform"] for t in _resolve_delivery_targets(job) or []
-                  if t.get("platform") and _delivery_platform_routed_from_primary_gateway(t["platform"])}
-        if not routed:
-            return set()
-        from gateway.config import load_gateway_config
-        return routed - {p.value for p in load_gateway_config().get_connected_platforms()}
-    except Exception:
-        return set()
 
 
-def _hand_off_primary_routed_run(job: dict[str, Any], extra_prompt: Optional[str] = None) -> Optional[str]:
-    """Queue a manual run for the gateway ticker when the job delivers through the primary gateway's
-    profile route: only the gateway process holding the primary's bot can send it, so an in-process
-    run would spend the whole turn and then record ``delivery_failed`` (#120330). Returns a JSON
-    result string when the hand-off engages, else None (normal in-process run)."""
-    runner_ref = getattr(sys.modules.get("gateway.run"), "_gateway_runner_ref", None)
-    if callable(runner_ref) and runner_ref() is not None:
-        return None  # inside the gateway: its live adapter delivers (#89302)
-    if not is_job_runnable(job):
-        return None  # keep the normal paused refusal; trigger_job would resume the job
-    routed = _primary_routed_delivery_platforms(job)
-    if not routed:
-        return None
-    from hermes_cli.cron import _builtin_gateway_liveness
-    alive = _builtin_gateway_liveness()
-    if alive is not True:
-        # None = the probe could not tell; a run queued for a ticker that may not exist is worse
-        # than an honest refusal (nothing would ever pick it up).
-        cause = ("Start the gateway — its ticker will deliver the job on schedule." if alive is False
-                 else "Could not determine whether a gateway serves this profile; check "
-                      "`hermes cron status` and re-run.")
-        return _dumps({
-            "success": False,
-            "error": (
-                f"This job delivers to {', '.join(sorted(routed))} through the primary "
-                f"gateway's profile route, which has no standalone sender. {cause}"),
-        })
-    updated = trigger_job(job["id"], extra_prompt=extra_prompt)
-    _notify_provider_jobs_changed_safe()
-    return _dumps({
-        "success": True,
-        "job": _format_job(updated),
-        "note": (
-            "This job delivers through the primary gateway's profile route; it was "
-            "queued for that gateway's next scheduler tick, which runs and delivers it."),
-    })
 
 
 def _manual_run_delivery_note(deliver: str, refreshed: dict[str, Any]) -> str:
@@ -349,37 +241,11 @@ def _run_claimed_job(job: dict[str, Any], extra_prompt: Optional[str] = None) ->
         claim = job.get("fire_claim")
         fire_owner = str(claim.get("by") or "") if isinstance(claim, dict) else None
 
-        # Inside the gateway process deliver on the loop that owns clients such as
-        # Matrix/aiohttp (a standalone asyncio.run() loop breaks them).
-        runner_ref = getattr(sys.modules.get("gateway.run"), "_gateway_runner_ref", None)
-        # Manual runs invoked from a gateway agent execute outside the scheduler ticker, but they still
-        # share the process with the live platform adapters. Calling those clients from run_one_job's
-        # standalone asyncio.run() loop raises errors like "Timeout context manager should be used inside a
-        # task" and can break encrypted Matrix delivery (#61495 — salvaged from #63586 by @Fly-onlyone).
-        runner = runner_ref() if callable(runner_ref) else None
-        adapters = getattr(runner, "adapters", None) if runner is not None else None
-        # ``runner.adapters`` is the LAUNCH profile's map; under multiplex the run executes with
-        # HERMES_HOME bound to the owning profile, so resolve that profile's adapters the way the
-        # ticker (``tick_adapters_for``) does — fail closed, never the default bot (#124248). A
-        # resolution error propagates to the ``except`` below and marks the run failed.
-        if runner is not None and hasattr(runner, "_adapters_for_profile"):
-            from hermes_constants import get_hermes_home, profile_name_for_home
-
-            profile = profile_name_for_home(get_hermes_home())
-            adapters = runner._adapters_for_profile(profile)
-            # A credentialless shared-bot satellite borrows the primary's bot for ROUTED targets
-            # only — the same grant the ticker's ``tick_adapters_for`` makes, never the full map.
-            if getattr(runner, "_is_shared_bot_satellite", lambda _p: False)(profile):
-                from cron.scheduler_preflight import (
-                    SharedRouteAdapters, _primary_profile_routes_for_current_home)
-
-                adapters = SharedRouteAdapters(adapters, _primary_profile_routes_for_current_home())
-        gateway_loop = getattr(runner, "_gateway_loop", None) if runner is not None else None
         try:
             # run_one_job records last_run_at/last_status via mark_job_run; `job` is the
             # owner-bearing claimed snapshot, so terminal writes stay fenced by that owner.
             with _run_heartbeat(str(job.get("name") or job_id)):
-                processed = run_one_job(job, adapters=adapters, loop=gateway_loop, extra_prompt=extra_prompt)
+                processed = run_one_job(job, extra_prompt=extra_prompt)
         finally:
             _registered = False
             release_running_job(job_id, owner=registration_owner)
@@ -458,7 +324,8 @@ def _latest_job_output_excerpt(job_id: str, max_chars: int = 2000) -> Optional[s
         files = sorted(out_dir.glob("*.md"))
         if not files:
             return None
-        text = files[-1].read_text(encoding="utf-8-sig", errors="replace").strip()
+        from hermes_security.io import read_text
+        text = (read_text(files[-1], purpose="state", encoding="utf-8-sig") or "").strip()
         if not text:
             return None
         if len(text) > max_chars:
@@ -543,7 +410,7 @@ def _try_dispatch_background_run(
 
     # Finite sessions cannot route a detached result back after the turn ends (delegate_task's gate).
     try:
-        from gateway.session_context import async_delivery_supported
+        from agent.session_context import async_delivery_supported
         if not async_delivery_supported():
             return None
     except Exception:
@@ -576,7 +443,7 @@ def _try_dispatch_background_run(
 
     origin_ui_session_id = ""
     try:
-        from gateway.session_context import get_session_env
+        from agent.session_context import get_session_env
         origin_ui_session_id = get_session_env("HERMES_UI_SESSION_ID", "") or ""
     except Exception:
         pass
@@ -666,9 +533,9 @@ def _action_create(a: dict[str, Any]) -> str:
         # to an attacker endpoint.
         or _validate_cron_base_url(a["provider"], a["base_url"])
         # bot-chat targets are machine-local: fail the CREATE, not the run.
-        or _validate_bot_chat_deliver(deliver)
+        or _validate_local_delivery(deliver)
         # failure_deliver shares deliver's grammar and validators.
-        or _validate_bot_chat_deliver(_normalize_deliver_param(a["failure_deliver"]))
+        or _validate_local_delivery(_normalize_deliver_param(a["failure_deliver"]))
         or (a["context_from"] and _validate_context_from_refs(
             [a["context_from"]] if isinstance(a["context_from"], str) else a["context_from"])))
     if error:
@@ -678,41 +545,36 @@ def _action_create(a: dict[str, Any]) -> str:
     if a["continuity"] is not None:
         context_from = _apply_continuity(context_from, a["continuity"])
 
-    from cron.scheduler import CronSchedulerRegistrationError, create_job_with_scheduler_registration
-    try:
-        job = create_job_with_scheduler_registration(
-            prompt=prompt or "", schedule=a["schedule"], name=a["name"], repeat=a["repeat"],
-            deliver=_resolve_cron_context_deliver(deliver),
-            origin=_origin_from_env(a["schedule"]),
-            skills=canonical_skills,
-            model=_normalize_optional_job_value(a["model"]), provider=_normalize_optional_job_value(a["provider"]),
-            base_url=_normalize_optional_job_value(a["base_url"], strip_trailing_slash=True),
-            script=_normalize_optional_job_value(script), context_from=context_from,
-            # [] is an explicit zero-tool allowlist, not a clear back to the unrestricted default (#82010).
-            enabled_toolsets=a["enabled_toolsets"] if a["enabled_toolsets"] is not None else None,
-            workdir=_normalize_optional_job_value(a["workdir"]),
-            no_agent=_no_agent, attach_to_session=a["attach_to_session"],
-            monitor_script=_normalize_optional_job_value(a["monitor_script"]),
-            monitor_url=_normalize_optional_job_value(a["monitor_url"]),
-            # CLI-only lane: absent from CRONJOB_SCHEMA and the model dispatch (models don't pick models).
-            reasoning_effort=a["reasoning_effort"], interpreter=a["interpreter"],
-            pinned=bool(a["pinned"]),
-            failure_deliver=_resolve_cron_context_deliver(_normalize_deliver_param(a["failure_deliver"])),
-            **({"paused": a["paused"], "paused_reason": a["paused_reason"]}
-               if a["paused"] is not False or a["paused_reason"] is not None else {}))
-    except CronSchedulerRegistrationError as exc:
-        _partial = exc.to_dict()
-        return tool_error(_partial.pop("error"), success=False, **_partial)
+    from cron.jobs import create_job
+    job = create_job(
+        prompt=prompt or "", schedule=a["schedule"], name=a["name"], repeat=a["repeat"],
+        deliver=deliver,
+        skills=canonical_skills,
+        model=_normalize_optional_job_value(a["model"]), provider=_normalize_optional_job_value(a["provider"]),
+        base_url=_normalize_optional_job_value(a["base_url"], strip_trailing_slash=True),
+        script=_normalize_optional_job_value(script), context_from=context_from,
+        # [] is an explicit zero-tool allowlist, not a clear back to the unrestricted default (#82010).
+        enabled_toolsets=a["enabled_toolsets"] if a["enabled_toolsets"] is not None else None,
+        workdir=_normalize_optional_job_value(a["workdir"]),
+        no_agent=_no_agent, attach_to_session=a["attach_to_session"],
+        monitor_script=_normalize_optional_job_value(a["monitor_script"]),
+        monitor_url=_normalize_optional_job_value(a["monitor_url"]),
+        # CLI-only lane: absent from CRONJOB_SCHEMA and the model dispatch (models don't pick models).
+        reasoning_effort=a["reasoning_effort"], interpreter=a["interpreter"],
+        pinned=bool(a["pinned"]),
+        failure_deliver=_normalize_deliver_param(a["failure_deliver"]),
+        **({"paused": a["paused"], "paused_reason": a["paused_reason"]}
+           if a["paused"] is not False or a["paused_reason"] is not None else {}))
     _create_message = " ".join(filter(None, (f"Cron job '{job['name']}' created.",
         "Created PAUSED — resume to schedule, or explicitly run now." if not job.get("enabled", True) else None,
-        _local_delivery_notice(job, deliver))))
+        "Results are saved locally. Run due jobs with `hermes cron tick` or this job with `hermes cron run`.")))
     # The builtin ticker lives in the gateway process: with no gateway running the job is stored
     # but never fires — tell the model (the CLI already warns).
     _result = {
         "success": True, "job_id": job["id"], "name": job["name"], "skill": job.get("skill"),
         "skills": job.get("skills", []), "schedule": job["schedule_display"], "repeat": _repeat_display(job),
         "deliver": job.get("deliver", "local"), "next_run_at": job["next_run_at"], "job": _format_job(job),
-        "message": _create_message, **_gateway_liveness_notice(),
+        "message": _create_message,
     }
     return _dumps(_with_guidance(_result, job, deliver))
 
@@ -720,11 +582,6 @@ def _action_create(a: dict[str, Any]) -> str:
 def _action_list(a: dict[str, Any]) -> str:
     jobs = [_format_job(job) for job in list_jobs(include_disabled=a["include_disabled"])]
     _result = {"success": True, "count": len(jobs), "jobs": jobs}
-    # Same inert-job class as create; an empty list has nothing inert.
-    if jobs:
-        # Same silent-inert-job class as create (#87033): an agent inspecting existing jobs in a
-        # gateway-less environment must learn they are not firing, not just see a clean list.
-        _result.update(_gateway_liveness_notice(plural=True))
     return _dumps(_result)
 
 
@@ -732,7 +589,6 @@ def _action_remove(job: dict[str, Any], a: dict[str, Any]) -> str:
     job_id = job["id"]
     if not remove_job(job_id):
         return tool_error(f"Failed to remove job '{job_id}'", success=False)
-    _notify_provider_jobs_changed_safe()
     return _dumps({
         "success": True,
         "message": f"Cron job '{job['name']}' removed.",
@@ -741,7 +597,6 @@ def _action_remove(job: dict[str, Any], a: dict[str, Any]) -> str:
 
 
 def _job_state_result(updated: dict[str, Any]) -> str:
-    _notify_provider_jobs_changed_safe()
     return _dumps({"success": True, "job": _format_job(updated)})
 
 
@@ -760,15 +615,10 @@ def _action_run(job: dict[str, Any], a: dict[str, Any]) -> str:
         scan_error = _scan_cron_prompt(extra_prompt)
         if scan_error:
             return tool_error(scan_error, success=False)
-    # Primary-routed satellite delivery has no sender outside the gateway: hand the run to its ticker.
-    handed_off = _hand_off_primary_routed_run(job, extra_prompt=extra_prompt)
-    if handed_off is not None:
-        return handed_off
     # A manual run must actually run even with no ticker active. Preferred: background
     # dispatch (handle now, outcome as a completion event); inline fallback otherwise.
     bg = _try_dispatch_background_run(job, session_id=a["session_id"], extra_prompt=extra_prompt)
     if bg is not None and bg.get("dispatched"):
-        _notify_provider_jobs_changed_safe()
         result = _refreshed_job_view(job_id)
         result["executed"] = True
         result["execution_mode"] = "background"
@@ -786,16 +636,12 @@ def _action_run(job: dict[str, Any], a: dict[str, Any]) -> str:
         exec_result = bg  # terminal result: claim lost or inline fallback
     else:
         # Relay-fronted manual run: no live adapter here — forward to the running gateway.
-        forwarded = _forward_relay_fronted_run(job, extra_prompt=extra_prompt)
-        if forwarded is not None:
-            return forwarded
+
         exec_result = _execute_job_now(job, extra_prompt=extra_prompt)
     # A claimed direct run advances next_run_at and may race an external provider's
     # one-shot for the same occurrence; a lost consumed fire cannot re-arm itself, so
     # reconcile after the run has persisted its final state.
     claimed = exec_result.get("claimed", False)
-    if claimed:
-        _notify_provider_jobs_changed_safe()
     result = _refreshed_job_view(job_id)
     result["executed"] = claimed
     result["execution_success"] = exec_result.get("success", False)
@@ -825,20 +671,19 @@ def _update_core_fields(job: dict[str, Any], a: dict[str, Any], updates: dict[st
         # type-default empties must not wipe untouched fields.
         updates["name"] = a["name"]
     if deliver is not None:
-        bot_chat_error = _validate_bot_chat_deliver(_normalize_deliver_param(deliver))
+        bot_chat_error = _validate_local_delivery(_normalize_deliver_param(deliver))
         if bot_chat_error:
             return bot_chat_error
-        updates["deliver"] = _resolve_cron_context_deliver(_normalize_deliver_param(deliver))
+        updates["deliver"] = _normalize_deliver_param(deliver)
     if a["failure_deliver"] is not None:
         # '' clears the override (failures fall back to deliver); non-empty values share
         # deliver's validation AND its cron-context origin resolution (a job created from
         # inside a cron run must never store literal 'origin').
         _norm_fd = _normalize_deliver_param(a["failure_deliver"])
         if _norm_fd:
-            bot_chat_error = _validate_bot_chat_deliver(_norm_fd)
+            bot_chat_error = _validate_local_delivery(_norm_fd)
             if bot_chat_error:
                 return bot_chat_error
-            _norm_fd = _resolve_cron_context_deliver(_norm_fd)
         updates["failure_deliver"] = _norm_fd
     if skills is not None or skill is not None:
         canonical_skills = _canonical_skills(skill, skills)
@@ -948,7 +793,6 @@ def _action_update(job: dict[str, Any], a: dict[str, Any]) -> str:
     if not updates:
         return tool_error("No updates provided.", success=False)
     updated = update_job(job["id"], updates)
-    _notify_provider_jobs_changed_safe()
     # An update can switch modes or delivery — echo the same guidance as create.
     return _dumps(_with_guidance(
         {"success": True, "job": _format_job(updated)}, updated, _normalize_deliver_param(a["deliver"])))
@@ -1096,11 +940,13 @@ Jobs run in a fresh session with no current-chat context, so prompts must be sel
             },
             "deliver": {
                 "type": "string",
-                "description": "Where the job's output is POSTED as a one-way message (the job itself always runs in a fresh session with no chat context). Omit to address the chat/topic this job was created from. Otherwise: 'local' (save only, no delivery), 'all' (every connected home channel, resolved at fire time), 'bot-chat' or 'bot-chat:<profile>' (inject into a Bot Chat as a real message), or platform:chat_id:thread_id (e.g. 'telegram:-1001234567890:17585'). Comma-combine like 'origin,all'."
+                "enum": ["local"],
+                "description": "Save results locally (default). Run jobs explicitly with hermes cron run or tick; remote delivery is unsupported."
             },
             "failure_deliver": {
                 "type": "string",
-                "description": "Optional override target for FAILURE notices only (same grammar as deliver). When set, engine failure/interruption notices go here instead of the deliver target; 'local' suppresses them entirely (state still recorded in cron list/run history). Use for jobs delivering into shared channels where failure noise is unwanted. Omit = failures follow deliver (default). On update, '' clears."
+                "enum": ["local", ""],
+                "description": "Optional local failure result policy. Only local is supported; an empty update clears the override."
             },
             "skills": {
                 "type": "array",
@@ -1138,10 +984,7 @@ Jobs run in a fresh session with no current-chat context, so prompts must be sel
                 "type": "string",
                 "description": "Optional absolute existing path to run the job from: injects that directory's AGENTS.md/context files and anchors terminal/file tools there. On update, '' clears."
             },
-            "attach_to_session": {
-                "type": "boolean",
-                "description": "True = the job's delivery is CONTINUABLE — the user can reply and the agent has the brief in context (threads on thread-capable platforms, mirrored into the DM elsewhere). Use for conversational recurring jobs (briefings); leave unset for fire-and-forget alerts. Scope: the job's own conversation only — the origin chat, the home-channel fallback when deliver='origin' captured no origin (script-created jobs), a user-written bare platform target (deliver='slack' — that platform's home channel), or the job's single explicit platform:chat target (this flag is the only way to attach an explicit target). Broadcast targets are never attached; no effect when deliver='local'."
-            },
+
         },
         "required": ["action"]
     }
@@ -1153,7 +996,7 @@ def check_cronjob_requirements() -> bool:
     scheduler is internal; no crontab needed). Flags must be explicitly truthy via
     ``env_var_enabled``. An external cron worker has the presence vars stripped from its env, so
     the cron session marker keeps ``cron.allow_agent_scheduling`` meaningful there."""
-    from gateway.session_context import get_session_env
+    from agent.session_context import get_session_env
     from utils import env_var_enabled, is_truthy_value
     return (
         env_var_enabled("HERMES_INTERACTIVE")

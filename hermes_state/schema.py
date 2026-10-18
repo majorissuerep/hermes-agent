@@ -514,17 +514,6 @@ class SessionSchemaMixin:
         holder_pids = sorted({pid for pid, _path in foreign_holders if pid > 0})
         if holder_pids != record.get("holder_pids"):
             holders_since, holders_attempts = now, 1
-        if attempts >= _FTS_HOLDER_ESCALATE_ATTEMPTS and now - first_seen >= _FTS_HOLDER_ESCALATE_SECONDS:
-            reaped = self._reap_inactive_orphan_desktop_holders(
-                foreign_holders, min_age_seconds=_FTS_HOLDER_ESCALATE_SECONDS,
-            )
-            if reaped:
-                logger.error(
-                    "Reaped inactive orphan Desktop backend(s) %s after %d "
-                    "state.db FTS rebuild deferrals; checking holders again.", reaped, attempts,
-                )
-                foreign_holders = self._foreign_state_db_holders()
-                holder_pids = sorted({pid for pid, _path in foreign_holders if pid > 0})
         futile = bool(holder_pids) and (
             holders_attempts >= _FTS_HOLDER_FUTILE_ATTEMPTS and now - holders_since >= _FTS_HOLDER_FUTILE_SECONDS
         )

@@ -77,7 +77,7 @@ def current_record() -> Optional[SetupRecord]:
 def wait_for_record(timeout: float = SETUP_READY_WAIT_SECONDS) -> Optional[SetupRecord]:
     """Block up to ``timeout`` seconds for a bootstrap that is IN FLIGHT, then return whatever it
     produced, reconciled with any provider configured since (:func:`reconcile_record`). Returns
-    None at once when no bootstrap ever started in this process (a bare ``tui_gateway`` under
+    None at once when no bootstrap ever started in this process (a bare ``tui_runtime`` under
     test, an old serve without the boot hook): the caller falls back to its live probe instead of
     paying the wait for nothing."""
     if not _started:
@@ -204,7 +204,7 @@ def run_bootstrap(*, announce: bool = True) -> SetupRecord:
     try:
         from hermes_cli import anon_auth
         from hermes_cli.onboarding_run import latch_first_install
-        if anon_auth.on_local_desktop_backend():
+        if anon_auth.on_local_terminal_runtime():
             latch_first_install()
             if anon_auth.welcome_provider_available():
                 from hermes_cli.welcome_trial import settle_interrupted_claim, grandfather_existing_guest
@@ -244,7 +244,7 @@ def _due_changed() -> None:
 
 def _broadcast(record: SetupRecord) -> None:
     try:
-        from tui_gateway.server import _broadcast_global_event
+        from tui_runtime.server import _broadcast_global_event
         _broadcast_global_event(SETUP_READY_EVENT, record.as_payload())
     except Exception as exc:  # no serve process (plain CLI): nobody to tell
         logger.debug("setup.ready not broadcast: %s", exc)

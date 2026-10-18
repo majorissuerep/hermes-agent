@@ -45,9 +45,10 @@ NOTE = (
 
 GUEST_SETUP_FAILED = "GUEST_SETUP_FAILED"
 
-# The connect request's ``initiator``: manage_connections, the Connectors page, the card's Try again.
+# The connect request's ``initiator``: the tool, local account settings, or the card's Try again.
 AGENT_TOOL = "agent_tool"
-DESKTOP_PAGE = "desktop_page"
+# The outgoing vendor API retains this historical wire value.
+ACCOUNT_SETTINGS = "desktop_page"
 CARD_RETRY = "card_retry"
 
 

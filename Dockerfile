@@ -294,31 +294,21 @@ RUN python3 -m pm.build_env --source /opt/hermes --python /usr/local/bin/python3
 # Icons render on the runtime environment: Pillow and resvg-py are core
 # dependencies. A stage of its own so the frontend stage keeps building its
 # Node dependencies in parallel with the Python ones.
-FROM python_deps AS icons
-COPY scripts/generate_icons.py scripts/
-COPY assets/ assets/
-RUN /opt/hermes/.venv/bin/python -I scripts/generate_icons.py --source /opt/hermes --out /tmp/hermes-icons
-
 # Frontend dependencies never enter the runtime layers.
 FROM runtime_base AS frontend_build
 COPY package.json package-lock.json ./
-COPY web/package.json web/
 COPY ui-tui/package.json ui-tui/
 COPY ui-tui/packages/hermes-ink/ ui-tui/packages/hermes-ink/
 COPY apps/shared/ apps/shared/
 COPY scripts/build/node-deps.mjs scripts/build/node-deps.mjs
 ENV npm_config_install_links=false
-RUN node scripts/build/node-deps.mjs --source /opt/hermes --workspace ui-tui --workspace web
+RUN node scripts/build/node-deps.mjs --source /opt/hermes --workspace ui-tui
 
 COPY pyproject.toml uv.lock ./
-COPY web/ web/
 COPY ui-tui/ ui-tui/
 COPY scripts/build/*.mjs scripts/build/
-COPY scripts/generate-icons.mjs scripts/generate_icons.py scripts/
 COPY assets/ assets/
-COPY --from=icons /tmp/hermes-icons /tmp/hermes-icons
-RUN node scripts/build/tui.mjs --source /opt/hermes --out /opt/products/tui && \
-    node scripts/build/web.mjs --source /opt/hermes --icons /tmp/hermes-icons --out /opt/products/web
+RUN node scripts/build/tui.mjs --source /opt/hermes --out /opt/products/tui
 
 FROM python_deps AS runtime
 # Standalone TypeScript linting is a runtime feature; Vite/esbuild are not.
@@ -326,25 +316,8 @@ COPY --from=frontend_build /opt/hermes/node_modules/typescript /opt/hermes/node_
 RUN mkdir -p /opt/hermes/node_modules/.bin && \
     ln -s ../typescript/bin/tsc /opt/hermes/node_modules/.bin/tsc
 
-# ---------- Photon iMessage sidecar deps (baked, NS-606) ----------
-# The photon plugin's Node sidecar needs its own node_modules
-# (spectrum-ts). The install tree is immutable at runtime, so a lazy
-# `npm ci` on first connect would hit EROFS — bake the deps here instead
-# (deterministic installs, NS-559). The patch script is copied alongside
-# the manifests because package.json's postinstall runs it, which also
-# means the spectrum-ts patch is applied at build time. Layer-cached:
-# only re-runs when the sidecar manifests/patch change.
-COPY plugins/platforms/photon/sidecar/package.json \
-     plugins/platforms/photon/sidecar/package-lock.json \
-     plugins/platforms/photon/sidecar/patch-spectrum-mixed-attachments.mjs \
-     plugins/platforms/photon/sidecar/
-RUN cd plugins/platforms/photon/sidecar && \
-    npm ci --no-audit --fetch-retries=5 && \
-    npm cache clean --force
-
 # Shared product outputs are independent of application dependency assembly.
 COPY --from=frontend_build /opt/products/tui /opt/hermes/ui-tui
-COPY --from=frontend_build /opt/products/web /opt/hermes/hermes_cli/web_dist
 # ---------- Bot Screen X socket directory ----------
 # Xvnc would create this itself (/tmp is 1777); pre-creating it keeps ownership
 # deterministic when HERMES_UID is remapped between boots.
@@ -417,11 +390,7 @@ RUN set -eu; \
     python3 -c 'import json, pathlib, tomllib; project = tomllib.loads(pathlib.Path("/opt/hermes/pyproject.toml").read_text(encoding="utf-8"))["project"]; stamp = json.loads(pathlib.Path("/opt/hermes/install-stamp.json").read_text(encoding="utf-8")); commit = stamp.get("commit"); revision = commit if commit and set(commit) != {"0"} else None; marker = pathlib.Path("/etc/hermes/image-provenance.json"); marker.write_text(json.dumps({"schema": 1, "deployment_kind": "image", "manager": "docker", "image": "nousresearch/hermes-agent", "version": project["version"], "revision": revision}, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8"); marker.chmod(0o444)'
 
 # ---------- s6-overlay service wiring ----------
-# Static services declared at build time: main-hermes + dashboard.
-# Per-profile gateway services are registered dynamically at runtime by
-# the profile create/delete hooks (Phase 4); they live under
-# /run/service/ (tmpfs) and are reconciled on container restart by
-# /etc/cont-init.d/02-reconcile-profiles (Phase 4 Task 4.0).
+# No background network services; s6 owns terminal child-process cleanup.
 COPY docker/s6-rc.d/ /etc/s6-overlay/s6-rc.d/
 
 # stage2-hook handles UID/GID remap, volume chown, config seeding,
@@ -429,18 +398,13 @@ COPY docker/s6-rc.d/ /etc/s6-overlay/s6-rc.d/
 # `exec hermes`. Wired in as cont-init.d/01- so it
 # runs before user services start.
 #
-# 02-reconcile-profiles re-creates per-profile gateway s6 service
-# slots from $HERMES_HOME/profiles/<name>/ after a container restart
-# (the /run/service/ scandir is tmpfs and wiped on restart). Phase 4.
 RUN mkdir -p /etc/cont-init.d && \
     printf '#!/command/with-contenv sh\nexec /opt/hermes/docker/stage2-hook.sh\n' \
         > /etc/cont-init.d/01-hermes-setup && \
     chmod +x /etc/cont-init.d/01-hermes-setup
 COPY --chmod=0755 docker/cont-init.d/015-supervise-perms /etc/cont-init.d/015-supervise-perms
-COPY --chmod=0755 docker/cont-init.d/02-reconcile-profiles /etc/cont-init.d/02-reconcile-profiles
 
 # ---------- Runtime ----------
-ENV HERMES_WEB_DIST=/opt/hermes/hermes_cli/web_dist
 # Point the TUI launcher at the prebuilt bundle baked at build time (Layer 8:
 # `ui-tui && npm run build`). This makes _make_tui_argv take the prebuilt-bundle
 # fast path (`node --expose-gc /opt/hermes/ui-tui/dist/entry.js`) and skip the

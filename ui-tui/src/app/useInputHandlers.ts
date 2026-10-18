@@ -2,11 +2,9 @@ import { forceRedraw, useInput } from '@hermes/ink'
 import { useStore } from '@nanostores/react'
 import { useEffect, useRef } from 'react'
 
-import { sharedControlParams } from '../canonicalGateway.js'
-import { DASHBOARD_TUI_MODE } from '../config/env.js'
 import { DOUBLE_ESC_MS, TYPING_IDLE_MS } from '../config/timing.js'
 import { applyCompletion } from '../domain/slash.js'
-import type { ConfigSetResponse, SharedControlRespondResponse, VoiceRecordResponse } from '../gatewayTypes.js'
+import type { ConfigSetResponse, VoiceRecordResponse } from '../gatewayTypes.js'
 import { t } from '../i18n/runtime.js'
 import { isAction, isCopyShortcut, isMac, isMacActionFallback, isVoiceToggleKey } from '../lib/platform.js'
 import { computePrecisionWheelStep, initPrecisionWheel } from '../lib/precisionWheel.js'
@@ -35,9 +33,13 @@ import { turnController } from './turnController.js'
 import { patchTurnState } from './turnStore.js'
 import { getUiState } from './uiStore.js'
 
-const isCtrl = (key: { ctrl: boolean }, ch: string, target: string) => key.ctrl && ch.toLowerCase() === target
-
-export const shouldAllowIdleHotkeyExit = (dashboardTuiMode = DASHBOARD_TUI_MODE) => !dashboardTuiMode
+const isCtrl = (
+  key: {
+    ctrl: boolean
+  },
+  ch: string,
+  target: string
+) => key.ctrl && ch.toLowerCase() === target
 
 /** Text or attachments in the composer: Ctrl+D must not exit over an unsent draft (#116443). */
 export const composerHasDraft = (cState: { input: string; inputBuf: string[]; tokens?: unknown[] }): boolean =>
@@ -56,17 +58,7 @@ export function handleInputSelectionClipboard(
   return true
 }
 
-export function handleIdleHotkeyExit(
-  actions: Pick<InputHandlerActions, 'die' | 'sys'>,
-  dashboardTuiMode = DASHBOARD_TUI_MODE,
-  requestDashboardNewSession?: () => void
-) {
-  if (!shouldAllowIdleHotkeyExit(dashboardTuiMode)) {
-    requestDashboardNewSession?.()
-
-    return actions.sys(t('session.input.dashboardNewSession'))
-  }
-
+export function handleIdleHotkeyExit(actions: Pick<InputHandlerActions, 'die'>) {
   return actions.die()
 }
 
@@ -175,7 +167,9 @@ export function applyVoiceRecordResponse(
 
 type SensitivePrompt = (typeof SENSITIVE_PROMPTS)[number]
 
-const DISMISSED_PROMPT_NOTICE: { [K in SensitivePrompt]: (req: NonNullable<OverlayState[K]>) => string } = {
+const DISMISSED_PROMPT_NOTICE: {
+  [K in SensitivePrompt]: (req: NonNullable<OverlayState[K]>) => string
+} = {
   sudo: () => t('session.input.sudoCancelled'),
   secret: () => t('session.input.secretCancelled'),
   vaultUnlock: req => t('session.input.vaultStaysLocked', req.displayName),
@@ -214,19 +208,15 @@ export function shouldDetachEditedHistoryInput(historyIdx: null | number, histor
 export function useInputHandlers(ctx: InputHandlerContext): InputHandlerResult {
   const { actions, composer, gateway, terminal, voice, wheelStep } = ctx
   const { actions: cActions, refs: cRefs, state: cState } = composer
-
   const overlay = useStore($overlayState)
   const isBlocked = useStore($isBlocked)
   const pagerPageSize = Math.max(5, (terminal.stdout?.rows ?? 24) - 6)
   const scrollIdleTimer = useRef<null | ReturnType<typeof setTimeout>>(null)
-
   // Wheel accel ported from claude-code: inter-event timing drives step size,
   // direction flips reset. wheelStep (WHEEL_SCROLL_STEP) is the base; final
   // rows = wheelStep × accelMult. State mutates in place across renders.
   const wheelAccelRef = useRef(initWheelAccelForHost())
-
   const precisionWheelRef = useRef(initPrecisionWheel())
-
   useEffect(() => () => clearTimeout(scrollIdleTimer.current ?? undefined), [])
 
   const scrollTranscript = (delta: number) => {
@@ -267,14 +257,6 @@ export function useInputHandlers(ctx: InputHandlerContext): InputHandlerResult {
       const settle = () => {
         patchOverlayState({ approval: null })
         patchTurnState({ outcome: t('session.approval.denied') })
-      }
-
-      // Canonical shared controls deny through the generation-bound RPC; a
-      // legacy server→client request resolves its response frame locally.
-      if (overlay.approval.sharedControl) {
-        return gateway
-          .rpc<SharedControlRespondResponse>('approval.respond', { choice: 'deny', ...sharedControlParams(overlay.approval) })
-          .then(r => r && fresh() && settle())
       }
 
       respondToServerRequest(overlay.approval.requestId, { choice: 'deny' })
@@ -357,7 +339,6 @@ export function useInputHandlers(ctx: InputHandlerContext): InputHandlerResult {
     }
 
     const index = cState.queueEditIdx === null ? (dir > 0 ? 0 : len - 1) : (cState.queueEditIdx + dir + len) % len
-
     cActions.setQueueEdit(index)
     cActions.setHistoryIdx(null)
     cActions.setInput(cActions.queueDraft(index))
@@ -379,7 +360,6 @@ export function useInputHandlers(ctx: InputHandlerContext): InputHandlerResult {
       }
 
       const index = cur === null ? h.length - 1 : Math.max(0, cur - 1)
-
       cActions.setHistoryIdx(index)
       cActions.setQueueEdit(null)
       cActions.setInput(h[index] ?? '')
@@ -446,7 +426,6 @@ export function useInputHandlers(ctx: InputHandlerContext): InputHandlerResult {
   // it. Ctrl+C now clears a non-empty composer even mid-stream; Esc Esc is
   // still the dedicated discard (pushes the draft to history so Up recalls it).
   const lastEscRef = useRef(0)
-
   useInput((ch, key, event) => {
     const live = getUiState()
 
@@ -460,7 +439,6 @@ export function useInputHandlers(ctx: InputHandlerContext): InputHandlerResult {
       } else {
         const now = Date.now()
         const isDouble = now - lastEscRef.current <= DOUBLE_ESC_MS
-
         lastEscRef.current = isDouble ? 0 : now
 
         if (isDouble) {
@@ -610,7 +588,6 @@ export function useInputHandlers(ctx: InputHandlerContext): InputHandlerResult {
 
     if (cState.completions.length && cState.input && cState.historyIdx === null && (key.upArrow || key.downArrow)) {
       const len = cState.completions.length
-
       cActions.setCompIdx(i => (key.upArrow ? (i - 1 + len) % len : (i + 1) % len))
 
       return
@@ -786,25 +763,13 @@ export function useInputHandlers(ctx: InputHandlerContext): InputHandlerResult {
         })
       }
 
-      return handleIdleHotkeyExit(actions, DASHBOARD_TUI_MODE, () => {
-        gateway.gw.publishLocalEvent({
-          payload: { reason: 'idle_exit_hotkey' },
-          session_id: live.sid ?? undefined,
-          type: 'dashboard.new_session_requested'
-        })
-      })
+      return handleIdleHotkeyExit(actions)
     }
 
     // Ctrl+D is the terminal EOF convention: exit only from an empty composer, on every
     // platform (macOS's action modifier is Cmd, which Ghostty consumes for split panes).
     if ((isAction(key, ch, 'd') || isMacActionFallback(key, ch, 'd')) && !composerHasDraft(cState)) {
-      return handleIdleHotkeyExit(actions, DASHBOARD_TUI_MODE, () => {
-        gateway.gw.publishLocalEvent({
-          payload: { reason: 'idle_exit_hotkey' },
-          session_id: live.sid ?? undefined,
-          type: 'dashboard.new_session_requested'
-        })
-      })
+      return handleIdleHotkeyExit(actions)
     }
 
     if (isAction(key, ch, 'l')) {

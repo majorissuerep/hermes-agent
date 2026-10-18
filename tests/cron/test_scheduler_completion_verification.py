@@ -15,12 +15,11 @@ mislabeling a healthy run.
 import os
 from types import SimpleNamespace
 
-from gateway import session_cron
 
 import pytest
 
 import cron.scheduler as cron_scheduler
-from gateway.session_context import reset_session_vars
+from agent.session_context import reset_session_vars
 
 
 class _FakeCronAgent:
@@ -71,8 +70,7 @@ def _run_booked_job(monkeypatch, tmp_path):
 
     db = _RecordingSessionDB()
     db.db_path = tmp_path / "state.db"
-    owner = SimpleNamespace(db=db)
-    monkeypatch.setattr("hermes_state.registry.acquire", lambda _path: db)
+    monkeypatch.setattr("hermes_state.registry.acquire", lambda: db)
     monkeypatch.setattr(run_agent, "AIAgent", _FakeCronAgent)
     monkeypatch.setattr(
         "hermes_constants.resolve_reasoning_config", lambda *_a, **_k: None
@@ -100,15 +98,11 @@ def _run_booked_job(monkeypatch, tmp_path):
     monkeypatch.setattr(
         cron_scheduler, "_guard_job_credential_exfil", lambda _job: None
     )
-    token = session_cron._execution.set((owner, "verify-session", "verify-complete", "verify-fire"))
-    try:
-        result = cron_scheduler.run_job(
-            {"id": "verify-complete", "name": "Verification", "prompt": "Do the thing",
-             "schedule_display": "manual"}, execution_id="verify-fire")
-    finally:
-        session_cron._execution.reset(token)
+    result = cron_scheduler.run_job(
+        {"id": "verify-complete", "name": "Verification", "prompt": "Do the thing",
+         "schedule_display": "manual"}, execution_id="verify-fire")
     assert result[0] and result[2] == "done", result
-    assert db.ended[0][0] == "verify-session"
+    assert db.ended[0][0].startswith("cron_verify-complete_")
     return [db]
 
 

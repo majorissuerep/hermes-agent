@@ -10,7 +10,6 @@
   makeWrapper,
   writeText,
   callPackage,
-  electron,
   ripgrep,
   git,
   openssh,
@@ -21,7 +20,6 @@
   xclip,
 
   # linux-only dev deps
-  cage,
 
   # Flake inputs — passed explicitly by packages.nix and overlays.nix
   uv2nix,
@@ -59,7 +57,7 @@ let
     else
       version;
 
-  # CLI and Electron consume the same provenance and update owner.
+  # CLI and TUI consume the same provenance and update owner.
   installStampFile = writeText "hermes-install-stamp.json" (builtins.toJSON {
     schemaVersion = 2;
     commit = rev;
@@ -92,20 +90,12 @@ let
   };
 
   # Icons render on the runtime venv: Pillow and resvg-py are core dependencies.
-  generatedIcons = callPackage ./icons.nix {
-    inherit (mkHermesVenv [ ]) venv;
-  };
-
   hermesNpmLib = callPackage ./lib.nix {
     inherit npm-lockfile-fix;
   };
 
   hermesTui = callPackage ./tui.nix {
     inherit hermesNpmLib;
-  };
-
-  hermesWeb = callPackage ./web.nix {
-    inherit hermesNpmLib generatedIcons;
   };
 
   bundledSkills = lib.cleanSourceWith {
@@ -191,7 +181,6 @@ let
     };
     frontends = {
       tui = "${hermesTui}/lib/hermes-tui";
-      web = toString hermesWeb;
     };
     ref = if dirty then null else rev;
     stamp = toString installStampFile;
@@ -305,7 +294,6 @@ stdenv.mkDerivation (finalAttrs: {
     {
       inherit
         hermesTui
-        hermesWeb
         hermesNpmLib
         hermesVenv
         agentBuilderSrc
@@ -314,19 +302,6 @@ stdenv.mkDerivation (finalAttrs: {
         pmRuntime
         python
         ;
-
-      # `hermesDesktop` references `finalAttrs.finalPackage` (this whole
-      # derivation, after all overrides are applied) so the desktop wrapper
-      # can pin its `hermes` command via HERMES_DESKTOP_HERMES. The
-      # deployment override then picks up the fully wrapped
-      # `hermes` binary — venv with all deps, bundled skills/plugins,
-      # runtime PATH (ripgrep/git/ffmpeg/etc).  No re-implementation
-      # of the agent resolution in the desktop wrapper.
-      hermesDesktop = callPackage ./desktop.nix {
-        inherit hermesNpmLib electron installStampFile generatedIcons;
-        python3 = python;
-        hermesAgent = finalAttrs.finalPackage;
-      };
 
       devShellHook = ''
         export HERMES_PYTHON=${devPython}/bin/python3
@@ -337,9 +312,7 @@ stdenv.mkDerivation (finalAttrs: {
         ++ [
           devPython
         ]
-        ++ lib.optionals stdenv.isLinux [
-          cage # for running e2e tests without popping windows
-        ];
+;
     };
 
   meta = with lib; {

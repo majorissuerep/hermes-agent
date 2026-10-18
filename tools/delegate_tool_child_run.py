@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from tools import file_state
 from tools.delegate_tool_progress import _quiet, _safe_progress
 from tools.delegate_tool_registry import (
-    _capture_gateway_steer_authority, _close_subagent_steering, _register_subagent, _unregister_subagent,
+    _capture_local_steer_authority, _close_subagent_steering, _register_subagent, _unregister_subagent,
 )
 from tools.delegate_tool_results import (
     _extract_output_tail, _looks_like_error_output, _stringify_tool_content, _summarize_tool_arguments,
@@ -354,10 +354,10 @@ def _register_child(
         return None
     if owner_session_id is None:
         with _quiet(None):
-            from gateway.session_context import get_session_env
+            from agent.session_context import get_session_env
             owner_session_id = get_session_env("HERMES_UI_SESSION_ID", "") or None
     if owner_session_id and (owner_transport is None or owner_session_record is None):
-        owner_transport, owner_session_record = _capture_gateway_steer_authority(owner_session_id)
+        owner_transport, owner_session_record = _capture_local_steer_authority(owner_session_id)
     _raw_depth = getattr(child, "_delegate_depth", 1)
     _register_subagent({
         "subagent_id": _subagent_id,

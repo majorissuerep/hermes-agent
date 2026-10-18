@@ -9,7 +9,7 @@ from contextlib import closing
 
 import pytest
 
-import hermes_state.runtime as rt
+from tests.hermes_state.legacy_rows import seed_admission
 from hermes_state import SessionDB
 from hermes_state.errors import classify_persistence_error
 
@@ -17,11 +17,7 @@ from hermes_state.errors import classify_persistence_error
 def _settled(db, epoch, sid):
     db.create_session(sid, source='cli')
     db.append_message(sid, role='user', content='kept')
-    accepted = rt.admit_session_input(db, epoch=epoch, principal_id='human', session_id=sid,
-                                      request_id='r', payload={'text': 'x'})
-    claim = rt.claim_session_input(db, epoch=epoch, session_id=sid)
-    rt.settle_session_input(db, epoch=epoch, admission_id=accepted['admission_id'],
-                            generation=claim['generation'], outcome='completed')
+    seed_admission(db, sid, status='terminal')
 
 
 def _older_release_delete(path, sid):
@@ -45,8 +41,7 @@ def _older_release_delete(path, sid):
 def test_an_older_release_delete_of_a_ledgered_session_is_refused_with_the_way_back(tmp_path):
     path = tmp_path / 'state.db'
     with closing(SessionDB(path)) as db:
-        epoch = rt.begin_runtime_epoch(db, instance_id='owner')
-        _settled(db, epoch, 'ledgered')
+        _settled(db, None, 'ledgered')
         db.create_session('plain', source='cli')
 
     with pytest.raises(sqlite3.IntegrityError) as refused:
@@ -68,8 +63,7 @@ def test_an_older_release_delete_of_a_ledgered_session_is_refused_with_the_way_b
 def test_an_upgraded_store_gains_the_guard_on_its_next_open(tmp_path):
     path = tmp_path / 'state.db'
     with closing(SessionDB(path)) as db:
-        epoch = rt.begin_runtime_epoch(db, instance_id='owner')
-        _settled(db, epoch, 's')
+        _settled(db, None, 's')
     with closing(sqlite3.connect(path)) as conn:
         conn.execute('DROP TRIGGER sessions_runtime_ledger_delete_guard')
         conn.commit()

@@ -57,28 +57,28 @@ def breaker_session(monkeypatch):
         A._permanent_approved.discard("execute_code")
         A._session_approved.get(session_key, set()).discard("breaker-test-danger")
         A._session_approved.get(session_key, set()).discard("execute_code")
-        A._gateway_queues.pop(session_key, None)
-        A._gateway_notify_cbs.pop(session_key, None)
+        A._session_queues.pop(session_key, None)
+        A._session_notify_cbs.pop(session_key, None)
     try:
         yield session_key
     finally:
         approval_context.reset_current_session_key(token)
         A._reset_denials(session_key)
         with A._lock:
-            A._gateway_queues.pop(session_key, None)
-            A._gateway_notify_cbs.pop(session_key, None)
+            A._session_queues.pop(session_key, None)
+            A._session_notify_cbs.pop(session_key, None)
 
 
 def _register_resolver(session_key: str, result):
     """Notify callback resolving the newest queued approval with *result*."""
     def cb(_approval_data):
         with A._lock:
-            entries = A._gateway_queues.get(session_key, [])
+            entries = A._session_queues.get(session_key, [])
             if entries:
                 entries[-1].result = result
                 entries[-1].event.set()
     with A._lock:
-        A._gateway_notify_cbs[session_key] = cb
+        A._session_notify_cbs[session_key] = cb
 
 
 def _denied_terminal(command="dangerous thing"):

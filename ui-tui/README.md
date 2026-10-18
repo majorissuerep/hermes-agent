@@ -8,12 +8,12 @@ hermes --tui
 
 ## What runs
 
-The client entrypoint is `src/entry.tsx`. It exits early if `stdin` is not a TTY, starts `GatewayClient`, then renders `App`.
+The client entrypoint is `src/entry.tsx`. It exits early if `stdin` is not a TTY, starts `LocalAgentClient`, then renders `App`.
 
-`GatewayClient` spawns:
+`LocalAgentClient` spawns:
 
 ```text
-python -m tui_gateway.entry
+python -m tui_runtime.entry
 ```
 
 Interpreter resolution uses `HERMES_PYTHON`, supplied by the CLI launcher or
@@ -24,17 +24,17 @@ checkout venv directories for a different interpreter.
 The transport is newline-delimited JSON-RPC over stdio:
 
 ```text
-ui-tui/src                  tui_gateway/
+ui-tui/src                  tui_runtime/
 -----------                 -------------
 entry.tsx                   entry.py
-  -> GatewayClient            -> request loop
+  -> LocalAgentClient            -> request loop
   -> App                      -> server.py RPC handlers
 
 stdin/stdout: JSON-RPC requests, responses, events
 stderr: captured into an in-memory log ring
 ```
 
-Malformed stdout lines are treated as protocol noise and surfaced as `gateway.protocol_error`. Stderr lines become `gateway.stderr`. Neither writes directly into the terminal.
+Malformed stdout lines are treated as protocol noise and surfaced as `runtime.protocol_error`. Stderr lines become `runtime.stderr`. Neither writes directly into the terminal.
 
 ## Running it
 
@@ -93,7 +93,7 @@ No model tool schema or prompt-caching behavior changes.
 
 `src/app.tsx` is the center of the UI. Heavy logic is split into `src/app/`:
 
-- `src/app/createGatewayEventHandler.ts` — maps gateway events to state updates
+- `src/app/createGatewayEventHandler.ts` — maps runtime events to state updates
 - `src/app/createSlashHandler.ts` — local slash command dispatch
 - `src/app/useComposerState.ts` — draft, multiline buffer, queue editing
 - `src/app/useInputHandlers.ts` — keypress routing
@@ -108,8 +108,7 @@ No model tool schema or prompt-caching behavior changes.
 - `src/app/delegationStore.ts` — nanostore for subagent spawning caps and overlay accordion state
 - `src/app/spawnHistoryStore.ts` — in-memory ring (last 10) of finished subagent fan-out snapshots; populated at turn end for `/replay`
 - `src/app/inputSelectionStore.ts` — nanostore exposing the active text-input selection handle
-- `src/app/gatewayContext.tsx` — React context for the gateway client
-- `src/app/gatewayRecovery.ts` — pure function that decides whether to respawn and resume after a gateway crash, with a 3-attempt / 60 s budget
+- `src/app/gatewayContext.tsx` — React context for the local agent client
 - `src/app/setupHandoff.ts` — launches external `hermes setup`, suspends Ink while it runs, opens a new session on success
 - `src/app/scroll.ts` — scrolls the viewport while keeping the text selection anchor in sync
 - `src/app/interfaces.ts` — internal interfaces (ComposerActions, GatewayRpc, etc.)
@@ -137,7 +136,7 @@ State managed at the top level includes:
 - prompt flows for approval, clarify, sudo, and secret input
 - slash command routing
 - tab completion and path completion
-- theme state from gateway skin data
+- theme state from runtime skin data
 
 The UI renders as a normal Ink tree with `Static` transcript output, a live streaming assistant row, prompt overlays, queue preview, status rule, input line, and completion list.
 
@@ -174,7 +173,7 @@ Current input behavior is split across `app.tsx`, `components/textInput.tsx`, an
 | `Ctrl+U`                        | Delete from the cursor back to the start of the line                                                                                                    |
 | `Ctrl+K`                        | Delete from the cursor to the end of the line                                                                                                           |
 | `Meta+B` / `Meta+F`             | Move by word                                                                                                                                            |
-| `!cmd`                          | Run a shell command through the gateway                                                                                                                 |
+| `!cmd`                          | Run a shell command through the local runtime                                                                                                                 |
 | `{!cmd}`                        | Inline shell interpolation before send; queued drafts keep the raw text until they are sent                                                            |
 
 Notes:
@@ -234,7 +233,7 @@ Tool/status activity is shown in a live activity lane. Transcript rows stay focu
 
 ## Prompt flows
 
-The Python gateway can pause the main loop and ask the client a question. These are JSON-RPC
+The local Python runtime can pause the main loop and ask the client a question. These are JSON-RPC
 **requests from the server** (string id, answered with a response frame of the same id — see
 `createServerRequestHandler.ts`), not events:
 
@@ -250,7 +249,7 @@ These are stateful UI branches in `app.tsx`, not separate screens.
 
 ## Commands
 
-The following commands are handled directly by the TUI client. Unrecognized commands fall through to the Python gateway via `slash.exec` and `command.dispatch`.
+The following commands are handled directly by the TUI client. Unrecognized commands fall through to the local Python runtime via `slash.exec` and `command.dispatch`.
 
 ### Core (`core.ts`)
 `/help`, `/quit` (alias `/exit`), `/update`, `/clear` (alias `/new`),
@@ -297,7 +296,7 @@ Primary event types the client handles today:
 
 | Event                      | Payload                                                                     |
 | -------------------------- | --------------------------------------------------------------------------- |
-| `gateway.ready`            | `{ skin? }`                                                                 |
+| `runtime.ready`            | `{ skin? }`                                                                 |
 | `skin.changed`             | `{ skin }`                                                                  |
 | `session.info`             | session metadata for banner + tool/skill panels                             |
 | `message.start`            | start assistant streaming                                                   |
@@ -327,13 +326,13 @@ Primary event types the client handles today:
 | `subagent.progress`        | `{ text }`                                                                  |
 | `subagent.complete`        | `{ status, summary?, text?, duration_seconds? }`                            |
 | `error`                    | `{ message }`                                                               |
-| `gateway.stderr`           | synthesized from child stderr                                               |
-| `gateway.protocol_error`   | synthesized from malformed stdout                                           |
-| `gateway.start_timeout`    | `{ cwd?, python?, stderr_tail? }`                                           |
+| `runtime.stderr`           | synthesized from child stderr                                               |
+| `runtime.protocol_error`   | synthesized from malformed stdout                                           |
+| `runtime.start_timeout`    | `{ cwd?, python?, stderr_tail? }`                                           |
 
 ## Theme model
 
-The client starts with `DEFAULT_THEME` from `theme.ts`, then merges in gateway skin data from `gateway.ready`.
+The client starts with `DEFAULT_THEME` from `theme.ts`, then merges in runtime skin data from `runtime.ready`.
 
 Current branding overrides:
 
@@ -357,7 +356,7 @@ ui-tui/
   src/
     entry.tsx            TTY gate + render()
     app.tsx              top-level Ink tree, composes src/app/*
-    gatewayClient.ts     child process + JSON-RPC bridge
+    localAgentClient.ts     child process + JSON-RPC bridge
     gatewayTypes.ts      gateway event and RPC response type definitions
     theme.ts             theme colors and skin merge
     banner.ts            ASCII art renderer (parses Rich color tags)
@@ -367,8 +366,7 @@ ui-tui/
       createGatewayEventHandler.ts  event → state mapping
       createSlashHandler.ts         local slash dispatch
       delegationStore.ts            nanostore for subagent spawning caps and overlay accordion state
-      gatewayContext.tsx            React context for gateway client
-      gatewayRecovery.ts            crash-recovery budget: respawn+resume capped to 3 attempts / 60 s
+      gatewayContext.tsx            React context for local agent client
       inputSelectionStore.ts        nanostore exposing the active text-input selection handle
       interfaces.ts                 internal interfaces (ComposerActions, GatewayRpc, etc.)
       overlayStore.ts               nanostores for overlay state
@@ -507,7 +505,7 @@ ui-tui/
 Related Python side:
 
 ```text
-tui_gateway/
+tui_runtime/
   entry.py               stdio entrypoint
   server.py              RPC handlers and session logic
   render.py              optional rich/ANSI bridge

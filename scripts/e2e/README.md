@@ -1,8 +1,8 @@
 # Reproducible encrypted lifecycle acceptance
 
-Linux scenarios start in a new **digest-pinned Ubuntu 24.04 container**; macOS
-scenarios use fresh hosted macOS 15 VMs on Apple Silicon and Intel. Each has an
-empty Hermes home and cold PM tool store. The Linux host only exports committed Git objects,
+Linux scenarios start in a new **digest-pinned Ubuntu 24.04 container**, each with
+an empty Hermes home and cold PM tool store. These receipts qualify Linux only;
+macOS requires an independently executed native macOS run. The Linux host only exports committed Git objects,
 controls Docker/Kubernetes and collects sanitized evidence. It never installs or
 runs Hermes, unlocks a real home, or mounts personal files into a test.
 
@@ -90,26 +90,20 @@ gateway publicly just for testing.
 
 ## GitHub Actions
 
-`.github/workflows/encrypted-lifecycle.yml` runs six Linux container legs and
-twelve native macOS VM legs (six scenarios × two architectures), with
-`fail-fast: false`, maximum parallelism two per platform job, and a fail-closed
-aggregate gate. Select `platform: all` for cross-platform qualification;
-Linux-only or macOS-only runs qualify only that subset.
-There is no schedule. Trigger manually or push to `e2e/encrypted/**`.
+`.github/workflows/terminal-lifecycle.yml` runs the six Linux Docker scenarios
+against distinct full baseline/candidate SHAs. It is manual/reusable, not a recurring
+PR-triggered live-provider workflow. Missing credentials fail before installation;
+evidence is uploaded even on failure. The workflow accepts only committed candidates.
 
-Configure:
+Configure dedicated secrets `TERMINAL_E2E_MODEL`, `TERMINAL_E2E_BASE_URL` and
+`TERMINAL_E2E_API_KEY`. Use a short-lived, spend-capped test key; never upload personal
+subscription tokens. These names are workflow inputs, not Hermes behavior settings.
 
-- Secret `E2E_LLM_API_KEY` (dedicated short-lived gateway key, never personal OAuth).
-- Variables `E2E_LLM_BASE_URL` and `E2E_LLM_MODEL`.
-- An exact candidate and distinct OLD fork baseline.
-
-Public gateways use Docker on standard GitHub-hosted Ubuntu coordinators. For a
-LAN-only gateway, select `private_runner: true` or `e2e/encrypted/private/**`.
-Those coordinators use isolated pods and the label `hermes-encrypted-container`.
-Set `E2E_KUBERNETES_NAMESPACE` to a dedicated test namespace. The one-job ephemeral
-coordinator needs only pod create/get/list/watch/delete and pod-exec access there;
-it does not need application secrets, host mounts or cluster administration.
-Replenish consumed runners; never label a personal Hermes workstation.
+A private LAN endpoint is not reachable from GitHub-hosted runners. Qualify it locally
+with disposable Kubernetes pods and a dedicated test namespace instead; do not expose
+the endpoint publicly just to satisfy a workflow. A Linux receipt does not qualify
+macOS, another provider or an unexecuted API dialect. Native macOS protocol/OS lanes
+and optional live-provider workflow runs have their own evidence requirements.
 
 ## Evidence and regression tests
 
@@ -118,7 +112,7 @@ Keep the whole evidence directory: aggregate `acceptance.json`, per-scenario
 source/image/harness identities, model/provider, prompt counts, independent
 delegation/resume oracles, retained-state hashes, restore and cleanup verdicts.
 Upload only evidence, never test homes, vault backups, Git bundles or credentials.
-Actions retains evidence for 14 days.
+The terminal lifecycle workflow retains sanitized evidence for 7 days.
 
 ```sh
 scripts/run_tests.sh tests/scripts/e2e/

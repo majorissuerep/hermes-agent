@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from gateway.session_context import declare_stateless_channel
+from agent.session_context import declare_stateless_channel
 from hermes_cli.fallback_config import get_fallback_chain
 
 _ALL_TOOLSETS = {"all", "*"}
@@ -235,7 +235,23 @@ def _write_usage_file(path: Optional[str], result: dict, failure: Optional[str] 
         pass
 
 
-def run_oneshot(
+def run_oneshot(prompt: str, model=None, provider=None, toolsets=None, skills=None,
+                usage_file=None, resume=None, reasoning=None, launch_options=None) -> int:
+    """Hold local profile ownership until the native agent and its children close."""
+    from hermes_constants import get_hermes_home
+    from hermes_state.runtime_ownership import ProfileOwnership
+    ownership = ProfileOwnership()
+    ownership.reserve([get_hermes_home()])
+    try:
+        from hermes_platform.child_processes import register_self
+        register_self("headless")
+        return _run_owned_oneshot(prompt, model, provider, toolsets, skills, usage_file, resume, reasoning,
+                                  **({"launch_options": launch_options} if launch_options else {}))
+    finally:
+        ownership.close()
+
+
+def _run_owned_oneshot(
     prompt: str,
     model: Optional[str] = None,
     provider: Optional[str] = None,
@@ -244,6 +260,7 @@ def run_oneshot(
     usage_file: Optional[str] = None,
     resume: Optional[str] = None,
     reasoning: object = None,
+    launch_options: dict | None = None,
 ) -> int:
     """Execute a single prompt and print only the final content block.
 
@@ -276,18 +293,23 @@ def run_oneshot(
     os.environ["HERMES_YOLO_MODE"] = "1"
     os.environ["HERMES_ACCEPT_HOOKS"] = "1"
     # Same finite-chat marker as `hermes chat -q` (cli.py): the session-source resolver uses it to drop an
-    # inherited tui/desktop transport label, and delegate dispatch to route detached results inline.
+    # inherited terminal transport label, and delegate dispatch to route detached results inline.
     os.environ["HERMES_SINGLE_QUERY_SESSION"] = "1"
 
-    # Nothing here drains process_registry.completion_queue (only cli.py's process_loop and the
-    # gateway watchers do), so left unbound delegate_task would be forced background and every
-    # subagent result discarded. Stateless routes it to the inline/synchronous path.
+    # Finite turns have no interactive event loop to drain completions. Stateless dispatch
+    # keeps delegated results inline instead of discarding background subagent output.
     declare_stateless_channel()
 
     # Redirect stderr AND stdout for the entire call tree; the final response goes to the real
     # stdout at the end.
     real_stdout = sys.stdout
     real_stderr = sys.stderr
+
+    emitter = None
+    if (launch_options or {}).get("output_format") == "stream-json":
+        from hermes_cli.stream_json import StreamJsonEmitter
+        emitter = StreamJsonEmitter(model=model or "", output=real_stdout)
+        launch_options = {**launch_options, "emitter": emitter}
 
     response: Optional[str] = None
     result: dict = {}
@@ -304,8 +326,9 @@ def run_oneshot(
                 resume=resume,
                 reasoning=reasoning,
                 ledger=bool(usage_file),
+                **({"launch_options": launch_options} if launch_options else {}),
             )
-        except BaseException as exc:
+        except BaseException as exc:  # health: allow BLE001 -- restore real stderr and emit the headless exit protocol outside stdout capture
             # Capture anything escaping the agent (OSError from prompt_toolkit on a non-TTY pipe,
             # KeyboardInterrupt, SystemExit, ...) so it reaches the real stderr instead of dying
             # silently past the redirect — the worst failure mode in cron / SSH / subprocess use.
@@ -319,10 +342,15 @@ def run_oneshot(
         _write_usage_file(usage_file, result, failure=str(failure))
         real_stderr.write(f"hermes -z: agent failed: {failure}\n")
         real_stderr.flush()
+        if emitter:
+            emitter.emit_result({"failed": True, "error": str(failure)}, exit_code=1)
         return 1
 
     _write_usage_file(usage_file, result)
 
+    if emitter:
+        return emitter.emit_result(result, session_id=result.get("session_id", ""),
+                                   exit_code=_oneshot_exit_code(response, result))
     if response:
         # Lone UTF-16 surrogates would raise UnicodeEncodeError on a real stdout and abort with
         # exit 1 after the turn already completed — scrub to U+FFFD first.
@@ -343,17 +371,9 @@ def run_oneshot(
 
 
 def _create_session_db_for_oneshot():
-    """Best-effort SessionDB — oneshot bypasses ``HermesCLI._init_agent()``, so it must wire the
-    SQLite store itself or ``session_search`` is advertised but always unavailable. The registry
-    handle is the one in-process tools (delegation, goals) acquire during the run, so the process
-    holds one writer; ``_close_agent``'s ``close()`` releases the refcount."""
-    try:
-        from hermes_state.registry import acquire
-
-        return acquire()
-    except Exception as exc:
-        logging.debug("SQLite session store not available for oneshot mode: %s", exc)
-        return None
+    """Fail closed if the encrypted local session store cannot be acquired."""
+    from hermes_state.registry import acquire
+    return acquire()
 
 
 @dataclass
@@ -510,6 +530,8 @@ def _run_agent(
     resume: Optional[str] = None,
     reasoning: object = None,
     ledger: bool = False,
+    conversation_runner=None,
+    launch_options: dict | None = None,
 ) -> tuple[str, dict]:
     """Build an AIAgent exactly like a normal CLI chat turn, run one conversation, and return
     ``(final_response, run_result)``. Imports are local to keep CLI startup cheap. *ledger* (set when
@@ -525,55 +547,59 @@ def _run_agent(
     # replace the ambient config (see _apply_stored_session_runtime) and the ended row must
     # be reopened before the agent can stamp a new lifecycle boundary.
     session_db = _create_session_db_for_oneshot()
-    resume_sid, conversation_history, resume_meta = _load_resume_target(session_db, resume)
-    choice = _apply_stored_session_runtime(choice, resume_meta, explicit_model=bool((model or "").strip()))
-    # Resolution-time fallback (#81209): a quota-exhausted/expired primary raises AuthError here, before
-    # AIAgent (and its mid-session ``fallback_model`` wiring) exists, so walk the chain like the gateway.
-    runtime, fallback_entry = resolve_runtime_with_fallback(
-        cfg,
-        requested=choice.provider,
-        target_model=choice.model or None,
-        explicit_base_url=choice.base_url,
-        explicit_api_key=choice.api_key,
-    )
-    if fallback_entry is not None:
-        # The chosen entry names the model that will be sent; the primary's stored api_mode no longer applies.
-        choice = dataclasses.replace(choice, model=fallback_entry["model"], provider=runtime.get("provider"),
-                                     api_mode=None)
-    if choice.api_mode:
-        runtime["api_mode"] = choice.api_mode
-
-    from hermes_constants import parse_reasoning_effort, resolve_reasoning_config
-
-    reasoning_config = resolve_reasoning_config(cfg, choice.model)
-    if reasoning is not None and str(reasoning).strip():
-        parsed_reasoning = parse_reasoning_effort(reasoning)
-        if parsed_reasoning is None:
-            logging.warning("Unknown --reasoning '%s', keeping the configured level", reasoning)
-        else:
-            reasoning_config = parsed_reasoning
-
-    # sorted() gives stable ordering for config-derived sets; explicit values preserve user order.
-    toolsets_list = _normalize_toolsets(toolsets)
-    if toolsets_list is None and use_config_toolsets:
-        toolsets_list = sorted(_get_platform_tools(cfg, "cli"))
-
-    # Oneshot builds AIAgent directly, bypassing cli.py's MCP background discovery and
-    # _init_agent's wait, so the construction-time tool snapshot would miss late MCP servers.
-    # Idempotent start + bounded wait with the single-query bound (there is no later turn).
-    # Ensure MCP tools are discovered before building the agent. This helper starts discovery if needed
-    # (idempotent) and bounded-waits with the larger single-query bound (default 15s) because there is only
-    # ONE turn and no between-turns late-binding refresh (#38448).
-    from hermes_cli.mcp_startup import ensure_mcp_discovery_before_agent_build
-
-    ensure_mcp_discovery_before_agent_build(logger=logging.getLogger(__name__), single_query=True)
-
-    skills_prompt = _build_preloaded_skills_prompt(skills)
-
-    # The try spans agent construction (not just ``chat``) so the store is always closed, even when
-    # ``AIAgent(...)`` raises — the one-shot exit path hard-exits via os._exit and skips finalizers.
     agent = relay_session_id = None
     try:
+        resume_sid, conversation_history, resume_meta = _load_resume_target(session_db, resume)
+        choice = _apply_stored_session_runtime(choice, resume_meta, explicit_model=bool((model or "").strip()))
+        overrides = launch_options or {}
+        choice = dataclasses.replace(choice,
+            base_url=overrides.get("base_url", choice.base_url),
+            api_key=overrides.get("api_key", choice.api_key))
+        # Resolution-time fallback (#81209): a quota-exhausted/expired primary raises AuthError here, before
+        # AIAgent (and its mid-session ``fallback_model`` wiring) exists, so walk the fallback chain before construction.
+        runtime, fallback_entry = resolve_runtime_with_fallback(
+            cfg,
+            requested=choice.provider,
+            target_model=choice.model or None,
+            explicit_base_url=choice.base_url,
+            explicit_api_key=choice.api_key,
+        )
+        if fallback_entry is not None:
+            # The chosen entry names the model that will be sent; the primary's stored api_mode no longer applies.
+            choice = dataclasses.replace(choice, model=fallback_entry["model"], provider=runtime.get("provider"),
+                                         api_mode=None)
+        if choice.api_mode:
+            runtime["api_mode"] = choice.api_mode
+
+        from hermes_constants import parse_reasoning_effort, resolve_reasoning_config
+
+        reasoning_config = resolve_reasoning_config(cfg, choice.model)
+        if reasoning is not None and str(reasoning).strip():
+            parsed_reasoning = parse_reasoning_effort(reasoning)
+            if parsed_reasoning is None:
+                logging.warning("Unknown --reasoning '%s', keeping the configured level", reasoning)
+            else:
+                reasoning_config = parsed_reasoning
+
+        # sorted() gives stable ordering for config-derived sets; explicit values preserve user order.
+        toolsets_list = _normalize_toolsets(toolsets)
+        if toolsets_list is None and use_config_toolsets:
+            toolsets_list = sorted(_get_platform_tools(cfg, "cli"))
+
+        # Oneshot builds AIAgent directly, bypassing cli.py's MCP background discovery and
+        # _init_agent's wait, so the construction-time tool snapshot would miss late MCP servers.
+        # Idempotent start + bounded wait with the single-query bound (there is no later turn).
+        # Ensure MCP tools are discovered before building the agent. This helper starts discovery if needed
+        # (idempotent) and bounded-waits with the larger single-query bound (default 15s) because there is only
+        # ONE turn and no between-turns late-binding refresh (#38448).
+        from hermes_cli.mcp_startup import ensure_mcp_discovery_before_agent_build
+
+        ensure_mcp_discovery_before_agent_build(logger=logging.getLogger(__name__), single_query=True)
+
+        skills_prompt = _build_preloaded_skills_prompt(skills)
+
+        # The try spans agent construction (not just ``chat``) so the store is always closed, even when
+        # ``AIAgent(...)`` raises — the one-shot exit path hard-exits via os._exit and skips finalizers.
         agent = AIAgent(
             api_key=runtime.get("api_key"),
             base_url=runtime.get("base_url"),
@@ -596,17 +622,26 @@ def _run_agent(
             # HERMES_INTERACTIVE (never set), hook approval via HERMES_ACCEPT_HOOKS=1, dangerous
             # commands via HERMES_YOLO_MODE=1, skill secret capture degrades gracefully.
             clarify_callback=_oneshot_clarify_callback,
+            **({"max_iterations": overrides["max_turns"]} if overrides.get("max_turns") is not None else {}),
+            **({"run_budget_seconds": overrides["run_budget"]} if overrides.get("run_budget") is not None else {}),
+            skip_context_files=bool(overrides.get("ignore_rules")),
+            skip_memory=bool(overrides.get("ignore_rules")),
         )
         # Belt-and-braces: no streaming display callbacks may bypass our stdout capture.
         agent.suppress_status_output = True
         agent.stream_delta_callback = None
         agent.tool_gen_callback = None
+        emitter = overrides.get("emitter")
+        if emitter:
+            emitter.bind_session(agent.session_id or "")
+            emitter.attach(agent)
 
         aux_before = _auxiliary_usage(session_db, resume_sid) if ledger else {}
         # Relay keys the root conversation to the id at turn entry; compression may rotate
         # agent.session_id mid-turn without opening a second root, so keep the entry id.
         relay_session_id = getattr(agent, "session_id", None)
-        result = agent.run_conversation(prompt, conversation_history=conversation_history or None)
+        result = (conversation_runner(agent, prompt, conversation_history) if conversation_runner
+                  else agent.run_conversation(prompt, conversation_history=conversation_history or None))
         if ledger:
             _attach_auxiliary_usage(result, session_db, aux_before,
                                     fallback_session_id=agent.session_id or resume_sid)
@@ -626,20 +661,18 @@ def _quietly(what: str, fn) -> None:
 def _linger_for_background_completions() -> None:
     # Linger (bounded) for background processes this turn spawned with notify_on_complete=true BEFORE
     # agent.close(): close() calls process_registry.kill_all(task_id) and the dying parent owns the
-    # children's stdout pipes, so exiting now destroys in-flight deliveries — including Bot Mode handoff
-    # replies dispatched from a short-lived recipient (#90879).
+    # children's stdout pipes, so exiting now can destroy in-flight terminal child output.
     from tools.process_registry import process_registry
 
     process_registry.wait_for_pending_completions(None)
 
 
 def _close_agent(agent, session_db, relay_session_id=None) -> None:
-    """Teardown mirroring gateway/run.py:_cleanup_agent_resources (NOT cli.py:_run_cleanup):
-    oneshot has no _active_agent_ref and the hard-exit path skips finalizers."""
+    """Release native agent and database resources before the hard-exit path skips finalizers."""
     if agent is not None:
         # Linger (bounded) for notify_on_complete background processes BEFORE agent.close():
         # close() kill_all()s the task and the dying parent owns the children's stdout pipes, so
-        # exiting now destroys in-flight deliveries (e.g. Bot Mode handoff replies).
+        # exiting now can destroy in-flight terminal child output.
         _quietly("background completion wait", _linger_for_background_completions)
         if relay_session_id:
             # run_conversation ends the turn but keeps the Relay root resumable; one-shot has no

@@ -564,51 +564,6 @@ class TestDeferredFtsRetryInProcess:
         assert _meta_value(db_path, FTS_STALE_KEY) is None
         assert _base_fts_triggers(db_path) == set(_FTS_TRIGGERS)
 
-    def test_gateway_housekeeping_tick_drives_the_retry(
-        self, tmp_path, fast_timeout, monkeypatch
-    ):
-        """The retry hangs off the EXISTING housekeeping loop (no new thread)
-        and reaches shared-registry instances."""
-        import threading
-
-        import hermes_state.registry
-        import hermes_state.schema
-        import gateway.run as grun
-
-        monkeypatch.setattr(hermes_state.schema, "_FTS_STALE_RETRY_SECONDS", 0.0)
-        db_path = tmp_path / "state.db"
-        d = SessionDB(db_path=db_path)
-        if not d._fts_enabled:
-            d.close()
-            pytest.skip("FTS5 unavailable in this build")
-        d.create_session("s1", source="test")
-        d.append_message("s1", "user", "hello housekeeping")
-        d.close()
-        self._mark_stale(db_path)
-
-        with _rebuild_lock_held_by_other_process(db_path):
-            gw = hermes_state.registry.acquire(db_path)
-        try:
-            assert gw._fts_stale is True
-            assert gw in hermes_state.registry.live_shared_session_dbs()
-            stop = threading.Event()
-            th = threading.Thread(
-                target=grun._start_gateway_housekeeping,
-                args=(stop,),
-                kwargs={"interval": 0.05},
-                daemon=True,
-            )
-            th.start()
-            deadline = time.monotonic() + 10.0
-            while gw._fts_stale and time.monotonic() < deadline:
-                time.sleep(0.05)
-            stop.set()
-            th.join(timeout=5)
-            assert gw._fts_stale is False
-            assert gw._fts_enabled is True
-        finally:
-            hermes_state.registry.release_or_close(gw)
-        assert _meta_value(db_path, FTS_STALE_KEY) is None
 
     def test_retry_noop_when_not_stale_or_read_only(self, tmp_path):
         db_path = tmp_path / "state.db"

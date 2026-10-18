@@ -55,8 +55,8 @@ class TestRequestToolApproval:
 
     def test_cli_approve_once(self, monkeypatch):
         monkeypatch.setattr(approval, "_is_interactive_cli", lambda: True)
-        monkeypatch.setattr(approval, "_is_gateway_approval_context", lambda: False)
-        monkeypatch.setattr(tools_approval_context, "_is_gateway_approval_context", lambda: False)
+        monkeypatch.setattr(approval, "_is_session_approval_context", lambda: False)
+        monkeypatch.setattr(tools_approval_context, "_is_session_approval_context", lambda: False)
         monkeypatch.setattr(approval, "prompt_dangerous_approval", lambda *a, **k: "once")
         monkeypatch.setattr(approval_prompt, "prompt_dangerous_approval", lambda *a, **k: "once")
         res = request_tool_approval("write_file", "writing ~/.ssh/authorized_keys")
@@ -66,8 +66,8 @@ class TestRequestToolApproval:
         from hermes_cli import lifecycle
 
         monkeypatch.setattr(approval, "_is_interactive_cli", lambda: True)
-        monkeypatch.setattr(approval, "_is_gateway_approval_context", lambda: False)
-        monkeypatch.setattr(tools_approval_context, "_is_gateway_approval_context", lambda: False)
+        monkeypatch.setattr(approval, "_is_session_approval_context", lambda: False)
+        monkeypatch.setattr(tools_approval_context, "_is_session_approval_context", lambda: False)
         monkeypatch.setattr(approval, "prompt_dangerous_approval", lambda *a, **k: "deny")
         monkeypatch.setattr(approval_prompt, "prompt_dangerous_approval", lambda *a, **k: "deny")
         events = []
@@ -97,8 +97,8 @@ class TestRequestToolApproval:
 
     def test_cli_session_persists_session_only(self, monkeypatch):
         monkeypatch.setattr(approval, "_is_interactive_cli", lambda: True)
-        monkeypatch.setattr(approval, "_is_gateway_approval_context", lambda: False)
-        monkeypatch.setattr(tools_approval_context, "_is_gateway_approval_context", lambda: False)
+        monkeypatch.setattr(approval, "_is_session_approval_context", lambda: False)
+        monkeypatch.setattr(tools_approval_context, "_is_session_approval_context", lambda: False)
         monkeypatch.setattr(approval, "prompt_dangerous_approval", lambda *a, **k: "session")
         monkeypatch.setattr(approval_prompt, "prompt_dangerous_approval", lambda *a, **k: "session")
         calls = {"session": [], "permanent": []}
@@ -115,8 +115,8 @@ class TestRequestToolApproval:
 
     def test_cron_deny_mode_blocks(self, monkeypatch):
         monkeypatch.setattr(approval, "_is_interactive_cli", lambda: False)
-        monkeypatch.setattr(approval, "_is_gateway_approval_context", lambda: False)
-        monkeypatch.setattr(tools_approval_context, "_is_gateway_approval_context", lambda: False)
+        monkeypatch.setattr(approval, "_is_session_approval_context", lambda: False)
+        monkeypatch.setattr(tools_approval_context, "_is_session_approval_context", lambda: False)
         monkeypatch.setattr(approval, "_is_cron_approval_context", lambda: True)
         monkeypatch.setattr(tools_approval_context, "_is_cron_approval_context", lambda: True)
         monkeypatch.setattr(approval_context, "_get_cron_approval_mode", lambda: "deny")
@@ -126,8 +126,8 @@ class TestRequestToolApproval:
 
     def test_cron_approve_mode_allows(self, monkeypatch):
         monkeypatch.setattr(approval, "_is_interactive_cli", lambda: False)
-        monkeypatch.setattr(approval, "_is_gateway_approval_context", lambda: False)
-        monkeypatch.setattr(tools_approval_context, "_is_gateway_approval_context", lambda: False)
+        monkeypatch.setattr(approval, "_is_session_approval_context", lambda: False)
+        monkeypatch.setattr(tools_approval_context, "_is_session_approval_context", lambda: False)
         monkeypatch.setattr(approval, "_is_cron_approval_context", lambda: True)
         monkeypatch.setattr(tools_approval_context, "_is_cron_approval_context", lambda: True)
         monkeypatch.setattr(approval_context, "_get_cron_approval_mode", lambda: "approve")
@@ -139,8 +139,8 @@ class TestRequestToolApproval:
         """Two different reasons on the SAME tool must not share an [a]lways
         allowlist entry (Finding 3: tool_name alone was too coarse)."""
         monkeypatch.setattr(approval, "_is_interactive_cli", lambda: True)
-        monkeypatch.setattr(approval, "_is_gateway_approval_context", lambda: False)
-        monkeypatch.setattr(tools_approval_context, "_is_gateway_approval_context", lambda: False)
+        monkeypatch.setattr(approval, "_is_session_approval_context", lambda: False)
+        monkeypatch.setattr(tools_approval_context, "_is_session_approval_context", lambda: False)
         monkeypatch.setattr(approval, "prompt_dangerous_approval", lambda *a, **k: "deny")
         monkeypatch.setattr(approval_prompt, "prompt_dangerous_approval", lambda *a, **k: "deny")
         k1 = request_tool_approval("write_file", "write to ~/.ssh")["pattern_key"]
@@ -149,8 +149,8 @@ class TestRequestToolApproval:
 
     def test_explicit_rule_key_overrides_derivation(self, monkeypatch):
         monkeypatch.setattr(approval, "_is_interactive_cli", lambda: True)
-        monkeypatch.setattr(approval, "_is_gateway_approval_context", lambda: False)
-        monkeypatch.setattr(tools_approval_context, "_is_gateway_approval_context", lambda: False)
+        monkeypatch.setattr(approval, "_is_session_approval_context", lambda: False)
+        monkeypatch.setattr(tools_approval_context, "_is_session_approval_context", lambda: False)
         monkeypatch.setattr(approval, "prompt_dangerous_approval", lambda *a, **k: "deny")
         monkeypatch.setattr(approval_prompt, "prompt_dangerous_approval", lambda *a, **k: "deny")
         res = request_tool_approval("terminal", "any", rule_key="my-rule")
@@ -160,8 +160,8 @@ class TestRequestToolApproval:
         """Non-interactive, non-gateway, NON-cron context blocks (fail-closed)
         — a plugin-flagged action never runs ungated without a human."""
         monkeypatch.setattr(approval, "_is_interactive_cli", lambda: False)
-        monkeypatch.setattr(approval, "_is_gateway_approval_context", lambda: False)
-        monkeypatch.setattr(tools_approval_context, "_is_gateway_approval_context", lambda: False)
+        monkeypatch.setattr(approval, "_is_session_approval_context", lambda: False)
+        monkeypatch.setattr(tools_approval_context, "_is_session_approval_context", lambda: False)
         monkeypatch.setattr(approval, "_is_cron_approval_context", lambda: False)
         monkeypatch.setattr(tools_approval_context, "_is_cron_approval_context", lambda: False)
         res = request_tool_approval("terminal", "smtp send")
@@ -171,8 +171,8 @@ class TestRequestToolApproval:
     def test_api_server_exec_ask_uses_approval_bridge(self, monkeypatch):
         """Plugin escalation reaches the /v1/runs approval bridge when ask mode is active."""
         monkeypatch.setattr(approval, "_is_interactive_cli", lambda: False)
-        monkeypatch.setattr(approval, "_is_gateway_approval_context", lambda: False)
-        monkeypatch.setattr(tools_approval_context, "_is_gateway_approval_context", lambda: False)
+        monkeypatch.setattr(approval, "_is_session_approval_context", lambda: False)
+        monkeypatch.setattr(tools_approval_context, "_is_session_approval_context", lambda: False)
         monkeypatch.setattr(approval, "_is_cron_approval_context", lambda: False)
         monkeypatch.setattr(tools_approval_context, "_is_cron_approval_context", lambda: False)
         monkeypatch.setattr(approval, "_is_single_query_approval_context", lambda: False)
@@ -184,15 +184,15 @@ class TestRequestToolApproval:
 
         def approve(data):
             notified.append(data)
-            assert approval.resolve_gateway_approval(
+            assert approval.resolve_session_approval(
                 "test-session", "once", request_id=data["request_id"]
             ) == 1
 
-        approval.register_gateway_notify("test-session", approve)
+        approval.register_session_notify("test-session", approve)
         try:
             res = request_tool_approval("home_lock", "unlock the front door", rule_key="unlock")
         finally:
-            approval.unregister_gateway_notify("test-session")
+            approval.unregister_session_notify("test-session")
 
         assert res["approved"] is True
         assert len(notified) == 1
@@ -201,8 +201,8 @@ class TestRequestToolApproval:
     def test_api_server_without_exec_ask_remains_fail_closed(self, monkeypatch):
         """An api_server call without an active approval bridge must not run ungated."""
         monkeypatch.setattr(approval, "_is_interactive_cli", lambda: False)
-        monkeypatch.setattr(approval, "_is_gateway_approval_context", lambda: False)
-        monkeypatch.setattr(tools_approval_context, "_is_gateway_approval_context", lambda: False)
+        monkeypatch.setattr(approval, "_is_session_approval_context", lambda: False)
+        monkeypatch.setattr(tools_approval_context, "_is_session_approval_context", lambda: False)
         monkeypatch.setattr(approval, "_is_cron_approval_context", lambda: False)
         monkeypatch.setattr(tools_approval_context, "_is_cron_approval_context", lambda: False)
         monkeypatch.setattr(approval, "_is_single_query_approval_context", lambda: False)

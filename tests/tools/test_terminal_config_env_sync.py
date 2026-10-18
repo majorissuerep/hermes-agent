@@ -31,46 +31,6 @@ def _cli_env_map() -> dict[str, str]:
     return dict(cli._TERMINAL_ENV_MAPPINGS)
 
 
-def _gateway_env_map() -> dict[str, str]:
-    """terminal config key -> env var actually written by the gateway bridge."""
-    from gateway.run import _bridge_terminal_config_to_env
-    from hermes_cli import config as hc_config
-
-    class _KeyRecorder(dict):
-        """Empty config that records every key the bridge looks up."""
-
-        def __init__(self):
-            super().__init__()
-            self.seen: set[str] = set()
-
-        def __contains__(self, key):
-            self.seen.add(key)
-            return super().__contains__(key)
-
-        def get(self, key, default=None):
-            self.seen.add(key)
-            return super().get(key, default)
-
-        def __getitem__(self, key):
-            self.seen.add(key)
-            return super().__getitem__(key)
-
-    recorder = _KeyRecorder()
-    _bridge_terminal_config_to_env(recorder)  # empty: writes nothing
-    # A bridge that stopped consulting its config would make the probe below vacuous.
-    assert len(recorder.seen) > 1, "gateway bridge looked up no terminal keys"
-    probe = "/hermes-bridge-probe"  # absolute, so the cwd placeholder skip never fires
-    candidates = set(_cli_env_map()) | set(hc_config.TERMINAL_CONFIG_ENV_MAP) | recorder.seen
-    bridged: dict[str, str] = {}
-    with patch.dict(os.environ):  # restores the process env on exit
-        for key in sorted(candidates):
-            for var in [v for v in os.environ if v.startswith("TERMINAL_")]:
-                del os.environ[var]
-            _bridge_terminal_config_to_env({key: probe})
-            written = [v for v, val in os.environ.items() if v.startswith("TERMINAL_") and val == probe]
-            if written:
-                (bridged[key],) = written
-    return bridged
 
 
 def _save_config_env_sync_keys() -> set[str]:
@@ -105,33 +65,6 @@ _CLI_ONLY_OK = frozenset({
 })
 
 
-def test_cli_and_gateway_env_maps_agree():
-    """cli.py and gateway/run.py must bridge each terminal key to the same env var.
-
-    Both feed the same downstream consumer (terminal_tool).  Drift between
-    them means a config.yaml setting that "works in CLI mode but not gateway
-    mode" (or vice-versa) — the bug class that shipped twice already.
-    """
-    cli_map = {k: v for k, v in _cli_env_map().items() if k not in _CLI_ONLY_OK}
-    gw_map = _gateway_env_map()
-    # cli.py copies the canonical `backend` key onto the legacy `env_type`
-    # alias before bridging, so the gateway's `backend` is cli's `env_type`.
-    gw_map.pop("backend", None)
-
-    missing_in_gateway = sorted(set(cli_map) - set(gw_map))
-    missing_in_cli = sorted(set(gw_map) - set(cli_map))
-    mismatched = {k: (cli_map[k], gw_map[k]) for k in set(cli_map) & set(gw_map) if cli_map[k] != gw_map[k]}
-
-    assert not missing_in_gateway, (
-        f"Keys the CLI bridges but gateway/run.py _bridge_terminal_config_to_env "
-        f"ignores: {missing_in_gateway}.  Add them to both maps (same bug class "
-        f"as docker_run_as_host_user shipping wired in cli but not gateway)."
-    )
-    assert not missing_in_cli, (
-        f"Keys the gateway bridges but cli.py env_mappings ignores: "
-        f"{missing_in_cli}.  Add them to both maps."
-    )
-    assert not mismatched, f"Same key bridged to different env vars (cli, gateway): {mismatched}"
 
 
 def test_save_config_set_bridges_every_cli_terminal_key():

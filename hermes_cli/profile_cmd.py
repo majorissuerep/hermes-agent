@@ -98,7 +98,7 @@ def _profile_status(args):
         p = current
         if p.model:
             print(f"Model:          {p.model}" + (f" ({p.provider})" if p.provider else ""))
-        print(f"Gateway:        {'running' if p.gateway_running else 'stopped'}")
+        print(f"Runtime:        {'running' if p.runtime_active else 'stopped'}")
         print(f"Skills:         {p.skill_count} installed")
         if p.alias_path:
             print(f"Alias:          {p.alias_name or p.name} → hermes -p {p.name}")
@@ -112,40 +112,17 @@ def _profile_list(args):
     if not profiles:
         print("No profiles found.")
         return
-    print(f"\n {'Profile':<16} {'Model':<28} {'Gateway':<12} {'Alias':<12} {'Distribution'}")
+    print(f"\n {'Profile':<16} {'Model':<28} {'Runtime':<12} {'Alias':<12} {'Distribution'}")
     print(f" {'─' * 15}    {'─' * 27}    {'─' * 11}    {'─' * 11}    {'─' * 20}")
     for p in profiles:
         marker = " ◆" if _is_active(p, active) else "  "
         name = format_profile_label(p.name, p.display_name)
         model = (p.model or "—")[:26]
-        gw = "running" if p.gateway_running else "stopped"
+        gw = "running" if p.runtime_active else "stopped"
         alias = (p.alias_name or p.name) if p.alias_path and not p.is_default else "—"
         dist = f"{p.distribution_name}@{p.distribution_version or '?'}"[:30] if p.distribution_name else "—"
         print(f"{marker}{name:<15} {model:<28} {gw:<12} {alias:<12} {dist}")
     print()
-    for line in _shared_credential_warnings(profiles):
-        print(line)
-
-
-def _shared_credential_warnings(profiles) -> list:
-    """One warning per named profile whose bot credential is byte-identical to the default's
-    (typically an old ``--clone`` that copied .env): the collision that parks a multiplexed
-    adapter or makes two standalone gateways fight over one bot."""
-    from hermes_cli.profile_channels import shared_channel_credentials, shared_credential_warning
-    default = next((p for p in profiles if p.is_default), None)
-    if default is None:
-        return []
-    lines = []
-    for p in profiles:
-        if p.is_default:
-            continue
-        try:
-            shared = shared_channel_credentials(p.path, default.path)
-        except Exception:
-            continue
-        if shared:
-            lines.append(shared_credential_warning(p.name, shared))
-    return lines + ([""] if lines else [])
 
 
 def _profile_use(args):
@@ -166,23 +143,14 @@ def _source_profile_dir(source_label: str) -> Path:
     return source_dir
 
 
-def _print_channel_clone_notice(name: str, source_label: str, clone_channels: bool, clone_flag: str) -> None:
-    from hermes_cli.profile_channels import (
-        channel_platforms_configured, format_stripped_notice, shared_channel_credentials,
-        shared_credential_warning,
-    )
-    from hermes_cli.profiles import get_profile_dir
+def _print_channel_clone_notice(name: str, source_label: str, clone_flag: str) -> None:
+    from hermes_cli.profile_channels import channel_platforms_configured, format_stripped_notice
     try:
         source_dir = _source_profile_dir(source_label)
     except FileNotFoundError:
         return
-    if not clone_channels:
-        for line in format_stripped_notice(name, channel_platforms_configured(source_dir), clone_flag):
-            print(line)
-        return
-    shared = shared_channel_credentials(get_profile_dir(name), source_dir)
-    if shared:
-        print(shared_credential_warning(name, shared, source_label))
+    for line in format_stripped_notice(name, channel_platforms_configured(source_dir), clone_flag):
+        print(line)
 
 
 def _profile_create(args):
@@ -196,7 +164,6 @@ def _profile_create(args):
     no_alias = getattr(args, "no_alias", False)
     no_skills = getattr(args, "no_skills", False)
     clone_from = getattr(args, "clone_from", None)
-    clone_channels = getattr(args, "clone_channels", False)
     sync_imports = getattr(args, "sync_imports", False)
     clone_config = clone or clone_from is not None
     cloned = clone_config or clone_all
@@ -205,7 +172,7 @@ def _profile_create(args):
         profile_dir = create_profile(
             name=name, clone_from=clone_from, clone_all=clone_all, clone_config=clone_config,
             no_alias=no_alias, no_skills=no_skills, description=getattr(args, "description", None),
-            clone_channels=clone_channels, sync_imports=sync_imports,
+            sync_imports=sync_imports,
         )
     except (ValueError, FileExistsError, FileNotFoundError) as e:
         _die(f"Error: {e}")
@@ -226,7 +193,7 @@ def _profile_create(args):
         if sync_imports:
             print(f"Import sources carried over — `hermes -p {name} import-agent --sync` "
                   "keeps pulling the same Claude Code / Codex trees.")
-        _print_channel_clone_notice(name, source_label, clone_channels, "--clone-all" if clone_all else "--clone")
+        _print_channel_clone_notice(name, source_label, "--clone-all" if clone_all else "--clone")
         # Auto-clone Honcho config for the new profile (only with clone operations)
         try:
             from plugins.memory import import_provider_module
@@ -264,32 +231,9 @@ def _profile_create(args):
                     print(f"\n⚠ {_get_wrapper_dir()} is not in your PATH.")
                     print("  Add to your shell config (~/.bashrc or ~/.zshrc):")
                     print('    export PATH="$HOME/.local/bin:$PATH"')
-    try:
-        profile_dir_display = "~/" + profile_dir.relative_to(Path.home()).as_posix()
-    except ValueError:
-        profile_dir_display = str(profile_dir)
     print("\nNext steps:")
     print(f"  {name} setup              Configure API keys and model")
     print(f"  {name} chat               Start chatting")
-    from hermes_cli.gateway_multiplex_served import live_default_gateway_pid, recorded_served_profiles
-    from hermes_cli.profiles import normalize_profile_name
-    served = recorded_served_profiles() if live_default_gateway_pid() is not None else None
-    if served is not None and normalize_profile_name(name) in {normalize_profile_name(p) for p in served}:
-        print("  (served now by the running multiplexed gateway — add its bot token and it connects)")
-    elif served is not None:
-        # The multiplexer did not pick the profile up (older gateway or the signal failed): a restart serves it.
-        print("  hermes gateway restart    Serve this profile from the running multiplexed gateway")
-    else:
-        print(f"  {name} gateway start      Start the messaging gateway")
-    if clone or clone_all:
-        print(f"\n  Edit {profile_dir_display}/.env for different API keys")
-        print(f"  Edit {profile_dir_display}/SOUL.md for different personality")
-    else:
-        print(f"\n  ⚠ This profile has no API keys yet. Run '{name} setup' first,")
-        print("    or it will inherit keys from your shell environment.")
-        print(f"  Edit {profile_dir_display}/SOUL.md to customize personality")
-    print()
-
 
 def _profile_delete(args):
     from hermes_cli.profiles import delete_profile
@@ -373,7 +317,7 @@ def _profile_describe(args):
 def _profile_show(args):
     name = args.profile_name
     from hermes_cli.profiles import (
-        get_profile_dir, profile_exists, _read_config_model, _check_gateway_running,
+        get_profile_dir, profile_exists, _read_config_model, _profile_runtime_active,
         _served_by_running_multiplexer, _count_skills, _read_distribution_meta, _wrapper_path,
         find_alias_for_profile, format_profile_label, read_profile_meta,
     )
@@ -381,7 +325,7 @@ def _profile_show(args):
         _die(f"Error: Profile '{name}' does not exist.")
     profile_dir = get_profile_dir(name)
     model, provider = _read_config_model(profile_dir)
-    gw = _check_gateway_running(profile_dir) or _served_by_running_multiplexer(name)
+    gw = _profile_runtime_active(profile_dir)
     dist_name, dist_version, dist_source = _read_distribution_meta(profile_dir)
     alias_name = find_alias_for_profile(name)
     display = read_profile_meta(profile_dir).get("display_name", "")
@@ -389,7 +333,7 @@ def _profile_show(args):
     print(f"Path:    {profile_dir}")
     if model:
         print(f"Model:   {model}" + (f" ({provider})" if provider else ""))
-    print(f"Gateway: {'running' if gw else 'stopped'}")
+    print(f"Runtime: {'running' if gw else 'stopped'}")
     print(f"Skills:  {_count_skills(profile_dir)}")
     print(f".env:    {'exists' if (profile_dir / '.env').exists() else 'not configured'}")
     print(f"SOUL.md: {'exists' if (profile_dir / 'SOUL.md').exists() else 'not configured'}")

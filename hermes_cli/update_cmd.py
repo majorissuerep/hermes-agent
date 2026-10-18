@@ -30,8 +30,6 @@ from hermes_cli import update_receipt as _completion_receipt, update_cmd_config 
 from hermes_cli._old_updater import stop_for_relaunch
 from hermes_cli._early_recovery import git_operation_in_progress, interrupted_pull_marker, is_object_id
 from hermes_cli import update_cmd_commit as _commit
-from hermes_cli import update_cmd_posix_pause as _posix_pause
-from hermes_cli.update_cmd_pause_gate import _checkout_move, _moves_for
 from hermes_cli import update_cmd_check as _check
 
 # Re-exports: every split-module name stays reachable (and monkeypatchable) as update_cmd.<name>.
@@ -57,7 +55,7 @@ from hermes_cli.update_cmd_fleet import (
     _clear_fleet_restart_pending_marker,
     _current_checkout_sha, _drain_or_signal_gateway_for_update, _fleet_probe_expected_runtimes,
     _fleet_restart_pending_marker_path, _fleet_restart_skip_reason, _for_each_systemd_gateway_unit,
-    _gateway_recovery_partition, _gateway_service_matches_profile, _pending_fleet_restart_needed,
+    _gateway_recovery_partition, _pending_fleet_restart_needed,
     _receipt_looks_unfinished, _receipt_reports_stale_runtime, _resolve_manage_cmd,
     _restart_gateway_fleet_after_update, _restart_launchd_gateway_after_update,
     _restart_macos_launchd_gateways, _restart_phase_failure_is_incomplete,
@@ -209,7 +207,7 @@ _UPDATE_CRITICAL_FILES = (
     "hermes_cli/_early_recovery.py", "hermes_cli/update_lock.py", "hermes_cli/update_custody.py",
     "hermes_cli/update_handoff.py", "hermes_cli/venv_sync.py", "pm/__init__.py", "pm/environments.py",
     "hermes_cli/main.py", "hermes_cli/config.py", "hermes_cli/__init__.py",
-    "hermes_cli/web_server.py", "cli.py", "run_agent.py", "model_tools.py", "toolsets.py",
+    "tui_runtime/__main__.py", "cli.py", "run_agent.py", "model_tools.py", "toolsets.py",
     "hermes_constants.py")
 
 
@@ -377,57 +375,10 @@ def _validate_critical_files_syntax(root) -> tuple[bool, str | None, str | None]
 # because a name it pulls from a sibling module no longer exists.
 
 
-def _gateway_prompt(prompt_text: str, default: str = "", timeout: float = 300.0) -> str:
-    """File-based IPC prompt for gateway mode.
-
-    Writes a prompt marker file so the gateway can forward the question to the
-    user, then polls for a response file.  Falls back to *default* on timeout.
-
-    Used by ``hermes update --gateway`` so interactive prompts (stash restore,
-    config migration) are forwarded to the messenger instead of being silently
-    skipped.
-    """
-    import json as _json
-    import uuid as _uuid
-    from hermes_constants import get_hermes_home
-
-    if _posix_pause.gateways_paused():  # the gateway that would relay it is stopped for the update
-        print(f"  → {prompt_text} → {default or '(empty)'} (gateways are paused for the update)")
-        return default
-    home = get_hermes_home()
-    prompt_path = home / ".update_prompt.json"
-    response_path = home / ".update_response"
-
-    # Clean any stale response file
-    response_path.unlink(missing_ok=True)
-
-    payload = {
-        "prompt": prompt_text,
-        "default": default,
-        "id": str(_uuid.uuid4()),
-    }
-    tmp = prompt_path.with_suffix(".tmp")
-    tmp.write_text(_json.dumps(payload), encoding="utf-8")
-    tmp.replace(prompt_path)
-
-    # Poll for response
-    deadline = _time.monotonic() + timeout
-    while _time.monotonic() < deadline:
-        if response_path.exists():
-            try:
-                answer = response_path.read_text(encoding="utf-8-sig").strip()
-                response_path.unlink(missing_ok=True)
-                prompt_path.unlink(missing_ok=True)
-                return answer if answer else default
-            except (OSError, ValueError):
-                pass
-        _time.sleep(0.5)
-
-    # Timeout — clean up and use default
-    prompt_path.unlink(missing_ok=True)
-    response_path.unlink(missing_ok=True)
-    print(f"  (no response after {int(timeout)}s, using default: {default!r})")
-    return default
+def _gateway_prompt(*args, **kwargs):
+    """A frozen pre-terminal updater must restart through fresh completion."""
+    from hermes_cli._old_updater import stop_for_relaunch
+    stop_for_relaunch()
 
 
 def _called_process_error_cmd_parts(exc: subprocess.CalledProcessError) -> list[str]:
@@ -768,21 +719,10 @@ def _settle_windows_resume(request: dict) -> None:
     request["windows_resume_settled"] = True
 
 
-def _resume_paused_gateways_at_exit(token: dict | None, request: dict | None) -> None:
-    """The command's last resume of gateways it paused; a failure is reported, never raised.
-
-    Raising here would replace the run's own exit (a committed update's 0, or the original
-    failure) with the restart's error. Skipped when the post-commit attempt already ran.
-    """
-    if not token or not token.get("resume_needed") or (request or {}).get("windows_resume_settled"):
-        return
-    try:
-        _m()._resume_windows_gateways_after_update(token)
-    except Exception as exc:  # health: allow BLE001 -- a restart failure is owed, not the update's status
-        from hermes_cli.update_receipt import owe_followup
-
-        owe_followup(request["receipt"]["update_id"] if request else None, "windows_resume",
-                     f"Windows gateway recovery failed: {exc}")
+def _resume_paused_gateways_at_exit(token, request) -> None:
+    """Retired in-flight updater entry must transfer to fresh completion."""
+    from hermes_cli._old_updater import stop_for_relaunch
+    stop_for_relaunch()
 
 
 def _complete_source_update(request: dict | None) -> None:
@@ -802,7 +742,6 @@ def _complete_source_update(request: dict | None) -> None:
         request["receipt"] = deepcopy(current.data)
     # A head capture that came back empty must not arm an SHA-less record: it names no code the
     # fleet can be proven current on, so the warning could never clear (#125952).
-    _write_fleet_restart_pending_marker(expected_sha=request.get("expected_sha") or _current_checkout_sha() or "")
     # Pre-swap module (imported with run_completion above): never the replacement tree's.
     from hermes_cli.update_completion import settle_lost_completion
     lost = False
@@ -835,15 +774,6 @@ def _complete_source_update(request: dict | None) -> None:
         resumed = dict(result["windows_resume"])
         token.clear()
         token.update(resumed)
-        _settle_windows_resume(request)
-    elif token and token.get("resume_needed") and not result["exit_code"]:
-        # Dependencies owed (A6) or a lost completion: no child resumed paused gateways; this process can.
-        try:
-            _m()._resume_windows_gateways_after_update(token)
-        except Exception as exc:  # health: allow BLE001 -- the code is committed (C3)
-            from hermes_cli.update_receipt import owe_followup
-
-            owe_followup(request["receipt"]["update_id"], "windows_resume", f"Windows gateway recovery failed: {exc}")
         _settle_windows_resume(request)
     if result["exit_code"]:
         raise SystemExit(result["exit_code"])
@@ -974,31 +904,30 @@ def _roll_back_broken_update(git_cmd, pre_pull_sha, failing_path, syntax_error, 
             # verified whole at pre_pull_sha below may report success (else the manual recipe).
             print(f"  ⚠ Could not write the interrupted-pull marker ({exc}); rolling back without it.")
         # The paused gateways' tree gate knows the rollback's target before git writes a file.
-        with _checkout_move(_windows_gateway_resume, pre_pull_sha):
-            added = _commit.files_added_by(git_cmd, root, pre_pull_sha, target_sha)
-            if mode == "detach":  # never move the update branch onto a parked/detached commit
-                rollback_args = ["update-ref", "--no-deref", "HEAD", pre_pull_sha]
-                rollback_result = _git_run(git_cmd, rollback_args)
-            if mode == "branch" or rollback_result.returncode == 0:
-                rollback_args = ["reset", "-q", pre_pull_sha]  # HEAD (and the index) only, no file
-                rollback_result = _git_run(git_cmd, rollback_args)
-            if rollback_result.returncode == 0:
-                rollback_args = ["reset", "--hard", pre_pull_sha]
-                rollback_result = _git_run(git_cmd, rollback_args)
-                if rollback_result.returncode == 0 and not _commit.drop_added_files(root, added):
-                    rollback_result = subprocess.CompletedProcess(
-                        rollback_args, 1, "", "could not remove the broken release's added files")
-            if rollback_result.returncode == 0 and not _commit.tree_whole_at(git_cmd, root, pre_pull_sha):
-                # git said yes; the tree must agree (HEAD on pre, no tracked change) before the marker goes.
+        added = _commit.files_added_by(git_cmd, root, pre_pull_sha, target_sha)
+        if mode == "detach":  # never move the update branch onto a parked/detached commit
+            rollback_args = ["update-ref", "--no-deref", "HEAD", pre_pull_sha]
+            rollback_result = _git_run(git_cmd, rollback_args)
+        if mode == "branch" or rollback_result.returncode == 0:
+            rollback_args = ["reset", "-q", pre_pull_sha]  # HEAD (and the index) only, no file
+            rollback_result = _git_run(git_cmd, rollback_args)
+        if rollback_result.returncode == 0:
+            rollback_args = ["reset", "--hard", pre_pull_sha]
+            rollback_result = _git_run(git_cmd, rollback_args)
+            if rollback_result.returncode == 0 and not _commit.drop_added_files(root, added):
                 rollback_result = subprocess.CompletedProcess(
-                    rollback_args, 1, "", f"the checkout is not whole at {pre_pull_sha[:10]}")
-            if rollback_result.returncode != 0 and _commit.settle_failed_tree_move(root):
-                rollback_result = subprocess.CompletedProcess(rollback_args, 0, "", "")  # restored in-process
-            if rollback_result.returncode == 0 and parked:
-                # Same commit, so only HEAD's name changes. The parked branch can be unavailable (e.g.
-                # checked out in another worktree): its commit then stays checked out detached.
-                if _git_run(git_cmd, ["checkout", rollback_branch]).returncode != 0:
-                    print(f"  ✗ Could not check out {rollback_branch}; restoring its commit detached.")
+                    rollback_args, 1, "", "could not remove the broken release's added files")
+        if rollback_result.returncode == 0 and not _commit.tree_whole_at(git_cmd, root, pre_pull_sha):
+            # git said yes; the tree must agree (HEAD on pre, no tracked change) before the marker goes.
+            rollback_result = subprocess.CompletedProcess(
+                rollback_args, 1, "", f"the checkout is not whole at {pre_pull_sha[:10]}")
+        if rollback_result.returncode != 0 and _commit.settle_failed_tree_move(root):
+            rollback_result = subprocess.CompletedProcess(rollback_args, 0, "", "")  # restored in-process
+        if rollback_result.returncode == 0 and parked:
+            # Same commit, so only HEAD's name changes. The parked branch can be unavailable (e.g.
+            # checked out in another worktree): its commit then stays checked out detached.
+            if _git_run(git_cmd, ["checkout", rollback_branch]).returncode != 0:
+                print(f"  ✗ Could not check out {rollback_branch}; restoring its commit detached.")
         if rollback_result.returncode == 0:
             interrupted_pull_marker(root).unlink(missing_ok=True)
             _commit.disarm_commit_obligations()  # back on the code this run started from
@@ -1142,8 +1071,7 @@ def _pull_updates(
             sys.exit(1)
         try:
             # The paused gateways' tree gate must know this move's target before git writes a file.
-            with _checkout_move(_windows_gateway_resume, target_sha):
-                _move_checkout_to(git_cmd, branch, merge_ref, target_sha, pre_pull_sha)
+            _move_checkout_to(git_cmd, branch, merge_ref, target_sha, pre_pull_sha)
             _refuse_unselected_head(git_cmd, target_sha, pre_pull_sha)  # before the marker goes
         except KeyboardInterrupt:
             raise  # Ctrl-C reached git too (same process group): the tree may be torn, keep the marker
@@ -1166,8 +1094,7 @@ def _pull_updates(
                 _windows_gateway_resume=_windows_gateway_resume)
             try:
                 _m()._sync_with_upstream_if_needed(
-                    git_cmd, _m().PROJECT_ROOT, assume_yes=assume_yes, input_fn=gw_input_fn,
-                    checkout_move=_moves_for(_windows_gateway_resume))
+                    git_cmd, _m().PROJECT_ROOT, assume_yes=assume_yes, input_fn=gw_input_fn)
             except UpstreamTargetBroken as broken:  # refused before its move: the update rolls back
                 _verify_head_after_pull(  # never reset an unexpected branch's ref onto pre
                     git_cmd, branch, movement_baseline, in_place_update=in_place_update,
@@ -1202,7 +1129,7 @@ def _pull_updates(
             else:
                 _m()._restore_stashed_changes(
                     git_cmd, _m().PROJECT_ROOT, auto_stash_ref, prompt_user=prompt_for_restore,
-                    input_fn=gw_input_fn, checkout_move=_moves_for(_windows_gateway_resume))
+                    input_fn=gw_input_fn)
     return movement_baseline
 
 
@@ -1282,7 +1209,6 @@ def _refuse_before_commit_point(git_cmd, target_ref, _windows_gateway_resume) ->
         return
     print(reason)
     print("  No update was applied; your install is unchanged.")
-    _m()._resume_windows_gateways_after_update(_windows_gateway_resume)
     sys.exit(1)
 
 
@@ -1307,8 +1233,7 @@ def _exit_after_failed_branch_switch(
     # Nothing moved: restore the stash before bailing so the user isn't stranded.
     if auto_stash_ref is not None:
         _m()._restore_stashed_changes(
-            git_cmd, _m().PROJECT_ROOT, auto_stash_ref, prompt_user=False, input_fn=gw_input_fn,
-            checkout_move=_moves_for(_windows_gateway_resume))
+            git_cmd, _m().PROJECT_ROOT, auto_stash_ref, prompt_user=False, input_fn=gw_input_fn)
     if track_result.args in (_ARM_REFUSED, _REF_MOVED):
         print(f"✗ {detail}.")
         _record_stop("commit_point_refused" if track_result.args is _ARM_REFUSED else "head_moved")
@@ -1367,7 +1292,6 @@ def _apply_parked_branch_guard(
             git_cmd, _m().PROJECT_ROOT, current_branch, branch, switch_block_reason)
         print()
         print(f"⚠ Update finished — code update SKIPPED{_branch_head_suffix(git_cmd, _m().PROJECT_ROOT)}")
-        _m()._resume_windows_gateways_after_update(_windows_gateway_resume)
         _record_stop("parked_branch_blocked")
         sys.exit(1)
     if not switch_block_reason.startswith("unmerged:"):
@@ -1415,7 +1339,7 @@ def _prepare_checkout_for_update(
         # Before the stash: its refs/stash would contain HEAD until it is dropped.
         _park_detached_head(git_cmd, _m().PROJECT_ROOT, branch)
     auto_stash_ref = _m()._stash_local_changes_if_needed(
-        git_cmd, _m().PROJECT_ROOT, checkout_move=_moves_for(_windows_gateway_resume))
+        git_cmd, _m().PROJECT_ROOT)
     moved_from_sha = None
     rollback_branch = None
     if not release_tag and not in_place_update and current_branch != branch:
@@ -1425,11 +1349,8 @@ def _prepare_checkout_for_update(
         rollback_branch = current_branch
         # The switch (or its -B fallback) is this update's first tree write: bind both commits first,
         # on the POSIX pause's baseline (its refusal, sticky, reaches the switch's arm_commit_point).
-        _posix_pause.pause_at_commit_point()
-        with _checkout_move(_windows_gateway_resume, *(_resolved_commit(git_cmd, ref) for ref in (
-                f"refs/heads/{branch}", f"origin/{branch}"))):
-            track_result = _switch_branch_at_commit_point(
-                git_cmd, branch, target_ref, pre=moved_from_sha, stash=auto_stash_ref)
+        track_result = _switch_branch_at_commit_point(
+            git_cmd, branch, target_ref, pre=moved_from_sha, stash=auto_stash_ref)
         if track_result.returncode != 0:
             _exit_after_failed_branch_switch(
                 git_cmd, branch, track_result, auto_stash_ref, gw_input_fn, _windows_gateway_resume)
@@ -1484,8 +1405,7 @@ def _prepare_checkout_for_update(
         pre_sync_sha = _capture_head_sha(git_cmd, _m().PROJECT_ROOT)
         try:
             upstream_checked = _m()._sync_with_upstream_if_needed(
-                git_cmd, _m().PROJECT_ROOT, assume_yes=assume_yes, input_fn=gw_input_fn,
-                checkout_move=_moves_for(_windows_gateway_resume))
+                git_cmd, _m().PROJECT_ROOT, assume_yes=assume_yes, input_fn=gw_input_fn)
         except UpstreamTargetBroken as broken:  # nothing moved; local edits stay parked, like a rollback
             if auto_stash_ref is not None:
                 print(f"  ℹ️  Local changes preserved in stash (ref: {auto_stash_ref})")
@@ -1665,7 +1585,6 @@ def _verify_head_after_pull(
             "  Reattach to the branch and retry: "
             f"git -C {_m().PROJECT_ROOT} checkout {branch} && hermes update")
         _commit.disarm_commit_obligations()  # nothing moved: no tail is owed (refused if HEAD did)
-        _m()._resume_windows_gateways_after_update(_windows_gateway_resume)
         _record_stop("detached_head")
         sys.exit(1)
 
@@ -1680,7 +1599,6 @@ def _verify_head_after_pull(
         print(
             "  Switch to the target branch and retry: "
             f"git -C {_m().PROJECT_ROOT} checkout {branch} && hermes update")
-        _m()._resume_windows_gateways_after_update(_windows_gateway_resume)
         _record_stop("unexpected_branch")
         sys.exit(1)
     return post_pull_sha
@@ -1747,7 +1665,7 @@ def _finish_already_up_to_date(
     if _plan.auto_stash_ref is not None:
         _m()._restore_stashed_changes(
             git_cmd, _m().PROJECT_ROOT, _plan.auto_stash_ref, prompt_user=_plan.prompt_for_restore,
-            input_fn=gw_input_fn, checkout_move=_moves_for(_windows_gateway_resume))
+            input_fn=gw_input_fn)
     if _plan.parked_branch_switched:
         if _plan.switch_block_reason.startswith("unmerged:"):
             _count = _plan.switch_block_reason.split(":", 1)[1]
@@ -1781,21 +1699,18 @@ def _apply_pulled_update(
         pinned = completion_request.get("expected_sha")
         if pinned is not None and observed != pinned:
             print("✗ Checkout no longer matches the selected channel commit. No completion was applied.")
-            _m()._resume_windows_gateways_after_update(_windows_gateway_resume)
             _record_stop("head_moved")
             sys.exit(1)
         completion_request["expected_sha"] = pinned or observed
     _complete_source_update(completion_request)
 
 
-def _pause_gateways_for_update(opts):
-    """Windows pauses here (venv locks); Linux/macOS only arm a pause the commit point performs."""
-    try:
-        return _m()._pause_windows_gateways_for_update() or _posix_pause.arm_pause(
-            no_gateway_restart=opts.no_gateway_restart)
-    except RuntimeError:  # update_cmd_holders._abort_on_error / ServicePauseFailed: nothing moved
-        _record_stop("gateway_pause_failed")
-        raise
+
+def _cmd_update_impl(args, gateway_mode: bool = False):
+    """External historical command seam; current terminal updates have one orchestrator."""
+    _hermes_current_updater_frame = True
+    from hermes_cli.terminal_update import update_source
+    return update_source(args)
 
 
 def _update_run_channel(args) -> str:
@@ -1805,173 +1720,3 @@ def _update_run_channel(args) -> str:
     except ValueError:  # ChannelError: this install's configured channel is not a valid name
         _record_stop("channel_unresolved")
         raise
-
-
-def _cmd_update_impl(args, gateway_mode: bool):
-    """Apply the update; the command boundary owns errors, receipts and stdio."""
-    # Marks this frame as the CURRENT updater for
-    # _old_updater.in_historical_update(); historical on-disk updaters do not
-    # declare this local, so only they hand off through retired shims.
-    _hermes_current_updater_frame = True
-    _commit.begin_update_attempt()  # nothing an earlier update in this process armed is ours (O5)
-    git_operation = git_operation_in_progress(_m().PROJECT_ROOT)
-    if git_operation:
-        root = _m().PROJECT_ROOT
-        print(f"✗ Cannot update while a Git {git_operation} is in progress in {root}.")
-        print(f"  Finish it or run `git {git_operation} --abort`, then re-run `hermes update`.")
-        _record_stop("git_in_progress", without_receipt="failed")  # before the receipt opens: a metrics row only
-        sys.exit(1)
-
-    # Self-heal abandoned .git/*.lock files (a crashed fetch) and aborted-transfer pack temps
-    # before anything else touches the checkout. Run at START, not only in the apply path
-    # below: a run that dies between here and the fetch would otherwise leave the next run to
-    # fail with "File exists" until an operator removed the lock by hand (#132089). Idempotent,
-    # and _sweep_stale skips everything while a git process holds it. A killed update's
-    # index.lock is younger than the sweep's age floor, so it goes here once its git is proven
-    # dead (we hold the update lock: no other update's git can own it).
-    from hermes_cli.gitlock import release_dead_index_lock
-    if release_dead_index_lock(_m().PROJECT_ROOT):
-        print("  (removed .git/index.lock left by a git that was killed)")
-    _check.clear_git_debris(_m().PROJECT_ROOT)
-
-    opts = _resolve_update_options(args, gateway_mode)
-    gw_input_fn, assume_yes = opts.gw_input_fn, opts.assume_yes
-
-    print("☤ Updating Hermes Agent...")
-    print()
-
-    _pre_update_plan = _begin_update_receipt_and_plan(args)
-
-    # Backup before any git/file mutation; the snapshot id (None if disabled/failed) feeds
-    # the post-update cron-jobs safety net. A deliberate opt-out is recorded as a skip with its
-    # reason, not as a failed step (see _record_pre_update_backup_outcome).
-    pre_update_snapshot_id = _m()._run_pre_update_backup(args)
-    _record_pre_update_backup_outcome(args, pre_update_snapshot_id)
-    _record_snapshot_stage(args, pre_update_snapshot_id)
-
-    _windows_gateway_resume = _pause_gateways_for_update(opts)
-    if _windows_gateway_resume:
-        import atexit as _atexit
-        _atexit.register(_m()._resume_windows_gateways_after_update, _windows_gateway_resume)
-    desktop_dir = _m().PROJECT_ROOT / "apps" / "desktop"
-    # An installed Hermes.app only this update refreshes counts even with no release/ build
-    # beside it: without one it was never rebuilt, so it never got newer (#52339).
-    had_desktop_app_before_update = (
-        _m()._desktop_packaged_executable(desktop_dir) is not None
-        or _m()._desktop_dist_exists(desktop_dir)
-        or bool(_m()._installed_desktop_apps()))
-
-    use_zip_update, git_cmd, is_fork = _prepare_git_command(checkout_move=_moves_for(_windows_gateway_resume))
-
-    completion_request = _source_completion_request(
-        opts, _pre_update_plan, pre_update_snapshot_id, _windows_gateway_resume,
-        had_desktop_app_before_update, gateway_mode)
-    branch = _m()._resolve_update_branch(args)
-    completion_request["branch"] = branch
-    target_ref, release_sha, target_is_head, target_repository = _check.select_apply_target(
-        args, branch, completion_request, git_cmd=None if use_zip_update else git_cmd,
-        stop=lambda: _m()._resume_windows_gateways_after_update(_windows_gateway_resume))
-    branch = completion_request["branch"]
-
-    if use_zip_update:
-        try:
-            _update_via_zip(
-                args, had_desktop_app_before_update=had_desktop_app_before_update,
-                target_sha=release_sha, completion_request=completion_request,
-                **({"target_repository": target_repository} if target_repository else {}))
-        finally:
-            _resume_paused_gateways_at_exit(_windows_gateway_resume, completion_request)
-
-        return
-
-    try:
-        _check.report_pack_tidy(_m().PROJECT_ROOT)
-        # Shallow installer checkouts collect one `.git/shallow` graft per past depth-1 fetch
-        # (#105951); stale grafts break merge-base and push this run into the divergence path.
-        from hermes_cli.gitlock import repair_broken_shallow_boundaries, prune_stale_shallow_grafts
-        repaired = repair_broken_shallow_boundaries(_m().PROJECT_ROOT)
-        if repaired:
-            print(f"  (restored {repaired} broken shallow boundary(ies))")
-        pruned = prune_stale_shallow_grafts(_m().PROJECT_ROOT)
-        if pruned:
-            print(f"  (pruned {pruned} stale shallow graft(s) left by past depth-1 checks)")
-
-        # Surface autostashes left by earlier updates (--keep-stash, failed restores).
-        # Surface autostash entries left behind by earlier updates (#63717 problem 6) — parked --keep-stash
-        # runs and failed restores preserve the stash but nothing ever mentioned it again.
-        _m()._warn_orphaned_update_autostashes(git_cmd, _m().PROJECT_ROOT)
-
-        # A shallow checkout's plain fetch drags in ~the whole history and cannot finish inside
-        # the network cap (#123254); its grafts also make merge-base report orphan divergence
-        # (#123346, #124645). Unshallow it (commits only) first.
-        _heal_stale_shallow_checkout(_m().PROJECT_ROOT, branch)
-
-        if release_sha and target_is_head:
-            # Forward-only default: the checkout already contains the release; nothing to fetch.
-            fetch_args = None
-        elif release_sha:
-            fetch_args = ["fetch", "--no-tags", "origin", target_ref]
-        else:
-            fetch_args = ["fetch", "origin", _check.tracking_refspec("origin", branch)]
-        from hermes_cli.gitlock import fetch_with_partial_clone_recovery, is_partial_clone_pack_objects_crash
-        # Marking the unmarked packs clears the git 2.53+ partial-clone pack-objects crash (#124272).
-        if fetch_args is None:
-            fetch_result = subprocess.CompletedProcess([], 0)
-        else:
-            print("→ Fetching updates...")
-            fetch_result = fetch_with_partial_clone_recovery(
-                lambda gc, a: _git_run(gc, a, network=True), git_cmd, fetch_args, _m().PROJECT_ROOT)
-        if fetch_result.returncode != 0:
-            if is_partial_clone_pack_objects_crash(fetch_result.stderr or ""):
-                print("✗ git still crashed after marking this checkout's packs. See 'Fetch fails with"
-                      " should_include_obj' in https://hermes-agent.nousresearch.com/docs/getting-started/updating")
-            _print_fetch_failure(fetch_result.stderr)
-            _m()._resume_windows_gateways_after_update(_windows_gateway_resume)
-            _record_stop("git_timeout" if fetch_result.returncode == 124 else "disk_full"
-                         if "No space left on device" in (fetch_result.stderr or "") else "fetch_failed")
-            sys.exit(1)
-
-        current_branch = _current_branch_name(git_cmd, check=True)
-        _commit.record_run_start(git_cmd, _m().PROJECT_ROOT)
-        _refuse_before_commit_point(git_cmd, target_ref, _windows_gateway_resume)
-        _plan = _prepare_checkout_for_update(
-            git_cmd, branch, current_branch, is_fork=is_fork, assume_yes=assume_yes,
-            gateway_mode=gateway_mode, gw_input_fn=gw_input_fn, switch_branch=opts.switch_branch,
-            target_ref=target_ref, _windows_gateway_resume=_windows_gateway_resume)
-        commit_count = _plan.commit_count
-
-        if commit_count == 0:
-            _finish_already_up_to_date(
-                git_cmd, branch, current_branch, _plan, gw_input_fn=gw_input_fn,
-                completion_request=completion_request, _windows_gateway_resume=_windows_gateway_resume)
-            return
-
-        if release_sha:
-            print(f"→ Switching to source commit {release_sha[:10]}")
-        elif commit_count > 0:
-            print(f"→ Found {commit_count} new commit(s)")
-        elif _plan.switched_without_new_commits:
-            print(f"→ Switched the running checkout to {branch} (no new commits to count)")
-        else:
-            # Shallow, exact count unrecoverable — but the tips differ, so there IS an update.
-            print("→ Updates available (commit count unknown on this shallow checkout)")
-
-        print("→ Pulling updates...")
-        movement_baseline = _pull_updates(
-            git_cmd, branch, _plan.auto_stash_ref, prompt_for_restore=_plan.prompt_for_restore,
-            gw_input_fn=gw_input_fn, discard_local_changes=opts.discard_local_changes,
-            keep_stash=opts.keep_stash, target_ref=target_ref, pre_sync_sha=_plan.pre_sync_sha,
-            rollback_branch=_plan.rollback_branch,
-            sync_upstream=is_fork and branch == "main" and not release_sha, assume_yes=assume_yes,
-            in_place_update=_plan.in_place_update, _windows_gateway_resume=_windows_gateway_resume,
-            expected_sha=completion_request.get("expected_sha"))
-        _apply_pulled_update(
-            git_cmd, branch, movement_baseline, _plan,
-            _windows_gateway_resume=_windows_gateway_resume, completion_request=completion_request)
-    except subprocess.CalledProcessError as e:
-        try:
-            _handle_update_called_process_error(
-                e, args, gateway_mode, had_desktop_app_before_update, target_sha=release_sha,
-                target_repository=target_repository, completion_request=completion_request)
-        finally:
-            _resume_paused_gateways_at_exit(_windows_gateway_resume, completion_request)

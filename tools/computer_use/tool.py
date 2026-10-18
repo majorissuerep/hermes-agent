@@ -321,16 +321,6 @@ def handle_computer_use(args: dict[str, Any], **kwargs) -> Any:
     if not action:
         return json.dumps({"error": "missing `action`"})
     session_id = str(kwargs.get("session_id") or "")  # approval-state / daemon-mode isolation key
-    # Bot Desktop lease: while a human drives the screen every action, capture included, is refused.
-    from tools.bot_desktop import lease as _bd_lease
-    from tools.bot_desktop.runtime import ensure_started_for_tool as _bd_ensure_started
-    def _refused(e: Exception) -> str:
-        return json.dumps({"ok": False, "action": action, "code": "human_has_control", "error": str(e)})
-    try:
-        admitted = _bd_lease.assert_agent_may_act()
-    except _bd_lease.HumanHasControl as e:
-        return _refused(e)
-    _bd_ensure_started()  # headless gateway: bring the profile's screen up before the backend probes DISPLAY
     if (err := _reject_unsafe(action, args)) is not None:
         return err
     scopes = ([action] if action in _ACTIONS and _ACTIONS[action].destructive else []) + (
@@ -351,28 +341,7 @@ def handle_computer_use(args: dict[str, Any], **kwargs) -> Any:
         return json.dumps({"error": f"computer_use backend unavailable: {e}", **hint})
     try:
         with call:
-            # Re-check under the dispatch lock: approval, backend start-up and lock waits above can take
-            # seconds, and a human may have taken over meanwhile. A result produced after such a flip is
-            # discarded too — it may picture what they typed.
-            try:
-                _bd_lease.assert_agent_may_act()
-            except _bd_lease.HumanHasControl as e:
-                return _refused(e)
-
-            def _fence() -> None:
-                # Any lease transition since admission voids the frame — including a full take-over /
-                # hand-back cycle that already finished: it still belongs to the human's turn. Capture
-                # paths call this BEFORE the frame is persisted, spilled or sent to auxiliary vision.
-                if _bd_lease.get().epoch != admitted.epoch:
-                    raise _bd_lease.HumanHasControl(
-                        "A human took over this desktop while the action ran; its result was discarded. "
-                        "Tell the user what you need and re-capture once they hand back.")
-            _fence()  # input actions never receive fence=; refuse before the device op starts
-            result = _dispatch(backend, action, args, fence=_fence, session_id=session_id or None)
-            _fence()
-            return result
-    except _bd_lease.HumanHasControl as e:
-        return _refused(e)
+            return _dispatch(backend, action, args, session_id=session_id or None)
     except Exception as e:
         logger.exception("computer_use %s failed", action)
         return json.dumps({"error": f"{action} failed: {e}"})
@@ -434,12 +403,11 @@ def _do_scroll(backend, action, args, **delivery):
     return backend.scroll(direction=args.get("direction", "down"), amount=int(args.get("amount", 3)),
                           element=args.get("element"), **_scroll_xy(args), modifiers=args.get("modifiers"), **delivery)
 
-def _do_capture(backend, action, args, fence=lambda: None, session_id=None, **_):
+def _do_capture(backend, action, args, session_id=None, **_):
     if (mode := str(args.get("mode", "som"))) not in {"som", "vision", "ax"}:
         return json.dumps({"error": f"bad mode {mode!r}; use som|vision|ax"})
     # pid/window_id forwarded only when given so older backends keep their defaults.
     cap = backend.capture(mode=mode, app=args.get("app"), **{k: args[k] for k in ("pid", "window_id") if args.get(k) is not None})
-    fence()
     return _capture_response(cap, session_id=session_id)
 
 def _do_listing(backend, action, args, key, **_):
@@ -490,11 +458,9 @@ _ACTION_SUGGESTIONS = {
     "input_text": "type", "screenshot": "capture", "get_window_state": "capture", "left_click": "click", "mouse_click": "click",
 }
 
-def _dispatch(backend: ComputerUseBackend, action: str, args: dict[str, Any], fence: Callable[[], None] = lambda: None,
+def _dispatch(backend: ComputerUseBackend, action: str, args: dict[str, Any],
               session_id: Optional[str] = None) -> Any:
-    """``fence`` raises when the screen lease moved since admission; capture paths call it as soon as the
-    frame is in hand, before anything derived from it leaves the process (including the screenshot dedup
-    cache keyed by ``session_id``)."""
+    """Dispatch a native action after approval and target validation."""
     spec = _ACTIONS.get(action)
     if spec is None:
         return json.dumps({"error": f"unknown action {action!r}" + (f" — did you mean {hint!r}? See the action enum in the tool schema."
@@ -511,8 +477,8 @@ def _dispatch(backend: ComputerUseBackend, action: str, args: dict[str, Any], fe
     # handlers forward their kwargs to the backend verbatim, so the lease fence and the dedup session key ride
     # only on read handlers (delivery kwargs would leak into backend input calls, and vice versa).
     res = spec.handler(backend, action, args, **(dict(delivery_mode=args.get("delivery_mode"), bring_to_front=bool(args.get("bring_to_front")))
-                                                 if spec.input else dict(fence=fence, session_id=session_id)))
-    return res if isinstance(res, (str, dict)) else _maybe_follow_capture(backend, res, bool(args.get("capture_after")), fence,
+                                                 if spec.input else dict(session_id=session_id)))
+    return res if isinstance(res, (str, dict)) else _maybe_follow_capture(backend, res, bool(args.get("capture_after")),
                                                                          session_id=session_id)
 
 # ── Response shaping ────────────────────────────────────────────────────────
@@ -738,7 +704,7 @@ def _capture_response(cap: CaptureResult, max_elements: int = _DEFAULT_MAX_ELEME
     return _text_capture_payload(v, "\n".join(lines), extra)
 
 def _maybe_follow_capture(backend: ComputerUseBackend, res: ActionResult, do_capture: bool,
-                          fence: Callable[[], None] = lambda: None, session_id: Optional[str] = None) -> Any:
+                          session_id: Optional[str] = None) -> Any:
     # No follow-up capture after a failed action: a normal-looking screenshot would suggest success.
     if not do_capture or not res.ok:
         return _text_response(res)
@@ -751,7 +717,6 @@ def _maybe_follow_capture(backend: ComputerUseBackend, res: ActionResult, do_cap
     except Exception as e:
         logger.warning("follow-up capture failed: %s", e)
         return _text_response(res)
-    fence()  # a frame taken after a takeover never reaches the dedup cache nor the model
     resp, payload = _capture_response(cap, session_id=session_id), _action_payload(res)
     if isinstance(resp, dict) and resp.get("_multimodal"):
         # Keep the evidence/verdict contract visible alongside the image — it governs whether input may repeat.

@@ -74,12 +74,6 @@ def test_background_state_reads_never_touch_shared_writer(db):
     try:
         assert db.get_compression_lock_holder("s1") == "holder"
         db.clear_session_activity_labels("s1")
-        assert db.get_handoff_state("s1") == {
-            "state": "pending",
-            "platform": "telegram",
-            "error": None,
-        }
-        assert [row["id"] for row in db.list_pending_handoffs()] == ["s1"]
     finally:
         db._conn = writer
 

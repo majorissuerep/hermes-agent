@@ -202,7 +202,7 @@ export const describeSlashExecError = (command: string, err: unknown): string =>
 }
 
 // slash.exec answers 4018 with exactly these texts when it does NOT own the
-// command (tui_gateway/methods_tools.py). Every other 4018 came from a
+// command (tui_runtime/methods_tools.py). Every other 4018 came from a
 // command.dispatch handler slash.exec already forwarded to (/retry, /undo,
 // /compress, /queue, bundles): re-dispatching would run a mutating command twice.
 const NOT_MINE_REFUSAL_RE = /^skill command: use command\.dispatch for \/|use command\.dispatch for \/snapshot restore/

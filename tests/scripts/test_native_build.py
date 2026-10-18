@@ -15,31 +15,19 @@ ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/bundles/native_build.py"
 
 
-def test_payload_transport_does_not_require_or_export_desktop_inputs(tmp_path):
-    from scripts.ci.desktop_build_cache import describe_cache
-
-    source = tmp_path / "source"
-    source.mkdir()
-    cache = tmp_path / "cache"
-    description = describe_cache(source, cache, "payload-test")
-    assert set(description["paths"]) == {str(cache / name) for name in ("tools", "python/runtime", "native")}
-    assert "payload-test" in description["key"]
-    assert not cache.exists()
-
-
 def test_native_worker_passes_shared_toolchain_to_native_owner(tmp_path, monkeypatch):
     from scripts.bundles import native_build
-    from scripts.bundles import desktop_toolchain, native
+    from scripts.bundles import native_toolchain, native
 
     request = {name: str(tmp_path / name) for name in ("source", "work", "cache", "out")}
     request["ref"] = "a" * 40
     selected = {"UV_CACHE_DIR": str(tmp_path / "native-wheel-identity"), "CC": "prepared-compiler"}
-    monkeypatch.setattr("scripts.bundles.desktop_prepare.require_source", lambda *args: None)
+    monkeypatch.setattr("scripts.bundles.native_source.require_source", lambda *args: None)
     prepared_tools = []
     def tools(source, work, cache, inherited):
         prepared_tools.append((source, work, cache))
         return Path("python"), Path("node"), selected
-    monkeypatch.setattr(desktop_toolchain, "prepare_tools", tools)
+    monkeypatch.setattr(native_toolchain, "prepare_tools", tools)
     calls = []
     def prepare_native(**kwargs):
         calls.append(kwargs)

@@ -1,0 +1,86 @@
+name: Terminal cold lifecycle
+
+on:
+  workflow_dispatch:
+    inputs:
+      baseline:
+        description: Exact full baseline commit SHA
+        required: true
+        type: string
+      candidate:
+        description: Exact full candidate commit SHA
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      baseline:
+        required: true
+        type: string
+      candidate:
+        required: true
+        type: string
+    secrets:
+      TERMINAL_E2E_MODEL:
+        required: true
+      TERMINAL_E2E_BASE_URL:
+        required: true
+      TERMINAL_E2E_API_KEY:
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: terminal-lifecycle-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  cold-lifecycle:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a # v7.0.1
+        with:
+          ref: ${{ inputs.candidate }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Require immutable commits and dedicated test credentials
+        env:
+          BASELINE: ${{ inputs.baseline }}
+          CANDIDATE: ${{ inputs.candidate }}
+          E2E_LLM_MODEL: ${{ secrets.TERMINAL_E2E_MODEL }}
+          E2E_LLM_BASE_URL: ${{ secrets.TERMINAL_E2E_BASE_URL }}
+          E2E_LLM_API_KEY: ${{ secrets.TERMINAL_E2E_API_KEY }}
+        run: |
+          python3 - <<'PY'
+          import os, re, subprocess
+          for name in ('BASELINE', 'CANDIDATE'):
+              value = os.environ[name]
+              if not re.fullmatch('[0-9a-f]{40}', value):
+                  raise SystemExit(f'{name} requires an exact full commit SHA')
+              subprocess.run(['git', 'cat-file', '-e', value + '^{commit}'], check=True)
+          for name in ('E2E_LLM_MODEL', 'E2E_LLM_BASE_URL', 'E2E_LLM_API_KEY'):
+              if not os.environ.get(name):
+                  raise SystemExit(f'Missing dedicated test credential: {name}')
+          PY
+      - name: Six real encrypted terminal lifecycle scenarios
+        env:
+          BASELINE: ${{ inputs.baseline }}
+          CANDIDATE: ${{ inputs.candidate }}
+          E2E_LLM_MODEL: ${{ secrets.TERMINAL_E2E_MODEL }}
+          E2E_LLM_BASE_URL: ${{ secrets.TERMINAL_E2E_BASE_URL }}
+          E2E_LLM_API_KEY: ${{ secrets.TERMINAL_E2E_API_KEY }}
+        run: |
+          python3 scripts/e2e/container_lifecycle.py --backend docker --scenario all \
+            --source "$GITHUB_WORKSPACE" --baseline "$BASELINE" --candidate "$CANDIDATE" \
+            --max-parallel 1 --evidence "$RUNNER_TEMP/terminal-lifecycle"
+      - name: Preserve bounded acceptance receipts and logs
+        if: always()
+        uses: actions/upload-artifact@3cea3b921571cedc309b252a5f320e37144368c7 # v7.0.0
+        with:
+          name: terminal-lifecycle-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/terminal-lifecycle/**/*.json
+            ${{ runner.temp }}/terminal-lifecycle/**/*.log
+          if-no-files-found: warn
+          retention-days: 7

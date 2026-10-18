@@ -22,7 +22,7 @@ from agent.prompt_builder import (
     DEFAULT_AGENT_IDENTITY, EXECUTION_GUIDANCE_MODELS, GOOGLE_MODEL_OPERATIONAL_GUIDANCE,
     HERMES_AGENT_HELP_GUIDANCE, HERMES_AGENT_HELP_GUIDANCE_NO_SKILLS, KANBAN_GUIDANCE,
     PARALLEL_TOOL_CALL_GUIDANCE, PLATFORM_HINTS, SESSION_SEARCH_GUIDANCE,
-    SKILLS_GUIDANCE, STEER_CHANNEL_NOTE, TASK_COMPLETION_GUIDANCE, TELEGRAM_RICH_MESSAGES_HINT,
+    SKILLS_GUIDANCE, STEER_CHANNEL_NOTE, TASK_COMPLETION_GUIDANCE,
     TOOL_USE_ENFORCEMENT_GUIDANCE, TOOL_USE_ENFORCEMENT_MODELS, drain_truncation_warnings,
 )
 from agent import prompt_builder as _pb
@@ -75,12 +75,6 @@ _TUI_EMBEDDED_PANE_CLARIFIER = (
 )
 
 
-def _tui_embedded_pane_clarifier(hint: str) -> str:
-    """Append the desktop embedded-terminal clarifier when ``HERMES_DESKTOP_TERMINAL``
-    is set (only the desktop's TUI PTY, never the chat backend). Idempotent."""
-    if not hint or _TUI_EMBEDDED_PANE_CLARIFIER in hint or not is_truthy_value(os.getenv("HERMES_DESKTOP_TERMINAL")):
-        return hint
-    return hint + _TUI_EMBEDDED_PANE_CLARIFIER
 
 
 def _plugin_session_info(agent: Any) -> dict[str, str]:
@@ -341,28 +335,6 @@ def _auto_load_parts(agent: Any) -> list[str]:
     return [prompt] if prompt else []
 
 
-def _bot_mode_parts(agent: Any) -> list[str]:
-    """Bot Mode teammate protocol — only in a bot's canonical "Bot Chat" session.
-    Marks the prompt timeless (the volatile date line is dropped) since a birth
-    date pinned in a months-long session is misinformation."""
-    parts: list[str] = []
-    try:
-        from tools.bot_mode_probe import BOT_CHAT_TITLE, epoch_line, get_bot_mode_protocol_section
-        _title = str(getattr(agent, "_session_title_hint", "") or "").strip()
-        if not _title:
-            _sdb = getattr(agent, "_session_db", None)
-            _sid = getattr(agent, "session_id", None)
-            _title = str((_sdb.get_session_title(_sid) if (_sdb and _sid) else None) or "").strip()
-        _bot_section = get_bot_mode_protocol_section(_agent_home(agent)) if _title == BOT_CHAT_TITLE else None
-        if _bot_section:
-            parts.append(_bot_section)
-            # Capability epoch lets the restore path rebuild ONCE per
-            # user-initiated capability change in an eternal session.
-            parts.append(epoch_line(_agent_home(agent)))
-            agent._bot_chat_timeless_prompt = True
-    except Exception:
-        pass
-    return parts
 
 
 def _ambient_file_safety_profile_name() -> str:
@@ -411,64 +383,17 @@ def _active_profile_line(agent: Any) -> str:
 
 
 def _default_platform_hint(platform_key: str) -> str:
-    """Built-in hint, else the plugin adapter's ``platform_hint``, else ``""``."""
-    hint = PLATFORM_HINTS.get(platform_key, "")
-    if not hint and platform_key:
-        try:
-            from gateway.platform_registry import platform_registry
-            _entry = platform_registry.get(platform_key)
-            hint = (_entry and _entry.platform_hint) or ""
-        except Exception:
-            pass
-    if platform_key == "telegram" and hint and _telegram_rich_messages_enabled():
-        hint = hint.rstrip() + " " + TELEGRAM_RICH_MESSAGES_HINT
-    return hint
+    return PLATFORM_HINTS.get(platform_key, "")
 
 
-def _cron_delivery_hint(agent: Any) -> str:
-    """The destination channel's hint (default + its ``platform_hints`` override) for a cron agent.
-
-    A cron agent runs as platform ``cron`` but its final response lands on the job's ``deliver``
-    channel, so without this the model never learns that MEDIA: tags become Slack/Telegram
-    attachments or that tables do not render there — and a user's ``platform_hints.slack.append``
-    never reached scheduled jobs at all. The scheduler publishes the primary auto-deliver target
-    into the session ContextVar before the agent runs (same seam ``send_message`` routes by).
-    """
-    from gateway.session_context import get_session_env
-    deliver_key = get_session_env("HERMES_CRON_AUTO_DELIVER_PLATFORM", "").lower().strip()
-    if not deliver_key or deliver_key == "cron":
-        return ""
-    hint = _resolve_platform_hint(agent, deliver_key, _default_platform_hint(deliver_key))
-    return f"Delivery destination ({deliver_key}): {hint}" if hint else ""
 
 
 def platform_hint(agent: Any) -> str:
-    """Built-in/plugin platform hint + Telegram rich-messages opt-in + config
-    override + desktop TUI clarifier; cron agents also carry their delivery channel's hint."""
+    """Formatting guidance for the local terminal interface."""
     platform_key = (agent.platform or "").lower().strip()
-    _effective_hint = _resolve_platform_hint(agent, platform_key, _default_platform_hint(platform_key))
-    if platform_key == "tui" and _effective_hint:
-        _effective_hint = _tui_embedded_pane_clarifier(_effective_hint)
-    if platform_key == "cron":
-        _delivery = _cron_delivery_hint(agent)
-        if _delivery:
-            _effective_hint = f"{_effective_hint}\n\n{_delivery}".strip()
-    return _effective_hint
+    return _resolve_platform_hint(agent, platform_key, _default_platform_hint(platform_key))
 
 
-def _telegram_rich_messages_enabled() -> bool:
-    """``rich_messages`` from the Telegram ``extra`` config; same precedence the
-    adapter uses (top-level ``platforms.telegram.extra`` overrides
-    ``gateway.platforms.telegram.extra`` at the leaf). False on any read failure."""
-    try:
-        from hermes_cli.config import load_config_readonly
-        _cfg = load_config_readonly()
-        _gw = (((_cfg.get("gateway") or {}).get("platforms") or {}).get("telegram") or {}).get("extra")
-        _top = ((_cfg.get("platforms") or {}).get("telegram") or {}).get("extra")
-        merged = {**(_gw if isinstance(_gw, dict) else {}), **(_top if isinstance(_top, dict) else {})}
-        return bool(merged.get("rich_messages"))
-    except Exception:
-        return False
 
 
 def _zone_bits(now: Any, tz: Any) -> list[str]:
@@ -496,8 +421,7 @@ def _timestamp_line(agent: Any) -> str:
     _zone_suffix = f" ({', '.join(_bits)})" if _bits else ""
     _start = _session_start_like(agent, now)
     timestamp_line = f"Conversation started: {safe_strftime(_start, '%A, %B %d, %Y')}{_zone_suffix}"
-    # Second line (maintainer design, salvaging #96224's anchor): long-lived sessions — Bot Mode
-    # forever-chats, messenger channels people never close — span many days and many compactions. A lone
+    # Long-lived sessions can span many days and compactions. A lone
     # birth date leads the model to believe it is still living in that old day. The prompt is rebuilt at
     # every compaction boundary, so stamp the rebuild day too: 'started' stays anchored and byte-stable, 'as
     # of' refreshes exactly when the cache prefix is already being invalidated (compaction), so the added
@@ -506,8 +430,6 @@ def _timestamp_line(agent: Any) -> str:
     if now.strftime("%Y%m%d") != _start.strftime("%Y%m%d"):
         timestamp_line += (f"\nToday's date (as of the last context rebuild): {safe_strftime(now, '%A, %B %d, %Y')} "
                            "— trust this over the start date for what day it is now; query tools for exact time.")
-    if getattr(agent, "_bot_chat_timeless_prompt", False):
-        timestamp_line = f"Timezone: {', '.join(_bits)}" if _bits else ""
     trailer = (("Session ID", agent.session_id if agent.pass_session_id else None), ("Model", agent.model),
                ("Provider", agent.provider), ("Platform", agent.platform))
     return timestamp_line + "".join(f"\n{label}: {value}" for label, value in trailer if value)
@@ -700,8 +622,6 @@ def _post_workspace_parts(agent: Any) -> list[str]:
             parts.append(get_environment_probe_line())
         except Exception:
             pass  # Probe failure must never block prompt build.
-    if getattr(agent, "_bot_mode_protocol", True):
-        parts.extend(_bot_mode_parts(agent))
     parts.append(platform_hint(agent))
     return parts
 

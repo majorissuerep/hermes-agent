@@ -37,7 +37,7 @@ jobs:
       - uses: ./.github/actions/setup-pm
         with:
           toolchain: all
-          extras: '[]'
+          extras: '["icons"]'
           cache-python: true
           prune-python-cache: true
 

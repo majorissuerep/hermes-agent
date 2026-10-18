@@ -7,7 +7,7 @@ import pytest
 from cron import executions, jobs
 from hermes_cli.observability import relay_shared_metrics as rsm
 from hermes_cli.observability import shared_metrics_contract as contract
-from hermes_cli.observability import shared_metrics_gateway as smg
+from hermes_cli.observability import shared_metrics_sessions as smg
 
 
 @pytest.fixture
@@ -35,17 +35,17 @@ def _execution(job_id, deliver, *, start=True):
 
 
 def test_each_terminal_execution_is_one_row_classified_without_job_details(cron_rows):
-    ok = _execution("job1", "telegram:-100555")
+    ok = _execution("job1", "local")
     executions.finish_execution(ok, success=True, delivery_outcome="delivered")
     executions.finish_execution(ok, success=False, error="late duplicate")  # write-once: no second row
     executions.finish_execution(_execution("job2", "local"), success=False, error="boom")
-    refused = _execution("job3", "webhook", start=False)  # claim lost before any side effect
+    refused = _execution("job3", "local", start=False)  # claim lost before any side effect
     executions.finish_execution(refused, success=False, error="Fire claim lost; execution was not started.")
-    gated = _execution("job4", "origin")
+    gated = _execution("job4", "local")
     smg.note_cron_skipped({"execution_id": gated})  # pre-run script said wakeAgent=false
     executions.finish_execution(gated, success=True, delivery_outcome="suppressed")
     assert [(r["outcome"], r["delivery_kind"]) for r in cron_rows()] == [
-        ("success", "platform"), ("failed", "local"), ("skipped", "webhook"), ("skipped", "platform"),
+        ("success", "local"), ("failed", "local"), ("skipped", "local"), ("skipped", "local"),
     ]
 
 

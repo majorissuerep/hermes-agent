@@ -28,12 +28,12 @@ describe('recordParentLifecycle', () => {
     rmSync(home, { force: true, recursive: true })
   })
 
-  it('appends a timestamped breadcrumb to logs/tui_gateway_crash.log', async () => {
+  it('appends a timestamped breadcrumb to logs/tui_runtime_crash.log', async () => {
     const { recordParentLifecycle } = await loadFresh(home)
 
     recordParentLifecycle('graceful-exit received signal=SIGHUP → killing gateway')
 
-    const contents = readFileSync(join(home, 'logs', 'tui_gateway_crash.log'), 'utf8')
+    const contents = readFileSync(join(home, 'logs', 'tui_runtime_crash.log'), 'utf8')
 
     expect(contents).toContain('[tui-parent]')
     expect(contents).toContain('graceful-exit received signal=SIGHUP → killing gateway')
@@ -45,7 +45,7 @@ describe('recordParentLifecycle', () => {
 
     recordParentLifecycle('uncaughtException: boom\n  at foo()\r\n  at bar()')
 
-    const lines = readFileSync(join(home, 'logs', 'tui_gateway_crash.log'), 'utf8')
+    const lines = readFileSync(join(home, 'logs', 'tui_runtime_crash.log'), 'utf8')
       .trimEnd()
       .split('\n')
 
@@ -58,7 +58,7 @@ describe('recordParentLifecycle', () => {
 
     recordParentLifecycle('x'.repeat(10_000))
 
-    const line = readFileSync(join(home, 'logs', 'tui_gateway_crash.log'), 'utf8')
+    const line = readFileSync(join(home, 'logs', 'tui_runtime_crash.log'), 'utf8')
 
     expect(line).toContain('[truncated 10000 chars]')
     expect(line.length).toBeLessThan(4_500)
@@ -72,6 +72,6 @@ describe('recordParentLifecycle', () => {
     const { recordParentLifecycle } = await import('../lib/parentLog.js')
 
     expect(() => recordParentLifecycle('should not be written')).not.toThrow()
-    expect(() => readFileSync(join(home, 'logs', 'tui_gateway_crash.log'), 'utf8')).toThrow()
+    expect(() => readFileSync(join(home, 'logs', 'tui_runtime_crash.log'), 'utf8')).toThrow()
   })
 })

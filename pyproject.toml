@@ -92,16 +92,6 @@ dependencies = [
   # Requirement and version checks must work in lean installs without
   # relying on another package to bring packaging in transitively.
   "packaging==26.0; python_version >= '3.14'",
-  # Markdown -> HTML conversion for rich message delivery (Matrix
-  # `formatted_body`, and the `send_message` tool's HTML path). Now on the
-  # DEFAULT delivery path, not matrix-specific: without it both
-  # gateway/platforms/matrix.py and tools/send_message_tool.py silently fall
-  # back to plain text, so cron/agent deliveries render raw `##`/`**`/tables
-  # in clients like Element (see #32486). Pure-Python py3-none-any wheel
-  # (~108KB, no compiled extensions, no platform constraints), so unlike the
-  # matrix extra's `mautrix`/`python-olm` it's safe to ship everywhere — keeps
-  # it out of the lazy-install path that exists only for the heavy matrix deps.
-  "Markdown==3.10.2; python_version >= '3.14'",
   # Skills Hub (GitHub App JWT auth — optional, only needed for bot identity)
   "PyJWT[crypto]==2.13.0; python_version >= '3.14'",  # PYSEC-2026-175/177/178/179
   # urllib3 2.7.0 fixes GHSA-mf9v-mfxr-j63j (decompression-bomb bypass)
@@ -151,22 +141,6 @@ dependencies = [
   # so it rides in the main venv and every install, Desktop bundle included,
   # ships it without a separate tool environment.
   "browser-harness==0.1.13; python_version >= '3.14'",
-  # .gitignore-aware file matching for desktop build stamp.
-  "pathspec==1.1.1; python_version >= '3.14'",
-  "fastapi>=0.104.0,<1; python_version >= '3.14'",
-  # CIDR-aware forwarded_allow_ips requires uvicorn >=0.31.0.
-  # uvicorn's [standard] extra bundles uvloop, httptools, and watchfiles.
-  # uvloop cannot build on Android/Termux (libuv's ./configure fails), so
-  # we declare the working components inline and gate uvloop behind the
-  # [uvloop] optional extra — desktop/server profiles pull it via [all].
-  "uvicorn>=0.31.0,<1; python_version >= '3.14'",
-  "httptools>=0.6.3,<0.9; python_version >= '3.14'",
-  "watchfiles>=0.20,<2; python_version >= '3.14'",
-  # Streaming multipart uploads for the dashboard file manager (NS-501).
-  # FastAPI's UploadFile/Form depend on python-multipart; it is NOT pulled in
-  # by fastapi itself, so the dashboard's multipart upload endpoint would 500
-  # without an explicit dependency here (and in the `web` extra below).
-  "python-multipart>=0.0.9,<1; python_version >= '3.14'",
   "ptyprocess>=0.7.0,<1; sys_platform != 'win32' and python_version >= '3.14'",
   # Python 3.14 requires pywinpty 3.x. Version 3.0.5 includes the native
   # binaries missing from 3.0.4 wheels on both Windows architectures.
@@ -192,12 +166,6 @@ dependencies = [
   # Ships prebuilt wheels bundling libheif for the common platforms (no system
   # libs needed), so it's safe in the base install alongside Pillow.
   "pillow-heif>=1.4.0,<2; python_version >= '3.14'",
-  # SVG rendering for the icon generator (scripts/generate_icons.py). Source
-  # builds render icons with the runtime interpreter (`hermes desktop`,
-  # `hermes update`), so a source install carries its renderer instead of
-  # preparing a separate environment at launch. abi3 wheels for every
-  # shipped platform, including Windows ARM64 and Android.
-  "resvg-py==0.4.0; python_version >= '3.14'",
   # Windows log rotation. Stdlib ``RotatingFileHandler.doRollover()`` uses
   # ``os.rename()`` which fails with ``PermissionError [WinError 32]`` on
   # Windows whenever any other process holds an append-mode handle on
@@ -234,16 +202,10 @@ lancedb-memory = [
   "lancedb==0.39.0; ((sys_platform == 'darwin' and platform_machine == 'arm64') or (sys_platform == 'linux' and platform_machine == 'x86_64' and 'android' not in platform_release) or (sys_platform == 'linux' and platform_machine == 'aarch64' and 'android' not in platform_release))",
   "fastembed==0.8.1; ((sys_platform == 'darwin' and platform_machine == 'arm64') or (sys_platform == 'linux' and platform_machine == 'x86_64' and 'android' not in platform_release) or (sys_platform == 'linux' and platform_machine == 'aarch64' and 'android' not in platform_release))",
 ]
-# High-performance event loop — uvloop replaces the stdlib asyncio loop with
 # a libuv-backed implementation for ~2-4x throughput on uvicorn.  Gated as an
 # optional extra because libuv's ./configure does not run on Android/Termux
 # (bionic libc, non-FHS layout).  Desktop and server installs pull this via
 # [all]; the [termux] / [termux-all] profiles intentionally omit it.
-uvloop = [
-  "uvloop>=0.15.1,<0.24; sys_platform != 'win32' and sys_platform != 'cygwin' and sys_platform != 'android' and platform_python_implementation != 'PyPy'",
-]
-# Native Anthropic provider — only needed when provider=anthropic (not via
-# OpenRouter or other aggregators).
 anthropic = ["anthropic==0.87.0"] # CVE-2026-34450, CVE-2026-34452
 # Web search backends — each only loaded when the user picks it as their
 # search provider (configured via `hermes tools` or config.yaml).
@@ -277,39 +239,7 @@ piper = [
 modal = ["modal==1.5.5"]
 daytona = ["daytona==0.155.0"]
 vercel = ["vercel==0.7.2"]
-google-meet = ["playwright==1.62.0", "websockets==15.0.1"]
-messaging = [
-  "python-telegram-bot[webhooks]==22.8",
-  "discord.py[voice]==2.7.1",
-  "aiohttp==3.14.3",
-  "brotlicffi==1.2.0.2",
-  "slack-bolt==1.30.0",
-  "slack-sdk==3.44.1",
-  "qrcode==7.4.2",
-] # aiohttp 3.14.3: prior CVEs + GHSA-cq5v-8q36-5273/GHSA-mfx4-hv73-q22v/GHSA-mq44-7p77-q5h7
 cron = [] # croniter is now a core dependency; this extra kept for back-compat
-slack = ["slack-bolt==1.30.0", "slack-sdk==3.44.1", "aiohttp==3.14.3"]
-# Matrix gateway deps. `mautrix[encryption]` pulls `python-olm`, whose
-# vendored libolm (archived 2023) cannot build on Windows or modern macOS:
-# no wheels for those targets AND the sdist fails to compile on current
-# clang/MSVC (olm/list.hh const-iterator error) and on CMake >= 4. It is
-# linux-only — gate the whole extra so `uv sync --all-extras` (the bundle
-# build) doesn't try to build python-olm on the win/darwin lanes. The
-# matrix adapter degrades gracefully without mautrix (import stubs).
-matrix = [
-  "mautrix[encryption]==0.21.1; sys_platform == 'linux'",
-  "aiosqlite==0.22.1; sys_platform == 'linux'",
-  "asyncpg==0.31.0; sys_platform == 'linux'",
-  "aiohttp-socks==0.11.0; sys_platform == 'linux'",
-  "aiohttp==3.14.3; sys_platform == 'linux'",
-] # aiohttp 3.14.3: prior CVEs + GHSA-cq5v-8q36-5273/GHSA-mfx4-hv73-q22v/GHSA-mq44-7p77-q5h7 (mautrix/aiohttp-socks only cap aiohttp<4 / >=3.10, so pin the patched floor directly)
-
-# WeCom callback-mode adapter — parses untrusted XML POST bodies from
-# WeCom-controlled callback endpoints, so we use defusedxml (drop-in
-# replacement for stdlib xml.etree.ElementTree) to block billion-laughs
-# and XXE. aiohttp/httpx are already in [messaging]; defusedxml lands
-# here to keep the dependency local to wecom_callback's threat model.
-wecom = ["defusedxml==0.7.1"]
 tts-premium = ["elevenlabs==1.59.0"]
 voice = [
   # Local STT pulls in wheel-only transitive deps (ctranslate2, onnxruntime).
@@ -346,9 +276,6 @@ wake = [
 # lazy-installed at first use via pm.ensure_import(name) and therefore
 # deliberately NOT in [all] (see tests/test_project_metadata.py's
 # lazy_covered_extras list — keep that list in sync when adding here).
-telegram = ["python-telegram-bot[webhooks]==22.8"]
-discord = ["discord.py[voice]==2.7.1"]
-# stt-whisper + audio-io compose [voice] (faster-whisper / sounddevice / numpy).
 stt-whisper = [
   "faster-whisper==1.2.1; (platform_machine != 'ARM64' or sys_platform != 'win32') and (platform_machine != 'x86_64' or platform_system != 'Darwin')",
 ]
@@ -368,18 +295,8 @@ wake-sherpa = [
   "pypinyin==0.55.0",
 ]
 wake-porcupine = ["pvporcupine==4.0.3"]
-# Google Chat service account push (gateway/platforms/google_chat) — pubsub
 # subscriber for the Chat API's Cloud Pub/Sub delivery.
-# grpcio (pubsub's native transitive) has no win_arm64 wheel, so win32-arm64
 # would build its sdist and fail — gate the whole extra off there like
-# faster-whisper. The adapter's pubsub import is lazy, so this just makes the
-# google-chat platform unavailable on win32-arm64.
-google-chat = [
-  "google-cloud-pubsub==2.39.2; platform_machine != 'ARM64' or sys_platform != 'win32'",
-]
-# Document extraction (read_file anydoc converter self-heal) — core already
-# bundles firecrawl-anydoc==0.2.4; the extra exists so a lean/broken install
-# can re-sync exactly the pin from core.
 doc-extract = ["firecrawl-anydoc==0.2.4"]
 trace-upload = ["huggingface-hub==1.24.0"]
 # Cloud memory providers are opt-in PM extras. They stay outside [all]
@@ -396,7 +313,6 @@ vision = []
 # without pulling in extra packages.
 pty = []
 # CVE-2026-48710 (BadHost): Starlette is pulled transitively by mcp's
-# sse-starlette / HTTP-SSE stack (and by fastapi in the `web` extra). Before
 # 1.0.1, a malformed Host header makes `request.url.path` desync from the path
 # the ASGI router actually dispatched, so middleware/endpoints that gate on
 # `request.url` can be bypassed. We pin a patched Starlette directly in every
@@ -418,19 +334,11 @@ mcp = [
 # Backwards-compatible no-op alias. Relay is a core dependency on supported
 # wheel targets and intentionally unavailable on other platforms.
 nemo-relay = []
-sms = ["aiohttp==3.14.3"]
-teams = [
-  "microsoft-teams-apps==2.0.13.4",
-  "aiohttp==3.14.3",
-] # aiohttp 3.14.3: prior CVEs + GHSA-cq5v-8q36-5273/GHSA-mfx4-hv73-q22v/GHSA-mq44-7p77-q5h7
-# Computer use talks to PM's pinned cua-driver over MCP stdio. This extra
-# provides the MCP client, independently of the native driver package.
 computer-use = [
   "mcp==2.0.0",
   "httpx2==2.12.0",
   "starlette==1.3.1",
 ] # starlette: CVE-2026-48710
-acp = ["agent-client-protocol==0.9.0"]
 # mistral: Voxtral STT + TTS. Pinned to an exact verified-clean version.
 # The `mistralai` PyPI project was quarantined 2026-05-12 after the malicious
 # 2.4.6 release (Mini Shai-Hulud worm); 2.4.6 was removed from PyPI and the
@@ -453,10 +361,8 @@ vertex = ["google-auth==2.55.1"]
 azure-identity = ["azure-identity==1.25.3"]
 termux = [
   # Baseline Android / Termux path for reliable fresh installs.
-  "python-telegram-bot[webhooks]==22.8",
   "hermes-agent[cron]",
   "hermes-agent[mcp]",
-  "hermes-agent[acp]",
 ]
 termux-all = [
   # Best-effort "install all" profile for Termux. Same policy as [all]:
@@ -465,16 +371,8 @@ termux-all = [
   # first use, so they're no longer eager-installed here.
   "hermes-agent[termux]",
   "hermes-agent[google]",
-  "hermes-agent[sms]",
-  "hermes-agent[web]",
   "hermes-agent[pty]",
 ]
-dingtalk = [
-  "dingtalk-stream==0.24.3",
-  "alibabacloud-dingtalk==2.2.42",
-  "qrcode==7.4.2",
-]
-feishu = ["lark-oapi==1.6.8", "qrcode==7.4.2"]
 google = [
   # Required by the google-workspace skill (Gmail, Calendar, Drive, Contacts,
   # Sheets, Docs). Declared here so PM environments and independent
@@ -497,48 +395,22 @@ youtube = [
   # at first invocation with ModuleNotFoundError (issue #22243).
   "youtube-transcript-api==1.2.4",
 ]
-# `hermes dashboard` (localhost SPA + API).  Not in core to keep the default install lean.
-# starlette==1.3.1 pinned for CVE-2026-48710 (BadHost) — fastapi pulls Starlette
-# transitively and pre-1.0.1 is the vulnerable range. See the mcp extra above.
-# uvicorn pin without [standard] — httptools / watchfiles are now core deps,
-# and uvloop is gated behind the [uvloop] extra.  This keeps [web] safe for
-# termux-all which includes it.
-web = [
-  "fastapi==0.133.1",
-  "uvicorn==0.41.0",
-  "starlette==1.3.1",
-  "python-multipart==0.0.32",
-]
+# Website branding renderer: build-only, never a terminal runtime dependency.
+icons = ["resvg-py==0.4.0"]
 all = [
   # Policy (2026-05-12): `[all]` includes only extras that genuinely
   # CAN'T be prepared on demand by PM — i.e. things every
   # session can use, things needed before the agent loop is alive
   # (terminal/CLI), and skill deps that dev environments need.
   # Anything an opt-in backend (provider, search, TTS, image, memory,
-  # messaging platform, terminal sandbox) needs MUST live exclusively in
+  # terminal sandbox) needs MUST live exclusively in
   # opt-in extras and resolve at first use — otherwise one quarantined PyPI
   # release breaks every fresh install.
   #
-  # Removed from [all] on 2026-05-12 (covered by lazy-install):
-  #   anthropic, exa, firecrawl, parallel-web, fal, edge-tts,
-  #   modal, daytona, vercel, messaging (telegram/discord/slack),
-  #   matrix, slack, honcho, voice (faster-whisper),
-  #   dingtalk, feishu, bedrock, tts-premium (elevenlabs)
-  #
-  # Why: the matrix extra in particular pulls `mautrix[encryption]`
-  # which depends on `python-olm`. python-olm has Linux-only wheels and
-  # no native build path on Windows or modern macOS. With matrix in
-  # [all], `uv sync --locked` on Windows tried to build it from sdist
-  # and failed on `make`. Lazy-install routes that build to first use,
-  # where the user is expected to have a toolchain available.
   "hermes-agent[cron]",
   "hermes-agent[pty]",
   "hermes-agent[mcp]",
-  "hermes-agent[uvloop]",
-  "hermes-agent[sms]",
-  "hermes-agent[acp]",
   "hermes-agent[google]",
-  "hermes-agent[web]",
   "hermes-agent[youtube]",
 ]
 
@@ -573,7 +445,6 @@ build-backend = "setuptools.build_meta"
 [project.scripts]
 hermes = "hermes_cli.main:main"
 hermes-agent = "agent.legacy_cli:main"
-hermes-acp = "acp_adapter.entry:main"
 
 [tool.hermes]
 supported-platforms = ["linux", "macos", "wsl"]
@@ -594,9 +465,6 @@ opt-in-extras = ["kittentts"]
 [tool.hermes.extras-platforms]
 lancedb-memory = "((sys_platform == 'darwin' and platform_machine == 'arm64') or (sys_platform == 'linux' and platform_machine == 'x86_64' and 'android' not in platform_release) or (sys_platform == 'linux' and platform_machine == 'aarch64' and 'android' not in platform_release))"
 # mautrix[encryption] → python-olm: linux-only wheels, no win/darwin build.
-matrix = "sys_platform == 'linux'"
-# grpcio (via google-cloud-pubsub) has no win_arm64 wheel.
-google-chat = "platform_machine != 'ARM64' or sys_platform != 'win32'"
 # Match the engine dependency markers so PM refuses an unsupported install.
 wake-openwakeword = "(platform_machine != 'ARM64' or sys_platform != 'win32') and (platform_machine != 'x86_64' or sys_platform != 'darwin')"
 # faster-whisper's closure is prebuilt-only: ctranslate2 has no win_arm64 wheel and onnxruntime
@@ -620,11 +488,6 @@ default-groups = []
 # where extras that only ever coexist on 3.14 (kittentts vs neutts) conflict.
 environments = ["python_version >= '3.14' and sys_platform != 'win32'"]
 override-dependencies = [
-  # discord.py's latest published version, 2.7.1, pins pynacl at <1.6. however, pynacl 1.5.0 has known vulnerabilities.
-  # discord.py has updated pynacl to 1.6 on `main`, but has not yet published a patch release.
-  # so, we force-override this to pynacl 1.6. here.
-  # remove this when we update discord.py
-  "pynacl>=1.6,<1.7",
   # alibabacloud-tea-openapi caps cryptography<49, and its latest release
   # still does. Without this override, that cap holds cryptography at 48.0.1
   # and its three advisories (see the cryptography pin in
@@ -674,7 +537,6 @@ include = [
   "tui_gateway.*",
   "cron",
   "cron.*",
-  "acp_adapter",
   "plugins",
   "plugins.*",
   "providers",
@@ -776,7 +638,6 @@ select = ["PLW1514", "ASYNC210", "ASYNC220", "ASYNC221", "ASYNC251", "TID251"]
 [tool.ruff.lint.per-file-ignores]
 "pm/**" = ["TID251"]
 # Desktop E2E fixtures stand in for PM's worker/runtime and reach into it like tests do.
-"apps/desktop/electron/fixtures/**" = ["TID251"]
 # Tests can intentionally exercise locale-encoding edge cases.
 "tests/**" = [
   "PLW1514",
@@ -804,7 +665,6 @@ select = ["PLW1514", "ASYNC210", "ASYNC220", "ASYNC221", "ASYNC251", "TID251"]
 "gateway/run_shutdown.py" = ["ASYNC220"]
 "gateway/slash_commands.py" = ["ASYNC220"]
 # Off-loop sweep for these routers is in flight (PR #84376).
-"hermes_cli/web_routers/profiles.py" = ["ASYNC220", "ASYNC221"]
 # Legacy blocking spawn sites in platform adapters, pending their own fixes.
 "plugins/platforms/whatsapp/adapter.py" = ["ASYNC220", "ASYNC221"]
 "plugins/platforms/photon/adapter.py" = ["ASYNC220"]

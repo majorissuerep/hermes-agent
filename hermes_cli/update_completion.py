@@ -209,19 +209,6 @@ def _record_owed_user_action(request: dict) -> bool:
     return notice is None
 
 
-def _publish_gateway_success(request: dict) -> None:
-    """The gateway /update watcher's status: the code is committed (same as _complete_selected).
-
-    Guarded like ``update_cmd_fleet._write_gateway_update_exit_code`` (which this stdlib-only
-    process cannot import): an unwritable home must not turn the committed run into an error
-    before its result is written (review P1). The watcher then falls back to its own timeout.
-    """
-    if not request.get("gateway_mode"):
-        return
-    try:
-        (Path(request["home"]) / ".update_exit_code").write_text("0", encoding="utf-8")
-    except OSError as exc:
-        print(f"  ⚠ Could not publish the gateway's update status: {exc}")
 
 
 #: The one whole line the Desktop hand-off scripts match (scripts/desktop-update/posix.sh and
@@ -229,19 +216,6 @@ def _publish_gateway_success(request: dict) -> None:
 DESKTOP_BUILD_OWED = "Desktop app build owed:"
 
 
-def _report_desktop_build_owed(request: dict, record: dict | None, reason: str) -> None:
-    """Name the owed Desktop build when this run never got the build to its own verdict (F6, review P4).
-
-    The builder prints the line only when the build itself fails; a run that never reached it
-    (dependencies owed, the tail refused by the lock, a completion process lost) would otherwise end
-    as a plain "Update complete." in the hand-off. A ``build`` stage on the run's record means the
-    build ran and printed this line itself when the Desktop app failed.
-    """
-    if not request.get("desktop"):
-        return
-    if any(isinstance(mark, dict) and mark.get("name") == "build" for mark in (record or {}).get("stages") or ()):
-        return
-    print(f"  {DESKTOP_BUILD_OWED} {reason}", flush=True)
 
 
 def settle_lost_completion(request: dict, reason: str) -> dict:
@@ -265,7 +239,6 @@ def settle_lost_completion(request: dict, reason: str) -> dict:
             arm_completion(Path(request["source"]))
         except Exception as exc:  # health: allow BLE001 -- post-commit boundary: stale dependencies still make the next launch sync
             print(f"  ⚠ Could not record the owed source-update tail: {exc}")
-        _report_desktop_build_owed(request, _running_record(request), "the update completion did not finish")
         update_receipt.resume_run_record()  # the child's persisted stages, never this stale snapshot
         update_receipt.record_followup("completion", reason, retry="the next launch or `hermes update` finishes it")
         parked = not _record_owed_user_action(request)
@@ -275,8 +248,6 @@ def settle_lost_completion(request: dict, reason: str) -> dict:
         receipt = _read_terminal_receipt(request)
     outcome = (receipt or {}).get("outcome")
     code = 130 if outcome == "interrupted" else 1 if outcome == "partial" else 0
-    if code == 0:
-        _publish_gateway_success(request)
     return {"exit_code": code, "receipt": receipt, "windows_resume": None, "pm_receipt": None}
 
 
@@ -299,7 +270,6 @@ def _settle_after_commit(request: dict, result_path: Path, step: str, reason: st
     if receipt is None:
         # A prepared child that died mid-tail persisted stages the parent's snapshot lacks.
         record = _running_record(request) or request["receipt"]
-        _report_desktop_build_owed(request, record, f"{step} did not finish")
         _resume_receipt(record)
         update_receipt.record_stage("deps" if step == "dependencies" else "build", "failed")
         update_receipt.record_followup(step, reason, retry="dependencies not installed yet — the next launch retries"
@@ -309,8 +279,6 @@ def _settle_after_commit(request: dict, result_path: Path, step: str, reason: st
         update_receipt.finalize_pending_update_receipt(0, f"{step} owed after the code was updated")
         receipt = _read_terminal_receipt(request)
     code = 0 if receipt is not None and receipt.get("outcome") == "success" else 1
-    if code == 0:
-        _publish_gateway_success(request)
     return _write_bootstrap_result(request, result_path, code, receipt)
 
 
@@ -362,100 +330,36 @@ def _prepare(request: dict, request_path: Path, result_path: Path) -> int:
 
 
 def _complete_selected(request: dict) -> bool:
-    """Everything after the commit point. No step failure fails the update (contract C3).
-
-    Each step is independent; a failed one prints ``⚠``, lands on the receipt as a follow-up
-    and keeps its own obligation armed (``source-completion-pending`` for the tail, the fleet
-    restart obligation for gateways), so the next launch or ``hermes update`` retries it.
-    Returns False only when the user's local changes were left parked in the stash: nothing
-    retries that, so the run is ``partial`` and exits 1 (#122557), never "Update complete".
-    """
+    """Complete committed source locally; preserve parked user changes and retryable tail debt."""
     from hermes_cli import main, update_cmd, update_cmd_config
     from hermes_cli.source_completion import complete_source_checkout
-    from hermes_cli.update_inventory import RuntimeRecord, UpdatePlan
-    from hermes_cli.update_receipt import (
-        TAIL_FOLLOWUPS, record_build_stage, record_followup, record_skip, record_stage)
+    from hermes_cli.update_receipt import TAIL_FOLLOWUPS, record_build_stage, record_followup
 
     root = Path(request["source"])
     main.PROJECT_ROOT = root
     complete = _record_owed_user_action(request)
-    update_cmd_config._LAST_SIBLING_SNAPSHOTS = request["sibling_snapshots"]
-    plan_data = request["plan"]
-    plan = None if plan_data is None else UpdatePlan(**{
-        **plan_data, "runtimes": [RuntimeRecord(**row) for row in plan_data.get("runtimes", [])]})
+    update_cmd_config._LAST_SIBLING_SNAPSHOTS = request.get("sibling_snapshots", {})
     update_cmd._sweep_bytecode_after_update(request["branch"])
-    # Launchers, products and post-build maintenance live in one place so an
-    # install and an update cannot end in different states.
     followups: list[tuple[str, str]] = []
-    # Exit status and runtime safety are separate facts (R8): an unsafe SQLite runtime keeps the
-    # committed update at exit 0 (reported as the ``sqlite_runtime`` follow-up), but fleet
-    # verification still needs the real verdict so it never auto-migrates the gateway topology
-    # on a runtime that can corrupt sessions. Unknown (the tail raised) is not proven safe.
-    runtime_safe = False
     try:
-        runtime_safe = complete_source_checkout(
-            root, desktop=request["desktop"], assume_yes=request["assume_yes"],
-            gateway_mode=request["gateway_mode"], pre_update_snapshot_id=request["snapshot_id"],
-            pre_update_version=request["pre_update_version"],
+        complete_source_checkout(
+            root, assume_yes=request["assume_yes"],
+            pre_update_snapshot_id=request.get("snapshot_id"),
+            pre_update_version=request.get("pre_update_version"),
             completion_message=request.get("completion_message"),
             announce=None if request.get("completion_message") else "\n✓ Code updated!",
-            followups=followups, before_build=lambda: _resume_paused_before_build(request))
-    except (Exception, SystemExit) as exc:  # health: allow BLE001 -- e.g. the shared update lock refused the tail
+            followups=followups)
+    except (Exception, SystemExit) as exc:  # health: allow BLE001 -- committed tree: preserve a named retryable tail
         reason = str(exc) or type(exc).__name__
-        # The tail's steps catch their own failures, so a raise here means the build never ran.
-        _report_desktop_build_owed(request, None, "the source-update tail did not run")
         record_followup("completion", reason)
         followups.append(("completion", reason))
-    tail_owed = any(step in TAIL_FOLLOWUPS for step, _ in followups)
     record_build_stage(followups)
-    if not tail_owed:
+    if not any(step in TAIL_FOLLOWUPS for step, _ in followups):
         from hermes_cli.venv_sync import clear_completion
         clear_completion(root)
-    # systemctl's KillMode=mixed fallback can kill this whole cgroup. Publish the
-    # gateway watcher's status BEFORE that operation: the code is committed, so it is 0 unless
-    # the user's own changes are still parked.
-    if request["gateway_mode"]:
-        update_cmd._write_gateway_update_exit_code(complete)
-    if request.get("no_gateway_restart", False):
-        record_skip("gateway_restart", "--no-gateway-restart: deferred, marker kept")
-        record_stage("restart", "skipped")
-        print("→ Gateway restart deferred (--no-gateway-restart); restart gateways separately.")
-        return complete
-    skip = update_cmd._fleet_restart_skip_reason(plan)
-    if skip and update_cmd._pending_fleet_restart_needed():
-        # A host already stamped "restarted" for this SHA whose fleet is still off the checkout
-        # (a stale sibling, a failed resume) gets the restart again instead of a dead end.
-        print(f"  → Gateway restart not skipped ({skip}): gateways are still off the checkout code.")
-        skip = None
-    if skip:
-        record_skip("gateway_restart", skip)
-        record_stage("restart", "skipped")
-        print(f"  ✓ Gateway restart skipped: {skip}.")
-        return complete
-    restart = update_cmd._restart_gateway_fleet_after_update(plan, request["gateway_mode"])
-    record_stage("restart", "failed" if getattr(restart, "incomplete", False) else "success")
-    update_cmd._resume_windows_gateways_and_merge_outcome(restart, request["windows_resume"], request["gateway_mode"])
-    update_cmd._verify_fleet_after_update(
-        restart, _pre_update_plan=plan, _windows_gateway_resume=request["windows_resume"],
-        update_complete=bool(runtime_safe) and complete)
     return complete
 
 
-def _resume_paused_before_build(request: dict) -> None:
-    """Restart the gateways the POSIX pause stopped: the dependencies are synced and the launchers
-    published, the product builds (minutes) have not started. A gateway needs nothing later to
-    boot. A failure stays owed: the post-build resume retries it and records the outcome.
-
-    POSIX only: the fleet restart skips what this restarted (``already_restarted``). A Windows set
-    keeps resuming after the fleet restart, which would otherwise drain it a second time."""
-    token = request.get("windows_resume")
-    if not token or not token.get("resume_needed") or token.get("platform") != "posix":
-        return
-    from hermes_cli.update_cmd import _m
-    try:
-        _m()._resume_windows_gateways_after_update(token)
-    except Exception as exc:  # health: allow BLE001 -- retried (and recorded) after the build
-        print(f"  ⚠ Paused gateway restart incomplete ({exc}); retrying after the build")
 
 
 class _ForwardedOutput:
@@ -471,13 +375,6 @@ class _ForwardedOutput:
         return getattr(self.stream, name)
 
 
-def _report_unbuilt_desktop(request: dict) -> None:
-    """The tail raised out of ``_complete_selected``: before the build stage, the build never ran."""
-    from hermes_cli import update_receipt
-
-    current = update_receipt._current.get()
-    if current is not None:  # a finalized run got past the build (verification finalizes it)
-        _report_desktop_build_owed(request, current.data, "the source-update tail did not finish")
 
 
 def _finish(request: dict, result_path: Path) -> int:
@@ -486,48 +383,26 @@ def _finish(request: dict, result_path: Path) -> int:
 
     _resume_receipt(request["receipt"])
     accept_worker_receipt(request.get("pm_receipt"), request["receipt"]["update_id"])
-    update_receipt.record_stage("deps", "success")  # only a completed PM preparation reaches --prepared
+    update_receipt.record_stage("deps", "success")
     code, reason = 0, "source update completion"
     try:
         if not _complete_selected(request):
             code, reason = 1, "local changes left in the stash; re-apply them by hand"
     except KeyboardInterrupt:
-        # An operator interrupt is not a step failure, and the code already moved: the run is
-        # ``interrupted`` (never "failed"), and the armed obligations finish the tail.
         code, reason = 130, "KeyboardInterrupt: interrupted after the code was updated"
         update_receipt.finalize_interrupted_update_receipt(reason, exit_code=code)
-    except SystemExit as exc:
-        if exc.code not in (0, None):
-            _report_unbuilt_desktop(request)
-            update_receipt.record_followup("completion", f"completion exited {exc.code}")
-    except BaseException as exc:
-        _report_unbuilt_desktop(request)
+    except (Exception, SystemExit) as exc:  # health: allow BLE001 -- committed tree: completion remains owed
         update_receipt.record_followup("completion", f"{type(exc).__name__}: {exc}")
     finally:
-        custody = sys.modules.get("hermes_cli.update_custody")
-        refusal = custody.refusal_notice() if code and custody is not None else None
-        if refusal:  # m2: what stopped it, whatever error the refusal turned into downstream
-            print(refusal)
-        # The new interpreter owns recovery too. The original parent's atexit
-        # token is updated from the response; it acts only if this process dies.
-        try:
-            from hermes_cli.update_cmd import _resume_windows_gateways_after_update
-            _resume_windows_gateways_after_update(request["windows_resume"])
-        except Exception as exc:
-            update_receipt.owe_followup(request["receipt"]["update_id"], "windows_resume",
-                                        f"Windows gateway recovery failed: {exc}")
         update_receipt.finalize_pending_update_receipt(code, reason)
-        terminal_receipt = _read_terminal_receipt(request)
-        if terminal_receipt and terminal_receipt.get("outcome") == "success":
-            code = 0  # an interrupt that landed after verification closed the run (review regression 3)
-        if code and request["gateway_mode"]:
-            from hermes_cli.update_cmd import _write_gateway_update_exit_code
-            _write_gateway_update_exit_code(False)
-        if not terminal_receipt:
-            code = code or 1  # the parent settles a lost result (settle_lost_completion)
+        terminal = _read_terminal_receipt(request)
+        if terminal and terminal.get("outcome") == "success":
+            code = 0
+        if not terminal:
+            code = code or 1
         _write_json(result_path, {
             "schema": 1, "update_id": request["receipt"]["update_id"], "exit_code": code,
-            "receipt": terminal_receipt, "windows_resume": request["windows_resume"],
+            "receipt": terminal, "windows_resume": None,
         })
     return code
 

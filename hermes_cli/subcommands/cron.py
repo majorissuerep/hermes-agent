@@ -26,31 +26,26 @@ def build_cron_parser(subparsers, *, cmd_cron: Callable) -> None:
     cron_create.add_argument(
         "prompt", nargs="?", help="Optional self-contained prompt or task instruction")
     cron_create.add_argument("--name", help="Optional human-friendly job name")
-    cron_create.add_argument("--deliver",
-        help="Delivery target: origin, local, telegram, discord, signal, "
-            "platform:chat_id, or bot-chat[:profile] (inject output into a "
-            "local profile's canonical Bot Chat as a message the bot responds to)")
-    cron_create.add_argument("--failure-deliver", dest="failure_deliver",
-        help="Override target for FAILURE notices only (same grammar as "
-            "--deliver). 'local' suppresses failure notices entirely; run "
-            "state stays visible in `hermes cron list`. Omit = failures "
-            "follow --deliver.")
+    cron_create.add_argument("--deliver", choices=["local"],
+        help="Store results locally (the only supported destination).")
+    cron_create.add_argument("--failure-deliver", dest="failure_deliver", choices=["local"],
+        help="Keep failure results local; execution state remains visible in cron runs.")
     cron_create.add_argument("--repeat", type=int, help="Optional repeat count")
     cron_create.add_argument("--skill", dest="skills", action="append",
         help="Attach a skill. Repeat to add multiple skills.")
     cron_create.add_argument("--script",
-        help="Path to a script under ~/.hermes/scripts/. Default mode: "
+        help="Path to a script under the active profile's scripts/ directory. Default mode: "
             "script stdout is injected into the agent's prompt each run. "
             "With --no-agent: the script IS the job and its stdout is "
-            "delivered verbatim. .sh/.bash files run via bash, everything "
+            "stored locally verbatim. .sh/.bash files run via bash, everything "
             "else via Python.")
     _flag(cron_create, "--no-agent", dest="no_agent", default=False,
-        help="Skip the LLM entirely — run --script on schedule and deliver "
-            "its stdout directly. Empty stdout = silent. Classic watchdog "
+        help="Skip the LLM entirely — run --script when ticked and store "
+            "its stdout locally. Empty stdout = silent. Classic watchdog "
             "pattern (memory alerts, disk alerts, CI pings).")
     cron_create.add_argument("--monitor-script", dest="monitor_script",
         help="Monitor mode: path to a cheap source script under "
-            "~/.hermes/scripts/ that runs each tick BEFORE the agent. "
+            "the active profile's scripts/ directory that runs each tick BEFORE the agent. "
             "Unchanged output (exact-bytes hash) suppresses the agent run "
             "entirely; changed output injects a MONITOR CHANGE DETECTED "
             "diff into the prompt. Script output must be stable (no "
@@ -71,7 +66,7 @@ def build_cron_parser(subparsers, *, cmd_cron: Callable) -> None:
         help="Lock the CURRENT main agent model (and its provider) onto this job so later "
             "`hermes model` changes never touch it. Ignored when --model is given.")
     cron_create.add_argument("--provider", dest="model_provider",
-        help="Inference provider paired with --model (e.g. 'openrouter', 'nous').")
+        help="Inference provider paired with --model (use a configured provider).")
     cron_create.add_argument("--reasoning-effort", dest="reasoning_effort",
         help="Pin this job's reasoning (thinking) effort: none, minimal, low, "
             "medium, high, xhigh, max, or ultra. Overrides agent.reasoning_effort "
@@ -97,10 +92,9 @@ def build_cron_parser(subparsers, *, cmd_cron: Callable) -> None:
     cron_edit.add_argument("--schedule", help="New schedule")
     cron_edit.add_argument("--prompt", help="New prompt/task instruction")
     cron_edit.add_argument("--name", help="New job name")
-    cron_edit.add_argument("--deliver", help="New delivery target")
+    cron_edit.add_argument("--deliver", choices=["local"], help="Store results locally")
     cron_edit.add_argument("--failure-deliver", dest="failure_deliver",
-        help="Override target for failure notices (same grammar as --deliver; "
-            "'local' suppresses; '' clears the override)")
+        choices=["local", ""], help="Keep failure results local; empty clears the override")
     cron_edit.add_argument("--repeat", type=int, help="New repeat count")
     cron_edit.add_argument("--skill", dest="skills", action="append",
         help="Replace the job's skills with this set. Repeat to attach multiple skills.")
@@ -110,7 +104,7 @@ def build_cron_parser(subparsers, *, cmd_cron: Callable) -> None:
         help="Remove a specific attached skill. Repeatable.")
     _flag(cron_edit, "--clear-skills", help="Remove all attached skills from the job")
     cron_edit.add_argument("--script",
-        help="Path to a script under ~/.hermes/scripts/. Pass empty string to clear. "
+        help="Path to a script under the active profile's scripts/ directory. Pass empty string to clear. "
             "With --no-agent the script IS the job; otherwise its stdout is "
             "injected into the agent's prompt each run.")
     cron_edit.add_argument(
@@ -170,7 +164,7 @@ def build_cron_parser(subparsers, *, cmd_cron: Callable) -> None:
     cron_remove.add_argument("job_id", help="Job ID to remove")
 
     # cron status
-    cron_subparsers.add_parser("status", help="Check if cron scheduler is running")
+    cron_subparsers.add_parser("status", help="Show manual scheduler status")
 
     cron_runs = cron_subparsers.add_parser(
         "runs", aliases=["history"], help="Show durable execution attempts")

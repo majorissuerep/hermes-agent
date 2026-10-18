@@ -694,3 +694,21 @@ def test_slices_partition_the_suite_exactly_even_with_different_duration_caches(
     slices = [rtp._slice_files(list(reversed(files)) if i % 2 else files, i % 3 + 1, 3, caches[i % 3], root)
               for i in range(3)]
     assert sorted(f for s in slices for f in s) == sorted(files)
+
+
+@pytest.mark.parametrize("flag", ["--collect-only", "--co", "--collectonly"])
+def test_collection_only_reports_items_without_execution_or_duration_updates(tmp_path, flag):
+    probe = _make_probe_dir(tmp_path)
+    marker = tmp_path / "executed"
+    (probe / "test_flagprobe.py").write_text(
+        f"from pathlib import Path\ndef test_alpha(): Path({str(marker)!r}).touch()\n"
+        "def test_beta(): assert False\n")
+    root = _probe_root(tmp_path)
+    cache = root / "test_durations.json"
+    cache.write_text('{"tests/test_old.py": 123.0}\n')
+    before = cache.read_bytes()
+    result = _run_runner(probe, flag)
+    assert result.returncode == 0, result.stdout
+    assert "2 tests collected" in result.stdout and "0 tests executed" in result.stdout
+    assert not marker.exists()
+    assert cache.read_bytes() == before

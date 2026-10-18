@@ -40,27 +40,10 @@ class TestChatVerboseArg:
         chat_parser.set_defaults(func=main_mod.cmd_chat)
         args = parser.parse_args(["chat"])
         captured = {}
-        fake_cli = types.ModuleType("cli")
-
-        def fake_main(**kwargs):
-            captured.update(kwargs)
-
-        fake_cli.main = fake_main
-        fake_banner = types.ModuleType("hermes_cli.banner")
-        fake_banner.prefetch_update_check = lambda: None
-        fake_skills_sync = types.ModuleType("tools.skills_sync")
-        fake_skills_sync.sync_skills = lambda quiet=True: None
-
-        monkeypatch.setitem(sys.modules, "cli", fake_cli)
-        monkeypatch.setitem(sys.modules, "hermes_cli.banner", fake_banner)
-        monkeypatch.setitem(sys.modules, "tools.skills_sync", fake_skills_sync)
-        monkeypatch.setattr(main_mod, "_has_any_provider_configured", lambda: True)
+        monkeypatch.setattr(main_mod, "_launch_tui", lambda *a, **kwargs: captured.update(kwargs))
         monkeypatch.setattr(main_mod, "_pin_kanban_board_env", lambda: None)
-
         main_mod.cmd_chat(args)
-
-        assert captured["quiet"] is False
-        assert "verbose" not in captured
+        assert captured["quiet"] is False and captured["verbose"] is None
 
 
 class TestAcceptHooksOnAgentSubparsers:
@@ -72,17 +55,11 @@ class TestAcceptHooksOnAgentSubparsers:
     with `unrecognized arguments`."""
 
     ARGVS = [
-        ["--accept-hooks", "gateway", "run", "--help"],
-        ["gateway", "--accept-hooks", "run", "--help"],
-        ["gateway", "run", "--accept-hooks", "--help"],
-        ["--accept-hooks", "cron", "tick", "--help"],
-        ["cron", "--accept-hooks", "tick", "--help"],
-        ["cron", "tick", "--accept-hooks", "--help"],
-        ["cron", "run", "--accept-hooks", "dummy-id", "--help"],
-        ["--accept-hooks", "mcp", "serve", "--help"],
-        ["mcp", "--accept-hooks", "serve", "--help"],
-        ["mcp", "serve", "--accept-hooks", "--help"],
-        ["acp", "--accept-hooks", "--help"],
+        ["--accept-hooks", "chat", "--help"],
+        ["chat", "--accept-hooks", "--help"],
+        ["--accept-hooks", "cron", "run", "--help"],
+        ["cron", "--accept-hooks", "run", "--help"],
+        ["cron", "run", "--accept-hooks", "--help"],
     ]
 
     # One driver subprocess parses ALL argvs: hermes_cli.main is a very heavy

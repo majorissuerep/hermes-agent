@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { expect, test, vi } from 'vitest'
 import { generateIcons } from '../scripts/generate-icons.mjs'
 
-test('the real wrapper builds and checks native icon artifacts in an independent output', () => {
+test('the real wrapper builds and checks website branding artifacts in an independent output', () => {
   const out = fs.mkdtempSync(path.join(os.tmpdir(), 'hermes-icons-'))
   const env = { ...process.env, HERMES_HOME: path.join(out, 'home'),
     HERMES_RUNTIME_DIR: path.join(out, 'tools'), HERMES_PAYLOAD_TAG: 'v1.2.3', HERMES_BUILD_COMMIT: '',
@@ -13,9 +13,9 @@ test('the real wrapper builds and checks native icon artifacts in an independent
   try {
     const args = ['--source', fileURLToPath(new URL('..', import.meta.url)), '--out', out]
     expect(generateIcons(args, { env })).toBe(0)
-    const png = fs.readFileSync(path.join(out, 'apps/desktop/assets/icon.png'))
+    const png = fs.readFileSync(path.join(out, 'website/static/img/logo.png'))
     expect(png.subarray(0, 8)).toEqual(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
-    expect([png.readUInt32BE(16), png.readUInt32BE(20)]).toEqual([1024, 1024])
+    expect([png.readUInt32BE(16), png.readUInt32BE(20)]).toEqual([1772, 1799])
     expect(generateIcons([...args, '--check'], { env })).toBe(0)
     expect(env.PYTHONPATH).toBe(path.join(out, 'foreign-site'))
   } finally {

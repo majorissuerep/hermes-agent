@@ -76,47 +76,6 @@ class TestCatchAllPatterns:
 # Non-secret keys → config.yaml
 # ---------------------------------------------------------------------------
 
-class TestGatewayPlatformsPrefixRedirect:
-    """#115212: ``gateway.platforms.<p>.<field>`` lands on the top-level ``platforms.<p>.<field>``
-    the gateway prefers, instead of a nested key that an existing top-level value shadows."""
-
-    def test_set_lands_on_top_level_platforms_block_the_loader_reads(self, _isolated_hermes_home, capsys):
-        (_isolated_hermes_home / "config.yaml").write_text(
-            "platforms:\n  telegram:\n    enabled: false\n", encoding="utf-8")
-        set_config_value("gateway.platforms.telegram.enabled", "true")
-        out = capsys.readouterr().out
-        assert "saved as platforms.telegram.enabled" in out
-        loaded = yaml.safe_load(_read_config(_isolated_hermes_home))
-        assert loaded["platforms"]["telegram"]["enabled"] is True
-        assert "gateway" not in loaded
-        from gateway.config import Platform, load_gateway_config
-        assert load_gateway_config().platforms[Platform.TELEGRAM].enabled is True
-
-    def test_nested_display_setting_still_reaches_display_platforms(self):
-        from hermes_cli.config import _redirect_platform_display_key
-        key, _ = _redirect_platform_display_key("gateway.platforms.telegram.streaming")
-        assert key == "display.platforms.telegram.streaming"
-
-    def test_get_and_unset_still_reach_a_legacy_nested_only_value(self, _isolated_hermes_home, capsys):
-        """A config whose value lives ONLY under ``gateway.platforms`` is still honoured by the gateway
-        (``merge_platform_sections``), so ``get`` must read it and ``unset`` must remove it instead of
-        reporting "not set" while the gateway keeps the platform enabled."""
-        from hermes_cli.config import get_config_value, unset_config_value
-
-        legacy = "gateway:\n  platforms:\n    telegram:\n      enabled: true\n"
-        (_isolated_hermes_home / "config.yaml").write_text(legacy, encoding="utf-8")
-        get_config_value("gateway.platforms.telegram.enabled")
-        assert capsys.readouterr().out.strip().lower() == "true"
-
-        unset_config_value("gateway.platforms.telegram.enabled")
-        assert "gateway" not in (yaml.safe_load(_read_config(_isolated_hermes_home)) or {})
-
-        # set on top of a nested-only value leaves one source of truth, not a shadowed duplicate
-        (_isolated_hermes_home / "config.yaml").write_text(legacy, encoding="utf-8")
-        set_config_value("gateway.platforms.telegram.enabled", "false")
-        loaded = yaml.safe_load(_read_config(_isolated_hermes_home))
-        assert loaded == {"platforms": {"telegram": {"enabled": False}}}
-
 
 class TestConfigYamlRouting:
     """Regular config keys should go to config.yaml, NOT .env."""
@@ -126,9 +85,6 @@ class TestConfigYamlRouting:
         config = _read_config(_isolated_hermes_home)
         assert "gpt-4o" in config
         assert "model" not in _read_env(_isolated_hermes_home)
-
-
-
 
 
     def test_tool_search_defer_is_recognized(self, _isolated_hermes_home, capsys):
@@ -156,7 +112,6 @@ class TestConfigYamlRouting:
             _isolated_hermes_home
         )
         assert "not a recognized config key" not in capsys.readouterr().out
-
 
 
 # ---------------------------------------------------------------------------
@@ -461,7 +416,6 @@ class TestSecretRedactionInDisplay:
         assert "Set model.api_key" in captured.out
 
 
-
 # ---------------------------------------------------------------------------
 # #34067: Schema validation for unknown keys
 # ---------------------------------------------------------------------------
@@ -469,18 +423,15 @@ class TestSecretRedactionInDisplay:
 class TestSchemaValidation:
     """#34067 / #112003 / #114107: only a WRONG-PREFIX path under a known section is provably a typo
     and refused before anything is written (headline case
-    ``gateway.discord.gateway_restart_notification``, correct path
-    ``discord.gateway_restart_notification``). Every other unknown path — unseeded runtime-read keys
+    ``agent.terminal.timeout``, correct path ``terminal.timeout``). Every other unknown path — unseeded runtime-read keys
     and same-section misspellings alike — is written with a post-write notice, because
     DEFAULT_CONFIG is not a complete registry of what the runtime reads.
     """
 
     @pytest.mark.parametrize("key,suggestion", [
-        ("gateway.discord.gateway_restart_notification", "discord.gateway_restart_notification"),
-        # The stray middle segment ``gateway`` fuzzy-matches the sibling ``agent.gateway_timeout``;
-        # the structural wrong-prefix match must win so the path is refused, not written with
-        # a misleading did-you-mean.
-        ("agent.gateway.strict", "gateway.strict"),
+        ("agent.terminal.timeout", "terminal.timeout"),
+        # A misplaced root is refused before it can be persisted as an unused nested option.
+        ("compression.terminal.backend", "terminal.backend"),
     ])
     def test_unknown_subkey_under_known_section_refused_before_write(
         self, key, suggestion, _isolated_hermes_home, capsys
@@ -504,10 +455,7 @@ class TestSchemaValidation:
         # from an unseeded key, so it is written too — the user gets the sibling suggestion
         # (``agent.max_turns``) instead of a refusal.
         ("agent.max_turnz", "50", 50, "agent.max_turns"),
-        # ``filter_silence_narration`` is an _EXTRA_KNOWN_ROOT_KEYS top-level form of a nested
-        # gateway setting (gateway/config_loader.py bridge). Its presence in the known roots
-        # must not turn the nested path into a wrong-prefix refusal.
-        ("gateway.filter_silence_narration", "false", False, None),
+        ("agent.future_retry_policy", "false", False, None),
     ])
     def test_unknown_leaf_under_known_section_is_written_with_notice(
         self, key, value, expected, suggestion, _isolated_hermes_home, capsys
@@ -534,14 +482,6 @@ class TestSchemaValidation:
         assert "not a recognized config key" in capsys.readouterr().out
 
 
-
-
-
-
-
-
-
-
     def test_force_suppresses_notice(self, _isolated_hermes_home, capsys):
         """``--force`` writes unknown keys without the notice (scripted
         forward-compat writes)."""
@@ -558,10 +498,10 @@ class TestValidateConfigKey:
 
     @pytest.mark.parametrize("key", [
         "agent.max_turns",
-        "discord.gateway_restart_notification",
+        "terminal.timeout",
         "mcp_servers.foo.command",
-        "providers.openrouter.api_key",
-        "gateway.platforms.my_platform.extra.token",
+        "providers.litellm.api_key",
+        "hooks.my_hook.extra.token",
         # _EXTRA_KNOWN_ROOT_KEYS: read by the runtime (setup wizard / tools_config save flow)
         # but absent from DEFAULT_CONFIG; they used to trip the false "not a recognized config
         # key" notice with a bogus near-miss suggestion (platform_hints.cli).
@@ -573,8 +513,8 @@ class TestValidateConfigKey:
         assert is_known, f"Expected {key!r} to validate as known"
 
     @pytest.mark.parametrize("key,expected_in_suggestion", [
-        ("gateway.discord.gateway_restart_notification", "discord.gateway_restart_notification"),
-        ("disco", "discord"),
+        ("agent.terminal.timeout", "terminal.timeout"),
+        ("termina", "terminal"),
         ("agent.max_turn", "agent.max_turns"),
         # A typo of an _EXTRA_KNOWN_ROOT_KEYS root points at the real root, not a near-miss.
         ("platform_toolset.cli", "platform_toolsets.cli"),
@@ -603,7 +543,7 @@ class TestValidateConfigKey:
 class TestDisplaySkinTouch:
     """Setting display.skin must bump the named skin file's mtime.
 
-    The gateway's skin watcher broadcasts ``skin.changed`` on a signature move
+    The local TUI's skin watcher broadcasts ``skin.changed`` on a signature move
     of (active name, skin-file mtime). Re-affirming the already-configured skin
     (`hermes config set display.skin X` while it is already X — the recovery
     path when a surface missed the original activation) moves NEITHER part, so

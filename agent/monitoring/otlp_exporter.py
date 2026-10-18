@@ -1,8 +1,7 @@
 """Export monitoring events to an OpenTelemetry Collector over OTLP/HTTP.
 
-Maps gateway monitoring events to OTel spans for the operator-configured ``monitoring.export.otlp``
-endpoint (no default destination ships) and hosts the OTLP plumbing shared with
-``gateway_health_export``.  The OTel SDK is an optional extra (``hermes-agent[otlp]``) imported
+Maps local cron monitoring events to OTel spans for the operator-configured ``monitoring.export.otlp``
+endpoint (no default destination ships) and hosts the shared OTLP plumbing.  The OTel SDK is an optional extra (``hermes-agent[otlp]``) imported
 lazily; ``headers_env`` values are read at export time and never logged or stored.  The streaming
 subscriber runs fail-isolated on the emitter thread; ``event_filter`` keeps other planes off it.
 """
@@ -17,7 +16,7 @@ import re
 from contextlib import suppress
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
-from agent.monitoring.gateway_health import _safe_instance_id
+from agent.monitoring.common import safe_instance_id
 from agent.monitoring.redaction import redact_bounded
 
 logger = logging.getLogger(__name__)
@@ -132,7 +131,7 @@ def _safe_resource_attributes(raw: Any) -> dict[str, str]:
             continue
         text = str(value)
         if key == "service.instance.id":
-            attrs[key] = _safe_instance_id(value)
+            attrs[key] = safe_instance_id(value)
         elif _SAFE_RESOURCE_VALUE.fullmatch(text) and redact_bounded(text, limit=128) == text:
             attrs[key] = text
     return attrs
@@ -140,9 +139,9 @@ def _safe_resource_attributes(raw: Any) -> dict[str, str]:
 
 def _runtime_resource_attributes(config: dict[str, Any], *, telemetry_scope: str) -> dict[str, str]:
     """Build the safe OTLP resource shared by spans, metrics and diagnostic logs."""
-    attrs = _safe_resource_attributes(_monitoring_section(config, "gateway_health_export").get("resource_attributes"))
-    attrs["service.name"] = "hermes-gateway"
-    attrs["service.instance.id"] = _safe_instance_id(_install_id(config))
+    attrs = _safe_resource_attributes(_otlp_config(config).get("resource_attributes"))
+    attrs["service.name"] = "hermes-terminal"
+    attrs["service.instance.id"] = safe_instance_id(_install_id(config))
     attrs["telemetry.scope"] = telemetry_scope
     return attrs
 
@@ -158,7 +157,7 @@ def build_exporter(config: dict[str, Any]):
 
 
 def _resource_attributes(config: dict[str, Any]) -> dict[str, str]:
-    return _runtime_resource_attributes(config, telemetry_scope="gateway_monitoring")
+    return _runtime_resource_attributes(config, telemetry_scope="local_monitoring")
 
 
 def _make_provider(config: dict[str, Any]):

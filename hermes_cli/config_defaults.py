@@ -74,47 +74,6 @@ DEFAULT_CONFIG = {
         "run_budget_seconds": None,
         # Gateway inactivity timeout (seconds). Only fires when the agent is completely idle — not
         # while calling tools or receiving API responses. 0 = unlimited.
-        "gateway_timeout": 1800,
-        # Max seconds an alias routing key waits for the active turn holding the same session lease;
-        # on expiry the message is rejected with a resend notice. Keep short: Telegram dispatches
-        # sequentially, so a waiter delays unrelated topics. Non-positive -> 5s.
-        "gateway_turn_lease_timeout": 5,
-        # Per-session AIAgent cache in the gateway. Each entry keeps a warm prompt prefix AND the
-        # full transcript: too small re-pays uncached prompts, too large fills the heap.
-        "agent_cache": {
-            "max_size": 128,  # LRU entry cap
-            "idle_ttl_secs": 3600,  # evict agents idle this long
-            # Anonymous-RSS budget (MB) above which LRU transcripts are shed (reloaded from disk
-            # next turn). "auto" = derive from cgroup memory limit (or total RAM); number =
-            # explicit; 0/off = disable the pass.
-            "memory_high_mb": "auto",
-            # Max sessions shed per pass (teardown bursts can't stall the gateway) and the number of
-            # most-recently-used sessions the pass never touches.
-            "max_evictions_per_pass": 16,
-            "protect_recent": 8,
-        },
-        # Force-interrupt budget (seconds) once gateway stop()/drain has begun (SIGTERM, and the
-        # final phase of in-band restart). 0 = interrupt immediately. Keep under systemd
-        # TimeoutStopSec or risk SIGKILL mid-cleanup; for /restart prefer restart_after_turn_timeout
-        # so turns finish BEFORE stop().
-        "restart_drain_timeout": 0,
-        # Floor under the stop()/drain wait (seconds) for cron jobs and api_server runs. Interrupted
-        # chat turns resume on the next message, but an interrupted cron run is recorded as a
-        # permanent failure and an interrupted /v1 run fails its waiting caller, so neither may
-        # inherit restart_drain_timeout's 0 (#82161, #132989). Clamped to the shutdown-watchdog
-        # leash minus teardown headroom (~50s unless TimeoutStopSec is raised). 0 = opt out.
-        "cron_drain_timeout": 30,
-        # In-band restart (/restart, SIGUSR1): refuse new work, then wait up to this many seconds
-        # for in-flight agents/cron/api runs to finish before stop(). 0 = enter stop() at once. 30
-        # min is a safety valve for wedged agents, not a target; raise for long unattended turns.
-        # Default 30 min is a safety valve for wedged agents, not a target latency — an interactive `hermes
-        # gateway restart` must never block for hours on a turn that wedged (#79133).
-        "restart_after_turn_timeout": 1800,
-        # Max seconds a submitted prompt waits for the deferred agent build (MCP discovery, model
-        # metadata, skills scan) before failing visibly. The prompt is delivered as soon as the
-        # build completes (progress notice past 30s), so this only fires on a hung build. Raise for
-        # many slow/unreachable MCP servers.
-        # See #63078.
         "build_wait_timeout": 600,
         # Hermes-level retry attempts for API errors (connection drops, timeouts, 5xx) wrapping the
         # whole call; the OpenAI SDK also retries transient errors (max_retries=2). Set 1 for fast
@@ -187,10 +146,6 @@ DEFAULT_CONFIG = {
         # uv); zero tokens when clean. Skipped for docker/modal/ssh backends (own probe).
         "environment_probe": True,
         # Bot Mode teammate-messaging protocol section (silent unless desktop Bot Mode manages it).
-        "bot_mode_protocol": True,
-        # Embedder-supplied text appended to the system prompt's environment-hints block, so a host
-        # wrapping Hermes (sandbox runner, managed platform) can describe proxy/credential/ mount
-        # layout without editing SOUL.md. Env HERMES_ENVIRONMENT_HINT overrides it.
         "environment_hint": "",
         # Coding posture: on interactive coding surfaces (CLI, TUI, desktop, ACP) in a code
         # workspace, add a coding brief + live git/workspace snapshot to the system prompt
@@ -216,24 +171,9 @@ DEFAULT_CONFIG = {
         # off for messaging surfaces. Doc/markdown/skill-only edits never fire.
         "verify_on_stop": False,
         # Inactivity warning (seconds), once per run before gateway_timeout; no interrupt. 0 = off.
-        "gateway_timeout_warning": 900,
-        # Max seconds any surface (CLI, TUI/Desktop, messaging gateway) blocks an agent awaiting a
-        # clarify-tool reply; then it unblocks with "[user did not respond within Xm]". 0 or less =
-        # unlimited. Resolved by tools/clarify_gateway.py::resolve_clarify_timeout (a legacy
-        # top-level ``clarify.timeout`` still wins when explicitly set).
-        # 1h because users step away and a shorter value evicted the entry mid-think so a later
-        # button tap hit a dead entry. Tradeoff: a higher value holds the gateway's running-agent
-        # guard longer for a genuinely abandoned prompt — lower it to free the guard sooner. See #32762.
         "clarify_timeout": 3600,
         # "Still working" status interval (seconds); 0 = off. Lower = faster feedback, more noise;
         # 180 catches spinning weak-model runs before users /restart.
-        "gateway_notify_interval": 180,
-        # Session stall watchdog (seconds): RECOVERY notifier for an in-process AIAgent with an
-        # adapter-queued follow-up while its activity clock is stale — NOT a general stall detector
-        # (ignores startup restore, build sentinels, leases, debounce, other processes; scan cadence
-        # per AIAgent). Notify-only: tells the user to try /new. Distinct from gateway_timeout
-        # (kills the turn) and gateway_notify_interval. 0 = disable.
-        # See #76354.
         "session_stall_timeout": 300,
         # Transcript-sanitiser heal escalation: after this many pre-send heal passes within a
         # 10-minute window, log one ERROR and queue a ONE-TIME out-of-band notice pointing at /debug
@@ -249,22 +189,6 @@ DEFAULT_CONFIG = {
         # next user message gets "[System note: your previous turn was interrupted...]" prepended;
         # only when the last persisted transcript row is younger than this, so stale markers don't
         # revive an unrelated old task. Covers gateway_timeout (1800) plus slack. 0 = always inject.
-        "gateway_auto_continue_freshness": 3600,
-        # Max seconds the gateway waits for boot auto-resume turns before releasing the
-        # startup-restore inbound gate (all inbound is QUEUED while shut, so one long resumed turn
-        # would leave every channel unanswered). On timeout the gate opens and the resume keeps
-        # running in the background; duplicate-agent protection is unaffected because the resume
-        # slot is claimed synchronously first. 0 = wait forever.
-        "gateway_startup_restore_drain_timeout": 30,
-        # Max seconds the boot turn-machinery warm-up (run_agent import graph, tool schemas +
-        # availability probes, context-file tier) may hold the inbound gate shut, so an early
-        # message isn't served with a skeleton system prompt. On timeout the gate opens and warm-up
-        # finishes in the background. 0 = disable warm-up (lazy init).
-        "gateway_startup_warmup_timeout": 20,
-        # Stale-stream ceiling (seconds) for local providers (Ollama, oMLX, llama-cpp). Applied when
-        # the base stale timeout is at its 180s default and a local endpoint is detected, so a
-        # wedged local server eventually trips the detector instead of hanging forever. Env
-        # HERMES_LOCAL_STREAM_STALE_TIMEOUT overrides.
         "local_stream_stale_timeout": 900,
         # How user-attached images reach the main model (gateway, TUI, CLI /attach). "auto" = native
         # when the model reports supports_vision=True AND auxiliary.vision.provider is not
@@ -754,17 +678,9 @@ DEFAULT_CONFIG = {
         # continues, Shift+Enter reported distinctly. False restores the c-j submit fallback for
         # POSIX PTYs whose plain Enter arrives as LF.
         "cli_multiline_shortcuts": True,
-        # Interface bare `hermes`/`hermes chat` launches: "cli" (prompt_toolkit REPL) | "tui" (Ink).
-        # Flags win: `--cli` forces the REPL, `--tui` / HERMES_TUI=1 forces the TUI.
-        "interface": "cli",
         # Native TUI uses the terminal's primary buffer and scrollback instead of the custom
-        # alternate-screen viewport. Flags win: `--native` / `--tui-native` and `--cli`.
+        # alternate-screen viewport. Override with `--native` / `--tui-native`.
         "tui_native": False,
-        # `hermes --tui` auto-resumes the most recent human-facing session (like `hermes -c`).
-        # HERMES_TUI_RESUME=<id> always wins.
-        "tui_auto_resume_recent": False,
-        # Desktop reopens the last chat/page on cold start (also in Settings → Appearance).
-        "resume_last_session": True,
         # One-time TUI hint ("subagents working · /agents to watch live") on first delegation.
         "tui_agents_nudge": True,
         "bell_on_complete": False,
@@ -779,12 +695,12 @@ DEFAULT_CONFIG = {
         # Memory updated") | "verbose" (content preview). Per-platform via
         # display.platforms.<platform>.memory_notifications.
         "memory_notifications": "on",
-        # Gateway notices when a terminal(background=true) process finishes: "concise" (one line;
+        # Local notices when a terminal(background=true) process finishes: "concise" (one line;
         # failures append an output tail) | "all" (running updates + final raw output) | "result"
         # (final raw only) | "error" (raw only on non-zero exit) | "off".
         "background_process_notifications": "concise",
         "streaming": False,
-        "timestamps": False,      # message timestamps (CLI labels, TUI rows, desktop transcript)
+        "timestamps": False,      # message timestamps
         "timestamp_format": "%H:%M",  # strftime format, e.g. "%b-%d %H:%M"
         "final_response_markdown": "strip",  # render | strip | raw
         # Preserve recent classic-CLI output across Ctrl+L, /redraw and resize clears; disable if an
@@ -914,75 +830,6 @@ DEFAULT_CONFIG = {
             "scale": 0.33,
             "unicode_cols": 0,  # Hard override for terminal column width; 0 = derive from scale.
         },
-    },
-
-    "dashboard": {
-        # Visual theme: "default" | "midnight" | "ember" | "mono" | "cyberpunk" | "rose"
-        "theme": "default",
-        # Process-isolation rollout controls. Read via the raw config loader, so tui_gateway.server
-        # also owns explicit defaults.
-        "turn_isolation": False,
-        "compute_host_heartbeat_secs": 15,
-        "compute_host_respawn_max": 3,
-        # Token/cost analytics surfaces are hidden by default: the numbers are a local LOWER-BOUND
-        # estimate, not billing — only successful main-agent responses with a response.usage count;
-        # auxiliary calls, retries, fallbacks and cache writes are missed, so the total can be
-        # 10x-100x under the provider bill.
-        "show_token_analytics": False,
-        # IPs / bounded CIDRs of reverse proxies trusted to supply X-Forwarded-Proto/-For. Loopback
-        # always trusted; wildcards and /0 rejected (spoofing guard).
-        "trusted_proxies": [],
-        # WebSocket keepalive (seconds), NON-loopback binds only: loopback always disables the
-        # protocol ping so an event-loop stall never kills a healthy local connection.
-        "ws_ping_interval": 20.0,
-        "ws_ping_timeout": 20.0,
-        # Grace (seconds) before a WS-orphaned gateway session is interrupted/reaped after its
-        # client disconnects. 0 = park forever. Env: HERMES_TUI_WS_ORPHAN_REAP_GRACE_S.
-        "ws_orphan_reap_grace_s": 20.0,
-        # A detached RUNNING turn is only interrupted once its activity clock (API waits, stream
-        # tokens, tool heartbeats) has been idle this many seconds; an active turn runs to
-        # completion. Default = agent.turn_liveness.timeout_s. 0 = interrupt at grace.
-        # See #100325, #98028.
-        "ws_orphan_activity_stale_s": 600.0,
-        # On gateway boot, close tui/desktop/subagent rows orphaned by a dead gateway (start AND
-        # newest message older than HERMES_TUI_SESSION_TTL_S, default 6h) with
-        # end_reason='startup_orphan_reap'; otherwise they stay phantom "active" forever.
-        # Messaging-gateway and live sessions are never touched; swept rows stay resumable.
-        # The ws-orphan grace timer above is in-process, so a gateway restart (update, crash, systemd)
-        # leaves disconnected sessions ``ended_at IS NULL`` forever — phantom "active" rows in /resume and
-        # dashboards. See #65194.
-        "startup_orphan_sweep": True,
-        # OAuth gate (engaged when --host is set and --insecure is not), read by the Nous Portal
-        # plugin. Env HERMES_DASHBOARD_OAUTH_CLIENT_ID / HERMES_DASHBOARD_PORTAL_URL win when
-        # non-empty. Empty client_id = no provider; empty portal_url = production.
-        "oauth": {
-            "client_id": "",  # agent:{instance_id} — Portal provisions this
-            "portal_url": "",
-        },
-        # Username/password gate (dashboard_auth/basic plugin, no OAuth IDP). Active when username
-        # plus password_hash (preferred) or password (hashed in-memory) are set; empty username =
-        # no-op. Env HERMES_DASHBOARD_BASIC_AUTH_USERNAME / _PASSWORD_HASH / _PASSWORD / _SECRET /
-        # _TTL_SECONDS win when non-empty. secret signs session tokens; empty = random per-process
-        # key (sessions die on restart, no multi-worker) — set 32+ random bytes. Hash:
-        # plugins.dashboard_auth.basic.hash_password('PW').
-        "basic_auth": {
-            "username": "",
-            "password_hash": "",  # scrypt$...
-            "password": "",
-            "secret": "",
-            "session_ttl_seconds": 0,  # 0 → plugin default (12h)
-        },
-        # Drain-control token auth (dashboard_auth/drain plugin). The secret is NOT here: env
-        # HERMES_DASHBOARD_DRAIN_SECRET; no-op unless >=256-bit, weak secrets rejected
-        # (fail-closed). scope = capability label; min_secret_chars in url-safe-b64 chars.
-        "drain_auth": {"scope": "drain", "min_secret_chars": 43},
-        # Public URL (env HERMES_DASHBOARD_PUBLIC_URL): full authority (scheme + host + optional
-        # prefix, e.g. https://example.com/hermes) for the OAuth redirect_uri; its hostname is
-        # trusted by Host/Origin guards and engages the auth gate when non-loopback. For proxies
-        # that don't forward X-Forwarded-Host/-Proto/-Prefix; X-Forwarded-Prefix is then IGNORED on
-        # the OAuth path. Empty or malformed (no http(s):// + host, or quote/angle/whitespace chars)
-        # = reconstruct from headers.
-        "public_url": "",
     },
 
     "privacy": {
@@ -1445,142 +1292,6 @@ DEFAULT_CONFIG = {
     # IANA timezone (e.g. "Asia/Kolkata", "America/New_York"). Empty = server-local time.
     "timezone": "",
 
-    "slack": {
-        "require_mention": True,  # require @mention to respond in channels
-        "free_response_channels": "",  # comma-separated channel IDs answered without mention
-        "allowed_channels": "",  # if set, ONLY respond in these channel IDs (whitelist)
-        "require_mention_channels": "",  # channel IDs where @mention is ALWAYS required
-        # Ignore messages whose first token @mentions another user unless the bot is also mentioned.
-        # Env: SLACK_IGNORE_OTHER_USER_MENTIONS.
-        "ignore_other_user_mentions": False,
-        "thread_require_mention": False,  # require @mention in thread replies too
-        "channel_prompts": {},  # per-channel ephemeral system prompts
-    },
-
-    "discord": {
-        "require_mention": True,  # require @mention to respond in server channels
-        "free_response_channels": "",  # comma-separated channel IDs answered without mention
-        "allowed_channels": "",  # if set, ONLY respond in these channel IDs (whitelist)
-        "auto_thread": True,  # auto-create threads on @mention in channels (like Slack)
-        # Free-response channels reply inline by default; true also gives each top-level
-        # message in them its own thread (still mention-free). Env: DISCORD_FREE_RESPONSE_AUTO_THREAD.
-        "free_response_auto_thread": False,
-        "thread_require_mention": False,  # require @mention in threads too (multi-bot threads)
-        # Bot authors must type @thisbot to trigger a reply; Discord reply pings alone do not count.
-        # Set False only for trusted legacy relays. Humans are unaffected.
-        "bots_require_inline_mention": True,
-        # Prepend recent channel scrollback when triggered (recovers messages gated out by
-        # require_mention); limit = max messages scanned.
-        "history_backfill": True,
-        "history_backfill_limit": 50,
-        # Replay messages missed while offline, after reconnect/startup.
-        "missed_message_backfill": {
-            "enabled": False,
-            "channels": "",  # comma-separated channel IDs; empty uses free_response_channels
-            "window_seconds": 21600,  # only inspect messages from the last 6 hours
-            "limit": 100,  # global cap on messages scanned per reconnect
-            "max_dispatches": 10,  # cap on recovered messages dispatched per reconnect
-            "max_attempts": 3,  # lifetime re-dispatch cap for one message, whatever its outcome
-        },
-        "reactions": True,  # add 👀/✅/❌ reactions to messages during processing
-        # Gateway transport health probe: inspects the WebSocket's ready/open/heartbeat state (never
-        # REST) as proof events still arrive. Any value 0 disables it.
-        "websocket_liveness_interval_seconds": 15,
-        "websocket_liveness_failure_threshold": 2,
-        "websocket_heartbeat_ack_max_age_seconds": 60,
-        "websocket_max_latency_seconds": 30,
-        # Dispatch-side dimension: a socket that ACKs heartbeats but delivers no events for this
-        # long is treated as deaf. 4 h absorbs a quiet server overnight; 0 disables it.
-        "websocket_event_max_silence_seconds": 14400,
-        # per-channel ephemeral system prompts (forum parents apply to child threads)
-        "channel_prompts": {},
-        # Opt-in DM role auth: DISCORD_ALLOWED_ROLES normally authorizes guild messages only (DMs
-        # need DISCORD_ALLOWED_USERS). A guild ID here also authorizes DMs from that guild's members
-        # holding the allowed role. Unset / "" / 0 = off.
-        # See #12136.
-        "dm_role_auth_guild": "",
-        # discord / discord_admin tools: allowed actions (comma string or YAML list; empty = all,
-        # subject to bot intents; unknown names dropped with a warning): list_guilds, server_info,
-        # list_channels, channel_info, list_roles, member_info, search_members, fetch_messages,
-        # list_pins, pin_message, unpin_message, create_thread, add_role, remove_role.
-        "server_actions": "",
-        # DEPRECATED no-op (uploads are always cached; messaging auth is the gate). Kept so existing
-        # configs don't error. Env: DISCORD_ALLOW_ANY_ATTACHMENT.
-        "allow_any_attachment": False,
-        # Max bytes per cached attachment (held in memory while written); 0 = no cap. Env:
-        # DISCORD_MAX_ATTACHMENT_BYTES.
-        "max_attachment_bytes": 33554432,
-        # Mention allowed users on approval prompts so owners notice them in shared channels. Env:
-        # DISCORD_APPROVAL_MENTIONS.
-        "approval_mentions": False,
-        # Voice-channel inactivity timeout (seconds); 0 = stay until `/voice leave`.
-        "voice_channel_inactivity_timeout_seconds": 300,
-        # Minimum seconds before force-stopping a VC playback; the adapter probes clip duration and
-        # extends this floor so long TTS isn't cut off.
-        "voice_playback_timeout_seconds": 120,
-        # Voice-channel software mixer (plugins/platforms/discord/voice_mixer.py): ambient
-        # "thinking" bed, verbal acks and TTS OVERLAP (ambient ducked) vs stop-and-swap.
-        "voice_fx": {
-            "enabled": False,  # master switch for the mixer subsystem
-            "ambient_enabled": True,  # play the idle "thinking" bed while tools run
-            "ambient_path": "",  # custom loop audio file; "" = synthesised pad
-            "ambient_gain": 0.18,  # idle bed loudness, 0.0–1.0
-            "duck_gain": 0.06,  # ambient loudness while speech plays
-            "speech_gain": 1.0,  # TTS / ack loudness, 0.0–1.0
-            "ack_enabled": True,  # speak a short phrase before the first tool call
-            "ack_phrases": [  # picked at random; [] disables phrases
-                "Let me look into that.",
-                "One moment.",
-                "Checking on that now.",
-                "Give me a sec.",
-                "On it.",
-            ],
-        },
-    },
-
-    "whatsapp": {
-        # reply_prefix: None = built-in "☤ *Hermes Agent*" header; "" disables; \n allowed.
-    },
-
-    "telegram": {
-        "reactions": False,  # add 👀/✅/❌ reactions to messages during processing
-        # per-chat/topic ephemeral system prompts (topics inherit from parent group)
-        "channel_prompts": {},
-        "allowed_chats": "",  # if set, ONLY respond in these group/supergroup chat IDs
-        "extra": {
-            # Bot API 10.1 native rich messages (tables/task lists/math). Off = legacy MarkdownV2,
-            # since rich messages are hard to copy as plain text.
-            "rich_messages": False,
-            # Experimental rich draft previews while streaming DMs; off because Telegram
-            # Desktop/macOS can overlay draft frames until the chat redraws.
-            "rich_drafts": False,
-            # CJK stays on legacy MarkdownV2 (Telegram Desktop/macOS garbles rich CJK, #47653);
-            # set True on an unaffected client to get native rich tables for CJK.
-            "allow_cjk_rich_messages": False,
-        },
-    },
-
-    "mattermost": {
-        "require_mention": True,  # require @mention to respond in channels
-        "free_response_channels": "",  # comma-separated channel IDs answered without mention
-        "allowed_channels": "",  # if set, ONLY respond in these channel IDs (whitelist)
-        "channel_prompts": {},  # per-channel ephemeral system prompts
-    },
-
-    "matrix": {
-        "require_mention": True,  # require @mention to respond in rooms
-        "free_response_rooms": "",  # comma-separated room IDs answered without mention
-        "allowed_rooms": "",  # if set, ONLY respond in these room IDs (whitelist)
-    },
-    # Approvals for dangerous commands.
-    # mode: manual (always prompt) | smart (aux LLM auto-approves low-risk) | off (= --yolo)
-    # cron_mode / single_query_mode / unattended_mode: deny | approve — what to do when a
-    #   cron job, a -q session (HERMES_INTERACTIVE=1 but nobody to answer), or an unattended
-    #   platform (webhook, msgraph_webhook, api_server; no /approve channel) hits one.
-    #   deny blocks instantly so the agent finds another way instead of waiting out the
-    #   timeout and failing closed.
-    # timeout: seconds before an unanswered prompt fails closed (CLI and gateway). 60s
-    #   proved too tight for Telegram/Discord push notifications, hence 300.
     "approvals": {
         "guard": GUARD_DEFAULTS,
         # single_query_mode — what to do when a single-query (-q) session hits a dangerous command. -q runs
@@ -1898,16 +1609,6 @@ DEFAULT_CONFIG = {
     },
     # Bot Mode cross-connection relay (tools/bot_relay.py): envelopes queued by message_agent for
     # agents on other connections wait in an on-disk outbox until the Desktop drains them.
-    "bot_mode": {
-        # Drain-time TTL (seconds): older envelopes are NOT delivered on drain; the sender gets an
-        # error reply (reason 'queued_expired') so a DM can't land hours late as a zombie. 0 = no
-        # drain-time expiry (the 6h stale-artifact sweep still applies).
-        "envelope_ttl_seconds": 900,
-        # How long a second delivery into a busy target profile queues behind the current turn
-        # before failing with a structured 'target_busy' error. Deliveries are serialized per
-        # profile with a cross-process file lock.
-        "turn_wait_seconds": 120,
-    },
     "code_execution": {  # execute_code settings (programmatic tool calls).
         # project = run in the session cwd with the active venv/conda python so project deps and
         # relative paths resolve. strict = isolated temp dir with hermes-agent's own python
@@ -2024,175 +1725,8 @@ DEFAULT_CONFIG = {
         # Stable install identifier on exported signals so operators can tell instances apart. "" =
         # mint a fresh UUID on first use; clear it to rotate. Carries no account identity.
         "install_id": "",
-        "gateway_health_export": {  # Gateway health & diagnostics export.
-            "enabled": False,
-            "metrics_enabled": True,
-            "diagnostic_events_enabled": True,
-            "warning_error_events_enabled": True,
-            "export_interval_seconds": 60,
-            "logs_export_interval_seconds": 5,
-            "resource_attributes": {
-                "service.name": "hermes-gateway", "deployment.environment.name": "production"
-            },
-        },
-        # OTLP destination. headers_env maps header names to ENVIRONMENT VARIABLE NAMES (never
-        # secret values); values are read from the environment at export time.
         "export": {"otlp": {"enabled": False, "endpoint": "", "headers_env": {}}},
     },
-    "gateway": {  # Gateway settings (messaging platforms: Telegram, Discord, Slack, ...).
-        # Fork (external-surface lockdown): false hard-disables EVERY external
-        # messaging platform adapter regardless of per-platform enabled flags —
-        # any connection to an outside messenger is treated as a vulnerability
-        # surface. LOCAL surfaces (CLI/TUI/desktop/dashboard) are unaffected.
-        "external_platforms": True,
-        # Seconds to let a SIGTERM-interrupted gateway agent unwind before adapter/database
-        # teardown. Keep short so service-manager shutdowns don't exhaust their stop budget.
-        "unmanaged_idle_exit_seconds": 600,  # client-auto-started gateway only; 0 disables
-        # Seconds a SIGTERM-interrupted agent unwinds before teardown (short: service stop budgets).
-        "signal_interrupt_grace_timeout": 1,
-        "service_install_choice": None,  # null | install | decline; never authorizes ordinary launch installation.
-        # Durable delivery-obligation ledger: final responses are recorded in state.db around the
-        # platform send; a gateway that died between finalize and platform ACK redelivers on next
-        # boot (ambiguous cases carry a "recovered reply — may be a duplicate" marker;
-        # at-least-once). Disable to lose in-flight final responses on crash/restart.
-        "delivery_ledger": True,
-        # Seconds to wait for one platform to connect at startup/reconnect; raise on "discord
-        # connect timed out" loops (many slash commands to sync). 0/negative = wait forever. Bridged
-        # to HERMES_GATEWAY_PLATFORM_CONNECT_TIMEOUT, which wins if set explicitly.
-        # Seconds the gateway waits for a single messaging platform to finish connecting during startup (and
-        # on reconnect). Discord in particular can blow past the old fixed 30s when an account has many
-        # slash commands to sync (#19776: 90-173 skills → ~28-31s sync). Raise this if your gateway hits
-        # "discord connect timed out" / "Timeout waiting for connection to Discord" restart loops. ``0`` or
-        # negative disables the timeout entirely (wait indefinitely).
-        "platform_connect_timeout": 30,
-        # Event-loop liveness watchdog: a daemon thread probes the asyncio loop; after consecutive
-        # missed probes it dumps all-thread stacks and hard-exits with the service-restart code so
-        # systemd/launchd revives the process instead of leaving a wedged-but-alive zombie.
-        # Set to false to disable. See #69089.
-        "loop_watchdog": True,
-        # Watchdog tuning (defaults mirror gateway/shutdown_watchdog.py): probe_interval = seconds
-        # between probes; probe_timeout = seconds before an unprocessed probe counts as a miss;
-        # max_strikes = consecutive misses before hard-exit 75 (~90-120s of sustained loop block at
-        # the defaults).
-        "loop_watchdog_probe_interval_s": 30.0,
-        "loop_watchdog_probe_timeout_s": 10.0,
-        "loop_watchdog_max_strikes": 3,
-        # Allow all users without allowlists (security opt-in).
-        "allow_all_users": False,
-        # Bot-to-bot loop guard: admitted bot messages per conversation before a cooldown.
-        "bot_loop_guard": {"enabled": True, "max_events": 20, "window_seconds": 300, "cooldown_seconds": 600},
-        # Startup-liveness watchdog: stdlib-only daemon thread armed at process entry that
-        # hard-exits 75 if the loop isn't live within the deadline. Armed before config loads, so
-        # run_gateway() bridges these to HERMES_STARTUP_WATCHDOG / HERMES_STARTUP_WATCHDOG_TIMEOUT_S
-        # and re-arms the live handle; explicit env wins.
-        "startup_watchdog": True,
-        "startup_watchdog_timeout_seconds": 300,
-        # Keep writing the legacy ~/.hermes/sessions/sessions.json mirror of the routing index
-        # (primary copy: state.db gateway_routing table). True for external tooling and downgrade
-        # safety; False stops producing the file.
-        "write_sessions_json": True,
-        # One gateway for every profile on this host: the DEFAULT profile's gateway also connects
-        # each named profile's bots (their own .env / config.yaml, per-profile secret scope) and
-        # stamps the profile into session keys. This is the ONLY supported topology — there is no
-        # `false` opt-out any more: an explicit `false` still parses (it is the runtime mode flag
-        # every scoped code path reads) but is warned about and IGNORED for process topology, and
-        # `hermes gateway migrate --multiplex` folds any per-profile fleet that is left.
-        # An UNSET key is a request, not a verdict: at boot the gateway runs the migration
-        # preflight and stays standalone (logging why) while a secondary still runs its own
-        # gateway or a blocker exists, then converges once that is resolved.
-        # TWO things DO change on a host that had pinned `false`, and neither is a process:
-        #   • INGRESS — `/p/<profile>/` on the default listener goes 404 -> served
-        #     (gateway/api_server.py::_resolve_request_profile, gateway/webhook.py). A host that
-        #     opted out GAINS that HTTP surface; it is authenticated exactly like the default
-        #     profile's, but it is new reachable surface, so audit any reverse proxy that assumed
-        #     /p/ was dead.
-        #   • SECRET SCOPE — eager multi-profile activation no longer consults the flag
-        #     (tui_gateway/launch_profile_policy.py), so a host with a leftover servable profile
-        #     dir flips eager=false/reads-open -> eager=true/fail-closed: an UNSCOPED `get_secret`
-        #     now raises UnscopedSecretError, and a key that lives ONLY in the unit's
-        #     `Environment=` (no .env) disappears from file-built scopes. A genuinely
-        #     single-profile host never activates and is byte-identical.
-        # Two profiles configuring the same bot token cannot be served together — the duplicate
-        # adapter is parked; `hermes profile create --clone` therefore leaves messaging channels
-        # behind unless --clone-channels is passed.
-        "multiplex_profiles": True,
-        # May `hermes update` fold this install onto a multiplexed default gateway by itself?
-        # True (the default) keeps today's behaviour: a multi-profile install whose secondaries run
-        # their own gateways is migrated automatically after an update when nothing blocks it.
-        # Set to False to choose WHEN you converge, not whether: the fold is left to you to run by
-        # hand (it is not an opt-out from the one-gateway-per-host model, which has none). Only the
-        # AUTOMATIC path reads this: `hermes gateway migrate --multiplex` is explicit and proceeds.
-        "auto_multiplex_migration": True,
-        # Route inbound chats of the default profile's bots to another profile
-        # (gateway/profile_routing.py): [{profile, platform, chat_id|user_id|guild_id|...}].
-        # Most-specific match wins; only read by the multiplexing default gateway.
-        "profile_routes": [],
-        # Scale-to-zero idle TIMEOUT only. When an instance is opted in via the NAS "Labs" toggle
-        # (HERMES_SCALE_TO_ZERO env stamp) AND messaging is relay-only/absent AND a wakeUrl is
-        # registered, the relay transport goes dormant so the platform (e.g. Fly autostop) can
-        # suspend the machine; it wakes on the wakeUrl poke. Enablement is the Labs toggle, never a
-        # config key. 0/negative = default.
-        "scale_to_zero": {"idle_timeout_minutes": 2},
-        # Auto-resume restart-loop breaker. A supervisor-revived gateway auto-resumes the
-        # SIGTERM-interrupted session; if that turn keeps triggering the kill, boots no more than
-        # `max_gap_seconds` apart (floored by `window_seconds`) chain, and after `max_restarts`
-        # auto-resume is SKIPPED for that boot (inbound messages still served). Gap-based chaining
-        # also catches SLOW ~150s crash cycles. max_restarts=0 disables.
-        "restart_loop_guard": {"max_restarts": 3, "window_seconds": 60, "max_gap_seconds": 300},
-        # Respawn-storm circuit breaker (complements restart_loop_guard): counts (re)starts in a
-        # sliding window and sleeps an exponential backoff before booting so a crash-looping
-        # supervisor can't hammer the process. max_starts <= 0 disables. Env escape hatches:
-        # HERMES_GATEWAY_MAX_STARTS / HERMES_GATEWAY_START_WINDOW_S.
-        "respawn_storm": {"max_starts": 5, "window_seconds": 120},
-        # Prefix user messages IN THE MODEL'S CONTEXT with a timestamp (e.g. "[Tue 2026-04-28
-        # 13:40:53 CEST]") for temporal awareness. Persisted transcripts stay clean (timestamp is
-        # message metadata regardless), so enabling later surfaces past send-times too.
-        "message_timestamps": {"enabled": False},
-        # Max bytes of inbound image/audio/video the gateway buffers into RAM and caches to disk.
-        # Media is read fully into memory first, so unbounded uploads (Discord Nitro: 500 MB) or
-        # huge remote URLs can OOM-kill constrained deployments. Enforced in
-        # gateway/platforms/base.py for every adapter. 0 = no cap. Default 128 MiB.
-        "max_inbound_media_bytes": 134217728,
-        # Let adapters read HTTP_PROXY/HTTPS_PROXY/NO_PROXY/SSL_CERT_FILE from the environment and
-        # auto-detect generic/macOS system proxies. False when the gateway inherits a proxy it must
-        # not use (e.g. a scheduled task picking up a Clash/V2Ray HTTP_PROXY -> "Cannot connect to
-        # host 127.0.0.1:7890"). Per-platform vars (DISCORD_PROXY, TELEGRAM_PROXY, ...) are still
-        # honored.
-        "trust_env": True,
-        # Media delivery. False: any emitted file path is delivered natively unless under the
-        # credential/system denylist (/etc, /proc, ~/.ssh, ~/.aws, ~/.hermes/.env, auth.json). True:
-        # files must be under the Hermes cache, media_delivery_allow_dirs, or fresher than
-        # trust_recent_files_seconds — recommended for public-facing gateways so prompt injection
-        # can't exfiltrate host secrets. Bridged to HERMES_MEDIA_DELIVERY_STRICT.
-        "strict": False,
-        # Extra roots (project/scratch dirs, mounted shares) from which bare file paths may be
-        # uploaded; the Hermes cache is always trusted. List of absolute paths or one
-        # os.pathsep-separated string; tildes expanded. Bridged to HERMES_MEDIA_ALLOW_DIRS. Honored
-        # in both modes.
-        "media_delivery_allow_dirs": [],
-        # Trust files whose mtime is within trust_recent_files_seconds even outside the cache/
-        # allowlist (e.g. `pandoc -o /tmp/report.pdf`); system paths stay blocked. False =
-        # pure-allowlist mode. Bridged to HERMES_MEDIA_TRUST_RECENT_FILES. Only consulted when
-        # strict is true.
-        "trust_recent_files": True,
-        # Recency window in seconds; 600 covers a multi-tool turn. Bridged to
-        # HERMES_MEDIA_TRUST_RECENT_SECONDS. Only consulted when strict is true.
-        "trust_recent_files_seconds": 600,
-        "api_server": {  # OpenAI-compatible API server platform (gateway/platforms/api_server.py).
-            # Max concurrent agent runs. Requests to /v1/chat/completions, /v1/responses, and
-            # /v1/runs beyond this get HTTP 429 + Retry-After, bounding CPU/memory/LLM-quota
-            # exhaustion from a request flood. 0 = no cap.
-            "max_concurrent_runs": 10,
-            # Cap (chars) on each tool output and tool-call argument string in the stored
-            # /v1/responses conversation history used for previous_response_id chaining. The
-            # stored history is cumulative, so a few large tool outputs can make one
-            # response_store.db write several hundred KB. 0 = store tool outputs verbatim
-            # (default: the capped text is what the model is replayed on the next turn).
-            "history_tool_output_max_chars": 0,
-        },
-    },
-    # Real-time token streaming to messaging platforms (gateway; restart after enabling). Off by
-    # default: costs extra edit/draft API calls per response.
     "streaming": {
         "enabled": False,  # When false, each response is delivered as one final message.
         # auto = native drafts where supported (Telegram DMs, Bot API 9.5+), edits elsewhere
@@ -2214,11 +1748,6 @@ DEFAULT_CONFIG = {
         # Session deck: `hermes --tui` sessions run in the machine session host, so a closed terminal
         # detaches instead of killing the session; every session stays open (listed by `hermes deck`)
         # until /close. false = the pre-deck behaviour (the session lives and dies with its terminal).
-        "host": True,
-        # Prune ENDED sessions inactive for retention_days (activity = freshest of live activity /
-        # latest message / creation) about once per min_interval_hours at startup. Open, pinned, or mid-turn sessions
-        # are never deleted; stale automation sessions whose process died are *closed*, then get a
-        # full retention window before removal.
         "auto_prune": True,
         # Inactive days of ended-session history to keep (= `hermes sessions prune`).
         # When true, prune ENDED sessions inactive for retention_days once per (roughly) min_interval_hours
@@ -2273,14 +1802,6 @@ DEFAULT_CONFIG = {
         "max_export_messages": 20000,
     },
     # First-touch onboarding hints (agent/onboarding.py), each latched under `seen` once shown.
-    "onboarding": {
-        "seen": {},
-        "profile_build": "ask",  # first-ever message: ask = offer; off = plain intro only
-        # Desktop first run, root profile only (onboarding_run.py): None = fresh install; true = next launch; false = done
-        "run": None,
-    },
-    # Fork: telemetry removed. Collection and transmission are disabled at the
-    # source (sender is a no-op); the endpoint default is scrubbed.
     "telemetry": {
         "shared_metrics": {
             "enabled": False,
@@ -2462,33 +1983,6 @@ DEFAULT_CONFIG = {
 
     # Bot Desktop: a headless Xfce screen per profile on the gateway host (Linux), streamed to Hermes
     # Desktop where a human can watch, take over (logins, 2FA, CAPTCHAs) and hand back. `hermes computer-use screen`.
-    "bot_desktop": {
-        "geometry": "1440x900",
-        # Opt-in: start the screen automatically the first time computer_use needs a display on a headless
-        # host. Off by default so installing TigerVNC for other reasons never yields a screen nobody asked
-        # for; Hermes Desktop's Screen pane offers Start and this toggle.
-        "auto_start": False,
-        # Refuse to start below this much free memory (MB), measured on the host or its container cgroup,
-        # whichever is tighter. Xvnc + Xfce idle at ~220 MB and a takeover's browser adds 0.5-1 GB, so a
-        # screen with one page runs past 1 GB; the kernel OOM killer picks its victim by score, so on a
-        # small instance the loser is the dashboard or the gateway rather than the desktop. 0 disables the
-        # check.
-        "min_free_memory_mb": 1536,
-        # Stop a screen nobody has used (no computer_use action, browser spawn, viewer or takeover) for this
-        # long; it restarts on the next use. Idle Xvnc + Xfce hold ~220 MB, an abandoned browser far more.
-        # 0 keeps screens up until stopped.
-        "idle_stop_minutes": 30,
-        # Where the screen (and with it computer_use and the bot's browser) runs.
-        #   auto      follow the terminal backend: inside the docker / ssh / singularity sandbox when one is
-        #             configured, on the gateway host when terminal.backend is local. A sandbox backend that
-        #             cannot host a screen (modal, daytona, vercel) REFUSES rather than quietly running the
-        #             desktop on the host beside the sandbox you chose for the agent.
-        #   terminal  always inside the terminal backend (error when it cannot host one).
-        #   gateway   always on the gateway host, even with a sandbox terminal: the agent's screen, browser
-        #             and computer_use then act OUTSIDE the terminal sandbox. Explicit opt-in.
-        # The sandbox image needs the desktop stack: nousresearch/hermes-sandbox:desktop.
-        "placement": "auto",
-    },
     "computer_use": {
         # cua-driver's upstream PostHog telemetry defaults ON; Hermes sets
         # CUA_DRIVER_RS_TELEMETRY_ENABLED=0 in every child env unless this is true.
@@ -2563,65 +2057,6 @@ DEFAULT_CONFIG = {
         # (`*.foo.com`) supported.
         "extra_allowed_hosts": [],
     },
-    "desktop": {  # Hermes Desktop (Electron) launch options; only affect `hermes desktop`.
-        # CSS font-family for the app's chat and UI text (e.g. "OpenDyslexic"). Layered in front
-        # of the active theme's own sans stack so missing glyphs still fall through. Empty = the
-        # theme's face. The terminal pane is terminal.font_family.
-        "font_family": "",
-        # Git repo discovery for the Projects sidebar. Empty roots are a safe
-        # no-op; users must explicitly configure roots for filesystem scanning.
-        # Session-derived projects remain available.
-        "repo_scan_enabled": True,
-        "repo_scan_roots": [],
-        "repo_scan_exclude_paths": [],
-        # Extra Electron flags per launch, e.g. ["--ozone-platform=x11"] or GPU workarounds. List of
-        # strings; a single string is shell-split.
-        "electron_flags": [],
-        # V8 old-space ceiling (MB) for the renderer, applied as --js-flags=--max-old-space-size=N by
-        # the app itself (also for Start-menu / .desktop launches). 0 = Chromium's default limit.
-        # A ceiling turns a machine-wide freeze into a bounded renderer reload (#77311).
-        "renderer_max_old_space_mb": 0,
-        # Linux Ozone backend, bridged to ELECTRON_OZONE_PLATFORM_HINT (explicit env wins). auto =
-        # Chromium default; x11 = XWayland, for compositors that ignore always-on-top for Wayland
-        # clients (e.g. COSMIC) — also puts the HUD on the solid-window input path; wayland = force
-        # a native Wayland surface.
-        # See #84011.
-        "ozone_platform_hint": "auto",
-        # Bridged to HERMES_DESKTOP_DISABLE_GPU: auto = disable GPU only on remote displays
-        # (SSH/VNC/RDP); true = always software rendering (no-GPU VMs where the GPU path hangs);
-        # false = always keep GPU on.
-        "disable_gpu": "auto",
-        # Linux keychain for token storage (Chromium --password-store). auto = detect KWallet (KDE
-        # env) or any org.freedesktop.secrets provider via D-Bus;
-        # gnome-libsecret|kwallet|kwallet5|kwallet6|basic force one (basic = unencrypted). Bridged
-        # to HERMES_DESKTOP_PASSWORD_STORE; ignored off-Linux.
-        "password_store": "auto",
-        # Expose the renderer's accessibility tree to the OS (macOS/Windows) so dictation/IME tools
-        # that insert text via the accessibility APIs can reach the composer (#118271, #92607).
-        # False bridges to HERMES_DESKTOP_RENDERER_ACCESSIBILITY=0 and skips the tree (perf opt-out).
-        "renderer_accessibility": True,
-        # Linux: False preserves an existing custom XDG launcher entry; missing entries
-        # are still created. True keeps the generated entry current on each launch.
-        "manage_launcher_entry": True,
-        # macOS only: code-signing identity (login-keychain cert; self-signed works) to re-sign
-        # locally rebuilt apps so the Designated Requirement — and thus TCC grants — survives
-        # updates. Empty = default ad-hoc identifier-pinned signing.
-        "macos_signing_identity": "",
-        # Windows only: explicit ssh client for SSH connections, the -G config probe and SSH
-        # terminals, e.g. "C:\\Program Files\\Git\\usr\\bin\\ssh.exe" when the in-box OpenSSH is
-        # missing or broken. Empty = System32 OpenSSH, then Git for Windows' ssh.exe, then PATH.
-        # Read by the app before its first window; restart to apply. Ignored off-Windows.
-        "ssh_path": "",
-        # Auto-continue a turn killed by a crash: resuming re-submits the interrupted prompt if
-        # fresh; a stale one just shows the recovered partial transcript.
-        "auto_continue": {
-            "enabled": True,
-            # How recent the interruption must be to auto-continue (minutes).
-            "freshness_minutes": 15,
-            "max_attempts": 2,  # Crash-loop breaker: max automatic re-runs of one interrupted turn.
-        },
-    },
-
     "nous": {
         # Upper bound (seconds) on the Nous auth keepalive tick, which derives from the
         # server-issued credential lifetime (raising above it has no effect). 0 disables the
@@ -2872,154 +2307,6 @@ OPTIONAL_ENV_VARS = {
     "OPENVIKING_ENDPOINT": _tool("OpenViking server URL (default: http://127.0.0.1:1933)",
         "OpenViking endpoint", password=None, advanced=True),
     # ── Messaging platforms ──
-    "TELEGRAM_BOT_TOKEN": _msg(
-        "Complete Telegram bot token created by @BotFather (numeric bot ID followed by a colon "
-        "and secret)", "Telegram bot token", "https://t.me/BotFather", password=True),
-    "TELEGRAM_ALLOWED_USERS": _msg(
-        "Optional comma-separated numeric Telegram user IDs allowed immediately; leave blank to "
-        "approve new users through DM pairing", "Allowed Telegram user IDs (comma-separated)",
-        "https://t.me/userinfobot"),
-    "TELEGRAM_PROXY": _msg(
-        "Proxy URL for Telegram connections (overrides HTTPS_PROXY). Supports http://, "
-        "https://, socks5://", "Telegram proxy URL (optional)"),
-    "DISCORD_BOT_TOKEN": _msg("Discord bot token from Developer Portal", "Discord bot token",
-        "https://discord.com/developers/applications", password=True),
-    "DISCORD_ALLOWED_USERS": _msg("Comma-separated Discord user IDs allowed to use the bot",
-        "Allowed Discord user IDs (comma-separated)", None),
-    "DISCORD_REPLY_TO_MODE": _msg(
-        "Discord reply threading mode: 'off' (no reply references), 'first' (reply on first "
-        "message only, default), 'all' (reply on every chunk)",
-        "Discord reply mode (off/first/all)", None),
-    "SLACK_BOT_TOKEN": _msg(
-        "Slack bot token (xoxb-). Get from OAuth & Permissions after installing your app. "
-        "Required scopes: chat:write, app_mentions:read, channels:history, groups:history, "
-        "im:history, im:read, im:write, mpim:history, mpim:read, users:read, files:read, "
-        "files:write", "Slack Bot Token (xoxb-...)", "https://api.slack.com/apps",
-        help=("In your Slack app, add the required bot scopes, install the app to the workspace, "
-        "then copy OAuth & Permissions > Bot User OAuth Token."), password=True),
-    "SLACK_APP_TOKEN": _msg(
-        "Slack app-level token (xapp-) for Socket Mode. Get from Basic Information → App-Level "
-        "Tokens. Also ensure Event Subscriptions include: message.im, message.channels, "
-        "message.groups, message.mpim, app_mention", "Slack App Token (xapp-...)",
-        "https://api.slack.com/apps",
-        help=("In your Slack app, enable Socket Mode, then create Basic Information > App-Level "
-        "Tokens with the connections:write scope."), password=True),
-    "SLACK_ALLOWED_USERS": _msg(
-        "Comma-separated Slack member IDs allowed to use Hermes, e.g. U01ABC2DEF3. Without "
-        "this, Slack may connect but deny messages by default.", "Allowed Slack member IDs",
-        "https://api.slack.com/apps",
-        help=("In Slack, open your profile, choose More or the three-dot menu, then Copy member "
-        "ID. Add multiple IDs comma-separated.")),
-    "MATTERMOST_URL": _msg("Mattermost server URL (e.g. https://mm.example.com)",
-        "Mattermost server URL", "https://mattermost.com/deploy/"),
-    "MATTERMOST_TOKEN": _msg("Mattermost bot token or personal access token",
-        "Mattermost bot token", None, password=True),
-    "MATTERMOST_ALLOWED_USERS": _msg("Comma-separated Mattermost user IDs allowed to use the bot",
-        "Allowed Mattermost user IDs (comma-separated)", None),
-    "MATTERMOST_REQUIRE_MENTION": _msg(
-        "Require @mention in Mattermost channels (default: true). Set to false to respond to "
-        "all messages.", "Require @mention in channels", None),
-    "MATTERMOST_FREE_RESPONSE_CHANNELS": _msg(
-        "Comma-separated Mattermost channel IDs where bot responds without @mention",
-        "Free-response channel IDs (comma-separated)", None),
-    "MATRIX_HOMESERVER": _msg("Matrix homeserver URL (e.g. https://matrix.example.org)",
-        "Matrix homeserver URL", "https://matrix.org/ecosystem/servers/"),
-    "MATRIX_ACCESS_TOKEN": _msg("Matrix access token (preferred over password login)",
-        "Matrix access token", None, password=True),
-    "MATRIX_USER_ID": _msg("Matrix user ID (e.g. @hermes:example.org)",
-        "Matrix user ID (@user:server)", None),
-    "MATRIX_ALLOWED_USERS": _msg(
-        "Comma-separated Matrix user IDs allowed to use the bot (@user:server format)",
-        "Allowed Matrix user IDs (comma-separated)", None),
-    "MATRIX_REQUIRE_MENTION": _msg(
-        "Require @mention in Matrix rooms (default: true). Set to false to respond to all "
-        "messages.", "Require @mention in rooms (true/false)", None, advanced=True),
-    "MATRIX_FREE_RESPONSE_ROOMS": _msg(
-        "Comma-separated Matrix room IDs where bot responds without @mention",
-        "Free-response room IDs (comma-separated)", None, advanced=True),
-    "MATRIX_AUTO_THREAD": _msg("Auto-create threads for messages in Matrix rooms (default: true)",
-        "Auto-create threads in rooms (true/false)", None, advanced=True),
-    "MATRIX_DM_AUTO_THREAD": _msg("Auto-create threads for DM messages in Matrix (default: false)",
-        "Auto-create threads in DMs (true/false)", None, advanced=True),
-    "MATRIX_DEVICE_ID": _msg(
-        "Stable Matrix device ID for E2EE persistence across restarts (e.g. HERMES_BOT)",
-        "Matrix device ID (stable across restarts)", None, advanced=True),
-    "MATRIX_RECOVERY_KEY": _msg(
-        "Matrix recovery key for cross-signing verification after device key rotation (from "
-        "Element: Settings → Security → Recovery Key)", "Matrix recovery key", None, password=True,
-        advanced=True),
-    "BLUEBUBBLES_SERVER_URL": _msg(
-        "BlueBubbles server URL for iMessage integration (e.g. http://192.168.1.10:1234)",
-        "BlueBubbles server URL", "https://bluebubbles.app/"),
-    "BLUEBUBBLES_PASSWORD": _msg(
-        "BlueBubbles server password (from BlueBubbles Server → Settings → API)",
-        "BlueBubbles server password", None, password=True),
-    "BLUEBUBBLES_ALLOWED_USERS": _msg(
-        "Comma-separated iMessage addresses (email or phone) allowed to use the bot",
-        "Allowed iMessage addresses (comma-separated)", None),
-    "BLUEBUBBLES_ALLOW_ALL_USERS": _msg("Allow all BlueBubbles users without allowlist",
-        "Allow All BlueBubbles Users", password=None),
-    "QQ_APP_ID": _msg("QQ Bot App ID from QQ Open Platform (q.qq.com)", "QQ App ID",
-        "https://q.qq.com", password=None),
-    "QQ_CLIENT_SECRET": _msg("QQ Bot Client Secret from QQ Open Platform", "QQ Client Secret",
-        password=True),
-    "QQ_ALLOWED_USERS": _msg("Comma-separated QQ user IDs allowed to use the bot",
-        "QQ Allowed Users", password=None),
-    "QQ_GROUP_ALLOWED_USERS": _msg("Comma-separated QQ group IDs allowed to interact with the bot",
-        "QQ Group Allowed Users", password=None),
-    "QQ_ALLOW_ALL_USERS": _msg("Allow all QQ users without an allowlist (true/false)",
-        "Allow All QQ Users", password=None),
-    "QQBOT_HOME_CHANNEL": _msg("Default QQ channel/group for cron delivery and notifications",
-        "QQ Home Channel", password=None),
-    "QQBOT_HOME_CHANNEL_NAME": _msg("Display name for the QQ home channel", "QQ Home Channel Name",
-        password=None),
-    "QQ_SANDBOX": _msg("Enable QQ sandbox mode for development testing (true/false)",
-        "QQ Sandbox Mode", password=None),
-    "IRC_SERVER": _msg("IRC server hostname (e.g. irc.libera.chat)", "IRC server", None),
-    "IRC_CHANNEL": _msg("IRC channel to join (e.g. #hermes)", "IRC channel", None),
-    "IRC_NICKNAME": _msg("Bot nickname on IRC (default: hermes-bot)", "IRC nickname", None),
-    "IRC_SERVER_PASSWORD": _msg("IRC server password (if required)", "IRC server password", None,
-        password=True, advanced=True),
-    "IRC_NICKSERV_PASSWORD": _msg("NickServ password for nick identification", "NickServ password",
-        None, password=True, advanced=True),
-    "GATEWAY_ALLOW_ALL_USERS": _msg(
-        "Allow all users to interact with messaging bots (true/false). Default: false.",
-        "Allow all users (true/false)", None, advanced=True),
-    "API_SERVER_ENABLED": _msg(
-        "Enable the OpenAI-compatible API server (true/false). Allows frontends like Open "
-        "WebUI, LobeChat, etc. to connect.", "Enable API server (true/false)", None, advanced=True),
-    "API_SERVER_KEY": _msg(
-        "Bearer token for API server authentication. Required whenever the API server is "
-        "enabled; server refuses to start without it.", "API server auth key", None, password=True,
-        advanced=True),
-    "API_SERVER_PORT": _msg("Port for the API server (default: 8642).", "API server port", None,
-        advanced=True),
-    "API_SERVER_HOST": _msg(
-        "Host/bind address for the API server (default: 127.0.0.1). API_SERVER_KEY is still "
-        "required even on loopback binds.", "API server host", None, advanced=True),
-    "API_SERVER_MODEL_NAME": _msg(
-        "Model name advertised on /v1/models. Defaults to the profile name (or 'hermes-agent' "
-        "for the default profile). Useful for multi-user setups with OpenWebUI.",
-        "API server model name", None, advanced=True),
-    "GATEWAY_PROXY_URL": _msg(
-        "URL of a remote Hermes API server to forward messages to (proxy mode). When set, the "
-        "gateway handles platform I/O only — all agent work is delegated to the remote server. "
-        "Use for Docker E2EE containers that relay to a host agent. Also configurable via "
-        "gateway.proxy_url in config.yaml.",
-        "Remote Hermes API server URL (e.g. http://192.168.1.100:8642)", None, advanced=True),
-    "GATEWAY_PROXY_KEY": _msg(
-        "Bearer token for authenticating with the remote Hermes API server (proxy mode). Must "
-        "match the API_SERVER_KEY on the remote host.", "Remote API server auth key", None,
-        password=True, advanced=True),
-    "WEBHOOK_ENABLED": _msg(
-        "Enable the webhook platform adapter for receiving events from GitHub, GitLab, etc.",
-        "Enable webhooks (true/false)", None),
-    "WEBHOOK_PORT": _msg("Port for the webhook HTTP server (default: 8644).", "Webhook port", None),
-    "WEBHOOK_SECRET": _msg(
-        "Global HMAC secret for webhook signature validation (overridable per route in "
-        "config.yaml).", "Webhook secret", None, password=True),
-    # ── Agent settings ── (MESSAGING_CWD is gone: use terminal.cwd in config.yaml, which the
-    # gateway bridges to TERMINAL_CWD.)
     "SUDO_PASSWORD": _setting(
         "Sudo password for terminal commands requiring root access; set to an explicit empty "
         "string to try empty without prompting", "Sudo password", None, password=True),

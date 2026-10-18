@@ -20,16 +20,13 @@ SOL_SPELLINGS = ("gpt-6.1-sol", "openai/gpt-6.1-sol", "gpt-6.1-sol-900k", "opena
 
 
 def test_every_config_loader_parses_tiers_through_the_same_table(monkeypatch):
-    from gateway.run import GatewayRunner
     from hermes_cli.cli_config_load import _parse_service_tier_config
-    import tui_gateway.server as tui
+    import tui_runtime.server as tui
 
     for word, tier in {**SERVICE_TIER_WORDS, "normal": None, "off": None, "bogus": None}.items():
-        monkeypatch.setattr(GatewayRunner, "_cfg_str", classmethod(lambda cls, *_k, _w=word: _w))
         monkeypatch.setattr(tui, "_load_cfg", lambda _w=word: {"agent": {"service_tier": _w}})
         assert parse_service_tier(word) == tier
         assert _parse_service_tier_config(word) == tier, word
-        assert GatewayRunner._load_service_tier() == tier, word
         assert tui._load_service_tier() == tier, word
     assert "ultrafast" in STATIC_TIERS
 
@@ -55,9 +52,9 @@ def test_ultrafast_is_requested_only_for_ultrafast_models_on_first_party_routes(
                                            base_url="https://proxy.example/v1", tier="ultrafast") is None
 
 
-def test_desktop_surfaces_carry_the_exact_tier_ultrafast_is_never_plain_fast():
+def test_tui_carries_the_exact_tier_ultrafast_is_never_plain_fast():
     from hermes_cli.inventory import _apply_capabilities
-    from tui_gateway.methods_session_model_guard import create_overrides
+    from tui_runtime.methods_session_model_guard import create_overrides
 
     rows = [{"slug": "openai-codex", "models": ["gpt-6-astra-900k", *SOL_SPELLINGS[::2], "gpt-6-sol", "gpt-daybreak-blue-latest-900k"]},
             {"slug": "openrouter", "models": ["openai/gpt-6-astra", "openai/gpt-6.1-sol"]}]
@@ -78,19 +75,13 @@ def test_desktop_surfaces_carry_the_exact_tier_ultrafast_is_never_plain_fast():
 
 
 @pytest.mark.parametrize("provider", ["openai", "openai-api"])
-def test_cli_and_gateway_turn_routes_send_the_static_tier(provider):
+def test_cli_turn_route_sends_the_static_tier(provider):
     import cli as cli_mod
-    from gateway.run import GatewayRunner
 
     stub = SimpleNamespace(model="gpt-6-astra", api_key="k", base_url="https://api.openai.com/v1", provider=provider,
                            api_mode="codex_responses", acp_command=None, acp_args=[], _credential_pool=None,
                            service_tier="ultrafast")
     assert cli_mod.HermesCLI._resolve_turn_agent_config(stub, "hi")["request_overrides"] == {"service_tier": "ultrafast"}
-    runner = object.__new__(GatewayRunner)
-    runner._service_tier = "ultrafast"
-    rk = {"api_key": "k", "base_url": "https://api.openai.com/v1", "provider": provider, "api_mode": "codex_responses",
-          "command": None, "args": [], "credential_pool": None, "max_tokens": None}
-    assert runner._resolve_turn_agent_config("hi", "gpt-6-astra", rk)["request_overrides"] == {"service_tier": "ultrafast"}
 
 
 def test_cli_refuses_ultrafast_on_a_model_without_it(monkeypatch):

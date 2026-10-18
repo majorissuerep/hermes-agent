@@ -10,367 +10,15 @@ Hermes has four hook systems that run custom code at key lifecycle points:
 
 | System | Registered via | Runs in | Use case |
 |--------|---------------|---------|----------|
-| **[Gateway hooks](#gateway-event-hooks)** | `HOOK.yaml` + `handler.py` in `~/.hermes/hooks/` | Gateway only | Logging, alerts, webhooks |
-| **[Plugin hooks](#plugin-hooks)** | `ctx.register_hook()` in a [plugin](./plugins.md) | CLI + Gateway | Tool interception, metrics, guardrails |
-| **[Shell hooks](#shell-hooks)** | `hooks:` block in profile `config.yaml` pointing at shell scripts | CLI + Gateway + Desktop/TUI/dashboard chat | Drop-in scripts for blocking, auto-formatting, context injection |
-| **[Outbound webhooks](#outbound-webhooks)** | `hooks.outbound:` list in `~/.hermes/config.yaml` | CLI + Gateway | Push signed lifecycle events to external HTTP endpoints — CI, dashboards, other agents |
+| **[Plugin hooks](#plugin-hooks)** | `ctx.register_hook()` in a [plugin](./plugins.md) | CLI + TUI | Tool interception, metrics, guardrails |
+| **[Shell hooks](#shell-hooks)** | `hooks:` block in profile `config.yaml` pointing at shell scripts | CLI + TUI | Drop-in scripts for blocking, auto-formatting, context injection |
+| **[Outbound webhooks](#outbound-webhooks)** | `hooks.outbound:` list in `~/.hermes/config.yaml` | CLI + TUI | Push signed lifecycle events to external HTTP endpoints — CI, dashboards, other agents |
 
 Hook callback errors are isolated and logged rather than crashing the agent. Hooks are not all passive: directive/control hooks can change flow, transforms can replace content, and a shell `pre_tool_call` hook can block or fail closed.
 
-## Gateway Event Hooks
-
-Gateway hooks fire automatically during gateway operation (Telegram, Discord, Slack, WhatsApp, Teams) without blocking the main agent pipeline.
-
-### Trust model: placing the files is the opt-in {#gateway-hook-trust}
-
-The hooks directory is a **trusted-by-placement** extension point — the documented contract since `3988c3c245f` (April 2026), when the comparison table below first recorded its consent model as "Implicit (dir trust)". It has no enable list, and `plugins.enabled` / `plugins.disabled` do not apply to it — gateway hooks are not plugins. Exactly what loads:
-
-- **When:** once, at gateway startup (`HookRegistry.discover_and_load()`, called from `gateway/run_startup.py`). Under [multi-profile gateways](../multi-profile-gateways.md), each served profile's own `hooks/` is loaded the first time an event fires inside that profile. The CLI, TUI, Desktop and cron never load gateway hooks.
-- **What:** every subdirectory of `<profile home>/hooks/` (`~/.hermes/hooks/` for the default profile) that contains both a `HOOK.yaml` parsing to a mapping with a non-empty `events` list **and** a `handler.py`. Directories missing either file are skipped silently; an invalid manifest or an empty `events` list is skipped with a `[hooks] Skipping …` log line.
-- **How:** `handler.py` is imported in-process — its module body runs at import, and its `handle` function is registered for the declared events. It runs as the gateway process with the same access as the gateway itself (loaded credentials, tools, plugin state). There is no sandbox, no first-use prompt, and `HERMES_SAFE_MODE` does not skip this loader.
-
-Dropping the two files into the directory **is** the opt-in; removing (or renaming) `HOOK.yaml` or the directory is the opt-out. Anyone who can write into your profile home can already run code as you through `config.yaml` shell hooks or `plugins.enabled`, so the directory sits inside the same trust envelope as the rest of `~/.hermes/` — see [Trusted-by-placement extension points](../security.md#trusted-by-placement) on the security page. Review a hook's `handler.py` before you place it, exactly as you would a plugin before enabling it.
-
-### Creating a Hook
-
-Each hook is a directory under `~/.hermes/hooks/` containing two files:
-
-```text
-~/.hermes/hooks/
-└── my-hook/
-    ├── HOOK.yaml      # Declares which events to listen for
-    └── handler.py     # Python handler function
-```
-
-#### HOOK.yaml
-
-```yaml
-name: my-hook
-description: Log all agent activity to a file
-events:
-  - agent:start
-  - agent:end
-  - agent:step
-```
-
-The `events` list determines which events trigger your handler. You can subscribe to any combination of events, including wildcards like `command:*`.
-
-#### handler.py
-
-```python
-import json
-from datetime import datetime
-from pathlib import Path
-
-LOG_FILE = Path.home() / ".hermes" / "hooks" / "my-hook" / "activity.log"
-
-async def handle(event_type: str, context: dict):
-    """Called for each subscribed event. Must be named 'handle'."""
-    entry = {
-        "timestamp": datetime.now().isoformat(),
-        "event": event_type,
-        **context,
-    }
-    with open(LOG_FILE, "a") as f:
-        f.write(json.dumps(entry) + "\n")
-```
-
-**Handler rules:**
-- Must be named `handle`
-- Receives `event_type` (string) and `context` (dict)
-- Can be `async def` or regular `def` — both work
-- Errors are caught and logged, never crashing the agent
-
-### Available Events
-
-| Event | When it fires | Context keys |
-|-------|---------------|--------------|
-| `gateway:startup` | Gateway process starts | `platforms` (list of active platform names) |
-| `session:start` | New messaging session created | `platform`, `user_id`, `session_id`, `session_key` |
-| `session:end` | Session ended (before reset) | `platform`, `user_id`, `session_key` |
-| `session:reset` | User ran `/new` or `/reset` | `platform`, `user_id`, `session_key` |
-| `session:compress` | Context compression completed for a session | `platform`, `session_id`, `old_session_id` (empty when compacted in place), `in_place` (bool — `true` = transcript compacted on the same id, `false` = rotated from `old_session_id`), `compression_count` |
-| `agent:start` | Agent begins processing a message | `platform`, `user_id`, `chat_id`, `thread_id` (forum-topic / thread root id; empty when not in a thread), `chat_type` (`"dm"` \| `"group"` \| `"forum"`; empty if unknown), `session_id`, `message` (truncated to 500 chars) |
-| `agent:step` | Each iteration of the tool-calling loop | `platform`, `user_id`, `session_id`, `iteration`, `tool_names` |
-| `agent:end` | Agent finishes processing | same keys as `agent:start`, plus `response` (truncated to 500 chars) |
-| `reaction:added` | An emoji reaction was added to a message the bot can see (Slack adapter currently). Requires the `reactions:read` scope + the `reaction_added` bot event subscription; the bot must be a member of the channel. | `platform`, `reaction`, `user_id`, `item_user_id`, `item_type`, `channel_id`, `message_ts`, `team_id`, `event_ts`, `raw_event` |
-| `reaction:removed` | An emoji reaction was removed from a message the bot can see. Requires the `reaction_removed` bot event subscription. | same shape as `reaction:added` |
-| `command:*` | Any slash command executed | `platform`, `user_id`, `command`, `args` |
-
-#### Wildcard Matching
-
-Handlers registered for `command:*` fire for any `command:` event (`command:model`, `command:reset`, etc.). Monitor all slash commands with a single subscription.
-
-:::tip Threaded replies
-A handler posting a follow-up message into the same Telegram forum topic should include `message_thread_id=int(thread_id)` when `chat_type == "forum"` and `thread_id` is non-empty.
-:::
-
-### Examples
-
-#### Telegram Alert on Long Tasks
-
-Send yourself a message when the agent takes more than 10 steps:
-
-```yaml
-# ~/.hermes/hooks/long-task-alert/HOOK.yaml
-name: long-task-alert
-description: Alert when agent is taking many steps
-events:
-  - agent:step
-```
-
-```python
-# ~/.hermes/hooks/long-task-alert/handler.py
-import os
-import httpx
-
-THRESHOLD = 10
-BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-CHAT_ID = os.getenv("TELEGRAM_HOME_CHANNEL")
-
-async def handle(event_type: str, context: dict):
-    iteration = context.get("iteration", 0)
-    if iteration == THRESHOLD and BOT_TOKEN and CHAT_ID:
-        tools = ", ".join(context.get("tool_names", []))
-        text = f"⚠️ Agent has been running for {iteration} steps. Last tools: {tools}"
-        async with httpx.AsyncClient() as client:
-            await client.post(
-                f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-                json={"chat_id": CHAT_ID, "text": text},
-            )
-```
-
-#### Command Usage Logger
-
-Track which slash commands are used:
-
-```yaml
-# ~/.hermes/hooks/command-logger/HOOK.yaml
-name: command-logger
-description: Log slash command usage
-events:
-  - command:*
-```
-
-```python
-# ~/.hermes/hooks/command-logger/handler.py
-import json
-from datetime import datetime
-from pathlib import Path
-
-LOG = Path.home() / ".hermes" / "logs" / "command_usage.jsonl"
-
-def handle(event_type: str, context: dict):
-    LOG.parent.mkdir(parents=True, exist_ok=True)
-    entry = {
-        "ts": datetime.now().isoformat(),
-        "command": context.get("command"),
-        "args": context.get("args"),
-        "platform": context.get("platform"),
-        "user": context.get("user_id"),
-    }
-    with open(LOG, "a") as f:
-        f.write(json.dumps(entry) + "\n")
-```
-
-#### Session Start Webhook
-
-POST to an external service on new sessions:
-
-```yaml
-# ~/.hermes/hooks/session-webhook/HOOK.yaml
-name: session-webhook
-description: Notify external service on new sessions
-events:
-  - session:start
-  - session:reset
-```
-
-```python
-# ~/.hermes/hooks/session-webhook/handler.py
-import httpx
-
-WEBHOOK_URL = "https://your-service.example.com/hermes-events"
-
-async def handle(event_type: str, context: dict):
-    async with httpx.AsyncClient() as client:
-        await client.post(WEBHOOK_URL, json={
-            "event": event_type,
-            **context,
-        }, timeout=5)
-```
-
-### Tutorial: BOOT.md — Run a Startup Checklist on Every Gateway Boot
-
-A popular pattern from the community: drop a Markdown checklist at `~/.hermes/BOOT.md`, and have the agent run it once every time the gateway starts. Useful for "on every boot, check overnight cron failures and ping me on Discord if anything failed," or "summarize the last 24h of deploy.log and post it to Slack #ops."
-
-This tutorial shows how to build it yourself as a user-defined hook. Hermes does not ship a built-in BOOT.md hook — you wire up exactly the behavior you want.
-
-#### What we're building
-
-1. A file at `~/.hermes/BOOT.md` with natural-language startup instructions.
-2. A gateway hook that fires on `gateway:startup`, spawns a one-shot agent with your gateway's resolved model/credentials, and runs the BOOT.md instructions.
-3. A `[SILENT]` convention so the agent can opt out of sending a message when there's nothing to report.
-
-#### Step 1: Write your checklist
-
-Create `~/.hermes/BOOT.md`. Write it as if you were giving instructions to a human assistant:
-
-```markdown
-# Startup Checklist
-
-1. Run `hermes cron list` and check if any scheduled jobs failed overnight.
-2. If any failed, summarize them for Discord #ops (the hook delivers your final response to its configured target).
-3. Check if `/opt/app/deploy.log` has any ERROR lines from the last 24 hours. If yes, summarize them and include in the same report.
-4. If nothing went wrong, reply with only `[SILENT]` so no message is sent.
-```
-
-The agent sees this as part of its prompt, so anything you can describe in plain language works — tool calls, shell commands, sending messages, summarizing files.
-
-#### Step 2: Create the hook
-
-```text
-~/.hermes/hooks/boot-md/
-├── HOOK.yaml
-└── handler.py
-```
-
-**`~/.hermes/hooks/boot-md/HOOK.yaml`**
-
-```yaml
-name: boot-md
-description: Run ~/.hermes/BOOT.md on gateway startup
-events:
-  - gateway:startup
-```
-
-**`~/.hermes/hooks/boot-md/handler.py`**
-
-```python
-"""Run ~/.hermes/BOOT.md on every gateway startup."""
-
-import logging
-import threading
-from pathlib import Path
-
-logger = logging.getLogger("hooks.boot-md")
-
-BOOT_FILE = Path.home() / ".hermes" / "BOOT.md"
-
-
-def _build_prompt(content: str) -> str:
-    return (
-        "You are running a startup boot checklist. Follow the instructions "
-        "below exactly.\n\n"
-        "---\n"
-        f"{content}\n"
-        "---\n\n"
-        "Execute each instruction. Put any user-facing summary in your "
-        "final response — the hook delivers it to the configured channel "
-        "(e.g. Discord or Slack); you do not send messages yourself.\n"
-        "If nothing needs attention and there is nothing to report, reply "
-        "with ONLY: [SILENT]"
-    )
-
-
-def _run_boot_agent(content: str) -> None:
-    """Spawn a one-shot agent and execute the checklist.
-
-    Uses the gateway's resolved model and runtime credentials so this works
-    against custom endpoints, aggregators, and OAuth-based providers alike.
-    """
-    try:
-        from gateway.run import _resolve_gateway_model, _resolve_runtime_agent_kwargs
-        from run_agent import AIAgent
-
-        agent = AIAgent(
-            model=_resolve_gateway_model(),
-            **_resolve_runtime_agent_kwargs(),
-            platform="gateway",
-            quiet_mode=True,
-            skip_context_files=True,
-            skip_memory=True,
-            max_iterations=20,
-        )
-        result = agent.run_conversation(_build_prompt(content))
-        response = (result.get("final_response", "") or "").strip()
-        if response.upper() not in {"[SILENT]", "SILENT", "NO_REPLY", "NO REPLY"}:
-            logger.info("boot-md completed: %s", response[:200])
-        else:
-            logger.info("boot-md completed (nothing to report)")
-    except Exception as e:
-        logger.error("boot-md agent failed: %s", e)
-
-
-async def handle(event_type: str, context: dict) -> None:
-    if not BOOT_FILE.exists():
-        return
-    content = BOOT_FILE.read_text(encoding="utf-8").strip()
-    if not content:
-        return
-
-    logger.info("Running BOOT.md (%d chars)", len(content))
-
-    # Background thread so gateway startup isn't blocked on a full agent turn.
-    thread = threading.Thread(
-        target=_run_boot_agent,
-        args=(content,),
-        name="boot-md",
-        daemon=True,
-    )
-    thread.start()
-```
-
-The two key lines:
-
-- `_resolve_gateway_model()` reads the gateway's currently-configured model.
-- `_resolve_runtime_agent_kwargs()` resolves provider credentials the same way a normal gateway turn does — including API keys, base URLs, OAuth tokens, and credential pools.
-
-Without these, a bare `AIAgent()` falls back to built-in defaults and will 401 against any non-default endpoint.
-
-#### Step 3: Test it
-
-Restart the gateway:
-
-```bash
-hermes gateway restart
-```
-
-Watch the logs:
-
-```bash
-hermes logs --follow --level INFO | grep boot-md
-```
-
-You should see `Running BOOT.md (N chars)` followed by either `boot-md completed: ...` (summary of what the agent did) or `boot-md completed (nothing to report)` when the agent replied with an exact silence token such as `[SILENT]`.
-
-Delete `~/.hermes/BOOT.md` to disable the checklist — the hook stays loaded but silently skips when the file isn't there.
-
-#### Extending the pattern
-
-- **Schedule-aware checklists:** key off `datetime.now().weekday()` inside BOOT.md's instructions ("if it's Monday, also check the weekly deploy log"). The instructions are free-form text, so anything the agent can reason about is fair game.
-- **Multiple checklists:** point the hook at a different file (`STARTUP.md`, `MORNING.md`, etc.) and register separate hook directories for each.
-- **Non-agent variant:** if you don't need a full agent loop, skip `AIAgent` entirely and have the handler post a fixed notification directly via `httpx`. Cheaper, faster, and has no provider dependency.
-
-#### Why this isn't a built-in
-
-An earlier version of Hermes shipped this as a built-in hook and silently spawned an agent with bare defaults on every gateway boot. That surprised users with custom endpoints and made the feature invisible to users who didn't know it was running. Keeping it as a documented pattern — built by you, in your hooks directory — means you see exactly what it does and opt in by writing the files.
-
-### How It Works
-
-1. On gateway startup, `HookRegistry.discover_and_load()` scans `~/.hermes/hooks/`
-2. Each subdirectory with `HOOK.yaml` + `handler.py` is imported in-process — no enable list is consulted (see [Trust model](#gateway-hook-trust))
-3. Handlers are registered for their declared events
-4. At each lifecycle point, `hooks.emit()` fires all matching handlers
-5. Errors in any handler are caught and logged — a broken hook never crashes the agent
-
-:::info
-Gateway hooks only fire in the **gateway** (Telegram, Discord, Slack, WhatsApp, Teams). The CLI does not load gateway hooks. For hooks that work everywhere, use [plugin hooks](#plugin-hooks).
-:::
-
 ## Plugin Hooks
 
-[Plugins](./plugins.md) can register hooks that fire in **both CLI and gateway** sessions. These are registered programmatically via `ctx.register_hook()` in your plugin's `register()` function.
+[Plugins](./plugins.md) can register hooks that fire in **CLI and TUI** sessions. These are registered programmatically via `ctx.register_hook()` in your plugin's `register()` function.
 
 For plugin packaging and registration details, see
 the [Plugins guide](./plugins.md).
@@ -475,15 +123,11 @@ Payload fields below are the exact event-specific fields supplied by each call s
 | `on_skill_lifecycle` | Observer | After an authoritative skill-usage state change; return ignored. | `action`, `skill_name`, `provenance`, `task_id`, `session_id`, `use_count`, `reused`, `reuse_after_patch` | Exposes the local skill name and provenance. |
 | `subagent_start` | Observer | Child constructed and about to run; return ignored. | `parent_session_id`, `parent_turn_id`, `parent_subagent_id`, `child_session_id`, `child_subagent_id`, `child_role`, `child_goal` | Child goal may contain user/project content. |
 | `subagent_stop` | Observer | Child exit; return ignored. | `parent_session_id`, `parent_turn_id`, `child_session_id`, `child_role`, `child_summary`, `child_status`, `tool_call_history`, `duration_ms` | Summary and redacted tool-history metadata may reveal project structure. |
-| `pre_gateway_dispatch` | Directive/control | Incoming non-internal message before auth/pairing/dispatch; first valid `skip`, `rewrite`, or `allow` controls flow. | `event`, `gateway`, `session_store` | Extremely privileged in-process objects expose inbound user/routing data and host handles. |
-| `post_gateway_admission` | Directive/control (fail-open) | Admitted non-internal message after auth, pause/drain, pending-reply, running-session and slash-command lanes, inside the claimed session slot and the routed profile's scope; first `handled` result skips the agent turn, anything else (including a raise or timeout) runs it. | `session_key`, `platform`, `source` (dict snapshot), `message_id`, `text` | Inbound text is untrusted user data; no runner or session-store handles are passed. |
-| `gateway_platform_event` | Observer | After the gateway's profile-scoped authorization succeeds, when a supported platform-native event is normalized at the gateway boundary (Telegram: reactions, message edits; Discord: message edits/deletes, thread created/renamed); return ignored. | `platform`, `event_type`, `payload` (event-type-specific dict — see the per-event contracts below) | Normalized plain-dict envelope only; raw SDK objects, adapter handles, and bot clients are never exposed. |
 | `pre_command` | Observer | Recognized slash command about to be dispatched, before the handler runs, on CLI and gateway cold-path dispatch; return ignored in v1 (directive-shaped dicts are logged at debug). Gateway running-agent intercept commands (`/stop`, `/approve` during an active run) are deliberately excluded — control-plane escape hatches must stay outside plugin reach. | `surface` (`"cli"` \| `"gateway"`), `command` (canonical name), `alias_used`, `args_raw`, `session_key`, `platform` | `args_raw` may contain user content or secrets typed after the command. |
 | `pre_approval_request` | Observer | Before prompted or smart approval; return ignored. | `command`, `description`, `pattern_key`, `pattern_keys`, `session_key`, `surface`, `turn_id`, `tool_call_id` | Command may contain secrets; smart observer preparation force-redacts, but surfaces do not all have identical redaction. |
 | `post_approval_response` | Observer | After a decision, timeout, or gateway notification failure; return ignored. | `command`, `description`, `pattern_key`, `pattern_keys`, `session_key`, `surface`, `turn_id`, `tool_call_id`, `choice`; smart path may add `decided_by` | Same command sensitivity plus decision metadata. |
 | `on_human_input_request` | Observer | The agent is about to block on a person — sudo password prompt, `clarify` question, or dangerous-command approval — on CLI, Ink TUI/Desktop, ACP and gateway platforms; return ignored. | `kind` (`"sudo"` \| `"clarify"` \| `"approval"`), `request_id`, `session_id`, `session_key`, `platform`, `prompt` | `prompt` is always force-redacted; the typed password or answer is never passed. |
 | `on_human_input_resolved` | Observer | Exactly once per `on_human_input_request`, when the wait ends (answered, skipped, timed out, withdrawn, or failed); return ignored. | Same as the request plus `outcome` | Outcome only — never the answer itself. |
-| `on_room_member_activity` | Observer | While a hosted Group Chat member turn runs on the Bot Mode gateway, once per runtime event the member session emits (tool start/complete, approval request, message/reasoning deltas, errors); queued per consumer off the token path; return ignored. | `room_id`, `thread_id`, `member_id`, `turn_id`, `task_id`, `execution_generation`, `kind`, `seq`, `payload` | `payload` is the client-safe session event body: tool args and results, redacted approval commands, streamed member text. |
 | `kanban_task_claimed` | Observer | After claim commit, in dispatcher process before worker spawn; return ignored. | `task_id`, `profile_name`, `board`, `assignee`, `run_id` | Board/task/profile/assignee identifiers. |
 | `kanban_task_completed` | Observer | After completion and cleanup, usually in worker process; return ignored. | `task_id`, `profile_name`, `board`, `assignee`, `run_id`, `summary` | Summary may contain project/user content. |
 | `kanban_task_blocked` | Observer | After a blocked transition; the dependency-wait path fires before its transaction exits. Return ignored. | `task_id`, `profile_name`, `board`, `assignee`, `run_id`, `reason` | Reason may contain project/user content. |
@@ -1232,132 +876,6 @@ With heavy delegation (e.g. orchestrator roles × 5 leaves × nested depth), `su
 
 ---
 
-### `pre_gateway_dispatch`
-
-Fires **once per incoming `MessageEvent`** in the gateway, after the internal-event guard but **before** auth/pairing and agent dispatch. This is the interception point for gateway-level message-flow policies (listen-only windows, human handover, per-chat routing, etc.) that don't fit cleanly into any single platform adapter.
-
-**Callback signature:**
-
-```python
-def my_callback(event, gateway, session_store, **kwargs):
-```
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `event` | `MessageEvent` | The normalized inbound message (has `.text`, `.source`, `.message_id`, `.internal`, etc.). |
-| `gateway` | `GatewayRunner` | The active gateway runner, so plugins can call `gateway.adapters[platform].send(...)` for side-channel replies (owner notifications, etc.). |
-| `session_store` | `SessionStore` | For silent transcript ingestion via `session_store.append_to_transcript(...)`. |
-
-**Fires:** In `gateway/run.py`, inside `GatewayRunner._handle_message()`, immediately after `is_internal` is computed. **Internal events skip the hook entirely** (they are system-generated — background-process completions, etc. — and must not be gate-kept by user-facing policy).
-
-**Return value:** `None` or a dict. The first recognized action dict wins; remaining plugin results are ignored. Exceptions in plugin callbacks are caught and logged; the gateway always falls through to normal dispatch on error.
-
-Callbacks may be `async def`: they are awaited on the gateway's own event loop, so awaiting loop-bound work (an `asyncio.Event`, an aiohttp session, `asyncio.to_thread`) makes progress and other inbound messages keep flowing while the callback runs. The hook is intentionally not bounded by `plugins.hook_callback_timeout` — dropping or passing a message on timeout are both wrong for a policy gate — so a callback that never returns holds up dispatch of that message.
-
-| Return | Effect |
-|--------|--------|
-| `{"action": "skip", "reason": "..."}` | Drop the message — no agent reply, no pairing flow, no auth. Plugin is assumed to have handled it (e.g. silent-ingested into the transcript). |
-| `{"action": "rewrite", "text": "new text"}` | Replace `event.text`, then continue normal dispatch with the modified event. Useful for collapsing buffered ambient messages into a single prompt. |
-| `{"action": "allow"}` / `None` | Normal dispatch — runs the full auth / pairing / agent-loop chain. |
-
-**Use cases:** Listen-only group chats (only respond when tagged; buffer ambient messages into context); human handover (silent-ingest customer messages while owner handles the chat manually); per-profile rate limiting; policy-driven routing.
-
-**Example — drop unauthorized DMs silently without triggering the pairing code:**
-
-```python
-def deny_unauthorized_dms(event, **kwargs):
-    src = event.source
-    if src.chat_type == "dm" and not _is_approved_user(src.user_id):
-        return {"action": "skip", "reason": "unauthorized-dm"}
-    return None
-
-def register(ctx):
-    ctx.register_hook("pre_gateway_dispatch", deny_unauthorized_dms)
-```
-
-**Example — rewrite an ambient-message buffer into a single prompt on mention:**
-
-```python
-_buffers = {}
-
-def buffer_or_rewrite(event, **kwargs):
-    key = (event.source.platform, event.source.chat_id)
-    buf = _buffers.setdefault(key, [])
-    if _bot_mentioned(event.text):
-        combined = "\n".join(buf + [event.text])
-        buf.clear()
-        return {"action": "rewrite", "text": combined}
-    buf.append(event.text)
-    return {"action": "skip", "reason": "ambient-buffered"}
-
-def register(ctx):
-    ctx.register_hook("pre_gateway_dispatch", buffer_or_rewrite)
-```
-
----
-
-### `post_gateway_admission`
-
-Fires **once per admitted, non-internal message** in the gateway, after authorization, bot admission, pause/drain, pending-reply intercepts (clarify, confirmations), the running-session lane (steering, busy commands) and idle slash-command dispatch. Rejected, ignored, internal and control traffic never reaches it. It runs inside the claimed session slot, so concurrent messages for the same chat queue behind it, and under the message's **routed profile** scope: only that profile's plugins run.
-
-Return `{"action": "handled", "reply": "..."}` to consume the message: the agent turn is skipped and `reply` (when a non-empty string) is delivered through the normal route. Omit `reply` to consume silently. Any other return value runs the ordinary agent turn.
-
-```python
-def consume(session_key, platform, source, message_id, text, **kwargs):
-    if not text.startswith("follow up:"):
-        return None                       # ordinary agent turn
-    enqueue_follow_up(source, text)       # commit your own durable state first
-    return {"action": "handled", "reply": "Got it - queued."}
-
-def register(ctx):
-    ctx.register_hook("post_gateway_admission", consume)
-```
-
-**Fail-open.** A callback that raises, times out (`plugins.hook_callback_timeout`) or returns something else is logged and the message proceeds to the agent, so one buggy plugin cannot block a profile's traffic. A plugin that needs fail-closed behaviour catches its own errors and returns `handled` with its own failure reply. The payload is a snapshot (`source` is `SessionSource.to_dict()`); do not send through adapters directly, return `reply` instead. Dedupe and durable acceptance are the plugin's responsibility.
-
----
-
-### `gateway_platform_event`
-
-Fires for supported platform-native events only **after** the gateway's normal, profile-scoped authorization check succeeds. The callback receives plain dictionaries; raw SDK objects, adapter handles, bot clients, and callback contexts are never part of this stable contract.
-
-Telegram message reactions were the first supported event; message edits, deletes, and thread lifecycle events followed:
-
-```python
-def on_platform_event(platform, event_type, payload, **kwargs):
-    if platform == "telegram" and event_type == "reaction":
-        print(payload["chat_id"], payload["message_id"], payload["emojis"])
-    elif event_type == "message_edited":
-        print(platform, payload["chat_id"], payload["message_id"], payload["text"])
-
-def register(ctx):
-    ctx.register_hook("gateway_platform_event", on_platform_event)
-```
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `platform` | `str` | Stable platform id (`"telegram"`, `"discord"`). |
-| `event_type` | `str` | Event-local contract id (see the table below). |
-| `payload` | `dict` | Event-type-specific fields, documented per event type below. |
-
-Every payload is additive and event-specific; there is no monolithic gateway payload version. All ids are strings; missing/unavailable fields are `None`, never guessed. Malformed events and events whose source cannot be authorized are dropped (fail closed). A transient Telegram Application rebuild re-registers the observer together with the core handlers.
-
-**Per-event payload contracts (v1, additive):**
-
-| `event_type` | Platforms | Payload fields |
-|--------------|-----------|----------------|
-| `reaction` | telegram | `emojis: list[str]`, `custom_emoji_ids: list[str]`, `chat_id: str`, `message_id: str`, `thread_id: str \| None` (Telegram reaction updates carry no topic id, so currently always `None`). |
-| `message_edited` | telegram, discord | `chat_id: str`, `message_id: str`, `thread_id: str \| None`, `text: str \| None` (edited text or caption, bounded; `None` for media-only edits or when uncached), `edited_at: str \| None` (ISO 8601). |
-| `message_deleted` | discord | `chat_id: str`, `message_id: str`, `thread_id: str \| None`, `author_id: str \| None`. Discord's delete event does not identify the deleter; the authorized source is the deleted message's author, and uncached deletions never fire. |
-| `thread_created` | discord | `thread_id: str`, `parent_chat_id: str \| None`, `name: str \| None`, `owner_id: str \| None`. |
-| `thread_renamed` | discord | `thread_id: str`, `parent_chat_id: str \| None`, `old_name: str \| None`, `new_name: str`. Fired only when the name actually changed; other thread updates (archive, slowmode, tags) are dropped. Discord's thread-update event carries no actor, so the thread owner is the authorized source. |
-
-The bot's own progressive message edits (streaming) never fire `message_edited` on Discord — bot-authored events are dropped at the fire-site.
-
-This hook is observer-only: it does **not** add raw-event access or adapter access. **Raw SDK payload access is deliberately not shipped** — adapter SDK objects change shape without notice and would become un-evolvable API surface; where genuinely needed it requires its own explicit capability (`gateway.raw_events`) with a "no stability guarantee" label and its own design (tracked in #64228). For *acting* on a platform (adding a reaction, renaming a thread), use the capability-gated `ctx.platform_actions` facade documented in the [plugins guide](plugins.md#platform-actions) — it is gated off by default behind the `gateway.platform_actions` capability. `PluginContext.dispatch_tool()` can only call tools registered in the tool registry; `send_message` is intentionally not registered there (its transport is reserved for explicit CLI, cron, kanban, and MCP delivery paths). A future outbound-delivery contract must first provide stable delivered content/handles across all adapters; this slice does not pre-register an inert `gateway_message_delivered` hook.
-
----
-
 ### `pre_approval_request`
 
 Fires before an approval decision is requested. It covers prompted surfaces—interactive CLI, Ink TUI, gateway platforms, and ACP clients—including protected agent-instruction write prompts and MCP/vault consent prompts, plus `approvals.mode=smart` decisions made without a human prompt (`surface="smart"`). In smart mode, the hook runs before the auxiliary LLM is called.
@@ -1510,51 +1028,6 @@ def register(ctx):
 
     ctx.register_hook("on_human_input_request", on_request)
     ctx.register_hook("on_human_input_resolved", on_resolved)
-```
-
----
-
-### `on_room_member_activity`
-
-Fires while a hosted [Group Chat](../bot-mode.md#groups-and-group-chats) member turn runs. A member executes on a hidden `Group: <room>` session that no client is attached to, so between the room log's `turn.started` and `turn.settled` the turn is a black box. This hook projects the runtime events that session already produces — tool start/complete, approval requests, streamed text and reasoning, errors — stamped with the room coordinates, so a client (Hermes Crew, a dashboard, an audit log) can render tool cards, approval prompts and live member status without inferring anything from text. The Group Chat runtime keeps ownership of execution, scheduling and the durable log; plugins only observe.
-
-**Callback signature:**
-
-```python
-def my_callback(
-    room_id: str,
-    thread_id: str,
-    member_id: str,
-    turn_id: str,
-    task_id: str,
-    execution_generation: int,
-    kind: str,
-    seq: int | None,
-    payload: dict,
-    **kwargs,
-):
-```
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `room_id`, `thread_id`, `turn_id`, `task_id` | `str` | The same coordinates the room log's `turn.*` and `message.member` events carry; join on them. |
-| `member_id` | `str` | The seated member (`members[].member_id` from `groups.state`). |
-| `execution_generation` | `int` | Increments on every retry of the same task; events from a superseded attempt carry the older value. |
-| `kind` | `str` | `tool.started`, `tool.completed`, `tool.output_risk`, `request.opened` (approval), `message.delta`, `message.interim`, `reasoning.delta`, `turn.error`. New kinds are additive. |
-| `seq` | `int \| None` | The member session's per-process event sequence (same numbering as `session.events.since`); monotonic within one gateway process, resets on restart. |
-| `payload` | `dict` | The client-safe body of the underlying session event (`tool_id`, `name`, `args`, `result`, `request_id`, `choices`, `text`, ...). Approval commands are already credential-redacted. |
-
-**Delivery:** each registered callback gets its own bounded queue and worker thread (the `on_stream_*` mechanism); a slow callback drops its oldest pending event and never delays the member's turn. Nothing is written to the room log — deltas are not durable and do not replay; clients that need durability persist what they receive. Local members only: a member seated from another machine runs on that machine's gateway, whose plugins see it.
-
-**Return value:** ignored.
-
-```python
-def on_member_activity(room_id, member_id, turn_id, kind, payload, **kwargs):
-    if kind == "request.opened":
-        notify(f"{member_id} in {room_id} needs approval: {payload['command']}")
-
-def register(ctx):
-    ctx.register_hook("on_room_member_activity", on_member_activity)
 ```
 
 ---
@@ -1799,12 +1272,11 @@ Shell hooks are registered by calling `agent.shell_hooks.register_from_config(cf
 
 ### Comparison at a glance
 
-| Dimension | Shell hooks | [Plugin hooks](#plugin-hooks) | [Gateway hooks](#gateway-event-hooks) |
 |-----------|-------------|-------------------------------|---------------------------------------|
 | Declared in | `hooks:` block in `~/.hermes/config.yaml` | `register()` in a `plugin.yaml` plugin | `HOOK.yaml` + `handler.py` directory |
 | Lives under | `~/.hermes/agent-hooks/` (by convention) | `~/.hermes/plugins/<name>/` | `~/.hermes/hooks/<name>/` |
 | Language | Any (Bash, Python, Go binary, …) | Python only | Python only |
-| Runs in | CLI + Gateway | CLI + Gateway | Gateway only |
+| Runs in | CLI + TUI | CLI + TUI | Gateway only |
 | Events | `VALID_HOOKS` (incl. `subagent_stop`) | `VALID_HOOKS` | Gateway lifecycle (`gateway:startup`, `agent:*`, `command:*`) |
 | Can block a tool call | Yes (`pre_tool_call`) | Yes (`pre_tool_call`) | No |
 | Can inject LLM context | Yes (`pre_llm_call`) | Yes (`pre_llm_call`) | No |
@@ -2061,7 +1533,7 @@ Both Python plugin hooks and shell hooks flow through the same `invoke_hook()` d
 
 ## Outbound Webhooks
 
-Outbound webhooks are the push-side mirror of the [inbound webhook platform](../messaging/webhooks.md): inbound webhooks wake Hermes when the world changes; outbound webhooks tell the world when Hermes does something. Configure a list of HTTP endpoints and the lifecycle events they care about, and Hermes POSTs a signed JSON payload to each endpoint whenever a matching event fires — no polling on the receiving end.
+Outbound webhooks notify explicitly configured external endpoints about local lifecycle events. Configure a list of HTTP endpoints and the lifecycle events they care about, and Hermes POSTs a signed JSON payload to each endpoint whenever a matching event fires — no polling on the receiving end.
 
 Typical uses:
 

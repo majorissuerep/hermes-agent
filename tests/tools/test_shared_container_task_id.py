@@ -113,7 +113,7 @@ def test_no_session_key_still_defaults(monkeypatch):
 # The tests above set HERMES_SESSION_KEY through os.environ, which only
 # exercises the os.getenv() *fallback* branch of the scoping logic. Real
 # gateway turns never write this process-global env var — they bind the
-# identity through gateway.session_context.set_session_vars(), which stores it
+# identity through agent.session_context.set_session_vars(), which stores it
 # in a ContextVar, and _resolve_container_task_id reads it back via
 # get_session_env(). These companion tests cover that production path with
 # HERMES_SESSION_KEY absent from os.environ.
@@ -122,7 +122,7 @@ def test_no_session_key_still_defaults(monkeypatch):
 def test_session_key_from_contextvar_without_environ(monkeypatch):
     # Prove the fix works on the gateway path: HERMES_SESSION_KEY is NOT in
     # os.environ; the key lives only in the ContextVar bound by the gateway.
-    from gateway.session_context import clear_session_vars, set_session_vars
+    from agent.session_context import clear_session_vars, set_session_vars
 
     monkeypatch.delenv("HERMES_SESSION_KEY", raising=False)
     tokens = set_session_vars(session_key="sess-ctx")
@@ -144,7 +144,7 @@ def test_contextvar_session_key_wins_over_environ(monkeypatch):
     # the ContextVar is authoritative even when a *different* value lingers in
     # os.environ (e.g. a CLI-set or previously-leaked global). The container
     # slot must follow the ContextVar-bound session, not the process global.
-    from gateway.session_context import clear_session_vars, set_session_vars
+    from agent.session_context import clear_session_vars, set_session_vars
 
     monkeypatch.setenv("HERMES_SESSION_KEY", "sess-ENV")
     tokens = set_session_vars(session_key="sess-CTX")
@@ -173,7 +173,7 @@ def _persistent_docker(monkeypatch):
 def test_persistent_docker_default_profile_shares_default_container(monkeypatch):
     # A gateway session of the default profile lands on the SAME container key
     # CLI mode uses — "default" — not a per-session key.
-    from gateway.session_context import clear_session_vars, set_session_vars
+    from agent.session_context import clear_session_vars, set_session_vars
 
     _persistent_docker(monkeypatch)
     tokens = set_session_vars(session_key="agent:main:telegram:dm:123", profile="")
@@ -184,7 +184,7 @@ def test_persistent_docker_default_profile_shares_default_container(monkeypatch)
 
 
 def test_persistent_docker_two_sessions_same_profile_share_container(monkeypatch):
-    from gateway.session_context import clear_session_vars, set_session_vars
+    from agent.session_context import clear_session_vars, set_session_vars
 
     _persistent_docker(monkeypatch)
     tokens = set_session_vars(session_key="agent:main:telegram:dm:123", profile="work")
@@ -201,7 +201,7 @@ def test_persistent_docker_two_sessions_same_profile_share_container(monkeypatch
 
 
 def test_persistent_docker_distinct_profiles_get_distinct_containers(monkeypatch):
-    from gateway.session_context import clear_session_vars, set_session_vars
+    from agent.session_context import clear_session_vars, set_session_vars
 
     _persistent_docker(monkeypatch)
     tokens = set_session_vars(session_key="sess-X", profile="work")
@@ -222,7 +222,7 @@ def test_persistent_docker_distinct_profiles_get_distinct_containers(monkeypatch
 def test_nonpersistent_docker_keeps_session_scoping(monkeypatch):
     # container_persistent:false is an explicit isolation statement (#82731) —
     # the profile-scope gate must not fire there.
-    from gateway.session_context import clear_session_vars, set_session_vars
+    from agent.session_context import clear_session_vars, set_session_vars
 
     monkeypatch.setenv("TERMINAL_ENV", "docker")
     monkeypatch.setenv("TERMINAL_CONTAINER_PERSISTENT", "false")
@@ -236,7 +236,7 @@ def test_nonpersistent_docker_keeps_session_scoping(monkeypatch):
 def test_ssh_backend_keeps_session_scoping(monkeypatch):
     # The original a270c4ade leak: SSH environments must stay session-scoped
     # regardless of profile, or profile A's SSHEnvironment leaks into B.
-    from gateway.session_context import clear_session_vars, set_session_vars
+    from agent.session_context import clear_session_vars, set_session_vars
 
     monkeypatch.setenv("TERMINAL_ENV", "ssh")
     tokens = set_session_vars(session_key="sess-A", profile="work")
@@ -250,7 +250,7 @@ def test_ssh_backend_keeps_session_scoping(monkeypatch):
 
 
 def test_shared_key_unifies_profiles(monkeypatch):
-    from gateway.session_context import clear_session_vars, set_session_vars
+    from agent.session_context import clear_session_vars, set_session_vars
 
     _persistent_docker(monkeypatch)
     monkeypatch.setenv("TERMINAL_DOCKER_SHARED_CONTAINER_KEY", "team/workspace")
@@ -277,7 +277,7 @@ def test_shared_key_applies_to_cli_no_session(monkeypatch):
 
 
 def test_empty_shared_key_keeps_profile_scoping(monkeypatch):
-    from gateway.session_context import clear_session_vars, set_session_vars
+    from agent.session_context import clear_session_vars, set_session_vars
 
     _persistent_docker(monkeypatch)
     monkeypatch.setenv("TERMINAL_DOCKER_SHARED_CONTAINER_KEY", "")
@@ -291,7 +291,7 @@ def test_empty_shared_key_keeps_profile_scoping(monkeypatch):
 def test_shared_key_ignored_outside_persistent_docker(monkeypatch):
     # The opt-in is a persistent-Docker concept only: SSH keeps session
     # scoping even when the key is set.
-    from gateway.session_context import clear_session_vars, set_session_vars
+    from agent.session_context import clear_session_vars, set_session_vars
 
     monkeypatch.setenv("TERMINAL_ENV", "ssh")
     monkeypatch.setenv("TERMINAL_DOCKER_SHARED_CONTAINER_KEY", "team/workspace")

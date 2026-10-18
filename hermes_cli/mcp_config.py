@@ -919,7 +919,7 @@ def _reauth_oauth_server(name: str, server_config: dict, *, flow: str | None = N
     # The probe triggers the OAuth flow (browser redirect + callback capture). Its bound must outlast
     # the oauth.timeout callback window (plus headroom for the token exchange), or a user who raised
     # oauth.timeout still gets cut off at the old fixed floor — matching the GUI re-auth path in
-    # web_server_mcp.py and tui_gateway/mcp_oauth_sessions.py. force_interactive_oauth: `hermes mcp
+    # web_server_mcp.py and tui_runtime/mcp_oauth_sessions.py. force_interactive_oauth: `hermes mcp
     # login` is explicitly user-initiated even when stdin isn't a TTY (desktop / agent-spawned
     # terminals), where _is_interactive() alone would refuse to open a browser.
     try:
@@ -1124,7 +1124,6 @@ _MCP_USAGE = (
     "hermes mcp                                    Open the catalog picker (default)",
     "hermes mcp catalog                            List Nous-approved MCPs",
     "hermes mcp install <name>                     Install a catalog MCP",
-    "hermes mcp serve                              Run as MCP server",
     "hermes mcp add <name> --url <endpoint>        Add a custom MCP server",
     "hermes mcp add <name> --command <cmd>         Add a stdio server",
     "hermes mcp add <name> --preset <preset>       Add from a known preset",
@@ -1139,18 +1138,7 @@ _MCP_USAGE = (
 
 def mcp_command(args):
     """Main dispatcher for ``hermes mcp`` subcommands."""
-    if getattr(args, "via_host", False):
-        from hermes_cli.mcp_host import mcp_host_command
-
-        return mcp_host_command(args)
-    if getattr(args, "config_json", None) is not None or getattr(args, "header", None):
-        _error("--config-json and --header require --via-host")
-        return 2
     action = getattr(args, "mcp_action", None)
-    if action == "serve":
-        from mcp_serve import run_mcp_server
-        run_mcp_server(verbose=getattr(args, "verbose", False))
-        return
     if action in ("picker", "catalog", "install"):
         # Catalog subcommands live in mcp_picker / mcp_catalog; import lazily to keep this module cheap.
         from hermes_cli import mcp_picker

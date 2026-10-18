@@ -7,7 +7,7 @@ at rest); liveness comes from the active-session lease registry, never from the 
 crashed owner reads as ``dormant`` instead of a ghost ``running``.
 
 Addressing: ``#7`` is handle 7 in the caller's profile, ``work#7`` handle 7 in profile ``work``.
-Everything here is host-independent: the session host (``tui_gateway/methods_deck.py``) and the
+Everything here is host-independent: the session host (``tui_runtime/methods_deck.py``) and the
 classic CLI both build on it.
 """
 

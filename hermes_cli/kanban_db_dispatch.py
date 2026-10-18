@@ -312,7 +312,7 @@ def reap_worker_zombies() -> list[int]:
 def _pid_alive(pid: Optional[int]) -> bool:
     """Return True if ``pid`` is still running on this host.
 
-    Uses ``gateway.status._pid_exists`` (OpenProcess on Windows, ``os.kill(pid, 0)``
+    Uses ``gateway.status.pid_exists`` (OpenProcess on Windows, ``os.kill(pid, 0)``
     on POSIX). **DO NOT** call ``os.kill(pid, 0)`` directly on Windows — there
     ``sig=0`` is ``CTRL_C_EVENT`` broadcast to the console group, potentially
     killing unrelated processes.
@@ -324,8 +324,8 @@ def _pid_alive(pid: Optional[int]) -> bool:
     """
     if not pid or pid <= 0:
         return False
-    from gateway.status import _pid_exists
-    if not _pid_exists(int(pid)):
+    from hermes_platform.processes import pid_exists
+    if not pid_exists(int(pid)):
         return False
     if sys.platform == "linux":
         try:
@@ -371,8 +371,8 @@ def _process_fingerprint(pid: int) -> Optional[str]:
     survives a reboot could match an unrelated process with the same PID and the same tick value;
     ``gateway.drain_control.current_instantiation_epoch`` (``boot_id`` + PID-1 start) changes on every
     reboot / container recreate, so the composed value never survives one. ``None`` when unreadable."""
-    from gateway.drain_control import current_instantiation_epoch
-    from gateway.status import get_process_start_time
+    from hermes_platform.runtime_health import current_instantiation_epoch
+    from hermes_platform.processes import get_process_start_time
     start = get_process_start_time(int(pid))
     if start is None:
         return None
@@ -405,12 +405,12 @@ def _pid_recycled(pid: Optional[int], started_at) -> bool:
         return True
     if isinstance(started_at, str) and "|" in started_at:
         return _process_fingerprint(int(pid)) != started_at
-    from gateway.status import _start_times_agree, get_process_start_time
+    from hermes_platform.processes import process_start_times_agree, get_process_start_time
     current = get_process_start_time(int(pid))
     if current is None:
         return True
     try:
-        return not _start_times_agree(current, started_at)
+        return not process_start_times_agree(current, started_at)
     except (TypeError, ValueError):
         return True
 
@@ -1849,7 +1849,7 @@ def _system_memory_sample() -> dict:
     ``{}`` so results don't depend on the CI runner's live memory.
     """
     try:
-        from gateway.lifecycle_ledger import sample_memory
+        from hermes_platform.runtime_health import sample_memory
         return sample_memory() or {}
     except Exception:
         return {}
@@ -1967,7 +1967,7 @@ def _memory_pressure_level(sample: Optional[Mapping[str, Any]] = None) -> str:
     if not sample:
         return "unknown"
     try:
-        from gateway.memory_status import classify_pressure
+        from hermes_platform.runtime_health import classify_pressure
         return classify_pressure(sample.get("mem_available_kib"), sample.get("mem_total_kib"))
     except Exception:
         return "unknown"
@@ -2665,7 +2665,7 @@ def _worker_profile_scope(hermes_home: str, *, bind_home: bool = True):
     from agent.secret_scope import build_profile_secret_scope, reset_secret_scope, set_secret_scope
     from hermes_constants import get_process_hermes_home, reset_hermes_home_override, set_hermes_home_override
     from tools.terminal_scope import install_profile_terminal_scope, reset_terminal_scope
-    from tui_gateway.launch_profile_policy import launch_secret_scope, launch_terminal_env
+    from tui_runtime.launch_profile_policy import launch_secret_scope, launch_terminal_env
 
     home = Path(hermes_home)
     is_launch_home = str(home.resolve()) == str(Path(get_process_hermes_home()).resolve())
@@ -2772,13 +2772,13 @@ def _restart_safe_worker_argv(task: Task, command: list[str]) -> list[str]:
     (``Type=oneshot`` dispatch timers, #113612) ``outlives_parent=True`` gets the
     worker its own scope so the unit's cgroup teardown cannot kill it.
     """
-    from tools.process_registry import restart_safe_gateway_child_argv
+    from tools.process_registry import restart_safe_child_argv
 
     if task.current_run_id is None:
         # Outside managed systemd this is harmless, but a managed dispatch must
         # never mint an untraceable worker.  Check topology through the shared
         # helper first, using a placeholder suffix that cannot be launched.
-        dispatch = restart_safe_gateway_child_argv(
+        dispatch = restart_safe_child_argv(
             command,
             unit_suffix=f"kanban-{task.id}-run-missing",
             require_restart_safe_scope=True,
@@ -2791,7 +2791,7 @@ def _restart_safe_worker_argv(task: Task, command: list[str]) -> list[str]:
             )
         return command
 
-    return restart_safe_gateway_child_argv(
+    return restart_safe_child_argv(
         command,
         unit_suffix=f"kanban-{task.id}-run-{task.current_run_id}",
         require_restart_safe_scope=True,
@@ -2841,7 +2841,7 @@ def _default_spawn(task: Task, workspace: str, *, board: Optional[str] = None) -
         )
     # The dispatcher is detached from every conversation; its worker must never
     # inherit routing mirrored by a previous gateway turn.
-    from gateway.session_context import _VAR_MAP
+    from agent.session_context import _VAR_MAP
     for key in _VAR_MAP:
         env.pop(key, None)
 

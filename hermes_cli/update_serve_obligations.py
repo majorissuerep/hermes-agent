@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 def defer_manual_serve(runtime: dict, *, require_alive: bool = False) -> bool:
     """Transfer an identified manual runtime to its own durable restart reminder."""
-    from hermes_cli.process_identity import _pid_alive_matches
+    from hermes_platform.child_processes import pid_alive_matches
 
     if runtime.get("kind") not in ("serve", "dashboard") or runtime.get("supervisor") != "manual-serve" or runtime.get("restart_via") != "respawn-argv":
         return False
@@ -30,9 +30,9 @@ def defer_manual_serve(runtime: dict, *, require_alive: bool = False) -> bool:
     if not identified:
         # Without a recorded creation time no durable reminder can be filed (#116507);
         # only a provably dead pid discharges the row, anything less stays pending.
-        return not require_alive and _pid_alive_matches(pid, None) is False
+        return not require_alive and pid_alive_matches(pid, None) is False
     try:
-        alive = _pid_alive_matches(pid, created)
+        alive = pid_alive_matches(pid, created)
         if require_alive and alive is not True:
             return False
         if alive is False:
@@ -80,7 +80,7 @@ def retain_receipt_manual_serves(receipt: dict) -> list[dict]:
 
 def warn_pending_manual_serves(*, startup: bool = False, pending_manual: list[dict] | None = None) -> None:
     """Warn about manual debt independently of gateway evidence; optionally reuse a snapshot's failed transfers."""
-    from hermes_cli.process_identity import _pid_alive_matches
+    from hermes_platform.child_processes import pid_alive_matches
     from hermes_cli.update_receipt import read_latest_receipt
 
     stream = sys.stderr if startup else sys.stdout
@@ -98,7 +98,7 @@ def warn_pending_manual_serves(*, startup: bool = False, pending_manual: list[di
     for path in sorted(directory.glob("*.json")):
         try:
             row = json.loads(path.read_text(encoding="utf-8-sig"))
-            if _pid_alive_matches(row["pid"], row["create_time"]) is False:
+            if pid_alive_matches(row["pid"], row["create_time"]) is False:
                 path.unlink(missing_ok=True)
                 continue
             print(f"  ⚠ {row['kind']} [{row['profile']}] pid {row['pid']}: manual restart still pending; this process may still serve pre-update code.", file=stream)

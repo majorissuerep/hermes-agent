@@ -2,7 +2,7 @@
 
 
 def record_unknown_worker_outcome(
-    job: dict, *, error=None, adapters=None, loop=None
+    job: dict, *, error=None
 ) -> bool:
     """Project only this fire's uncertain outcome, without retrying its side effects.
 
@@ -29,7 +29,7 @@ def record_unknown_worker_outcome(
         delivery_error = None
         try:
             delivery_error, _ = scheduler._deliver_crash_failure(
-                job, error, adapters=adapters, loop=loop
+                job, error
             )
         finally:
             scheduler._reset_fire_secret_scope(scope_tokens)

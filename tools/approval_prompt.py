@@ -10,7 +10,7 @@ import logging
 import os
 import sys
 import threading
-from tools import approval_context as _ctx, approval_gateway_wait as _gw
+from tools import approval_context as _ctx, approval_session_wait as _gw
 from tools.approval_human_wait import activity_heartbeat, human_wait_window
 from tools.interrupt import is_interrupted
 
@@ -288,7 +288,7 @@ def request_elicitation_consent(message: str, description: str, *,
                                 timeout_seconds: int | None = None,
                                 surface: str = "mcp-elicitation", title: str = "Confirm this action?") -> str:
     """Route an MCP elicitation request to the surface owning the active session:
-    gateway sessions through ``_await_gateway_decision``, CLI/TUI through
+    gateway sessions through ``_await_session_decision``, CLI/TUI through
     ``prompt_dangerous_approval``. Always fails closed: a missing notify_cb in a
     gateway session, timeouts, and exceptions map to ``"decline"`` so a server
     treats them as "user did not approve" rather than retrying or hanging.
@@ -313,14 +313,14 @@ def request_elicitation_consent(message: str, description: str, *,
         and not _ctx._is_cron_approval_context()
         and not _ctx._is_single_query_approval_context()
     )
-    if _ctx._is_gateway_approval_context() or api_run_context:
-        notify_cb = _a._gateway_notify_cb(session_key)
+    if _ctx._is_session_approval_context() or api_run_context:
+        notify_cb = _a._session_notify_cb(session_key)
         if notify_cb is None:
             logger.warning("Elicitation requested in gateway session %s but no "
                            "notify_cb is registered — failing closed", session_key)
             return "decline"
         try:
-            decision = _gw._await_gateway_decision(
+            decision = _gw._await_session_decision(
                 session_key, notify_cb, {"command": message, "description": description,
                                          "pattern_key": "mcp_elicitation",
                                          "pattern_keys": ["mcp_elicitation"]}, surface=surface)

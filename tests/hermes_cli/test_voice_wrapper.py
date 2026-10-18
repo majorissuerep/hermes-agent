@@ -1,6 +1,6 @@
 """Tests for ``hermes_cli.voice`` — the TUI gateway's voice wrapper.
 
-The module is imported *lazily* by ``tui_gateway/server.py`` so that a
+The module is imported *lazily* by ``tui_runtime/server.py`` so that a
 box with missing audio deps fails at call time (returning a clean RPC
 error) rather than at gateway startup. These tests therefore only
 assert the public contract the gateway depends on: the three symbols
@@ -480,5 +480,3 @@ class TestSpeakTextStreamingDispatch:
         assert voice.speak_text("Hello streaming world") is None
         assert streamed == ["Hello streaming world"]
         assert synced == [], "sync whole-file path must be skipped when streaming"
-
-

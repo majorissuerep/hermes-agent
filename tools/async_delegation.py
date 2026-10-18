@@ -23,7 +23,6 @@ from typing import Any, Callable, Dict, List, Optional
 from hermes_constants import get_hermes_home, hermes_home_key
 from tools.daemon_pool import DaemonThreadPoolExecutor
 from tools.thread_context import propagate_context_to_thread
-from tools.async_delegation_worker import worker_ledger, require_ledger_owner
 
 logger = logging.getLogger(__name__)
 
@@ -100,9 +99,6 @@ def _db_path():
 
 
 def _connect() -> sqlite3.Connection:
-    from agent.runtime_session_store import WorkerPersistenceError, is_worker_process
-    if is_worker_process():
-        raise WorkerPersistenceError('worker_delegation_ledger_unavailable')
     from hermes_cli.sqlite_util import open_db
     # Same state.db as hermes_state.SessionDB -- reuse its owner-only (0600)
     # hardening so this writer doesn't create/leave the file (and its WAL
@@ -148,18 +144,16 @@ def _capture_routing_origin() -> dict[str, Any]:
     has no contextvars) so a restart-replayed completion can rebuild a SessionSource.
     Best-effort: empty values are omitted."""
     try:
-        from gateway.session_context import get_session_env
+        from agent.session_context import get_session_env
         return {k: v for k in _ROUTING_KEYS if (v := get_session_env(f"HERMES_SESSION_{k.upper()}", ""))}
     except Exception:
         return {}
 
 
 def _persist_dispatch(record: dict[str, Any]) -> None:
-    if remote := worker_ledger():
-        return remote.dispatch(record)
     now = time.time()
     try:
-        from gateway.status import get_process_start_time
+        from hermes_platform.processes import get_process_start_time
         owner_started_at = get_process_start_time(os.getpid())
     except Exception:
         owner_started_at = None
@@ -186,7 +180,6 @@ def _persist_dispatch(record: dict[str, Any]) -> None:
 
 def _prune_durable_records() -> None:
     """Bound terminal history, preferring delivered records for deletion."""
-    require_ledger_owner()
     cutoff = time.time() - _DURABLE_RETENTION_SECONDS
     with _DB_LOCK, _transaction() as conn:
         conn.execute(
@@ -211,8 +204,6 @@ def _prune_durable_records() -> None:
 
 
 def _persist_completion(event: dict[str, Any], result: dict[str, Any]) -> None:
-    if remote := worker_ledger():
-        return remote.complete(event, result)
     now = time.time()
     with _DB_LOCK, _transaction() as conn:
         conn.execute("""UPDATE async_delegations SET state=?, completed_at=?, updated_at=?,
@@ -227,8 +218,6 @@ def record_unit_child(delegation_id: str, entry: dict[str, Any]) -> None:
     the unit joins loses only the children that had not finished. Stored in ``result_json`` (overwritten by the real
     result at finalize); ``recover_abandoned_delegations`` replays it. Best-effort: a failed write costs recovery
     fidelity, never the live result."""
-    if remote := worker_ledger():
-        return remote.child(delegation_id, entry)
     try:
         with _DB_LOCK, _transaction() as conn:
             row = conn.execute("SELECT result_json FROM async_delegations WHERE delegation_id=? AND state='running'",
@@ -258,12 +247,12 @@ def _owner_liveness() -> Optional[Callable[[Any, Any], bool]]:
     """``alive(owner_pid, owner_started_at)`` over the shared drift-tolerant start-time comparator,
     or None when the liveness probes cannot be imported."""
     try:
-        from gateway.status import _pid_exists, get_process_start_time, start_time_fingerprints_match
+        from hermes_platform.processes import pid_exists, get_process_start_time, start_time_fingerprints_match
     except Exception:
         return None
 
     def alive(pid, started) -> bool:
-        return bool(pid) and _pid_exists(int(pid)) and (
+        return bool(pid) and pid_exists(int(pid)) and (
             started is None or start_time_fingerprints_match(started, get_process_start_time(int(pid)) or 0))
     return alive
 
@@ -271,7 +260,6 @@ def _owner_liveness() -> Optional[Callable[[Any, Any], bool]]:
 def recover_abandoned_delegations() -> int:
     """Classify records whose owning process disappeared as outcome unknown; children a multi-child unit had already
     recorded (``record_unit_child``) are replayed with their real results."""
-    require_ledger_owner()
     alive = _owner_liveness()
     if alive is None:
         return 0
@@ -333,11 +321,6 @@ def restore_undelivered_completions(target_queue) -> int:
     ownership, otherwise a brand-new session adopts a dead session's delegation results seconds after boot
     (#64484).
     """
-    from agent.runtime_session_store import is_worker_process
-    if is_worker_process():
-        # The ordinary owner restores delivery-only results; a compute import
-        # must neither reap that owner's ledger nor steal its delivery queue.
-        return 0
     if not _db_path().exists():
         return 0  # nothing to replay; a replay must not create (or migrate) the ledger (#123265)
     recover_abandoned_delegations()
@@ -451,7 +434,6 @@ def _update_delivery(sql: str, params: tuple) -> bool:
 
 def mark_completion_delivered(delegation_id: str) -> bool:
     """Atomically acknowledge successful injection of a durable completion."""
-    require_ledger_owner()
     now = time.time()
     return _update_delivery(
         """UPDATE async_delegations SET delivery_state='delivered', delivered_at=?, updated_at=?
@@ -460,8 +442,6 @@ def mark_completion_delivered(delegation_id: str) -> bool:
 
 def claim_completion_delivery(delegation_id: str, claim_id: str) -> bool:
     """Claim one pending completion across competing consumers/processes."""
-    if remote := worker_ledger():
-        return remote.claim(delegation_id, claim_id)
     now = time.time()
     with _DB_LOCK, _transaction() as conn:
         row = conn.execute(
@@ -498,8 +478,6 @@ def release_completion_delivery(delegation_id: str, claim_id: str) -> bool:
     """Release a failed delivery claim so another consumer may retry. Attempts are
     counted at claim time; once the budget is exhausted the row converges to
     terminal ``dropped`` (only pending rows replay on restart)."""
-    if remote := worker_ledger():
-        return remote.release(delegation_id, claim_id)
     now = time.time()
     with _DB_LOCK, _transaction() as conn:
         capped = conn.execute("""UPDATE async_delegations SET delivery_state='dropped',
@@ -521,8 +499,6 @@ def release_completion_delivery(delegation_id: str, claim_id: str) -> bool:
 
 def defer_completion_delivery(delegation_id: str, claim_id: str) -> bool:
     """Return an unadmitted completion to pending without spending a delivery attempt."""
-    if remote := worker_ledger():
-        return remote.defer(delegation_id, claim_id)
     return _update_delivery("""UPDATE async_delegations SET delivery_claim=NULL,
                   delivery_claimed_at=NULL, delivery_attempts=MAX(0, delivery_attempts-1),
                   updated_at=?
@@ -535,8 +511,6 @@ def drop_completion_delivery(delegation_id: str, claim_id: str) -> bool:
     spawning session ended at an explicit user boundary such as /new or reset).
     ``dropped`` — not ``delivered`` — keeps the ack honest; not ``pending`` keeps
     restart recovery from replaying it into a fail-closed drop forever."""
-    if remote := worker_ledger():
-        return remote.drop(delegation_id, claim_id)
     return _update_delivery("""UPDATE async_delegations SET delivery_state='dropped',
                   updated_at=?, delivery_claim=NULL,
                   delivery_claimed_at=NULL
@@ -546,8 +520,6 @@ def drop_completion_delivery(delegation_id: str, claim_id: str) -> bool:
 
 def complete_completion_delivery(delegation_id: str, claim_id: str) -> bool:
     """Acknowledge acceptance for the consumer holding this claim."""
-    if remote := worker_ledger():
-        return remote.ack(delegation_id, claim_id)
     now = time.time()
     return _update_delivery("""UPDATE async_delegations SET delivery_state='delivered',
                   delivered_at=?, updated_at=?, delivery_claim=NULL,
@@ -612,8 +584,6 @@ def _event_delivery(fn, evt: dict[str, Any], claim_id: str) -> None:
 
 
 def get_durable_delegation(delegation_id: str) -> Optional[dict[str, Any]]:
-    if remote := worker_ledger():
-        return remote.read(delegation_id)
     with _DB_LOCK, _transaction() as conn:
         row = conn.execute("""SELECT origin_session, state, dispatched_at, completed_at,
                       result_json, delivery_state, delivery_attempts,
@@ -752,7 +722,7 @@ def _current_origin_session_id() -> str:
     request-scoped ``HERMES_SESSION_CHAT_ID`` (raw X-Hermes-Session-Id on api_server) survives
     child construction; on push platforms chat_id is a chat, not a session => ``""``."""
     try:
-        from gateway.session_context import get_session_env
+        from agent.session_context import get_session_env
         is_api = get_session_env("HERMES_SESSION_PLATFORM", "") == "api_server"
         return (get_session_env("HERMES_SESSION_CHAT_ID", "") or "") if is_api else ""
     except Exception:
@@ -775,16 +745,9 @@ def _batch_status(combined: dict[str, Any]) -> str:
     return "error" if child_results and all(r.get("status") not in ok for r in child_results) else "completed"
 
 
-def _dispatch(**kwargs) -> dict[str, Any]:
-    from hermes_cli.backend_retirement import retirement
-
-    with retirement.work() as admitted:
-        if not admitted:
-            return {"status": "rejected", "error": "backend is retiring; reconnect to continue"}
-        return _dispatch_admitted(**kwargs)
 
 
-def _dispatch_admitted(
+def _dispatch(
     *, delegation_id: str, goal: str, goals: Optional[list[str]], context: Optional[str],
     toolsets: Optional[list[str]], role: str, model: Optional[str], session_key: str,
     parent_session_id: Optional[str], runner: Callable[[], dict[str, Any]], origin_ui_session_id: str,
@@ -799,7 +762,6 @@ def _dispatch_admitted(
     can't pile up unbounded background work. ``slot_key`` names the pool slot the unit occupies
     (default: its own id); the units of one delegate_task call share the first unit's id so
     splitting a call into per-group completions never consumes more capacity than the call did."""
-    worker_ledger()  # refuse unbound workers before publishing a live record
     is_batch = goals is not None
     label = " batch" if is_batch else ""
     classify = _batch_status if is_batch else (lambda r: r.get("status") or "completed")
@@ -850,23 +812,14 @@ def _dispatch_admitted(
         finally:
             _finalize(delegation_id, result, status)
 
-    from hermes_cli.backend_retirement import retirement
-
-    # The outer dispatch reservation prevents a freeze during this handoff. Retain a worker
-    # reservation too: the stall monitor may finalize its registry record before it really exits.
-    retirement.acquire()
     try:
-        future = executor.submit(propagate_context_to_thread(_worker))
-        future.add_done_callback(lambda _: retirement.release())
+        executor.submit(propagate_context_to_thread(_worker))
     except Exception as exc:  # pragma: no cover — pool submit failure is rare
-        retirement.release()
+        logger.exception("Failed to schedule async delegation %s", delegation_id)
         with _records_lock:
             _records.pop(delegation_id, None)
-        if remote := worker_ledger():
-            remote.unscheduled(delegation_id)
-        else:
-            with _DB_LOCK, _transaction() as conn:
-                conn.execute("DELETE FROM async_delegations WHERE delegation_id=?", (delegation_id,))
+        with _DB_LOCK, _transaction() as conn:
+            conn.execute("DELETE FROM async_delegations WHERE delegation_id=?", (delegation_id,))
         return {"status": "rejected", "error": f"Failed to schedule async delegation{label}: {exc}"}
     if progress_fn is not None:
         _ensure_stale_monitor()

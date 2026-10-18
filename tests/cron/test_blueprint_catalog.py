@@ -135,13 +135,13 @@ class TestCommandHandler:
     def test_fill_creates_job(self, isolated_home):
         from hermes_cli.blueprint_cmd import handle_blueprint_command
 
-        res = handle_blueprint_command("morning-brief time=07:30 deliver=telegram")
+        res = handle_blueprint_command("morning-brief time=07:30 deliver=local")
         assert "Scheduled" in res.text
         assert res.agent_seed is None
         jobs = isolated_home.load_jobs()
         assert len(jobs) == 1
         assert (jobs[0].get("schedule_display") or jobs[0].get("schedule")) == "30 7 * * *"
-        assert jobs[0].get("deliver") == "telegram"
+        assert jobs[0].get("deliver") == "local"
 
 
 class TestDocsGenerator:

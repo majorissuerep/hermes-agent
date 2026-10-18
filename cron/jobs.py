@@ -32,7 +32,7 @@ from hermes_constants import get_hermes_home
 from cron.constants import CLAIM_TTL_INACTIVITY_HEADROOM, FIRE_CLAIM_SKEW_SECONDS, FIRE_CLAIM_TTL_SECONDS
 from cron.env_settings import cron_env_setting
 from cron.jobs_invariants import _validate_job_mode_invariants
-from cron.scheduler_ownership import _claim_owner_is_dead
+from cron.occurrences import _claim_owner_is_dead
 from cron import store_health
 from typing import Optional, Dict, List, Any, Callable, Set, Tuple, Union, Collection
 
@@ -40,7 +40,7 @@ logger = logging.getLogger(__name__)
 
 from hermes_time import now as _hermes_now
 from hermes_time import get_timezone
-from hermes_cli.observability.shared_metrics_gateway import record_cron_missed
+from hermes_cli.observability.shared_metrics_sessions import record_cron_missed
 from utils import atomic_replace, atomic_write_text, fsync_directory, mkstemp_beside
 
 # croniter is imported lazily (slow import, only needed for cron exprs). HAS_CRONITER stays a
@@ -1855,7 +1855,7 @@ def create_job(
     if parsed_schedule["kind"] == "once" and repeat is None:
         repeat = 1
     if deliver is None:
-        deliver = "origin" if origin else "local"
+        deliver = "local"
     job_id = uuid.uuid4().hex[:12]
     now = _hermes_now().isoformat()
 
@@ -1869,9 +1869,11 @@ def create_job(
     prompt_text = _coerce_job_text(prompt).strip()
     if not prompt_text and not f["script"] and not normalized_skills:
         raise ValueError(EMPTY_PAYLOAD_ERROR)
-    # Reject gateway-lifecycle commands (respawn loops) here, not just in the CLI: covers the tool.
-    from cron.lifecycle_guard import check_gateway_lifecycle
-    check_gateway_lifecycle(prompt_text, f["script"])
+    from cron.scheduler_delivery import local_delivery_error
+    delivery_error = local_delivery_error({"deliver": deliver, "failure_deliver": failure_deliver,
+                                           "attach_to_session": attach_to_session})
+    if delivery_error:
+        raise ValueError(delivery_error)
 
     label_source = (
         prompt_text
@@ -2114,6 +2116,11 @@ def update_job(job_id: str, updates: dict[str, Any]) -> Optional[dict[str, Any]]
         _normalize_job_updates(job, updates)
         _apply_pin_update(job, updates)
         updated = _apply_skill_fields({**job, **updates})
+        if {"deliver", "failure_deliver", "attach_to_session"}.intersection(updates):
+            from cron.scheduler_delivery import local_delivery_error
+            error = local_delivery_error(updated)
+            if error:
+                raise ValueError(error)
         _reject_terminal_activation(job, updated, job_id)
         # Re-check on the MERGED record; scoped to changed fields so legacy records keep loading.
         if {"monitor_script", "monitor_url", "no_agent", "script"}.intersection(updates):
@@ -2489,8 +2496,7 @@ def mark_job_run(
         now = _hermes_now().isoformat()
         _record_run_outcome(job, success, error, delivery_error, status, now)
         if execution_id is not None:  # retire ids recovery can no longer replay; latest stays last
-            from cron.scheduler_authority import replayable_completions as live
-            job["canonical_completions"] = [*live(job_id, job.get("canonical_completions")), execution_id]
+            job["canonical_completions"] = [execution_id]
         _advance_after_run(job, now, ladder_rung=ladder_rung)
         from cron import quota_hold
         from cron.unreachable_retry import clear_state, plan_retry
@@ -3407,7 +3413,8 @@ def save_job_output(job_id: str, output: str):
     _ensure_cron_dir(job_output_dir)
     _secure_dir(job_output_dir)
     output_file = job_output_dir / f"{_hermes_now().strftime('%Y-%m-%d_%H-%M-%S')}.md"
-    atomic_write_text(output_file, output, tmp_prefix=".output_", mode=0o600)
+    from hermes_security.io import write_text
+    write_text(output_file, output, purpose="state")
     _secure_file(output_file)
     # Bound per-job output growth so long-running deploys don't fill the disk (#52383).
     _prune_job_output(job_output_dir, _cron_output_keep())

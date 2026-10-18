@@ -99,6 +99,8 @@ def start_background_mcp_discovery(*, logger, thread_name: str) -> None:
     Desktop backend) is connected by the next call, which every agent build makes, so a new session
     gets its tools without a reload (#76954). Discovery is additive: live servers are untouched.
     """
+    from hermes_platform.child_processes import reap_orphaned_mcp_helpers
+    reap_orphaned_mcp_helpers()
     home_key = hermes_home_key()
     with _mcp_discovery_lock:
         if home_key in _mcp_discovery_started:
@@ -279,10 +281,10 @@ def _current_home_thread() -> Optional[threading.Thread]:
 def mcp_discovery_in_flight() -> bool:
     """True if THIS module's discovery thread (for the current profile home) is still running.
 
-    Mirrors ``tui_gateway.entry.mcp_discovery_in_flight``; surfaces that start discovery here
+    Mirrors ``tui_runtime.entry.mcp_discovery_in_flight``; surfaces that start discovery here
     (desktop, dashboard sidecar) populate this thread, so the late-refresh scheduler consults both.
 
-    Those processes populate THIS module's ``_mcp_discovery_thread``, not ``tui_gateway.entry``'s, so the
+    Those processes populate THIS module's ``_mcp_discovery_thread``, not ``tui_runtime.entry``'s, so the
     late-refresh scheduler must consult both to decide whether a slow server's tools are still pending (see
     #51587).
     """

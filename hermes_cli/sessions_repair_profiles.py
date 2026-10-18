@@ -133,25 +133,8 @@ def enumerate_stores() -> list[Store]:
     return stores
 
 
-def _gateway_multiplexes(root: Path) -> bool:
-    """Does the default gateway serve every profile? Same reader as every other CLI surface: the live
-    record, else the explicit flag, else False — an unset flag is a verdict only the gateway reaches,
-    and guessing "yes" would uproot a standalone gateway's own routing index."""
-    from hermes_cli.gateway_multiplex_mode import default_gateway_multiplexes
-    try:
-        return default_gateway_multiplexes(root)
-    except Exception:
-        return False
 
 
-def live_gateway_homes(stores: Iterable[Store]) -> list[tuple[str, int]]:
-    from gateway.status import live_gateway_pid_for_home
-    live = []
-    for store in stores:
-        pid = live_gateway_pid_for_home(store.home)
-        if pid is not None:
-            live.append((store.profile, pid))
-    return live
 
 
 # ── scan ──────────────────────────────────────────────────────────────────────
@@ -165,7 +148,7 @@ class RepairPlan:
         self.claimed: set[str] = set(self.by_profile)
         self.routing_store = next((s for s in stores if s.routing), None)
         self.legacy_main = legacy_main
-        self.multiplexes = _gateway_multiplexes(self.routing_store.home) if self.routing_store else False
+        self.multiplexes = False
         self.findings: list[Finding] = []
         self._moves: dict[tuple[Path, Path], _MoveBatch] = {}
 

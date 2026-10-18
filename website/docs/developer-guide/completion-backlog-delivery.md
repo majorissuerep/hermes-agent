@@ -20,16 +20,13 @@ notifications, in their original order; they are not folded into completion batc
 
 - **Classic CLI:** `hermes_cli/cli_process_notifications.py` owns the idle/post-turn
   drain, compression-aware ownership and final input unwrapping.
-- **TUI and Desktop:** `tui_gateway/session_notifications.py` groups the poller's
+- **TUI:** `tui_runtime/session_notifications.py` groups the poller's
   ready snapshot after checking ownership. Each process still emits its own UI
   status. Busy sessions requeue structured events, not rendered batch strings.
-- **Post-turn TUI safety net:** `tui_gateway/prompt_turn.py` uses the same routing
-  and rendering path. Desktop and dashboard chat clients share this backend.
-- **Messaging gateway:** `gateway/run_notifications.py` already uses its own
-  route-keyed short-window batching. This interactive-backlog change does not
-  replace that mechanism or alter adapter sends.
-- **Noninteractive/headless consumers:** this change does not create a new
-  autonomous notification loop for an API request, ACP client, or one-shot CLI.
+- **Post-turn TUI safety net:** `tui_runtime/prompt_turn.py` uses the same routing
+  and rendering path. The local Ink client uses this private backend.
+- **Noninteractive/headless consumers:** this does not create an autonomous
+  notification loop for a one-shot CLI invocation.
 
 The shared renderer is `tools/process_registry_notifications.py::ProcessNotificationBatch`.
 Neither a batch nor its delivery status is persisted into the system prompt.

@@ -1,21 +1,8 @@
-"""Messaging-channel settings a profile clone must NOT inherit.
+"""Sanitize historical messaging identity when cloning a terminal-only profile.
 
-A ``--clone``d profile that keeps the source's bot tokens, allowlists and platform state makes two
-gateways fight over one bot (standalone) or blocks ``hermes gateway migrate --multiplex`` with a
-duplicate-credential finding per platform.
-
-The inventory is OWNERSHIP-based and evaluated in the SOURCE profile's plugin scope: every adapter
-(built-in ``Platform`` member, a platform that left core — its ``LEFT_CORE`` row, plugin installed or
-not — or a plugin registered under the source's ``HERMES_HOME``) owns the env
-keys it declares outright (``required_env``, allowlist / allow-all / home-channel names, the gateway
-env-override table ``gateway.config_env._ENV_STEPS`` / ``_ENV_ENABLE_CREDENTIALS``) plus every key
-under its canonical ``<PLATFORM>_`` prefix and its historical alias prefixes. Gateway-wide channel
-policy (``GATEWAY_ALLOW_ALL_USERS`` / ``GATEWAY_ALLOWED_USERS``) and relay enrollment identity
-(``GATEWAY_RELAY_*``) are channel settings too. A prefix an adapter SHARES with a non-channel
-capability (``TWILIO_*`` is also the telephony skill, ``EMAIL_*`` mail-sending scripts, and a plugin
-platform's ``shared_env_prefixes`` its own tools) is stripped only when the source actually runs that adapter — the credential is
-then the bot's identity; otherwise it is a tool key and survives. Model/provider keys, tool keys,
-memory and general config are never touched.
+The passive inventory uses known historical prefixes and left-core metadata, never live adapters.
+Shared telephony/mail tool credentials survive unless the donor configured them as channel identity.
+The donor is unchanged; provider/tool keys and unrelated terminal configuration survive.
 """
 
 from __future__ import annotations
@@ -23,7 +10,6 @@ from __future__ import annotations
 import contextlib
 import logging
 import re
-from functools import partial
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Set, Tuple
 
@@ -58,34 +44,12 @@ _GATEWAY_OWNER_KEYS = ("multiplex_profiles", "profile_routes")
 _ENV_LINE_RE = re.compile(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=")
 
 
-@contextlib.contextmanager
-def _plugin_scope(source_dir: Optional[Path]):
-    """Evaluate adapter discovery in ``source_dir``'s plugin scope (its private ``plugins/``), not the
-    ambient profile's. ``None`` keeps the ambient scope."""
-    if source_dir is None:
-        yield
-        return
-    from hermes_constants import reset_hermes_home_override, set_hermes_home_override
-    token = set_hermes_home_override(str(source_dir))
-    try:
-        yield
-    finally:
-        reset_hermes_home_override(token)
-
-
 def platform_env_prefixes(platform_id: str) -> tuple[str, ...]:
     """Env-var prefixes owned by one messaging platform: canonical ``<PLATFORM>_`` plus aliases."""
     canonical = platform_id.upper().replace("-", "_") + "_"
     return (canonical, *_PLATFORM_ENV_PREFIX_ALIASES.get(platform_id, ()))
 
 
-def _registry_entries() -> list:
-    with contextlib.suppress(Exception):
-        from hermes_cli.plugins import discover_plugins
-        discover_plugins()  # idempotent per profile scope
-        from gateway.platform_registry import platform_registry
-        return list(platform_registry.all_entries())
-    return []
 
 
 def _left_core_platforms() -> list:
@@ -96,136 +60,35 @@ def _left_core_platforms() -> list:
 
 
 def _shared_with_tools(source_dir: Optional[Path] = None) -> dict[str, tuple[str, ...]]:
-    """``_SHARED_WITH_TOOLS``, left-core platforms' prefixes, and every plugin platform's
-    ``shared_env_prefixes`` in ``source_dir``'s scope."""
+    """``_SHARED_WITH_TOOLS``, left-core platforms' prefixes, and historical left-core shared prefixes."""
     shared = dict(_SHARED_WITH_TOOLS)
     shared.update({f.platform: f.channel_env_prefixes for f in _left_core_platforms() if f.channel_env_prefixes})
-    with _plugin_scope(source_dir):
-        for entry in _registry_entries():
-            prefixes = tuple(getattr(entry, "shared_env_prefixes", ()) or ())
-            if prefixes:
-                shared[entry.name] = prefixes
     return shared
 
 
 def platform_ids(source_dir: Optional[Path] = None) -> list[str]:
     """Every messaging platform id: built-in ``Platform`` members, platforms that left core, plus the
     plugin adapters registered in ``source_dir``'s scope (ambient scope when ``None``)."""
-    from gateway.config import Platform
-    ids = {m.value for m in Platform.__members__.values() if m.value != "local"}
-    ids.update(feature.platform for feature in _left_core_platforms())
-    with _plugin_scope(source_dir):
-        ids.update(entry.name for entry in _registry_entries())
-    return sorted(ids)
-
-
-def _cred_row_envs(row) -> set[str]:
-    """Every env name a ``gateway.config_env._Cred`` row reads."""
-    names: set[str] = set()
-
-    def _flatten(spec) -> None:
-        if isinstance(spec, str):
-            names.add(spec)
-        elif isinstance(spec, (tuple, list)):
-            for item in spec:
-                _flatten(item)
-
-    _flatten(row.creds)
-    if row.token:
-        names.add(row.token)
-    for key_env in (*row.fixed, *row.optional, *row.optional_stripped):
-        _flatten(key_env[1])
-    if row.warn_missing:
-        names.add(row.warn_missing[0])
-    if row.home:
-        names.update({row.home, f"{row.home}_NAME", f"{row.home}_THREAD_ID"})
-    return names
+    return sorted({"telegram", "discord", "sms", "relay", "google_chat_user", "slack", "whatsapp", "whatsapp_cloud", "signal",
+                   "bluebubbles", "email", "mattermost", "matrix", "dingtalk", "feishu", "wecom",
+                   "wecom_callback", "weixin", "qqbot", "yuanbao", "webhook", "api_server",
+                   *(feature.platform for feature in _left_core_platforms())})
 
 
 def config_env_table_keys() -> dict[str, str]:
-    """``{ENV_KEY: platform_id}`` for the names the gateway env-override table reads outright: the
-    enable-credential sets and every ``_Cred`` row. Registry-free, so it is cheap at import time;
-    raises if the table cannot be read (callers decide whether that is fatal)."""
-    from gateway import config_env
-    keys: dict[str, str] = {}
-    for platform, names in config_env._ENV_ENABLE_CREDENTIALS.items():
-        keys.update(dict.fromkeys(names, platform.value))
-    for step in config_env._ENV_STEPS:
-        if isinstance(step, config_env._Cred):
-            keys.update(dict.fromkeys(_cred_row_envs(step), step.platform.value))
-    return keys
+    """Historical names only; retired adapters are never imported during cloning."""
+    return {"GATEWAY_RELAY_TOKEN": "relay", **dict.fromkeys(_GATEWAY_POLICY_KEYS, GATEWAY_POLICY_ID)}
 
 
 def declared_channel_env_keys(source_dir: Optional[Path] = None) -> dict[str, str]:
-    """``{ENV_KEY: platform_id}`` for every env name an adapter declares outright (registry entry
-    fields, the gateway env-override table) plus gateway-wide channel policy. Prefix matching covers
-    the rest."""
-    keys: dict[str, str] = dict.fromkeys(_GATEWAY_POLICY_KEYS, GATEWAY_POLICY_ID)
+    keys = config_env_table_keys()
     for feature in _left_core_platforms():
         keys.update(dict.fromkeys(feature.enable_env, feature.platform))
-    with _plugin_scope(source_dir):
-        for entry in _registry_entries():
-            for name in (*entry.required_env, entry.allowed_users_env, entry.allow_all_env, entry.cron_deliver_env_var):
-                if name:
-                    keys[name] = entry.name
-    with contextlib.suppress(Exception):
-        from gateway import config_env
-        keys.update(config_env_table_keys())
-        for step in config_env._ENV_STEPS:
-            if isinstance(step, partial):
-                platform = step.keywords.get("platform")
-                for kw in ("env", "env_base"):
-                    if step.keywords.get(kw) and platform is not None:
-                        keys[step.keywords[kw]] = platform.value
     return keys
 
 
 def _policy_env_keys(source_dir: Optional[Path] = None) -> set[str]:
-    """Allowlist / allow-all / home-channel names adapters declare — channel-only by nature."""
-    names: set[str] = set(_GATEWAY_POLICY_KEYS)
-    with _plugin_scope(source_dir):
-        for entry in _registry_entries():
-            names.update(n for n in (entry.allowed_users_env, entry.allow_all_env, entry.cron_deliver_env_var) if n)
-    with contextlib.suppress(Exception):
-        from gateway import config_env
-        for step in config_env._ENV_STEPS:
-            if isinstance(step, config_env._Cred) and step.home:
-                names.update({step.home, f"{step.home}_NAME", f"{step.home}_THREAD_ID"})
-            elif isinstance(step, partial) and step.keywords.get("env_base"):
-                base = step.keywords["env_base"]
-                names.update({base, f"{base}_NAME", f"{base}_THREAD_ID"})
-    return names
-
-
-_CREDENTIAL_SUFFIXES = (
-    "_TOKEN", "_SECRET", "_KEY", "_PASSWORD", "_APP_ID", "_CLIENT_ID", "_BOT_ID", "_ACCOUNT_SID",
-    "_SERVICE_ACCOUNT_JSON", "_PROJECT_ID",
-)
-
-
-def credential_env_keys() -> dict[str, str]:
-    """``{ENV_KEY: platform_id}`` for the keys that make an adapter CONNECT AS a bot (token / app id /
-    client id / secret — the shape ``GatewayRunner._adapter_credential_fingerprint`` hashes). Enable
-    flags, URLs and hosts are excluded: two profiles pointing at one Mattermost server collide only
-    when they also share the token."""
-    keys: dict[str, str] = {}
-    for feature in _left_core_platforms():
-        keys.update(dict.fromkeys(feature.enable_env, feature.platform))
-    for entry in _registry_entries():
-        keys.update(dict.fromkeys(entry.required_env, entry.name))
-    with contextlib.suppress(Exception):
-        from gateway import config_env
-        for platform, names in config_env._ENV_ENABLE_CREDENTIALS.items():
-            keys.update(dict.fromkeys(names, platform.value))
-        for step in config_env._ENV_STEPS:
-            if isinstance(step, config_env._Cred):
-                creds: set[str] = set()
-                for group in step.creds:
-                    creds.update((group,) if isinstance(group, str) else group)
-                if step.token:
-                    creds.add(step.token)
-                keys.update(dict.fromkeys(creds, step.platform.value))
-    return {key: pid for key, pid in keys.items() if key.endswith(_CREDENTIAL_SUFFIXES)}
+    return set(_GATEWAY_POLICY_KEYS)
 
 
 def _env_values(env_path: Path, wanted: Optional[dict[str, str]] = None) -> dict[str, str]:
@@ -263,16 +126,10 @@ def _shared_adapters_active(source_dir: Optional[Path], shared: dict[str, tuple[
         with contextlib.suppress(Exception):
             raw = read_user_config_raw(source_dir / "config.yaml") or {}
     env = _env_values(source_dir / ".env")
-    creds_by_platform: dict[str, set[str]] = {}
-    with contextlib.suppress(Exception):
-        from gateway import config_env
-        for platform, names in config_env._ENV_ENABLE_CREDENTIALS.items():
-            creds_by_platform[platform.value] = set(names)
+    creds_by_platform = {"sms": {"TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN"},
+                         "email": {"EMAIL_ADDRESS", "EMAIL_PASSWORD"}}
     for feature in _left_core_platforms():
         creds_by_platform.setdefault(feature.platform, set(feature.enable_env))
-    with _plugin_scope(source_dir):
-        for entry in _registry_entries():
-            creds_by_platform.setdefault(entry.name, set(entry.required_env))
     active: set[str] = set()
     for pid in shared:
         explicit = _explicit_enabled(raw, pid)
@@ -343,26 +200,9 @@ def strip_channel_env_file(env_path: Path, index: Optional[ChannelKeyIndex] = No
 
 
 def _channel_config_paths(raw: dict, platforms: Iterable[str]) -> list[tuple[str, ...]]:
-    """Dotted paths in a raw config.yaml mapping that hold platform identity: ``platforms``, every
-    top-level ``<platform>:`` block, ``gateway.platforms`` / ``gateway.<platform>``, and the
-    multiplexer-owner keys (both spellings the gateway loader accepts)."""
-    paths: list[tuple[str, ...]] = []
-    gateway: dict = raw["gateway"] if isinstance(raw.get("gateway"), dict) else {}
-    if "platforms" in raw:
-        paths.append(("platforms",))
-    if "platforms" in gateway:
-        paths.append(("gateway", "platforms"))
-    for key in _GATEWAY_OWNER_KEYS:
-        if key in raw:
-            paths.append((key,))
-        if key in gateway:
-            paths.append(("gateway", key))
-    for pid in platforms:
-        if pid in raw:
-            paths.append((pid,))
-        if pid in gateway:
-            paths.append(("gateway", pid))
-    return paths
+    """Retired channel configuration is never carried into a new terminal profile."""
+    names = {"platforms", "gateway", *_GATEWAY_OWNER_KEYS, *platforms}
+    return [(key,) for key in raw if key in names]
 
 
 def strip_channel_config(config_path: Path, index: Optional[ChannelKeyIndex] = None) -> list[str]:
@@ -455,79 +295,10 @@ def channel_platforms_configured(profile_dir: Path) -> list[str]:
     return sorted(found)
 
 
-def clone_channels_refusal(source_dir: Path, source_label: str) -> Optional[str]:
-    """Why ``--clone-channels`` must be refused for ``source_dir``: a live multiplexer already serves
-    the source, so the copied bot would be parked as a duplicate credential at once (the same finding
-    the migrate preflight reports). ``None`` when the copy is allowed. Shared by CLI, REST and TUI
-    through :func:`hermes_cli.profiles.create_profile`."""
-    from hermes_cli.gateway_multiplex_served import recorded_served_profiles
-    from hermes_cli.profiles import normalize_profile_name
-    served = recorded_served_profiles()
-    if not served or len(served) < 2 or normalize_profile_name(source_label) not in {
-        normalize_profile_name(p) for p in served
-    }:
-        return None
-    platforms = channel_platforms_configured(source_dir)
-    if not platforms:
-        return None
-    return (
-        f"--clone-channels would copy {', '.join(platforms)} from '{source_label}', which the running "
-        "multiplexed gateway already serves: the bot can only belong to one profile, so the copy would be "
-        "parked as a duplicate credential. Clone without --clone-channels and give the new profile its own bot "
-        "(hermes -p <name> setup), or route its chats with gateway.profile_routes instead."
-    )
-
-
-def _config_platform_tokens(config_path: Path) -> dict[str, str]:
-    """``{platform: token}`` from ``platforms.<p>.token|api_key`` (both nesting spellings)."""
-    tokens: dict[str, str] = {}
-    if not config_path.is_file():
-        return tokens
-    from hermes_cli.config import read_user_config_raw
-    raw = read_user_config_raw(config_path)
-    gateway: dict = raw["gateway"] if isinstance(raw.get("gateway"), dict) else {}
-    for section in (raw.get("platforms"), gateway.get("platforms")):
-        if not isinstance(section, dict):
-            continue
-        for pid, block in section.items():
-            if isinstance(block, dict):
-                token = block.get("token") or block.get("api_key")
-                if isinstance(token, str) and token.strip():
-                    tokens[str(pid)] = token.strip()
-    return tokens
-
-
-def shared_channel_credentials(profile_dir: Path, source_dir: Path) -> list[str]:
-    """Platforms whose CONNECTING credential (bot token / app id / account) in ``profile_dir`` is
-    byte-identical to ``source_dir``'s — the bots that will collide. Pure file reads: no secret
-    manager, no gateway config load, so ``hermes profile list`` can afford it per profile."""
-    wanted = credential_env_keys()
-    mine = _env_values(profile_dir / ".env", wanted)
-    theirs = _env_values(source_dir / ".env", wanted)
-    shared = {wanted[key] for key in mine if theirs.get(key) == mine[key]}
-    mine_cfg = _config_platform_tokens(profile_dir / "config.yaml")
-    theirs_cfg = _config_platform_tokens(source_dir / "config.yaml")
-    shared.update(pid for pid, token in mine_cfg.items() if theirs_cfg.get(pid) == token)
-    return sorted(shared)
-
-
-def shared_credential_warning(profile: str, platforms: list[str], source: str = "default") -> str:
-    return (
-        f"⚠ Profile '{profile}' shares its {', '.join(platforms)} credential with {source}: the bot can "
-        f"only belong to one profile. Give '{profile}' its own bot (hermes -p {profile} setup, or the "
-        f"dashboard Messaging page) or remove the token from '{profile}'; a multiplexed gateway parks "
-        f"the duplicate and `hermes gateway migrate --multiplex` refuses until it is gone."
-    )
 
 
 def format_stripped_notice(profile: str, platforms: list[str], clone_flag: str = "--clone") -> list[str]:
-    """Lines printed after a channel-less clone so the user knows what was left behind and how to
-    configure the new profile's own bots."""
+    """Explain historical credentials omitted from a terminal-only profile clone."""
     if not platforms:
         return []
-    return [
-        f"Messaging channels were NOT cloned ({', '.join(platforms)}): a copied bot token or allowlist "
-        "would make two gateways fight over one bot.",
-        f"  Configure this profile's own bots:  hermes -p {profile} setup   (or the dashboard Messaging page)",
-        f"  To copy the source's channels anyway:  hermes profile create {profile} {clone_flag} --clone-channels",
-    ]
+    return [f"Retired messaging settings were not cloned ({', '.join(platforms)})."]

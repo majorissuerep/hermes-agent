@@ -115,33 +115,6 @@ class TestNormalizeMainRuntimePreservesCallable:
 # Display surfaces never invoke the callable
 # ---------------------------------------------------------------------------
 
-class TestTruncateTokenCallable:
-    def test_callable_returns_placeholder(self):
-        """Dashboard preview must render the Entra placeholder, NOT
-        ``"<function ...>"``."""
-        from hermes_cli.web_server_oauth import _truncate_token
-
-        invoked = {"count": 0}
-
-        def provider():
-            invoked["count"] += 1
-            return "should-not-appear-in-ui"
-
-        token_provider = cast(str | None, provider)
-        rendered = _truncate_token(token_provider)
-        assert rendered == "<entra-id-bearer>"
-        assert invoked["count"] == 0
-
-    def test_string_jwt_still_truncated_to_signature_tail(self):
-        from hermes_cli.web_server_oauth import _truncate_token
-        # JWT shape: header.payload.signature → only signature tail shown.
-        out = _truncate_token("aaaa.bbbb.cccccccsig", visible=4)
-        assert out == "…csig"
-
-    def test_empty_returns_empty(self):
-        from hermes_cli.web_server_oauth import _truncate_token
-        assert _truncate_token(None) == ""
-        assert _truncate_token("") == ""
 
 # ---------------------------------------------------------------------------
 # Serialization scrub — runtime dicts with callables must NOT silently

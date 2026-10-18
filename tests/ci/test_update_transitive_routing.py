@@ -28,10 +28,10 @@ from tests.ci.test_update_ci_routing import _REPO, _ci_run, _consumers_reached, 
 ])
 def test_second_hop_update_change_dispatches_real_update_consumers(path):
     lanes = _real_classifier([path])
-    for lane in ("e2e_upgrade", "e2e_desktop_update"):
+    for lane in ("e2e_upgrade",):
         assert lanes[lane], f"{path}: classifier leaves {lane} off"
     run = _ci_run(lanes)
-    for lane in ("e2e_upgrade", "e2e_desktop_update"):
+    for lane in ("e2e_upgrade",):
         assert all(_consumers_reached(run, lane).values()), f"{path}: {lane} never reaches its consumers"
 
 

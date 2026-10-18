@@ -52,7 +52,6 @@ from hermes_state.readpool import _READ_POOL_MAX, _proc_fd_targets, _read_budget
 from hermes_state.sessions import SessionSessionsMixin
 from hermes_state.fts import SessionFtsSetupMixin, load_fts5_cjk_extension
 from hermes_state.portability import SessionPortabilityMixin
-from hermes_state.telegram import SessionTelegramTopicsMixin
 from hermes_state.profile_repair import SessionProfileRepairMixin
 from hermes_state.schema import SessionSchemaMixin
 import hermes_state.holders as _state_holders
@@ -68,7 +67,6 @@ from hermes_state.dbfile import (
 from hermes_state.messages import SessionMessagesMixin
 from hermes_state.coverage import SessionCoverageMixin
 from hermes_state.rewind import SessionRewindMixin
-from hermes_state.deck import SessionDeckMixin
 from hermes_state.wal import (
     _WAL_INCOMPAT_MARKERS, _on_disk_journal_mode, apply_database_pragmas, apply_wal_with_fallback,
 )
@@ -76,7 +74,7 @@ from hermes_state.repair import _claim_repair_attempt, preflight_db_writability,
 from hermes_state.titles import SessionTitlesMixin
 from hermes_state.usage import SessionUsageMixin
 from hermes_state.maintenance import SessionMaintenanceMixin
-from hermes_state.gateway import SessionGatewayMixin
+from hermes_state.legacy_sessions import SessionLegacyMixin
 from hermes_state.compression import SessionCompressionMixin
 from hermes_state.search import SessionSearchMixin
 
@@ -493,9 +491,9 @@ def _vaulted_row_factory(db_path) -> "sqlite3.Row":
 
 class SessionDB(
     SessionSessionsMixin, SessionFtsSetupMixin, SessionSearchMixin, SessionSchemaMixin,
-    SessionPortabilityMixin, SessionTelegramTopicsMixin, SessionCompressionMixin,
-    SessionGatewayMixin, SessionMaintenanceMixin, SessionUsageMixin, SessionTitlesMixin,
-    SessionMessagesMixin, SessionCoverageMixin, SessionRewindMixin, SessionProfileRepairMixin, SessionDeckMixin,
+    SessionPortabilityMixin, SessionCompressionMixin,
+    SessionLegacyMixin, SessionMaintenanceMixin, SessionUsageMixin, SessionTitlesMixin,
+    SessionMessagesMixin, SessionCoverageMixin, SessionRewindMixin, SessionProfileRepairMixin,
 ):
     """SQLite-backed session storage with FTS5 search; many reader threads, one writer (WAL)."""
 

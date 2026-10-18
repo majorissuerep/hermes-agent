@@ -30,7 +30,7 @@ from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Dict, Any, Literal, Optional, List, Tuple, Set
+from typing import Dict, Any, Optional, List, Tuple, Set
 
 import hermes_yaml as yaml
 
@@ -975,11 +975,6 @@ _EXTRA_KNOWN_ROOT_KEYS = {
     "known_plugin_toolsets", # hermes_cli/tools_config.py toolset-save flow
     "known_builtin_toolsets",  # ditto — builtin toolsets a platform's checklist has offered
     "tool_gateway_declined_tools",  # per-tool Tool Gateway offer declines
-    # Top-level forms read/bridged by gateway/config.py:
-    "group_sessions_per_user", "thread_sessions_per_user",
-    "stt_echo_transcripts", "reset_triggers", "always_log_local", "filter_silence_narration",
-    "multiplex_profiles", "profile_routes", "platforms", "require_mention",
-    "unauthorized_dm_behavior", "signal", "allow_all_users",
     "timeouts",          # unified timeout resolution section (agent/deadline.py)
 }
 _KNOWN_ROOT_KEYS = frozenset(DEFAULT_CONFIG.keys()) | _EXTRA_KNOWN_ROOT_KEYS
@@ -2129,17 +2124,6 @@ def _ensure_dict(parent: dict[str, Any], key: str) -> dict[str, Any]:
     return child
 
 
-def write_platform_config_field(
-    platform_key: str, field_key: str, value: Any, *, raw: bool = False) -> None:
-    """Persist one scalar field under ``platforms.<platform_key>``.
-    ``raw=True`` (CLI setup flows) edits only the user's raw file; dashboard routes use the
-    default loaded-config path to keep their profile-scoped ``load_config`` behavior."""
-    config = read_raw_config() if raw else load_config()
-    platforms = _ensure_dict(config, "platforms")
-    _ensure_dict(platforms, platform_key)[field_key] = value
-    save_config(config)
-
-
 # ``terminal.<key>`` -> env var read by tools.terminal_tool. Every key maps to ``TERMINAL_<KEY>``
 # except ``backend`` (historically ``TERMINAL_ENV``).
 TERMINAL_CONFIG_ENV_MAP = {
@@ -3046,13 +3030,9 @@ _OPEN_DICT_TOP_LEVEL_KEYS = frozenset({
     "personalities", "command_allowlist", "model_catalog", "channel_prompts", "server_actions",
     "secrets", "goals", "loops"})
 
-# Top-level keys whose sub-keys are partially schema-defined (e.g. a PlatformConfig dataclass) but
+# Top-level keys whose sub-keys are partially schema-defined but
 # where users may add fields DEFAULT_CONFIG doesn't enumerate: validate the FIRST segment only.
 _SCHEMA_DEFINED_DICT_KEYS = frozenset({
-    # Platform configs — PlatformConfig dataclass + dynamic extras
-    "discord", "telegram", "slack", "whatsapp", "signal", "mattermost",
-    "matrix", "feishu", "wecom", "weixin", "bluebubbles", "qqbot", "yuanbao",
-    "email", "sms", "dingtalk",
     # MCP server template / dynamic auth dicts
     "sessions", "checkpoints",
     # Plugin enable/disable lists + per-plugin entries; absent from DEFAULT_CONFIG.
@@ -3062,11 +3042,6 @@ _SCHEMA_DEFINED_DICT_KEYS = frozenset({
 _DYNAMIC_TOP_LEVEL_KEYS = frozenset({
     "custom_providers",  # list-shaped, but indexed by position
 })
-
-# Containers whose immediate child IS a user-supplied platform name (``platforms.<name>.<field>``),
-# both top-level and under ``gateway``; anything below the name is accepted (open ``extra``).
-_PLATFORM_CONTAINER_KEYS = frozenset({"platforms"})
-
 
 # Top-level keys whose sub-keys are accepted without deep checking.
 _OPEN_SUBKEY_TOP_LEVEL_KEYS = _OPEN_DICT_TOP_LEVEL_KEYS | _DYNAMIC_TOP_LEVEL_KEYS | _SCHEMA_DEFINED_DICT_KEYS
@@ -3090,11 +3065,7 @@ def _suggest_closest_key(key: str, candidates: set[str], cutoff: float = 0.6) ->
 def _validate_config_key(key: str) -> tuple[bool, Optional[str]]:
     """Validate a dotted config-key path against the known schema -> ``(is_known, suggestion)``.
 
-    Headline case from #34067: ``gateway.discord.gateway_restart_notification`` was silently written, even
-    though ``gateway`` only has 4 known sub-keys (``strict``, ``media_delivery_allow_dirs``,
-    ``trust_recent_files``, ``trust_recent_files_seconds``). The correct path is
-    ``discord.gateway_restart_notification`` (platform configs live at the top level, not under a
-    ``platforms`` namespace).
+    A valid root nested beneath another section is a misplaced prefix, not a new setting.
     """
     if not key:
         return False, None
@@ -3104,7 +3075,7 @@ def _validate_config_key(key: str) -> tuple[bool, Optional[str]]:
 
     # A leading underscore on the FIRST segment marks an intentionally non-schema internal key
     # (test harnesses/tooling); only the first segment is exempt so ``agent._max_turns`` is caught.
-    if top.startswith("_") or top in _PLATFORM_CONTAINER_KEYS:
+    if top.startswith("_"):
         return True, None
 
     known = _known_top_level_keys()
@@ -3118,7 +3089,7 @@ def _validate_config_key(key: str) -> tuple[bool, Optional[str]]:
     if top in _OPEN_SUBKEY_TOP_LEVEL_KEYS:
         return True, None
 
-    # Walk DEFAULT_CONFIG: a nested ``platforms`` container, a scalar leaf, or an EMPTY dict hit
+    # Walk DEFAULT_CONFIG: a scalar leaf or an EMPTY dict hit
     # before the path is consumed all accept. An empty dict is a free-form mapping section
     # (``compression.model_thresholds.<model>``, ``terminal.docker_env.<VAR>``,
     # ``lsp.servers.<lang>``): its keys are user-chosen, so nothing under it can be a typo. An
@@ -3126,17 +3097,11 @@ def _validate_config_key(key: str) -> tuple[bool, Optional[str]]:
     node: Any = DEFAULT_CONFIG.get(top)
     consumed = [top]
     for seg in segments[1:]:
-        if seg in _PLATFORM_CONTAINER_KEYS or not isinstance(node, dict) or not node:
+        if not isinstance(node, dict) or not node:
             return True, None
         if seg not in node:
-            # ``gateway.discord.<field>``: the path minus its wrong prefix is itself a known key.
-            # Checked BEFORE the fuzzy sibling: a structural match is proof, a fuzzy match is a
-            # guess, and ``agent.gateway.strict`` must be refused as ``gateway.strict`` rather
-            # than written with a misleading ``agent.gateway_timeout`` did-you-mean.
-            # Only DEFAULT_CONFIG / open-subkey roots qualify as the stripped prefix:
-            # ``_EXTRA_KNOWN_ROOT_KEYS`` also holds the top-level FORMS of nested gateway
-            # settings (``filter_silence_narration``, ``reset_triggers``, ...), and
-            # ``gateway.filter_silence_narration`` is a runtime-read path, not a wrong prefix.
+            # A structural wrong-prefix match takes precedence over fuzzy sibling guesses.
+            # Only documented or explicitly open roots qualify, not optional legacy aliases.
             rest = ".".join(segments[len(consumed):])
             if (
                 _split_key_path(rest)[0] in set(DEFAULT_CONFIG) | _OPEN_SUBKEY_TOP_LEVEL_KEYS
@@ -3315,51 +3280,6 @@ def _refuse_container_type_mismatch(key: str, value: Any, user_config: dict[str,
         "  or edit config.yaml directly.")
 
 
-def _redirect_platform_display_key(key: str) -> tuple[str, Optional[str]]:
-    """Canonicalize ``platforms.<name>.<display_setting>`` -> ``display.platforms.<name>.<setting>``.
-    The gateway resolves per-platform display settings (streaming, show_reasoning, ...) from
-    ``display.platforms``; the top-level ``platforms.<name>`` block holds only connection config.
-    Only known display settings (``OVERRIDEABLE_KEYS``) are redirected. Returns ``(key, note)``;
-    the gateway import is guarded so the CLI works where the gateway package is unavailable.
-
-    Before #71047 a write such as ``hermes config set platforms.telegram.streaming false`` landed on a key
-    the gateway never reads: ``config get`` echoed the new value back while the runtime kept the old
-    ``display.platforms`` one — a silent no-op that looks like a duplicated key to the user.
-
-    ``gateway.platforms.<name>.<field>`` is canonicalized to the top-level ``platforms.<name>.<field>``
-    first (#115212): ``merge_platform_sections`` reads both blocks but the top-level one wins on
-    shared keys, so a nested write beside an existing top-level value printed ``✓ Set`` while the
-    gateway kept the old value.
-    """
-    segs = _split_key_path(key)
-    note = None
-    if len(segs) >= 3 and segs[0] == "gateway" and segs[1] == "platforms":
-        segs = segs[1:]
-        key = ".".join(segs)
-        note = f"  (note: the top-level platforms.{segs[1]} block outranks gateway.platforms — saved as {key})"
-    if len(segs) != 3 or segs[0] != "platforms":
-        return key, note
-    try:
-        from gateway.display_config import OVERRIDEABLE_KEYS as _display_keys
-    except Exception:
-        return key, note
-    if segs[2] not in _display_keys:
-        return key, note
-    canonical = f"display.platforms.{segs[1]}.{segs[2]}"
-    return canonical, f"  (note: per-platform display setting — saved as {canonical})"
-
-
-def _legacy_gateway_platforms_key(requested_key: str) -> Optional[str]:
-    """The ``gateway.platforms.<name>.<field>`` spelling the user typed, when that is what they typed.
-    ``merge_platform_sections`` still honours a value that lives only there, so ``get`` must fall
-    back to it and ``unset``/``set`` must clear it, or the CLI reports "not set" / writes a value
-    while the gateway keeps reading the nested one."""
-    segs = _split_key_path(requested_key)
-    if len(segs) >= 3 and segs[0] == "gateway" and segs[1] == "platforms":
-        return ".".join(segs)
-    return None
-
-
 def _exit_if_key_managed(key: str, action: str) -> None:
     """A key pinned by the managed layer cannot be set/unset (the next load would reinstate it):
     hard-reject and name the source. Distinct from ``is_managed()``; env-shaped keys route to the
@@ -3372,7 +3292,7 @@ def _exit_if_key_managed(key: str, action: str) -> None:
 
 
 def _touch_skin_file(key: str, value: Any) -> None:
-    """``display.skin`` set means "apply NOW": bump the skin file's mtime so the gateway watcher's
+    """``display.skin`` set means "apply NOW": bump the skin file's mtime so the local TUI watcher's
     (name, mtime) signature moves even when the name is unchanged. Best-effort."""
     if key == "display.skin" and isinstance(value, str) and value:
         try:
@@ -3423,8 +3343,8 @@ def _unknown_subkey_refusal(key: str, suggestion: Optional[str]) -> str:
 
 def set_config_value(key: str, value: str, force: bool = False):
     """Set a configuration value at a dotted ``key``; ``value`` is auto-coerced to bool/int/float.
-    ``force`` writes a known key given under the wrong prefix (``gateway.discord.foo`` where
-    ``discord.foo`` is known; otherwise refused — any other unknown path under a known section
+    ``force`` writes a known key given under the wrong prefix (``agent.terminal.timeout`` where
+    ``terminal.timeout`` is known; otherwise refused — any other unknown path under a known section
     is written with a did-you-mean notice), skips the unknown-top-level-key notice AND
     authorizes replacing a mapping section with a scalar. Without it, scalar writes over mappings are refused and bare ``model`` is redirected
     to ``model.default``."""
@@ -3464,12 +3384,6 @@ def set_config_value(key: str, value: str, force: bool = False):
         print(f"✓ Set {key.upper()} in {get_env_path()}")
         return
 
-    # Canonicalize per-platform display keys BEFORE validation/coercion so both see the path the
-    # runtime reads.
-    legacy_key = _legacy_gateway_platforms_key(key)
-    key, _redirect_note = _redirect_platform_display_key(key)
-    if _redirect_note:
-        print(_redirect_note)
     is_known, suggestion = _validate_config_key(key)
     # DEFAULT_CONFIG is an incomplete schema: runtime-read settings may deliberately have no
     # seeded default. Refuse only the positive wrong-prefix case from #112003; other unknown
@@ -3500,8 +3414,6 @@ def set_config_value(key: str, value: str, force: bool = False):
         _set_nested(user_config, key, value)
     except ValueError as e:
         _exit_invalid(f"✗ {e}")
-    if legacy_key and _unset_nested(user_config, legacy_key):
-        print(f"  (removed the shadowed {legacy_key} duplicate)")
     # A provider switch re-points ``model:`` at a new route; ``base_url``/``api_mode`` are route
     # state of the OLD provider, and the runtime honours them for whatever provider the block now
     # names — the new provider's key would be posted to the old endpoint (#113719, #40862). Sync
@@ -3571,14 +3483,8 @@ def get_config_value(key: str, *, as_json: bool = False, raw: bool = False):
         env_value = read_env_setting(key)
         value = _MISSING if env_value is None else env_value
     else:
-        # Mirror set_config_value: read the canonical display.platforms path.
-        # See #71047.
-        legacy_key = _legacy_gateway_platforms_key(key)
-        key, _ = _redirect_platform_display_key(key)
         config = load_config()
         value = _get_nested(config, key)
-        if value is _MISSING and legacy_key:
-            value = _get_nested(config, legacy_key)
 
     if value is _MISSING:
         _exit_invalid(f"Config key not set: {key}")
@@ -3648,14 +3554,7 @@ def unset_config_value(key: str):
     config_path = get_config_path()
     user_config = require_readable_config_before_write(config_path)
 
-    legacy_key = _legacy_gateway_platforms_key(key)
-    key, _redirect_note = _redirect_platform_display_key(key)
-    if _redirect_note:
-        # Mirror set_config_value's display.platforms canonicalization (#71047).
-        print(_redirect_note.replace("saved as", "resolved as"))
     removed = _unset_nested(user_config, key)
-    if legacy_key:
-        removed = _unset_nested(user_config, legacy_key) or removed
 
     env_var = terminal_config_env_var_for_key(key)
     if env_var and key != "terminal.cwd":
@@ -3804,7 +3703,7 @@ def _cmd_config_check(args):
 
     from hermes_cli.config_check_diagnostics import config_check_diagnostics
 
-    diagnostics = config_check_diagnostics(read_raw_config_readonly(), get_env_value)
+    diagnostics = config_check_diagnostics(read_raw_config_readonly())
     if diagnostics:
         print()
         print(color("  Saved configuration:", Colors.BOLD))
@@ -3883,191 +3782,3 @@ def _inject_profile_env_vars() -> None:
 
 
 _inject_profile_env_vars()
-
-
-PlatformManifestSource = Literal["all", "bundled", "user"]
-
-
-def _is_plugin_dir_name(name: str) -> bool:
-    # Same rule as plugins_discovery.scan_directory: __pycache__-style dunders aren't plugins; a dot
-    # dir can be, so its secrets are declared too.
-    return not (name.startswith("__") and name.endswith("__"))
-
-
-def _platform_manifest_paths(home: Optional[Path] = None, source: PlatformManifestSource = "all"):
-    """Yield ``(dir_name, manifest_path, require_kind, stat)`` for every platform plugin manifest.
-    ``source`` is ``"bundled"`` (shipped ``plugins/platforms/*``), ``"user"`` (``<home>/plugins/
-    platforms/*`` plus flat ``<home>/plugins/*`` installs, which must declare ``kind: platform``,
-    #46600) or ``"all"``. ``home`` defaults to the bound Hermes home. A directory that cannot be
-    listed or searched yields ``(name, None, require_kind, error)``: a plugin there can't load
-    either, so callers skip it. One ``scandir`` per root and one ``stat`` per candidate, because
-    the child-env scrub stamps these on every spawn."""
-    roots = []
-    if source in ("all", "bundled"):
-        roots.append((get_project_root() / "plugins" / "platforms", False))
-    if source in ("all", "user"):
-        user_plugins = (home if home is not None else get_hermes_home()) / "plugins"
-        roots += [(user_plugins / "platforms", False), (user_plugins, True)]
-    for root, require_kind in roots:
-        try:
-            with os.scandir(root) as it:
-                entries = [e for e in it if _is_plugin_dir_name(e.name)]
-        except (FileNotFoundError, NotADirectoryError):
-            continue
-        except OSError as exc:
-            yield str(root), None, require_kind, exc
-            continue
-        for entry in entries:
-            try:
-                if not entry.is_dir():
-                    continue
-            except OSError:
-                continue
-            for file_name in ("plugin.yaml", "plugin.yml"):
-                path = Path(entry.path) / file_name
-                try:
-                    st = os.stat(path)
-                except PermissionError as exc:  # the dir itself is not searchable
-                    yield entry.name, None, require_kind, exc
-                    break
-                except OSError:  # missing, a symlink loop: discovery's exists() is False too
-                    continue
-                if not stat.S_ISREG(st.st_mode):
-                    continue
-                yield entry.name, path, require_kind, st
-                break
-
-
-def platform_manifest_stamp(home: Optional[Path] = None) -> tuple:
-    """Change-detection key over every user platform plugin manifest of ``home`` (path plus
-    :func:`utils.file_signature`): it changes when one is added, removed, replaced or edited in
-    place, so a cache keyed on it never serves a stale declaration."""
-    return tuple((name, str(path), file_signature(st) if path is not None else type(st).__name__)
-                 for name, path, _kind, st in _platform_manifest_paths(home, "user"))
-
-
-def _platform_plugin_manifests(home: Optional[Path] = None, source: PlatformManifestSource = "all", *,
-                               strict: bool = False, skipped: list | None = None):
-    """Yield ``(dir_name, manifest_dict)`` for every platform plugin manifest (see
-    :func:`_platform_manifest_paths`). ``strict`` raises when a manifest cannot be read instead of
-    skipping it: the child-env scrub must not lose a declared secret to an I/O error. Only a
-    manifest known to be a platform's counts (the bundled and ``plugins/platforms/`` dirs); a
-    flat ``plugins/*`` manifest proves it is one only by its content, so an unreadable one is
-    skipped with a warning, as is an unsearchable plugin directory. A manifest that does not
-    parse declares nothing (its adapter cannot load either) and is skipped. Every skip is appended
-    to ``skipped``, so a caller can tell a complete scan from a partial one. A safe worker reads
-    no plugin manifest at all."""
-    from agent.safe_worker_policy import safe_worker_enabled
-
-    if safe_worker_enabled():
-        return
-    for dir_name, manifest_path, require_kind, st in _platform_manifest_paths(home, source):
-        if manifest_path is None:
-            logger.warning("Skipping unreadable plugin directory %s: %s", dir_name, st)
-            if skipped is not None:
-                skipped.append(dir_name)
-            continue
-        try:
-            with open(manifest_path, "r", encoding="utf-8-sig") as f:
-                manifest = fast_safe_load(f) or {}
-        except OSError as exc:
-            if strict and not require_kind:
-                raise
-            logger.warning("Skipping unreadable plugin manifest %s: %s", manifest_path, exc)
-            if skipped is not None:
-                skipped.append(str(manifest_path))
-            continue
-        except Exception:
-            if skipped is not None:
-                skipped.append(str(manifest_path))
-            continue
-        if not isinstance(manifest, dict) or (require_kind and manifest.get("kind") != "platform"):
-            continue
-        yield dir_name, manifest
-
-
-# Env-name suffixes that make a platform variable a secret unless its declaration says otherwise.
-PLATFORM_SECRET_ENV_SUFFIXES = ("_TOKEN", "_SECRET", "_KEY", "_PASSWORD", "_JSON")
-
-
-def _platform_manifest_env_entries(manifest: dict, *, optional: bool = True):
-    """Yield ``(name, is_secret, meta)`` for a manifest's ``requires_env`` (and, unless
-    ``optional=False``, ``optional_env``) entries (a bare name or a dict with ``name`` plus optional
-    ``description``/``url``/``password``/``prompt``/``category``). A name ending in
-    PLATFORM_SECRET_ENV_SUFFIXES is a password field unless the entry says ``password: false``."""
-    for entry in [*(manifest.get("requires_env") or []), *((manifest.get("optional_env") or []) if optional else [])]:
-        meta = {"name": entry} if isinstance(entry, str) else entry if isinstance(entry, dict) else {}
-        name = meta.get("name")
-        if not name or not isinstance(name, str):
-            continue
-        is_secret = bool(meta.get("password") or meta.get("secret"))
-        if not is_secret and not meta.get("password") is False:
-            is_secret = name.upper().endswith(PLATFORM_SECRET_ENV_SUFFIXES)
-        yield name, is_secret, meta
-
-
-def _manifest_secret_envs(manifests) -> frozenset[str]:
-    """Upper-cased secret messaging env names the given manifests declare, minus core-declared
-    names: a manifest never reclassifies a core variable such as OPENAI_API_KEY."""
-    names = {name.upper() for _dir, manifest in manifests
-             for name, is_secret, meta in _platform_manifest_env_entries(manifest)
-             if is_secret and (meta.get("category") or "messaging") == "messaging"}
-    return frozenset(names - {n.upper() for n in CORE_DECLARED_ENV_NAMES})
-
-
-def platform_manifest_secret_envs(home: Optional[Path] = None, source: PlatformManifestSource = "user", *,
-                                  strict: bool = False) -> frozenset[str]:
-    """Secret env names declared by one source's platform plugin manifests: ``"user"`` reads only
-    ``home``'s user-installed plugins, which belong to that profile alone; ``"bundled"`` returns
-    the set read once at import (re-read strictly if that read hit an I/O error)."""
-    if source == "bundled" and BUNDLED_PLATFORM_SECRET_ENVS is not None:
-        return BUNDLED_PLATFORM_SECRET_ENVS
-    return _manifest_secret_envs(_platform_plugin_manifests(home, source, strict=strict))
-
-
-def platform_manifest_secret_scan(home: Optional[Path] = None) -> tuple[frozenset[str], bool]:
-    """``home``'s user-installed platform plugin secrets, strictly read, and whether the scan was
-    complete: False when a plugin dir or flat manifest could not be read or parsed, so the caller
-    keeps the denials it already knew instead of releasing them on a failed discovery."""
-    skipped: list = []
-    names = _manifest_secret_envs(_platform_plugin_manifests(home, "user", strict=True, skipped=skipped))
-    return names, not skipped
-
-
-def _inject_platform_plugin_env_vars() -> frozenset[str] | None:
-    """Populate OPTIONAL_ENV_VARS from platform plugin manifests (bundled AND user-installed) so
-    Teams / IRC / Google Chat and third-party platforms are configurable in the ``hermes config`` /
-    Desktop Gateway form without the core knowing they exist. Failures are swallowed so a
-    malformed plugin.yaml can't break CLI import. Returns the bundled manifests' secret names, or
-    None when a bundled manifest could not be read (the policy then re-reads strictly).
-    """
-    bundled: list | None = []
-    try:
-        bundled = list(_platform_plugin_manifests(source="bundled", strict=True))
-    except OSError:
-        bundled = None
-    manifests = list(bundled or [])
-    for source in ("bundled", "user") if bundled is None else ("user",):
-        try:
-            manifests += list(_platform_plugin_manifests(source=source))
-        except Exception:
-            pass
-    for dir_name, manifest in manifests:
-        label = manifest.get("label") or manifest.get("name") or dir_name
-        for name, is_secret, meta in _platform_manifest_env_entries(manifest):
-            if name in OPTIONAL_ENV_VARS:
-                continue  # hardcoded entry wins (back-compat)
-            OPTIONAL_ENV_VARS[name] = {
-                "description": meta.get("description") or f"{label} configuration",
-                "prompt": meta.get("prompt") or name,
-                "url": meta.get("url") or None,
-                "password": is_secret,
-                "category": meta.get("category") or "messaging"}
-    return _manifest_secret_envs(bundled) if bundled is not None else None
-
-
-# Names declared in core, before any platform manifest is read. A manifest never reclassifies
-# one: the config form keeps the core entry, and the child-env scrub keeps a plugin that lists
-# OPENAI_API_KEY from turning a provider key into an adapter secret.
-CORE_DECLARED_ENV_NAMES: frozenset[str] = frozenset(OPTIONAL_ENV_VARS)
-BUNDLED_PLATFORM_SECRET_ENVS: frozenset[str] | None = _inject_platform_plugin_env_vars()

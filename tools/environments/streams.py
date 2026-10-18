@@ -1,14 +1,9 @@
 """A long-lived process INSIDE a terminal backend with both stdio pipes open.
 
-``BaseEnvironment.execute`` is request/response: it captures output and returns. The desktop that
-follows the terminal backend needs three things that are not: the RFB byte stream between the
-Desktop pane and the sandbox's Xvnc, cua-driver's MCP-over-stdio server, and agent-browser
-invocations whose daemon must outlive the call. All three are "spawn argv in the sandbox, keep
-stdin/stdout as pipes". Each spawn-per-call backend has a local argv prefix that gives exactly that
-(``docker exec -i``, ``ssh``, ``apptainer exec``); this module is the one place that knows it.
-
-SDK backends (modal, daytona, vercel) have no argv prefix: ``exec_prefix`` returns None there and
-the desktop stays on the gateway host (or refuses, per ``bot_desktop.placement``).
+``BaseEnvironment.execute`` is request/response. Browser commands and outgoing protocol clients
+sometimes need a process whose stdio streams remain open. Docker, SSH and Singularity provide
+an explicit exec prefix; SDK-only environments that cannot provide one return no prefix and
+callers must refuse rather than silently executing on the native host.
 """
 from __future__ import annotations
 

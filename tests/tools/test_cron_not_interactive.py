@@ -43,9 +43,9 @@ def test_api_server_platform_keeps_exec_ask_for_runs_approval_bridge(monkeypatch
     (#100532; covered in test_approval.py)."""
     monkeypatch.setenv("HERMES_SESSION_PLATFORM", "api_server")
     monkeypatch.setenv("HERMES_SESSION_KEY", "test-runs-bridge-presence")
-    approval_mod.register_gateway_notify("test-runs-bridge-presence", lambda data: None)
+    approval_mod.register_session_notify("test-runs-bridge-presence", lambda data: None)
     try:
         _, _, _, is_ask = approval_mod._presence()
         assert is_ask is True
     finally:
-        approval_mod.unregister_gateway_notify("test-runs-bridge-presence")
+        approval_mod.unregister_session_notify("test-runs-bridge-presence")

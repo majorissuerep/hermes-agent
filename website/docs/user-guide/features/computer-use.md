@@ -40,16 +40,11 @@ no-foreground invariant, click-dispatch internals — see
 
 ## Which machine it drives
 
-`computer_use` acts on the same machine the bot's screen lives on, never on
-the machine running Hermes Desktop. On a gateway with `terminal.backend:
-local` that is the gateway host. With a sandboxed terminal (`docker`, `ssh`,
-`singularity`) the driver runs **inside the sandbox** on the sandbox's own
-display, so it can only ever touch what the terminal can; the sandbox image
-must carry `cua-driver` (`nousresearch/hermes-sandbox:desktop` does). Modal,
-Daytona and Vercel sandboxes cannot host a display yet, so with those
-backends `computer_use` refuses unless `bot_desktop.placement: gateway` opts
-into driving the host. Details: [Bot Screen → Where the screen
-runs](./bot-screen.md#where-the-screen-runs).
+`computer_use` drives the native desktop session on the machine running Hermes.
+It requires a local terminal backend and a reachable display with the platform's
+normal permissions. Selecting Docker, SSH, Singularity or another sandbox terminal
+makes native computer use refuse; it never falls back to controlling the host.
+For a remote browser, configure an explicit outgoing CDP endpoint instead.
 
 ## Enabling
 
@@ -324,7 +319,7 @@ Screenshots taken during computer control are normally internal — they exist
 so the model can see the screen, and the agent replies in text. But every
 image capture also saves a bounded, shareable copy under Hermes' image cache
 and reports its path, so on attachment-capable surfaces (Telegram, Discord,
-Desktop, and other gateway platforms) you can simply ask:
+the local TUI) you can simply ask:
 
 > *"Send me a screenshot of my screen."*
 
@@ -455,15 +450,9 @@ of screenshot context, not ~600K.
     session, or set up cua-driver's autostart Scheduled Task —
     [windows-ssh](https://cua.ai/docs/how-to-guides/driver/windows-ssh)
     has the recipe.
-  - **Linux** requires a reachable display server. Headless servers
-    get one from [Bot Screen](./bot-screen.md): a per-profile Xfce
-    desktop over TigerVNC, streamed into Hermes Desktop, where you can
-    take over for logins and 2FA. You start it from the Desktop's
-    Screen pane or `hermes computer-use screen start`; it starts on
-    first use (the first `computer_use` call or headed browser use) only
-    when `bot_desktop.auto_start: true` is set (off by default).
-    Pure Wayland sessions need an XWayland bridge for screen capture
-    (cua-driver's Wayland inject path handles input independently).
+  - **Linux** requires an existing reachable display server. Hermes does not
+    provision a desktop, VNC server or screen-sharing service. Pure Wayland sessions
+    need an XWayland bridge for screen capture (input is handled independently).
 
 For cross-platform GUI automation without the desktop overhead (and
 without TCC / Session 0 / X11 setup), the `browser` toolset uses a

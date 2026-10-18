@@ -12,7 +12,7 @@ import { $overlayState } from '../app/overlayStore.js'
 import { turnController } from '../app/turnController.js'
 import { $uiState, resetUiState } from '../app/uiStore.js'
 import { useSessionLifecycle } from '../app/useSessionLifecycle.js'
-import { GatewayClient } from '../gatewayClient.js'
+import { LocalAgentClient } from '../localAgentClient.js'
 
 const noop = () => {}
 
@@ -34,7 +34,7 @@ function mount() {
   vi.stubEnv('HERMES_HOME', home)
   resetUiState()
 
-  const gw = new GatewayClient()
+  const gw = new LocalAgentClient()
   gw.isCanonical = true
 
   const onEvent = createGatewayEventHandler({

@@ -37,7 +37,6 @@ def prepare(request: dict) -> tuple[Path, dict[str, str]]:
     # both for the next launch / `hermes update` instead of nothing.
     refuse_foreign_owned_venv(root)
     arm_completion(root)
-    _arm_fleet_obligation(root)
     correlation = request["update_id"]
     with receipt.worker_context(correlation):
         # A pre-PM installation has no required-tool facts. A current Python
@@ -64,49 +63,8 @@ def prepare(request: dict) -> tuple[Path, dict[str, str]]:
     return python, activation_environment(root)
 
 
-def _arm_fleet_obligation(root: Path) -> None:
-    """Owe the fleet restart for the moved tree. Never raises: the update is already committed, and
-    ``main`` would report any exception here as a failed update."""
-    # This runs in the HISTORICAL interpreter, before PM syncs the new dependencies: only stdlib-only
-    # modules here (``update_cmd_fleet``'s writer imports ``update_cmd`` -> config -> ruamel, which a
-    # release older than ruamel does not have). Same arm and per-home fallback as the commit point's;
-    # its False (a debt other profiles cannot see) is already said out loud, and the tree has moved.
-    from hermes_cli.update_host_obligation import PROFILE_MARKER_NAME, arm_host_obligation
-    from hermes_constants import get_hermes_home
-
-    # A git-less archive root has no SHA: an SHA-less record still owes the restart; its readers hold
-    # the fleet to the checkout instead of a named pull.
-    arm_host_obligation(get_hermes_home() / PROFILE_MARKER_NAME, expected_sha=_head_sha(root))
 
 
-def _head_sha(root: Path) -> str:
-    """HEAD of ``root``, or ``''``. Git may be off PATH (only PM's store copy) or broken here, so a
-    failed ``rev-parse`` falls back to reading the ref files git itself would read."""
-    from hermes_cli._early_recovery import _git_dir, _git_executable
-    from hermes_cli.update_lock import _git_common_dir
-
-    try:
-        head = subprocess.run([_git_executable(), "-C", str(root), "rev-parse", "HEAD"], capture_output=True,
-                              text=True, encoding="utf-8", errors="replace", stdin=subprocess.DEVNULL, timeout=60, check=False)
-        if head.returncode == 0 and _SHA.fullmatch(head.stdout.strip()):
-            return head.stdout.strip()
-    except (OSError, subprocess.SubprocessError):
-        pass  # no runnable git: the ref files below are the whole of the evidence
-    try:
-        git_dir = _git_dir(root)  # a linked worktree's own dir holds HEAD; its branch refs, the common dir
-        common = _git_common_dir(root) or git_dir
-        head = (git_dir / "HEAD").read_text(encoding="utf-8-sig").strip()
-        if head.startswith("ref:"):
-            ref = head.removeprefix("ref:").strip()
-            loose = common / ref
-            if loose.is_file():
-                head = loose.read_text(encoding="utf-8-sig").strip()
-            else:
-                packed = (common / "packed-refs").read_text(encoding="utf-8-sig").splitlines()
-                head = next((line.split(" ", 1)[0] for line in packed if line.endswith(f" {ref}")), "")
-    except (OSError, UnicodeDecodeError):
-        return ""
-    return head if _SHA.fullmatch(head) else ""
 
 
 def _record_failure(request: dict, result: Path, code: int, detail: str) -> None:
@@ -126,22 +84,8 @@ def main() -> int:
     sys.path.insert(0, request["root"])
     from hermes_cli.update_vault import child_vault
     if "stopped_serves" in request:
-        # Historical atexit cleanup may run after the update's result is fixed.
-        # It must reuse that installation, never start a second update/repair.
-        from hermes_cli._launchers import resolve_store_python
-        from pm.environments import activation_environment
-
-        root = Path(request["root"])
-        python = resolve_store_python(root)
-        if python is None:
-            print("Cannot resume stopped backends: no selected Hermes interpreter", file=sys.stderr)
-            return 1
-        env = activation_environment(root)
-        with child_vault(env) as vault_kwargs:
-            return subprocess.run(
-                [str(python), "-I", "-B", "-X", "utf8", str(root / "hermes_cli/update_serve_resume.py"),
-                 str(context), str(result)], check=False, cwd=root, env=env, **vault_kwargs,
-            ).returncode
+        result.write_text(json.dumps({"receipt_handled": False, "resume_handled": True}), encoding="utf-8")
+        return 0
     from hermes_cli import update_receipt
     from hermes_cli.update_lock import UpdateLock, describe_holder
 

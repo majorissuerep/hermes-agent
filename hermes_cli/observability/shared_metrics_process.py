@@ -90,7 +90,6 @@ def begin_process(kind: str) -> None:
     try:
         from hermes_constants import get_hermes_home
 
-        from .shared_metrics_desktop import ONBOARDING_LATCH_DIRNAME
         from .shared_metrics_setup import markers_dir as setup_markers_dir
         from .shared_metrics_update import _collection_on
 
@@ -100,11 +99,10 @@ def begin_process(kind: str) -> None:
         if not _collection_on():
             home = get_hermes_home()
             purge_pending_receipts(home)  # parked while on / left by the installer, never counted once off
-            latches = home / "telemetry" / "shared_metrics" / ONBOARDING_LATCH_DIRNAME  # an opt-out outside Desktop
-            for directory in (markers_dir(home), setup_markers_dir(home), latches):  # likewise pending exits/setups
+            for directory in (markers_dir(home), setup_markers_dir(home)):  # likewise pending exits/setups
                 shutil.rmtree(directory, ignore_errors=True)
             return
-        from gateway.status import get_process_start_time
+        from hermes_platform.processes import get_process_start_time
 
         home = get_hermes_home()
         directory = markers_dir(home)
@@ -129,18 +127,18 @@ def current_process_kind() -> str:
 
 
 def _claimer_alive(path: Path) -> bool:
-    from gateway.status import runtime_status_pid_is_live
+    from hermes_platform.processes import process_record_is_live
 
     try:
         claimer = int(path.name.rsplit(".", 2)[-2])
     except (IndexError, ValueError):
         return False
-    return runtime_status_pid_is_live({"pid": claimer})
+    return process_record_is_live({"pid": claimer})
 
 
 def _claim(path: Path) -> Path | None:
     """Rename a reportable marker so exactly one reporter owns it; None when not reportable."""
-    from gateway.status import runtime_status_pid_is_live
+    from hermes_platform.processes import process_record_is_live
 
     if path.name.endswith(_REPORTING):
         if _claimer_alive(path):
@@ -154,7 +152,7 @@ def _claim(path: Path) -> Path | None:
         return None
     if not isinstance(record, dict):
         return None
-    if record_path is None and record.get("state") == "running" and runtime_status_pid_is_live(record):
+    if record_path is None and record.get("state") == "running" and process_record_is_live(record):
         return None
     claimed = path.with_name(f"{path.name.split('.json')[0]}.json.{os.getpid()}{_REPORTING}")
     try:

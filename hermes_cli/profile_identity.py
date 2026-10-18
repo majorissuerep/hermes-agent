@@ -42,14 +42,14 @@ def migrate_profile_identity(old_name: str, new_name: str) -> bool:
     when all applicable identity was migrated, False when any durable migration failed or a live
     gateway would not accept the routing migration.
     """
-    from hermes_cli.profiles import _canon_valid, _live_default_multiplexer, _unknown_profile_error, get_profile_dir
+    from hermes_cli.profiles import _canon_valid, _unknown_profile_error, get_profile_dir
     old_canon = _canon_valid(old_name)
     new_canon = _canon_valid(new_name)
     if "default" in (old_canon, new_canon):
         raise ValueError("Identity migration applies to named profiles only.")
     if not get_profile_dir(new_canon).is_dir():
         raise _unknown_profile_error(new_canon)
-    return _migrate_profile_identity(old_canon, new_canon, _live_default_multiplexer())
+    return _migrate_profile_identity(old_canon, new_canon)
 
 
 def purge_profile_identity(profile: str) -> bool:
@@ -74,7 +74,7 @@ def purge_profile_identity(profile: str) -> bool:
     Idempotent: purging an already-purged profile succeeds. Returns False only when the identity was
     not settled — by this process or by the live gateway.
     """
-    from hermes_cli.profiles import _canon_valid, _live_default_multiplexer, profile_exists
+    from hermes_cli.profiles import _canon_valid, profile_exists
     canon = _canon_valid(profile)
     if canon == "default":
         raise ValueError("Identity purge applies to named profiles only.")
@@ -82,37 +82,16 @@ def purge_profile_identity(profile: str) -> bool:
         raise ValueError(
             f"Profile '{canon}' exists; purge-identity only settles the identity of a delete that "
             "has already completed.")
-    return _purge_profile_identity(canon, _live_default_multiplexer())
+    return _purge_profile_identity(canon)
 
 
-def _purge_profile_identity(canon: str, live_mux: bool) -> bool:
+def _purge_profile_identity(canon: str) -> bool:
     """Purge deleted-profile identity without racing a live gateway's in-memory routing index.
 
     Returns True when the identity was purged — by the gateway's control verb, or by this process's
     durable delete when no gateway holds the store — and False when a live gateway did not accept
     it. Never fatal to the delete, which has already happened by this point.
     """
-    if live_mux:
-        from hermes_constants import get_default_hermes_root
-        root = get_default_hermes_root()
-        try:
-            from gateway.control_socket import purge_gateway_profile_identity
-            answer = purge_gateway_profile_identity(root, canon)
-        except Exception as exc:
-            reason = f"{type(exc).__name__}: {exc}"
-        else:
-            if isinstance(answer, dict) and answer.get("ok") is True:
-                return True
-            reason = _control_answer_failure(answer)
-            if answer is None and _gateway_accepts_profile_identity_verb(root):
-                reason += (" — the gateway is running but does not implement "
-                           "'purge-profile-identity' (an older process than this CLI)")
-        print(
-            "⚠ Profile was deleted, but the live gateway could not purge its session identity"
-            f" ({reason}). Restart the gateway, then run:\n"
-            f"    hermes profile purge-identity {canon}",
-            file=sys.stderr)
-        return False
 
     from hermes_cli.profiles import get_profile_dir
     from hermes_constants import get_default_hermes_root
@@ -139,26 +118,8 @@ def _purge_profile_identity(canon: str, live_mux: bool) -> bool:
     return purged
 
 
-def _control_answer_failure(answer) -> str:
-    """Why a control-socket answer is not a success. Keeps the raw answer when the payload carries
-    no reason field, so a malformed or old-gateway response stays diagnosable instead of
-    collapsing into a generic warning."""
-    if isinstance(answer, dict):
-        failure = answer.get("error") or answer.get("message") or answer.get("detail")
-        return str(failure) if failure else repr(answer)
-    if answer is not None:
-        return repr(answer)
-    return "no response from gateway control socket"
 
 
-def _gateway_accepts_profile_identity_verb(root: Path) -> bool:
-    """True when the gateway at *root* answers a verb it has always had. Distinguishes a failed
-    migration verb caused by an older gateway process from one caused by no gateway at all."""
-    try:
-        from gateway.control_socket import identify_gateway
-        return identify_gateway(root) is not None
-    except Exception:
-        return False
 
 
 def _migrate_checkpoint_identity(old_canon: str, new_canon: str) -> bool:
@@ -182,7 +143,7 @@ def _migrate_checkpoint_identity(old_canon: str, new_canon: str) -> bool:
     return False
 
 
-def _migrate_profile_identity(old_canon: str, new_canon: str, live_mux: bool) -> bool:
+def _migrate_profile_identity(old_canon: str, new_canon: str) -> bool:
     """Rekey renamed-profile identity without racing a live gateway's in-memory routing index.
 
     Returns True when every applicable identity was migrated. Session/routing identity is handled
@@ -192,27 +153,6 @@ def _migrate_profile_identity(old_canon: str, new_canon: str, live_mux: bool) ->
     """
     checkpoint_migrated = _migrate_checkpoint_identity(old_canon, new_canon)
 
-    if live_mux:
-        from hermes_constants import get_default_hermes_root
-        root = get_default_hermes_root()
-        try:
-            from gateway.control_socket import migrate_gateway_profile_identity
-            answer = migrate_gateway_profile_identity(root, old_canon, new_canon)
-        except Exception as exc:
-            reason = f"{type(exc).__name__}: {exc}"
-        else:
-            if isinstance(answer, dict) and answer.get("ok") is True:
-                return checkpoint_migrated
-            reason = _control_answer_failure(answer)
-            if answer is None and _gateway_accepts_profile_identity_verb(root):
-                reason += (" — the gateway is running but does not implement "
-                           "'migrate-profile-identity' (an older process than this CLI)")
-        print(
-            "⚠ Profile was renamed, but the live gateway could not migrate session identity"
-            f" ({reason}). Restart the gateway, then run:\n"
-            f"    hermes profile migrate-identity {old_canon} {new_canon}",
-            file=sys.stderr)
-        return False
 
     from hermes_cli.profiles import get_profile_dir
     from hermes_state.registry import acquire, release_or_close

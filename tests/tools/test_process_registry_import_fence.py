@@ -36,39 +36,6 @@ def test_importing_process_registry_does_not_connect_to_state_db(tmp_path):
     assert not (home / "state.db").exists()
 
 
-@pytest.mark.asyncio
-async def test_gateway_startup_restores_pending_delegation_completions(tmp_path, monkeypatch):
-    """The gateway authority is the owner that rehydrates durable completions, at startup."""
-    from unittest.mock import MagicMock
-    import gateway.run as gateway_run
-    import tools.async_delegation as ad
-    from tools.process_registry import process_registry
-
-    monkeypatch.setattr(ad, "_db_path", lambda: tmp_path / "state.db")
-    monkeypatch.setattr(gateway_run, "_hermes_home", tmp_path)
-    monkeypatch.setattr("hermes_cli.plugins.discover_plugins", lambda: None)
-    monkeypatch.setattr("agent.shell_hooks.register_from_config", lambda *a, **k: None)
-    monkeypatch.setattr(process_registry, "recover_from_checkpoint", lambda: 0)
-    event = {"type": "async_delegation", "delegation_id": "d-owner", "session_key": "OLD", "origin_ui_session_id": "",
-             "goal": "g", "status": "success", "summary": "S", "api_calls": 1, "duration_seconds": 1.0,
-             "dispatched_at": time.time() - 2, "completed_at": time.time() - 1}
-    ad._persist_dispatch({"delegation_id": "d-owner", "goal": "g", "context": None, "toolsets": None, "role": "leaf",
-                          "model": "m", "session_key": "OLD", "origin_ui_session_id": "", "parent_session_id": "OLD",
-                          "status": "running", "dispatched_at": time.time() - 2, "completed_at": None, "interrupt_fn": None})
-    ad._persist_completion(event, {"summary": "S"})
-    while not process_registry.completion_queue.empty():
-        process_registry.completion_queue.get_nowait()
-
-    runner = gateway_run.GatewayRunner.__new__(gateway_run.GatewayRunner)
-    runner._start_register_plugins_relay_hooks = MagicMock()
-    runner.hooks = MagicMock()
-    runner._recover_unclean_sessions = _async_return((0, 0))
-    runner._consume_clean_shutdown_marker = _async_return(0)
-    runner._suspend_stuck_loop_sessions = lambda: 0
-    await runner._start_recover_previous_run()
-
-    restored = process_registry.completion_queue.get_nowait()
-    assert restored["delegation_id"] == "d-owner" and restored["restored"] is True
 
 
 def _async_return(value):

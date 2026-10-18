@@ -129,7 +129,6 @@ def refresh_agent_mcp_tools(
     new_names = {_def_name(t) for t in new_defs}
     # Post-build families re-appended on LOCALS only; live attributes untouched until publish.
     staged_engine_names = _reinject_post_build_tools(agent, new_defs, new_names)
-    _reinject_authorized_dynamic_tools(agent, new_defs, new_names)
     # Registry membership is read OUTSIDE ``_agent_tools_lock``: taking ``registry._lock``
     # under the tools lock would be the first nesting of the two.
     prefix_registered: Optional[set] = None
@@ -188,10 +187,7 @@ def _config_permitted_names(agent) -> set:
     forward. A client-surface toolset counts as allowed (only its client can add it, so its absence
     here is no config choice); ``disabled_toolsets`` still strips it."""
     from model_tools import _select_tool_names
-    from toolsets import CLIENT_SURFACE_TOOLSETS
     enabled = getattr(agent, "enabled_toolsets", None)
-    if enabled is not None:
-        enabled = [*enabled, *CLIENT_SURFACE_TOOLSETS]
     return _select_tool_names(enabled, getattr(agent, "disabled_toolsets", None), True)
 
 
@@ -239,7 +235,6 @@ def restore_agent_tool_prefix(agent, saved) -> bool:
     merged.extend(t for t in fresh_defs if _def_name(t) not in pinned_names)
     merged = _drop_gated_carried_tools(merged, carried)
     merged_names = {_def_name(t) for t in merged}
-    _reinject_authorized_dynamic_tools(agent, merged, merged_names)
     merged, merged_names = _drop_session_tools(agent, merged, merged_names)
     changed = merged != fresh_defs
     if changed:
@@ -275,19 +270,6 @@ def _merge_preserving_prefix(current_defs: list, new_defs: list, registered_name
             merged.append(entry)
     merged.extend(fresh.values())
     return merged, {_def_name(t) for t in merged}
-
-
-def _reinject_authorized_dynamic_tools(agent, tools_list: list, name_set: set) -> None:
-    """``message_agent`` is injected by an auth gate, never registered, so a registry-derived
-    rebuild drops it. Scrub any stale copy from the STAGED pair and re-add it only when the live
-    gate re-authorizes, so the publisher exposes a coherent ``(tools, valid_tool_names)``."""
-    from tools.bot_mode_dm import MESSAGE_AGENT_TOOL_NAME, message_agent_authorized, message_agent_tool_schema
-
-    tools_list[:] = [entry for entry in tools_list if _def_name(entry) != MESSAGE_AGENT_TOOL_NAME]
-    name_set.discard(MESSAGE_AGENT_TOOL_NAME)
-    if message_agent_authorized(agent):
-        tools_list.append(message_agent_tool_schema())
-        name_set.add(MESSAGE_AGENT_TOOL_NAME)
 
 
 def _reinject_post_build_tools(agent, tools_list: list, name_set: set) -> set:

@@ -113,13 +113,6 @@ def test_disposable_scope_streams_lists_and_never_touches_production(r2_server, 
     # Scoping is opt-in via R2_DISPOSABLE_RUN alone: there is no fork isolation
     # to assert after the fork-conditional dispatch was dropped.
     assert r2_server.requests == before
-    from scripts.releases.channel_disposable import probe
-    from scripts.releases.channels import ChannelPublisher, R2ChannelStore
-    unscoped = ChannelPublisher(R2ChannelStore(creds, base, bucket), "fixture/fork", root,
-                                authorize=lambda *_: None)
-    with pytest.raises(ValueError, match="disposable"):
-        probe(unscoped, "a" * 40, "1.2.3", "b" * 40)
-    assert r2_server.requests == before
 
 
 # ── SigV4 vectors ───────────────────────────────────────────────────────────

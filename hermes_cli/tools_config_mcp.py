@@ -227,14 +227,6 @@ def _known_tool_platforms() -> set[str]:
     from hermes_cli.tools_config import PLATFORMS
 
     known = set(PLATFORMS)
-    try:
-        from hermes_cli.plugins import discover_plugins
-        from gateway.platform_registry import platform_registry
-        discover_plugins()  # idempotent
-        known.update(platform_registry.registered_names())
-    except Exception:
-        # Plugin discovery is optional: keep the built-in path when a plugin is malformed or deps are missing.
-        pass
     return known
 
 

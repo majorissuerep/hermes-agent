@@ -164,7 +164,7 @@ def anthropic_homes(tmp_path, monkeypatch):
 
 
 def _disconnect(slug):
-    from tui_gateway import server
+    from tui_runtime import server
 
     return server._methods["model.disconnect"](1, {"slug": slug})
 
@@ -181,5 +181,3 @@ def test_disconnect_on_a_package_managed_install_still_clears_the_auth_store(ant
 
 
 # ── bulk save strips managed leaves ──────────────────────────────────────────
-
-

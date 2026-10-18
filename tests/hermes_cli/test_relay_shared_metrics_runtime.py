@@ -859,8 +859,8 @@ def test_real_binding_correlates_plugin_approval_denial_to_tool_metric(
     monkeypatch.setattr(approval, "get_current_session_key", lambda: "session-key")
     monkeypatch.setattr(approval_context, "get_current_session_key", lambda: "session-key")
     monkeypatch.setattr(approval, "_is_interactive_cli", lambda: True)
-    monkeypatch.setattr(approval, "_is_gateway_approval_context", lambda: False)
-    monkeypatch.setattr(approval_context, "_is_gateway_approval_context", lambda: False)
+    monkeypatch.setattr(approval, "_is_session_approval_context", lambda: False)
+    monkeypatch.setattr(approval_context, "_is_session_approval_context", lambda: False)
     monkeypatch.setattr(approval, "prompt_dangerous_approval", lambda *args, **kwargs: "deny")
     monkeypatch.setattr(approval_prompt, "prompt_dangerous_approval", lambda *args, **kwargs: "deny")
 

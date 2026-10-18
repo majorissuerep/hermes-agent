@@ -131,6 +131,9 @@ def _run_chrome_fallback_command(task_id: str, command: str, args: list[str], ti
         _bt.logger.warning("Chrome fallback: could not determine current URL from LP session")
         return {"success": False, "error": "Chrome fallback failed: could not determine current URL"}
 
+    from tools.browser_terminal import browser_in_terminal
+    if browser_in_terminal():
+        return {"success": False, "error": "Native Chrome fallback is unavailable outside the selected terminal sandbox."}
     # 2. Temporary Chrome session (bypasses _get_session_info's cache).
     tmp_session = f"h_cfb_{uuid.uuid4().hex[:8]}"
     try:
@@ -150,7 +153,6 @@ def _run_chrome_fallback_command(task_id: str, command: str, args: list[str], ti
     base_args = _session._agent_browser_argv(browser_cmd) + ["--engine", "chrome", "--session", tmp_session, "--json"]
     task_socket_dir = _session._prepare_session_socket_dir(tmp_session)
     # Bypasses _run_browser_command, so apply the same Chromium sandbox/screen policy explicitly.
-    _session._ensure_screen_for_headed_chromium()
     browser_env = _session._agent_browser_command_env(task_socket_dir)
     _session._apply_chromium_sandbox_args(browser_env)
     # #64867: the temp Chrome session is a background retry, so it launches

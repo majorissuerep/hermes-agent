@@ -4,7 +4,7 @@
 # sessions/configs onto the master-password vault.
 #
 # What it does:
-#   1. Stops running hermes processes (gateway/desktop serve) cleanly.
+#   1. Refuses active Hermes sessions/tasks; asks you to close them first.
 #   2. Moves the old source checkout aside (kept, not deleted).
 #   3. Clones the fork into the install location.
 #   4. Prepares the pinned Python and dependencies through PM.
@@ -36,31 +36,133 @@ die() { echo "✗ $*" >&2; exit 1; }
 
 command -v git >/dev/null || die "git not found"
 
-# ── 1. Stop live processes that hold DB handles ────────────────────────────
-stop_hermes() {
-    say "→ Stopping running Hermes services..."
-    systemctl --user stop 'hermes-gateway*' 2>/dev/null || true
-    # Kill EVERY hermes process from ANY venv (old install, respawned
-    # gateway, stale --yolo session, kernel runners). A surviving
-    # plaintext-mode process fights the vault mid-migration and clobbers
-    # sealed envelopes (real incident: watchdog-respawned old-venv gateway
-    # NUL-stripped a sealed .env into garbage).
-    pkill -f 'hermes-agent/. *gateway run' 2>/dev/null || true
-    pkill -f 'gateway run' 2>/dev/null || true
-    pkill -f 'hermes_kernel_runner' 2>/dev/null || true
-    pkill -f 'hermes-agent.*--yolo' 2>/dev/null || true
-    pkill -f 'hermes-agent/hermes ' 2>/dev/null || true
-    sleep 1
-    # Watchdogs respawn their victims: after the first sweep, kill any
-    # survivor once more and report if something STILL refuses to die.
-    if pgrep -f 'hermes-agent/(venv|.venv)/bin' >/dev/null 2>&1; then
-        pkill -9 -f 'hermes-agent/(venv|.venv)/bin' 2>/dev/null || true
-        sleep 1
-        pgrep -f 'hermes-agent/(venv|.venv)/bin' >/dev/null 2>&1 \
-            && say "  ⚠ hermes processes still alive — stop them before migrating (pgrep -af hermes)"
-    fi
-    # desktop serve backend dies with the app; give DBs a moment to close
-    sleep 2
+# ── 1. Refuse live owners; never stop services or signal other processes ─────
+require_quiescent_home() {
+    local guard_python
+    guard_python="$(command -v python3 || command -v python || true)"
+    [[ -n "$guard_python" ]] || die "Python is required to verify that Hermes sessions are closed"
+    "$guard_python" - "$HERMES_HOME" "$INSTALL_DIR" <<'PY_GUARD'
+import fcntl
+import os
+from pathlib import Path
+import re
+import shlex
+import subprocess
+import sys
+
+home, install = (Path(value).expanduser().resolve() for value in sys.argv[1:])
+modules = {"hermes_cli.main", "gateway.run", "tui_runtime", "tui_runtime.entry",
+           "tui_runtime.__main__", "tui_gateway", "tui_gateway.entry", "hermes_kernel_runner"}
+
+
+def below(path, root):
+    return path == root or root in path.parents
+
+
+def owned_interpreter(path):
+    return below(path, install) or below(path, home / "installs")
+
+
+def runtime_command(argv, cwd):
+    if not argv:
+        return False
+    executable = Path(argv[0])
+    if not executable.is_absolute():
+        executable = cwd / executable
+    if owned_interpreter(executable.absolute()):
+        return True  # Even arbitrary code in this install's interpreter can hold its databases.
+    if not re.fullmatch(r"(?:python(?:w)?(?:\d+(?:\.\d+)*)?|pypy(?:\d+)?)", executable.name):
+        return False
+    args = iter(argv[1:])
+    for token in args:
+        if token == "-m":
+            return next(args, "") in modules
+        if token.startswith("-m"):
+            return token[2:] in modules
+        if token in {"-c", "-"}:
+            return False  # Trailing strings are data, not process identity.
+        if token in {"-W", "-X"}:
+            next(args, None)
+        elif token.startswith("-"):
+            continue
+        else:
+            script = Path(token)
+            return below((script if script.is_absolute() else cwd / script).resolve(), install)
+    return False
+
+
+def holds_state_database(entry):
+    try:
+        descriptors = list((entry / "fd").iterdir())
+    except PermissionError:
+        return False  # Protected unrelated processes (for example dbus) reveal no ownership evidence.
+    for descriptor in descriptors:
+        try:
+            target = Path(os.readlink(descriptor).removesuffix(" (deleted)"))
+            if target.name in {"state.db", "state.db-wal", "state.db-shm"} and below(target, home):
+                return True
+        except (FileNotFoundError, PermissionError):
+            continue
+    return False
+
+
+def linux_owners():
+    owners = []
+    for entry in Path("/proc").iterdir():
+        if not entry.name.isdecimal() or int(entry.name) == os.getpid():
+            continue
+        try:
+            if entry.stat().st_uid != os.getuid():
+                continue
+            argv = [part.decode(errors="surrogateescape") for part in (entry / "cmdline").read_bytes().split(b"\0") if part]
+            if holds_state_database(entry):
+                owners.append(entry.name)
+                continue
+            try:
+                cwd = (entry / "cwd").resolve()
+            except PermissionError:
+                cwd = Path("/")
+            if not runtime_command(argv, cwd):
+                continue
+            env = dict(part.split(b"=", 1) for part in (entry / "environ").read_bytes().split(b"\0") if b"=" in part)
+            active = Path(os.fsdecode(env.get(b"HERMES_HOME", env.get(b"HOME", b"/nonexistent") + b"/.hermes"))).expanduser().resolve()
+            if below(active, home):
+                owners.append(entry.name)
+        except (FileNotFoundError, ProcessLookupError):
+            continue  # An exited process no longer holds state.
+        except PermissionError:
+            raise RuntimeError(f"Cannot verify process {entry.name}; close sessions and retry") from None
+    return owners
+
+
+def other_posix_owners():
+    # macOS exposes argv through ps, not procfs. Without a trustworthy per-process home,
+    # conservatively refuse exact runtime identities even when they may own another profile.
+    listing = subprocess.check_output(["ps", "-ax", "-o", "uid=", "-o", "pid=", "-o", "command="], text=True)
+    owners = []
+    for row in listing.splitlines():
+        fields = row.split(None, 2)
+        if len(fields) == 3 and fields[0] == str(os.getuid()):
+            if runtime_command(shlex.split(fields[2]), Path("/")):
+                owners.append(fields[1])
+    return owners
+
+
+try:
+    # Existing native/legacy locks catch inline launchers without interpreting Python source.
+    for scope in (home, *(home / "profiles").glob("*")):
+        for name in ("runtime.lock", "gateway.lock"):
+            lock = scope / name
+            if lock.exists():
+                with lock.open("rb") as handle:
+                    fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    owners = linux_owners() if Path("/proc/self/cmdline").is_file() else other_posix_owners()
+    if owners:
+        raise RuntimeError("Active Hermes processes: " + ", ".join(owners))
+except (OSError, RuntimeError, ValueError) as error:
+    print(f"Takeover refused: {error}. Close Hermes sessions/tasks before retrying; no processes were stopped.", file=sys.stderr)
+    raise SystemExit(1)
+PY_GUARD
 }
 
 # ── 2/3. Swap the source tree ───────────────────────────────────────────────
@@ -177,7 +279,7 @@ _tty_available() {
 }
 
 main() {
-    stop_hermes
+    require_quiescent_home
     swap_source
     build_venv
     install_launcher
@@ -190,6 +292,7 @@ main() {
         say "→ Installing 1Password CLI (op)…"
         bash "$INSTALL_DIR/scripts/install_op.sh" || say "  ○ op install failed — run scripts/install_op.sh later"
     fi
+    require_quiescent_home
     migrate_state
     say ""
     say "✓ Fork installed at $INSTALL_DIR"

@@ -2,27 +2,23 @@
 
 The MCP client, the toolset resolver, the profile editor, the catalog and the list/status
 surfaces used to parse the key four different ways, so ``enabled: 0`` was off for the resolver
-and on for the client, and ``enabled: "false"`` was on in the server list. The case table is
-shared with the desktop (``apps/desktop/src/lib/mcp-enabled-cases.json``).
+and on for the client, and ``enabled: "false"`` was on in the server list. The table covers the supported native readers and legacy saved values.
 """
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
 
 import pytest
 
-CASES = json.loads(
-    (Path(__file__).resolve().parents[2] / "apps/desktop/src/lib/mcp-enabled-cases.json").read_text(encoding="utf-8"))
+CASES = [{'enabled': True, 'on': True}, {'enabled': False, 'on': False}, {'enabled': 1, 'on': True}, {'enabled': 0, 'on': False}, {'enabled': 0.0, 'on': False}, {'enabled': 2, 'on': True}, {'enabled': -0.0, 'on': False}, {'enabled': [], 'on': True}, {'enabled': 'true', 'on': True}, {'enabled': 'Yes', 'on': True}, {'enabled': ' on ', 'on': True}, {'enabled': '1', 'on': True}, {'enabled': 'false', 'on': False}, {'enabled': 'OFF', 'on': False}, {'enabled': 'no', 'on': False}, {'enabled': '0', 'on': False}, {'enabled': '', 'on': True}, {'enabled': 'maybe', 'on': True}, {'enabled': None, 'on': True}, {'on': True}]
 
 
 def _readers():
     from hermes_cli.mcp_catalog import server_enabled
     from hermes_cli.tools_config import enabled_mcp_server_names
     from tools.mcp_tool_common import mcp_server_enabled
-    from tui_gateway.mcp_rpc_helpers import summarize_server
-    from tui_gateway.methods_profiles import _mcp_entry_enabled
+    from tui_runtime.mcp_rpc_helpers import summarize_server
+    from tui_runtime.methods_profiles import _mcp_entry_enabled
 
     return {
         "mcp client": mcp_server_enabled,

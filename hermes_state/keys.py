@@ -39,3 +39,10 @@ def profile_from_session_key(session_key):
     if len(parts) < 2 or parts[0] != "agent":
         return None
     return profile_from_session_key_namespace(parts[1] or "main")
+
+
+def legacy_session_key_namespace(profile):
+    """Historical namespace spelling used only when rekeying imported session metadata."""
+    if not profile or profile == 'default':
+        return 'agent:main'
+    return 'agent:main~' if profile == 'main' else f'agent:{profile}'

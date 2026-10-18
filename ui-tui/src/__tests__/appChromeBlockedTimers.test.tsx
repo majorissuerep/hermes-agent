@@ -11,8 +11,8 @@ import { patchOverlayState, resetOverlayState } from '../app/overlayStore.js'
 import { patchUiState, resetUiState } from '../app/uiStore.js'
 import { StatusRule } from '../components/appChrome.js'
 import { AppLayout } from '../components/appLayout.js'
-import type { GatewayClient } from '../gatewayClient.js'
 import { DEFAULT_VOICE_RECORD_KEY } from '../lib/platform.js'
+import type { LocalAgentClient } from '../localAgentClient.js'
 import { DEFAULT_THEME } from '../theme.js'
 
 type StatusRuleProps = React.ComponentProps<typeof StatusRule>
@@ -124,7 +124,7 @@ const gatewayStub = {
   gw: {
     request: () => new Promise<never>(() => {}),
     send: () => {}
-  } as unknown as GatewayClient,
+  } as unknown as LocalAgentClient,
   rpc: (() => new Promise<never>(() => {})) as never
 }
 

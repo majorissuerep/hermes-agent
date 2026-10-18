@@ -265,33 +265,6 @@ class TestFormatFooter:
         assert "/tmp/a.md" in out
         assert "Could not find old_string" in out
 
-    def test_footer_path_not_extracted_by_gateway(self):
-        """End-to-end: the gateway's extract_local_files must NOT pull a
-        config.yaml path out of the rendered footer (#35584)."""
-        import os
-        import tempfile
-        from gateway.platforms.base import BasePlatformAdapter
-
-        tmp = tempfile.mkdtemp(prefix="hermes_footer_")
-        try:
-            cfg = os.path.join(tmp, "config.yaml")
-            with open(cfg, "w") as fh:
-                fh.write("openrouter_api_key: sk-LEAK\n")
-            footer = AIAgent._format_file_mutation_failure_footer(
-                {cfg: {
-                    "tool": "patch",
-                    "error_preview": (
-                        f"Write denied: '{cfg}' is a protected "
-                        "system/credential file."
-                    ),
-                }},
-            )
-            response = "I updated your config.\n\n" + footer
-            paths, _ = BasePlatformAdapter.extract_local_files(response)
-            assert paths == [], f"footer leaked deliverable path(s): {paths}"
-        finally:
-            import shutil
-            shutil.rmtree(tmp, ignore_errors=True)
 
 # ---------------------------------------------------------------------------
 # _file_mutation_verifier_enabled — env + config precedence

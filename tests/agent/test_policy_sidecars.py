@@ -231,7 +231,7 @@ def test_guard_blocks_all_dispatch_paths_and_preserves_the_human_approval_bounda
 
 
 def test_profiles_and_real_turns_keep_policy_cache_and_route_state_separate(tmp_path, monkeypatch, endpoint):
-    from gateway.run import _profile_runtime_scope
+    from tui_runtime.model_switch import _session_profile_runtime_scope
     from agent.secret_scope import is_multiplex_active, set_multiplex_active
     from agent.policy_sidecars import get_sidecars
     from run_agent import AIAgent
@@ -248,7 +248,7 @@ def test_profiles_and_real_turns_keep_policy_cache_and_route_state_separate(tmp_
     agents = []
     try:
         for index in (0, 1, 0):
-            with _profile_runtime_scope(homes[index]):
+            with _session_profile_runtime_scope({"profile_home": str(homes[index])}):
                 agent = AIAgent(model="main", provider="custom", base_url=base, api_key=f"key-{'AB'[index]}",
                                 enabled_toolsets=[], quiet_mode=True, skip_memory=True, skip_context_files=True,
                                 save_trajectories=False, max_iterations=3)
@@ -283,7 +283,7 @@ def test_profiles_and_real_turns_keep_policy_cache_and_route_state_separate(tmp_
     from decimal import Decimal
     state["complexity"] = 2
     state["cache_fraction"] = 0.99
-    with _profile_runtime_scope(homes[0]):
+    with _session_profile_runtime_scope({"profile_home": str(homes[0])}):
         agent = agents[-1]
         history = [{"role": "user", "content": "Inspect the project."},
                    {"role": "assistant", "content": "Earlier findings: " + "a" * 240000}]

@@ -49,10 +49,8 @@ def _turn(db, agent, cli, surface, n, prompt_tokens):
     """One turn exactly as the classic CLI (staged dict, history[:-1]) or the gateway (transcript reload) runs it."""
     text = f"U{n} please continue with the next step"
     agent.client.chat.completions.create.side_effect = [_reply(f"A{n} " + "lorem ipsum dolor " * 300, prompt_tokens)]
-    if surface == "gateway":
-        from gateway.run import _build_gateway_agent_history
-
-        history = _build_gateway_agent_history(db.get_messages_as_conversation("sid", repair_alternation=True))[0]
+    if surface == "durable":
+        history = db.get_resume_conversations("sid")[0]
         agent.run_conversation(user_message=text, conversation_history=history, task_id="sid", persist_user_message=text)
         return
     from hermes_cli.cli_chat_turn_mixin import CLIChatTurnMixin
@@ -68,7 +66,7 @@ def _replies_displayed(db):
             if m.get("role") == "assistant" and isinstance(m.get("content"), str)}
 
 
-@pytest.mark.parametrize("surface", ["cli", "gateway"])
+@pytest.mark.parametrize("surface", ["cli", "durable"])
 def test_turn_start_compaction_hides_no_summarized_turn(session, surface):
     db, agent = session
     cli = SimpleNamespace(conversation_history=[])
@@ -90,12 +88,10 @@ def test_manual_compress_between_turns_rewinds_every_carried_original(session):
     db, agent = session
     cli = SimpleNamespace(conversation_history=[])
     for n in range(1, 15):
-        _turn(db, agent, cli, "gateway", n, 5_000)
+        _turn(db, agent, cli, "durable", n, 5_000)
     assert agent._persist_user_message_idx is not None
 
-    from gateway.run import _build_gateway_agent_history
-
-    history = _build_gateway_agent_history(db.get_messages_as_conversation("sid", repair_alternation=True))[0]
+    history = db.get_resume_conversations("sid")[0]
     assert compress_now(agent, history, parse_compress_args(""), system_message="").status == "compressed"
 
     model_history, display_history = db.get_resume_conversations("sid")

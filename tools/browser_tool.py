@@ -66,11 +66,7 @@ def _build_browser_env() -> dict:
             env[key] = value
     # The Browser Use harness dials the resolved local CDP URL over ``websockets``; without a
     # loopback NO_PROXY a macOS system proxy captures that dial (#110565).
-    # Headed Chromium opens on this profile's Bot Desktop when one is running (human can take it over). Pure: this
-    # builder also serves the npx cache warmer, the Chromium auto-installer and the Lightpanda engine, none of which
-    # may bring a screen up — the auto-start hook lives at the headed Chromium spawn sites (browser_tool_session).
-    from tools.bot_desktop.runtime import desktop_env as _bot_desktop_env
-    env = add_loopback_no_proxy(_bot_desktop_env(env))
+    env = add_loopback_no_proxy(env)
     # Chrome puts its SingletonSocket under $TMPDIR; a deep scratch dir overflows the AF_UNIX
     # path cap and Chrome dies at startup ("Socket path too long"), so browsers get the short root.
     env["TMPDIR"] = _socket_safe_tmpdir()
@@ -1125,15 +1121,9 @@ def _browser_eval(expression: str, task_id: Optional[str] = None) -> str:
     if _is_camofox_mode():
         return _camofox_eval(expression, task_id)
 
-    # The supervisor answers over its own WebSocket and never reaches _run_browser_command, so the Bot
-    # Desktop lease fence has to bracket it here too — otherwise the one command that reads arbitrary
-    # page state is the one a human's takeover does not stop. Same fence, same session identity.
-    fenced = _session.run_fenced(_active_sessions.get(effective_task_id) or {},
-                                 lambda: {"fast": _eval_supervisor_fast_path(effective_task_id, expression)})
-    if fenced.get("code") == "human_has_control":
-        return _dumps(fenced)
-    if fenced["fast"] is not None:
-        return fenced["fast"]
+    fast = _eval_supervisor_fast_path(effective_task_id, expression)
+    if fast is not None:
+        return fast
 
     result = _session._run_browser_command(effective_task_id, "eval", [expression])
     if not result.get("success"):
@@ -1326,14 +1316,10 @@ def browser_vision(question: str, annotate: bool = False, task_id: Optional[str]
 # Registry
 # ---------------------------------------------------------------------------
 from tools.registry import registry, tool_error
-from tools.browser_extension_router import extension_controller_available, routed_browser_handler
 
 _BROWSER_SCHEMA_MAP = {s["name"]: s for s in BROWSER_TOOL_SCHEMAS}
 
 
-def check_browser_routed_requirements(action: str = "browser_snapshot") -> bool:
-    """Availability gate for tools that can use either browser backend."""
-    return _install.check_browser_requirements() or extension_controller_available(action)
 
 
 def _fallback_call(fn_name: str, arg_defaults: dict[str, Any], extra_kw: tuple = ()):
@@ -1365,26 +1351,17 @@ _BROWSER_TOOL_TABLE = (
 )
 
 
-def _routed_check_fn(name: str):
-    """Per-action availability gate (a named function, as the registry expects)."""
-    def check() -> bool:
-        return check_browser_routed_requirements(name)
-    check.__name__ = check.__qualname__ = f"check_{name}_requirements"
-    return check
 
 
-def _routed_handler(name: str, fallback):
+def _browser_handler(call):
     def handler(args, **kw):
-        return record_browser_call(lambda legacy: routed_browser_handler(
-            name, args, fallback=lambda: legacy(lambda: fallback(args, kw)),
-            task_id=kw.get("task_id"), session_id=kw.get("session_id"),
-        ), _cloud.browser_backend_name)
+        return record_browser_call(lambda execute: execute(lambda: call(args, kw)), _cloud.browser_backend_name)
     return handler
 
 
 for _name, _emoji, _check_fn, _defaults, *_extra in _BROWSER_TOOL_TABLE:
-    if _check_fn is None:  # also binds the legacy check_browser_<x>_requirements globals (tests + callers)
-        _check_fn = globals()[f"check_{_name}_requirements"] = _routed_check_fn(_name)
+    if _check_fn is None:
+        _check_fn = _install.check_browser_requirements
     registry.register(name=_name, toolset="browser", schema=_BROWSER_SCHEMA_MAP[_name],
-                      handler=_routed_handler(_name, _fallback_call(_name, _defaults, *_extra)),
+                      handler=_browser_handler(_fallback_call(_name, _defaults, *_extra)),
                       check_fn=_check_fn, emoji=_emoji)

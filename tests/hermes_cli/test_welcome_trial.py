@@ -6,7 +6,7 @@ import contextlib
 import pytest
 
 from hermes_cli import anon_auth, install_state, welcome_trial
-from tests.hermes_cli.anon_portal import as_local_desktop_backend, claimed_trial, install_portal
+from tests.hermes_cli.anon_portal import as_local_terminal_runtime, claimed_trial, install_portal
 
 
 @pytest.fixture
@@ -28,10 +28,10 @@ def test_the_claim_is_stamped_by_the_mint_write_itself(portal, monkeypatch):
     def lost_second_write(_flag):
         raise OSError("disk full")
     monkeypatch.setattr(anon_auth, "set_guest_flag", lost_second_write)
-    as_local_desktop_backend(monkeypatch)
+    as_local_terminal_runtime(monkeypatch)
 
     with contextlib.suppress(OSError):
-        welcome_trial.claim_desktop_free_tier()
+        welcome_trial.claim_terminal_free_tier()
 
     assert anon_auth.free_inference_active()
 
@@ -39,10 +39,10 @@ def test_the_claim_is_stamped_by_the_mint_write_itself(portal, monkeypatch):
 BLOCKED = {
     "the CLI": lambda mp, home: None,
     "an SSH backend": lambda mp, home: (mp.setenv("HERMES_DESKTOP", "1"), mp.delenv("HERMES_DASHBOARD_SESSION_TOKEN", raising=False)),
-    "guests switched off": lambda mp, home: (as_local_desktop_backend(mp),
+    "guests switched off": lambda mp, home: (as_local_terminal_runtime(mp),
                                               (home / "config.yaml").write_text("nous:\n  guest: false\n", encoding="utf-8")),
-    "a provider key": lambda mp, home: (as_local_desktop_backend(mp), mp.setenv("AI_GATEWAY_API_KEY", "sk-or-test")),
-    "a used machine": lambda mp, home: (as_local_desktop_backend(mp), install_state.mark_machine_used()),
+    "a provider key": lambda mp, home: (as_local_terminal_runtime(mp), mp.setenv("AI_GATEWAY_API_KEY", "sk-or-test")),
+    "a used machine": lambda mp, home: (as_local_terminal_runtime(mp), install_state.mark_machine_used()),
 }
 
 
@@ -52,28 +52,28 @@ def test_the_trial_is_never_claimed_outside_a_first_desktop_install(portal, monk
 
     BLOCKED[case](monkeypatch, get_hermes_home())
 
-    assert welcome_trial.claim_desktop_free_tier() is None
+    assert welcome_trial.claim_terminal_free_tier() is None
     assert portal.creates() == 0
     assert not anon_auth.free_inference_active()
 
 
 def test_a_connector_guest_neither_claims_nor_carries_inference(portal, monkeypatch):
-    as_local_desktop_backend(monkeypatch)
+    as_local_terminal_runtime(monkeypatch)
     anon_auth.ensure_portal_identity(explicit=True)  # the first hosted connector action
 
-    assert welcome_trial.claim_desktop_free_tier() is None
+    assert welcome_trial.claim_terminal_free_tier() is None
     assert not anon_auth.free_inference_active()
     from hermes_cli.auth import resolve_nous_access_token
     resolve_nous_access_token()
     assert [r["body"]["purpose"] for r in portal.token_requests] == ["connectors"]
 
 
-def test_a_claimed_guest_carries_inference_only_on_the_local_desktop_backend(portal, monkeypatch):
+def test_a_claimed_guest_carries_existing_entitlement_to_headless(portal, monkeypatch):
     state = claimed_trial(monkeypatch)
-    monkeypatch.delenv("HERMES_DASHBOARD_SESSION_TOKEN")  # the same home, read by a CLI process
+    monkeypatch.setattr(anon_auth, "on_local_terminal_runtime", lambda: False)
 
-    assert not anon_auth.free_inference_active()
-    assert anon_auth.guest_without_free_tier(state)
+    assert anon_auth.free_inference_active()
+    assert not anon_auth.guest_without_free_tier(state)
 
 
 def _chat(db_path, model: str) -> None:
@@ -103,7 +103,7 @@ def _legacy_guest() -> None:
 def test_a_guest_that_chatted_on_the_free_model_keeps_it(portal, monkeypatch, model, kept):
     from hermes_constants import get_hermes_home
 
-    as_local_desktop_backend(monkeypatch)
+    as_local_terminal_runtime(monkeypatch)
     _legacy_guest()  # grandfathering is only for guests minted before the key existed
     _chat(get_hermes_home() / "state.db", model)
 
@@ -116,7 +116,7 @@ def test_grandfathering_never_overwrites_a_sign_in_from_another_profile(portal, 
     from hermes_constants import get_hermes_home
     from tests.hermes_cli.anon_portal import PORTAL
 
-    as_local_desktop_backend(monkeypatch)
+    as_local_terminal_runtime(monkeypatch)
     _legacy_guest()                                    # this profile still holds the old guest
     _chat(get_hermes_home() / "state.db", anon_auth.GUEST_MODEL)
     _write_shared_nous_state({"auth_method": "oauth_device_code", "portal_base_url": PORTAL,
@@ -131,7 +131,7 @@ def test_a_lost_claim_is_not_replaced(portal, monkeypatch):
     claimed_trial(monkeypatch)
     anon_auth.clear_dead_guest("anon_credential_dead")
 
-    assert welcome_trial.claim_desktop_free_tier() is None
+    assert welcome_trial.claim_terminal_free_tier() is None
     assert portal.creates() == 1
 
 
@@ -151,7 +151,7 @@ def test_a_connector_guest_adopted_from_the_shared_store_is_not_grandfathered(po
     from hermes_cli.auth import _load_auth_store, _save_auth_store
     from hermes_constants import get_hermes_home
 
-    as_local_desktop_backend(monkeypatch)
+    as_local_terminal_runtime(monkeypatch)
     anon_auth.ensure_portal_identity(explicit=True)  # connector mint: welcome_claim False, mirrored
     store = _load_auth_store()
     store["providers"].pop("nous")  # a profile whose own identity differs adopts the shared one
@@ -187,7 +187,7 @@ def test_a_lost_trial_is_never_claimed_again_after_a_relaunch(portal, monkeypatc
     free_tier_bootstrap.reset_for_tests()
     free_tier_bootstrap.run_bootstrap(announce=False)
 
-    assert welcome_trial.claim_desktop_free_tier() is None
+    assert welcome_trial.claim_terminal_free_tier() is None
     assert portal.creates() == creates
     assert welcome_trial.grandfather_existing_guest() is False
     assert not anon_auth.free_inference_active()
@@ -219,7 +219,7 @@ def test_a_connector_guest_pinned_to_nous_gets_no_inference_token(portal, monkey
     from hermes_constants import get_hermes_home
 
     if desktop:
-        as_local_desktop_backend(monkeypatch)
+        as_local_terminal_runtime(monkeypatch)
     anon_auth.ensure_portal_identity(explicit=True)  # a connector action's guest, never claimed
     (get_hermes_home() / "config.yaml").write_text("model:\n  provider: nous\n  default: nous/welcome\n",
                                                    encoding="utf-8")
@@ -234,7 +234,7 @@ def test_the_token_seam_refuses_an_inference_token_to_a_guest_without_the_trial(
 
     from hermes_cli.auth_constants import AuthError
 
-    as_local_desktop_backend(monkeypatch)
+    as_local_terminal_runtime(monkeypatch)
     state = dict(anon_auth.ensure_portal_identity(explicit=True))  # a connector guest
     with httpx.Client() as client, pytest.raises(AuthError):
         anon_auth.refresh_guest_state(state, client, purpose="inference")
@@ -262,7 +262,7 @@ def _relaunch():
 def test_the_first_desktop_boot_records_that_onboarding_is_due(portal, monkeypatch, used):
     from hermes_cli.onboarding_run import set_run
 
-    as_local_desktop_backend(monkeypatch)
+    as_local_terminal_runtime(monkeypatch)
     if used:
         install_state.mark_machine_used()
     _relaunch()
@@ -278,7 +278,7 @@ def test_a_missed_first_launch_stays_due_and_keeps_the_trial(portal, monkeypatch
     from hermes_cli.onboarding_run import should_run
     from hermes_constants import get_hermes_home
 
-    as_local_desktop_backend(monkeypatch)
+    as_local_terminal_runtime(monkeypatch)
     _relaunch()                                         # first boot; the app never opened onboarding
     _chat(get_hermes_home() / "state.db", "anthropic/claude")   # then the user chatted
     install_state.probe.cache_clear()
@@ -286,12 +286,12 @@ def test_a_missed_first_launch_stays_due_and_keeps_the_trial(portal, monkeypatch
     assert install_state.probe().existing
     assert should_run() is True
     assert welcome_trial.claim_blocker() is None
-    assert welcome_trial.claim_desktop_free_tier() is not None
+    assert welcome_trial.claim_terminal_free_tier() is not None
     assert welcome_trial.claim_blocker() == "a Nous identity exists"
 
 
 def test_a_claim_cut_off_before_its_marker_write_never_claims_twice(portal, monkeypatch):
-    as_local_desktop_backend(monkeypatch)
+    as_local_terminal_runtime(monkeypatch)
     _relaunch()                                         # first boot: due, the trial reserved
     mark = install_state.mark_machine_used
 
@@ -299,12 +299,12 @@ def test_a_claim_cut_off_before_its_marker_write_never_claims_twice(portal, monk
         raise RuntimeError("the process died here")
     monkeypatch.setattr(install_state, "mark_machine_used", die)  # the stamped guest is saved, then the crash
     with pytest.raises(RuntimeError):
-        welcome_trial.claim_desktop_free_tier()
+        welcome_trial.claim_terminal_free_tier()
     monkeypatch.setattr(install_state, "mark_machine_used", mark)
     _relaunch()
     anon_auth.clear_dead_guest("anon_credential_dead")   # the claimed guest is reaped later
 
-    assert welcome_trial.claim_desktop_free_tier() is None
+    assert welcome_trial.claim_terminal_free_tier() is None
     assert portal.creates() == 1
 
 
@@ -316,7 +316,7 @@ def test_two_installs_claiming_at_once_mint_one_trial(portal, monkeypatch, tmp_p
     from hermes_cli import auth_nous
     from hermes_constants import get_hermes_home, reset_hermes_home_override, set_hermes_home_override
 
-    as_local_desktop_backend(monkeypatch)
+    as_local_terminal_runtime(monkeypatch)
     _relaunch()                                          # the trial is reserved for this OS user
     monkeypatch.setattr(auth_nous, "_nous_shared_auth_dir", lambda: get_hermes_home() / "shared-nous")
     canary_root = tmp_path / "hermes-canary"
@@ -327,7 +327,7 @@ def test_two_installs_claiming_at_once_mint_one_trial(portal, monkeypatch, tmp_p
     def canary_claims():
         token = set_hermes_home_override(canary_root)
         try:
-            canary["state"] = welcome_trial.claim_desktop_free_tier()
+            canary["state"] = welcome_trial.claim_terminal_free_tier()
         finally:
             reset_hermes_home_override(token)
             canary_done.set()
@@ -342,7 +342,7 @@ def test_two_installs_claiming_at_once_mint_one_trial(portal, monkeypatch, tmp_p
         return real_mint(**kwargs)
     monkeypatch.setattr(anon_auth, "ensure_portal_identity", stable_mints)
 
-    assert welcome_trial.claim_desktop_free_tier() is not None
+    assert welcome_trial.claim_terminal_free_tier() is not None
     canary_thread.join(timeout=30.0)
     assert canary == {"state": None}
     assert portal.creates() == 1
@@ -351,7 +351,7 @@ def test_two_installs_claiming_at_once_mint_one_trial(portal, monkeypatch, tmp_p
 def test_one_due_answer_walks_the_provider_ladder_once(portal, monkeypatch):
     from hermes_cli import auth
 
-    as_local_desktop_backend(monkeypatch)
+    as_local_terminal_runtime(monkeypatch)
     real, calls = auth.resolve_provider, []
     monkeypatch.setattr(auth, "resolve_provider", lambda *a, **kw: (calls.append(kw), real(*a, **kw))[1])
 

@@ -19,7 +19,7 @@ import type {
 } from '../gatewayTypes.js'
 import { t } from '../i18n/runtime.js'
 import { billingDialogCopy } from '../lib/billingDialog.js'
-import { type ImageAttachment, stageImagePath } from '../lib/imageAttachments.js'
+import { type ImageAttachment } from '../lib/imageAttachments.js'
 import { isTodoDone } from '../lib/liveProgress.js'
 import { openExternalUrl } from '../lib/openExternalUrl.js'
 import { rpcErrorMessage } from '../lib/rpc.js'
@@ -31,23 +31,13 @@ import { defaultThemeForCurrentBackground, fromSkin, skinIsLight, type Theme, th
 import type { Msg, SessionInfo, SubagentProgress } from '../types.js'
 
 import { applyConnectionRequest, applyConnectionUpdate } from './connectionOperationStore.js'
-import { $deck, DECK_HOME, patchDeck } from './deckStore.js'
 import { applyDelegationStatus, getDelegationState } from './delegationStore.js'
 import { createBillingVerificationPresenter, createFreeTierChallengePresenter } from './gatewayBrowserLinks.js'
-import {
-  fenceLifecycleEvent,
-  isGenericErrorEvent,
-  openCanonicalApproval,
-  openCanonicalClarify,
-  settleSharedPrompt
-} from './gatewayCanonicalEvents.js'
 import { applyGoalSnapshot } from './goalStatus.js'
 import type { GatewayEventHandlerContext, NoticeLevel } from './interfaces.js'
 import { getOverlayState, patchOverlayState, SENSITIVE_PROMPTS } from './overlayStore.js'
-import { markBubbleShown, newlyStartedRows } from './pendingBubbles.js'
 import { flashGoodVibes, flashPet } from './petFlashStore.js'
 import { forgetServerRequest } from './serverRequestStore.js'
-import { noteCanonicalCompletion } from './slash/canonicalSessionCommands.js'
 import { reportStartupLatency } from './startupLatency.js'
 import { markNextSubmitVoice } from './submissionCore.js'
 import { captureDestination, isCurrentDestination } from './submissionDestination.js'
@@ -55,7 +45,6 @@ import { turnController } from './turnController.js'
 import { getTurnState } from './turnStore.js'
 import { getUiState, patchUiState } from './uiStore.js'
 import {
-  backendReconnecting,
   backendSlowStart,
   backendSlowStartStatus,
   describeRpcError,
@@ -67,12 +56,9 @@ import {
 } from './userMessages.js'
 import { handleVoiceCapture } from './voicePartialStore.js'
 import { isWakeUserDisabled } from './wakeState.js'
-
 const NO_PROVIDER_RE = /\bNo (?:LLM|inference) provider configured\b/i
-
 const NOTICE_LEVELS: readonly NoticeLevel[] = ['error', 'info', 'success', 'warn']
 const isNoticeLevel = (value: unknown): value is NoticeLevel => NOTICE_LEVELS.includes(value as NoticeLevel)
-
 type VoiceSubmitMode = 'direct' | 'draft'
 
 const normalizeVoiceSubmitMode = (value: unknown): VoiceSubmitMode =>
@@ -108,9 +94,8 @@ export const mergeUsageStable = (prev: Usage, patch: Partial<Usage> | undefined)
 }
 
 const statusFromBusy = () => (getUiState().busy ? 'running…' : 'ready')
-
 // The last gateway skin, kept so the theme can be re-derived when the OSC-11
-// background answer arrives after (or without) gateway.ready.
+// background answer arrives after (or without) runtime.ready.
 let lastSkin: GatewaySkin | null = null
 
 const themeForSkin = (s: GatewaySkin) => {
@@ -122,7 +107,6 @@ const themeForSkin = (s: GatewaySkin) => {
   // skin's authored background when it has one (the skin paints the terminal
   // with it), else the host's.
   const paired = skinIsLight(s.colors ?? {}) ? s.light_colors : s.dark_colors
-
   const colors = paired && Object.keys(paired).length ? { ...(s.colors ?? {}), ...paired } : (s.colors ?? {})
 
   return fromSkin(
@@ -156,7 +140,6 @@ const commitTheme = (theme: Theme) => {
   // case: cold start defaults dark, then resolves to a light skin).
   const prev = lastCommittedTheme ?? getUiState().theme
   const changed = !themesEqual(prev, theme)
-
   lastCommittedTheme = theme
   patchUiState({ theme })
   // Persist the config pin alongside the resolved theme + physical
@@ -165,7 +148,6 @@ const commitTheme = (theme: Theme) => {
   // recreates the multi-stage flash on the next launch (light first frame →
   // dark skin resolve against the cached background → light config pin).
   const pin = configPinnedTheme ? process.env.HERMES_TUI_THEME : undefined
-
   writeBootTheme(theme, process.env.HERMES_TUI_BACKGROUND, pin === 'light' || pin === 'dark' ? pin : undefined)
 
   if (changed) {
@@ -202,7 +184,6 @@ const themesEqual = (a: Theme, b: Theme) => {
 // terminal quantizes it to `ansi256(N)`, which OSC-10 cannot speak.
 const paintTerminalDefaults = (theme: Theme) => {
   const background = lastSkin?.colors?.background ?? ''
-
   setTerminalBackground(background)
   setTerminalForeground(isPaintableHex(background) ? themeToneHex(theme.color.text) : '')
 }
@@ -210,7 +191,6 @@ const paintTerminalDefaults = (theme: Theme) => {
 const applySkin = (s: GatewaySkin) => {
   lastSkin = s
   const theme = themeForSkin(s)
-
   commitTheme(theme)
   paintTerminalDefaults(theme)
 }
@@ -219,7 +199,6 @@ const applySkin = (s: GatewaySkin) => {
  *  OSC-11 answer) — used by /theme, config sync, and the OSC listener. */
 export function reapplyTheme(): void {
   const theme = lastSkin ? themeForSkin(lastSkin) : defaultThemeForCurrentBackground()
-
   commitTheme(theme)
   // Polarity flips swap paired palettes, so the default fg must track the
   // re-derived text tone even though the skin's background hasn't moved.
@@ -319,9 +298,7 @@ export function syncThemeToTerminalBackground(): void {
   }
 
   themeBackgroundSyncStarted = true
-
   let resolved = false
-
   onTerminalBackground(hex => {
     // Exactly-#000000 is the "unset default" fingerprint, not a measurement:
     // xterm.js reports it when the editor theme sets no terminal background
@@ -355,7 +332,6 @@ export function syncThemeToTerminalBackground(): void {
     process.env.HERMES_TUI_BACKGROUND = hex
     reapplyTheme()
   })
-
   // Foreground tiebreaker for the distrusted-background case. The two OSC
   // replies arrive in the same startup batch; this listener only commits when
   // the background didn't (first-writer-wins via `resolved`), and an explicit
@@ -375,7 +351,6 @@ export function syncThemeToTerminalBackground(): void {
     process.env.HERMES_TUI_BACKGROUND = inferred
     reapplyTheme()
   })
-
   // Last-resort inference when the probe never answers (or answered with the
   // untrusted default): on macOS, editor themes overwhelmingly track the
   // system appearance, so `AppleInterfaceStyle` is a strong prior. Runs only
@@ -402,7 +377,6 @@ export function syncThemeToTerminalBackground(): void {
       // light mode; "Dark" means dark. Cache as an inferred background so
       // every later signal (config pin, real OSC answer) still outranks it.
       const dark = !error && stdout.trim() === 'Dark'
-
       // Mark resolved so a LATE OSC-10 foreground reply (also an inference)
       // can't re-flip this committed guess after the fact — visible churn.
       // A real OSC-11 background answer still corrects it: that listener
@@ -464,7 +438,12 @@ interface VoiceTranscriptDeps {
 }
 
 function handleVoiceTranscript(
-  payload: Extract<AnyGatewayEvent, { type: 'voice.transcript' }>['payload'],
+  payload: Extract<
+    AnyGatewayEvent,
+    {
+      type: 'voice.transcript'
+    }
+  >['payload'],
   deps: VoiceTranscriptDeps
 ): void {
   const {
@@ -548,7 +527,12 @@ interface ErrorEventSinks {
 }
 
 function handleErrorEvent(
-  payload: Extract<AnyGatewayEvent, { type: 'error' }>['payload'],
+  payload: Extract<
+    AnyGatewayEvent,
+    {
+      type: 'error'
+    }
+  >['payload'],
   versionedGenericError: boolean,
   { panel, setStatus, sys }: ErrorEventSinks
 ): void {
@@ -561,9 +545,7 @@ function handleErrorEvent(
 
   turnController.recordError()
   flashPet('failed')
-
   const message = String(payload?.message || t('gatewayMsg.error.unknown'))
-
   turnController.pushActivity(message, 'error')
 
   if (NO_PROVIDER_RE.test(message)) {
@@ -597,13 +579,6 @@ function applySessionInfo(payload: unknown, { appendMessage, setHistoryItems, se
 
   let info: SessionInfo = { ...current, ...incoming }
 
-  // A busy-time admission painted no bubble at submit; paint it when the
-  // authority starts it, so it lands after the previous assistant reply.
-  for (const started of newlyStartedRows(current?.pending_submissions, incoming.pending_submissions)) {
-    markBubbleShown(started.input_id)
-    appendMessage({ role: 'user', text: started.user })
-  }
-
   // A replayed snapshot can be the only terminal signal after reconnect.
   // Missing running on older gateways must not clear a live turn.
   if (incoming.running === true) {
@@ -635,15 +610,13 @@ function applySessionInfo(payload: unknown, { appendMessage, setHistoryItems, se
     storedSid,
     usage: info.usage ? mergeUsageStable(state.usage, info.usage) : state.usage
   }))
-
   setHistoryItems(prev => prev.map(m => (m.kind === 'intro' ? { ...m, info } : m)))
 }
 
 export function createGatewayEventHandler(ctx: GatewayEventHandlerContext): (ev: AnyGatewayEvent) => void {
   syncThemeToTerminalBackground()
-
   const { gw, rpc } = ctx.gateway
-  const { STARTUP_RESUME_ID, newSession, recoverSidRef, resumeById, setCatalog } = ctx.session
+  const { STARTUP_RESUME_ID, newSession, resumeById, setCatalog } = ctx.session
   const { bellOnComplete, bellOnPrompt, stdout, sys } = ctx.system
 
   // display.bell_on_prompt — BEL whenever a blocking prompt modal opens
@@ -658,11 +631,9 @@ export function createGatewayEventHandler(ctx: GatewayEventHandlerContext): (ev:
   const { setInput, enqueue } = ctx.composer
   const { submitLiteralRef, submitRef } = ctx.submission
   const { setProcessing: setVoiceProcessing, setRecording: setVoiceRecording, setVoiceEnabled } = ctx.voice
-
   let pendingThinkingStatus = ''
   let thinkingStatusTimer: null | ReturnType<typeof setTimeout> = null
   let startupPromptSubmitted = false
-
   // Request IDs of clarify prompts we've already flushed to the transcript as
   // an abandoned-prompt record, so the tool.complete and message.complete
   // paths can't both persist the same prompt twice.
@@ -712,7 +683,6 @@ export function createGatewayEventHandler(ctx: GatewayEventHandlerContext): (ev:
         .slice(0, 2)
 
       const label = top.length ? top.join(' · ') : `${subagents.length} subagents`
-
       await rpc('spawn_tree.save', {
         finished_at: Date.now() / 1000,
         label: label.slice(0, 120),
@@ -721,19 +691,17 @@ export function createGatewayEventHandler(ctx: GatewayEventHandlerContext): (ev:
         subagents
       })
     } catch {
-      // Persistence is best-effort; in-memory history is the authoritative
-      // same-session source.  A write failure doesn't block the turn.
+      // Saving a progress preview must not interrupt the conversation.
     }
   }
 
   // Refresh delegation caps at most every 5s so the status bar HUD can
   // render a /warning close to the configured cap without spamming the RPC.
   let lastDelegationFetchAt = 0
-
   // ── Shared full-config read ──────────────────────────────────────────
   //
   // Several concerns need `display.*` flags at startup (the /agents nudge
-  // gate below, the auto-resume check in the `gateway.ready` handler).
+  // gate below, the auto-resume check in the `runtime.ready` handler).
   // Memoize the `config.get full` RPC so we make exactly one round-trip
   // instead of one per concern.  Resolves to null on RPC failure; callers
   // treat null as "use defaults".
@@ -865,10 +833,7 @@ export function createGatewayEventHandler(ctx: GatewayEventHandlerContext): (ev:
 
       if (STARTUP_IMAGE) {
         try {
-          if (gw.isCanonical) {
-            const image = await stageImagePath(STARTUP_IMAGE, gw, destination)
-            attachments.push({ path: image.path, mime: image.mime })
-          } else {
+          {
             await rpc('image.attach', { path: STARTUP_IMAGE, session_id: sid })
           }
         } catch (e) {
@@ -901,7 +866,6 @@ export function createGatewayEventHandler(ctx: GatewayEventHandlerContext): (ev:
     }
 
     reportStartupLatency(gw)
-
     // Kick off the config fetch once the gateway is actually ready. If handler
     // construction does this during React render, a startup transport error can
     // report through sys(), mutate transcript state, and trip React's
@@ -920,7 +884,6 @@ export function createGatewayEventHandler(ctx: GatewayEventHandlerContext): (ev:
     // skills follow the session's repo. Before the first session the gateway
     // uses the same workspace it seeds a new session with.
     const catalogSid = getUiState().sid
-
     rpc<CommandsCatalogResponse>('commands.catalog', catalogSid ? { session_id: catalogSid } : {})
       .then(r => {
         if (!r?.pairs) {
@@ -943,36 +906,10 @@ export function createGatewayEventHandler(ctx: GatewayEventHandlerContext): (ev:
         turnController.pushActivity(t('gatewayMsg.startup.commandCatalogUnavailable', rpcErrorMessage(e)), 'info')
       )
 
-    // Keep the recovery target until resume succeeds, including across a second
-    // disconnect during setup or history loading. Recovery never resends the prompt.
-    const recoverSid = recoverSidRef?.current
-
-    if (recoverSidRef && recoverSid) {
-      void resumeById(recoverSid).then(() => {
-        if (getUiState().sid && recoverSidRef.current === recoverSid) {
-          recoverSidRef.current = null
-        }
-      })
-      // After resumeById: it synchronously sets status to 'resuming…' on entry,
-      // so override it here to keep the distinct "recovering" label visible for
-      // the duration of the resume RPC (which later flips status to 'ready').
-      patchUiState({ status: t('gatewayMsg.status.recoveringSession') })
-
-      return
-    }
-
     if (STARTUP_RESUME_ID) {
       patchUiState({ status: t('session.status.resuming') })
       resumeById(STARTUP_RESUME_ID)
       scheduleStartupPrompt()
-
-      return
-    }
-
-    // `hermes deck`: land on the deck; the user picks (or starts) the session.
-    if (DECK_HOME && !getUiState().sid) {
-      patchUiState({ status: 'deck' })
-      patchOverlayState({ sessions: true })
 
       return
     }
@@ -1023,17 +960,6 @@ export function createGatewayEventHandler(ctx: GatewayEventHandlerContext): (ev:
       return
     }
 
-    const current = getUiState().info
-    const genericError = isGenericErrorEvent(ev)
-
-    if (fenceLifecycleEvent(ev, current, genericError)) {
-      return
-    }
-
-    if (settleSharedPrompt(ev)) {
-      return
-    }
-
     if (handleVoiceCapture(ev, ctx.voice)) {
       return
     }
@@ -1056,7 +982,7 @@ export function createGatewayEventHandler(ctx: GatewayEventHandlerContext): (ev:
 
         return
 
-      case 'gateway.ready':
+      case 'runtime.ready':
         handleReady(ev.payload?.skin)
 
         return
@@ -1068,23 +994,6 @@ export function createGatewayEventHandler(ctx: GatewayEventHandlerContext): (ev:
 
         return
 
-      case 'deck.changed':
-        patchDeck({ generation: $deck.get().generation + 1, openCount: ev.payload?.open_count ?? 0 })
-
-        return
-      case 'deck.closed': {
-        // Closed from elsewhere (another session, `hermes deck close`): the runtime is ending. Drop it and
-        // put the deck in front so the next move is one keystroke away.
-        const by = ev.payload?.closed_by ? ` by ${ev.payload.closed_by}` : ''
-        sys(`■ ${ev.payload?.ref ?? 'this session'} was closed${by}`)
-        ctx.session.resetSession()
-        patchDeck({ ref: null })
-        patchUiState({ status: 'closed' })
-        patchOverlayState({ sessions: true })
-
-        return
-      }
-
       case 'free_tier.challenge':
         showChallenge(ev.payload)
 
@@ -1094,23 +1003,8 @@ export function createGatewayEventHandler(ctx: GatewayEventHandlerContext): (ev:
         applySessionInfo(ev.payload, { appendMessage, setHistoryItems, setStatus })
 
         return
-
-      case 'session.replay_gap':
-        // The authority retired this subscription (fanout overflow) while the
-        // socket stayed healthy, so no reconnect will ever re-attach it and the
-        // turn's completion can no longer arrive. Only the focused session
-        // reaches here (the sid filter above dropped the rest; activating one
-        // of those later gets a fresh subscription anyway). Re-attach through
-        // the resume path — same as desktop's replay-gap consumer — for an
-        // authoritative snapshot + fresh subscription; the draft and pending
-        // inputs stay fenced to their captured destination.
-        if (sid) {
-          resumeById(sid)
-        }
-
-        return
       case 'session.usage': {
-        // Live usage tick while a turn runs (see tui_gateway
+        // Live usage tick while a turn runs (see tui_runtime
         // _start_usage_ticker) — keeps the status-bar context window current
         // mid-turn instead of only at message.complete. The session filter at
         // the top of this handler already dropped ticks for non-focused
@@ -1242,7 +1136,7 @@ export function createGatewayEventHandler(ctx: GatewayEventHandlerContext): (ev:
         showBillingVerification(ev.payload)
 
         return
-      case 'gateway.stderr': {
+      case 'runtime.stderr': {
         // Every raw line is already in the /logs buffer (gatewayClient.pushLog).
         // Only failure-looking lines earn an activity row, and a traceback's
         // many lines collapse into one (pushActivity dedupes a repeated tail).
@@ -1255,14 +1149,6 @@ export function createGatewayEventHandler(ctx: GatewayEventHandlerContext): (ev:
         if (stderrLooksLikeProblem(line)) {
           turnController.pushActivity(stderrProblemActivity(line), 'warn')
         }
-
-        return
-      }
-
-      case 'gateway.reconnecting': {
-        const { attempt, delay_ms: delayMs } = ev.payload ?? {}
-
-        setStatus(backendReconnecting(attempt, delayMs))
 
         return
       }
@@ -1325,23 +1211,20 @@ export function createGatewayEventHandler(ctx: GatewayEventHandlerContext): (ev:
           await rpc('voice.record', { action: 'start', session_id: sid })
         })().catch((e: unknown) => {
           sys(t('gatewayMsg.wake.failed', rpcErrorMessage(e)))
-
           void rpc('wake.resume', {}).catch(() => undefined)
         })
 
         return
       }
 
-      case 'gateway.start_timeout': {
+      case 'runtime.start_timeout': {
         // Still waiting (the ready timer does not give up) — say so, and point
         // at /logs for the interpreter/cwd/stderr detail instead of printing
         // paths here. Only failure-looking stderr lines are echoed inline so
         // "wrong python" / "missing dep" stay diagnosable at a glance.
         const { stderr_tail: stderrTail } = ev.payload ?? {}
-
         setStatus(backendSlowStartStatus())
         turnController.pushActivity(backendSlowStart(), 'warn')
-
         const STDERR_LINE_CAP = 120
         const STDERR_LINES_MAX = 4
 
@@ -1358,7 +1241,7 @@ export function createGatewayEventHandler(ctx: GatewayEventHandlerContext): (ev:
         return
       }
 
-      case 'gateway.protocol_error':
+      case 'runtime.protocol_error':
         setStatus(t('gatewayMsg.status.protocolWarning'))
         restoreStatusAfter(4000)
 
@@ -1531,18 +1414,6 @@ export function createGatewayEventHandler(ctx: GatewayEventHandlerContext): (ev:
         return
       }
 
-      // Canonical gateways publish generation-bound shared controls as events
-      // carrying `prompt_id` (see gatewayCanonicalEvents.ts).
-      case 'clarify.request':
-        openCanonicalClarify(ev, setStatus, ringPromptBell)
-
-        return
-
-      case 'approval.request':
-        openCanonicalApproval(ev, setStatus, ringPromptBell)
-
-        return
-
       case 'background.complete':
         if (!ev.payload) {
           return
@@ -1584,7 +1455,6 @@ export function createGatewayEventHandler(ctx: GatewayEventHandlerContext): (ev:
         }
 
         turnController.upsertSubagent(ev.payload, c => (isTerminalStatus(c.status) ? {} : { status: 'queued' }))
-
         // First sign of delegation this turn → nudge toward /agents.
         maybeNudgeAgents()
 
@@ -1604,7 +1474,6 @@ export function createGatewayEventHandler(ctx: GatewayEventHandlerContext): (ev:
         }
 
         turnController.upsertSubagent(ev.payload, c => (isTerminalStatus(c.status) ? {} : { status: 'running' }))
-
         // `subagent.start` is the first delegation event the TUI reliably
         // receives (the delegate callback drops `spawn_requested` in the
         // CLI→gateway path), so nudge here too.  Once-per-turn guarded, so
@@ -1717,9 +1586,6 @@ export function createGatewayEventHandler(ctx: GatewayEventHandlerContext): (ev:
       }
 
       case 'message.complete': {
-        // `/usage` on the shared gateway reads this admission's committed result.
-        noteCanonicalCompletion(ev.session_id, (ev.payload as { admission_id?: unknown } | undefined)?.admission_id)
-
         const { finalMessages, finalText, interruptedReply, wasInterrupted } = turnController.recordMessageComplete(
           ev.payload ?? {}
         )
@@ -1731,7 +1597,6 @@ export function createGatewayEventHandler(ctx: GatewayEventHandlerContext): (ev:
           appendMessage({ role: 'assistant', text: interruptedReply.to })
         } else if (interruptedReply) {
           const { from, to } = interruptedReply
-
           setHistoryItems(prev => {
             const at = prev.findLastIndex(m => m.role === 'assistant' && m.text === from)
 
@@ -1766,7 +1631,6 @@ export function createGatewayEventHandler(ctx: GatewayEventHandlerContext): (ev:
               : [{ role: 'assistant', text: finalText }]
 
           msgs.forEach(appendMessage)
-
           // Pet beat: celebrate a finished plan, otherwise a clean-finish wave.
           flashPet(isTodoDone(getTurnState().todos) ? 'jump' : 'wave')
 
@@ -1794,7 +1658,6 @@ export function createGatewayEventHandler(ctx: GatewayEventHandlerContext): (ev:
         if (ev.payload?.billing) {
           const block = ev.payload.billing
           const copy = billingDialogCopy(block)
-
           patchOverlayState({
             confirm: {
               cancelLabel: copy.cancelLabel,
@@ -1818,7 +1681,7 @@ export function createGatewayEventHandler(ctx: GatewayEventHandlerContext): (ev:
       }
 
       case 'error':
-        handleErrorEvent(ev.payload, genericError && current?.execution_generation !== undefined, {
+        handleErrorEvent(ev.payload, false, {
           panel,
           setStatus,
           sys

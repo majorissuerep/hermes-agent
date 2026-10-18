@@ -19,7 +19,7 @@ from tools.delegate_tool_child_run import _attach_child, _detach_child, _fabrica
 from tools.delegate_tool_progress import (
     SUBAGENT_FAILURE_STATUSES, _print_completion_line, _quiet, describe_subagent_failure, format_batch_tag,
 )
-from tools.delegate_tool_registry import _capture_gateway_steer_authority
+from tools.delegate_tool_registry import _capture_local_steer_authority
 from tools.delegate_tool_results import _finalize_child_results
 
 logger = logging.getLogger("tools.delegate_tool")  # log-record parity with the origin module
@@ -81,10 +81,10 @@ def _capture_origin() -> tuple[str, str, Any, Any, bool]:
     _origin_ui_session_id = ""
     _origin_session_history_delivery = False
     with _quiet(None):
-        from gateway.session_context import get_session_env, session_history_delivery_supported
+        from agent.session_context import get_session_env, session_history_delivery_supported
         _origin_ui_session_id = get_session_env("HERMES_UI_SESSION_ID", "")
         _origin_session_history_delivery = session_history_delivery_supported()
-    return (_origin_wake_sid, _origin_ui_session_id, *_capture_gateway_steer_authority(_origin_ui_session_id), _origin_session_history_delivery)
+    return (_origin_wake_sid, _origin_ui_session_id, *_capture_local_steer_authority(_origin_ui_session_id), _origin_session_history_delivery)
 
 def _report_child_done(parent_agent, spinner_ref, entry, tag, task_labels, n_tasks, remaining) -> None:
     """Print one completion line for a finished child and refresh the spinner text. Failed/errored/timed-out children
@@ -245,13 +245,9 @@ def _resolve_async_wake_sid(origin_wake_sid: str, origin_session_history_deliver
 
     API completion only persists a row; this does not authorize a model wake. The
     continuation must read that row, not an authoritative caller-owned snapshot."""
-    from gateway.session_context import get_session_env
+    from agent.session_context import get_session_env
 
-    # Finite consumers need the result in this tool round. Owner admission scope
-    # wins over legacy standalone launch markers, without changing terminal delivery.
-    from gateway.session_finite import finite_turn_required
-    finite = finite_turn_required()
-    if finite is True or (finite is None and get_session_env("HERMES_SINGLE_QUERY_SESSION") == "1"):
+    if get_session_env("HERMES_SINGLE_QUERY_SESSION") == "1":
         return None
 
     try:
@@ -259,7 +255,7 @@ def _resolve_async_wake_sid(origin_wake_sid: str, origin_session_history_deliver
         # ends. This includes stateless HTTP requests (#10760) and one-shot Kanban workers (#63169). Fall
         # back to SYNCHRONOUS execution so the result returns in this same turn instead of handing out a
         # handle with no durable consumer. Mirrors the pool-at-capacity inline fallback below.
-        from gateway.session_context import async_delivery_supported
+        from agent.session_context import async_delivery_supported
         if async_delivery_supported():
             return ""
     except Exception:
@@ -290,7 +286,7 @@ def _resolve_async_session_key(parent_agent: Any, origin_ui_session_id: str) -> 
     session_key = get_current_session_key(default="")
     agent_session_id = str(getattr(parent_agent, "session_id", "") or "")
     with _quiet(None):
-        from gateway.session_context import get_session_env
+        from agent.session_context import get_session_env
         source = get_session_env("HERMES_SESSION_SOURCE", "")
         # Refresh from the task-local source when available, else retain the
         # immutable value captured before child construction.

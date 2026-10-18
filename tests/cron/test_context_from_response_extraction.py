@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from hermes_security.io import read_text, write_text
 import cron.scheduler
 import run_agent
 
@@ -21,6 +22,9 @@ def cron_env(tmp_path, monkeypatch):
     """Isolated cron environment with temp HERMES_HOME."""
     hermes_home = tmp_path / ".hermes"
     hermes_home.mkdir()
+    from hermes_security import vault
+    vault.init_vault(hermes_home, "synthetic-continuity-password")
+    vault.unlock(hermes_home, "synthetic-continuity-password")
     (hermes_home / "cron").mkdir()
     (hermes_home / "cron" / "output").mkdir()
     monkeypatch.setenv("HERMES_HOME", str(hermes_home))
@@ -39,7 +43,7 @@ def _write_archive(cron_env, job_id: str, filename: str, body: str) -> None:
 
     out_dir = OUTPUT_DIR / job_id
     out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / filename).write_text(body, encoding="utf-8")
+    write_text(out_dir / filename, body, purpose="state")
 
 
 def _run_stub_job(monkeypatch, job, answer):
@@ -118,7 +122,7 @@ class TestScriptModeArchives:
         assert "```\nplain script payload\nline two\n```" in prompt
 
 
-def test_writer_reader_preserve_response_with_nested_frames(cron_env, monkeypatch, cron_owner):
+def test_writer_reader_preserve_response_with_nested_frames(cron_env, monkeypatch):
     from cron.jobs import create_job, save_job_output
     from cron.scheduler_prompt import _inject_context_from
 
@@ -135,7 +139,7 @@ def test_writer_reader_preserve_response_with_nested_frames(cron_env, monkeypatc
     assert "Original prompt noise" not in prompt
 
 
-def test_truncated_outer_frame_cannot_promote_a_quoted_inner_frame(cron_env, monkeypatch, cron_owner):
+def test_truncated_outer_frame_cannot_promote_a_quoted_inner_frame(cron_env, monkeypatch):
     import os
     from cron.jobs import create_job, save_job_output, OUTPUT_DIR
     from cron.scheduler_prompt import _inject_context_from
@@ -151,11 +155,11 @@ def test_truncated_outer_frame_cannot_promote_a_quoted_inner_frame(cron_env, mon
     assert success, error
     save_job_output(job["id"], archive)
     saved = next((OUTPUT_DIR / job["id"]).glob("*.md"))
-    complete = saved.read_text(encoding="utf-8")
+    complete = read_text(saved, purpose="state")
     assert complete.endswith(suffix + "\n")
     # Simulate a partial write: the quoted inner frame now reaches EOF exactly,
     # but the enclosing writer-owned response is missing its declared suffix.
-    saved.write_text(complete[:-len(suffix + "\n")] + "\n", encoding="utf-8")
+    write_text(saved, complete[:-len(suffix + "\n")] + "\n", purpose="state")
     os.utime(saved, (2, 2))
     prompt, injected = _inject_context_from(job, "Next task")
     assert not injected
@@ -169,7 +173,7 @@ def test_truncated_outer_frame_cannot_promote_a_quoted_inner_frame(cron_env, mon
     assert quoted not in prompt
 
     # Losing the response boundary itself is also unusable, not a script archive.
-    saved.write_text(complete.split("**Response Characters:**", 1)[0], encoding="utf-8")
+    write_text(saved, complete.split("**Response Characters:**", 1)[0], purpose="state")
     os.utime(saved, (2, 2))
     prompt, injected = _inject_context_from(job, "Next task")
     assert injected and "OLDER COMPLETE ANSWER" in prompt

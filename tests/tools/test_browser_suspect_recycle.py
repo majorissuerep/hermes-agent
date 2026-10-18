@@ -71,7 +71,7 @@ class TestTimeoutMarksSuspect:
 
         # Daemon alive + responsive → recycle-at-next-use branch, no kill.
         monkeypatch.setattr("tools.browser_tool_session._read_browser_daemon_pid", lambda *_a: 4321)
-        monkeypatch.setattr("tools.browser_tool_lifecycle._pid_exists", lambda _pid: True)
+        monkeypatch.setattr("hermes_platform.processes.pid_exists", lambda _pid: True)
         monkeypatch.setattr("tools.browser_tool_lifecycle._verify_reapable_browser_daemon", lambda *_a: True)
         monkeypatch.setattr("tools.browser_tool_session._browser_daemon_responsive", lambda *_a, **_k: True)
         kills = []
@@ -208,7 +208,7 @@ class TestWedgedDaemonTreeKill:
         _install_command_stubs(monkeypatch, tmp_path, process)
 
         # Wedged: daemon PID exists but the control socket is unresponsive.
-        monkeypatch.setattr("tools.browser_tool_lifecycle._pid_exists", lambda _pid: True)
+        monkeypatch.setattr("hermes_platform.processes.pid_exists", lambda _pid: True)
         monkeypatch.setattr("tools.browser_tool_lifecycle._verify_reapable_browser_daemon", lambda *_a: True)
         monkeypatch.setattr("tools.browser_tool_session._browser_daemon_responsive", lambda *_a, **_k: False)
 

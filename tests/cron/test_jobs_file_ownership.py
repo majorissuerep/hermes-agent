@@ -163,73 +163,8 @@ class TestTickerErrorMarker:
         assert jobs.get_ticker_last_error() is None
 
 
-class TestTickerLoopRecordsErrors:
-    def _run_one_tick(self, monkeypatch, tick_fn):
-        """Run one iteration of the built-in ticker loop with a stubbed tick."""
-        from cron.scheduler_provider import InProcessCronScheduler
-
-        provider = InProcessCronScheduler()
-        monkeypatch.setattr(provider, "recover_interrupted", lambda: 0)
-        monkeypatch.setattr("cron.scheduler.tick", tick_fn)
-
-        stop_event = threading.Event()
-        original_wait = stop_event.wait
-
-        def _stop_after_first_tick(timeout=None):
-            stop_event.set()
-            return original_wait(0)
-
-        stop_event.wait = _stop_after_first_tick
-        provider.start(stop_event)
-
-    def test_failing_tick_persists_error(self, cron_store, monkeypatch):
-        def _boom(**kwargs):
-            raise RuntimeError(
-                "Failed to read cron database: [Errno 13] Permission denied"
-            )
-
-        self._run_one_tick(monkeypatch, _boom)
-
-        msg = jobs.get_ticker_last_error()
-        assert msg is not None, (
-            "a failing tick must persist its reason for `hermes cron status` "
-            "to surface (#68483)"
-        )
-        assert "Permission denied" in msg
-
-    def test_successful_tick_clears_error(self, cron_store, monkeypatch):
-        jobs.record_ticker_error("RuntimeError: stale failure")
-
-        self._run_one_tick(monkeypatch, lambda **kwargs: None)
-
-        assert jobs.get_ticker_last_error() is None, (
-            "a clean tick must clear the stale error marker"
-        )
 
 
 # =========================================================================
 # 3. `hermes cron status` surfaces the failure reason
 # =========================================================================
-
-
-class TestCronStatusSurfacesError:
-    def test_status_shows_last_error_and_permission_hint(self, monkeypatch, capsys):
-        from hermes_cli import cron as cron_cli
-
-        monkeypatch.setattr("hermes_cli.gateway.find_gateway_pids", lambda: [4321])
-        monkeypatch.setattr(jobs, "get_ticker_heartbeat_age", lambda: 5.0)   # alive
-        monkeypatch.setattr(jobs, "get_ticker_success_age", lambda: 9_999.0)  # failing
-        monkeypatch.setattr(
-            jobs,
-            "get_ticker_last_error",
-            lambda: (
-                "RuntimeError: Failed to read cron database: "
-                "[Errno 13] Permission denied: '/opt/data/cron/jobs.json'"
-            ),
-        )
-        monkeypatch.setattr("cron.jobs.list_jobs", lambda **k: [])
-
-        cron_cli.cron_status()
-        out = capsys.readouterr().out
-        assert "Permission denied" in out
-

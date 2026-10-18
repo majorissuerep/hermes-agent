@@ -42,9 +42,6 @@ def _catch_up_stamp(late_seconds=1860.0, kind="catch_up"):
 
 class TestCronListDispatchLine:
     def test_catch_up_dispatch_rendered(self, tmp_cron_dir, capsys, monkeypatch):
-        monkeypatch.setattr(
-            "hermes_cli.cron._warn_if_gateway_not_running", lambda: None
-        )
         job = create_job(prompt="daily report", schedule="0 9 * * *")
         _stamp_last_dispatch(job["id"], _catch_up_stamp())
 
@@ -57,9 +54,6 @@ class TestCronListDispatchLine:
         assert "31m late" in out
 
     def test_on_time_dispatch_rendered_quietly(self, tmp_cron_dir, capsys, monkeypatch):
-        monkeypatch.setattr(
-            "hermes_cli.cron._warn_if_gateway_not_running", lambda: None
-        )
         job = create_job(prompt="daily report", schedule="0 9 * * *")
         _stamp_last_dispatch(job["id"], _catch_up_stamp(30.0, kind="on_time"))
 
@@ -71,9 +65,6 @@ class TestCronListDispatchLine:
         assert "catch-up" not in out
 
     def test_no_stamp_no_dispatch_line(self, tmp_cron_dir, capsys, monkeypatch):
-        monkeypatch.setattr(
-            "hermes_cli.cron._warn_if_gateway_not_running", lambda: None
-        )
         create_job(prompt="daily report", schedule="0 9 * * *")
 
         cron_list()

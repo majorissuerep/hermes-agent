@@ -74,7 +74,6 @@ jobs:
     timeout-minutes: 3
     outputs:
       python: ${{ steps.gate-lanes.outputs.python }}
-      python_prod: ${{ steps.gate-lanes.outputs.python_prod }}
       frontend: ${{ steps.gate-lanes.outputs.frontend }}
       site: ${{ steps.gate-lanes.outputs.site }}
       scan: ${{ steps.gate-lanes.outputs.scan }}
@@ -84,11 +83,8 @@ jobs:
       bootstrap: ${{ steps.gate-lanes.outputs.bootstrap }}
       remote_backends: ${{ steps.gate-lanes.outputs.remote_backends }}
       docker_meta: ${{ steps.gate-lanes.outputs.docker_meta }}
-      desktop_updater: ${{ steps.gate-lanes.outputs.desktop_updater }}
       e2e: ${{ steps.gate-lanes.outputs.e2e }}
       e2e_upgrade: ${{ steps.gate-lanes.outputs.e2e_upgrade }}
-      e2e_desktop_core: ${{ steps.gate-lanes.outputs.e2e_desktop_core }}
-      e2e_desktop_update: ${{ steps.gate-lanes.outputs.e2e_desktop_update }}
       event_name: ${{ github.event_name }}
     steps:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a # v7.0.1
@@ -158,9 +154,8 @@ jobs:
   tests-os:
     name: OS-specific tests
     needs: detect
-    # desktop_updater still gates this lane: its Electron marker/result-reader
     # tests are macOS-collected (fork: Windows lanes removed).
-    if: needs.detect.outputs.python == 'true' || needs.detect.outputs.desktop_updater == 'true'
+    if: needs.detect.outputs.python == 'true'
     uses: ./.github/workflows/tests-os.yml
     with:
       commit: ${{ inputs.commit }}
@@ -206,51 +201,6 @@ jobs:
     # are platforms("windows") pytest files and run in tests-os.
     if: needs.detect.outputs.bootstrap == 'true'
     uses: ./.github/workflows/bootstrap-installer.yml
-    with:
-      commit: ${{ inputs.commit }}
-
-  e2e-desktop:
-    name: Desktop E2E
-    needs: detect
-    # python_prod (not python): the Playwright suite exercises the built app
-    # + `hermes serve` backend, which never import anything under tests/.
-    # Tests-only PRs (~17% of commits) skip this 5-minute job — the longest
-    # single job in the workflow — while still running the full pytest lanes.
-    #
-    # Re-disabled (Sep 2026): the Sep 1 re-enable is still incredibly flaky.
-    # Keep this a bare `if: false`. The earlier
-    # `${{ false && (... || ...) }}` form on this reusable-workflow job made
-    # GitHub's workflow parser fail at startup ("An unexpected error has
-    # occurred") — every ci.yaml run repo-wide dispatched 0 jobs from
-    # 24f5a60ed1 until this line changed. To re-enable, restore:
-    #   if: ${{ needs.detect.outputs.python_prod == 'true' || needs.detect.outputs.frontend == 'true' }}
-    if: false
-    uses: ./.github/workflows/e2e-desktop.yml
-    with:
-      commit: ${{ inputs.commit }}
-
-  e2e-desktop-core:
-    name: Desktop core E2E
-    needs: detect
-    # The deterministic core suite (apps/desktop/e2e/core): transcript
-    # integrity, boot/respawn/orphans, clarify+approval. Required; retries 0.
-    if: needs.detect.outputs.e2e_desktop_core == 'true'
-    uses: ./.github/workflows/e2e-desktop-core.yml
-    with:
-      commit: ${{ inputs.commit }}
-
-  e2e-desktop-update:
-    name: Desktop update E2E
-    needs: detect
-    # apps/desktop/e2e/update: a real install.sh install + packaged Desktop,
-    # first run, "Update now" hand-off/relaunch, concurrent-update refusal.
-    # Required when it runs: a PR that touches the Desktop update path (the
-    # classifier's e2e_desktop_update lane) cannot merge on a red shard. Like
-    # the Linux e2e-upgrade shards and the Windows install + update journey
-    # (tests / tests-os, gated on e2e_upgrade), it is skipped — and the skip
-    # counts as success — when the PR does not touch that path.
-    if: needs.detect.outputs.e2e_desktop_update == 'true'
-    uses: ./.github/workflows/e2e-desktop-update.yml
     with:
       commit: ${{ inputs.commit }}
 
@@ -378,8 +328,7 @@ jobs:
   #   by detect.outputs must succeed; only unselected consumers may skip.
   #   Release (inputs.release): strict — every required job must be
   #   `success`. A skipped required lane fails the gate; only the PR-only
-  #   jobs (history-check, lockfile-diff, prompt-surface-diff, supply-chain) and
-  #   the deferred Desktop E2E (e2e-desktop) may skip. The OSV scan's
+  #   jobs (history-check, lockfile-diff, prompt-surface-diff, supply-chain) may skip.
   #   findings are advisory, but its execution is required.
   #
   # Branch protection should require ONLY this check.
@@ -405,9 +354,6 @@ jobs:
       - js-tests
       - remote-backends
       - bootstrap-installer
-      - e2e-desktop
-      - e2e-desktop-core
-      - e2e-desktop-update
       - docs-site
       - history-check
       - contributor-check

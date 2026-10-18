@@ -23,11 +23,14 @@ fresh output outside the checkout, set `HERMES_PYTHON` to its interpreter.
 
 ```bash
 scripts/run_tests.sh                                    # full suite
-scripts/run_tests.sh tests/gateway/                     # one directory
+scripts/run_tests.sh tests/hermes_state/                     # one directory
 scripts/run_tests.sh tests/agent/test_foo.py -k test_x  # runner is file-granular; -k narrows
 scripts/run_tests.sh -v --tb=long                       # pytest flags pass through
 ```
 
+- **Explicit targets fail closed:** every named path must exist, including `--files` /
+  `--files-from` entries. A missing target is an argument error even alongside valid files
+  or `--ignore`; partial execution must not masquerade as the requested suite.
 - **Flake policy:** a failing FILE is retried once in a fresh subprocess (`--file-retries`;
   `HERMES_TEST_FILE_RETRIES=0` disables); a worker killed by signal or the file timeout is never
   retried (relaunching a runaway doubles the damage). Pass-on-retry is green but printed under `⚠ FLAKY`
@@ -36,8 +39,8 @@ scripts/run_tests.sh -v --tb=long                       # pytest flags pass thro
   non-zero `time.sleep`/`asyncio.sleep` in a test fails the ratchet (HX013): wait on an Event or
   poll with `tests.waiting.wait_until` / `async_wait_until`.
 - **Placement mirrors the source tree.** A test lives in `tests/<top-level source dir>/` (`tests/hermes_cli/`,
-  `tests/agent/`, `tests/hermes_state/`, `tests/gateway/relay/`, ...); installer/updater script tests
-  under `tests/scripts/{install,desktop_update}/`. Only tests of root-level modules (`batch_runner`,
+  `tests/agent/`, `tests/hermes_state/`, `tests/tui_runtime/`, ...); installer/updater script tests
+  under `tests/scripts/install/`. Only tests of root-level modules (`batch_runner`,
   `utils`, `hermes_constants`, packaging) sit directly in `tests/`. No issue numbers in filenames —
   cite the issue in the module docstring (`test_89315_x.py` → `test_x.py`, "Regression for #89315").
 - **Placement (CI lanes):** `scripts/ci/classify_changes.py` picks jobs by changed files. A Python test
@@ -89,21 +92,11 @@ Specs: `linux`, `macos`, `windows`, `posix`, `any`, and `not <spec>`.
 The historic `linux_only` / `macos_only` / `windows_only` markers have been
 fully replaced — `platforms` is the only host-gating marker in the tree.
 
-**Live Windows process-topology E2E: the `wine2e` lane.** For claims about
-real Windows process behavior that mocks cannot reproduce (venv-holder
-scans, process-tree parentage, launcher/worker chains, detach semantics),
-there is an on-demand workflow `windows-venv-e2e.yml` that runs
-`tests/hermes_cli/test_venv_holder_windows_live.py` on a real
-`windows-latest` runner — spawning actual processes and driving the real
-detection code, no mocked psutil. It fires ONLY on pushes to `wine2e/**`
-branches (inert on PRs and main; costs nothing on normal work). The proven
-workflow: write probes that pin CORRECT behavior, push to a `wine2e/`
-branch to reproduce the bugs live on unfixed code, build the fix, iterate
-until the lane is green, then open the PR — the live receipt on the exact
-head is the Windows proof reviewers ask for. Extend the live suite when
-touching that subsystem; assert against the gateway ANCESTOR found by
-argv, not the direct parent (the venv shim makes every spawn a
-launcher/worker chain).
+**Native process-topology proof:** run process ownership, launcher, child reaping and
+maintenance-lock contracts on the actual target OS using ``platforms(...)``. Terminal
+runtimes and headless children are local processes; no gateway/service ancestor is expected.
+Keep Windows-only tests on the native Windows lane and preserve real PID/start-time identity
+checks. A skipped host-specific test is not qualification for that host.
 
 **Use the marker, never a bare `skipif`.** `scripts/ci/list_os_marked_tests.py`
 decides which files an OS lane imports by resolving the quoted specs inside

@@ -2,7 +2,7 @@ import { appendFileSync, mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
-// Mirror the Python gateway's panic log (tui_gateway/server.py::_CRASH_LOG) from
+// Mirror the Python gateway's panic log (tui_runtime/server.py::_CRASH_LOG) from
 // the Node parent so lifecycle breadcrumbs interleave, by timestamp, with the
 // child's `=== SIGTERM received ===` / `=== gateway exit ===` entries.
 //
@@ -19,7 +19,7 @@ import { join } from 'node:path'
 // distinction (and a memory-critical `process.exit(137)`, which closes stdin →
 // clean EOF, not SIGTERM) diagnosable after the fact.
 const logDir = join(process.env.HERMES_HOME?.trim() || join(homedir(), '.hermes'), 'logs')
-const CRASH_LOG = join(logDir, 'tui_gateway_crash.log')
+const CRASH_LOG = join(logDir, 'tui_runtime_crash.log')
 
 // Skipped under vitest so unit tests exercising start()/kill() can't write into
 // a real ~/.hermes (tests must stay hermetic — see AGENTS.md).
@@ -28,7 +28,7 @@ const enabled = !process.env.VITEST
 // "[truncated …]" marker is appended, so the written line is slightly longer)
 // so a pathological value (e.g. a giant error) can't bloat the shared crash log
 // or add noticeable blocking on the synchronous append. Mirrors the spirit of
-// GatewayClient's in-memory log-line cap.
+// LocalAgentClient's in-memory log-line cap.
 const MAX_BREADCRUMB = 4096
 let warned = false
 

@@ -42,11 +42,7 @@ def _resolve_origin() -> Optional[dict[str, Any]]:
 def _accept(store, rest: str, origin, surface: str) -> str:
     if not rest:
         return "Usage: /suggestions accept <number|id>"
-    from cron.scheduler import CronSchedulerRegistrationError
-    try:
-        job = store.accept_suggestion(rest, origin=origin)
-    except CronSchedulerRegistrationError as e:
-        return e.user_message()
+    job = store.accept_suggestion(rest, origin=origin)
     if job is None:
         return f"No pending suggestion matches '{rest}'. Run /suggestions to list them."
     sched = job.get("schedule_display") or (job.get("job_spec", {}) or {}).get("schedule", "")

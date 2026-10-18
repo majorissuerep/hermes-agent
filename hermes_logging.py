@@ -1,8 +1,7 @@
 """Centralized logging setup for Hermes Agent.
 
-Log files: agent.log (INFO+, everything), errors.log (WARNING+), gateway.log (INFO+,
-gateway components; ``mode="gateway"``), gui.log (INFO+, dashboard/TUI-gateway;
-``mode="gui"``). All are rotating files driven through one async queue and formatted
+Log files: agent.log (INFO+, everything), errors.log (WARNING+).
+Both are rotating files driven through one async queue and formatted
 with ``RedactingFormatter`` so secrets never reach disk.
 """
 
@@ -291,28 +290,15 @@ def _install_session_record_factory() -> None:
 _install_session_record_factory()
 
 
-class _ComponentFilter(logging.Filter):
-    """Only pass records whose logger name starts with one of *prefixes*."""
-
-    def __init__(self, prefixes: Sequence[str]) -> None:
-        super().__init__()
-        self._prefixes = tuple(prefixes)
-
-    def filter(self, record: logging.LogRecord) -> bool:
-        return record.name.startswith(self._prefixes)
 
 
-# Logger name prefixes per component; used by _ComponentFilter and ``hermes logs --component``.
+# Logger name prefixes for ``hermes logs --component``.
 COMPONENT_PREFIXES = {
-    # ``plugins.platforms``: messaging adapters that migrated out of
-    # ``gateway/platforms/`` into bundled plugins (#41112) are still gateway
-    # components and belong in gateway.log.
-    "gateway": ("gateway", "hermes_plugins", "plugins.platforms"),
     "agent": ("agent", "run_agent", "model_tools", "batch_runner"),
     "tools": ("tools",),
     "cli": ("hermes_cli", "cli"),
     "cron": ("cron",),
-    "gui": ("hermes_cli.web_server", "hermes_cli.pty_bridge", "hermes_cli.desktop", "tui_gateway", "uvicorn"),
+    "tui": ("tui_runtime",),
 }
 
 
@@ -353,14 +339,12 @@ def setup_logging(
     log_level: Optional[str] = None,
     max_size_mb: Optional[int] = None,
     backup_count: Optional[int] = None,
-    mode: Optional[str] = None,
     force: bool = False,
 ) -> Path:
     """Configure the Hermes logging subsystem; returns the ``logs/`` directory.
 
     Safe to call multiple times; the second call is a no-op unless *force*. Level and
-    rotation defaults come from config.yaml ``logging.*``. ``mode="gateway"`` adds
-    ``gateway.log`` and ``mode="gui"`` adds ``gui.log``.
+    rotation defaults come from config.yaml ``logging.*``.
     """
     global _logging_initialized
     global _fallback_warned
@@ -390,21 +374,14 @@ def setup_logging(
 
     root = logging.getLogger()
 
-    # (filename, level, max_bytes, backup_count, component) — a component gates
-    # the file on ``mode`` and restricts it to that component's logger prefixes.
     handler_specs = (
-        ("agent.log", level, max_bytes, backups, None),
-        ("errors.log", logging.WARNING, 2 * 1024 * 1024, 2, None),
-        ("gateway.log", logging.INFO, 5 * 1024 * 1024, 3, "gateway"),
-        ("gui.log", logging.INFO, 10 * 1024 * 1024, 5, "gui"),
+        ("agent.log", level, max_bytes, backups),
+        ("errors.log", logging.WARNING, 2 * 1024 * 1024, 2),
     )
-    for filename, lvl, size, count, component in handler_specs:
-        if component is not None and mode != component:
-            continue
+    for filename, lvl, size, count in handler_specs:
         _add_rotating_handler(
             log_dir / filename, level=lvl, max_bytes=size, backup_count=count,
             formatter=RedactingFormatter(_LOG_FORMAT),
-            log_filter=_ComponentFilter(COMPONENT_PREFIXES[component]) if component else None,
         )
 
     if _WINDOWS_CLH_FALLBACK and not _fallback_warned:

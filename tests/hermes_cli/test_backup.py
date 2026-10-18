@@ -12,22 +12,12 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-import hermes_cli.gateway_setup_service as service_setup
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-@pytest.fixture(autouse=True)
-def _no_real_gateway_service(monkeypatch):
-    """run_import() may start an existing gateway service post-restore; tests must
-    never touch the host's systemd/launchd. Individual tests re-patch these to
-    assert the wiring."""
-    import hermes_cli.gateway as gateway_mod
-
-    monkeypatch.setattr(service_setup, "ensure_gateway_service", lambda **kw: False)
-    monkeypatch.setattr(gateway_mod, "_is_service_running", lambda: False)
 
 
 def _advance_backup_clock(seconds: float = 1.1) -> None:
@@ -484,78 +474,8 @@ class TestImport:
                 else:
                     zf.writestr(name, content)
 
-    def test_import_auto_installs_gateway_service(self, tmp_path, monkeypatch):
-        """After a restore, run_import brings the gateway service up without
-        prompting — restored cron jobs and bot tokens must not sit dormant
-        (the install-then-import dead-gateway bug)."""
-        import hermes_cli.gateway as gateway_mod
 
-        hermes_home = tmp_path / ".hermes"
-        hermes_home.mkdir()
-        monkeypatch.setenv("HERMES_HOME", str(hermes_home))
-        monkeypatch.setattr(Path, "home", lambda: tmp_path)
 
-        calls = []
-        monkeypatch.setattr(
-            service_setup, "ensure_gateway_service",
-            lambda **kw: calls.append(kw) or True,
-        )
-        monkeypatch.setattr(gateway_mod, "_is_service_running", lambda: False)
-
-        zip_path = tmp_path / "backup.zip"
-        self._make_backup_zip(zip_path, {"config.yaml": "model: test\n"})
-
-        from hermes_cli.backup import run_import
-        run_import(Namespace(zipfile=str(zip_path), force=True))
-
-        assert calls and calls[0].get("context") == "import"
-
-    def test_import_skips_service_when_already_running(self, tmp_path, monkeypatch):
-        """A live gateway is left alone — no reinstall churn during import."""
-        import hermes_cli.gateway as gateway_mod
-
-        hermes_home = tmp_path / ".hermes"
-        hermes_home.mkdir()
-        monkeypatch.setenv("HERMES_HOME", str(hermes_home))
-        monkeypatch.setattr(Path, "home", lambda: tmp_path)
-
-        calls = []
-        monkeypatch.setattr(
-            service_setup, "ensure_gateway_service",
-            lambda **kw: calls.append(kw) or True,
-        )
-        monkeypatch.setattr(gateway_mod, "_is_service_running", lambda: True)
-
-        zip_path = tmp_path / "backup.zip"
-        self._make_backup_zip(zip_path, {"config.yaml": "model: test\n"})
-
-        from hermes_cli.backup import run_import
-        run_import(Namespace(zipfile=str(zip_path), force=True))
-
-        assert not calls
-
-    def test_import_survives_service_layer_import_failure(self, tmp_path, monkeypatch, capsys):
-        """If the service helpers can't even be reached, import still completes
-        and prints the manual fallback."""
-        hermes_home = tmp_path / ".hermes"
-        hermes_home.mkdir()
-        monkeypatch.setenv("HERMES_HOME", str(hermes_home))
-        monkeypatch.setattr(Path, "home", lambda: tmp_path)
-
-        import hermes_cli.gateway as gateway_mod
-
-        def boom():
-            raise RuntimeError("service layer unavailable")
-
-        monkeypatch.setattr(gateway_mod, "_is_service_running", boom)
-
-        zip_path = tmp_path / "backup.zip"
-        self._make_backup_zip(zip_path, {"config.yaml": "model: test\n"})
-
-        from hermes_cli.backup import run_import
-        run_import(Namespace(zipfile=str(zip_path), force=True))
-
-        assert (hermes_home / "config.yaml").read_text() == "model: test\n"
 
     @staticmethod
     def _corrupt_member(zip_path: Path, name: str, damage: str) -> None:
@@ -800,9 +720,8 @@ class TestImport:
         # No foreign runtime file is installed. Maintenance creates a local lock
         # inode which must remain after release, or concurrent openers can split ownership.
         assert not (hermes_home / "cron.pid").exists()
-        lock = json.loads((hermes_home / "gateway.lock").read_text())
-        from gateway.runtime_ownership import canonical_home  # the identity the lock stores (normcase)
-        assert lock["hermes_home"] == str(canonical_home(hermes_home))
+        assert (hermes_home / "runtime.lock").exists()
+        assert not (hermes_home / "gateway.lock").exists()
 
 
 
@@ -2593,80 +2512,7 @@ class TestImportHonorsHermesHomeOverride:
         )
         assert (root / "config.yaml").read_text() == "model:\n  provider: openai\n"
 
-    def test_import_skips_gateway_install_for_non_default_home(
-        self, tmp_path, monkeypatch
-    ):
-        """A restore into a sandbox must not silently start a second gateway
-        pointed at it — the profile/sandbox gateway would shadow the default
-        service installed by the primary install."""
-        native_default = tmp_path / "native-default"
-        sandbox = tmp_path / "sandbox-home"
-        sandbox.mkdir(parents=True)
-        # Live default install markers.
-        native_default.mkdir()
-        (native_default / "config.yaml").write_text("model:\n  provider: openai\n")
 
-        monkeypatch.setenv("HERMES_HOME", str(sandbox))
-
-        import argparse
-
-        from hermes_cli import backup as backup_mod
-
-        monkeypatch.setattr(
-            backup_mod,
-            "_get_platform_default_hermes_home",
-            lambda: native_default,
-        )
-
-        calls = []
-        monkeypatch.setattr(
-            "hermes_cli.gateway_setup_service.ensure_gateway_service",
-            lambda *a, **kw: calls.append(kw),
-        )
-        monkeypatch.setattr(
-            "hermes_cli.gateway._is_service_running",
-            lambda: False,
-        )
-
-        zip_path = self._make_backup_zip(tmp_path)
-        args = argparse.Namespace(zipfile=str(zip_path), force=True)
-        backup_mod.run_import(args)
-
-        assert calls == [], "gateway must not be auto-installed for a sandbox restore"
-
-    def test_import_installs_gateway_when_default_home_is_target(
-        self, tmp_path, monkeypatch
-    ):
-        """Restoring into the default home keeps the auto-install behavior."""
-        native_default = tmp_path / "native-default"
-        native_default.mkdir()
-        monkeypatch.setenv("HERMES_HOME", str(native_default))
-
-        import argparse
-
-        from hermes_cli import backup as backup_mod
-
-        monkeypatch.setattr(
-            backup_mod,
-            "_get_platform_default_hermes_home",
-            lambda: native_default,
-        )
-
-        calls = []
-        monkeypatch.setattr(
-            "hermes_cli.gateway_setup_service.ensure_gateway_service",
-            lambda *a, **kw: calls.append(kw),
-        )
-        monkeypatch.setattr(
-            "hermes_cli.gateway._is_service_running",
-            lambda: False,
-        )
-
-        zip_path = self._make_backup_zip(tmp_path)
-        args = argparse.Namespace(zipfile=str(zip_path), force=True)
-        backup_mod.run_import(args)
-
-        assert calls and calls[0].get("context") == "import"
 
 
 # ---------------------------------------------------------------------------

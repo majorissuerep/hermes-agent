@@ -1,9 +1,9 @@
 import { useStore } from '@nanostores/react'
 import { useEffect } from 'react'
 
-import type { GatewayClient } from '../gatewayClient.js'
 import type { SystemBatteryResponse } from '../gatewayTypes.js'
 import { asRpcResult } from '../lib/rpc.js'
+import type { LocalAgentClient } from '../localAgentClient.js'
 
 import type { BatteryCategory, BatteryInfo } from './interfaces.js'
 import { $uiState, patchUiState } from './uiStore.js'
@@ -42,7 +42,7 @@ export const toBatteryInfo = (r: null | SystemBatteryResponse): BatteryInfo | nu
  * 30s cadence is plenty to keep the read-out fresh without churn. When the
  * indicator is toggled off the cached reading is cleared.
  */
-export function useBatteryPoll(gw: GatewayClient) {
+export function useBatteryPoll(gw: LocalAgentClient) {
   const enabled = useStore($uiState).battery
 
   useEffect(() => {

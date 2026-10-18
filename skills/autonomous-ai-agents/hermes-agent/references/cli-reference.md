@@ -1,157 +1,62 @@
-# Hermes CLI Reference
+# Native terminal commands
 
-Live sources when anything looks stale: `hermes --help`, `hermes <command> --help`,
-https://hermes-agent.nousresearch.com/docs/reference/cli-commands
+Use `hermes --help` and `hermes <command> --help` for the installed version.
+There is one interactive interface: the local Ink TUI. There is no Desktop,
+messaging gateway, remote-management server, inbound MCP server or ACP server.
 
-### Global Flags
+## Start and resume
 
-```
-hermes [flags] [command]        (no subcommand = interactive chat)
-
-  --version, -V             Show version
-  -z, --oneshot PROMPT      One-shot: print ONLY the final response (for scripts/pipes)
-  -m MODEL  --provider P    Model/provider override for this invocation
-  -t, --toolsets LIST       Comma-separated toolsets for this invocation
-  --resume, -r SESSION      Resume session by ID or title
-  --continue, -c [NAME]     Resume by name, or most recent session
-  --worktree, -w            Isolated git worktree mode (parallel agents)
-  --skills, -s SKILL        Preload skills (comma-separate or repeat)
-  --profile, -p NAME        Use a named profile
-  --yolo                    Skip dangerous command approval
-  --tui / --cli             Force the Ink TUI / classic REPL
-  --ignore-rules            Skip AGENTS.md/SOUL.md/memory/skill injection
-  --safe-mode               Disable ALL customizations (troubleshooting)
-  --pass-session-id         Include session ID in system prompt
+```sh
+hermes
+hermes --continue
+hermes --resume SESSION_ID
+hermes chat -q "One bounded task"
+hermes --profile NAME chat -q "A profile-specific task"
 ```
 
-### Chat
+`--model`, `--provider`, `--toolsets`, `--skills` and `--max-turns` configure an
+invocation. `--native` selects primary-buffer TUI rendering. Do not pass removed
+`--cli` flags. `--safe-mode` is for customization diagnosis; pass an explicit
+provider/model when ignoring profile configuration.
 
-```
-hermes chat [flags]
-  -q, --query TEXT          Single query, non-interactive
-  --image PATH              Attach a local image to a single query
-  -Q, --quiet               Suppress banner, spinner, tool previews
-  --checkpoints             Enable filesystem checkpoints (/rollback)
-  --max-turns N             Cap tool-calling iterations
-  --source TAG              Session source tag (default: cli)
-```
-(plus the global flags above)
+Inside the TUI, `/model` opens the picker and `/model <model>` switches the session.
+`/reasoning` controls effort. Use `/help` for actual supported slash commands.
+History and cached prompt prefixes must survive model switches.
 
-### Configuration
+## Manage locally
 
-```
-hermes setup [section]      Wizard (model|tts|terminal|gateway|tools|agent)
-hermes model                Interactive model/provider picker
-hermes fallback [add|remove|list]  Fallback provider chain
-hermes config [show|edit|get|set|unset|path|env-path|check|migrate]
-hermes login / logout       OAuth sign-in / clear stored auth
-hermes doctor [--fix]       Check dependencies and config
-hermes status [--full]      Component summary (--full: every section)
-```
-
-### Tools & Skills
-
-```
-hermes tools [list|enable NAME|disable NAME]   Per-platform toolsets (curses UI with no args)
-
-hermes skills list|browse|search QUERY|inspect ID
-hermes skills install ID    Hub identifier OR a direct https://…/SKILL.md URL
-hermes skills config        Enable/disable skills per platform
-hermes skills check|update|uninstall|publish PATH
-hermes skills tap add REPO  Add a GitHub repo as a skill source
-hermes bundles              Skill bundles (one /<name> alias loads several skills)
+```sh
+hermes model
+hermes tools
+hermes config get agent.max_turns
+hermes config set agent.max_turns 30
+hermes update --check
+hermes update --backup
+hermes doctor
+hermes pm repair
+hermes secure-vault status
+hermes secure-vault repair
+hermes backup
+hermes import --help
 ```
 
-### MCP Servers
+Ordinary local commands inside an unlocked Hermes session reuse scoped authority.
+Never forward a passphrase or key, edit ciphertext, or use another profile to bypass
+unlocking. Read `encrypted-self-management.md` for repair, update and offline export.
 
-```
-hermes mcp add NAME (--url or --command) | remove | list | test NAME
-hermes mcp catalog | install NAME     Curated catalog install
-hermes mcp configure NAME             Toggle tool selection
-hermes mcp serve                      Run Hermes as an MCP server
-hermes mcp add NAME --via-host ...    Noninteractive setup through the unlocked session host
-hermes mcp list --via-host            Read configured servers as JSON
-hermes mcp test NAME --via-host       Probe in the owning profile; nonzero on failure
-hermes mcp remove NAME --via-host     Remove through the host; takes effect next session
-hermes mcp set-api-key NAME --value-stdin --env-var TOKEN_NAME
-                                     Store a piped credential through the host
-```
-Details (transport, tool discovery, catalog): `references/native-mcp.md`.
+## Extensions, history and local workers
 
-### Gateway (Messaging Platforms)
+| Command | Purpose |
+| --- | --- |
+| `hermes skills --help` | Skills and bundles |
+| `hermes plugins --help` | Explicit opt-in plugins |
+| `hermes mcp --help` | Outgoing stdio/HTTP tool connections |
+| `hermes sessions --help` | Local history |
+| `hermes profile --help` | Local profile lifecycle and migration |
+| `hermes cron --help` | Jobs, explicit local tick/run and run history |
+| `hermes kanban --help` | Local board and terminal workers |
+| `hermes curator --help` | Skill maintenance and rollback |
+| `hermes logs --help` | Native agent/error logs |
 
-```
-hermes gateway run|install|start|stop|restart|status|setup
-```
-
-20+ platforms: Telegram, Discord, Slack, WhatsApp (Baileys + Business Cloud API), iMessage (Photon — `hermes photon setup`), Signal, Email, SMS, Matrix, Mattermost, Teams, LINE, SimpleX, ntfy, Google Chat, Home Assistant, DingTalk, Feishu, WeCom, Weixin, API Server, Webhooks. Open WebUI connects via the API Server adapter. Most adapters ship under `plugins/platforms/`.
-Docs: https://hermes-agent.nousresearch.com/docs/user-guide/messaging/
-
-### Sessions
-
-```
-hermes sessions list|browse|rename ID TITLE|delete ID|export OUT|prune|stats
-```
-
-### Cron / Webhooks
-
-```
-hermes cron list|create SCHED|edit ID|pause|resume|run ID|remove|status
-    Schedules: '30m', 'every 2h', '0 9 * * *', ISO timestamp
-hermes webhook subscribe NAME|list|remove NAME|test NAME
-```
-Webhook payloads/routes: `references/webhooks.md`.
-
-### Profiles
-
-```
-hermes profile list|create NAME (--clone|--clone-all|--clone-from)|use|show|delete
-hermes profile rename A B | alias NAME | export NAME | import FILE
-hermes profile migrate-identity A B   Retry a completed rename's session/routing identity migration
-```
-
-### Credentials & Pools
-
-```
-hermes auth                 Interactive credential manager
-hermes auth add [PROVIDER]  Add OAuth or API-key credential (nous, openai-codex, qwen-oauth, …)
-hermes auth list|remove P IDX|reset PROVIDER|status
-```
-Multiple credentials per provider form a pool that rotates automatically and skips exhausted keys.
-
-### Other
-
-```
-hermes desktop / gui        Native desktop app
-hermes dashboard            Web admin panel + embedded chat (--stop / --status)
-hermes proxy                OpenAI-compatible local proxy backed by an OAuth provider
-hermes portal               Quick setup / sign in via Nous Portal
-hermes kanban <verb>        Multi-agent work-queue board
-hermes project              Named multi-folder workspaces
-hermes skin list|use|set    Switch/tweak skins (see references/themes.md)
-hermes pets <verb>          Pet mascots (see references/petdex.md)
-hermes memory setup|status|off|reset   Memory provider
-hermes secrets bitwarden|onepassword   External secret stores
-hermes moa                  Mixture-of-Agents slots
-hermes hooks / security / backup / import / checkpoints / console
-hermes logs [-f] [errors]   View agent/error logs
-hermes send                 One-off message through a gateway platform
-hermes pairing / plugins / insights / journey / computer-use
-hermes acp                  ACP server (IDE integration)
-hermes completion bash|zsh|fish
-hermes update / uninstall / claw migrate
-```
-
-Plugin- and provider-supplied subcommands (e.g. `hermes photon setup`) only appear once their plugin is installed/active.
-
-### Where to Find Things
-
-| Looking for... | Location |
-|---|---|
-| Config options | `hermes config edit` · [Configuration docs](https://hermes-agent.nousresearch.com/docs/user-guide/configuration) |
-| Tools / toolsets | `hermes tools list` · [Tools reference](https://hermes-agent.nousresearch.com/docs/reference/tools-reference) |
-| Skills catalog | `hermes skills browse` · [Skills catalog](https://hermes-agent.nousresearch.com/docs/reference/skills-catalog) |
-| Provider setup | `hermes model` · [Providers guide](https://hermes-agent.nousresearch.com/docs/integrations/providers) |
-| Env variables | `hermes config env-path` · [Env vars reference](https://hermes-agent.nousresearch.com/docs/reference/environment-variables) |
-| Gateway logs | `~/.hermes/logs/gateway.log` (or `hermes logs`) |
-| Sessions | `hermes sessions browse` (reads state.db) |
+No `--via-host` management route is needed: use the ordinary local CLI. Tool and
+system-prompt changes normally activate in a new session, preserving prompt caching.

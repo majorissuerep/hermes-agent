@@ -1,4 +1,4 @@
-"""Startup-liveness watchdog — respawn a gateway that wedges before its loop runs (OOF-298).
+"""Startup-liveness watchdog for bounded native initialization.
 
 Every other liveness backstop (loop-liveness watchdog, shutdown watchdog, heartbeat file)
 assumes startup succeeded; none can fire if the process deadlocks before the event loop
@@ -18,7 +18,7 @@ waits call :func:`kick_startup_watchdog` (respawn-storm backoff, up to 300s); MC
 discovery's 120s wait sits inside the 300s default.
 
 IMPORT-LIGHTNESS IS A CORRECTNESS PROPERTY: top-level module, stdlib only. Arming must
-precede importing ``gateway`` (hundreds of modules; an import-time deadlock is in scope),
+precede heavyweight application imports (hundreds of modules; an import-time deadlock is in scope),
 and at fire time the wedged main thread may hold the import lock — so the fire path does
 no imports on its own thread; the ledger write runs on a helper thread joined with a
 timeout. Config is env-only (``HERMES_STARTUP_WATCHDOG=0``,
@@ -160,18 +160,6 @@ def _log_quietly(level: str, msg: str, *args) -> None:
         pass
 
 
-def _mark_lifecycle_exit(exit_code: int) -> None:
-    """Record the watchdog exit in the NS-608 lifecycle sentinel.
-
-    Runs on a helper thread (see ``_fire``): the import can block on the
-    interpreter import lock, and the fire path must reach ``os._exit`` regardless.
-    """
-    try:
-        from gateway.lifecycle_ledger import mark_exited
-
-        mark_exited(exit_code, reason="startup_liveness_watchdog")
-    except Exception:
-        pass
 
 
 class StartupWatchdogHandle:
@@ -308,18 +296,6 @@ class StartupWatchdogHandle:
             faulthandler.dump_traceback(all_threads=True)
         except Exception:
             logger.debug("Startup watchdog faulthandler dump failed", exc_info=True)
-        # Ledger write on a helper thread (it imports application code; the
-        # wedged main thread may hold the import lock). Bounded join, then exit
-        # regardless — NS-608 classification is best-effort; the respawn is not.
-        try:
-            ledger_thread = threading.Thread(
-                target=_mark_lifecycle_exit, args=(self.exit_code,), daemon=True,
-                name="gateway-startup-watchdog-ledger",
-            )
-            ledger_thread.start()
-            ledger_thread.join(timeout=_LEDGER_JOIN_TIMEOUT_S)
-        except Exception:
-            pass
         self._fire_done.set()
         self._exit(self.exit_code)
 

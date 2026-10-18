@@ -2,71 +2,16 @@
 import json
 import time
 
-from hermes_state.runtime import RuntimeStoreError, _epoch, _json
+from hermes_state.errors import RuntimeStoreError
+from hermes_state.ledger_values import _json
 
 POLICY_PREFIX = 'gateway.local_policy.v1:'
 API_BINDING_PREFIX = 'gateway.api.binding.v1.'
 API_DECLARED_PREFIX = 'gateway.api.conversation.v1.'
 
 
-def commit_local_session(db, *, epoch, receipt):
-    """Reserve the row, route and immutable policy together, before publication."""
-    encoded = _json(receipt)
-    receipt = json.loads(encoded)
-    sid, route = receipt['session_id'], receipt['route']
-    key = POLICY_PREFIX + sid
-    def write(conn):
-        _epoch(conn, epoch)
-        old = conn.execute('SELECT value FROM state_meta WHERE key=?', (key,)).fetchone()
-        if old is not None:
-            try:
-                saved = json.loads(old[0])
-                same = all(saved[k] == receipt[k] for k in (
-                    'profile_id', 'principal_id', 'request_id', 'session_id', 'route'))
-                same = same and saved['policy']['request_json'] == receipt['policy']['request_json']
-            except (ValueError, TypeError, KeyError) as exc:
-                raise RuntimeStoreError('storage_unavailable') from exc
-            if not same:
-                raise RuntimeStoreError('invalid_params')
-            return saved
-        from hermes_state.mutation_retirement import RETIRED_PREFIX
-        if conn.execute('SELECT 1 FROM state_meta WHERE key=?', (RETIRED_PREFIX + sid,)).fetchone():
-            # Deleted: its receipt was retired with the transcript; a create/cron retry must not
-            # resurrect the row (and re-fire its prompt) under the same deterministic id.
-            raise RuntimeStoreError('not_found')
-        if ('legacy_session_id' not in receipt and
-                conn.execute('SELECT 1 FROM sessions WHERE id=?', (sid,)).fetchone()):
-            raise RuntimeStoreError('storage_unavailable')
-        if conn.execute("SELECT 1 FROM gateway_routing WHERE scope='' AND session_key=?", (route,)).fetchone():
-            raise RuntimeStoreError('admission_conflict')
-        if 'legacy_session_id' in receipt:
-            from hermes_state.local_migration import bind_legacy_target
-            bind_legacy_target(db, conn, receipt)
-        policy, entry = receipt['policy'], receipt['entry']
-        from datetime import datetime
-        started = datetime.fromisoformat(entry['created_at']).timestamp()
-        conn.execute('''INSERT INTO sessions(id,source,user_id,session_key,chat_id,chat_type,
-            model,cwd,profile_name,origin_json,started_at) VALUES(?,?,?,?,?,'dm',?,?,?,?,?)
-            ON CONFLICT(id) DO NOTHING''',
-            (sid, policy['source'], receipt['principal_id'], route, entry['origin']['chat_id'],
-             policy['model'], _row_cwd(policy), db._own_profile_name(), _json(entry['origin']), started))
-        conn.execute("INSERT INTO gateway_routing(scope,session_key,entry_json,updated_at) VALUES('',?,?,?)",
-                     (route, _json(entry), started))
-        conn.execute('INSERT INTO state_meta(key,value) VALUES(?,?)', (key, encoded))
-        return receipt
-    return db._execute_write(write)
 
 
-def _row_cwd(policy):
-    """The sessions-row ``cwd``: the create request's ``row_cwd`` (``""`` = none) when it sent one,
-    else the execution cwd. Row metadata only (workspace grouping, ``-c``, cwd restore); the
-    frozen policy's ``cwd`` / ``TERMINAL_CWD`` stay where the session's tools run."""
-    try:
-        request = json.loads(policy.get('request_json') or '{}')
-    except (TypeError, ValueError):
-        request = {}
-    value = request.get('row_cwd') if isinstance(request, dict) else None
-    return policy['cwd'] if not isinstance(value, str) else (value or None)
 
 
 def _policy_target(raw):
@@ -181,35 +126,3 @@ def annotate_local_lineages(sessions, heads):
         if found is not None:
             row['_lineage_ids'] = list(dict.fromkeys([*found[1], *(row.get('_lineage_ids') or ())]))
     return sessions
-
-
-def local_receipt(db, session_id):
-    with db._read_ctx() as conn:
-        row = conn.execute('SELECT value FROM state_meta WHERE key=?', (POLICY_PREFIX + session_id,)).fetchone()
-    if row is None:
-        raise RuntimeStoreError('storage_unavailable')
-    try:
-        value = json.loads(row[0])
-        if not isinstance(value, dict):
-            raise ValueError('invalid receipt')
-        return value
-    except (TypeError, ValueError) as exc:
-        raise RuntimeStoreError('storage_unavailable') from exc
-
-
-def end_idle_local_session(db, *, epoch, session_id, target_id, reason):
-    """Stamp ``ended_at`` on *target_id* only while the logical *session_id*'s FIFO is idle.
-
-    The idle check and the stamp share one owner write txn, so an admission committed first keeps
-    the row open; one committed after is reopened by the drain (``reopen_local_session``)."""
-    def write(conn):
-        _epoch(conn, epoch)
-        if conn.execute("SELECT 1 FROM session_admissions WHERE target_session_id=? AND status IN ('queued','started','unknown')",
-                        (session_id,)).fetchone():
-            return 0
-        if conn.execute("SELECT 1 FROM worker_executions WHERE session_id IN (?,?) AND status IN ('registered','running','unknown')",
-                        (session_id, target_id)).fetchone():
-            return 0
-        return db._end_and_bump(conn, 'UPDATE sessions SET ended_at=?, end_reason=? WHERE id=? AND ended_at IS NULL',
-                                (time.time(), reason, target_id), target_id, reason)
-    return db._execute_write(write)

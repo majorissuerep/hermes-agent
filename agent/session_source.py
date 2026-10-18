@@ -6,14 +6,14 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from gateway.session_context import get_session_env
+from agent.session_context import get_session_env
 
 # Sources that label the human conversation an interactive UI transport hosts. A finite ``hermes chat -q`` /
 # one-shot child spawned from such a session inherits HERMES_SESSION_SOURCE (the terminal tool bridges the
 # session env into child processes) but is NOT that conversation: labelling it ``tui``/``desktop`` lists it
 # in the TUI/WebUI pickers as a resumable chat and lets ``hermes -c`` in the TUI continue it (#112550).
 # Automation sources (kanban, tool, cron, a2a, ...) are inherited on purpose.
-UI_TRANSPORT_SOURCES = frozenset({"tui", "desktop"})
+UI_TRANSPORT_SOURCES = frozenset({"tui"})
 
 # Finite non-interactive CLI runs (``hermes chat -q``/``--oneshot``, ``hermes -z``) get their own source so human
 # pickers hide them without title/cwd heuristics; ``hermes -c`` still treats them as CLI history.
@@ -21,7 +21,7 @@ ONESHOT_SOURCE = "oneshot"
 CLI_FAMILY_SOURCES = frozenset({"cli", ONESHOT_SOURCE})
 
 # A person reads the turn as it runs: not cron, batch, a messaging chat, or a one-shot run.
-ATTENDED_SOURCES = UI_TRANSPORT_SOURCES | {"cli", "acp"}
+ATTENDED_SOURCES = UI_TRANSPORT_SOURCES | {"cli"}
 
 
 def session_source_for(platform: Optional[str]) -> str:
@@ -41,9 +41,7 @@ def is_attended(agent: Any) -> bool:
     platform = getattr(agent, "platform", None)
     if not platform or platform == "subagent":
         return False
-    # A gateway-admitted ``hermes chat -q`` / ``-z`` turn carries its one-shot fact on the admission,
-    # not in HERMES_SINGLE_QUERY_SESSION (the daemon never had that env).
-    from gateway.session_finite import finite_turn_required
-    if finite_turn_required() is True:
+    from agent.oneshot_footprint import is_single_query_session
+    if is_single_query_session():
         return False
     return session_source_for(platform) in ATTENDED_SOURCES

@@ -13,7 +13,6 @@ import { patchOverlayState } from '../app/overlayStore.js'
 import { type ProcessRow, useProcessRows } from '../app/processRoster.js'
 import { $spawnDiff, $spawnHistory, clearDiffPair, type SpawnSnapshot } from '../app/spawnHistoryStore.js'
 import { $uiState } from '../app/uiStore.js'
-import type { GatewayClient } from '../gatewayClient.js'
 import type { DelegationPauseResponse, DelegationStatusResponse, SubagentInterruptResponse } from '../gatewayTypes.js'
 import { messages } from '../i18n/runtime.js'
 import type { Translations } from '../i18n/types.js'
@@ -35,6 +34,7 @@ import {
   widthByDepth
 } from '../lib/subagentTree.js'
 import { compactPreview } from '../lib/text.js'
+import type { LocalAgentClient } from '../localAgentClient.js'
 import type { Theme } from '../theme.js'
 import type { SubagentNode, SubagentProgress } from '../types.js'
 
@@ -42,16 +42,12 @@ import { AgentLiveTail, AgentSteerForm, rosterViewport } from './agentControls.j
 import { buildProcessBlock, ProcessRowLine, processSummary } from './agentsPanel.js'
 import { listRowStyle } from './overlayPrimitives.js'
 import { OverlayScrollbar } from './overlayScrollbar.js'
-
 // ── Types + lookup tables ────────────────────────────────────────────
-
 type SortMode = 'depth-first' | 'duration-desc' | 'status' | 'tools-desc'
 type FilterMode = 'all' | 'failed' | 'leaf' | 'running'
 type Status = SubagentProgress['status']
-
 const SORT_ORDER: readonly SortMode[] = ['depth-first', 'tools-desc', 'duration-desc', 'status']
 const FILTER_ORDER: readonly FilterMode[] = ['all', 'running', 'failed', 'leaf']
-
 type AgentsMessages = Translations['hubs']['agents']
 
 // Mode → catalog leaf. Labels are resolved against the active language at
@@ -71,7 +67,6 @@ const FILTER_KEY: Record<FilterMode, keyof AgentsMessages['filter']> = {
 }
 
 export const sortLabel = (mode: SortMode, m: AgentsMessages = messages().hubs.agents): string => m.sort[SORT_KEY[mode]]
-
 export const filterLabel = (mode: FilterMode, m: AgentsMessages = messages().hubs.agents): string =>
   m.filter[FILTER_KEY[mode]]
 
@@ -111,9 +106,7 @@ const FILTER_PREDICATES: Record<FilterMode, (n: SubagentNode) => boolean> = {
 
 // Heatmap palette — cold → hot, resolved against the active theme.
 const heatPalette = (t: Theme) => [t.color.border, t.color.accent, t.color.primary, t.color.warn, t.color.error]
-
 // ── Pure helpers ─────────────────────────────────────────────────────
-
 const fmtDur = (seconds?: number) => (seconds == null || seconds <= 0 ? '' : fmtDuration(seconds))
 const fmtElapsedLabel = (seconds: number) => (seconds < 0 ? '' : fmtDuration(seconds))
 
@@ -132,7 +125,6 @@ const displayElapsedSeconds = (item: SubagentProgress, nowMs: number): number | 
 const indentFor = (depth: number): string => '  '.repeat(Math.max(0, depth))
 const formatRowId = (n: number): string => String(n + 1).padStart(2, ' ')
 const cycle = <T,>(order: readonly T[], current: T): T => order[(order.indexOf(current) + 1) % order.length]!
-
 const statusGlyph = (item: SubagentProgress, t: Theme) => agentStatusGlyph(item.status, t)
 
 const prepareRows = (tree: SubagentNode[], sort: SortMode, filter: FilterMode): SubagentNode[] =>
@@ -146,7 +138,6 @@ const diffMetricLine = (name: string, a: number, b: number, fmt: (n: number) => 
 }
 
 // ── Sub-components ───────────────────────────────────────────────────
-
 function GanttStrip({
   cols,
   cursor,
@@ -185,7 +176,6 @@ function GanttStrip({
   const globalEnd = Math.max(...spans.map(s => s.endAt))
   const totalSpan = Math.max(1, globalEnd - globalStart)
   const totalSeconds = (globalEnd - globalStart) / 1000
-
   // 5-col id gutter ("  12  ") so the bar doesn't press against the id.
   // 10-col right reserve: pad + up to `12m 30s`-style label without
   // truncate-end against a full-width bar.
@@ -246,7 +236,6 @@ function GanttStrip({
         const active = idx === cursor
         const { color } = statusGlyph(node.item, t)
         const accent = active ? t.color.accent : t.color.muted
-
         const elSec = displayElapsedSeconds(node.item, now)
         const elLabel = elSec != null ? fmtElapsedLabel(elSec) : ''
 
@@ -355,12 +344,10 @@ function Detail({ id, node, t }: { id?: string; node: SubagentNode; t: Theme }) 
   const D = T.detail
   const { aggregate: agg, item } = node
   const { color, glyph } = statusGlyph(item, t)
-
   const inputTokens = item.inputTokens ?? 0
   const outputTokens = item.outputTokens ?? 0
   const localTokens = inputTokens + outputTokens
   const subtreeTokens = agg.inputTokens + agg.outputTokens - localTokens
-
   const filesRead = item.filesRead ?? []
   const filesWritten = item.filesWritten ?? []
   const outputTail = item.outputTail ?? []
@@ -368,7 +355,6 @@ function Detail({ id, node, t }: { id?: string; node: SubagentNode; t: Theme }) 
   // that stream is often empty even when tool_count > 0, so fall back to
   // the tool names captured in outputTail at subagent.complete time.
   const toolLines = item.tools.length > 0 ? item.tools : outputTail.map(e => e.tool).filter(Boolean)
-
   const filesOverflow = Math.max(0, filesRead.length - 8) + Math.max(0, filesWritten.length - 8)
 
   return (
@@ -498,7 +484,6 @@ function ListRow({
   const palette = heatPalette(t)
   const heatIdx = hotnessBucket(node.aggregate.hotness, peak, palette.length)
   const heatMarker = heatIdx >= 2 ? palette[heatIdx]! : null
-
   const goal = compactPreview(node.item.goal || T.subagentFallback, width - 28 - node.item.depth * 2)
   const toolsCount = node.aggregate.totalTools > 0 ? ` ·${node.aggregate.totalTools}t` : ''
   const kids = node.children.length ? ` ·${node.children.length}↓` : ''
@@ -583,20 +568,21 @@ function DiffView({
 }: {
   cols: number
   onClose: () => void
-  pair: { baseline: SpawnSnapshot; candidate: SpawnSnapshot }
+  pair: {
+    baseline: SpawnSnapshot
+    candidate: SpawnSnapshot
+  }
   t: Theme
 }) {
   const T = useT().hubs.agents.diff
   const aTotals = useMemo(() => treeTotals(buildSubagentTree(pair.baseline.subagents)), [pair.baseline])
   const bTotals = useMemo(() => treeTotals(buildSubagentTree(pair.candidate.subagents)), [pair.candidate])
   const paneWidth = Math.floor((cols - 4) / 2)
-
   useInput((ch, key) => {
     if (key.escape || ch === 'q') {
       onClose()
     }
   })
-
   const round = (n: number) => String(Math.round(n))
   const sumTokens = (x: typeof aTotals) => x.inputTokens + x.outputTokens
 
@@ -637,7 +623,6 @@ function DiffView({
 }
 
 // ── Main overlay ─────────────────────────────────────────────────────
-
 export function AgentsOverlay({ gw, initialHistoryIndex = 0, onClose, t }: AgentsOverlayProps) {
   const T = useT().hubs.agents
   const liveSubagents = useAgentRoster()
@@ -662,12 +647,9 @@ export function AgentsOverlay({ gw, initialHistoryIndex = 0, onClose, t }: Agent
   const [mode, setMode] = useState<'detail' | 'list' | 'steer' | 'tail'>('list')
   const { sid } = useStore($uiState)
   const processRows = useProcessRows(now)
-
   const detailScrollRef = useRef<null | ScrollBoxHandle>(null)
   const prevLiveCountRef = useRef(liveSubagents.length)
-
   // ── Derived state ──────────────────────────────────────────────────
-
   const activeSnapshot = historyIndex > 0 ? history[historyIndex - 1] : null
   // Instant fallback to history[0] the moment the live list clears — avoids
   // a one-frame "no subagents" flash while the auto-follow effect fires.
@@ -675,16 +657,13 @@ export function AgentsOverlay({ gw, initialHistoryIndex = 0, onClose, t }: Agent
   const effectiveSnapshot = activeSnapshot ?? justFinishedSnapshot
   const replayMode = effectiveSnapshot != null
   const subagents = replayMode ? effectiveSnapshot.subagents : liveSubagents
-
   const tree = useMemo(() => buildSubagentTree(subagents), [subagents])
   const totals = useMemo(() => treeTotals(tree), [tree])
   const widths = useMemo(() => widthByDepth(tree), [tree])
   const spark = useMemo(() => sparkline(widths), [widths])
   const peak = useMemo(() => peakHotness(tree), [tree])
   const rows = useMemo(() => prepareRows(tree, sort, filter), [tree, sort, filter])
-
   const selected = rows[cursor] ?? null
-
   const cols = stdout?.columns ?? 80
 
   const {
@@ -694,7 +673,6 @@ export function AgentsOverlay({ gw, initialHistoryIndex = 0, onClose, t }: Agent
   } = rosterViewport((stdout?.rows ?? 24) - (flash ? 1 : 0), rows.length, cursor)
 
   // ── Effects ────────────────────────────────────────────────────────
-
   useEffect(() => {
     // Ticker drives both the live gantt and OverlayScrollbar content-reflow
     // detection.  Slower in replay (nothing's growing) but not stopped
@@ -703,14 +681,12 @@ export function AgentsOverlay({ gw, initialHistoryIndex = 0, onClose, t }: Agent
 
     return () => clearInterval(id)
   }, [replayMode])
-
   useEffect(() => {
     // Clamp stale index when history grows/shrinks beneath us.
     if (historyIndex > history.length) {
       setHistoryIndex(history.length)
     }
   }, [history.length, historyIndex])
-
   useEffect(() => {
     // Auto-follow the just-finished turn onto history[1] so the user isn't
     // dropped into an empty live view.  Fires only when transitioning from
@@ -724,12 +700,10 @@ export function AgentsOverlay({ gw, initialHistoryIndex = 0, onClose, t }: Agent
       setFlash(messages().hubs.agents.flash.turnFinished)
     }
   }, [history.length, historyIndex, liveSubagents.length])
-
   useEffect(() => {
     // Reset detail scroll on navigation so the top of the new node shows.
     detailScrollRef.current?.scrollTo(0)
   }, [cursor, historyIndex, mode])
-
   useEffect(() => {
     // A control acknowledgement or newer hydration must win over this request.
     const initial = $delegationState.get()
@@ -746,7 +720,6 @@ export function AgentsOverlay({ gw, initialHistoryIndex = 0, onClose, t }: Agent
       active = false
     }
   }, [gw])
-
   useEffect(() => {
     if (cursor >= rows.length) {
       setCursor(Math.max(0, rows.length - 1))
@@ -754,7 +727,6 @@ export function AgentsOverlay({ gw, initialHistoryIndex = 0, onClose, t }: Agent
   }, [cursor, rows.length])
 
   // ── Actions ────────────────────────────────────────────────────────
-
   const guardLive = (action: () => void) => {
     if (replayMode) {
       setFlash(T.flash.replayLocked)
@@ -768,11 +740,6 @@ export function AgentsOverlay({ gw, initialHistoryIndex = 0, onClose, t }: Agent
 
   const killOne = (id: string) =>
     guardLive(() => {
-      // The shared owner serves no subagent.interrupt: the sidecar would answer "session not found".
-      if (gw.isCanonical) {
-        return setFlash(messages().canonical.controls.notAvailable('agents kill'))
-      }
-
       interrupt(id)
         .then(raw => {
           const r = asRpcResult<SubagentInterruptResponse>(raw)
@@ -783,10 +750,6 @@ export function AgentsOverlay({ gw, initialHistoryIndex = 0, onClose, t }: Agent
 
   const killSubtree = (node: SubagentNode) =>
     guardLive(() => {
-      if (gw.isCanonical) {
-        return setFlash(messages().canonical.controls.notAvailable('agents kill'))
-      }
-
       const ids = [node.item.id, ...descendantIds(node)]
       ids.forEach(id => interrupt(id).catch(() => {}))
       setFlash((ids.length === 1 ? T.flash.killingSubtreeOne : T.flash.killingSubtreeOther)(ids.length))
@@ -821,11 +784,9 @@ export function AgentsOverlay({ gw, initialHistoryIndex = 0, onClose, t }: Agent
   }
 
   // ── Input ──────────────────────────────────────────────────────────
-
   const detailPageSize = Math.max(4, rowsH - 2)
   const wheelDetailDy = 3
   const scrollDetail = (dy: number) => detailScrollRef.current?.scrollBy(dy)
-
   useInput((ch, key) => {
     if (mode === 'steer') {
       return
@@ -947,7 +908,6 @@ export function AgentsOverlay({ gw, initialHistoryIndex = 0, onClose, t }: Agent
   })
 
   // ── Header assembly ────────────────────────────────────────────────
-
   const mix = Object.entries(
     subagents.reduce<Record<string, number>>((acc, it) => {
       const key = it.model ? it.model.split('/').pop()! : T.inheritModel
@@ -967,9 +927,7 @@ export function AgentsOverlay({ gw, initialHistoryIndex = 0, onClose, t }: Agent
 
   const title =
     replayMode && effectiveSnapshot
-      ? `${historyIndex > 0 ? T.title.replay(historyIndex, history.length) : T.title.lastTurn}${T.title.finishedAt(
-          new Date(effectiveSnapshot.finishedAt).toLocaleTimeString()
-        )}`
+      ? `${historyIndex > 0 ? T.title.replay(historyIndex, history.length) : T.title.lastTurn}${T.title.finishedAt(new Date(effectiveSnapshot.finishedAt).toLocaleTimeString())}`
       : `${T.title.spawnTree}${delegation.paused ? T.title.pausedSuffix : ''}`
 
   const metaLine = [formatSummary(totals), spark, capsLabel, mix ? `· ${mix}` : ''].filter(Boolean).join('  ')
@@ -979,7 +937,6 @@ export function AgentsOverlay({ gw, initialHistoryIndex = 0, onClose, t }: Agent
     : T.hint.controls(delegation.paused ? T.hint.resume : T.hint.pause)
 
   // ── Rendering ──────────────────────────────────────────────────────
-
   if (diffPair) {
     return <DiffView cols={cols} onClose={closeWithCleanup} pair={diffPair} t={t} />
   }
@@ -1083,11 +1040,10 @@ export function AgentsOverlay({ gw, initialHistoryIndex = 0, onClose, t }: Agent
 }
 
 interface AgentsOverlayProps {
-  gw: GatewayClient
+  gw: LocalAgentClient
   initialHistoryIndex?: number
   onClose: () => void
   t: Theme
 }
-
 export const closeAgentsOverlay = () => patchOverlayState({ agents: false })
 export const openAgentsOverlay = () => patchOverlayState({ agents: true })

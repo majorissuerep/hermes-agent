@@ -28,7 +28,7 @@ def _visible(setting):
 
 def test_compression_replay_is_classified_diagnostic():
     from agent.conversation_compression import replay_compression_warning
-    from gateway.warning_notifications import DiagnosticText, is_warning_status
+    from agent.warning_notifications import DiagnosticText, is_warning_status
     seen = []
     agent = types.SimpleNamespace(_compression_warning="ℹ Codex caps context at 272K, so auto-compaction was raised",
                                   status_callback=lambda kind, msg: seen.append((kind, msg)))
@@ -43,7 +43,7 @@ def test_compression_replay_reaches_gateway_status_sink_only_when_visible(tmp_pa
     """Composed: replay -> the gateway status callback's own gate (render_notification + is_warning_status)."""
     _policy(tmp_path, monkeypatch, setting)
     from agent.conversation_compression import replay_compression_warning
-    from gateway.warning_notifications import is_warning_status, render_notification
+    from agent.warning_notifications import is_warning_status, render_notification
     rendered = []
 
     def gateway_status_callback(kind, msg):  # mirrors gateway/run_turn_runner._status_callback_sync
@@ -91,12 +91,12 @@ def test_cli_browser_downgrade_notice_honors_policy(tmp_path, monkeypatch, setti
     assert (len(out) == 1 and "⚠" in out[0]) is _visible(setting)
 
 
-# --- TUI (functions are rebound onto tui_gateway.server by bind_module) -------------------------
+# --- TUI (functions are rebound onto tui_runtime.server by bind_module) -------------------------
 
 @pytest.mark.parametrize("setting", MODES)
 def test_tui_goal_compression_recovery_notice_honors_policy(tmp_path, monkeypatch, setting):
     _policy(tmp_path, monkeypatch, setting)
-    from tui_gateway import server
+    from tui_runtime import server
     emitted = []
     monkeypatch.setattr(server, "_emit", lambda ev, sid, payload: emitted.append((ev, payload)))
     monkeypatch.setattr(server, "_plan_goal_compression_recovery",
@@ -113,11 +113,11 @@ def test_tui_preview_restart_status_warning_honors_policy(tmp_path, monkeypatch,
     """The preview-restart progress panel's status_callback: warning rows follow the TUI policy;
     ordinary status rows and tool progress always render."""
     _policy(tmp_path, monkeypatch, setting)
-    from tui_gateway import server
+    from tui_runtime import server
     emitted = []
     monkeypatch.setattr(server, "_emit", lambda ev, sid, payload: emitted.append(payload["text"]))
     monkeypatch.setattr(server, "_session_get", lambda sid: {"agent": types.SimpleNamespace(_notification_config=None)}, raising=False)
-    from gateway.warning_notifications import DiagnosticText
+    from agent.warning_notifications import DiagnosticText
     cbs = server._preview_restart_callbacks("parent-1", "task-1")
     cbs["status_callback"]("lifecycle", "Starting preview")
     cbs["status_callback"]("warn", "⚠ provider fallback engaged")

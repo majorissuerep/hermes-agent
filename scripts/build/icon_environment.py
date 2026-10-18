@@ -1,8 +1,7 @@
 """Prepare an interpreter that can run the icon generator without a Hermes install.
 
-Pillow and resvg-py are core runtime dependencies, so builders that have no
-Hermes runtime environment (desktop bundles, product staging) render icons on
-the locked runtime dependencies alone, without installing the application.
+Website branding builders use the committed build-only icons extra in an isolated
+PM environment, without adding image renderers to the terminal runtime.
 """
 from __future__ import annotations
 
@@ -17,8 +16,8 @@ import pm
 
 
 def prepare_icon_environment(source: Path, out: Path, cache: Path | None) -> Path:
-    """Prepare a fresh interpreter with the locked runtime dependencies only."""
+    """Prepare a fresh interpreter with the locked build-only icons dependency selection."""
     return pm.build_environment(
         source=source.resolve(), out=out.resolve(), cache=cache.resolve() if cache else None,
-        no_install_project=True, explicit=True,
+        no_install_project=True, extras=["icons"], explicit=True,
     )

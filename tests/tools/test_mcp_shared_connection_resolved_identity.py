@@ -100,14 +100,14 @@ def two_profile_homes(tmp_path, monkeypatch):
 
 
 def _discover_and_call(homes: dict, tool: str, args: dict) -> dict:
-    import gateway.run as gateway_run
-    from gateway.config import GatewayConfig
+    from tui_runtime.model_switch import _session_profile_runtime_scope
+    from tools.mcp_tool_discovery import discover_mcp_tools
     from tools.registry import registry
 
-    asyncio.run(gateway_run._discover_gateway_mcp_tools(GatewayConfig(multiplex_profiles=True)))
     results = {}
     for name, home in homes.items():
-        with gateway_run._profile_runtime_scope(home):
+        with _session_profile_runtime_scope({"profile_home": str(home)}):
+            discover_mcp_tools()
             results[name] = json.loads(registry.dispatch(tool, args)).get("result")
     return results
 

@@ -8,7 +8,7 @@ import re
 import pytest
 
 from cron.scheduler_preflight import _preflight_check_provider_key
-from cron.scheduler_provider import _profile_cron_scope
+from hermes_constants import set_hermes_home_override, reset_hermes_home_override
 
 JOB = {"id": "7a6ae427c1d8", "name": "radar", "provider": "openai-codex", "model": "gpt-5.6-sol"}
 
@@ -41,6 +41,9 @@ def test_missing_codex_credential_verdict_names_the_home_it_read(two_homes):
     assert _scope(reason) == ("default", str(root))
 
     # Multiplex tick of a satellite profile: the verdict names alpha, not the gateway's launch home.
-    with _profile_cron_scope(alpha):
+    token = set_hermes_home_override(alpha)
+    try:
         reason = _preflight_check_provider_key(JOB, {"cron": {}})
+    finally:
+        reset_hermes_home_override(token)
     assert reason and _scope(reason) == ("alpha", str(alpha))

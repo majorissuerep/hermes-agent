@@ -7,10 +7,10 @@ import { useEffect, useMemo, useState } from 'react'
 
 import { providerDisplayNames } from '../domain/providers.js'
 import { TUI_SESSION_MODEL_FLAG } from '../domain/slash.js'
-import type { GatewayClient } from '../gatewayClient.js'
 import { messages } from '../i18n/runtime.js'
 import { useT } from '../i18n/useT.js'
 import { asRpcResult, rpcErrorMessage } from '../lib/rpc.js'
+import type { LocalAgentClient } from '../localAgentClient.js'
 import type { Theme } from '../theme.js'
 
 import { OverlayHint, useOverlayKeys, windowItems } from './overlayControls.js'
@@ -542,8 +542,14 @@ export function ModelPicker({
       return
     }
 
-    // Any other printable single character extends the filter.
-    if (ch && !key.ctrl && !key.meta && ch.length === 1 && ch >= ' ') {
+    // Bracketed paste arrives as one input event, not one event per character.
+    const printable = ch && Array.from(ch).every(char => {
+      const code = char.codePointAt(0)!
+
+      return code >= 32 && (code < 127 || code > 159)
+    })
+
+    if (printable && !key.ctrl && !key.meta) {
       setFilter(v => v + ch)
       setSel(0)
     }
@@ -842,7 +848,7 @@ export function ModelPicker({
 
 interface ModelPickerProps {
   allowPersistGlobal?: boolean
-  gw: GatewayClient
+  gw: LocalAgentClient
   initialRefresh?: boolean
   maxWidth?: number
   onCancel: () => void

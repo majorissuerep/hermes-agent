@@ -30,30 +30,25 @@ main = _mod.main
 
 DEFAULT = {
     "python": True,
-    "python_prod": True,
     "frontend": True,
     "docker": True,
     "docker_meta": True,
     "nix": True,
     "e2e": True,
     "e2e_upgrade": True,
-    "e2e_desktop_core": True,
-    "e2e_desktop_update": True,
     "site": True,
     "scan": True,
     "deps": True,
     "uv_lock": True,
     "npm_lock": True,
     "bootstrap": True,
-    "desktop_updater": True,
-    "rust": True,
     "remote_backends": True,
 }
 
-SLOW_LANES = {"docker", "nix", "e2e", "e2e_upgrade", "e2e_desktop_core", "e2e_desktop_update"}
+SLOW_LANES = {"docker", "nix", "e2e", "e2e_upgrade"}
 
 
-def _lanes(python=False, frontend=False, site=False, scan=False, deps=False, uv_lock=False, npm_lock=False, bootstrap=False, desktop_updater=False, rust=False, docker_meta=False, python_prod=None, nix=False, docker=None, e2e=False, e2e_upgrade=False, e2e_desktop_core=False, e2e_desktop_update=False, remote_backends=False) -> dict[str, bool]:
+def _lanes(python=False, frontend=False, site=False, scan=False, deps=False, uv_lock=False, npm_lock=False, bootstrap=False, docker_meta=False, nix=False, docker=None, e2e=False, e2e_upgrade=False, remote_backends=False) -> dict[str, bool]:
     # python_prod tracks python except for tests-only diffs; default it to
     # python so the majority of cases don't need to spell it out.
     #
@@ -61,16 +56,12 @@ def _lanes(python=False, frontend=False, site=False, scan=False, deps=False, uv_
     # names them: an ordinary product change reaches them on main, not on
     # the PR. Docker meta files are docker-lane paths, so docker follows
     # docker_meta unless the case says otherwise.
-    _python_prod = python if python_prod is None else python_prod
     return {
         "python": python,
-        "python_prod": _python_prod,
         "docker": docker_meta if docker is None else docker,
         "nix": nix,
         "e2e": e2e,
         "e2e_upgrade": e2e_upgrade,
-        "e2e_desktop_core": e2e_desktop_core,
-        "e2e_desktop_update": e2e_desktop_update,
         "frontend": frontend,
         "docker_meta": docker_meta,
         "site": site,
@@ -79,8 +70,6 @@ def _lanes(python=False, frontend=False, site=False, scan=False, deps=False, uv_
         "uv_lock": uv_lock,
         "npm_lock": npm_lock,
         "bootstrap": bootstrap,
-        "desktop_updater": desktop_updater,
-        "rust": rust,
         "remote_backends": remote_backends,
     }
 
@@ -88,10 +77,7 @@ def _lanes(python=False, frontend=False, site=False, scan=False, deps=False, uv_
 CASES = {
     # source_build runs it on every source update, and the Desktop build steps
     # through the same compilers (tests/ci/test_update_ci_routing.py).
-    "shared JS builder → frontend + both update suites": (
-        ["scripts/build/web.mjs"],
-        _lanes(python=True, frontend=True, e2e_upgrade=True, e2e_desktop_update=True),
-    ),
+
     "root JS tests → frontend": (["tests-js/product-builders.test.mjs"], _lanes(python=True, frontend=True)),
     "docs-only → nothing heavy": (["README.md", "docs/guide.md"], _lanes()),
     "python source → python": (["run_agent.py"], _lanes(python=True, scan=True)),
@@ -99,13 +85,9 @@ CASES = {
     # also re-arms the desktop_updater integration tests (fail-open).
     # The dependency manifests are inputs to the image, the flake and every
     # install, so they start those slow lanes on the PR itself.
-    "dep manifest → python": (
-        ["pyproject.toml"],
-        _lanes(python=True, scan=True, deps=True, uv_lock=True, desktop_updater=True, docker=True, nix=True, e2e_upgrade=True),
-    ),
+
     "uv.lock → python": (["uv.lock"], _lanes(python=True, uv_lock=True, docker=True, nix=True, e2e_upgrade=True)),
-    "ts package → frontend": (["apps/desktop/src/app.tsx"], _lanes(frontend=True)),
-    "ui-tui → frontend": (["ui-tui/src/entry.ts"], _lanes(frontend=True)),
+        "ui-tui → frontend": (["ui-tui/src/entry.ts"], _lanes(frontend=True)),
     # Lockfile bump shifts every TS package's tree, but not the Python suite.
     "root lockfile → frontend, not python": (["package-lock.json"], _lanes(frontend=True, npm_lock=True, docker=True, nix=True)),
     "nested lockfile → npm_lock": (["website/package-lock.json"], _lanes(site=True, npm_lock=True)),
@@ -118,25 +100,18 @@ CASES = {
         ["website/docs/developer-guide/plugins/index.md"],
         _lanes(python=True, site=True),
     ),
-    "frontend → no uv_lock": (["apps/desktop/src/store/profile.ts"], _lanes(frontend=True)),
-    # Cross-language contract JSON under apps/: the pytest that pins it against
+        # Cross-language contract JSON under apps/: the pytest that pins it against
     # the Python side must run even when nothing else in the PR is Python.
     "generated gateway contract → python + frontend": (
         ["apps/shared/src/gateway-contract.generated.ts"],
-        _lanes(python=True, frontend=True, e2e_desktop_core=True),
+        _lanes(python=True, frontend=True),
     ),
     "gateway OpenRPC document → python + frontend": (
         ["apps/shared/src/gateway-contract.openrpc.json"],
-        _lanes(python=True, frontend=True, e2e_desktop_core=True),
-    ),
-    "desktop slash-registry JSON → python + frontend": (
-        ["apps/desktop/src/lib/desktop-slash-registry.json"],
         _lanes(python=True, frontend=True),
     ),
-    "desktop card-tool names → python + frontend": (
-        ["apps/desktop/src/lib/tool-render-class.ts"],
-        _lanes(python=True, frontend=True),
-    ),
+
+
     # The published CIMD document is asserted about by the Python suite, so a
     # lone edit there must not skip the lane that would catch a bad edit.
     "cimd document → python + site": (
@@ -171,7 +146,7 @@ CASES = {
     # tests/ is not packaged, so the built binary cannot change.
     "tests-only → no nix": (
         ["tests/agent/test_foo.py"],
-        _lanes(python=True, python_prod=False, scan=True),
+        _lanes(python=True, scan=True),
     ),
     # Prose cannot change the closure or the binary.
     "docs-only → no nix": (["README.md"], _lanes()),
@@ -181,56 +156,31 @@ CASES = {
     "installer suite → python": (["scripts/tests/test-install-ps1-longpath.ps1"], _lanes(python=True)),
     # The shipped updater page is exercised by the desktop Electron suite;
     # a page-only change must run that suite as well as the server tests.
-    "updater ui.html → frontend + desktop_updater": (
-        ["scripts/desktop-update/ui.html"],
-        _lanes(python=True, frontend=True, desktop_updater=True, e2e_upgrade=True, e2e_desktop_update=True),
-    ),
-    "updater-process.ts → desktop_updater": (
-        ["apps/desktop/electron/updater-process.ts"],
-        _lanes(frontend=True, desktop_updater=True, e2e_desktop_update=True),
-    ),
-    "python source alone → no desktop_updater lane": (["gateway/run.py"], _lanes(python=True, scan=True)),
-    # `.rs` lives under apps/, so it matches `frontend` too. That lane builds
+
+
+        # `.rs` lives under apps/, so it matches `frontend` too. That lane builds
     # TypeScript and cannot notice a Rust error — before `rust` existed it was
     # the ONLY lane a Rust change ran, and the crate's tests never executed.
-    "rust source → rust": (
-        ["apps/bootstrap-installer/src-tauri/src/powershell.rs"],
-        _lanes(frontend=True, bootstrap=True, rust=True),
-    ),
-    "cargo lockfile → rust": (
-        ["apps/bootstrap-installer/src-tauri/Cargo.lock"],
-        _lanes(frontend=True, bootstrap=True, rust=True),
-    ),
+
+
     # Non-.rs files in the crate still change what cargo builds.
-    "tauri config → rust": (
-        ["apps/bootstrap-installer/src-tauri/tauri.conf.json"],
-        _lanes(frontend=True, bootstrap=True, rust=True),
-    ),
-    "ts source alone → no rust lane": (
-        ["apps/bootstrap-installer/src/main.tsx"],
-        _lanes(frontend=True, bootstrap=True),
-    ),
+
+
     # Unknown top-level file keeps Python on rather than risk a silent skip.
     "unknown toplevel → python": (["Makefile"], _lanes(python=True)),
     "mixed docs+python → python": (["README.md", "agent/x.py"], _lanes(python=True, scan=True)),
-    "mixed docs+frontend → frontend": (["README.md", "apps/x.tsx"], _lanes(frontend=True)),
+    "mixed docs+frontend → frontend": (["README.md", "ui-tui/src/x.tsx"], _lanes(frontend=True)),
     # tests-only diffs: pytest lanes stay ON, product jobs (Desktop E2E,
     # Docker) gate on python_prod and skip.
     "tests-only → python without python_prod": (
         ["tests/agent/test_foo.py"],
-        _lanes(python=True, python_prod=False, scan=True),
+        _lanes(python=True, scan=True),
     ),
     # conftest.py owns the _OS_MARKS skip logic, so it re-arms the
     # desktop_updater integration tests too (fail-open).
     # The shared harness can break every Python E2E suite.
-    "conftest → python + desktop_updater + python e2e": (
-        ["tests/conftest.py"],
-        _lanes(python=True, python_prod=False, scan=True, desktop_updater=True, e2e=True, e2e_upgrade=True),
-    ),
-    "conftest fixture module → python + desktop_updater + python e2e": (
-        ["tests/_fixtures/platform_gating.py"],
-        _lanes(python=True, python_prod=False, scan=True, desktop_updater=True, e2e=True, e2e_upgrade=True),
-    ),
+
+
     "tests + prod source → both lanes": (
         ["tests/agent/test_foo.py", "agent/x.py"],
         _lanes(python=True, scan=True),
@@ -255,10 +205,7 @@ CASES = {
         ["hermes_cli/mcp_catalog.py"],
         _lanes(python=True, scan=True),
     ),
-    "eslint config → frontend": (
-        ["apps/desktop/eslint.config.mjs"],
-        _lanes(frontend=True),
-    ),
+
     "shared eslint config → python": (
         ["eslint.config.shared.mjs"],
         _lanes(python=True),
@@ -267,18 +214,12 @@ CASES = {
         ["ui-tui/eslint.config.mjs"],
         _lanes(frontend=True),
     ),
-    "web eslint config → frontend": (
-        ["web/eslint.config.js"],
-        _lanes(frontend=True),
-    ),
+
     "shared package eslint config → frontend": (
         ["apps/shared/eslint.config.mjs"],
         _lanes(frontend=True),
     ),
-    "bootstrap-installer eslint config → frontend + bootstrap": (
-        ["apps/bootstrap-installer/eslint.config.mjs"],
-        _lanes(frontend=True, bootstrap=True),
-    ),
+
     "prettier config → python": (
         [".prettierrc"],
         _lanes(python=True),
@@ -289,26 +230,17 @@ CASES = {
     ),
     # The bootstrap installer lane: shell installer, dev-checkout wrapper,
     # and the Tauri app's non-Rust sources.
-    "install.sh → bootstrap lane": (
-        ["scripts/install.sh"],
-        _lanes(python=True, bootstrap=True, python_prod=True, e2e_upgrade=True, e2e_desktop_update=True),
-    ),
+
     "setup-hermes.sh → bootstrap lane": (
         ["setup-hermes.sh"],
-        _lanes(python=True, bootstrap=True, python_prod=True, e2e_upgrade=True),
+        _lanes(python=True, bootstrap=True, e2e_upgrade=True),
     ),
-    "tauri installer source → bootstrap + rust": (
-        ["apps/bootstrap-installer/src-tauri/src/lib.rs"],
-        _lanes(frontend=True, bootstrap=True, rust=True),
-    ),
+
     "composite action → fail-open all": (
         [".github/actions/retry/action.yml"],
         DEFAULT,
     ),
-    "desktop src → frontend only": (
-        ["apps/desktop/src/app.tsx"],
-        _lanes(frontend=True),
-    ),
+
     # Slow lanes on a pull request: an ordinary product change starts none of
     # them; the suite, its harness, or the code it guards starts its own.
     # Real SSH/Docker backend lane: the backends, the terminal tool, the real tests
@@ -321,77 +253,42 @@ CASES = {
         ["tools/terminal_tool_backends.py"], _lanes(python=True, scan=True, remote_backends=True)),
     "real docker backend test → remote_backends": (
         ["tests/tools/test_docker_backend_real.py"],
-        _lanes(python=True, python_prod=False, scan=True, remote_backends=True)),
+        _lanes(python=True, scan=True, remote_backends=True)),
     "mocked docker unit test → no remote_backends": (
-        ["tests/tools/test_docker_environment.py"], _lanes(python=True, python_prod=False, scan=True)),
+        ["tests/tools/test_docker_environment.py"], _lanes(python=True, scan=True)),
     "sshd harness → remote_backends": (
         ["scripts/ci/start_test_sshd.sh"], _lanes(python=True, remote_backends=True)),
     "sshd container setup → remote_backends": (
         ["scripts/ci/test_sshd_container_setup.sh"], _lanes(python=True, remote_backends=True)),
     "other tool → no remote_backends": (["tools/file_tools.py"], _lanes(python=True, scan=True)),
-    "gateway python → no slow lane": (["gateway/run.py", "agent/x.py"], _lanes(python=True, scan=True)),
-    "desktop renderer → no slow lane": (["apps/desktop/src/app/chat/composer.tsx"], _lanes(frontend=True)),
-    "python e2e suite → e2e only": (
+            "python e2e suite → e2e only": (
         ["tests/e2e/core/sqlite/test_torture.py"],
-        _lanes(python=True, python_prod=False, scan=True, e2e=True),
+        _lanes(python=True, scan=True, e2e=True),
     ),
     "state db → e2e": (["hermes_state/wal.py"], _lanes(python=True, scan=True, e2e=True)),
     "upgrade suite → e2e_upgrade, not e2e": (
         ["tests/e2e/core/upgrade/pm/test_pm_lifecycle.py"],
-        _lanes(python=True, python_prod=False, scan=True, e2e_upgrade=True),
+        _lanes(python=True, scan=True, e2e_upgrade=True),
     ),
-    "updater → e2e_upgrade + desktop update": (
-        ["hermes_cli/update_cmd_git.py"],
-        _lanes(python=True, scan=True, e2e_upgrade=True, e2e_desktop_update=True),
-    ),
+
     "PM → e2e_upgrade + docker": (["pm/environments.py"], _lanes(python=True, scan=True, e2e_upgrade=True, docker=True)),
     # The update pipeline lives beyond the update_* family too: the entry
     # point, launch-time recovery, the gateway restart/pause surface.
     # main.py is also `hermes desktop --build-only`, the update's Desktop rebuild.
-    "cmd_update entry → both update suites": (
-        ["hermes_cli/main.py"], _lanes(python=True, scan=True, e2e_upgrade=True, e2e_desktop_update=True),
-    ),
-    "gateway status stamp → e2e_upgrade": (["gateway/status.py"], _lanes(python=True, scan=True, e2e_upgrade=True)),
-    "desktop verify → desktop_updater + both update suites": (
-        ["hermes_cli/desktop_update_verify.py"],
-        _lanes(python=True, scan=True, desktop_updater=True, e2e_upgrade=True, e2e_desktop_update=True),
-    ),
-    "electron main → desktop update": (
-        ["apps/desktop/electron/main.ts"],
-        _lanes(frontend=True, e2e_desktop_update=True),
-    ),
-    "handoff result reader → desktop_updater + desktop update": (
-        ["apps/desktop/electron/handoff-result.ts"],
-        _lanes(frontend=True, desktop_updater=True, e2e_desktop_update=True),
-    ),
-    "desktop backend spawn → desktop core": (
-        ["apps/desktop/electron/backend-child.ts"],
-        _lanes(frontend=True, e2e_desktop_core=True),
-    ),
-    "desktop session resume → desktop core": (
-        ["apps/desktop/src/app/session/hooks/use-session-actions/index.ts"],
-        _lanes(frontend=True, e2e_desktop_core=True),
-    ),
-    "desktop core spec → desktop core": (
-        ["apps/desktop/e2e/core/transcript-integrity.spec.ts"],
-        _lanes(frontend=True, e2e_desktop_core=True),
-    ),
-    "desktop profile rail → desktop core": (
-        ["apps/desktop/src/app/chat/sidebar/profile-switcher.tsx"],
-        _lanes(frontend=True, e2e_desktop_core=True),
-    ),
-    "desktop update spec → desktop update, not core": (
-        ["apps/desktop/e2e/update/app-update.spec.ts"],
-        _lanes(frontend=True, e2e_desktop_update=True),
-    ),
+
+
+
+
+
+
+
+
+
     # The update suite runs on the core suite's harness.
-    "desktop core harness → both desktop suites": (
-        ["apps/desktop/e2e/core/harness.ts"],
-        _lanes(frontend=True, e2e_desktop_core=True, e2e_desktop_update=True),
-    ),
+
     "image tests → docker": (
         ["tests/docker/test_image_smoke.py"],
-        _lanes(python=True, python_prod=False, scan=True, docker=True),
+        _lanes(python=True, scan=True, docker=True),
     ),
     # Fail open: CI-config / empty / blank diffs run everything.
     ".github change → all": ([".github/workflows/tests.yml"], DEFAULT),
@@ -406,7 +303,7 @@ def test_classify(files, expected):
     assert classify(files) == expected
 
 
-@pytest.mark.parametrize("files", [["README.md"], ["gateway/run.py"], ["apps/desktop/src/app.tsx"]])
+@pytest.mark.parametrize("files", [["README.md"], ["run_agent.py"], ["ui-tui/src/app.tsx"]])
 def test_run_e2e_label_turns_every_slow_lane_on_and_nothing_else(files):
     labelled = classify(files, run_e2e=True)
     assert {lane for lane in SLOW_LANES if labelled[lane]} == SLOW_LANES
@@ -445,8 +342,8 @@ def test_every_slow_lane_path_matches_a_tracked_file():
 # gateway/ / hermes_bootstrap.py skipped both the Linux and Windows journeys.
 _UPDATE_PATH_FILES = (
     "hermes_cli/main.py",
-    "hermes_cli/main_dashboard.py",
-    "hermes_cli/main_desktop.py",
+
+
     "hermes_cli/_early_recovery.py",
     "hermes_cli/venv_sync.py",
     "hermes_cli/update_lock.py",
@@ -462,30 +359,14 @@ _UPDATE_PATH_FILES = (
     "hermes_cli/gitlock.py",
     "hermes_cli/process_identity.py",
     "hermes_cli/relaunch.py",
-    "hermes_cli/gateway.py",
-    "hermes_cli/gateway_migrate.py",
-    "hermes_cli/desktop_update_verify.py",
+
+
+
     "hermes_bootstrap.py",
     "hermes_constants.py",
-    "gateway/status.py",
-    "gateway/control_socket.py",
-    "gateway/code_skew.py",
-    "scripts/desktop-update/posix.sh",
+
 )
-_DESKTOP_UPDATE_PATH_FILES = (
-    "apps/desktop/electron/main.ts",
-    "apps/desktop/electron/update-marker.ts",
-    "apps/desktop/electron/update-gate.ts",
-    "apps/desktop/electron/updater-process.ts",
-    "apps/desktop/electron/updater/checkout.ts",
-    "apps/desktop/electron/handoff-result.ts",
-    "apps/desktop/electron/desktop-installation.ts",
-    "apps/desktop/electron/backend-discovery.ts",
-    "apps/desktop/electron/local-gateway.ts",
-    "scripts/desktop-update/posix.sh",
-    "hermes_cli/desktop_update_verify.py",
-    "hermes_cli/main_desktop.py",
-)
+
 
 
 @pytest.mark.parametrize("path", _UPDATE_PATH_FILES)
@@ -494,10 +375,6 @@ def test_every_update_path_file_starts_the_real_update_suite(path):
     assert classify([path])["e2e_upgrade"], path
 
 
-@pytest.mark.parametrize("path", _DESKTOP_UPDATE_PATH_FILES)
-def test_every_desktop_update_path_file_starts_the_desktop_update_suite(path):
-    assert (_REPO / path).is_file(), f"{path} moved: update the classifier and this table"
-    assert classify([path])["e2e_desktop_update"], path
 
 
 _REPO = Path(__file__).resolve().parents[2]
@@ -558,7 +435,6 @@ def _iter_if_expressions(job: object):
 # suite: each runs on a PR exactly when its lane fires and then gates the merge.
 _REAL_UPDATE_LANES = (
     ("ci.yaml", "tests", "tests.yml", "e2e_upgrade"),
-    ("ci.yaml", "e2e-desktop-update", "e2e-desktop-update.yml", "e2e_desktop_update"),
     # Not an update suite, but the same contract: the real SSH/Docker backend lane.
     ("ci.yaml", "remote-backends", "remote-backends.yml", "remote_backends"),
 )
@@ -665,7 +541,6 @@ def test_main_recovers_pr_files_instead_of_fail_open(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "frontend=false" in out
     assert "python=true" in out
-    assert "python_prod=true" in out
 
 
 def test_main_still_fail_opens_when_recovery_is_empty(monkeypatch, capsys):

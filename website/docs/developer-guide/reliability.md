@@ -13,7 +13,10 @@ Chat Completions does not qualify its Responses or Anthropic endpoint.
 
 Hermes is a focused personal agent, not a catalog of every available integration.
 Reliable conversations, encrypted self-management, and installation/update/recovery
-take priority over expanding the feature count.
+take priority over expanding the feature count. The product is the local Ink TUI
+and headless/self-called terminal agents on Linux and macOS. Desktop, messaging
+gateways, remote management and inbound agent servers are not shipped. A private
+stdio runtime is an implementation detail, not an exposed management endpoint.
 
 - The provider catalog and platform policy define the default support boundary.
   An upstream merge, model catalog entry, or working custom URL does not expand it.

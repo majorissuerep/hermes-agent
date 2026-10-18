@@ -282,7 +282,7 @@ def _request_protected_instruction_approval(reasons: list[str], task_id: str = "
     try:
         import tools.approval as _approval
         from tools.approval_context import _fire_approval_hook, get_current_session_key
-        from tools.approval_gateway_wait import _await_gateway_decision
+        from tools.approval_session_wait import _await_session_decision
         from tools.approval_prompt import prompt_dangerous_approval
     except Exception:
         return blocked.format(why=_APPROVAL_UNAVAILABLE)
@@ -292,7 +292,7 @@ def _request_protected_instruction_approval(reasons: list[str], task_id: str = "
     session_key = get_current_session_key()
     try:
         with _approval._lock:
-            notify_cb = _approval._gateway_notify_cbs.get(session_key)
+            notify_cb = _approval._session_notify_cbs.get(session_key)
     except Exception:
         notify_cb = None
 
@@ -304,7 +304,7 @@ def _request_protected_instruction_approval(reasons: list[str], task_id: str = "
             "description": description,
             "allow_permanent": False,
             "allow_session": False}
-        decision = _await_gateway_decision(session_key, notify_cb, approval_data, surface="gateway")
+        decision = _await_session_decision(session_key, notify_cb, approval_data, surface="gateway")
         if decision.get("notify_failed"):
             return blocked.format(why="requires approval but the approval request could not be delivered.")
         if decision.get("cancelled"):

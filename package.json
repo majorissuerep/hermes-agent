@@ -4,23 +4,18 @@
   "description": "An AI agent with advanced tool-calling capabilities, featuring a flexible toolsets system for organizing and managing tools.",
   "private": true,
   "workspaces": [
-    "apps/*",
+    "apps/shared",
     "ui-tui",
     "ui-tui/packages/*",
-    "web",
     "tests-js"
   ],
   "scripts": {
     "postinstall": "echo '✅ Node dependencies installed. Run: python run_agent.py --help'",
     "install:root": "npm install --workspaces=false",
-    "install:web": "npm install --workspace web",
     "install:tui": "npm install --workspace ui-tui",
-    "install:desktop": "npm install --workspace apps/desktop",
     "audit:root": "npm audit --workspaces=false",
-    "audit:web": "npm audit --workspace web",
     "audit:tui": "npm audit --workspace ui-tui",
     "audit:fix:root": "npm audit fix --workspaces=false",
-    "audit:fix:web": "npm audit fix --workspace web",
     "audit:fix:tui": "npm audit fix --workspace ui-tui",
     "check": "npm run --ws check",
     "fix": "npm run --ws fix",
@@ -47,9 +42,6 @@
     "typescript-eslint": "8.64.0"
   },
   "overrides": {
-    "@electron/osx-sign": {
-      "isbinaryfile": "5.0.7"
-    },
     "lodash": "4.18.1",
     "yauzl": "^3.3.1",
     "protobufjs": "^8.7.1",
@@ -76,12 +68,8 @@
   "allowScripts": {
     "unicode-animations": false,
     "esbuild@0.28.1": true,
-    "node-pty@1.1.0": true,
-    "electron-winstaller@5.4.0": true,
-    "electron@40.10.6": true,
     "fsevents@2.3.2": true,
     "fsevents@2.3.3": true,
-    "get-windows@9.3.0": true,
     "lefthook@2.1.14": true
   },
   "dependencies": {

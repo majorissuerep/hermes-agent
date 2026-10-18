@@ -171,20 +171,18 @@ class TestRoutedForeignHomeScope:
         guard the desktop backend and routed turns use) installs the home override +
         secret scope together. Inside it, a miss must not borrow launch env, while
         the foreign profile's own .env resolves and the adapter-facing reader agrees."""
-        from gateway.platforms._shared import get_scoped_secret
-        from gateway.run import _profile_runtime_scope
+        from tui_runtime.model_switch import _session_profile_runtime_scope
 
         foreign = tmp_path / "profiles" / "team_b"
         foreign.mkdir(parents=True)
         (foreign / ".env").write_text("TEAM_B_KEY=from-b\n", encoding="utf-8")
         monkeypatch.setenv("OPENAI_API_KEY", "sk-launch-profile")
 
-        with _profile_runtime_scope(foreign, hydrate_secrets=False):
+        with _session_profile_runtime_scope({"profile_home": str(foreign)}, hydrate_secrets=False):
             assert ss.serves_routed_profile() is True
             assert ss.get_secret("OPENAI_API_KEY") is None
             assert ss.get_secret("TEAM_B_KEY") == "from-b"
             # The reader adapters actually call takes the same fail-closed path.
-            assert get_scoped_secret("OPENAI_API_KEY") is None
 
     def test_worker_profile_scope_bind_home_false_e2e(self, monkeypatch, tmp_path):
         """The kanban spawn-env build binds the assignee's secret scope with
@@ -210,7 +208,7 @@ class TestScopeSetupRecovery:
     the caller's context."""
 
     def test_profile_runtime_scope_setup_failure_restores_override(self, monkeypatch, tmp_path):
-        from gateway.run import _profile_runtime_scope
+        from tui_runtime.model_switch import _session_profile_runtime_scope
         from hermes_constants import get_hermes_home_override
 
         foreign = tmp_path / "profiles" / "b"
@@ -221,7 +219,7 @@ class TestScopeSetupRecovery:
 
         monkeypatch.setattr("agent.secret_scope.build_profile_secret_scope", boom)
         with pytest.raises(RuntimeError):
-            with _profile_runtime_scope(foreign, hydrate_secrets=False):
+            with _session_profile_runtime_scope({"profile_home": str(foreign)}, hydrate_secrets=False):
                 pass
         assert get_hermes_home_override() is None
         assert ss.current_secret_scope() is None
@@ -248,7 +246,7 @@ class TestScopeSetupRecovery:
         bind must release what it already bound (home override + secret scope).
         Driven through ``server`` — the split module's functions run rebound on
         server.py's globals (``bind_module``)."""
-        from tui_gateway import server
+        from tui_runtime import server
         from hermes_constants import get_hermes_home_override
 
         home = tmp_path / "profiles" / "b"

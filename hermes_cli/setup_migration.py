@@ -63,17 +63,6 @@ def _cfg_summary(config: dict, section: str, key: str, default, prefix: str) -> 
     return f"{prefix}{cfg_get(config, section, key, default=default)}"
 
 
-def _gateway_summary(config: dict) -> Optional[str]:
-    from hermes_cli.gateway import _all_platforms, _platform_status
-    # Any non-empty status other than "not configured" counts — WhatsApp ("enabled, not paired"),
-    # Matrix ("configured + E2EE"), Signal ("partially configured") mean setup already started.
-    configured = [
-        # Trailing parenthetical qualifiers are stripped from the label.
-        plat["label"].split("(", 1)[0].strip() or plat["label"]
-        for plat in _all_platforms()
-        if _platform_status(plat) and _platform_status(plat) != "not configured"
-    ]
-    return ", ".join(configured) if configured else None
 
 
 _TOOL_ENV_LABELS = (
@@ -93,7 +82,7 @@ _SECTION_SUMMARIES = {
     "model": _model_summary,
     "terminal": partial(_cfg_summary, section="terminal", key="backend", default="local", prefix="backend: "),
     "agent": partial(_cfg_summary, section="agent", key="max_turns", default=90, prefix="max turns: "),
-    "gateway": _gateway_summary,
+
     "tools": _tools_summary,
 }
 

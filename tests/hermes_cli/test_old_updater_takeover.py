@@ -305,7 +305,7 @@ def test_atexit_recovers_only_stopped_serves_after_cached_update(tmp_path, ackno
 
 @pytest.mark.parametrize("spawn_fails", [False, True])
 @pytest.mark.parametrize("discarded", [False, True])
-def test_serve_resume_child_reuses_respawn_without_updater_or_supervisors(tmp_path, spawn_fails, discarded):
+def test_legacy_serve_tokens_are_discharged_without_starting_services(tmp_path, spawn_fails, discarded):
     root = Path(__file__).resolve().parents[2]
     context, result_path = tmp_path / "request.json", tmp_path / "result.json"
     home = tmp_path / "home"
@@ -351,18 +351,13 @@ def test_serve_resume_child_reuses_respawn_without_updater_or_supervisors(tmp_pa
     env.update(HOME=str(home), HERMES_HOME=str(home))
     result = subprocess.run([sys.executable, "-I", "-B", "-X", "utf8", str(program)],
                             env=env, capture_output=True, text=True, timeout=30, check=False)
-    assert result.returncode == int(spawn_fails or discarded), result.stdout + result.stderr
+    assert result.returncode == 0, result.stdout + result.stderr
     assert json.loads(result_path.read_text()) == {"serves_handled": True}
     commands = json.loads((home / "commands.json").read_text())
-    assert commands == [
-        [sys.executable, str(root / "hermes"), "serve", "--host", "127.0.0.1", "--port", "8119"],
-        [sys.executable, str(root / "hermes"), "--profile", "ops team 日本", "dashboard",
-         "--host", "::1", "--port", "8120", "--no-open"],
-    ]
-    assert ("probe spawn failed" in result.stdout) is spawn_fails
+    assert commands == []
 
 
-def test_serve_resume_child_leaves_token_unhandled_when_imports_fail(tmp_path):
+def test_retired_serve_token_discharged_without_application_imports(tmp_path):
     root = Path(__file__).resolve().parents[2]
     context, result_path = tmp_path / "request.json", tmp_path / "result.json"
     context.write_text(json.dumps({"root": str(tmp_path), "home": str(tmp_path),
@@ -377,9 +372,8 @@ def test_serve_resume_child_leaves_token_unhandled_when_imports_fail(tmp_path):
          str(context), str(result_path)], env=env, capture_output=True, text=True, timeout=30,
          check=False,
     )
-    assert result.returncode == 1
-    assert json.loads(result_path.read_text()) == {"serves_handled": False}
-    assert "Stopped serve recovery failed" in result.stderr
+    assert result.returncode == 0
+    assert json.loads(result_path.read_text()) == {"serves_handled": True}
 
 
 @pytest.mark.parametrize("encoding", ["utf-8", "utf-8-sig"])
@@ -411,7 +405,9 @@ def test_completed_serve_token_is_acknowledged_without_preparation(tmp_path, enc
         check=False,
     )
     assert child.returncode == 0, child.stdout + child.stderr
-    assert json.loads(result_path.read_text(encoding="utf-8-sig")) == {"serves_handled": True}
+    expected = ({"serves_handled": True} if entrypoint == "update_serve_resume" else
+                {"receipt_handled": False, "resume_handled": True})
+    assert json.loads(result_path.read_text(encoding="utf-8-sig")) == expected
     assert not result_path.read_bytes().startswith(b"\xef\xbb\xbf")
     assert context.read_bytes() == before
 
@@ -456,94 +452,10 @@ def test_bootstrap_lock_remains_live_without_application_dependencies(tmp_path):
 SHA = "c" * 40
 
 
-@pytest.mark.parametrize("git", [
-    "missing",
-    pytest.param("failing", marks=pytest.mark.platforms("posix")),  # POSIX shell stub
-])
-def test_takeover_arms_the_checkout_head_when_git_cannot_answer(tmp_path, monkeypatch, git):
-    """The historical takeover arms the fleet restart AFTER the tree moved. A host whose git is off
-    PATH (only PM's store copy) used to raise FileNotFoundError there, reporting a committed update
-    as failed (F20); a git that runs but fails silently armed nothing (F25). Either way the record
-    must still name the HEAD the checkout's own ref files hold."""
-    from hermes_cli import _early_recovery, _update_takeover
-    from hermes_cli.update_host_obligation import read_host_obligation
-
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    monkeypatch.setenv("PATH", str(bin_dir))
-    root = tmp_path / "checkout"
-    if git == "missing":
-        # The git PATH and PM's store cannot find; the checkout is a linked worktree whose branch
-        # is only in the common dir's packed-refs.
-        monkeypatch.setattr(_early_recovery, "_git_executable", lambda *args, **kwargs: "git")
-        worktree = tmp_path / "repo.git" / "worktrees" / "checkout"
-        worktree.mkdir(parents=True)
-        (worktree / "commondir").write_text("../..\n", encoding="utf-8")
-        (worktree / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
-        (tmp_path / "repo.git" / "packed-refs").write_text(
-            f"# pack-refs with: peeled fully-peeled sorted\n{'d' * 40} refs/heads/other\n{SHA} refs/heads/main\n",
-            encoding="utf-8")
-        root.mkdir()
-        (root / ".git").write_text(f"gitdir: {worktree}\n", encoding="utf-8")
-    else:
-        stub = bin_dir / "git"
-        stub.write_text("#!/bin/sh\nexit 128\n", encoding="utf-8")
-        stub.chmod(0o755)
-        monkeypatch.setattr(_early_recovery, "_git_executable", lambda *args, **kwargs: str(stub))
-        (root / ".git" / "refs" / "heads").mkdir(parents=True)
-        (root / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
-        (root / ".git" / "refs" / "heads" / "main").write_text(f"{SHA}\n", encoding="utf-8")
-
-    _update_takeover._arm_fleet_obligation(root)
-
-    assert (read_host_obligation() or {}).get("expected_sha") == SHA
 
 
-@pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
-def test_takeover_arms_an_sha_less_obligation_for_a_git_less_root(tmp_path, monkeypatch):
-    """An archive install has no HEAD to name, yet its update still owes the fleet a restart (F21):
-    an SHA-less record (readers hold the fleet to the checkout) instead of no record at all."""
-    from hermes_cli import _update_takeover
-    from hermes_cli.update_host_obligation import read_host_obligation
-
-    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))  # no enclosing repo answers for it
-    root = tmp_path / "archive"
-    root.mkdir()
-
-    _update_takeover._arm_fleet_obligation(root)
-
-    record = read_host_obligation()
-    assert record is not None and record["expected_sha"] == ""
 
 
-@pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
-def test_takeover_arms_the_host_record_without_application_dependencies(tmp_path):
-    """The arm runs in the HISTORICAL interpreter, before PM installs the new dependencies. A
-    ruamel-less interpreter (-I -S here) must still write the HOST record every profile reads, not
-    only the arming profile's per-home breadcrumb (R1-1)."""
-    source = Path(__file__).resolve().parents[2]
-    root = tmp_path / "checkout"
-    git = ["git", "-C", str(root), "-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false"]
-    subprocess.run(["git", "init", "-q", str(root)], check=True)
-    subprocess.run([*git, "commit", "-q", "--allow-empty", "-m", "init"], check=True)
-    rev_parse = [*git, "rev-parse", "HEAD"]
-    head = subprocess.run(rev_parse, check=True, capture_output=True, text=True, encoding="utf-8").stdout.strip()
-    lock_dir, home = tmp_path / "gateway-locks", tmp_path / "home"
-    home.mkdir()
-    child = subprocess.run(
-        [sys.executable, "-I", "-S", "-B", "-c",
-         "import importlib.util, sys\nfrom pathlib import Path\n"
-         f"sys.path.insert(0, {str(source)!r})\n"
-         "assert importlib.util.find_spec('ruamel') is None, 'precondition: no app dependencies'\n"
-         "from hermes_cli._update_takeover import _arm_fleet_obligation\n"
-         f"_arm_fleet_obligation(Path({str(root)!r}))\n"],
-        env={**os.environ, "HERMES_GATEWAY_LOCK_DIR": str(lock_dir), "HERMES_HOME": str(home)},
-        stdin=subprocess.DEVNULL, capture_output=True, text=True, encoding="utf-8", timeout=60,
-        check=False,
-    )
-    assert child.returncode == 0, child.stdout + child.stderr
-    [armed] = lock_dir.glob("host-update-restart-*.json")  # the install-keyed record (review S3)
-    assert json.loads(armed.read_text(encoding="utf-8-sig"))["expected_sha"] == head
 
 
 def test_a_finish_child_that_cannot_start_after_the_commit_is_owed_not_failed(tmp_path, monkeypatch, capsys):
@@ -589,52 +501,8 @@ def test_a_finish_child_that_cannot_start_after_the_commit_is_owed_not_failed(tm
     assert "finishing steps did not run" in capsys.readouterr().err
 
 
-def test_the_takeover_breadcrumb_is_written_temp_fsync_rename(tmp_path, monkeypatch):
-    """With the host record unwritable the takeover falls back to the per-home breadcrumb; it was
-    written in place (review C12, invariant 5): a crash mid-write left a truncated debt record."""
-    from hermes_cli import _update_takeover, update_host_obligation
-    from hermes_constants import get_hermes_home
-
-    monkeypatch.setattr(update_host_obligation, "write_host_obligation", lambda **_kw: False)
-    monkeypatch.setattr(_update_takeover, "_head_sha", lambda _root: "a" * 40)
-    synced, replaced = [], []
-    real_fsync, real_replace = os.fsync, os.replace
-    monkeypatch.setattr(os, "fsync", lambda fd: synced.append(fd) or real_fsync(fd))
-    monkeypatch.setattr(os, "replace", lambda src, dst: replaced.append((Path(dst), len(synced)))
-                        or real_replace(src, dst))
-
-    _update_takeover._arm_fleet_obligation(tmp_path)
-
-    crumb = get_hermes_home() / "fleet_restart_pending"
-    assert replaced and replaced[-1][0] == crumb and replaced[-1][1] > 0
-    assert f"expected_sha={'a' * 40}" in crumb.read_text(encoding="utf-8")
 
 
-@pytest.mark.skipif(getattr(os, "geteuid", lambda: 1)() == 0, reason="root ignores directory permissions")
-def test_a_takeover_debt_another_profile_cannot_see_is_never_silent(tmp_path, monkeypatch, capsys):
-    """The takeover arms after the historical updater already moved the tree, through the same
-    fallback as the commit point: with the host record unwritable on a two-profile install, the
-    arming profile's marker hides the debt from the other one, so the takeover must say so (it
-    cannot refuse a move that already happened) (kshitijk4poor P2, review S2)."""
-    from hermes_cli import _update_takeover
-
-    homes = {name: tmp_path / "profiles" / name for name in ("coder", "writer")}
-    for home in homes.values():
-        home.mkdir(parents=True)
-        (home / "config.yaml").write_text("{}\n", encoding="utf-8")
-    lock_dir = tmp_path / "gateway-locks"
-    lock_dir.mkdir()
-    monkeypatch.setenv("HERMES_GATEWAY_LOCK_DIR", str(lock_dir))
-    monkeypatch.setenv("HERMES_HOME", str(homes["coder"]))
-    monkeypatch.setattr(_update_takeover, "_head_sha", lambda _root: "a" * 40)
-    lock_dir.chmod(0o500)
-    try:
-        _update_takeover._arm_fleet_obligation(tmp_path)
-    finally:
-        lock_dir.chmod(0o700)
-
-    assert (homes["coder"] / "fleet_restart_pending").is_file()
-    assert "hermes gateway restart" in capsys.readouterr().err
 
 
 def test_a_historical_updater_arms_the_host_record_under_the_current_mutex(tmp_path, monkeypatch):

@@ -12,18 +12,14 @@ def build_update_parser(subparsers, *, cmd_update: Callable) -> None:
         "update", help="Update Hermes Agent to the latest version",
         description="Pull the latest changes from git and reinstall dependencies")
     update_parser.add_argument(
-        "--gateway", action="store_true", default=False,
-        help="Gateway mode: use file-based IPC for prompts instead of stdin (used internally by /update)",
-    )
-    update_parser.add_argument(
         "--check", action="store_true", default=False,
         help="Check whether an update is available without installing anything")
     update_parser.add_argument(
         "--plan", action="store_true", default=False,
         help="Show the update plan and exit without changing anything: install "
-            "kind (git/docker/nix), every running Hermes service across all "
-            "profiles with its supervisor and running code version, and how "
-            "each will be restarted. Read-only; safe on a live fleet.")
+            "kind (git/docker/nix), local terminal sessions across "
+            "profiles and their running code version, and how "
+            "each adopts the update on relaunch. Read-only.")
     update_parser.add_argument(
         "--list-venv-holders", action="store_true", default=False,
         help="Print the processes the Windows venv-holder guard would refuse on as a JSON list "
@@ -106,10 +102,5 @@ def build_update_parser(subparsers, *, cmd_update: Callable) -> None:
             "--set-channel persists). 'stable' and 'canary' select published "
             "releases, 'main' the branch tip. Source installs only."
         ),
-    )
-    update_parser.add_argument(
-        "--no-gateway-restart", action="store_true", default=False,
-        help="Update code and dependencies but defer the fleet restart. Use for updates "
-             "running inside a gateway cgroup, then restart gateways separately.",
     )
     update_parser.set_defaults(func=cmd_update)

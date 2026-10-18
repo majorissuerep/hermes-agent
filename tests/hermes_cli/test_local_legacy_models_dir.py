@@ -39,9 +39,8 @@ def test_legacy_models_move_into_the_machine_dir_without_clobbering(tmp_path, mo
     assert bootstrap.adopt_legacy_models() == []  # idempotent
 
 
-def test_boot_and_status_both_adopt_legacy_models(tmp_path, monkeypatch):
+def test_boot_adopts_legacy_models(tmp_path, monkeypatch):
     from hermes_cli.local_runtime import binaries
-    from hermes_cli.web_routers import local_models as lm
 
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
     monkeypatch.setattr(binaries, "installed_engine", lambda backend="auto": None)
@@ -50,9 +49,3 @@ def test_boot_and_status_both_adopt_legacy_models(tmp_path, monkeypatch):
     (work / "models" / "booted.gguf").touch()
     bootstrap.ensure_local_runtime({"local_runtime": {"enabled": True}})
     assert (bootstrap.models_dir() / "booted.gguf").exists()
-
-    (work / "models").mkdir()  # the boot's adoption emptied and removed it
-    (work / "models" / "listed.gguf").touch()
-    monkeypatch.setattr(lm, "_runtime_section", lambda: {"enabled": False})
-    monkeypatch.setattr(lm, "_state_endpoint", lambda: None)
-    assert "listed" in {row["id"] for row in lm.local_models_status()["models"]}

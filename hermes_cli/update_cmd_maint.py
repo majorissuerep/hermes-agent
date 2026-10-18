@@ -263,44 +263,6 @@ def _finish_dashboard_update_cleanup(
     stop_for_relaunch()
 
 
-def _refresh_dashboard_after_update(*, already_restarted_units: set[str] | None = None) -> set[int]:
-    """Refresh managed dashboards or stop stale manual ones after an update; returns the PIDs it
-    stopped and could not bring back, so the receipt records them ``failed`` (#109290).
-
-    *already_restarted_units*: systemd unit names (no ``.service``) the fleet-restart loop
-    already restarted, so a Serve-only install isn't restarted a second time here.
-
-    See #83595.
-    """
-    from hermes_cli.update_cmd import _m, _record_update_step
-    from hermes_constants import get_hermes_home
-
-    try:
-        stop_result = _m()._kill_stale_dashboard_processes(
-            restart_managed=True, already_restarted_units=already_restarted_units,
-            scope_home=str(get_hermes_home()),
-        )
-    except Exception as exc:
-        # Isolated like every sibling post-update step: a failure here (#112604) used to abort
-        # the fleet matrix, reconciliation and the inner receipt finalize that follow it. A
-        # dashboard/serve left on pre-update code is still caught by the survivor probe →
-        # reconciliation (an owed gateway_restart follow-up).
-        logger.warning("Post-update dashboard cleanup failed: %s", exc)
-        _record_update_step("dashboard_cleanup", False, f"{type(exc).__name__}: {exc}")
-        print()
-        print(f"⚠ Could not refresh running dashboard/serve process(es): {exc}")
-        print("  If one is still running, restart it so it serves the updated code:")
-        print("    hermes dashboard --port <port>   (or: systemctl --user restart hermes-dashboard)")
-        return set()
-    unrecovered = {int(pid) for pid in stop_result.get("unrecovered") or ()}
-    if not unrecovered:
-        return unrecovered
-
-    print()
-    print("⚠ A web dashboard/serve process was stopped during update and could not be auto-restarted.")
-    print("  Re-launch it when you want the web UI back:")
-    print("    hermes dashboard --port <port>")
-    return unrecovered
 
 
 def _print_update_completion(message: str) -> None:
@@ -965,22 +927,6 @@ def _run_post_update_maintenance(
                 followups.append((name, reason))
 
     from hermes_cli.update_cmd import _check_and_apply_config_migration, _m
-    # macOS TCC: Desktop bundles are re-signed each update, so old grants can go stale
-    # (toggle ON, yet macOS re-prompts with no Allow button). Tell users how to re-grant.
-    # With the post-#73681 identifier-pinned DR, new grants survive rebuilds — but a grant made to a pre-fix
-    # binary stays stale: the System Settings toggle shows ON while macOS re-prompts on every capture, and
-    # the modern prompt has no Allow button, so users loop. One line of guidance after update tells affected
-    # users how to complete the one-time re-grant.
-    if sys.platform == "darwin" and had_desktop_app_before_update:
-        print()
-        print(
-            "  ℹ macOS: if Hermes re-prompts for permissions you already "
-            "granted (toggle shows ON), the stored grant is stale — run "
-            "`tccutil reset ScreenCapture com.nousresearch.hermes` (repeat "
-            "per affected service), toggle it ON in System Settings, then "
-            "fully quit & relaunch once."
-        )
-
     # macOS TCC interpreter anchor; boot-gated — a failed probe leaves the venv untouched.
     try:
         # See #95596.
@@ -1024,18 +970,11 @@ def _run_post_update_maintenance(
     owed_step("profile_sync", _sync_profiles_after_update)
 
     owed_step("config_migration", lambda: _check_and_apply_config_migration(
-        assume_yes=assume_yes, gateway_mode=gateway_mode, pre_update_snapshot_id=pre_update_snapshot_id,
+        assume_yes=assume_yes, gateway_mode=False, pre_update_snapshot_id=pre_update_snapshot_id,
     ))
 
     print()
     update_complete = _print_verified_update_completion(completion_message or _update_complete_message(pre_update_version))
-    # A multi-profile host whose gateway came back standalone on a guard says so here too — the
-    # update summary is the one line operators read (the boot log under s6 is not).
-    with suppress(Exception):
-        from hermes_cli.gateway_multiplex_mode import consume_rewritten_notice, recorded_standalone_warning_lines
-        for line in [*consume_rewritten_notice(), *recorded_standalone_warning_lines()]:
-            print(line)
-
     with _best_effort('Post-update notices failed: %s'):
         _print_post_update_notices_and_self_heals()
     # A non-✓ completion message (parked local changes) withholds success on its own; only a
@@ -1044,3 +983,9 @@ def _run_post_update_maintenance(
         record_followup("sqlite_runtime", "the selected Python links an unsafe SQLite runtime",
                         retry="run the installer again")
     return update_complete
+
+
+def _refresh_dashboard_after_update(*args, **kwargs):
+    """Frozen external updater symbol: transfer ownership to fresh terminal completion."""
+    from hermes_cli._old_updater import stop_for_relaunch
+    stop_for_relaunch()

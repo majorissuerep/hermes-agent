@@ -1,11 +1,10 @@
 import { randomUUID } from 'node:crypto'
 
 import { useStore } from '@nanostores/react'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 
-import { isServerQueued } from '../app/pendingBubbles.js'
 import { captureDestination, type SubmissionDestination } from '../app/submissionDestination.js'
-import { $uiState, getUiState, patchUiState } from '../app/uiStore.js'
+import { $uiState, getUiState } from '../app/uiStore.js'
 import { t } from '../i18n/runtime.js'
 import {
   loadPendingInputs,
@@ -27,10 +26,8 @@ export interface QueueItem {
   inFlight?: boolean
   failed?: boolean
   attachments?: Array<{ path: string; mime: string }>
-  controlMethod?: 'session.steer' | 'session.redirect'
-  executionGeneration?: number
   preparedText?: string
-  legacyAttempted?: boolean
+  deliveryAttempted?: boolean
   settle?: (accepted: boolean) => void
 }
 
@@ -62,7 +59,7 @@ export function takeQueueItem(queue: QueueItem[], index: number, editedDisplay?:
   const {
     failed: _f,
     inFlight: _i,
-    legacyAttempted: _l,
+    deliveryAttempted: _l,
     preparedText: _p,
     settle: _s,
     submissionId: _id,
@@ -94,8 +91,8 @@ interface PendingQueue {
 // `gw` owns server-queued rows: the authority's pending fanout is rendered
 // after this client's unconfirmed local items, and deleting/editing one goes
 // through `prompt.cancel` — the next fanout, not a local splice, retires it.
-export function useQueue(gw?: { request: (method: string, params: Record<string, unknown>) => Promise<unknown> }) {
-  const ui = useStore($uiState)
+export function useQueue() {
+  useStore($uiState)
   const queues = useRef(new Map<string, PendingQueue>())
   const unbound = useRef<PendingQueue>({ edit: null, items: [] })
   const [, refresh] = useState(0)
@@ -199,51 +196,8 @@ export function useQueue(gw?: { request: (method: string, params: Record<string,
     [getQueue]
   )
 
-  const serverRows = (ui.info?.pending_submissions ?? []).filter(isServerQueued)
-
-  const queuedDisplay = [
-    ...queueRef.current.map(item => `${item.failed ? t('canonical.queue.unconfirmedPrefix') : ''}${item.display}`),
-    // A queued row reads as main's plain queue line; only an unknown execution keeps its status tag.
-    ...serverRows.map(row =>
-      row.status === 'queued' ? String(row.user) : t('canonical.queue.serverRow', String(row.status), String(row.user))
-    )
-  ]
-
-  // Indexes past the local items address server rows (read live, not from
-  // render state: key handlers run between renders).
-  const serverRowAt = useCallback(
-    (index: number) => {
-      const local = queueRef.current.length
-
-      return index >= local ? (getUiState().info?.pending_submissions ?? []).filter(isServerQueued)[index - local] : undefined
-    },
-    [queueRef]
-  )
-
-  const queueDraft = useCallback(
-    (index: number) => serverRowAt(index)?.user ?? queueRef.current[index]?.display ?? '',
-    [queueRef, serverRowAt]
-  )
-
-  // Resolves once the authority has retired the row; the rejection carries the
-  // store's refusal (stale_generation, …) so callers decide what the edited
-  // or deleted text becomes.
-  const cancelServerRow = useCallback(
-    (row: { admission_id: string; status?: string; execution_generation?: number | null }) => {
-      const session_id = getUiState().sid
-      const unknown = row.status === 'unknown'
-
-      return (gw?.request(unknown ? 'prompt.resolve_unknown' : 'prompt.cancel', {
-        session_id, admission_id: row.admission_id,
-        ...(unknown ? { execution_generation: row.execution_generation } : {})
-      }) ?? Promise.resolve()).catch((error: Error) => {
-        if (getUiState().sid === session_id) { patchUiState({ status: t('canonical.queue.discardFailed', error.message) }) }
-
-        throw error
-      })
-    },
-    [gw]
-  )
+  const queuedDisplay = queueRef.current.map(item => `${item.failed ? t('canonical.queue.unconfirmedPrefix') : ''}${item.display}`)
+  const queueDraft = useCallback((index: number) => queueRef.current[index]?.display ?? '', [queueRef])
 
   const queueEditIdx = queueEditRef.current
   const syncQueue = useCallback(() => refresh(version => version + 1), [])
@@ -326,9 +280,7 @@ export function useQueue(gw?: { request: (method: string, params: Record<string,
         item.failed = !accepted
 
         if (accepted) {
-          try { removePendingInput(item) } catch (error) {
-            patchUiState({ status: t('canonical.queue.journalCleanupFailed', (error as Error).message) })
-          }
+          removePendingInput(item)
 
           for (const pending of queues.current.values()) {
             removeAtInPlace(pending.items, pending.items.indexOf(item))
@@ -348,32 +300,6 @@ export function useQueue(gw?: { request: (method: string, params: Record<string,
     },
     [getQueue, syncQueue]
   )
-
-  useEffect(() => {
-    const queue = getQueue()
-
-    for (const receipt of getUiState().info?.pending_submissions ?? []) {
-      const item = queue.items.find(
-        item =>
-          item.submissionId === (receipt.input_id ?? receipt.admission_id) &&
-          Boolean(item.destination?.storedSid) &&
-          item.destination?.storedSid === receipt.target_session_id &&
-          (item.destination?.ownerHome ?? item.destination?.profileHome) === receipt.target_profile_home
-      )
-
-      if (!item) {
-        continue
-      }
-
-      if (item.settle) {
-        item.settle(true)
-      } else {
-        removePendingInput(item)
-        removeAtInPlace(queue.items, queue.items.indexOf(item))
-        syncQueue()
-      }
-    }
-  }, [ui.info, getQueue, syncQueue])
 
   // One durable write: the row joins the queue only once its attempt is journaled,
   // so a failed write leaves the composer as the draft's only copy.
@@ -400,13 +326,7 @@ export function useQueue(gw?: { request: (method: string, params: Record<string,
         return undefined
       }
 
-      try {
-        return claim(queue, item)
-      } catch (error) {
-        patchUiState({ status: t('canonical.queue.notSavedQueueKept', (error as Error).message) })
-
-        return undefined
-      }
+      return claim(queue, item)
     },
     [getQueue, claim]
   )
@@ -414,37 +334,6 @@ export function useQueue(gw?: { request: (method: string, params: Record<string,
   const takeQ = useCallback(
     (i: number, editedDisplay?: string) => {
       const queue = getQueue()
-      const server = serverRowAt(i)
-
-      // Editing a durable row re-admits the edited text as a new input once
-      // the authority has retired the original. Until then the edit is a
-      // durable local row; a refused retirement leaves it as an unconfirmed
-      // draft (Alt+K) instead of admitting a second copy behind the original.
-      if (server) {
-        if (server.status === 'unknown') {
-          patchUiState({ status: t('canonical.queue.unknownExecution') })
-
-          return undefined
-        }
-
-        const text = editedDisplay ?? server.user
-        const { item } = draft(text, text, queue.destination)
-        savePendingInput({ ...item, inFlight: true })
-        item.inFlight = true
-        queue.items.push(item)
-        syncQueue()
-
-        return cancelServerRow(server).then(
-          () => claim(queue, item),
-          () => {
-            item.inFlight = false
-            item.failed = true
-            savePendingInput(item)
-            syncQueue()
-
-            return undefined
-          })
-      }
 
       if (queue.items[i]?.inFlight) {
         return undefined
@@ -465,17 +354,11 @@ export function useQueue(gw?: { request: (method: string, params: Record<string,
 
       return claim(queue, item)
     },
-    [getQueue, claim, cancelServerRow, draft, serverRowAt, syncQueue]
+    [getQueue, claim]
   )
 
   const removeQ = useCallback(
     (i: number) => {
-      const server = serverRowAt(i)
-
-      if (server) {
-        return void cancelServerRow(server).catch(() => undefined)
-      }
-
       if (queueRef.current[i]?.inFlight) {
         return
       }
@@ -489,7 +372,7 @@ export function useQueue(gw?: { request: (method: string, params: Record<string,
       removeAtInPlace(queueRef.current, i)
       syncQueue()
     },
-    [queueRef, syncQueue, cancelServerRow, serverRowAt]
+    [queueRef, syncQueue]
   )
 
   return {

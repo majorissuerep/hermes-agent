@@ -87,7 +87,7 @@ def test_launch_artifact_context_cwd_follows_routed_profile(two_homes, tmp_path)
 def test_terminal_backend_consumers_read_the_routed_scope(two_homes):
     """Every ``TERMINAL_ENV`` reader that shapes a turn (image-source locality, credential-file path
     translation, image-gen cache base, skill readiness) resolves the ROUTED profile's backend."""
-    from gateway.run import _profile_runtime_scope
+    from tui_runtime.model_switch import _session_profile_runtime_scope
     from tools import credential_files, image_generation_tool, image_source
 
     a, b = two_homes
@@ -100,9 +100,9 @@ def test_terminal_backend_consumers_read_the_routed_scope(two_homes):
             sorted(Path(m["host_path"]).name for m in credential_files.get_credential_file_mounts()),
         )
 
-    with _profile_runtime_scope(a):
+    with _session_profile_runtime_scope({"profile_home": str(a)}):
         assert observe() == (True, None, "/host/.hermes/x.png", ["cred_a.txt"])
-    with _profile_runtime_scope(b):
+    with _session_profile_runtime_scope({"profile_home": str(b)}):
         local, cache_base, translated, mounts = observe()
     assert local is False
     assert cache_base == "/root/.hermes"

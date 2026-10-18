@@ -39,12 +39,6 @@ _HERMES_CORE_TOOLS = [
 ]
 
 # Webhook payloads are untrusted third-party content: no file/system execution.
-_HERMES_WEBHOOK_SAFE_TOOLS = ["web_search", "web_extract", "vision_analyze", "clarify"]
-_FEISHU_TOOLS = [
-    "feishu_doc_read", "feishu_drive_list_comments", "feishu_drive_list_comment_replies",
-    "feishu_drive_reply_comment", "feishu_drive_add_comment",
-]
-_YUANBAO_TOOLS = ["yb_query_group_info", "yb_query_group_members", "yb_send_dm", "yb_search_sticker", "yb_send_sticker"]
 
 
 def _ts(description, tools=(), includes=(), **extra):
@@ -68,7 +62,6 @@ _CODING_TOOLS = _core_without("image_generate", "text_to_speech", "cronjob_manag
 
 # Toolsets a CLIENT adds to its own sessions (tui_gateway/server.py::_gui_surface_toolsets), never
 # config: another surface lacking them made no configuration choice.
-CLIENT_SURFACE_TOOLSETS = frozenset({"project", "desktop_ui", "catalog"})
 
 # Core toolset definitions: individual tools or references to other toolsets.
 TOOLSETS = {
@@ -130,45 +123,24 @@ TOOLSETS = {
     "context_engine": _ts("Runtime tools exposed by the active context engine"),
     "session_search": _ts("Search and recall past conversations with summarization", ["session_search"]),
     "connections": _ts("Remote connector discovery, execution, and account authorization", ["manage_connections"]),
-    "project": _ts("Desktop Projects — create/switch named workspaces (GUI sessions only)", ["desktop_project"]),
-    "bot_room": _ts("Verified text-only Group Chat turn capabilities"),
 
     # GUI-renderer affordances, enabled per desktop-sourced SESSION by the GUI
     # gateway (tui_gateway/server.py::_load_enabled_toolsets) — never by a
     # process env var, which is blind to a desktop client on a remote backend.
-    "desktop_ui": _ts(
-        "Desktop GUI affordances — in-app terminal/browser panes, pane focus, "
-        "reactions, appearance (GUI sessions only)",
-        ["read_terminal", "close_terminal", "desktop_preview", "drive_preview",
-         "annotate_preview", "read_window_below", "focus_pane", "react_to_message",
-         "gui_tour", "show_tip", "set_theme"],
-    ),
-    "onboarding": _ts("First-run onboarding cards; folded in only for the onboarding chat (tui_gateway/methods_onboarding.py)",
-                      ["setup_beat"], platforms=frozenset({"desktop"})),
     # ``platforms``: the session platforms this toolset exists for (TOOLSET_SESSION_PLATFORMS).
-    "catalog": _ts(
-        "Desktop catalog plugin/skill install requests through the approval card (GUI sessions only)",
-        ["manage_catalog"],
-        platforms=frozenset({"desktop"}),
-    ),
     "clarify": _ts("Ask the user clarifying questions (multiple-choice or open-ended)", ["clarify"]),
     "code_execution": _ts("Run Python scripts that call tools programmatically (reduces LLM round trips)", ["execute_code"]),
     "delegation": _ts("Spawn subagents with isolated context for complex subtasks", ["delegate_task"]),
     "kanban": _ts(
         "Kanban multi-agent coordination — only active when the agent is spawned by "
         "the kanban dispatcher (HERMES_KANBAN_TASK env set). The dispatcher runs "
-        "inside the gateway by default; see `kanban.dispatch_in_gateway` in "
+        "from an explicitly started local dispatcher; see "
         "config.yaml. Lets workers mark tasks done with structured handoffs, enter "
         "first-class review (request_review — not a block), return review changes, "
         "block for human input, heartbeat during long ops, comment on threads, attach "
         "files, and (for orchestrators) list, unblock, and fan out tasks.",
         [t for t in _HERMES_CORE_TOOLS if t.startswith("kanban_")],
     ),
-    "discord": _ts("Discord read and participate tools (fetch messages, search members, create threads)", ["discord"]),
-    "discord_admin": _ts("Discord server management (list channels/roles, pin messages, assign roles)", ["discord_admin"]),
-    "yuanbao": _ts("Yuanbao platform tools - group info, member queries, DM, stickers", _YUANBAO_TOOLS),
-    "feishu_doc": _ts("Read Feishu/Lark document content", ["feishu_doc_read"]),
-    "feishu_drive": _ts("Feishu/Lark document comment operations (list, reply, add)", _FEISHU_TOOLS[1:]),
 
     # Scenario-specific toolsets
     "debugging": _ts("Debugging and troubleshooting toolkit", ["terminal", "process_manage"], includes=["web", "file"]),
@@ -188,59 +160,11 @@ TOOLSETS = {
     # Full Hermes toolsets (CLI + messaging platforms). All share the core tools;
     # there is deliberately no agent-callable send_message tool. hermes-acp is the
     # coding posture minus the interactive clarify UI.
-    "hermes-acp": _ts(
-        "Editor integration (VS Code, Zed, JetBrains) — coding-focused tools without "
-        "messaging, audio, or clarify UI",
-        [t for t in _CODING_TOOLS if t != "clarify"],
-    ),
-    "hermes-api-server": _ts(
-        "OpenAI-compatible API server — full agent tools accessible via HTTP (no "
-        "interactive UI tools like clarify or send_message)",
-        _core_without("text_to_speech", "clarify", "computer_use", kanban=False),
-    ),
     "hermes-cli": _bundle("Full interactive CLI toolset - all default tools plus cronjob management"),
 
     # Mirrors hermes-cli; `hermes tools` platform config filters it down and
     # _get_platform_tools() drops _DEFAULT_OFF_TOOLSETS unless user-enabled.
     "hermes-cron": _bundle("Default cron toolset - same core tools as hermes-cli; gated by `hermes tools`"),
-    "hermes-telegram": _bundle("Telegram bot toolset - full access for personal use (terminal has safety checks)"),
-    "hermes-discord": _bundle(
-        "Discord bot toolset - full access (terminal has safety checks via dangerous "
-        "command approval)",
-        ["discord", "discord_admin"],
-    ),
-    "hermes-whatsapp": _bundle("WhatsApp bot toolset - similar to Telegram (personal messaging, more trusted)"),
-    "hermes-slack": _bundle("Slack bot toolset - full access for workspace use (terminal has safety checks)"),
-    "hermes-signal": _bundle("Signal bot toolset - encrypted messaging platform (full access)"),
-    "hermes-bluebubbles": _bundle("BlueBubbles iMessage bot toolset - Apple iMessage via local BlueBubbles server"),
-    "hermes-email": _bundle("Email bot toolset - interact with Hermes via email (IMAP/SMTP)"),
-    "hermes-mattermost": _bundle("Mattermost bot toolset - self-hosted team messaging (full access)"),
-    "hermes-matrix": _bundle("Matrix bot toolset - decentralized encrypted messaging (full access)"),
-    "hermes-dingtalk": _bundle("DingTalk bot toolset - enterprise messaging platform (full access)"),
-    "hermes-feishu": _bundle("Feishu/Lark bot toolset - enterprise messaging via Feishu/Lark (full access)", _FEISHU_TOOLS),
-    "hermes-weixin": _bundle("Weixin bot toolset - personal WeChat messaging via iLink (full access)"),
-    "hermes-qqbot": _bundle("QQBot toolset - QQ messaging via Official Bot API v2 (full access)"),
-    "hermes-wecom": _bundle("WeCom bot toolset - enterprise WeChat messaging (full access)"),
-    "hermes-wecom-callback": _bundle("WeCom callback toolset - enterprise self-built app messaging (full access)"),
-    "hermes-yuanbao": {
-        "description": "Yuanbao Bot 元宝消息平台工具集 - 群信息、成员查询、私聊、贴纸表情",
-        "tools": _HERMES_CORE_TOOLS + _YUANBAO_TOOLS,
-        "module": "tools.yuanbao_tools",
-        "includes": [],
-    },
-    "hermes-sms": _bundle("SMS bot toolset - interact with Hermes via SMS (Twilio)"),
-    "hermes-webhook": _ts("Webhook toolset - receive and process external webhook events", _HERMES_WEBHOOK_SAFE_TOOLS),
-    "hermes-gateway": _ts(
-        "Gateway toolset - union of all messaging platform tools",
-        [],
-        includes=[
-            "hermes-telegram", "hermes-discord", "hermes-whatsapp", "hermes-slack",
-            "hermes-signal", "hermes-bluebubbles", "hermes-email",
-            "hermes-sms", "hermes-mattermost", "hermes-matrix", "hermes-dingtalk",
-            "hermes-feishu", "hermes-wecom", "hermes-wecom-callback", "hermes-weixin",
-            "hermes-qqbot", "hermes-webhook", "hermes-yuanbao",
-        ],
-    ),
 }
 
 # Toolset -> the session platforms it exists for, from the specs that carry ``platforms``.
@@ -343,24 +267,6 @@ def bundle_non_core_tools(toolset_name: str) -> set[str]:
 _resolve_toolset_memo: dict[tuple[str, bool, int, int, str], list[str]] = {}
 
 
-def _plugin_platform_bundle(name: str) -> list[str]:
-    """Implicit `hermes-<platform>` bundle for a registered plugin platform: core
-    tools plus whatever the plugin registered under the platform name. [] otherwise."""
-    if not name.startswith("hermes-"):
-        return []
-    platform_name = name[len("hermes-"):]
-    try:
-        from gateway.platform_registry import platform_registry
-        if not platform_registry.is_registered(platform_name):
-            return []
-    except Exception:
-        return []
-    tools = set(_HERMES_CORE_TOOLS)
-    try:
-        tools.update(e.name for e in _registry_call("get_all_entries", ()) if e.toolset == platform_name)
-    except Exception:
-        pass
-    return list(tools)
 
 
 def resolve_toolset(name: str, visited: set[str] | None = None, *, include_registry: bool = True) -> list[str]:
@@ -396,7 +302,7 @@ def resolve_toolset(name: str, visited: set[str] | None = None, *, include_regis
 
     toolset = get_toolset(name, include_registry=include_registry)
     if not toolset:
-        return _plugin_platform_bundle(name) if include_registry else []
+        return []
 
     tools = set(toolset.get("tools", []))
     for included_name in toolset.get("includes", []):

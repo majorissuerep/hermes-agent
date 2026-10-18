@@ -16,7 +16,6 @@ from hermes_state import SessionDB
 _READERS = {
     "sidebar": lambda db: db.list_sessions_rich(limit=2, order_by_last_active=True, include_pinned=True),
     "session_search": lambda db: db.list_recent_sessions_bounded(limit=2),
-    "telegram_unlinked": lambda db: db.list_unlinked_telegram_sessions_for_user(chat_id="c", user_id="u", limit=2),
 }
 
 

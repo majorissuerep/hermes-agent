@@ -8,7 +8,6 @@ prompts and profile names stay local (the contract buckets every count).
 from __future__ import annotations
 
 import contextlib
-import json
 import sqlite3
 import time
 from itertools import islice
@@ -16,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from hermes_constants import get_hermes_home
+from hermes_security.sqlite import connect
 
 from . import shared_metrics_contract as contract
 
@@ -40,12 +40,9 @@ def _plugin_count(config: dict[str, Any]) -> int:
 
 
 def _cron_job_count() -> int:
-    try:
-        # utf-8-sig: same dialect as cron/jobs.load_jobs (Windows editors may leave a BOM).
-        with open(get_hermes_home() / "cron" / "jobs.json", encoding="utf-8-sig") as handle:
-            jobs = json.load(handle).get("jobs", [])
-    except (OSError, ValueError, AttributeError):
-        return 0
+    from cron.jobs import load_jobs
+
+    jobs = load_jobs()
     return sum(1 for job in jobs if isinstance(job, dict) and job.get("enabled", True))
 
 
@@ -64,10 +61,6 @@ def _profile_count() -> int:
     return len(list_profile_names())
 
 
-def _messaging_platform_count() -> int:
-    from gateway.config import load_gateway_config
-
-    return len(load_gateway_config().get_connected_platforms())
 
 
 def _display_language() -> str:
@@ -99,7 +92,7 @@ def _first_session_started_at(home: Path | None = None) -> float | None:
     if not database.exists():
         return time.time()
     with contextlib.closing(
-        sqlite3.connect(f"file:{database}?mode=ro", uri=True, timeout=1)
+        connect(f"file:{database}?mode=ro", uri=True, timeout=1)
     ) as connection:
         row = connection.execute("SELECT MIN(started_at) FROM sessions").fetchone()
     if not row or row[0] is None:
@@ -135,7 +128,7 @@ def collect_install_snapshot(config: dict[str, Any]) -> dict[str, str]:
         skills=_skill_count(),
         cron_jobs=_cron_job_count(),
         profiles=_profile_count(),
-        messaging_platforms=_safe_count(_messaging_platform_count),
+        messaging_platforms=0,
         install_age_bucket=install_age_bucket(),
         main_provider=_sub(model, "provider") if isinstance(model, dict) else None,
         terminal_backend=_sub(_sub(config, "terminal"), "backend"),

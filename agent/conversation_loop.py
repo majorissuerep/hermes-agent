@@ -639,43 +639,6 @@ def _print_billing_or_entitlement_guidance(
     ))
 
 
-def _bot_chat_prompt_stale(agent, stored_prompt: str | None) -> bool:
-    """Bot Chat capability epoch check for a stored prompt.
-
-    The stored prompt embeds a capability fingerprint; a mismatch is a deliberate
-    once-per-change rebuild. Unstamped prompts never match; probe failures fail closed
-    to "reuse" so the cache is kept. Legacy upgrade: a Bot Chat prompt predating the
-    epoch mechanism gets ONE title-gated migration rebuild; the stamped result cannot
-    re-fire. A NULL or empty stored prompt already rebuilds every turn, so this probe
-    is not a gate there and must not run.
-    """
-    if not stored_prompt:
-        return False
-    try:
-        from tools.bot_mode_probe import (
-            BOT_CHAT_TITLE,
-            stored_bot_chat_prompt_needs_upgrade,
-            stored_prompt_capability_stale,
-        )
-        home = None
-        try:
-            from agent.system_prompt import _agent_home
-            home = _agent_home(agent)
-        except Exception:
-            pass
-        if stored_prompt_capability_stale(stored_prompt, home):
-            return True
-        if not getattr(agent, "_bot_mode_protocol", True):
-            return False
-        title = str(getattr(agent, "_session_title_hint", "") or "").strip()
-        if not title and agent._session_db and agent.session_id:
-            try:
-                title = str(agent._session_db.get_session_title(agent.session_id) or "").strip()
-            except Exception:
-                title = ""
-        return title == BOT_CHAT_TITLE and bool(stored_bot_chat_prompt_needs_upgrade(stored_prompt, home))
-    except Exception:
-        return False
 
 
 def _persist_system_prompt(agent, failure_message: str, *, persist_tools: bool = False) -> None:
@@ -715,35 +678,6 @@ def _restore_pinned_tools(agent, session_row) -> list:
     return built_for_this_surface
 
 
-def _refresh_bot_chat_tools(agent) -> None:
-    """Rebuild ``agent.tools`` for a Bot Chat capability refresh through the builder that
-    created the session, so the refreshed set is what a fresh desktop/TUI session gets
-    (#124211). A canonical Bot Chat never forks, so its tools[] is otherwise a fossil of
-    session creation: ``hermes tools enable/disable`` writes ``platform_toolsets`` and the
-    automatic between-turns refresh reuses the build-time selection. Only the desktop/TUI
-    gateway keeps agents alive across turns; every other surface builds a fresh agent whose
-    tools[] already reflects config. No prefix preservation: a disabled toolset must drop,
-    and the prompt rebuild this rides on already breaks the cache."""
-    from gateway.session_policy import active_policy
-    policy = active_policy()
-    platform = getattr(agent, "platform", None)
-    if policy is None and platform not in ("desktop", "tui"):
-        return
-    try:
-        from tools.mcp_tool_agent import refresh_agent_mcp_tools
-        if policy is not None:
-            # Gateway-owned session (managed worker / owner turn): toolsets are frozen in its
-            # launch policy, so live config edits never widen or narrow a running session.
-            refresh_agent_mcp_tools(agent, enabled_override=list(policy.toolsets),
-                                    quiet_mode=True, content_aware=True)
-            return
-        from tui_gateway.server import _load_disabled_toolsets, _load_enabled_toolsets
-        refresh_agent_mcp_tools(
-            agent, enabled_override=_load_enabled_toolsets(platform),
-            disabled_override=_load_disabled_toolsets(), quiet_mode=True, content_aware=True)
-    except Exception as exc:
-        logger.warning("Bot Chat capability refresh kept the previous tools for session %s: %s",
-                       agent.session_id, exc)
 
 
 def _restore_or_build_system_prompt(agent, system_message, conversation_history):
@@ -771,35 +705,6 @@ def _restore_or_build_system_prompt(agent, system_message, conversation_history)
 
     if stored_prompt and _stored_prompt_matches_runtime(agent, stored_prompt):
         # NULL/empty rows never reach this probe: they already rebuild below.
-        if _bot_chat_prompt_stale(agent, stored_prompt):
-            logger.info(
-                "Bot Chat capability epoch changed for session %s; rebuilding system prompt to "
-                "adopt the new capability surface (one-time prefix-cache break).",
-                agent.session_id,
-            )
-            agent._session_title_hint = "Bot Chat"
-            # The skills index cache (LRU + disk snapshot) does not watch the skills
-            # dir; a capability refresh must rebuild THROUGH it or new skills are lost.
-            try:
-                from agent.prompt_builder import clear_skills_system_prompt_cache
-                clear_skills_system_prompt_cache(clear_snapshot=True)
-            except Exception:
-                pass
-            _refresh_bot_chat_tools(agent)
-            agent._cached_system_prompt = agent._build_system_prompt(system_message)
-            record_cache_break(agent, "toolset_change")
-            stage_surface_switch_note(agent, agent._cached_system_prompt, conversation_history)
-            # Persist so the NEXT turn restores the new bytes verbatim (cache break is
-            # once per capability change). Tools re-pin too: without it the next
-            # turn's pin-restore would resurrect the pre-refresh toolset (#124211).
-            # on_session_start not re-fired: continuation.
-            _persist_system_prompt(
-                agent,
-                "Session DB update_system_prompt failed after Bot Chat capability refresh "
-                "(session=%s): %s. The refresh will re-fire next turn.",
-                persist_tools=True,
-            )
-            return
         # Continuing session — reuse the exact system prompt from the
         # previous turn so the Anthropic cache prefix matches.
         agent._cached_system_prompt = stored_prompt

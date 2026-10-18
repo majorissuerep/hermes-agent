@@ -1,6 +1,6 @@
 """A gateway approval wait that ends without a user answer must not be reported as a user deny.
 
-Teardown paths (a parent's ``delegate_task`` finishing, ``unregister_gateway_notify`` at turn
+Teardown paths (a parent's ``delegate_task`` finishing, ``unregister_session_notify`` at turn
 end, a ``/stop``) end the wait fail-closed, but the tool result carries ``outcome="cancelled"``
 and the cause instead of "denied by user" (#112026, #22992).
 """
@@ -18,8 +18,8 @@ SESSION_KEY = "test-cancelled-attribution"
 
 @pytest.fixture
 def gateway_session(monkeypatch):
-    mod._gateway_queues.clear()
-    mod._gateway_notify_cbs.clear()
+    mod._session_queues.clear()
+    mod._session_notify_cbs.clear()
     mod._session_approved.clear()
     for k in ("HERMES_CRON_SESSION", "HERMES_YOLO_MODE", "HERMES_INTERACTIVE"):
         monkeypatch.delenv(k, raising=False)
@@ -34,15 +34,15 @@ def gateway_session(monkeypatch):
     monkeypatch.setattr(approval_context, "_fire_approval_hook",
                         lambda name, **kw: (hooks.append((name, kw)), original(name, **kw)))
     yield hooks
-    mod._gateway_queues.clear()
-    mod._gateway_notify_cbs.clear()
+    mod._session_queues.clear()
+    mod._session_notify_cbs.clear()
 
 
 def _run_gate_until_pending():
     """Start the real command gate on a worker thread and return (thread, tid, result_holder)
     once the prompt has been handed to the gateway notifier."""
     notified = threading.Event()
-    mod.register_gateway_notify(SESSION_KEY, lambda _data: notified.set())
+    mod.register_session_notify(SESSION_KEY, lambda _data: notified.set())
     holder = {}
 
     def worker():
@@ -81,16 +81,16 @@ def test_teardown_interrupt_reports_cause_not_user_deny(gateway_session):
 
 
 def test_turn_end_unregister_reports_withdrawn_prompt(gateway_session):
-    """``unregister_gateway_notify`` at turn end wakes the wait with no decision: the result is
+    """``unregister_session_notify`` at turn end wakes the wait with no decision: the result is
     a withdrawn prompt, while an explicit /deny on the same gate still reads as a user deny."""
     thread, holder = _run_gate_until_pending()
-    mod.unregister_gateway_notify(SESSION_KEY)
+    mod.unregister_session_notify(SESSION_KEY)
     thread.join(timeout=10)
     assert not thread.is_alive()
     _assert_withdrawn(holder["result"], "the turn ended before the prompt was answered")
 
     thread, holder = _run_gate_until_pending()
-    mod.resolve_gateway_approval(SESSION_KEY, "deny")
+    mod.resolve_session_approval(SESSION_KEY, "deny")
     thread.join(timeout=10)
     denied = holder["result"]
     assert denied["outcome"] == "denied"

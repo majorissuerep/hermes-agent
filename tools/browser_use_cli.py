@@ -35,7 +35,6 @@ _SESSION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 _PRIVATE_BROWSER_SENTINEL = "_HERMES_BU_PRIVATE_BROWSER"
 # Internal route provenance: this exec resolved to a browser on the Bot Desktop display and must use
 # the same human-control lease fence as the built-in browser tools. Popped before launching the CLI.
-_BOT_DESKTOP_BROWSER_SENTINEL = "_HERMES_BU_BOT_DESKTOP_BROWSER"
 
 # Prepended to the model's code for named sessions on SHARED browsers (a /browser connect CDP override): the
 # harness daemon attaches to the first existing page at startup, so two fresh named daemons can land on the
@@ -396,33 +395,22 @@ def _resolve_lightpanda_cdp(env: dict, task_id: Optional[str], session_name: str
     )
     if err is None:
         env[_PRIVATE_BROWSER_SENTINEL] = "1"
-        env[_BOT_DESKTOP_BROWSER_SENTINEL] = "1"
     return err
 
 
 def _reach_sandbox_cdp(cdp: str) -> str:
-    """A CDP endpoint agent-browser reported from INSIDE the terminal backend's sandbox is that sandbox's
-    loopback: unreachable from this host (Docker bridge / ssh remote). The harness, the vault supervisor
-    and ``browser_exec`` all connect from here, so forward the port over the sandbox's exec stream and hand
-    them the local end. Chromium's DevTools accepts any loopback ``Host`` header, port included."""
-    try:
-        from tools.browser_tool_session import _browser_in_sandbox
-        if not _browser_in_sandbox():
-            return cdp
-        from urllib.parse import urlsplit, urlunsplit
-        from tools.bot_desktop import runtime as _bd_runtime, sandbox_host
-        from tools.environments import streams
-        parts = urlsplit(cdp)
-        if parts.hostname not in ("127.0.0.1", "localhost") or not parts.port:
-            return cdp
-        sandbox = _bd_runtime._sandbox_env(create=True)
-        if sandbox is None:
-            return cdp
-        local = streams.forward_port(sandbox, parts.port, user=sandbox_host._user_for(sandbox))
-        return urlunsplit(parts._replace(netloc=f"127.0.0.1:{local}"))
-    except Exception as e:  # a failed forward degrades to the unreachable endpoint's own error
-        logger.debug("sandbox CDP forward unavailable: %s", e)
+    """Forward a sandbox loopback endpoint; a failed chosen target never becomes host CDP."""
+    from tools import browser_terminal as terminal
+    if not terminal.browser_in_terminal():
         return cdp
+    from urllib.parse import urlsplit, urlunsplit
+    from tools.environments import streams
+    parts = urlsplit(cdp)
+    if parts.hostname not in ("127.0.0.1", "localhost") or not parts.port:
+        return cdp
+    sandbox = terminal.terminal_environment(create=True)
+    local = streams.forward_port(sandbox, parts.port)
+    return urlunsplit(parts._replace(netloc=f"127.0.0.1:{local}"))
 
 
 def _resolve_managed_chromium_cdp(env: dict, task_id: Optional[str], session_name: str = "",
@@ -449,7 +437,6 @@ def _resolve_managed_chromium_cdp(env: dict, task_id: Optional[str], session_nam
     cdp = _reach_sandbox_cdp(cdp)
     _set_cdp_env(env, cdp)
     env[_PRIVATE_BROWSER_SENTINEL] = "1"  # one Chromium per cache key: nothing to share a tab with
-    env[_BOT_DESKTOP_BROWSER_SENTINEL] = "1"
     return None
 
 
@@ -564,7 +551,6 @@ def _resolve_real_profile_cdp(env: dict, force_local: bool) -> Optional[str]:
     cdp, err = _real_profile_cdp()
     if cdp and not err:
         _set_cdp_env(env, cdp)
-        env[_BOT_DESKTOP_BROWSER_SENTINEL] = "1"
     return err or None
 
 
@@ -725,7 +711,6 @@ def browser_exec(code: str, session: str = "", timeout_s: int = _DEFAULT_TIMEOUT
     if local_sidecar:
         env["BU_NAME"] = _sidecar_daemon_name(session)
     _exec_route_is_sidecar[route_key] = local_sidecar
-    bot_desktop_browser = bool(env.pop(_BOT_DESKTOP_BROWSER_SENTINEL, None))
 
     # SHARED browser (/browser connect CDP override): pin each named session to its own tab (see
     # _OWN_TAB_PREAMBLE). Private per-name browsers skip this — nothing to collide with.
@@ -760,11 +745,7 @@ def browser_exec(code: str, session: str = "", timeout_s: int = _DEFAULT_TIMEOUT
         except OSError as e:
             return {"error_result": tool_error(f"Failed to launch browser-use CLI: {e}")}
 
-    if bot_desktop_browser:
-        from tools.browser_tool_session import run_fenced
-        dispatched = run_fenced({"features": {"local": True}}, dispatch)
-    else:
-        dispatched = dispatch()
+    dispatched = dispatch()
     if "proc" not in dispatched:
         if "error_result" in dispatched:
             return dispatched["error_result"]

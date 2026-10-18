@@ -50,7 +50,14 @@ def _make_source(path: Path) -> dict[str, int]:
                 )
 
         db.set_meta("goal:recovery-session-0", '{"status":"active"}')
-        db.apply_telegram_topic_migration()
+        # Seed a historical donor schema directly; retired transport code is not a runtime API.
+        db._conn.executescript("""
+            CREATE TABLE telegram_dm_topic_mode (
+                chat_id TEXT, user_id TEXT, enabled INTEGER, activated_at REAL, updated_at REAL);
+            CREATE TABLE telegram_dm_topic_bindings (
+                chat_id TEXT, thread_id TEXT, user_id TEXT, session_key TEXT, session_id TEXT,
+                managed_mode TEXT, linked_at REAL, updated_at REAL);
+        """)
         db._conn.execute(
             """
             INSERT INTO telegram_dm_topic_mode (
@@ -651,11 +658,11 @@ def test_partial_recovery_clears_only_unreadable_system_prompt_refs(
 
 
 def _insert_delivery_obligations(path: Path, rows: list[tuple[object, ...]]) -> None:
-    from gateway.delivery_ledger import _initialize_schema
+    from hermes_state.legacy_delivery_schema import initialize_schema
 
     conn = sqlite3.connect(str(path), isolation_level=None)
     try:
-        _initialize_schema(conn)
+        initialize_schema(conn)
         conn.executemany(
             """INSERT INTO delivery_obligations (
                 obligation_id, session_key, platform, chat_id, thread_id,

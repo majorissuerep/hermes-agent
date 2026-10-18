@@ -116,7 +116,7 @@ def test_no_agent_forwards_cancel_event_to_script_runner(monkeypatch):
     ids=("script-only-job", "pre-agent-script"),
 )
 def test_long_running_script_refreshes_owned_claim_in_profile_store(
-    tmp_path, monkeypatch, no_agent, script_output, cron_owner
+    tmp_path, monkeypatch, no_agent, script_output
 ):
     """Both blocking script paths keep their one-shot claim alive.
 
@@ -348,10 +348,8 @@ def test_lost_fire_claim_stops_stale_delivery(monkeypatch):
     monkeypatch.setattr(scheduler, "mark_execution_running", lambda execution_id: {})
     monkeypatch.setattr(scheduler, "finish_execution", lambda *args, **kwargs: None)
     save_output = MagicMock()
-    deliver_result = MagicMock()
     mark_run = MagicMock()
     monkeypatch.setattr(scheduler, "save_job_output", save_output)
-    monkeypatch.setattr(scheduler, "_deliver_result", deliver_result)
     monkeypatch.setattr(scheduler, "mark_job_run", mark_run)
 
     with patch("agent.secret_scope.set_secret_scope", return_value=None), \
@@ -360,7 +358,6 @@ def test_lost_fire_claim_stops_stale_delivery(monkeypatch):
         assert scheduler.run_one_job(job) is True
 
     save_output.assert_not_called()
-    deliver_result.assert_not_called()
     mark_run.assert_not_called()
 
 
@@ -381,20 +378,7 @@ def _run_claimed_job_with_mid_run_action(
             raise crash
         return True, "saved output", "D1 is promoting", None
 
-    # A completed agent run hands its notice to the durable delivery queue; a gateway drain that
-    # wins the race against the run's bookkeeping sends it through ``_deliver_result``. A crash
-    # alerts inline through the same stubbed door.
-    from cron import delivery_queue
-    monkeypatch.setattr(delivery_queue, "DELIVERY_DB", tmp_path / "cron" / "deliveries.db")
-    real_enqueue = delivery_queue.enqueue
-
-    def _enqueue_then_drain(*args, **kwargs):
-        queued = real_enqueue(*args, **kwargs)
-        assert scheduler.drain_delivery_queue({}, None) == 1
-        return queued
-
-    delivered = MagicMock(side_effect=_enqueue_then_drain)
-    monkeypatch.setattr(scheduler, "_deliver_result", MagicMock(return_value=None))
+    delivered = MagicMock()
     finished = MagicMock()
     monkeypatch.setattr(scheduler, "_RUN_CLAIM_HEARTBEAT_SECONDS", 0.05)
     monkeypatch.setattr(scheduler, "run_job", _run_job)
@@ -403,11 +387,10 @@ def _run_claimed_job_with_mid_run_action(
     monkeypatch.setattr(scheduler, "finish_execution", finished)
     if stub_output:
         monkeypatch.setattr(scheduler, "save_job_output", lambda *_args: "output.md")
-    monkeypatch.setattr("cron.delivery_queue.enqueue", delivered)
 
     with jobs.use_cron_store(tmp_path):
         job = jobs.create_job(
-            prompt="work", schedule="every 5m", name="remove self", deliver="telegram")
+            prompt="work", schedule="every 5m", name="remove self", deliver="local")
         assert jobs.claim_job_for_fire(job["id"])
         claimed = jobs.get_job(job["id"])
         claimed["execution_id"] = execution_id
@@ -419,7 +402,7 @@ def _run_claimed_job_with_mid_run_action(
     return delivered, finished
 
 
-def test_self_removed_job_still_delivers_after_post_removal_heartbeat(tmp_path, monkeypatch):
+def test_self_removed_job_still_completes_after_post_removal_heartbeat(tmp_path, monkeypatch):
     """A run that removes its own job (cronjob remove on its own id) and keeps working past a
     heartbeat tick must still deliver its final response and complete its ledger row (#111039)."""
     from cron import jobs
@@ -429,10 +412,10 @@ def test_self_removed_job_still_delivers_after_post_removal_heartbeat(tmp_path, 
         lambda jobs_mod, job: jobs_mod.remove_job(job["id"]),
         execution_id="self-removal-heartbeat-execution")
 
-    delivered.assert_called_once()
+    delivered.assert_not_called()
     finished.assert_called_once_with(
         "self-removal-heartbeat-execution",
-        success=True, error=None, delivery_outcome="delivered")
+        success=True, error=None, delivery_outcome="suppressed")
     with jobs.use_cron_store(tmp_path):
         assert jobs.load_jobs() == []
 
@@ -447,7 +430,7 @@ def test_self_removed_job_leaves_no_output_directory(tmp_path, monkeypatch):
         lambda jobs_mod, job: jobs_mod.remove_job(job["id"]),
         execution_id="self-removal-output-execution", stub_output=False)
 
-    delivered.assert_called_once()
+    delivered.assert_not_called()
     with jobs.use_cron_store(tmp_path):
         assert jobs.load_jobs() == []
     assert list((tmp_path / "cron" / "output").glob("*")) == []
@@ -469,7 +452,7 @@ def test_self_removed_job_crash_skips_mark_job_run(tmp_path, monkeypatch):
     marked.assert_not_called()
     finished.assert_called_once_with(
         "self-removal-crash-execution", success=False,
-        error="boom after self-removal", delivery_outcome="delivered")
+        error="boom after self-removal", delivery_outcome="suppressed")
 
 
 def test_self_removal_followed_by_replacement_record_stays_fail_closed(tmp_path, monkeypatch):
@@ -675,7 +658,6 @@ def test_terminal_owner_cas_failure_marks_ledger_ownership_lost(monkeypatch):
     )
     monkeypatch.setattr(scheduler, "fire_claim_fence", owned_fence, raising=False)
     monkeypatch.setattr(scheduler, "save_job_output", lambda *_args: "output.md")
-    monkeypatch.setattr(scheduler, "_deliver_result", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(scheduler, "mark_job_run", lambda *_args, **_kwargs: False)
     monkeypatch.setattr(scheduler, "finish_execution", finish)
 

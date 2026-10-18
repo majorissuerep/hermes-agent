@@ -123,12 +123,12 @@ class TestPrune:
         resuming a session id that no longer exists."""
         _insert(db, "junk", age_days=45)
         _insert(db, "keeper", age_days=1)
-        db.save_gateway_routing_entry(
+        _seed_legacy_route(db,
             "agent:main:telegram:dm:junk",
             json.dumps({"session_id": "junk"}),
             scope="/tmp/pytest-of-dev/test0",
         )
-        db.save_gateway_routing_entry(
+        _seed_legacy_route(db,
             "agent:main:telegram:dm:keeper",
             json.dumps({"session_id": "keeper"}),
             scope="/home/dev/project",
@@ -159,7 +159,7 @@ class TestPruneSkipsLiveTurns:
         _insert(db, "dead-junk", age_days=45)
         _insert(db, "gone-junk", age_days=45)
         for sid, scope in (("live-junk", "/tmp/pytest-live"), ("gone-junk", "/tmp/pytest-gone")):
-            db.save_gateway_routing_entry(
+            _seed_legacy_route(db,
                 f"agent:main:telegram:dm:{sid}", json.dumps({"session_id": sid}), scope=scope)
         holder = f"pid={os.getpid()}:turn=1"
         assert db.try_acquire_session_turn_lease("live-junk", holder, ttl_seconds=300.0) is True
@@ -189,3 +189,13 @@ class TestPruneSkipsLiveTurns:
         db.release_session_turn_lease("live-junk", holder)
         assert db.prune_never_active_keyed_sessions(older_than_days=30) == (1, 1, 0)
         assert db.get_session("live-junk") is None
+
+
+def _seed_legacy_route(db, session_key, entry_json, *, scope=''):
+    db._write_sql('INSERT INTO gateway_routing(scope,session_key,entry_json,updated_at) VALUES(?,?,?,?)',
+                  (scope,session_key,entry_json,0))
+
+
+def _legacy_routes(db, *, scope=''):
+    return {row['session_key']: row['entry_json'] for row in
+            db._read_all('SELECT session_key,entry_json FROM gateway_routing WHERE scope=?', (scope,))}

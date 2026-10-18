@@ -292,11 +292,11 @@ class SessionProfileRepairMixin:
         """``agent:main:…`` → ``agent:<profile>:…`` (+ ``profile_name``) for rows a standalone
         gateway wrote before this store's profile was multiplexed (#113884). Only rows still under
         the legacy namespace change; a ``main``-named profile is written in its marked form."""
-        from gateway.session import _session_key_namespace
+        from hermes_state.keys import legacy_session_key_namespace
         wanted = list(ids)
         if not wanted:
             return 0
-        new_ns = _session_key_namespace(profile) + ":"
+        new_ns = legacy_session_key_namespace(profile) + ":"
 
         def _do(conn) -> int:
             changed = 0

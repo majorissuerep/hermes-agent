@@ -468,12 +468,11 @@ def _is_ancestor_pid(pid: int) -> bool:
 
 
 def _is_runtime_host(cmdline: list[str]) -> bool:
-    """A long-lived Hermes host (``gateway run`` / ``serve`` / ``dashboard``), by the canonical
-    command-line matchers (profile flags, ``hermes_cli/main.py`` paths, inline bootstraps)."""
-    from gateway.status import looks_like_gateway_command_line
-    from hermes_cli.update_cmd_holders import _hermes_holder_subcommand
-    line = " ".join(cmdline)
-    return looks_like_gateway_command_line(line) or _hermes_holder_subcommand(line) in ("serve", "dashboard")
+    """A local interactive runtime is not a partner in its ancestor's update transaction."""
+    for index, argument in enumerate(cmdline[:-1]):
+        if argument == "-m":
+            return cmdline[index + 1] in {"tui_runtime", "tui_runtime.__main__", "tui_runtime.entry"}
+    return False
 
 
 def _runtime_host_below(holder_pid: int) -> bool:

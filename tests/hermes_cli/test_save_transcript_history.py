@@ -69,8 +69,8 @@ def _tui_save(db, fmt, out, *, host=False, profile=False):
     import threading
     from unittest import mock
 
-    from tui_gateway import server
-    from tui_gateway.compute_host import ComputeHost
+    from tui_runtime import server
+    from tui_runtime.compute_host import ComputeHost
 
     assert fmt == "json"
 

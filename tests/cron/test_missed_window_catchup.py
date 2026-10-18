@@ -74,6 +74,8 @@ def slot_env(tmp_path, monkeypatch):
         proc = subprocess.run([sys.executable, "-c", _CRASH_BEFORE_DISPATCH, str(REPO)],
                               env=env, cwd=str(REPO), capture_output=True, text=True, timeout=120, check=False)
         assert proc.returncode == 137, proc.stderr[-2000:]
+        from hermes_security.migrate import migrate_home
+        migrate_home(home, "synthetic-crash-recovery-password")
 
     yield {"job_id": job["id"], "slot": slot, "fires": fires, "crash": crash_before_dispatch,
            "S": S, "J": J, "E": E}

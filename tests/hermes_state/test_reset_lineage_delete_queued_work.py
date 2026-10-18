@@ -10,9 +10,12 @@ import time
 import pytest
 
 from hermes_state import SessionDB
-import hermes_state.runtime as rt
+import json
+from types import SimpleNamespace
+from hermes_state.errors import RuntimeStoreError
+from tests.hermes_state.legacy_rows import seed_admission
+rt = SimpleNamespace(RuntimeStoreError=RuntimeStoreError)
 from hermes_state.local import POLICY_PREFIX
-from tests.hermes_state.test_target_advance_fence import _local_session, _mutate
 
 OPERATIONS = {
     'single': lambda db, s0, s1: db.delete_session(s1, exclude_active_write_guards=True),
@@ -27,17 +30,20 @@ OPERATIONS = {
 
 def _conversation(tmp_path, operation, queued):
     db = SessionDB(tmp_path / 'state.db')
-    epoch = rt.begin_runtime_epoch(db, instance_id='owner')
-    s0 = _local_session(db, epoch, tmp_path)
+    s0, s1 = 'old-logical-owner', 'old-reset-target'
+    db.create_session(s0, 'cli', chat_id=s0)
     db.append_message(s0, 'user', 'root history')
-    s1 = _mutate(db, epoch, s0, 'reset')['target_session_id']
+    db.end_session(s0, 'session_reset')
+    db.create_session(s1, 'cli', parent_session_id=s0, chat_id=s0,
+                      session_key='agent:main:cli:old-reset-target', model_config={'_reset_from': s0})
+    receipt = {'session_id': s0, 'entry': {'session_id': s1}, 'lineage': [s0, s1]}
+    db._write_sql('INSERT INTO state_meta(key,value) VALUES(?,?)', (POLICY_PREFIX+s0,json.dumps(receipt)))
     old = time.time() - 200 * 86400
     # Aged past every cutoff; the current segment ended for the ended-only prune, open for never-active.
     db._execute_write(lambda c: c.execute('UPDATE sessions SET started_at=? WHERE id IN (?,?)', (old, s0, s1)))
     if operation.startswith('prune'):
         db._execute_write(lambda c: c.execute('UPDATE sessions SET ended_at=? WHERE id=?', (old, s1)))
-    admission = queued and rt.admit_session_input(db, epoch=epoch, principal_id='human', session_id=s0,
-                                                  request_id='queued', payload={'text': 'continue'})
+    admission = {'admission_id': seed_admission(db, s0)} if queued else None
     return db, s0, s1, admission
 
 
@@ -58,7 +64,7 @@ def test_segment_delete_or_sweep_keeps_a_conversation_with_queued_work(tmp_path,
         except rt.RuntimeStoreError as exc:
             assert operation in {'single', 'bulk'} and exc.reason == 'session_busy', (operation, exc.reason)
         assert _state(db, s0, s1) == {'s0': True, 's1': True, 'policy': True}, operation
-        assert rt.get_session_admission(db, admission_id=admission['admission_id'])['status'] == 'queued'
+        assert db._read_one('SELECT status FROM session_admissions WHERE admission_id=?', (admission['admission_id'],))['status'] == 'queued'
 
 
 @pytest.mark.parametrize('operation', ['single', 'bulk', 'prune-all'])

@@ -1,10 +1,10 @@
 import { Box, Text, useInput } from '@hermes/ink'
 import { useEffect, useState } from 'react'
 
-import type { GatewayClient } from '../gatewayClient.js'
 import { messages } from '../i18n/runtime.js'
 import { useT } from '../i18n/useT.js'
 import { asRpcResult } from '../lib/rpc.js'
+import type { LocalAgentClient } from '../localAgentClient.js'
 import type { Theme } from '../theme.js'
 
 import { TextInput } from './textInput.js'
@@ -17,15 +17,10 @@ export function rosterViewport(height: number, count: number, cursor: number) {
   return { rows, start, timelineRows }
 }
 
-export async function sendAgentSteer(gw: GatewayClient, sid: string, id: string, text: string) {
-  // The shared owner serves no subagent.steer: the sidecar would answer "session not found".
-  if (gw.isCanonical) {
-    return { accepted: false, message: messages().canonical.controls.notAvailable('agents steer') }
-  }
-
-  const result = asRpcResult<{ status: string }>(
-    await gw.request('subagent.steer', { session_id: sid, subagent_id: id, text })
-  )
+export async function sendAgentSteer(gw: LocalAgentClient, sid: string, id: string, text: string) {
+  const result = asRpcResult<{
+    status: string
+  }>(await gw.request('subagent.steer', { session_id: sid, subagent_id: id, text }))
 
   const accepted = result?.status === 'queued'
   const T = messages().hubs.agentControls
@@ -37,7 +32,7 @@ export async function sendAgentSteer(gw: GatewayClient, sid: string, id: string,
 }
 
 interface ControlProps {
-  gw: GatewayClient
+  gw: LocalAgentClient
   sid: string
   id: string
   t: Theme
@@ -50,7 +45,10 @@ export function AgentSteerForm({
   t,
   cols,
   onClose
-}: ControlProps & { cols: number; onClose: () => void }) {
+}: ControlProps & {
+  cols: number
+  onClose: () => void
+}) {
   const T = useT().hubs.agentControls
   const [text, setText] = useState('')
   const [feedback, setFeedback] = useState('')
@@ -121,9 +119,11 @@ export function AgentLiveTail({ gw, sid, id, t }: ControlProps) {
       pending = true
 
       try {
-        const result = asRpcResult<{ available: boolean; text: string; truncated: boolean }>(
-          await gw.request('subagent.tail', { session_id: sid, subagent_id: id })
-        )
+        const result = asRpcResult<{
+          available: boolean
+          text: string
+          truncated: boolean
+        }>(await gw.request('subagent.tail', { session_id: sid, subagent_id: id }))
 
         if (active) {
           setTail(

@@ -135,162 +135,9 @@ def _credential_store_scope_label() -> str:
     return f"[profile '{get_active_profile_name() or 'default'}', HERMES_HOME {get_hermes_home()}]"
 
 
-def _primary_profile_routes_for_current_home() -> list:
-    """Primary gateway ``profile_routes`` targeting the profile being served; ``[]`` if this IS the
-    primary home. Satellite crons are ticked and delivered by the primary gateway (a satellite
-    holding its own token is a ``duplicate_credential`` fatal). Reads the primary home's YAML
-    layers (user file + managed-scope overlay, top-level or nested ``gateway.``) through the same
-    loader ``load_gateway_config()`` uses, without bridging platform config into this process.
-    Shared by preflight rescue and delivery-time resolution so they cannot drift.
-
-    Under ``gateway.multiplex_profiles`` a satellite profile's cron jobs are ticked by the primary gateway's
-    in-process ticker (#69377) and delivered through the primary gateway's live adapters — the satellite
-    home never holds the platform credentials itself (giving it a token of its own is a
-    ``duplicate_credential`` fatal).
-    """
-    try:
-        from hermes_constants import get_default_hermes_root, get_hermes_home
-        primary_home = get_default_hermes_root()
-        current_home = _sched.Path(get_hermes_home())
-        if (
-            primary_home.expanduser().resolve(strict=False)
-            == current_home.expanduser().resolve(strict=False)
-        ):
-            return []  # this IS the primary home — nothing to consult
-
-        # Same layers the primary gateway's own loader reads: routes pinned in the managed scope
-        # (/etc/hermes/config.yaml) never reached the raw user-file read (#121212), so preflight
-        # false-blocked and routed delivery failed closed on centrally-managed installs.
-        from gateway.config_loader import read_yaml_layers
-        layered = read_yaml_layers(primary_home.expanduser())
-        routes_raw = layered.get("profile_routes")
-        if routes_raw is None and isinstance(layered.get("gateway"), dict):
-            routes_raw = layered["gateway"].get("profile_routes")
-        if not isinstance(routes_raw, list):
-            return []
-
-        from gateway.profile_routing import parse_profile_routes
-        from hermes_cli.profiles import profile_matches_home
-        return [
-            route for route in parse_profile_routes(routes_raw)
-            if route.enabled and profile_matches_home(route.profile)
-        ]
-    except Exception:
-        logger.debug("primary-gateway profile-route lookup unavailable", exc_info=True)
-        return []
-
-
-def _delivery_platform_routed_from_primary_gateway(platform_name: str) -> bool:
-    """True when the primary gateway routes this platform to the profile being served.
-
-    scheduler is currently serving (preflight rescue, #97476).
-    """
-    platform_key = platform_name.lower()
-    return any(
-        str(route.platform).lower() == platform_key
-        for route in _primary_profile_routes_for_current_home()
-    )
-
-
-class SharedRouteAdapters:
-    """Read-only adapter map for a credentialless satellite profile. ``get(platform, target)``
-    resolves the PRIMARY adapter iff the inbound route matcher (``ProfileRoute.matches``) accepts
-    the target; anything else (unmatched target, disabled route, other profile, or target-less
-    ``get(platform)``) is a miss — fail closed, never the default bot.
-
-    See #101113.
-    """
-
-    def __init__(self, primary_adapters, routes) -> None:
-        self._primary = dict(primary_adapters or {})
-        self._routes = list(routes or [])
-
-    def __bool__(self) -> bool:
-        return bool(self._primary) and bool(self._routes)
-
-    def get(self, platform, target=None, default=None):
-        if not target:
-            return default
-        adapter = self._primary.get(platform)
-        if adapter is None:
-            return default
-        platform_key = str(getattr(platform, "value", platform)).lower()
-        chat_id = str(target.get("chat_id") or "") or None
-        thread_id = target.get("thread_id")
-        thread_id = str(thread_id) if thread_id else None
-        # A cron target carries no inbound guild anchor, so a route's guild_id is matched against
-        # itself — the target-exact discriminators (chat_id/thread_id) authorize the send. Without
-        # this the documented ``guild_id + chat_id`` Discord route never authorized cron output.
-        for route in self._routes:
-            if str(route.platform).lower() != platform_key:
-                continue
-            if not (route.chat_id or route.thread_id):
-                continue  # guild-only routes are not target-exact
-            if route.matches(
-                str(route.platform), guild_id=route.guild_id, chat_id=chat_id, thread_id=thread_id,
-            ):
-                return adapter
-        return default
-
-
 def _preflight_check_delivery(job: dict) -> Optional[str]:
-    """Check delivery targets resolve to configured platforms. ``local``/``origin``/``all`` are
-    never checked (no gateway-config load). Unknown platform always blocks; known platform blocks
-    only if the gateway config loads AND reports it unconnected; config load failures fail OPEN.
-    ``failure_deliver`` gets the same rules — a typo'd failure platform would otherwise only
-    surface when a failure occurs (NS-788)."""
-    deliver_value = _delivery._normalize_deliver_value(job.get("deliver", "local"))
-    failure_deliver_value = _delivery._normalize_deliver_value(
-        _delivery._delivery_lane_value(job, for_failure=True))
-    lane_values = [deliver_value]
-    if failure_deliver_value != deliver_value:
-        lane_values.append(failure_deliver_value)
-    platform_parts: list[str] = []
-    for lane_value in lane_values:
-        for part in lane_value.split(","):
-            part = part.strip()
-            if not part or part.lower() in {"local", "origin", "all"}:
-                continue
-            # bot-chat targets deliver via a local subprocess; failures land in last_delivery_error.
-            if _delivery.parse_bot_chat_deliver_token(part) is not None:
-                continue
-            platform_parts.append(part.split(":", 1)[0].strip())
-    if not platform_parts:
-        return None
-
-    connected: Optional[set] = None
-    for platform_name in platform_parts:
-        if not _delivery._is_known_delivery_platform(platform_name):
-            return (
-                f"delivery platform '{platform_name}' is not a known cron "
-                "delivery target. Fix the job's `deliver` value or configure "
-                "the platform's gateway credentials."
-            )
-        if connected is None:
-            try:
-                from gateway.config import load_gateway_config
-                gateway_config = load_gateway_config()
-                connected = {p.value for p in gateway_config.get_connected_platforms()}
-                connected |= _delivery._relay_fronted_delivery_platforms(connected)
-            except Exception:
-                logger.debug(
-                    "preflight: gateway config unavailable — skipping "
-                    "delivery credential check", exc_info=True)
-                return None  # fail-open
-        # Multiplex: a satellite served by the primary's adapters reads unconnected — no block.
-        if (
-            platform_name.lower() not in connected
-            # Multiplex escape hatch: a satellite profile whose deliveries are routed by the primary
-            # gateway's profile_routes is served by the primary's adapters, so its own unconnected reading
-            # is a false block (#97476).
-            and not _delivery_platform_routed_from_primary_gateway(platform_name)
-        ):
-            return (
-                f"delivery platform '{platform_name}' has no gateway "
-                "credentials configured (not connected). Configure it via "
-                "`hermes setup` or change the job's `deliver` target."
-            )
-    return None
+    """Removed transports are an unconditional configuration error, never a probe."""
+    return _delivery.local_delivery_error(job)
 
 
 # ``skill_view`` payload keys naming missing prerequisites -> label for the preflight verdict.
@@ -392,10 +239,12 @@ def _preflight_job_config(job: dict, cfg: dict) -> Optional[str]:
     Same fail-before-spend spirit as the fail-loud-on-hidden-tools direction in #27948; alert dedup
     follows the alert-once pattern from the dead-pin auto-pause (#73506).
     """
+    delivery_error = _preflight_check_delivery(job)
+    if delivery_error:
+        return delivery_error
     for name, check in (
         ("provider_key", lambda: _preflight_check_provider_key(job, cfg)),
-        ("skills", lambda: _preflight_check_skills(job)),
-        ("delivery", lambda: _preflight_check_delivery(job))):
+        ("skills", lambda: _preflight_check_skills(job))):
         try:
             reason = check()
         except Exception:

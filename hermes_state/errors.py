@@ -195,7 +195,7 @@ class DeletedWalGenerationError(StateDbReplacedError):
 _STATE_DB_APPLICATION_ID_OFFSET = 68
 _STATE_DB_GENERATION_KEY = "db_file_generation"
 _STATE_DB_REPLACED_MSG = (
-    "FATAL: state.db was replaced underneath the gateway; refusing further "
+    "FATAL: state.db was replaced underneath the running terminal; refusing further "
     "writes to this file. Divert transcripts to sessions/<id>.jsonl (and the "
     "gateway pending_messages spool) and restore or reopen after operator intervention."
 )
@@ -207,7 +207,7 @@ STORAGE_RECOVERY_DOCS_URL = "https://hermes-agent.nousresearch.com/docs/user-gui
 _DELETED_WAL_GENERATION_MSG = (
     "FATAL: session storage stopped writing because another Hermes process still holds a deleted "
     "state.db-wal or state.db-shm inode (an old copy of the write-ahead log). Nothing is lost: quit "
-    "every Hermes process on this profile (Desktop app, gateway, dashboard, cron), run `hermes doctor` "
+    "every Hermes terminal and local task on this profile, run `hermes doctor` "
     "(it names the processes still holding the log), then start Hermes again. Do not delete the WAL "
     "yourself and do not run `hermes doctor --fix` while they are running. "
     f"Guide: {STORAGE_RECOVERY_DOCS_URL} "
@@ -239,7 +239,7 @@ _STATE_DB_CORRUPT_MSG = (
     "FATAL: state.db reported structural corruption (database disk image is "
     "malformed outside the FTS shadow tables) on a live handle; refusing further "
     "writes, automatic reopen, and the close-time WAL checkpoint on this file. "
-    "Stop the gateway, then run `hermes sessions recover --source <state.db> "
+    "Exit Hermes terminals and local tasks, then run `hermes sessions recover --source <state.db> "
     "--inspect-only` or restore a snapshot. Unwritten transcripts are diverted to "
     "sessions/<id>.jsonl (and the gateway pending_messages spool)."
 )
@@ -303,3 +303,10 @@ def classify_persistence_error(exc_or_str) -> str:
     if is_disk_full_error(exc_or_str) or any(m in text for m in ("disk", "readonly", "read-only")):
         return "disk"
     return "unknown"
+
+
+class RuntimeStoreError(ValueError):
+    """A durable historical ledger or local transaction failed its value contract."""
+    def __init__(self, reason: str):
+        self.reason = reason
+        super().__init__(reason)

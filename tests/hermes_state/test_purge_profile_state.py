@@ -12,6 +12,7 @@ import time
 import pytest
 
 from hermes_state import SessionDB
+from tests.hermes_state.legacy_rows import seed_topic_mode, seed_topic_binding, delivery_connection
 
 
 @pytest.fixture
@@ -66,9 +67,8 @@ def _write_obligation(db, monkeypatch, obligation_id, session_key, chat_id, prof
                       state="pending"):
     """delivery_obligations is created lazily by the delivery ledger against the same state.db."""
     monkeypatch.setenv("HERMES_HOME", str(db.db_path.parent))
-    from gateway import delivery_ledger
-    monkeypatch.setattr(delivery_ledger, "_db_path", lambda: db.db_path)
-    with delivery_ledger._connect() as conn:
+
+    with delivery_connection(db) as conn:
         now = time.time()
         conn.execute(
             "INSERT INTO delivery_obligations (obligation_id, session_key, platform, chat_id, "
@@ -81,10 +81,10 @@ def _write_obligation(db, monkeypatch, obligation_id, session_key, chat_id, prof
 
 class TestPurgeProfileState:
     def test_purges_routing_and_heartbeats_but_keeps_bystanders(self, db):
-        db.save_gateway_routing_entry(
+        _seed_legacy_route(db,
             "agent:gone:feishu:dm:chatA", json.dumps({"session_key": "agent:gone:feishu:dm:chatA"}),
             scope="/root/sessions")
-        db.save_gateway_routing_entry(
+        _seed_legacy_route(db,
             "agent:keepme:feishu:dm:chatB",
             json.dumps({"session_key": "agent:keepme:feishu:dm:chatB"}), scope="/root/sessions")
         db.register_backend_heartbeat(
@@ -96,7 +96,7 @@ class TestPurgeProfileState:
 
         assert counts["gateway_routing"] == 1
         assert counts["gateway_heartbeats"] == 1
-        routing = db.load_gateway_routing_entries(scope="/root/sessions")
+        routing = _legacy_routes(db, scope="/root/sessions")
         assert "agent:gone:feishu:dm:chatA" not in routing
         assert "agent:keepme:feishu:dm:chatB" in routing
         assert db._read_one(
@@ -159,11 +159,11 @@ class TestPurgeProfileState:
             "sess_keep", "telegram", session_key="agent:keepme:telegram:dm:chatB",
             profile_name="keepme", chat_id="chatB", chat_type="dm",
         )
-        db.bind_telegram_topic(
+        seed_topic_binding(db,
             chat_id="chatA", thread_id="threadA", user_id="userA",
             session_key="agent:gone:telegram:dm:chatA", session_id="sess_gone",
             profile_name="otherholder")
-        db.bind_telegram_topic(
+        seed_topic_binding(db,
             chat_id="chatB", thread_id="threadB", user_id="userB",
             session_key="agent:keepme:telegram:dm:chatB", session_id="sess_keep",
             profile_name="keepme")
@@ -179,16 +179,16 @@ class TestPurgeProfileState:
         assert counts["telegram_dm_topic_bindings"] == 1
 
     def test_underscore_in_profile_name_is_not_a_like_wildcard(self, db):
-        db.save_gateway_routing_entry(
+        _seed_legacy_route(db,
             "agent:foo_bar:feishu:dm:chatA",
             json.dumps({"session_key": "agent:foo_bar:feishu:dm:chatA"}), scope="/root/sessions")
-        db.save_gateway_routing_entry(
+        _seed_legacy_route(db,
             "agent:fooXbar:feishu:dm:chatB",
             json.dumps({"session_key": "agent:fooXbar:feishu:dm:chatB"}), scope="/root/sessions")
 
         db.purge_profile_state("foo_bar")
 
-        routing = db.load_gateway_routing_entries(scope="/root/sessions")
+        routing = _legacy_routes(db, scope="/root/sessions")
         assert "agent:foo_bar:feishu:dm:chatA" not in routing
         assert "agent:fooXbar:feishu:dm:chatB" in routing
 
@@ -232,3 +232,13 @@ class TestPurgeProfileState:
         states = {row["obligation_id"]: row["state"] for row in db._read_all(
             "SELECT obligation_id, state FROM delivery_obligations")}
         assert states == {"ob_gone": "abandoned", "ob_keep": "pending"}
+
+
+def _seed_legacy_route(db, session_key, entry_json, *, scope=''):
+    db._write_sql('INSERT INTO gateway_routing(scope,session_key,entry_json,updated_at) VALUES(?,?,?,?)',
+                  (scope,session_key,entry_json,0))
+
+
+def _legacy_routes(db, *, scope=''):
+    return {row['session_key']: row['entry_json'] for row in
+            db._read_all('SELECT session_key,entry_json FROM gateway_routing WHERE scope=?', (scope,))}

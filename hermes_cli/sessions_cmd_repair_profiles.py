@@ -10,7 +10,7 @@ import sys
 from typing import Dict, List
 
 from hermes_cli.sessions_repair_profiles import (
-    Finding, default_snapshot, enumerate_stores, live_gateway_homes, scan_stores,
+    Finding, default_snapshot, enumerate_stores, scan_stores,
 )
 
 _KIND_LABELS = {
@@ -46,21 +46,19 @@ def _print_report(findings: list[Finding]) -> None:
 
 
 def cmd_repair_profiles(args) -> int:
+    from hermes_state.runtime_ownership import exclusive_maintenance
+    if not getattr(args, "apply", False):
+        return _repair_profiles_owned(args)
+    stores = enumerate_stores()
+    with exclusive_maintenance([store.home for store in stores]):
+        return _repair_profiles_owned(args)
+
+
+def _repair_profiles_owned(args) -> int:
     stores = enumerate_stores()
     apply = bool(getattr(args, "apply", False))
     as_json = bool(getattr(args, "json", False))
     legacy_main = getattr(args, "legacy_main", None) or "report"
-
-    if apply:
-        # Before any store is opened for write: a writable open runs schema init, and a live
-        # gateway holds the routing index in memory and would write it back over the repair.
-        live = live_gateway_homes(stores)
-        if live:
-            names = ", ".join(f"{profile} (pid {pid})" for profile, pid in live)
-            print(f"A gateway is running for: {names}. It holds the routing index in memory and would "
-                  "write it back over this repair. Stop it (`hermes gateway stop`), then re-run --apply.",
-                  file=sys.stderr)
-            return 1
 
     plan, session = scan_stores(stores, legacy_main=legacy_main, read_only=not apply)
     try:

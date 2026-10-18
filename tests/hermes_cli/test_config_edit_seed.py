@@ -6,7 +6,6 @@ import shutil
 
 import pytest
 
-from tests.gateway.test_display_config import assert_keeps_platform_display_defaults
 
 
 def _config_edit(tmp_path, monkeypatch, cfg, *, template):
@@ -69,9 +68,8 @@ SEEDERS = {
 
 
 @pytest.mark.parametrize("seeder", list(SEEDERS))
-def test_every_seeder_keeps_every_platform_display_default(tmp_path, monkeypatch, seeder):
+def test_every_seeder_produces_terminal_configuration(tmp_path, monkeypatch, seeder):
     import hermes_cli.config as cfg
-    from gateway.run import _load_gateway_config
 
     home = tmp_path / "home"
     home.mkdir()
@@ -81,4 +79,6 @@ def test_every_seeder_keeps_every_platform_display_default(tmp_path, monkeypatch
 
     config_path = home / "config.yaml"
     assert config_path.exists()  # the resolution checks below would pass on a missing file
-    assert_keeps_platform_display_defaults(_load_gateway_config(config_path))
+    raw = cfg.read_user_config_raw(config_path)
+    assert isinstance(raw, dict)
+    assert not ({"gateway", "platforms", "desktop", "dashboard"} & raw.keys())

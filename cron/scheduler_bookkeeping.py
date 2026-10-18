@@ -61,8 +61,6 @@ def finish_completed_run(d, fire_owner: Optional[str], execution_id: str, *, rec
         update_job(job["id"], {"last_delivery_queued": None})
         job["last_delivery_queued"] = None
     mark_kwargs: dict = {"delivery_error": d.delivery_error}
-    from cron.scheduler_authority import journal_path
-    journal = journal_path(job['id'], execution_id)
     if not job.get('no_agent'):
         mark_kwargs['execution_id'] = execution_id
     if not d.success and job.pop("_model_unreachable", False):
@@ -104,13 +102,6 @@ def finish_completed_run(d, fire_owner: Optional[str], execution_id: str, *, rec
         incident_acked=d.incident_acked,
         success=d.success,
     )
-    from cron.delivery_outcome import settle_quietly, settled_outcome
-    if delivery_outcome == "queued":
-        # A drain that already finished this send (cron/delivery_outcome.py) is the real outcome.
-        delivery_outcome = settled_outcome(execution_id) or "queued"
-    if delivery_outcome in ("delivered", "not_configured") and not d.success:
-        # Failure ping left the process (or had a configured target): mark the incident alerted.
-        scheduler._mark_incident_alerted(d.failure_incident_id)
     from functools import partial
     from cron.executions import get_execution, recover_receipted_execution
     finish = partial(recover_receipted_execution, job_id=job['id']) if recovered else scheduler.finish_execution
@@ -122,8 +113,4 @@ def finish_completed_run(d, fire_owner: Optional[str], execution_id: str, *, rec
         # Legacy direct calls may have no execution row; an already-finished row is also safe.
         if current is not None and current['status'] not in {'completed', 'failed'}:
             return False
-    if job.get("last_delivery_queued"):
-        # A drain that settled before this run's own bookkeeping landed found nothing to fence on.
-        settle_quietly(job["id"], execution_id)
-    journal.unlink(missing_ok=True)
     return True

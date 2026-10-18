@@ -3,7 +3,7 @@
     "prompt_tokens": {
       "context": 249,
       "stable": 1935,
-      "volatile": 1954
+      "volatile": 1929
     },
     "tool_tokens": 13277,
     "tools": [
@@ -46,7 +46,7 @@
     "prompt_tokens": {
       "context": 0,
       "stable": 1445,
-      "volatile": 1954
+      "volatile": 1930
     },
     "tool_tokens": 13277,
     "tools": [
@@ -89,7 +89,7 @@
     "prompt_tokens": {
       "context": 0,
       "stable": 1866,
-      "volatile": 1953
+      "volatile": 1928
     },
     "tool_tokens": 13277,
     "tools": [
@@ -132,7 +132,7 @@
     "prompt_tokens": {
       "context": 0,
       "stable": 2640,
-      "volatile": 1950
+      "volatile": 1926
     },
     "tool_tokens": 13433,
     "tools": [
@@ -175,7 +175,7 @@
     "prompt_tokens": {
       "context": 0,
       "stable": 1445,
-      "volatile": 1954
+      "volatile": 1929
     },
     "tool_tokens": 13277,
     "tools": [
@@ -218,7 +218,7 @@
     "prompt_tokens": {
       "context": 0,
       "stable": 1317,
-      "volatile": 1954
+      "volatile": 1930
     },
     "tool_tokens": 13277,
     "tools": [
@@ -257,100 +257,22 @@
       "write_file"
     ]
   },
-  "desktop.claude": {
+  "subagent.claude": {
     "prompt_tokens": {
       "context": 0,
-      "stable": 1579,
-      "volatile": 1955
+      "stable": 282,
+      "volatile": 191
     },
-    "tool_tokens": 13912,
-    "tools": [
-      "browser_back",
-      "browser_cdp",
-      "browser_click",
-      "browser_console",
-      "browser_dialog",
-      "browser_exec",
-      "browser_get_images",
-      "browser_navigate",
-      "browser_press",
-      "browser_scroll",
-      "browser_snapshot",
-      "browser_type",
-      "browser_vision",
-      "clarify",
-      "delegate_task",
-      "execute_code",
-      "manage_connections",
-      "memory",
-      "patch",
-      "react_to_message",
-      "read_file",
-      "search_files",
-      "skill_manage",
-      "skill_view",
-      "skills_list",
-      "terminal",
-      "text_to_speech",
-      "tool_call",
-      "tool_describe",
-      "tool_search",
-      "vision_analyze",
-      "web_extract",
-      "web_search",
-      "write_file"
-    ]
+    "tool_tokens": 0,
+    "tools": []
   },
-  "discord.claude": {
+  "tui.claude": {
     "prompt_tokens": {
       "context": 0,
-      "stable": 1349,
-      "volatile": 1955
+      "stable": 1397,
+      "volatile": 1930
     },
-    "tool_tokens": 13277,
-    "tools": [
-      "browser_back",
-      "browser_cdp",
-      "browser_click",
-      "browser_console",
-      "browser_dialog",
-      "browser_exec",
-      "browser_get_images",
-      "browser_navigate",
-      "browser_press",
-      "browser_scroll",
-      "browser_snapshot",
-      "browser_type",
-      "browser_vision",
-      "clarify",
-      "delegate_task",
-      "execute_code",
-      "manage_connections",
-      "memory",
-      "patch",
-      "read_file",
-      "search_files",
-      "skill_manage",
-      "skill_view",
-      "skills_list",
-      "terminal",
-      "text_to_speech",
-      "tool_call",
-      "tool_describe",
-      "tool_search",
-      "vision_analyze",
-      "web_extract",
-      "web_search",
-      "write_file"
-    ]
-  },
-  "telegram.claude": {
-    "prompt_tokens": {
-      "context": 0,
-      "stable": 1382,
-      "volatile": 1955
-    },
-    "tool_tokens": 13277,
+    "tool_tokens": 13301,
     "tools": [
       "browser_back",
       "browser_cdp",

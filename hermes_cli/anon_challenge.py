@@ -117,14 +117,8 @@ def server_message(value: Any) -> str:
 
 
 def client_surface() -> str:
-    """``gateway`` in the process that holds the messaging gateway's runtime lock (nobody is at its
-    console), ``desktop`` for the backend the desktop app spawned, else ``cli``. ``HERMES_DESKTOP``
-    alone is inherited by every terminal-pane shell, so desktop ownership needs the spawn credential."""
-    status = sys.modules.get("gateway.status")
-    if status is not None and status.owns_gateway_runtime_lock():
-        return "gateway"
-    from hermes_cli.process_identity import is_desktop_owned_backend
-    return "desktop" if is_desktop_owned_backend() else "cli"
+    """The terminal product identifies itself as the provider's CLI client."""
+    return "cli"
 
 
 def client_info() -> dict[str, Any]:
@@ -321,7 +315,7 @@ def _announce(challenge: BrowserChallenge) -> bool:
     """Broadcast to connected desktop clients. False when this process is not a gateway at all
     (``HERMES_DESKTOP`` is an env var, and a CLI the desktop spawned inherits it): importing the
     gateway here just to find nobody listening would also write an event frame to stdout."""
-    server = sys.modules.get("tui_gateway.server")
+    server = sys.modules.get("tui_runtime.server")
     if server is None:
         return False
     try:
@@ -365,7 +359,7 @@ def present(challenge: BrowserChallenge) -> None:
         return
     if not challenge.required or _background.get():
         return
-    server = sys.modules.get("tui_gateway.server")
+    server = sys.modules.get("tui_runtime.server")
     if server is not None and server._stdio_is_rpc_channel and _announce(challenge):
         return
     _present_in_terminal(challenge)

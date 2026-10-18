@@ -9,7 +9,7 @@ from datetime import datetime
 from typing import Any, Callable, Optional
 
 from agent.monitoring.events import CronExecutionEvent
-from agent.monitoring.gateway_health import GatewayMetric, _contains_any, _safe_instance_id
+from agent.monitoring.common import Metric, contains_any, safe_instance_id
 from cron.jobs import (
     _compute_grace_seconds,
     get_ticker_heartbeat_age,
@@ -30,12 +30,12 @@ _TERMINAL_STATUSES = {"completed", "failed", "unknown"}
 
 @dataclass(frozen=True, slots=True)
 class CronHealthSnapshot:
-    metrics: list[GatewayMetric]
+    metrics: list[Metric]
     events: list[CronExecutionEvent]
 
 
 # Opaque job key: same sha256:<24 hex> shape as service.instance.id — never the raw id.
-_job_key = _safe_instance_id
+_job_key = safe_instance_id
 
 _AUTH_RE = re.compile(
     r"\b(?:authentication|authenticated|authenticate|authorization|authorized|authorize|unauthorized|forbidden|bearer|401|403)\b"
@@ -46,13 +46,13 @@ _AUTH_RE = re.compile(
 # "oauth"/"tokenizer"/"HTTP 4015" do not false-positive.
 _CRON_ERROR_RULES: tuple[tuple[Callable[[str], bool], str], ...] = (
     (lambda s: _AUTH_RE.search(s) is not None, "auth_failed"),
-    (_contains_any("rate limit", "429", "quota"), "rate_limited"),
-    (_contains_any("timeout", "timed out"), "timeout"),
-    (_contains_any("network", "connection", "dns", "socket", "unreachable"), "network_error"),
-    (_contains_any("dispatch", "executor"), "dispatch_failed"),
-    (_contains_any("interrupt", "owner exited", "restarted"), "interrupted"),
-    (_contains_any("empty response"), "empty_response"),
-    (_contains_any("config", "missing", "invalid"), "invalid_config"),
+    (contains_any("rate limit", "429", "quota"), "rate_limited"),
+    (contains_any("timeout", "timed out"), "timeout"),
+    (contains_any("network", "connection", "dns", "socket", "unreachable"), "network_error"),
+    (contains_any("dispatch", "executor"), "dispatch_failed"),
+    (contains_any("interrupt", "owner exited", "restarted"), "interrupted"),
+    (contains_any("empty response"), "empty_response"),
+    (contains_any("config", "missing", "invalid"), "invalid_config"),
 )
 
 
@@ -125,28 +125,28 @@ def _is_overdue(job: dict[str, Any], now: datetime) -> bool:
         return False
 
 
-def _job_metrics(metrics: list[GatewayMetric]) -> None:
+def _job_metrics(metrics: list[Metric]) -> None:
     enabled = [job for job in load_jobs() if job.get("enabled", True)]
-    metrics.append(GatewayMetric("hermes.cron.jobs.enabled", len(enabled), {}))
-    metrics.append(GatewayMetric("hermes.cron.jobs.overdue", sum(1 for job in enabled if _is_overdue(job, _now())), {}))
+    metrics.append(Metric("hermes.cron.jobs.enabled", len(enabled), {}))
+    metrics.append(Metric("hermes.cron.jobs.overdue", sum(1 for job in enabled if _is_overdue(job, _now())), {}))
 
 
-def _freshness_metric(name: str, reader: Callable[[], Optional[float]]) -> Callable[[list[GatewayMetric]], None]:
-    def build(metrics: list[GatewayMetric]) -> None:
+def _freshness_metric(name: str, reader: Callable[[], Optional[float]]) -> Callable[[list[Metric]], None]:
+    def build(metrics: list[Metric]) -> None:
         value = reader()
         if value is not None:
-            metrics.append(GatewayMetric(name, max(0.0, float(value)), {}))
+            metrics.append(Metric(name, max(0.0, float(value)), {}))
 
     return build
 
 
-def _single_metric(name: str, reader: Callable[[], Any]) -> Callable[[list[GatewayMetric]], None]:
-    return lambda metrics: metrics.append(GatewayMetric(name, reader(), {}))
+def _single_metric(name: str, reader: Callable[[], Any]) -> Callable[[list[Metric]], None]:
+    return lambda metrics: metrics.append(Metric(name, reader(), {}))
 
 
 # Each group is independently fail-open so one unavailable source never hides the rest.
 # Readers are wrapped in lambdas so monkeypatching this module's names still takes effect.
-_METRIC_GROUPS: tuple[tuple[Callable[[list[GatewayMetric]], None], str], ...] = (
+_METRIC_GROUPS: tuple[tuple[Callable[[list[Metric]], None], str], ...] = (
     (_freshness_metric("hermes.cron.scheduler.heartbeat_age_seconds", lambda: get_ticker_heartbeat_age()), "cron freshness metric unavailable"),
     (_freshness_metric("hermes.cron.scheduler.last_success_age_seconds", lambda: get_ticker_success_age()), "cron freshness metric unavailable"),
     (_single_metric("hermes.cron.scheduler.catch_up_occurrences", lambda: get_catch_up_occurrence_count()), "cron catch-up metric unavailable"),
@@ -161,7 +161,7 @@ _METRIC_GROUPS: tuple[tuple[Callable[[list[GatewayMetric]], None], str], ...] = 
 
 
 def build_cron_health_snapshot() -> CronHealthSnapshot:
-    metrics: list[GatewayMetric] = []
+    metrics: list[Metric] = []
     for build, failure_msg in _METRIC_GROUPS:
         try:
             build(metrics)

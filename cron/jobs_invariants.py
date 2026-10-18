@@ -48,6 +48,6 @@ def _script_is_command_line(script: str) -> bool:
     missing filename stays creatable (``hermes cron doctor`` reports it)."""
     if not any(ch.isspace() for ch in script.strip()):
         return False
-    from cron.lifecycle_guard import _resolve_script_path
+    from cron.script_paths import _resolve_script_path
     path = _resolve_script_path(script)
     return path is None or not path.is_file()

@@ -43,6 +43,9 @@ def cron_env(tmp_path, monkeypatch):
     """Isolated cron env + a recurring no_agent interval job, due NOW."""
     hermes_home = tmp_path / ".hermes"
     hermes_home.mkdir()
+    from hermes_security import vault
+    vault.init_vault(hermes_home, "synthetic-recurring-password")
+    vault.unlock(hermes_home, "synthetic-recurring-password")
     (hermes_home / "cron").mkdir()
     (hermes_home / "cron" / "output").mkdir()
     (hermes_home / "scripts").mkdir()
@@ -64,7 +67,8 @@ def cron_env(tmp_path, monkeypatch):
     jobs_mod.update_job(job["id"], {"next_run_at": (now - timedelta(minutes=1)).isoformat()})
 
     script = hermes_home / "scripts" / "probe.py"
-    script.write_text("print('ok')\n")
+    from hermes_security.io import write_text
+    write_text(script, "print('ok')\n", purpose="state")
 
     return {"home": hermes_home, "job_id": job["id"]}
 

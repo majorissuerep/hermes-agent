@@ -16,7 +16,6 @@ import { useQueue } from '../hooks/useQueue.js'
 import { t } from '../i18n/runtime.js'
 import { isUsableClipboardText, readClipboardText } from '../lib/clipboard.js'
 import { resolveEditor } from '../lib/editor.js'
-import { stageClipboardImage, stageImagePath } from '../lib/imageAttachments.js'
 import { readOsc52Clipboard } from '../lib/osc52.js'
 import { isRemoteShellSession } from '../lib/terminalSetup.js'
 import { pasteTokenLabel, stripTrailingPasteNewlines } from '../lib/text.js'
@@ -32,7 +31,6 @@ import type {
 import { $isBlocked } from './overlayStore.js'
 import { captureDestination, isCurrentDestination, type SubmissionDestination } from './submissionDestination.js'
 import { getUiState } from './uiStore.js'
-
 const TOKEN_MAX_COUNT = 32
 const TOKEN_MAX_TOTAL_BYTES = 4 * 1024 * 1024
 
@@ -56,7 +54,14 @@ const trimTokens = (tokens: ComposerToken[]): ComposerToken[] => {
 }
 
 /** Insert text at the cursor position, adding spacing to separate from adjacent non-whitespace. */
-function insertAtCursor(value: string, cursor: number, text: string): { cursor: number; value: string } {
+function insertAtCursor(
+  value: string,
+  cursor: number,
+  text: string
+): {
+  cursor: number
+  value: string
+} {
   const lead = cursor > 0 && !/\s/.test(value[cursor - 1] ?? '') ? ' ' : ''
   const tail = cursor < value.length && !/\s/.test(value[cursor] ?? '') ? ' ' : ''
   const insert = `${lead}${text}${tail}`
@@ -147,7 +152,10 @@ export function useComposerState({ gw, submitRef, sys }: UseComposerStateOptions
   }, [])
 
   const isBlocked = useStore($isBlocked)
-  const { querier } = useStdin() as { querier: Parameters<typeof readOsc52Clipboard>[0] }
+
+  const { querier } = useStdin() as {
+    querier: Parameters<typeof readOsc52Clipboard>[0]
+  }
 
   const {
     stage,
@@ -162,7 +170,7 @@ export function useComposerState({ gw, submitRef, sys }: UseComposerStateOptions
     removeQ,
     setQueueEdit,
     takeQ
-  } = useQueue(gw)
+  } = useQueue()
 
   const { historyRef, historyIdx, setHistoryIdx, historyDraftRef, pushHistory } = useInputHistory()
   const { completions, compIdx, setCompIdx, compReplace } = useCompletion(input, isBlocked, gw)
@@ -191,7 +199,7 @@ export function useComposerState({ gw, submitRef, sys }: UseComposerStateOptions
       }
 
       for (const token of gone) {
-        if (token.kind === 'image' && !gw.isCanonical) {
+        if (token.kind === 'image' && !false) {
           void gw.request('image.detach', { path: token.path, session_id: getUiState().sid }).catch(() => {})
         }
       }
@@ -208,20 +216,21 @@ export function useComposerState({ gw, submitRef, sys }: UseComposerStateOptions
    */
   const attachImageToken = useCallback(
     (
-      attached: ImageAttachResponse & { path?: string; mime?: string },
+      attached: ImageAttachResponse & {
+        path?: string
+        mime?: string
+      },
       value: string,
       cursor: number
     ): ComposerPasteResult => {
       const index = nextImageIndex(tokensRef.current)
       const label = imageToken(index)
-
       setComposerTokens(prev =>
         trimTokens([
           ...prev,
           { index, kind: 'image', label, path: attached.path ?? '', ...(attached.mime ? { mime: attached.mime } : {}) }
         ])
       )
-
       const withToken = insertAtCursor(value, cursor, label)
       const remainder = attached.remainder?.trim() ?? ''
 
@@ -231,10 +240,20 @@ export function useComposerState({ gw, submitRef, sys }: UseComposerStateOptions
   )
 
   const attachmentFlights = useRef(0)
-  const staleAttachments = useRef<Array<{ destination: SubmissionDestination; path: string }>>([])
+
+  const staleAttachments = useRef<
+    Array<{
+      destination: SubmissionDestination
+      path: string
+    }>
+  >([])
 
   const resolveAttachment = useCallback(
-    async <T extends { path?: string }>(
+    async <
+      T extends {
+        path?: string
+      }
+    >(
       destination: SubmissionDestination,
       revision: number,
       request: Promise<T | null>,
@@ -249,7 +268,7 @@ export function useComposerState({ gw, submitRef, sys }: UseComposerStateOptions
           return accept(attached)
         }
 
-        if (attached?.path && !gw.isCanonical) {
+        if (attached?.path && !false) {
           staleAttachments.current.push({ destination, path: attached.path })
         }
 
@@ -293,26 +312,31 @@ export function useComposerState({ gw, submitRef, sys }: UseComposerStateOptions
         return null
       }
 
-      return resolveAttachment<ClipboardPasteResponse & { path?: string; mime?: string }>(
+      return resolveAttachment<
+        ClipboardPasteResponse & {
+          path?: string
+          mime?: string
+        }
+      >(
         destination,
         revision,
-        (gw.isCanonical
-          ? stageClipboardImage(gw, destination).then(image => (image ? { ...image, attached: true } : null))
-          : gw.request<ClipboardPasteResponse & { path?: string; mime?: string }>('clipboard.paste', {
-              session_id: sid
-            })
-        ).catch((error: Error) => {
-          if (!quiet) {
-            sys(t('canonical.queue.clipboardImageFailed', error.message))
-          }
+        gw
+          .request<
+            ClipboardPasteResponse & {
+              path?: string
+              mime?: string
+            }
+          >('clipboard.paste', {
+            session_id: sid
+          })
+          .catch((error: Error) => {
+            if (!quiet) {
+              sys(t('canonical.queue.clipboardImageFailed', error.message))
+            }
 
-          return null
-        }),
+            return null
+          }),
         r => {
-          if (r?.attached) {
-            return attachImageToken(r, value, cursor)
-          }
-
           if (!quiet) {
             sys(r?.message || 'No image found in clipboard')
           }
@@ -321,7 +345,7 @@ export function useComposerState({ gw, submitRef, sys }: UseComposerStateOptions
         }
       )
     },
-    [attachImageToken, gw, resolveAttachment, sys]
+    [gw, resolveAttachment, sys]
   )
 
   const handleResolvedPaste = useCallback(
@@ -338,15 +362,22 @@ export function useComposerState({ gw, submitRef, sys }: UseComposerStateOptions
 
       if (sid && looksLikeDroppedPath(cleanedText)) {
         try {
-          const next = await resolveAttachment<ImageAttachResponse & { path?: string; mime?: string }>(
+          const next = await resolveAttachment<
+            ImageAttachResponse & {
+              path?: string
+              mime?: string
+            }
+          >(
             destination,
             revision,
-            gw.isCanonical
-              ? stageImagePath(cleanedText, gw, destination)
-              : gw.request<ImageAttachResponse & { path?: string }>('image.attach', {
-                  path: cleanedText,
-                  session_id: sid
-                }),
+            gw.request<
+              ImageAttachResponse & {
+                path?: string
+              }
+            >('image.attach', {
+              path: cleanedText,
+              session_id: sid
+            }),
             attached => (attached?.name ? attachImageToken(attached, value, cursor) : null)
           )
 
@@ -354,7 +385,7 @@ export function useComposerState({ gw, submitRef, sys }: UseComposerStateOptions
             return next
           }
         } catch {
-          // Fall back to generic file-drop detection below.
+          // A pasted path can be ordinary text rather than an image.
         }
 
         if (!(isCurrentDestination(destination) && revision === composerRevision.current)) {
@@ -375,7 +406,7 @@ export function useComposerState({ gw, submitRef, sys }: UseComposerStateOptions
             return insertAtCursor(value, cursor, dropped.text)
           }
         } catch {
-          // Fall through to normal text paste behavior.
+          // Keep the original paste when file-drop detection is unavailable.
         }
       }
 
@@ -394,12 +425,12 @@ export function useComposerState({ gw, submitRef, sys }: UseComposerStateOptions
 
       const label = pasteTokenLabel(cleanedText, lineCount)
       const inserted = insertAtCursor(value, cursor, label)
-
       const token: ComposerToken = { kind: 'paste', label, text: cleanedText }
       setComposerTokens(prev => trimTokens([...prev, token]))
-
       void gw
-        .request<{ path?: string }>('paste.collapse', { text: cleanedText })
+        .request<{
+          path?: string
+        }>('paste.collapse', { text: cleanedText })
         .then(r => {
           const path = r?.path
 
@@ -469,7 +500,6 @@ export function useComposerState({ gw, submitRef, sys }: UseComposerStateOptions
       const destination = captureDestination()
       const revision = composerRevision.current
       const current = inputRef.current
-
       void attach(current, current.length).then(next => {
         if (next && isCurrentDestination(destination) && revision === composerRevision.current) {
           setInput(next.value)
@@ -495,19 +525,27 @@ export function useComposerState({ gw, submitRef, sys }: UseComposerStateOptions
           return null
         }
 
-        return resolveAttachment<ImageAttachResponse & { path?: string; mime?: string }>(
+        return resolveAttachment<
+          ImageAttachResponse & {
+            path?: string
+            mime?: string
+          }
+        >(
           destination,
           revision,
-          (gw.isCanonical
-            ? stageImagePath(path, gw, destination)
-            : gw.request<ImageAttachResponse & { path?: string }>('image.attach', { path, session_id: sid })
-          ).catch((e: Error) => {
-            if (isCurrentDestination(destination) && revision === composerRevision.current) {
-              sys(`error: ${e.message}`)
-            }
+          gw
+            .request<
+              ImageAttachResponse & {
+                path?: string
+              }
+            >('image.attach', { path, session_id: sid })
+            .catch((e: Error) => {
+              if (isCurrentDestination(destination) && revision === composerRevision.current) {
+                sys(`error: ${e.message}`)
+              }
 
-            return null
-          }),
+              return null
+            }),
           attached => (attached?.name ? attachImageToken(attached, value, cursor) : null)
         )
       }),
@@ -520,11 +558,8 @@ export function useComposerState({ gw, submitRef, sys }: UseComposerStateOptions
     const dir = mkdtempSync(join(tmpdir(), 'hermes-'))
     const file = join(dir, 'prompt.md')
     const [cmd, ...args] = resolveEditor()
-
     writeFileSync(file, [...inputBuf, input].join('\n'))
-
     let exitCode: null | number = null
-
     await withInkSuspended(async () => {
       exitCode = spawnSync(cmd!, [...args, file], { stdio: 'inherit' }).status
     })

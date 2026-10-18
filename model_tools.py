@@ -610,7 +610,6 @@ _AGENT_LOOP_TOOLS = {"todo_list", "memory", "session_search", "delegate_task"}
 # prompts keep working); schemas advertise only new names.
 _LEGACY_TOOL_ALIASES = {
     **dict.fromkeys(TODO_LEGACY_ALIASES, TODO_SCHEMA["name"]), "cronjob": "cronjob_manage", "process": "process_manage",
-    "tour": "gui_tour", "tip": "show_tip",
 }
 _READ_SEARCH_TOOLS = {"read_file", "search_files"}
 

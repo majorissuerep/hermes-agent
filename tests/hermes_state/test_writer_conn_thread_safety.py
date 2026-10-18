@@ -51,8 +51,6 @@ class TestConcurrentReadersDoNotRaceTheWriter:
 
     READER_METHODS = (
         "get_compression_lock_holder",
-        "list_pending_handoffs",
-        "get_handoff_state",
         "clear_session_activity_labels",
     )
 
@@ -105,12 +103,6 @@ class TestConcurrentReadersDoNotRaceTheWriter:
         )
         assert errors == []
 
-    def test_pending_handoff_reads_race_free(self, db):
-        errors = self._run_race(
-            db, lambda d, sid: (d.list_pending_handoffs(),
-                                d.get_handoff_state(sid))
-        )
-        assert errors == []
 
     def test_activity_label_noop_fast_path_race_free(self, db):
         errors = self._run_race(

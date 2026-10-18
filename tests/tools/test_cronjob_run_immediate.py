@@ -38,57 +38,16 @@ class TestCronjobRunExecutesImmediately:
         assert out["job"]["executed"] is True
         assert out["job"]["execution_success"] is True
         m_claim.assert_called_once_with("job-run-1", manual=True, return_job=True)
-        m_run.assert_called_once_with(claimed, adapters=None, loop=None, extra_prompt=None)
+        m_run.assert_called_once_with(claimed, extra_prompt=None)
 
-    def test_run_reconciles_external_provider_after_claimed_execution(self):
-        """A direct run must re-arm Chronos after it advances next_run_at.
 
-        Otherwise a scheduled Chronos fire that loses its claim to this direct
-        run is consumed without a successor one-shot, permanently stalling the
-        recurring job.
-        """
-        order = []
-        ran = {"id": "job-run-1", "last_status": "ok", "last_error": None}
-        claimed = {**_JOB, "fire_claim": {"by": "manual-owner"}}
-        with patch("tools.cronjob_tools.resolve_job_ref", return_value=dict(_JOB)), \
-             patch("tools.cronjob_tools.claim_job_for_fire", return_value=claimed), \
-             patch("cron.scheduler.run_one_job",
-                   side_effect=lambda *a, **kw: order.append("run") or True), \
-             patch("tools.cronjob_tools.get_job", return_value=ran), \
-             patch("tools.cronjob_tools._notify_provider_jobs_changed_safe",
-                   side_effect=lambda: order.append("notify")) as m_notify:
-            out = json.loads(cronjob(action="run", job_id="job-run-1"))
-
-        assert out["job"]["executed"] is True
-        m_notify.assert_called_once_with()
-        # Reconcile only AFTER the run persisted its final state (mark_job_run
-        # inside run_one_job), so the provider arms the post-run next_run_at.
-        assert order == ["run", "notify"]
-
-    def test_run_reconciles_external_provider_even_when_claimed_run_fails(self):
-        """A claimed direct run advances next_run_at at claim time, so the
-        provider must be reconciled even when the execution itself fails."""
-        failed = {"id": "job-run-1", "last_status": "error", "last_error": "provider 500"}
-        claimed = {**_JOB, "fire_claim": {"by": "manual-owner"}}
-        with patch("tools.cronjob_tools.resolve_job_ref", return_value=dict(_JOB)), \
-             patch("tools.cronjob_tools.claim_job_for_fire", return_value=claimed), \
-             patch("cron.scheduler.run_one_job", side_effect=RuntimeError("boom")), \
-             patch("tools.cronjob_tools.mark_job_run"), \
-             patch("tools.cronjob_tools.get_job", return_value=failed), \
-             patch("tools.cronjob_tools._notify_provider_jobs_changed_safe") as m_notify:
-            out = json.loads(cronjob(action="run", job_id="job-run-1"))
-
-        assert out["job"]["executed"] is True
-        assert out["job"]["execution_success"] is False
-        m_notify.assert_called_once_with()
 
     def test_run_skips_when_claim_lost(self):
         """If the scheduler already holds the fire claim, do NOT double-run."""
         with patch("tools.cronjob_tools.resolve_job_ref", return_value=dict(_JOB)), \
              patch("tools.cronjob_tools.claim_job_for_fire", return_value=False), \
              patch("cron.scheduler.run_one_job") as m_run, \
-             patch("tools.cronjob_tools.get_job", return_value=dict(_JOB)), \
-             patch("tools.cronjob_tools._notify_provider_jobs_changed_safe") as m_notify:
+             patch("tools.cronjob_tools.get_job", return_value=dict(_JOB)):
             out = json.loads(cronjob(action="run", job_id="job-run-1"))
 
         assert out["success"] is True
@@ -96,7 +55,6 @@ class TestCronjobRunExecutesImmediately:
         assert out["job"]["execution_success"] is False
         assert "execution_skipped" in out["job"]
         m_run.assert_not_called()  # claim lost -> never fired
-        m_notify.assert_not_called()  # the winning scheduler owns the re-arm
 
     def test_run_reports_failure_from_last_status(self):
         """A failed run is reported via the re-read job's last_status/last_error."""
@@ -112,117 +70,15 @@ class TestCronjobRunExecutesImmediately:
         assert out["job"]["execution_success"] is False
         assert out["job"]["execution_error"] == "provider 500"
 
-    def test_execute_job_now_passes_live_gateway_context_to_delivery(self):
-        """Manual runs must deliver on the live gateway adapter's owning loop."""
-        adapters = {"matrix": object()}
-        gateway_loop = object()
-        runner = SimpleNamespace(adapters=adapters, _gateway_loop=gateway_loop)
-        completed = {"id": "job-run-1", "last_status": "ok", "last_error": None}
 
-        with patch("tools.cronjob_tools.claim_job_for_fire", return_value={**_JOB, "fire_claim": {"by": "manual-owner"}}), \
-             patch("gateway.run._gateway_runner_ref", return_value=runner), \
-             patch("cron.scheduler.run_one_job", return_value=True) as m_run, \
-             patch("tools.cronjob_tools.get_job", return_value=completed):
-            res = _execute_job_now(dict(_JOB))
 
-        assert res["success"] is True
-        m_run.assert_called_once_with(
-            {**_JOB, "fire_claim": {"by": "manual-owner"}},
-            adapters=adapters,
-            loop=gateway_loop,
-            extra_prompt=None,
-        )
 
-    def test_execute_job_now_delivers_through_owner_profile_adapters(self):
-        """Under multiplex a manual run fired from a secondary profile must deliver through THAT
-        profile's adapters, not the default profile's ``runner.adapters`` (wrong Telegram bot)."""
-        from pathlib import Path
-
-        default_adapters = {"telegram": object()}
-        work_adapters = {"telegram": object()}
-        gateway_loop = object()
-        runner = SimpleNamespace(
-            adapters=default_adapters,
-            _gateway_loop=gateway_loop,
-            _adapters_for_profile=lambda profile: work_adapters if profile == "work" else default_adapters,
-        )
-        completed = {"id": "job-run-1", "last_status": "ok", "last_error": None}
-
-        with patch("tools.cronjob_tools.claim_job_for_fire", return_value={**_JOB, "fire_claim": {"by": "manual-owner"}}), \
-             patch("gateway.run._gateway_runner_ref", return_value=runner), \
-             patch("hermes_constants.get_hermes_home", return_value=Path("/srv/hermes/profiles/work")), \
-             patch("cron.scheduler.run_one_job", return_value=True) as m_run, \
-             patch("tools.cronjob_tools.get_job", return_value=completed):
-            res = _execute_job_now(dict(_JOB))
-
-        assert res["success"] is True
-        assert m_run.call_args.kwargs["adapters"] is work_adapters
-
-    def test_execute_job_now_grants_a_shared_bot_satellite_only_its_routed_targets(self):
-        """A credentialless satellite that posts through the primary's bot gets the ticker's
-        route-restricted view (``SharedRouteAdapters``), never the whole primary adapter map: an
-        unrouted target is a miss (fail closed), the routed one resolves the primary adapter."""
-        from pathlib import Path
-
-        from cron.scheduler_preflight import SharedRouteAdapters
-        from gateway.profile_routing import ProfileRoute
-
-        primary_bot = object()
-        default_adapters = {"telegram": primary_bot}
-        runner = SimpleNamespace(
-            adapters=default_adapters, _gateway_loop=object(),
-            _adapters_for_profile=lambda profile: default_adapters,  # what authz hands a shared-bot satellite
-            _is_shared_bot_satellite=lambda profile: profile == "keeper",
-        )
-        route = ProfileRoute(name="ops", platform="telegram", profile="keeper", chat_id="-100")
-        completed = {"id": "job-run-1", "last_status": "ok", "last_error": None}
-
-        with patch("tools.cronjob_tools.claim_job_for_fire", return_value={**_JOB, "fire_claim": {"by": "manual-owner"}}), \
-             patch("gateway.run._gateway_runner_ref", return_value=runner), \
-             patch("hermes_constants.get_hermes_home", return_value=Path("/srv/hermes/profiles/keeper")), \
-             patch("cron.scheduler_preflight._primary_profile_routes_for_current_home", return_value=[route]), \
-             patch("cron.scheduler.run_one_job", return_value=True) as m_run, \
-             patch("tools.cronjob_tools.get_job", return_value=completed):
-            res = _execute_job_now(dict(_JOB))
-
-        assert res["success"] is True
-        adapters = m_run.call_args.kwargs["adapters"]
-        assert isinstance(adapters, SharedRouteAdapters)
-        assert adapters.get("telegram", {"chat_id": "-100"}) is primary_bot
-        assert adapters.get("telegram", {"chat_id": "-999"}) is None
-        assert adapters.get("telegram") is None
-
-    def test_execute_job_now_fails_instead_of_falling_back_when_owner_resolution_raises(self):
-        """Fail closed: if the owner profile cannot be resolved, the run is marked failed with the
-        error surfaced — it must NOT silently fall back to ``runner.adapters`` (the default bot)."""
-        default_adapters = {"telegram": object()}
-
-        def boom(profile):
-            raise RuntimeError("profile adapters unavailable")
-
-        runner = SimpleNamespace(adapters=default_adapters, _gateway_loop=object(),
-                                 _adapters_for_profile=boom)
-
-        with patch("tools.cronjob_tools.claim_job_for_fire", return_value={**_JOB, "fire_claim": {"by": "manual-owner"}}), \
-             patch("gateway.run._gateway_runner_ref", return_value=runner), \
-             patch("cron.scheduler.run_one_job", return_value=True) as m_run, \
-             patch("tools.cronjob_tools.mark_job_run") as m_mark, \
-             patch("tools.cronjob_tools.get_job", return_value=dict(_JOB)):
-            res = _execute_job_now(dict(_JOB))
-
-        assert res["claimed"] is True
-        assert res["success"] is False
-        assert "profile adapters unavailable" in res["error"]
-        m_run.assert_not_called()
-        m_mark.assert_called_once()
-        assert m_mark.call_args.args[1] is False
 
     def test_execute_job_now_remains_standalone_without_gateway(self):
         """CLI-only runs retain the standalone delivery path."""
         completed = {"id": "job-run-1", "last_status": "ok", "last_error": None}
 
         with patch("tools.cronjob_tools.claim_job_for_fire", return_value={**_JOB, "fire_claim": {"by": "manual-owner"}}), \
-             patch.dict(sys.modules, {"gateway.run": None}), \
              patch("cron.scheduler.run_one_job", return_value=True) as m_run, \
              patch("tools.cronjob_tools.get_job", return_value=completed):
             res = _execute_job_now(dict(_JOB))
@@ -230,8 +86,6 @@ class TestCronjobRunExecutesImmediately:
         assert res["success"] is True
         m_run.assert_called_once_with(
             {**_JOB, "fire_claim": {"by": "manual-owner"}},
-            adapters=None,
-            loop=None,
             extra_prompt=None,
         )
 

@@ -293,15 +293,19 @@ def main() -> None:
 
         return {name: [redact_sensitive_text(line, force=True) for line in
                        _read_tail(home / "logs" / (name + ".log"), 60, has_filters=False)]
-                for name in ("gateway", "errors") if (home / "logs" / (name + ".log")).is_file()}
+                for name in ("agent", "errors", "mcp-stderr") if (home / "logs" / (name + ".log")).is_file()}
 
-    def stop_runtime():
-        from hermes_cli.gateway import stop_profile_gateway, find_gateway_pids
+    def verify_runtime_closed():
+        from hermes_cli.active_sessions import active_session_registry_snapshot
+        from hermes_cli.profiles import list_profiles
+        from hermes_state.runtime_ownership import exclusive_maintenance
 
-        stop_profile_gateway()
-        if find_gateway_pids():
-            raise RuntimeError("the rehearsal's gateway survived cleanup")
-        return {"stopped": True}
+        homes = {home, *(profile.path for profile in list_profiles(lazy_skill_count=True))}
+        with exclusive_maintenance(homes):
+            for owner in homes:
+                if active_session_registry_snapshot(registry_home=owner, strict=True):
+                    raise RuntimeError("a local session survived the completed rehearsal command")
+        return {"closed": True, "exclusive_maintenance_verified": True}
 
     def legacy_proof():
         memory = io.read_text(home / "memories" / "legacy.md", purpose="memory")
@@ -340,7 +344,7 @@ def main() -> None:
                 "mutate-retained": mutate_retained, "mutate-legacy": mutate_legacy,
                 "upstream-proof": upstream_proof, "restore-upstream": restore_upstream, "host-facts": host_facts,
                 "update-status": update_status, "live-proof": live_proof, "diagnostics": diagnostics,
-                "stop-runtime": stop_runtime, "seeded-state-proof": seeded_state_proof}
+                "verify-runtime-closed": verify_runtime_closed, "seeded-state-proof": seeded_state_proof}
     print(json.dumps(handlers[request["action"]](), sort_keys=True))
 
 

@@ -12,7 +12,7 @@ export const canonicalEn = {
       identityUnavailable: 'session execution identity unavailable; reconnect before editing',
       compressedStale: 'compressed transcript is stale; reopen the session',
       compressed: '✓ transcript compressed',
-      notAvailable: (command: string) => `/${command} is not available on the shared gateway yet`,
+      notAvailable: (command: string) => `/${command} is not available in this terminal`,
       launchToolsets: (toolsets: string) => `toolsets fixed at session launch: ${toolsets}`,
       retryUnsupported: '/retry: retry does not support media or unknown content parts'
     },
@@ -21,7 +21,7 @@ export const canonicalEn = {
       correction: (status: string) => `correction ${status}`,
       correctionRejected: 'correction rejected — input retained',
       admissionNotConfirmed: 'admission not confirmed — input retained; use Alt+K to retry with the same identity',
-      statusAdmissionUnconfirmed: 'admission unconfirmed',
+      statusAdmissionUnconfirmed: 'delivery unconfirmed',
       executionUnconfirmed: (message: string) => `execution status unconfirmed: ${message}`,
       legacyDelivery: 'durable admission unavailable for this session — using legacy delivery',
       legacyUnconfirmed: 'legacy delivery unconfirmed — input retained; check the session before sending a new input',
@@ -30,7 +30,7 @@ export const canonicalEn = {
       statusDeliveryUnconfirmed: 'delivery unconfirmed',
       deliveryNotResent: 'delivery unconfirmed — check the session before sending a new input; retained input was not resent',
       busyTextOnly: 'busy corrections accept text only — image input retained; submit it with /queue',
-      inputRetained: (message: string) => `input retained: ${message} — Alt+K retries the same submission`,
+      inputRetained: (message: string) => `input retained: ${message} — check the conversation before editing and resending`,
       imageNotSubmitted: (message: string) => `image not submitted: ${message} — input retained`,
       statusImageNotSubmitted: 'image not submitted',
       interruptFailed: (message: string) => `interrupt failed: ${message}`,
@@ -38,7 +38,7 @@ export const canonicalEn = {
     },
     // hooks/useQueue.ts, app/useSubmission.ts, app/useComposerState.ts — the local input journal.
     queue: {
-      unconfirmedPrefix: '[unconfirmed · Alt+K retry] ',
+      unconfirmedPrefix: '[unconfirmed · edit to resend] ',
       // {0}=admission status identifier (unknown; queued rows render plain), {1}=input text
       serverRow: (status: string, text: string) => `[${status}] ${text}`,
       discardFailed: (message: string) => `discard failed: ${message}`,

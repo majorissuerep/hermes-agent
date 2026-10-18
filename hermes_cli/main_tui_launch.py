@@ -21,14 +21,6 @@ from agent.i18n import t
 logger = logging.getLogger("hermes_cli.main")
 
 
-def _bypass_chat_launch(args) -> bool:
-    """--safe-mode / --ignore-user-config chat: the gateway owner freezes code defaults and runs
-    the turn out of process, so the profile's display.interface must not pick a surface and the
-    client performs no discovery. Explicit --tui forwards the flags in its session.create policy."""
-    return bool(getattr(args, "safe_mode", False) or getattr(args, "ignore_user_config", False)) \
-        and not getattr(args, "tui", False)
-
-
 def _read_tui_active_session_file(path: Optional[str]) -> Optional[str]:
     if not path:
         return None
@@ -204,7 +196,7 @@ def _tui_node_bin(bin: str) -> str:
         print(
             f"Node.js is required for the TUI but `{bin}` was not found. Install it from "
             "https://nodejs.org (run `hermes doctor` for the install hint for your OS), then "
-            "retry `hermes --tui`. To keep working now, run `hermes --cli`."
+            "retry `hermes`. For a finite terminal task, use `hermes chat -q <prompt>`."
         )
         sys.exit(1)
     return path
@@ -421,7 +413,6 @@ def _refuse_unforwarded_tui_flags(args) -> None:
     flags = [flag for name, flag in _TUI_UNFORWARDED.items() if getattr(args, name, None)]
     if flags:
         print(f"Error: Unsupported --tui options: {', '.join(flags)}. No session was started.\n"
-              f"  Use classic chat for this launch: hermes chat --cli {' '.join(flags)} ...\n"
               "  Or set model.base_url / agent.reasoning_effort in config.yaml (/reasoning in the TUI).",
               file=sys.stderr)
         raise SystemExit(2)
@@ -446,8 +437,7 @@ def _launch_tui(
     provider: Optional[str] = None, toolsets: object = None, skills: object = None,
     verbose: Optional[bool] = None, quiet: bool = False, query: Optional[str] = None,
     image: Optional[str] = None, worktree: bool = False, checkpoints: bool = False,
-    pass_session_id: bool = False, max_turns: Optional[int] = None, accept_hooks: bool = False,
-    deck_profile: Optional[str] = None, deck_cwd: Optional[str] = None, deck_home: bool = False):
+    pass_session_id: bool = False, max_turns: Optional[int] = None, accept_hooks: bool = False):
     """Replace current process with the TUI."""
     from hermes_cli.main import PROJECT_ROOT
     tui_dir = PROJECT_ROOT / "ui-tui"
@@ -463,25 +453,9 @@ def _launch_tui(
     # names *a* real directory, so the is_dir() repair in _apply_tui_python_env keeps it
     # and the gateway starts in last session's project. `--worktree` still wins below.
     env["HERMES_CWD"] = _safe_tui_cwd(env)
-    # Deck mode: the session lives in the machine session host. Per-launch overrides the backend reads from
-    # ITS env (model, toolsets, skills, worktree, ...) cannot reach a shared host, so those launches keep a
-    # private backend.
-    local_only = any((model, provider, toolsets, skills, worktree, checkpoints, pass_session_id,
-                      max_turns is not None, accept_hooks, verbose, quiet))
-    from hermes_cli.tui_deck_launch import configure_deck_host, print_deck_exit_summary
-    deck_mode = not local_only and configure_deck_host(
-        env, profile=deck_profile, cwd=deck_cwd, required=deck_home or deck_profile is not None)
-    if (deck_home or deck_profile is not None) and not deck_mode:
-        raise SystemExit(1)
-    if deck_home:
-        env["HERMES_TUI_DECK_HOME"] = "1"
-    if not deck_mode:
-        from hermes_cli.shared_session_attach import configure_tui_attachment
-        try:
-            configure_tui_attachment(env, resume_session_id)
-        except (ValueError, RuntimeError) as exc:
-            print(f"Error: {exc}", file=sys.stderr)
-            raise SystemExit(1) from None
+    # Each terminal owns a private stdio runtime; never attach to a background service.
+    for key in ("HERMES_GATEWAY_URL", "HERMES_TUI_GATEWAY_URL", "HERMES_TUI_DECK_HOME"):
+        env.pop(key, None)
     try:
         from hermes_cli.config import apply_terminal_config_to_env
         apply_terminal_config_to_env(env=env)
@@ -548,15 +522,23 @@ def _launch_tui(
     code: Optional[int] = None
     try:
         try:
-            code = subprocess.call(argv, cwd=str(cwd), env=env)
+            from hermes_security.handoff import prepare_child_key
+            handoff = prepare_child_key()
+            try:
+                if handoff:
+                    key_fd, key_env = handoff
+                    env.update(key_env)
+                    code = subprocess.call(argv, cwd=str(cwd), env=env, pass_fds=(key_fd,))  # health: allow HX006 -- foreground interactive UI lifetime is user-controlled
+                else:
+                    code = subprocess.call(argv, cwd=str(cwd), env=env)  # health: allow HX006 -- foreground interactive UI lifetime is user-controlled
+            finally:
+                if handoff:
+                    os.close(handoff[0])
         except KeyboardInterrupt:
             code = 130
 
         if code in {0, 130}:
-            if deck_mode:
-                print_deck_exit_summary(active_session_file, deck_profile)
-            else:
-                _print_tui_exit_summary(resume_session_id, active_session_file)
+            _print_tui_exit_summary(resume_session_id, active_session_file)
     finally:
         attached_session = _read_tui_active_session_file(active_session_file) or resume_session_id
         with contextlib.suppress(OSError):
@@ -609,27 +591,6 @@ def _sync_bundled_skills_quietly() -> None:
 
 
 def _resolve_use_tui(args) -> bool:
-    """Decide whether to launch the TUI: ``--cli`` → classic; ``--tui`` → TUI; no TTY → classic;
-    ``HERMES_TUI=1`` → TUI; ``display.interface`` config; default classic.
-
-    The TTY gate is load-bearing: ambient preferences must never hijack a piped
-    ``hermes chat -q`` (kanban workers, cron) — the Ink no-TTY bail-out exits 0 and
-    the worker dies with a protocol violation. Explicit ``--tui`` still bails out.
-    """
-    if getattr(args, "cli", False):
-        return False
-    if getattr(args, "tui", False) or getattr(args, "tui_native", False):
-        return True
-    try:
-        if not (sys.stdin.isatty() and sys.stdout.isatty()):
-            return False
-    except Exception:
-        return False
-    if os.environ.get("HERMES_TUI") == "1":
-        return True
-    try:
-        from hermes_cli.config import load_config
-        iface = (load_config().get("display", {}) or {}).get("interface", "cli")
-        return isinstance(iface, str) and iface.strip().lower() == "tui"
-    except Exception:
-        return False
+    """Interactive sessions use Ink; explicit queries run locally without a UI."""
+    return not any((getattr(args, "query", None), getattr(args, "query_file", None),
+                    getattr(args, "oneshot", None), getattr(args, "oneshot_exit", False)))

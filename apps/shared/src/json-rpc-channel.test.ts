@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 
-import { JSON_RPC_SESSION_NOT_SHOWN, JsonRpcGatewayError, JsonRpcRequestChannel, type JsonRpcTransport } from './json-rpc-channel.js'
+import { JsonRpcGatewayError, JsonRpcRequestChannel, type JsonRpcTransport } from './json-rpc-channel.js'
 
 const spyTransport = () => {
   const sent: string[] = []
@@ -75,98 +75,7 @@ describe('JsonRpcRequestChannel', () => {
 
       channel.detach(new Error('gateway exited (1)'))
       await expect(untilDetach).rejects.toThrow('gateway exited (1)')
-      await expect(channel.request('c.after')).rejects.toThrow('gateway not connected')
-    } finally {
-      vi.useRealTimers()
-    }
-  })
-
-  it("'any-inbound' liveness (desktop/web): pings while frames keep arriving and reports a silent transport", async () => {
-    vi.useFakeTimers()
-
-    try {
-      const failures: string[] = []
-
-      const channel = new JsonRpcRequestChannel({
-        heartbeatDeadlineMs: 300,
-        heartbeatIntervalMs: 100,
-        heartbeatLiveness: 'any-inbound',
-        onHeartbeatFailure: e => void failures.push(e.message)
-      })
-
-      const { sent, transport } = spyTransport()
-
-      channel.attach(transport)
-      channel.startHeartbeat()
-
-      for (let i = 0; i < 6; i++) {
-        await vi.advanceTimersByTimeAsync(100)
-        channel.handleFrame(JSON.stringify({ jsonrpc: '2.0', method: 'event', params: { type: 'status.update' } }))
-      }
-
-      expect(sent.filter(f => f.includes('gateway.ping')).length).toBeGreaterThanOrEqual(5)
-      expect(failures).toEqual([])
-
-      await vi.advanceTimersByTimeAsync(400)
-      expect(failures).toHaveLength(1)
-      // Failure stops the timer: no further pings after the report.
-      const pings = sent.length
-      await vi.advanceTimersByTimeAsync(500)
-      expect(sent.length).toBe(pings)
-    } finally {
-      vi.useRealTimers()
-    }
-  })
-
-  // 'response' mode itself stays available (explicit opt-in): a caller that
-  // wants only a pong (or a response to its own request) to prove the
-  // backend can answer keeps that stricter contract.
-  it("'response' liveness (explicit opt-in): unanswered pings fail the heartbeat even while deltas stream", async () => {
-    // unchanged semantics for any caller that still chooses 'response'
-    vi.useFakeTimers()
-
-    try {
-      const failures: string[] = []
-
-      const channel = new JsonRpcRequestChannel({
-        heartbeatDeadlineMs: 300,
-        heartbeatIntervalMs: 100,
-        onHeartbeatFailure: e => void failures.push(e.message)
-      })
-
-      const { sent, transport } = spyTransport()
-
-      channel.attach(transport)
-      channel.startHeartbeat()
-
-      const pingIds = () =>
-        sent.map(f => JSON.parse(f) as { id: string; method: string }).filter(f => f.method === 'gateway.ping').map(f => f.id)
-
-      // Pongs arrive: alive well past the deadline.
-      for (let i = 0; i < 6; i++) {
-        await vi.advanceTimersByTimeAsync(100)
-        channel.handleFrame(JSON.stringify({ id: pingIds().at(-1), jsonrpc: '2.0', result: { ok: true } }))
-      }
-
-      expect(failures).toEqual([])
-
-      // A response to one of our own requests also counts.
-      const call = channel.request('session.list')
-      const callId = (JSON.parse(sent.at(-1)!) as { id: string }).id
-
-      await vi.advanceTimersByTimeAsync(250)
-      channel.handleFrame(JSON.stringify({ id: callId, jsonrpc: '2.0', result: [] }))
-      await call
-      await vi.advanceTimersByTimeAsync(100)
-      expect(failures).toEqual([])
-
-      // Deltas keep streaming but no ping is answered → dead.
-      for (let i = 0; i < 4; i++) {
-        await vi.advanceTimersByTimeAsync(100)
-        channel.handleFrame(JSON.stringify({ jsonrpc: '2.0', method: 'event', params: { type: 'message.delta', payload: {} } }))
-      }
-
-      expect(failures).toHaveLength(1)
+      await expect(channel.request('c.after')).rejects.toThrow('local runtime not connected')
     } finally {
       vi.useRealTimers()
     }
@@ -174,57 +83,6 @@ describe('JsonRpcRequestChannel', () => {
 
   // Server→client requests (tui_gateway/server_requests.py): the backend asks,
   // the client answers with a RESPONSE frame carrying the same id.
-  it('advertises server-request support once per gateway.ready and shrugs off an older backend', () => {
-    // A backend that never hears client.capabilities treats a WebSocket client as a build older than
-    // server→client requests and fails every clarify/approval for it at once (tui_gateway/server_requests.py).
-    const channel = new JsonRpcRequestChannel({ requestIdPrefix: 'c' })
-    const { sent, transport, last } = spyTransport()
-
-    channel.attach(transport)
-    channel.handleFrame(JSON.stringify({ jsonrpc: '2.0', method: 'event', params: { type: 'session.info', session_id: 's' } }))
-    expect(sent).toHaveLength(0)
-
-    channel.handleFrame(JSON.stringify({ jsonrpc: '2.0', method: 'event', params: { type: 'gateway.ready', payload: {} } }))
-    expect(sent).toHaveLength(1)
-    expect(JSON.parse(sent[0])).toMatchObject({ method: 'client.capabilities', params: { server_requests: true } })
-
-    // An older backend answers -32601: nothing rejects out of the channel.
-    channel.handleFrame(JSON.stringify({ error: { code: -32601, message: 'unknown method' }, id: last().id, jsonrpc: '2.0' }))
-    expect(sent).toHaveLength(1)
-  })
-
-  it('sends a not-shown decline only to a backend that advertised counting it', async () => {
-    // An older backend settles a request on the first error frame, so a bystander window's decline
-    // would beat the owner's answer (#113348): there `decline` must stay silent.
-    const channel = new JsonRpcRequestChannel({ requestIdPrefix: 'c' })
-    const { sent, transport, last } = spyTransport()
-
-    const ready = () =>
-      channel.handleFrame(JSON.stringify({ jsonrpc: '2.0', method: 'event', params: { type: 'gateway.ready', payload: {} } }))
-
-    const ask = (id: string) =>
-      channel.handleFrame(JSON.stringify({ id, jsonrpc: '2.0', method: 'preview.read', params: { session_id: 's1' } }))
-
-    channel.attach(transport)
-    channel.onRequest(req => void req.decline?.('not here'))
-
-    ready()
-    channel.handleFrame(JSON.stringify({ id: last().id, jsonrpc: '2.0', result: { server_requests: ['preview.read'] } }))
-    await Promise.resolve()
-    ask('srq-old')
-    expect(sent).toHaveLength(1)
-
-    ready()
-    channel.handleFrame(JSON.stringify({ id: last().id, jsonrpc: '2.0', result: { declines_not_shown: true, server_requests: [] } }))
-    await Promise.resolve()
-    ask('srq-new')
-    expect(JSON.parse(sent.at(-1)!)).toEqual({
-      error: { code: JSON_RPC_SESSION_NOT_SHOWN, message: 'not here' },
-      id: 'srq-new',
-      jsonrpc: '2.0'
-    })
-  })
-
   it('routes a server request to the first accepting handler and answers -32601 when nobody accepts', () => {
     const unhandled: string[] = []
     const channel = new JsonRpcRequestChannel({ onUnhandledRequest: req => void unhandled.push(req.method) })

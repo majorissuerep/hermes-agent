@@ -271,7 +271,7 @@ def _detect_kind_from_source(source_text: str) -> Optional[str]:
     ``register_provider`` + ``ProviderProfile`` -> ``model-provider``; else ``None``. Keeps these kinds out
     of the general manager's eager import (its PluginContext has no ``register_cron_scheduler``, #62951)."""
     if any(marker in source_text for marker in (
-            "register_memory_provider", "MemoryProvider", "register_cron_scheduler", "CronScheduler",
+            "register_memory_provider", "MemoryProvider",
             "register_computer_use_provider", "ComputerUseProvider")):
         return "exclusive"
     if "register_provider" in source_text and "ProviderProfile" in source_text:

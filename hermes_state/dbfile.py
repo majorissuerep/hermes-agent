@@ -862,18 +862,3 @@ def count_db_holders(db_path: Path) -> Optional[int]:
         return len({pid for pid, link, _fd_path in _iter_proc_fd_targets() if link == target})
     except Exception:
         return None
-
-
-def _is_inactive_orphan_desktop_holder(*, ppid: int, age_seconds: float, min_age_seconds: float,
-                                       ephemeral_backend: bool, connection_statuses: list[str]) -> bool:
-    """Pure safety predicate for the narrow Desktop holder reap."""
-    return (ppid in (0, 1) and age_seconds >= min_age_seconds and ephemeral_backend
-            and "ESTABLISHED" not in connection_statuses)
-
-
-def _concrete_state_db_holder_pids(db_path: Path, holders: list[tuple[int, str]]) -> list[int]:
-    """Return unique PIDs proven to hold this DB or one of its sidecars."""
-    canonical_db = os.path.normcase(os.path.abspath(os.fspath(db_path)))
-    watched = {canonical_db, canonical_db + "-wal", canonical_db + "-shm"}
-    return list(dict.fromkeys(
-        pid for pid, path in holders if pid > 0 and canonical_sqlite_path(path) in watched))

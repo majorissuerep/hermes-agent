@@ -1,158 +1,91 @@
-# agent/ — AIAgent, turn loop, prompt, compression
+# agent/ — native agent, turns, prompts, and compression
 
-Applies on top of the root `AGENTS.md` (prompt-caching invariant, facade + siblings rules).
+Applies on top of root AGENTS.md. The same native AIAgent runs local TUI,
+headless, cron, and delegated work. No remote session host owns its turns.
 
-## Shape
+## Find behavior
 
-`run_agent.py` is the public facade: `AIAgent` is assembled from mixins (`agent/turn_facade.py`,
-`client_lifecycle.py`, `stream_delivery.py`, `session_persistence.py`, `compression_facade.py`, ...).
-Construction runs `agent/agent_init.py::init_agent`; a turn is
-`agent/conversation_loop.py::run_conversation`, which `AIAgent.run_conversation` forwards to after
-taking the session turn lease (`turn_facade_lease.py`). `AIAgent.__init__` takes ~60 parameters
-(credentials, routing, callbacks, session context, budget, credential pool, ...) — read
-`run_agent.py` for the list; the subset you usually touch: `base_url`, `api_key`, `provider`,
-`api_mode` (`"chat_completions" | "codex_responses" | ...`), `model` (empty → resolved from
-config/provider later), `max_iterations` (default 500, shared with subagents),
-`enabled_toolsets`/`disabled_toolsets`, `quiet_mode`, `save_trajectories`, `platform`
-(`"cli"`, `"telegram"`, ...), `session_id`, `skip_context_files`, `skip_memory`, `credential_pool`.
-`chat(message) -> str` is the simple interface; `run_conversation(user_message, system_message=None,
-conversation_history=None, task_id=None) -> dict` returns `final_response` + `messages`.
+run_agent.py is the public facade. Construction is agent_init.init_agent;
+conversation_loop and turn_* siblings own turn phases. Inline agent-state
+tools dispatch through inline_tool_executors, not a new name ladder.
+Client lifecycle, session persistence, compression, tool execution, and
+provider resolution each have topic siblings. Read the actual constructor
+rather than copying an old parameter list.
 
-## Agent loop (`agent/conversation_loop.py` + `agent/turn_*.py`)
+## Message and cache invariants
 
-Entirely synchronous, with interrupt checks, budget tracking, and a one-turn grace call:
+- A conversation's system prompt, tools, memories, and existing transcript
+  prefix stay byte-stable. Context compression is the exception. New
+  instructions enter a new user message or tool result, not a system rewrite.
+- Preserve role order, tool-call/result pairing, stable tool-call identities,
+  exact API-content sidecars, and reasoning needed by the active protocol.
+  Never execute a partial streamed call or replay a completed side effect.
+- /steer is an explicit new-user-message boundary, not permission to edit an
+  earlier turn. Ordinary reloads default to next session.
+- Model/credential routing changes must not rebuild cached prompt state.
+  Restore the actual persisted local route on resume, including passive
+  historical route decoding; do not infer authority from titles or room labels.
+- Persist accepted turns through the native SQLCipher SessionDB. Failure to
+  acquire or read durable state is visible and fail-closed, not ephemeral mode.
+- Session turn leases and terminal runtime ownership are distinct. The first
+  serializes a conversation; the second fences exclusive restore/maintenance.
 
-```python
-while (api_call_count < self.max_iterations and self.iteration_budget.remaining > 0) \
-        or self._budget_grace_call:
-    if self._interrupt_requested: break
-    response = client.chat.completions.create(model=model, messages=messages, tools=tool_schemas)
-    if response.tool_calls:
-        for tc in response.tool_calls:
-            messages.append(tool_result_message(handle_function_call(tc.name, tc.args, task_id)))
-        api_call_count += 1
-    else:
-        return response.content
-```
+## Provider and context behavior
 
-Each phase of an iteration is its own sibling, so a change to (say) overflow handling touches one
-~600-line file: `turn_preflight*`, `turn_iteration_prep`, `turn_request_assembly`/`turn_api_request`,
-`turn_api_call`, `turn_api_error`, `turn_response_intake`/`turn_response_check`,
-`turn_empty_response`, `turn_tool_round`/`turn_tool_validation`, `turn_overflow`,
-`turn_truncation`, `turn_scripted_prelude` (tool calls a prompt built-in plays before the first model
-call), `turn_context_compaction`, `turn_recovery`, `turn_recovery_autorecover`
-(post-exhaustion wait-and-retry ladder), `turn_retry_state`,
-`turn_stop_gates`, `turn_liveness`, `turn_usage`, `turn_final_response`, `turn_finalizer`,
-`turn_summary`. Find the phase with `grep -rn "def X" agent/turn_*.py`.
+Use the bounded built-in catalog and existing runtime/auxiliary resolvers.
+A models.dev entry is metadata, not new transport support. Each configured
+custom connection owns its endpoint and API dialect; never silently redirect it.
 
-Messages use OpenAI format `{"role": "system|user|assistant|tool", ...}`; reasoning content is stored
-in `assistant_msg["reasoning"]`.
+Context pressure includes provider-reported usage, new content, tools,
+replayed reasoning, and reserved output. Confirmed smaller input limits win
+over speculative catalog values. Output-cap errors do not shrink input windows.
+Recheck pressure before a recovered request.
 
-**Agent-level tools** (`todo`, `memory`, ...) are intercepted by `agent/tool_executor.py` through the
-`INLINE_TOOL_EXECUTORS` table in `agent/inline_tool_executors.py` before `handle_function_call()`.
-Adding one: register in that table (no `if name == ...` chain); `tools/todo_tool.py` is the pattern.
+ContextCompressor and its context-engine integration own automatic and explicit
+compression. Preserve active requests, tool pairs, durable lineage, resume
+identity, and the previous usable history if a summary fails, refuses, truncates,
+or times out. Compression fallback must be bounded and honest. Do not add a
+surface-specific compressor or remote hygiene layer.
 
-## Message-flow invariants (every change is reviewed against these)
+Transient retries honor Retry-After, request/turn budgets, interrupts, fallback
+cooldowns, and stream completion. Never turn a provider refusal/auth/billing
+error into an endless recovery loop or claim success from empty output.
 
-- **Prompt caching must not break.** Never alter past context, change toolsets, reload memories,
-  or rebuild the system prompt mid-conversation. The system prompt is byte-stable for the life of
-  a conversation; the ONLY context mutation is compression. Anything that must inject content
-  mid-conversation rides a **user message or tool result**, never the system prompt: skill slash
-  commands (`agent/skill_commands.py`) inject as a user message; subdirectory `AGENTS.md` hints
-  (`agent/subdirectory_hints.py`) append to the tool result (head+tail truncated past `_MAX_HINT_CHARS = 32_000`;
-  the truncation is logged, never queued as a chat status warning — `context_file_max_chars` does not raise that cap).
-- **Strict role alternation.** Never two same-role messages in a row; never a synthetic user
-  message injected mid-loop. The one exception is `/steer`, delivered as a standalone user row
-  after a tool result (`assistant(tool_calls) → tool → user` is legal on every provider path) —
-  never smeared onto the already-persisted tool row, which append-only persistence would leave
-  divergent from the live request. Cron deliveries live in their own session for this reason.
-- **Context files** (`agent/prompt_builder.py`) load from the CWD only at startup and are capped
-  (`CONTEXT_FILE_MAX_CHARS` / dynamic cap from the context window / `context_file_max_chars`).
-  Never load an install-tree `AGENTS.md` as project context (PR #64611); subdirectory hints reject
-  paths outside the working dir so `~/.codex/AGENTS.md` / `~/.claude/CLAUDE.md` never mix in.
-- **`_last_resolved_tool_names` is a process-global in `model_tools.py`.** `_run_single_child()`
-  in `tools/delegate_tool.py` saves/restores it around subagent execution; code reading it may see
-  a temporarily stale value during child runs.
+## Tools, callbacks, and sub-agents
 
-## Compression (`agent/compression_facade.py`, `conversation_compression.py`, `turn_context_compaction.py`)
+Inline tools use the existing executor table. Local connection cards, clarify,
+approval, progress, and streaming callbacks are real TUI consumers; preserve them.
+Desktop preview/window/tour/theme callbacks and Bot Chat tools are retired.
+Keep the tool schema fixed even when a newly connected MCP server becomes
+available through the existing deferred tool bridge.
 
-Manual `/compress` on every surface (CLI, gateway, TUI, ACP) runs through
-`agent/conversation_compression_manual.py::compress_now` (one parser for `here [N]` / focus /
-`--preview` / `--aggressive`; surfaces only parse their own argv, install `after_messages` and render).
+Delegated agents use direct native construction and their own conversation
+state. Acquire the parent's real database path through the registry; fail closed
+on persistence failure. Close only owned resources. Cancellation and final
+bookkeeping must not revoke the parent or discard an accepted child result.
 
-Two layers: gateway session hygiene (85% threshold) and the agent `ContextCompressor` (50%,
-configurable; per-model overrides; failure cooldown after provider-proven overflow). The algorithm
-prunes old tool results first (no LLM call), then picks boundaries, then generates a structured
-summary with the `auxiliary` compression model. In-place compaction keeps a single stable session
-id; native Responses/Codex compaction paths are provider-specific. A stalled summary stream retries
-once on `auxiliary.compression.fallback_chain`, and a repeated stall (a stall-class failure already on
-the cooldown ladder) ends with the deterministic fallback summary through the same pipeline — never a
-prune committed outside the lease/fence. Compression is the sanctioned
-cache break — keep it the only one. Full detail:
-`website/docs/developer-guide/context-compression-and-caching.md`.
+## Encrypted profile scope
 
-## Model and provider resolution
+Use agent.session_context and agent.secret_scope. Bind the owning home and
+secret scope before callbacks, thread hops, background jobs, and child spawns.
+Resolve credentials through get_secret, never ambient process environment for
+a routed profile. Profiles remain isolated even in one local process.
 
-- Runtime provider/model resolution and its precedence: `website/docs/developer-guide/provider-runtime.md`.
-  Provider profiles are plugins (`plugins/model-providers/<name>/`, see `plugins/AGENTS.md`);
-  `agent/model_metadata.py` holds context lengths and capabilities.
-- **Auxiliary (side-LLM) work** — curator, vision, embedding, title generation, session_search,
-  compression — resolves through `agent/auxiliary_client.py::_resolve_auto_route`; each task can pin
-  its own `provider/model/base_url/reasoning_effort` under `auxiliary:` in config.yaml.
-  Every physical attempt funnels through `_relay_sync_completion` / `_relay_async_completion` /
-  `_relay_sync_stream`, where `agent/auxiliary_hooks.py` emits `pre_auxiliary_call` /
-  `post_auxiliary_call` (observer-only, fail-open, `aux_task` set); the main-loop
-  `pre/post_api_request` events must NOT fire for aux calls (#79733).
-- Optional tool review and model routing live in `policy_sidecars.py`, `tool_policy.py`, and
-  `model_router.py`; configuration is snapshotted per agent in its owning profile scope.
-  `sidecar_client.py` uses one pinned auxiliary route with no cloud recovery ladder. Tool
-  review covers the common executor, inline handlers and registry dispatch, including nested
-  execute_code RPCs. Automatic routing calls `model_switch_runtime.py::switch_model` with
-  `preserve_prompt=True`; `tool_invocation.py::invoke_tool` owns direct agent invocation.
-- Fallback models and credential pools are resolution-chain code: E2E them with real imports
-  against a temp `HERMES_HOME`, not mocks (root rubric).
+A session retains an unlocked key in memory, not a passphrase. Local commands
+and sub-agents inherit revocable home/session capability or one-shot key FDs.
+The runtime owns its early session reference so /config works before agent
+construction; agent references are independently released. Session close and
+compression identity transitions must revoke the right authority.
 
-## i18n (`agent/i18n.py` + `i18n_layers.py` + `i18n_languages.py`)
+Use existing encrypted atomic state I/O and SQLCipher. Public installed code
+and the explicitly excluded regenerable cache roots follow the established
+migration policy; never classify prompts, job payloads, memory, or credentials
+as a cache to bypass encryption.
 
-`t(key)` resolves plugin packs (last registered wins) → user overlay `<home>/locales/<lang>.yaml`
-(profile-scoped) → bundled `locales/<lang>.yaml` → the same for `en` → bare key; every layer is flat
-dotted keys and may be partial. One merged dict per `(home, lang)` is cached; `reset_language_cache()`
-(called by every pack registration and by `config set display.language`) drops everything.
-`supported_languages()` is the live set (bundled ∪ overlay ∪ packs) and is what `display.language`
-validation and `_normalize_lang` accept; `SUPPORTED_LANGUAGES` stays the bundled tuple. `.tui.yaml` /
-`.desktop.yaml` pack files are opaque here beyond parse/flatten/serve (`surface_catalog`, RPC
-`i18n.catalog`); for the `tui` surface the bundled `locales/<lang>.tui.yaml` is the bottom layer of what
-`surface_catalog` serves (the TUI ships English only in TS). Endonyms for bundled ids live in `i18n_languages.py` and must agree with
-`apps/shared/src/i18n.ts`.
+## Verification
 
-## Memory, context engines, curator
-
-`agent/memory_provider.py` (ABC) + `agent/memory_manager.py` (orchestrator) drive memory-provider
-plugins; `agent/context_engine.py` drives context-engine plugins; `agent/image_gen_provider.py`
-image-gen plugins (all in `plugins/AGENTS.md`). `agent/curator.py` + `curator_backup.py` implement
-the skill curator (`skills/AGENTS.md`). Cron sessions pass `skip_memory=True` by default — memory
-providers intentionally do not run during cron.
-
-- End-of-session memory extraction and provider `on_session_end` run wherever the session ends —
-  turn, eviction, shutdown, `tui_gateway` teardown — and the CALLER binds the owning profile's scope
-  first (`_run_release_in_profile_scope`, `_session_profile_runtime_scope`); the agent never derives
-  its home from `os.environ` at flush time (`Path(_session_db.db_path).parent` is the ground truth).
-  Provider background work starts through `memory_provider.py::spawn_context_thread` (copies the
-  contextvars), never a bare `threading.Thread`; `title_generator.py` is the shape.
-- `agent/secret_scope.py::get_secret` fails closed (`UnscopedSecretError`) only after
-  `set_multiplex_active(True)`; the gateway, cron, migrate and `serve` set it. A new multi-home host
-  must too, or every guard is silently off. Isolation is BETWEEN profiles; children inherit via
-  `copy_context`; a child's `UnscopedSecretError` is a spawn-site bug, never grounds for an
-  `os.getenv` fallthrough. Delegated children carry `delegation_context.py::
-  DELEGATED_CHILD_ENV_MARKER` valued as the fenced Kanban board root, not a bare flag.
-
-## Tests
-
-Loop/phase tests go in `tests/agent/`; patch the binding the phase actually reads (siblings often
-`from run_agent import X` inside the function — root "patch where production reads"). Assert
-message-shape invariants (alternation, byte-stable system prompt) rather than snapshotting prompt
-text.
-
-Long-form: `website/docs/developer-guide/agent-loop.md`, `prompt-assembly.md`,
-`context-compression-and-caching.md`, `provider-runtime.md`, `session-storage.md`,
-`subagent-lifecycle-api.md`.
+Use scripts/run_tests.sh with synthetic homes. Resolution/security/I/O changes
+need real imports and native persistence. Interactive claims need the public
+Ink keyboard path plus actual next-request model/history observation. Protocol
+faults, live-provider tests, and cold lifecycle tests prove different things;
+record exact SHA, failures, skips, and cleanup instead of adding their counts.

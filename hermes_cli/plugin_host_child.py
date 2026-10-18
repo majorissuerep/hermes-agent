@@ -135,7 +135,6 @@ class HostRuntime:
         self._lock = threading.Lock()
         self.unload_callbacks: dict[str, list[Callable[[], Any]]] = {}
         self.modules: dict[str, str] = {}
-        self.asgi_apps: dict[str, Any] = {}
         self.profiles: dict[str, dict[str, Any]] = {}
         self.instance_modules: dict[str, Any] = {}
         self.stopped = threading.Event()
@@ -297,38 +296,6 @@ class HostRuntime:
         args, kwargs = self._decode_args(params)
         return encode(self._run(target(*args, **kwargs)))
 
-    def op_asgi(self, params: dict[str, Any]) -> Any:
-        """Serve one dashboard API request with the plugin's FastAPI ``router`` (loaded once)."""
-        api_path = Path(str(params["dashboard_dir"])) / str(params["api_file"])
-        app = self.asgi_apps.get(str(api_path))
-        if app is None:
-            from fastapi import FastAPI
-            module_name = f"hermes_dashboard_plugin_{params['plugin']}"
-            spec = importlib.util.spec_from_file_location(module_name, api_path)
-            if spec is None or spec.loader is None:
-                raise ImportError(f"cannot load dashboard api {api_path}")
-            module = importlib.util.module_from_spec(spec)
-            sys.modules[module_name] = module
-            spec.loader.exec_module(module)
-            router = getattr(module, "router", None)
-            if router is None:
-                raise AttributeError(f"dashboard api {api_path.name} has no 'router'")
-            app = FastAPI()
-            app.include_router(router)
-            self.asgi_apps[str(api_path)] = app
-
-        async def request() -> dict[str, Any]:
-            import httpx
-            transport = httpx.ASGITransport(app=app)
-            async with httpx.AsyncClient(transport=transport, base_url="http://plugin-host") as client:
-                response = await client.request(
-                    str(params["method"]), str(params["path"]), params=str(params.get("query") or ""),
-                    headers=[tuple(h) for h in params.get("headers") or []],
-                    content=decode(params.get("body")) or b"")
-            return {"status": response.status_code, "headers": list(response.headers.multi_items()),
-                    "body": response.content}
-
-        return encode(self._run(request()))
 
     def op_invoke(self, params: dict[str, Any]) -> Any:
         ref = int(params["ref"])
@@ -408,7 +375,7 @@ class HostRuntime:
 
 _HANDLERS: dict[str, Callable[[HostRuntime, dict[str, Any]], Any]] = {
     "hello": HostRuntime.op_hello, "load": HostRuntime.op_load, "load_instance": HostRuntime.op_load_instance,
-    "asgi": HostRuntime.op_asgi, "profile_call": HostRuntime.op_profile_call,
+    "profile_call": HostRuntime.op_profile_call,
     "invoke": HostRuntime.op_invoke,
     "obj_invoke": HostRuntime.op_obj_invoke, "obj_getattr": HostRuntime.op_obj_getattr,
     "obj_setattr": HostRuntime.op_obj_setattr, "unload": HostRuntime.op_unload,

@@ -12,7 +12,7 @@ import shutil
 import subprocess
 import uuid
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from hermes_cli._subprocess_compat import windows_hide_flags
 from tools.browser_tool_origin import origin as _bt
@@ -31,9 +31,7 @@ _CHROMIUM_MISSING_DOCKER_HINT = ("Chromium browser is missing. You're running in
 _CHROMIUM_MISSING_HINT = f"Chromium browser is missing. Install it with: {_CHROMIUM_INSTALL}"
 
 
-# THE Chromium startup flags for a host where its sandbox cannot work; agent-browser gets them through
-# AGENT_BROWSER_ARGS and the Bot Desktop dock's Browser icon (same binary, same profile) through
-# ``tools.bot_desktop.browser.dock_argv`` — one list, or the human's click dies while the agent's works.
+# Shared Chromium flags for execution where the browser's user-namespace sandbox is unavailable.
 CHROMIUM_SANDBOX_BYPASS_ARGS = ("--no-sandbox", "--disable-dev-shm-usage")
 
 
@@ -193,38 +191,14 @@ def _agent_browser_command_env(socket_dir: str) -> dict[str, str]:
     return env
 
 
-_SHARED_HEADED_DAEMON_IDLE_SECONDS = 24 * 3600
 
 
 def _daemon_idle_timeout_seconds() -> int:
-    """The daemon's self-termination idle timer. The bot's headed Chromium on the Bot Desktop screen is
-    shared with a human who may take the lease to log in: the agent is idle by definition then, so the
-    daemon's own timer must not decide (it cannot see the lease); the lease-aware Python janitor owns that
-    browser's lifetime, and a crashed hermes leaves it to the orphan reaper (#110064)."""
-    if _cloud._is_headed_mode():
-        from tools.bot_desktop.runtime import published_env
-        if published_env().get("DISPLAY"):
-            return _SHARED_HEADED_DAEMON_IDLE_SECONDS
     return _bt.BROWSER_SESSION_INACTIVITY_TIMEOUT
 
 
-def human_holds_shared_browser(session_info: dict[str, Any]) -> bool:
-    """True while a human holds the Bot Desktop lease over the browser ``session_info`` shares with them.
-    The janitor treats that as activity: reaping the browser mid-login is the human's session dying under
-    them, not an idle agent's cleanup (#110064)."""
-    if not _shares_bot_desktop_browser(session_info):
-        return False
-    from tools.bot_desktop import lease as _bd_lease
-    return _bd_lease.human_holds()
 
 
-def _ensure_screen_for_headed_chromium() -> None:
-    """Tool-call boundary for ``bot_desktop.auto_start`` (mirrors computer_use dispatch): a headed Chromium is
-    about to be spawned for a real browser action, so a fresh headless profile gets its screen first. Headless
-    browsing, Lightpanda and the env-only callers of ``_build_browser_env`` never bring one up."""
-    if _cloud._is_headed_mode():
-        from tools.bot_desktop.runtime import ensure_started_for_tool
-        ensure_started_for_tool()
 
 
 def _popen_agent_browser(argv: list[str], env: dict[str, str], socket_dir: str, tag: str,
@@ -518,7 +492,8 @@ def _recycle_local_session(task_id: str, session_info: dict[str, Any], task_sock
     _bt._browser_session_backend(task_id).mark_suspect(reason)
 
     session_name = str(session_info.get("session_name") or "")
-    if _browser_in_sandbox():
+    from tools.browser_terminal import browser_in_terminal
+    if browser_in_terminal():
         # The daemon lives in the sandbox: no host pid, no host socket. Ask the CLI there to close it, evict the record.
         _sandbox_close_daemon(session_name)
         with _bt._cleanup_lock:
@@ -528,9 +503,10 @@ def _recycle_local_session(task_id: str, session_info: dict[str, Any], task_sock
         _bt._suspect_browser_sessions.pop(task_id, None)
         return
     daemon_pid = _read_browser_daemon_pid(task_socket_dir, session_name) if session_name else None
+    from hermes_platform.processes import pid_exists
     daemon_alive = (
         daemon_pid is not None
-        and _lifecycle._pid_exists(daemon_pid)
+        and pid_exists(daemon_pid)
         and _lifecycle._verify_reapable_browser_daemon(daemon_pid, task_socket_dir, session_name)
         and _browser_daemon_responsive(task_socket_dir)
     )
@@ -548,44 +524,36 @@ def _recycle_local_session(task_id: str, session_info: dict[str, Any], task_sock
 
 
 def _sandbox_close_daemon(session_name: str) -> None:
-    """``agent-browser --session <name> close`` inside the sandbox (best effort; the daemon's own idle timer and
-    the sandbox's lifetime bound it otherwise)."""
-    from tools.bot_desktop import runtime as _bd_runtime, sandbox_host
+    """Close a sandbox browser without creating or substituting an execution target."""
+    from tools import browser_terminal as terminal
     from tools.environments import streams
-    env = _bd_runtime._sandbox_env(create=False)
-    if env is None or not session_name:
+    if not session_name:
         return
     try:
+        env = terminal.terminal_environment(create=False)
         streams.run_in(env, [_SANDBOX_AGENT_BROWSER, "--session", session_name, "close"],
-                       child_env={"AGENT_BROWSER_SOCKET_DIR": _sandbox_socket_dir(env)}, user=sandbox_host._user_for(env),
-                       timeout=15)
-    except (OSError, subprocess.SubprocessError) as exc:
+                       child_env={"AGENT_BROWSER_SOCKET_DIR": _sandbox_socket_dir(env)}, timeout=15)
+    except (RuntimeError, OSError, subprocess.SubprocessError) as exc:
         _bt.logger.debug("sandbox browser close for %s failed: %s", session_name, exc)
 
 
 def _sandbox_socket_dir(env) -> str:
-    return f"{env.get_temp_dir().rstrip('/')}/hermes-bot-desktop/agent-browser"
+    return f"{env.get_temp_dir().rstrip('/')}/hermes-browser/agent-browser"
 
 
 def sandbox_screenshot_path(host_path: Path) -> Optional[str]:
-    """Where the sandboxed CLI should write a screenshot (its own tmp), or None on a gateway-hosted browser."""
-    if not _browser_in_sandbox():
+    from tools import browser_terminal as terminal
+    if not terminal.browser_in_terminal():
         return None
-    from tools.bot_desktop import runtime as _bd_runtime
-    env = _bd_runtime._sandbox_env(create=False)
-    if env is None:
-        return None
-    return f"{env.get_temp_dir().rstrip('/')}/hermes-bot-desktop/shots/{host_path.name}"
+    env = terminal.terminal_environment(create=False)
+    return f"{env.get_temp_dir().rstrip('/')}/hermes-browser/shots/{host_path.name}"
 
 
 def fetch_sandbox_file(remote_path: str, local_dest: Path, *, max_bytes: int = 16 * 1024 * 1024) -> bool:
-    """Copy a file the sandboxed browser wrote (a screenshot) to the host; False when not in sandbox mode."""
-    if not _browser_in_sandbox():
+    from tools import browser_terminal as terminal
+    if not terminal.browser_in_terminal():
         return False
-    from tools.bot_desktop import runtime as _bd_runtime
-    env = _bd_runtime._sandbox_env(create=False)
-    if env is None:
-        return False
+    env = terminal.terminal_environment(create=False)
     env.fetch_file(remote_path, local_dest, max_bytes=max_bytes)
     return True
 
@@ -648,68 +616,53 @@ def _interpret_browser_command_output(command: str, stdout: str, stderr: str, re
 _SANDBOX_AGENT_BROWSER = "agent-browser"  # the CLI baked into nousresearch/hermes-sandbox:desktop
 _SANDBOX_ENV_KEYS = ("AGENT_BROWSER_SOCKET_DIR", "AGENT_BROWSER_IDLE_TIMEOUT_MS", "AGENT_BROWSER_ARGS",
                      "AGENT_BROWSER_PROFILE", "AGENT_BROWSER_EXECUTABLE_PATH", "AGENT_BROWSER_HEADED",
-                     "DISPLAY", "XAUTHORITY", "DBUS_SESSION_BUS_ADDRESS", "ANONYMIZED_TELEMETRY", "TMPDIR")
+                     "ANONYMIZED_TELEMETRY", "TMPDIR")
 
 
-def _browser_in_sandbox() -> bool:
-    """The bot's browser runs INSIDE the terminal backend when its screen is PLACED there (policy, not
-    liveness: same Chromium a human takes over in the pane, same profile, and the host is never touched by a
-    page the model chose — whether or not the screen happens to be up right now). ``_browser_command_preflight``
-    is where the screen is brought up or the command refused."""
-    from tools.bot_desktop import placement
-    return placement.resolve().where == placement.TERMINAL
 
 
 def _sandbox_wrap(cmd_parts: list[str], browser_env: dict[str, str], task_socket_dir: str) -> tuple[list[str], dict[str, str]]:
-    """Rewrite one agent-browser invocation to run inside the sandbox: exec prefix + the CLI by name, with the
-    browser-relevant variables exported there (the daemon's socket dir mirrors the host path so the host-side
-    liveness probes keep their shape) and a screen-published DISPLAY. Identity on a gateway-hosted screen."""
-    if not _browser_in_sandbox():
+    """Run agent-browser in the chosen terminal, never on a fallback host."""
+    from tools import browser_terminal as terminal
+    if not terminal.browser_in_terminal():
         return cmd_parts, browser_env
-    from tools.bot_desktop import runtime as _bd_runtime, sandbox_host
     from tools.environments import streams
-    env = _bd_runtime._sandbox_env(create=True)
-    if env is None:
-        raise RuntimeError("the terminal backend's sandbox is not running, so there is nowhere to run the browser")
-    published = _bd_runtime.published_env()
-    if not published.get("DISPLAY"):
-        # The sandbox died under a live screen (container removed, ssh host rebooted). Fail here rather than
-        # let a DISPLAY-less agent-browser run headless inside a dead sandbox or, worse, fall back to the host.
-        raise RuntimeError("the screen inside the terminal backend's sandbox is gone; start it again")
+    if "--headed" in cmd_parts and "--cdp" not in cmd_parts:
+        raise RuntimeError("Headed sandbox browsers require an explicit outgoing CDP endpoint")
+    env = terminal.terminal_environment(create=True)
     remote_env = {k: v for k, v in browser_env.items() if k in _SANDBOX_ENV_KEYS}
-    remote_env.update(published)
     remote_env["AGENT_BROWSER_SOCKET_DIR"] = _sandbox_socket_dir(env)
-    remote_env.pop("AGENT_BROWSER_EXECUTABLE_PATH", None)  # the sandbox image's Playwright Chromium, not a host path
-    remote_env["AGENT_BROWSER_PROFILE"] = sandbox_host.browser_profile_dir(env)  # persists with the container, not its tmpfs
+    remote_env.pop("AGENT_BROWSER_EXECUTABLE_PATH", None)
+    remote_env["AGENT_BROWSER_PROFILE"] = terminal.browser_profile_dir(env)
     remote_env["TMPDIR"] = env.get_temp_dir()
-    if not getattr(env, "_bd_browser_dirs_ready", False):
-        streams.run_in(env, ["mkdir", "-p", _sandbox_socket_dir(env), f"{env.get_temp_dir().rstrip('/')}/hermes-bot-desktop/shots",
-                             remote_env["AGENT_BROWSER_PROFILE"]], user=sandbox_host._user_for(env), timeout=15)
-        env._bd_browser_dirs_ready = True
-    remote_env["AGENT_BROWSER_ARGS"] = ",".join(CHROMIUM_SANDBOX_BYPASS_ARGS)  # container: no userns for Chromium's own sandbox
-    # cmd_parts = <agent-browser argv0 (+npx spec)> + backend args + command; keep everything after argv0.
+    if not getattr(env, "_hermes_browser_dirs_ready", False):
+        streams.run_in(env, ["mkdir", "-p", _sandbox_socket_dir(env),
+                             f"{env.get_temp_dir().rstrip('/')}/hermes-browser/shots",
+                             remote_env["AGENT_BROWSER_PROFILE"]], timeout=15)
+        env._hermes_browser_dirs_ready = True
+    remote_env["AGENT_BROWSER_ARGS"] = ",".join(CHROMIUM_SANDBOX_BYPASS_ARGS)
     tail = cmd_parts[len(_agent_browser_argv(cmd_parts[0])):]
-    wrapped = streams.remote_command(env, [_SANDBOX_AGENT_BROWSER, *tail], child_env=remote_env,
-                                     user=sandbox_host._user_for(env), interactive=True)
+    wrapped = streams.remote_command(env, [_SANDBOX_AGENT_BROWSER, *tail], child_env=remote_env, interactive=True)
     if wrapped is None:
-        raise RuntimeError(f"{type(env).__name__} cannot host the browser")
-    host_env = {"PATH": browser_env.get("PATH", os.environ.get("PATH", "")), "HOME": os.environ.get("HOME", "")}
-    return wrapped, host_env
+        raise RuntimeError(f"{type(env).__name__} cannot host browser commands")
+    return wrapped, {"PATH": browser_env.get("PATH", os.environ.get("PATH", "")), "HOME": os.environ.get("HOME", "")}
 
 
 def _browser_command_preflight() -> dict[str, Any]:
     """Fail fast before spawning (missing CLI, Termux gap, interrupt, no Chromium in local
     mode — else every call hangs for command_timeout). Error result, or ``{"browser_cmd": path}``."""
-    from tools.bot_desktop import placement, runtime as _bd_runtime
-    try:
-        where = _bd_runtime.tool_placement()  # starts the sandbox screen on demand; raises for refused / down
-    except RuntimeError as e:
-        return {"success": False, "error": f"The browser cannot run here: {e}"}
-    if where == placement.TERMINAL:
+    from tools import browser_terminal as terminal
+    if terminal.browser_in_terminal():
         from tools.interrupt import is_interrupted
         if is_interrupted():
             return {"success": False, "error": "Interrupted"}
-        return {"browser_cmd": _SANDBOX_AGENT_BROWSER}  # resolved inside the sandbox, not on this host
+        try:
+            terminal.terminal_environment(create=True)
+            if _cloud._is_local_mode() and _cloud._is_headed_mode() and _cloud._get_browser_engine() != "lightpanda":
+                raise RuntimeError("headed sandbox browsers are unsupported; use headless browsing or an explicit outgoing CDP endpoint")
+        except RuntimeError as exc:
+            return {"success": False, "error": f"The browser cannot run in the selected terminal backend: {exc}"}
+        return {"browser_cmd": _SANDBOX_AGENT_BROWSER}
     try:
         browser_cmd = _install._find_agent_browser()
     except FileNotFoundError as e:
@@ -741,8 +694,6 @@ def _spawn_and_collect(
     task_socket_dir = _prepare_session_socket_dir(session_info["session_name"])
     _bt.logger.debug("browser cmd=%s task=%s socket_dir=%s (%d chars)",
                  command, task_id, task_socket_dir, len(task_socket_dir))
-    if engine != "lightpanda":
-        _ensure_screen_for_headed_chromium()  # first command forks the daemon; a headed window needs the screen up
     browser_env = _agent_browser_command_env(task_socket_dir)
 
     # Lightpanda rejects Chromium-only launch flags: strip current and legacy vars;
@@ -786,61 +737,12 @@ def _spawn_and_collect(
     return _interpret_browser_command_output(command, stdout, stderr, proc.returncode)
 
 
-def run_fenced(session_info: dict[str, Any], fn: Callable[[], dict[str, Any]]) -> dict[str, Any]:
-    """Run ``fn`` under the Bot Desktop lease fence when ``session_info`` is the bot's LOCAL browser.
-
-    That browser lives on the Bot Desktop screen, in the same profile a human who took over is typing
-    into. While the human holds the lease every action AND read against it is refused (the page may show
-    their credential); the fence brackets the whole run so a takeover mid-command also voids the result.
-    Cloud / user-supplied CDP sessions are a different browser and run unfenced. This is THE fence: every
-    path that reaches the page (agent-browser subprocess, CDP supervisor fast path) goes through here.
-    """
-    if not _shares_bot_desktop_browser(session_info):
-        return fn()
-    from tools.bot_desktop import lease as _bd_lease
-    try:
-        admitted = _bd_lease.assert_agent_may_act()
-    except _bd_lease.HumanHasControl as e:
-        return {"success": False, "error": str(e), "code": "human_has_control"}
-    result = fn()
-    if _bd_lease.get().epoch != admitted.epoch:
-        return {"success": False, "code": "human_has_control",
-                "error": "A human took over the bot's screen while this browser command ran; its result was "
-                         "discarded. Tell the user what you need; retry once they hand back."}
-    return result
 
 
-def run_fenced_pair(session_info: dict[str, Any], fn: Callable[[], tuple[str, dict[str, Any]]]) -> tuple[str, dict[str, Any]]:
-    """``run_fenced`` for the dispatch shape ``(engine, result)``; a refusal carries no engine (never ran)."""
-    engine_box: list = []
-
-    def _call() -> dict[str, Any]:
-        engine, result = fn()
-        engine_box.append(engine)
-        return result
-
-    result = run_fenced(session_info, _call)
-    return (engine_box[0] if engine_box else "auto"), result
 
 
-def _shares_bot_desktop_browser(session_info: dict[str, Any]) -> bool:
-    """Decided by provenance, not transport: every LOCAL session (plain ``--session``, real-profile CDP
-    attach, Lightpanda) is a browser Hermes launched with this profile's Bot Desktop DISPLAY, so it is the
-    screen a human who took over is typing into. Cloud / user-supplied CDP sessions are another browser.
-    A human lease with the screen already gone (dead Xvnc) still fences — computer_use does the same."""
-    if not (session_info.get("features") or {}).get("local"):
-        return False
-    from tools.bot_desktop import lease as _bd_lease, runtime as _bd_runtime
-    return bool(_bd_runtime.published_env().get("DISPLAY")) or _bd_lease.human_holds()
 
 
-def _bot_desktop_attach_port(session_info: dict[str, Any]) -> Optional[int]:
-    """DevTools port of a human-started Chromium on the Bot Desktop's shared profile, else ``None``."""
-    if not _shares_bot_desktop_browser(session_info):
-        return None
-    from tools.bot_desktop import browser as _bd_browser
-    return _bd_browser.running_instance_cdp_port(str(_bd_browser.profile_dir()),
-                                                 exclude_session=session_info["session_name"])
 
 
 def _dispatch_browser_command(
@@ -862,12 +764,6 @@ def _dispatch_browser_command(
     if session_info.get("cdp_url"):
         backend_args += ["--cdp", session_info["cdp_url"]]
     else:
-        if (bd_port := _bot_desktop_attach_port(session_info)) is not None:
-            # A Chromium already runs on the Bot Desktop's shared profile (the human clicked the dock's
-            # Browser first): a launch would be forwarded into it by Chromium's singleton and die without
-            # a DevTools endpoint, so the session's daemon attaches to the port it advertises instead.
-            # Same daemon (keyed by --session) either way, so snapshot refs stay valid across commands.
-            backend_args += ["--cdp", str(bd_port)]
         if _cloud._is_headed_mode():
             backend_args.append("--headed")
         if engine != "auto" and not _bt._is_camofox_mode():
@@ -911,10 +807,8 @@ def _run_browser_command(
         except Exception as e:
             _bt.logger.warning("Failed to create browser session for task=%s: %s", task_id, e)
             return {"success": False, "error": f"Failed to create browser session: {e!s}"}
-        engine, result = run_fenced_pair(session_info, lambda: _dispatch_browser_command(
-            task_id, session_info, browser_cmd, command, args, timeout, _engine_override))
-        if result.get("code") == "human_has_control":
-            return result
+        engine, result = _dispatch_browser_command(
+            task_id, session_info, browser_cmd, command, args, timeout, _engine_override)
         # #115184: a protocol-level failure (exit 101 on a stale session daemon, empty/non-JSON
         # output) poisons the cached local session record exactly like a timeout — recycle it
         # the same way and retry once on the replacement before handing the caller the error.

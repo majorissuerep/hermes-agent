@@ -20,8 +20,6 @@ from pathlib import Path
 import pytest
 
 import hermes_state
-from gateway.config import GatewayConfig
-from gateway.session import SessionStore
 from hermes_state import SessionDB
 
 # These probe the live-DB guard against the real root on purpose.
@@ -103,40 +101,6 @@ class TestBypassMarker:
         DB) — with the bypass marker active it must not raise.
         """
         hermes_state._ensure_test_isolation(REAL_ROOT / "state.db")
-
-
-class TestSessionStoreLoudFailure:
-    def test_guard_error_is_not_swallowed_into_jsonl_fallback(
-        self, tmp_path, monkeypatch
-    ):
-        """SessionStore must re-raise the guard error, not degrade to JSONL.
-
-        The historical failure mode: SessionDB() blew up (or silently
-        opened the live DB) inside SessionStore.__init__'s blanket
-        ``except Exception`` and the gateway carried on. A guard trip must
-        be loud.
-        """
-
-        def _boom(*args, **kwargs):
-            raise RuntimeError(
-                "live-system guard: test attempted to open production state.db"
-            )
-
-        monkeypatch.setattr(hermes_state, "SessionDB", _boom)
-        with pytest.raises(RuntimeError, match="live-system guard"):
-            SessionStore(sessions_dir=tmp_path, config=GatewayConfig())
-
-    def test_ordinary_db_failure_still_degrades_to_jsonl(
-        self, tmp_path, monkeypatch
-    ):
-        """Non-guard SQLite failures keep the existing graceful fallback."""
-
-        def _boom(*args, **kwargs):
-            raise RuntimeError("disk on fire")
-
-        monkeypatch.setattr(hermes_state, "SessionDB", _boom)
-        store = SessionStore(sessions_dir=tmp_path, config=GatewayConfig())
-        assert store._db is None
 
 
 class TestSubprocessChildCovered:

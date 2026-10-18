@@ -11,20 +11,15 @@ import pytest
 @pytest.mark.parametrize("variant,distribution,mechanism,payload,tag", [
     ("", None, "self", "bootstrap", None),
     ("bootstrap", "docker", "external", "bootstrap", None),
-    ("bundled", "desktop-app", "electron-updater", "bundled", "v0.18.0"),
-    ("bundled", "desktop-app", "app-installer", "bundled", "v0.18.0"),
-    ("bundled", "desktop-app", "microsoft-store", "bundled", "v0.18.0"),
-    ("bundled", "desktop-app", "external", "bundled", "v0.18.0"),
-    ("light", "desktop-app", "electron-updater", "light", "v0.18.0"),
     ("runtime", "apt-termux", "external", "runtime", "v0.18.0"),
 ])
 def test_cli_stamp_roundtrip(tmp_path, monkeypatch, variant, distribution, mechanism, payload, tag):
     out = tmp_path / "install-stamp.json"
     script = Path(__file__).resolve().parents[2] / "scripts/write_install_stamp.py"
-    env = {**os.environ, "HERMES_DESKTOP_VARIANT": variant, "HERMES_PAYLOAD_TAG": "v0.18.0", "HERMES_BUILD_COMMIT": ""}
+    env = {**os.environ, "HERMES_PAYLOAD_TAG": "v0.18.0", "HERMES_BUILD_COMMIT": ""}
     args = [sys.executable, str(script), "--output", str(out), "--commit", "d" * 40,
             "--source", "ci", "--base-version", "0.18.0", "--distance", "0",
-            "--update-mechanism", mechanism]
+            "--update-mechanism", mechanism, "--payload", variant or "bootstrap"]
     if distribution:
         args += ["--distribution", distribution]
     result = subprocess.run(args, env=env, capture_output=True, text=True, timeout=30, check=False)
@@ -66,16 +61,16 @@ def test_missing_or_invalid_mechanism_cannot_emit_stamp(tmp_path, arguments):
 
 
 @pytest.mark.parametrize("variant,tag,error", [
-    ("bundled", "", "HERMES_PAYLOAD_TAG"), ("light", "", "HERMES_PAYLOAD_TAG"),
-    ("chonky", "v0.18.0", "unknown HERMES_DESKTOP_VARIANT"),
+    ("runtime", "", "HERMES_PAYLOAD_TAG"),
+    ("chonky", "v0.18.0", "invalid choice"),
 ])
 def test_invalid_variant_cannot_emit_stamp(tmp_path, variant, tag, error):
     out = tmp_path / "install-stamp.json"
     result = subprocess.run(
         [sys.executable, str(Path(__file__).resolve().parents[2] / "scripts/write_install_stamp.py"),
          "--output", str(out), "--commit", "d" * 40, "--base-version", "0.18.0",
-         "--update-mechanism", "self"],
-        env={**os.environ, "HERMES_DESKTOP_VARIANT": variant, "HERMES_PAYLOAD_TAG": tag, "HERMES_BUILD_COMMIT": ""},
+         "--update-mechanism", "self", "--payload", variant],
+        env={**os.environ, "HERMES_PAYLOAD_TAG": tag, "HERMES_BUILD_COMMIT": ""},
         capture_output=True, text=True, timeout=30, check=False)
     assert result.returncode != 0 and error in result.stderr
     assert not out.exists()

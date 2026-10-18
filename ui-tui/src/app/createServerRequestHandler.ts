@@ -18,7 +18,7 @@ const strList = (v: unknown): null | string[] =>
 
 /**
  * The Ink TUI's answer to the backend's server→client requests
- * (`tui_gateway/server_requests.py`). Each method opens its overlay card;
+ * (`tui_runtime/server_requests.py`). Each method opens its overlay card;
  * the card's answer path resolves the request through `serverRequestStore`.
  * Methods the terminal cannot answer (desktop GUI bridges: `preview.*`,
  * `window.read`, `tour`, `mcp.setup`, `terminal.read`) return `false` so the

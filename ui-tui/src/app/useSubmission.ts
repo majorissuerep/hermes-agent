@@ -4,22 +4,28 @@ import { type MutableRefObject, useCallback, useEffect, useRef } from 'react'
 import { TYPING_IDLE_MS } from '../config/timing.js'
 import { expandTokens, imageAttachments } from '../domain/attachments.js'
 import { completionToApplyOnSubmit } from '../domain/slash.js'
-import type { GatewayClient } from '../gatewayClient.js'
 import type { ShellExecResponse } from '../gatewayTypes.js'
 import { queueItem, type QueueItem } from '../hooks/useQueue.js'
 import { t } from '../i18n/runtime.js'
 import { asRpcResult, rpcErrorMessage } from '../lib/rpc.js'
+import type { LocalAgentClient } from '../localAgentClient.js'
 import { hasInterpolation, INTERPOLATION_RE } from '../protocol/interpolation.js'
 import type { Msg } from '../types.js'
 
 import { reportSlashCommand } from './createSlashHandler.js'
-import type { BusyInputMode, ComposerActions, ComposerRefs, ComposerState, ComposerToken, SlashHandler } from './interfaces.js'
+import type {
+  BusyInputMode,
+  ComposerActions,
+  ComposerRefs,
+  ComposerState,
+  ComposerToken,
+  SlashHandler
+} from './interfaces.js'
 import { findSlashCommand } from './slash/registry.js'
 import { submitPrompt } from './submissionCore.js'
 import { captureDestination, isCurrentDestination, type SubmissionDestination } from './submissionDestination.js'
 import { turnController } from './turnController.js'
 import { getUiState, patchUiState } from './uiStore.js'
-
 const DOUBLE_ENTER_MS = 450
 
 const spliceMatches = (text: string, matches: RegExpMatchArray[], results: string[]) =>
@@ -27,7 +33,6 @@ const spliceMatches = (text: string, matches: RegExpMatchArray[], results: strin
 
 export const expandPasteTokens = (tokens: ComposerToken[]) =>
   expandTokens(tokens.filter(token => token.kind === 'paste'))
-
 const slashArgument = (command: string) => /^\/\S+\s+([\s\S]+)$/.exec(command)?.[1] ?? ''
 
 export const queueItemFromSlash = (displayCommand: string, expandedCommand: string): QueueItem | undefined => {
@@ -45,7 +50,6 @@ export const prepareSubmission = (display: string, tokens: ComposerToken[]) => (
   text: expandTokens(tokens)(display),
   attachments: imageAttachments(display, tokens)
 })
-
 /**
  * Split a slash submission into the two things it has to be at once.
  *
@@ -63,9 +67,7 @@ export const prepareSlashSubmission = (display: string, tokens: ComposerToken[])
   command: expandPasteTokens(tokens)(display),
   display
 })
-
 export const shouldInterpolateSubmission = (display: string) => hasInterpolation(display)
-
 /**
  * Where and how a busy-time input is admitted. Captured synchronously at the
  * moment the user commits the input: a continuation that runs after an await
@@ -75,13 +77,15 @@ export const shouldInterpolateSubmission = (display: string) => hasInterpolation
 export interface BusyControl {
   destination: SubmissionDestination
   mode: BusyInputMode
-  executionGeneration?: number
 }
 
 export const captureBusyControl = (): BusyControl => {
   const live = getUiState()
 
-  return { destination: captureDestination(), mode: live.busyInputMode, executionGeneration: live.info?.execution_generation }
+  return {
+    destination: captureDestination(),
+    mode: live.busyInputMode
+  }
 }
 
 export function useSubmission(opts: UseSubmissionOptions) {
@@ -90,7 +94,6 @@ export function useSubmission(opts: UseSubmissionOptions) {
 
   const lastEmptyAt = useRef(0)
   const typingIdleTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-
   useEffect(() => {
     if (typingIdleTimer.current) {
       clearTimeout(typingIdleTimer.current)
@@ -126,16 +129,25 @@ export function useSubmission(opts: UseSubmissionOptions) {
       showUserMessage = true,
       displayText?: string,
       expandOverride?: (value: string) => string,
-      submitOpts: { attachments?: Array<{ path: string; mime: string }>; skipDetectDrop?: boolean; destination?: SubmissionDestination; queueItem?: QueueItem; behindTurn?: boolean } = {}
+      submitOpts: {
+        attachments?: Array<{
+          path: string
+          mime: string
+        }>
+        skipDetectDrop?: boolean
+        destination?: SubmissionDestination
+        queueItem?: QueueItem
+        behindTurn?: boolean
+      } = {}
     ) => {
       // Read tokens off the ref, not render state: a paste immediately followed
       // by Enter submits before React has re-rendered with the new token.
       const expand = expandOverride ?? expandTokens(composerRefs.tokensRef.current)
-
       const destination = submitOpts.destination ?? captureDestination()
 
       const item =
-        submitOpts.queueItem ?? (destination.sid ? composerActions.stage?.(text, displayText, destination, submitOpts.attachments) : undefined)
+        submitOpts.queueItem ??
+        (destination.sid ? composerActions.stage?.(text, displayText, destination, submitOpts.attachments) : undefined)
 
       submitPrompt(
         text,
@@ -160,7 +172,6 @@ export function useSubmission(opts: UseSubmissionOptions) {
       const focused = () => isCurrentDestination(destination)
       appendMessage({ role: 'user', text: `!${cmd}` })
       patchUiState({ busy: true, status: 'running…' })
-
       gw.request<ShellExecResponse>('shell.exec', { command: cmd, session_id: destination.sid })
         .then(raw => {
           const r = asRpcResult<ShellExecResponse>(raw)
@@ -207,20 +218,17 @@ export function useSubmission(opts: UseSubmissionOptions) {
     (text: string, then: (result: string) => void, destination = captureDestination(), item?: QueueItem) => {
       patchUiState({ status: 'interpolating…' })
       const matches = [...text.matchAll(new RegExp(INTERPOLATION_RE.source, 'g'))]
-
       Promise.all(
         matches.map(m =>
-          gw
-            .request<ShellExecResponse>('shell.exec', { command: m[1]!, session_id: destination.sid })
-            .then(raw => {
-              const r = asRpcResult<ShellExecResponse>(raw)
+          gw.request<ShellExecResponse>('shell.exec', { command: m[1]!, session_id: destination.sid }).then(raw => {
+            const r = asRpcResult<ShellExecResponse>(raw)
 
-              if (!r) {
-                throw new Error(t('session.common.invalidResponse', 'shell.exec'))
-              }
+            if (!r) {
+              throw new Error(t('session.common.invalidResponse', 'shell.exec'))
+            }
 
-              return [r.stdout, r.stderr].filter(Boolean).join('\n').trim()
-            })
+            return [r.stdout, r.stderr].filter(Boolean).join('\n').trim()
+          })
         )
       ).then(
         results => then(spliceMatches(text, matches, results)),
@@ -279,8 +287,14 @@ export function useSubmission(opts: UseSubmissionOptions) {
   // `opts.fallbackToFront` re-inserts at the queue head (queue-edit picks keep
   // their position); the mainline submit path appends.
   const handleBusyInput = useCallback(
-    (item: QueueItem, opts: { fallbackToFront?: boolean; control?: BusyControl } = {}) => {
-      const { destination, mode, executionGeneration } = opts.control ?? captureBusyControl()
+    (
+      item: QueueItem,
+      opts: {
+        fallbackToFront?: boolean
+        control?: BusyControl
+      } = {}
+    ) => {
+      const { destination, mode } = opts.control ?? captureBusyControl()
 
       const enqueueText = () => {
         if (opts.fallbackToFront) {
@@ -290,27 +304,7 @@ export function useSubmission(opts: UseSubmissionOptions) {
         }
       }
 
-      if (gw.isCanonical && mode !== 'queue') {
-        const staged = item.settle ? item : composerActions.stage?.(item.text, item.display, destination)
-
-        if (!staged) { return }
-        staged.controlMethod ??= mode === 'steer' ? 'session.steer' : 'session.redirect'
-        staged.executionGeneration ??= executionGeneration
-        staged.attachments ??= item.attachments
-
-        return send(item.text, true, item.display, value => value, {
-          destination, behindTurn: true, queueItem: staged, attachments: item.attachments })
-      }
-
       if (mode === 'queue') {
-        // Canonical authority: admit now so the input is crash-durable and in
-        // every viewer's pending list; the server FIFO orders it behind the
-        // running turn. Legacy gateways keep the renderer-side queue.
-        if (gw.isCanonical) {
-          return send(item.text, true, item.display, value => value, {
-            destination, behindTurn: true, queueItem: item.settle ? item : undefined, attachments: item.attachments })
-        }
-
         return enqueueText()
       }
 
@@ -322,9 +316,14 @@ export function useSubmission(opts: UseSubmissionOptions) {
       // the agent is in model generation, tool execution, or an older runtime.
       // Reuse the normal submit pipeline so the correction gets its user bubble
       // and file-drop interpolation exactly once.
-      send(item.text, true, item.display, value => value, { destination, queueItem: item.settle ? item : undefined, attachments: item.attachments })
+      send(item.text, true, item.display, value => value, {
+        destination,
+        queueItem: item.settle ? item : undefined,
+        attachments: item.attachments,
+        behindTurn: true
+      })
     },
-    [composerActions, gw, send]
+    [composerActions, send]
   )
 
   const dispatchSubmission = useCallback(
@@ -352,7 +351,13 @@ export function useSubmission(opts: UseSubmissionOptions) {
       // The composer is the only copy of a draft until the pending-input
       // journal holds it, so it is cleared after that first durable write and
       // kept — text and image tokens — when the write fails.
-      const journaled = <T,>(write: () => T): { value: T } | undefined => {
+      const journaled = <T>(
+        write: () => T
+      ):
+        | {
+            value: T
+          }
+        | undefined => {
         try {
           const value = write()
           composerActions.clearIn()
@@ -368,10 +373,8 @@ export function useSubmission(opts: UseSubmissionOptions) {
 
       if (looksLikeSlashCommand(full)) {
         const slash = prepareSlashSubmission(full, submissionTokens)
-
         appendMessage({ kind: 'slash', role: 'system', text: slash.display })
         composerActions.pushHistory(toHistory)
-
         const parsed = parseSlashCommand(full)
 
         const queued =
@@ -381,15 +384,22 @@ export function useSubmission(opts: UseSubmissionOptions) {
           // Handled here, before the slash handler, so it is counted here.
           reportSlashCommand(gw, parsed.name, getUiState().sid)
 
-          const saved = journaled(() => composerActions.enqueue(queued.text, queued.display, destination, submission.attachments))
+          const saved = journaled(() =>
+            composerActions.enqueue(queued.text, queued.display, destination, submission.attachments)
+          )
 
-          if (saved) { sys(`queued: "${queued.display.slice(0, 50)}${queued.display.length > 50 ? '…' : ''}"`) }
+          if (saved) {
+            sys(`queued: "${queued.display.slice(0, 50)}${queued.display.length > 50 ? '…' : ''}"`)
+          }
         } else {
           // Attachment commands capture the cleared composer's revision.
           composerActions.clearIn()
           // Image tokens are labels in the command; the descriptors and their
           // expander ride along so a skill/alias send still carries the image.
-          slashRef.current(slash.command, { attachments: submission.attachments, expand: expandTokens(submissionTokens) })
+          slashRef.current(slash.command, {
+            attachments: submission.attachments,
+            expand: expandTokens(submissionTokens)
+          })
         }
 
         return
@@ -402,7 +412,6 @@ export function useSubmission(opts: UseSubmissionOptions) {
       }
 
       const live = getUiState()
-
       // No session yet (boot, or the socket is down): the input joins the local queue and the
       // sid/connected drain effect sends it once the session is bound. On an attached gateway
       // the first session.create lands seconds after the composer accepts input, so an Enter
@@ -411,7 +420,9 @@ export function useSubmission(opts: UseSubmissionOptions) {
 
       if (unbound) {
         composerActions.pushHistory(toHistory)
-        journaled(() => composerActions.enqueue(submission.text, submission.display, destination, submission.attachments))
+        journaled(() =>
+          composerActions.enqueue(submission.text, submission.display, destination, submission.attachments)
+        )
 
         return
       }
@@ -441,7 +452,7 @@ export function useSubmission(opts: UseSubmissionOptions) {
             // 'interrupt' / 'steer' should reach the live turn instead of
             // silently going back to the queue.  handleBusyInput resolves
             // mode-specific behavior (interrupt-and-send, steer, or queue).
-            if (control.mode === 'queue' && !gw.isCanonical) {
+            if (control.mode === 'queue' && !false) {
               return composerActions.prependQueue(item, control.destination)
             }
 
@@ -456,13 +467,19 @@ export function useSubmission(opts: UseSubmissionOptions) {
 
       if (getUiState().busy) {
         return void journaled(() =>
-          handleBusyInput({ ...queueItem(submission.text, submission.display), attachments: submission.attachments }))
+          handleBusyInput({ ...queueItem(submission.text, submission.display), attachments: submission.attachments })
+        )
       }
 
       if (shouldInterpolateSubmission(full)) {
-        const staged = journaled(() => composerActions.stage?.(submission.text, submission.display, destination, submission.attachments))
+        const staged = journaled(() =>
+          composerActions.stage?.(submission.text, submission.display, destination, submission.attachments)
+        )
 
-        if (!staged) { return }
+        if (!staged) {
+          return
+        }
+
         patchUiState({ busy: true })
         const item = staged.value
 
@@ -471,14 +488,17 @@ export function useSubmission(opts: UseSubmissionOptions) {
           text =>
             send(prepareSubmission(text, submissionTokens).text, true, text, value => value, {
               destination,
-              queueItem: item, attachments: submission.attachments
+              queueItem: item,
+              attachments: submission.attachments
             }),
           destination,
           item
         )
       }
 
-      journaled(() => send(submission.text, true, submission.display, value => value, { attachments: submission.attachments }))
+      journaled(() =>
+        send(submission.text, true, submission.display, value => value, { attachments: submission.attachments })
+      )
     },
     [
       appendMessage,
@@ -555,7 +575,13 @@ export function useSubmission(opts: UseSubmissionOptions) {
   // $(...) interpolation. Startup `-q` queries use this — they're arbitrary
   // launcher/script text, and one-shot mode already treats them literally.
   const submitLiteral = useCallback(
-    (value: string, attachments?: Array<{ path: string; mime: string }>) => {
+    (
+      value: string,
+      attachments?: Array<{
+        path: string
+        mime: string
+      }>
+    ) => {
       if (!value.trim()) {
         return
       }
@@ -573,7 +599,7 @@ export interface UseSubmissionOptions {
   composerActions: ComposerActions
   composerRefs: ComposerRefs
   composerState: ComposerState
-  gw: GatewayClient
+  gw: LocalAgentClient
   setLastUserMsg: (value: string) => void
   slashRef: MutableRefObject<SlashHandler>
   submitRef: MutableRefObject<(value: string) => void>

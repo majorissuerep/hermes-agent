@@ -5,18 +5,9 @@ from pathlib import Path
 
 import pytest
 
-import hermes_cli.gateway_setup_service as service_setup
 from tests.hermes_cli.test_backup import _make_hermes_tree
 
 
-@pytest.fixture(autouse=True)
-def _no_real_gateway_service(monkeypatch):
-    """run_import() may start an existing gateway service post-restore; tests must
-    never touch the host's systemd/launchd."""
-    import hermes_cli.gateway as gateway_mod
-
-    monkeypatch.setattr(service_setup, "ensure_gateway_service", lambda **kw: False)
-    monkeypatch.setattr(gateway_mod, "_is_service_running", lambda: False)
 
 
 def test_run_backup_prunes_older_default_named_zips_but_not_others(tmp_path, monkeypatch):

@@ -17,15 +17,6 @@ Disable only when you deliberately need raw credential-like strings for debuggin
 hermes config set security.redact_secrets false
 ```
 
-### PII redaction in gateway messages
-
-Separate from secret redaction. When enabled, the gateway hashes user IDs and strips phone numbers from the session context before it reaches the model:
-
-```bash
-hermes config set privacy.redact_pii true    # enable
-hermes config set privacy.redact_pii false   # disable (default)
-```
-
 ### Command approval prompts
 
 By default (`approvals.mode: smart`), Hermes asks an auxiliary LLM to assess shell commands flagged as destructive (`rm -rf`, `git reset --hard`, etc.). The modes are:
@@ -55,7 +46,7 @@ go through the approval prompt, only shell commands do). Two stores hold it:
 2. Shell-hook consent (only if present): `rm -f ~/.hermes/shell-hooks-allowlist.json`
 
 Then sanity-check `hermes config get approvals.mode` (should not be `off`)
-and confirm `--yolo` isn't baked into their launch alias or systemd unit.
+and confirm `--yolo` isn't baked into their launch alias.
 
 ### Shell hooks allowlist
 
@@ -63,5 +54,5 @@ Some shell-hook integrations require explicit allowlisting before they fire. Man
 
 ### Disabling the web/browser/image-gen tools
 
-To keep the model away from network or media tools entirely, open `hermes tools` and toggle per-platform. Takes effect on next session (`/reset`). See `references/configuration.md` for the toolset list.
+To keep the model away from network or media tools entirely, open `hermes tools` and toggle the local toolsets. Takes effect on next session (`/reset`). See `references/configuration.md` for the toolset list.
 

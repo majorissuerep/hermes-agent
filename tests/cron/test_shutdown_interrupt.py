@@ -363,7 +363,6 @@ class TestExecutionScopedInterruption:
              ), \
              patch("cron.scheduler.save_job_output", return_value="/tmp/out.md"), \
              patch("cron.scheduler._is_cron_silence_response", return_value=False), \
-             patch("cron.scheduler._deliver_result", return_value=None), \
              patch("cron.scheduler.fire_claim_fence"), \
              patch("cron.scheduler.heartbeat_fire_claim", return_value=True), \
              patch("cron.scheduler.mark_job_run", return_value=True) as mock_mark:
@@ -551,7 +550,6 @@ class TestRunOneJobHonoursInterruptedFlag:
              ), \
              patch("cron.scheduler.save_job_output", return_value="/tmp/out.md"), \
              patch("cron.scheduler._is_cron_silence_response", return_value=False), \
-             patch("cron.scheduler._deliver_result", return_value=None), \
              patch("cron.scheduler.mark_job_run") as mock_mark:
             result = sched.run_one_job(job)
 
@@ -563,47 +561,6 @@ class TestRunOneJobHonoursInterruptedFlag:
         # isn't permanently silenced.
         assert sched._inflight_key(job["id"]) not in sched._interrupted_job_ids
 
-    def test_interrupted_job_delivers_failure_summary_not_raw_response(self):
-        """The status-write guard alone isn't enough: delivery happens
-        BEFORE mark_job_run in run_one_job's own flow, so a job that kept
-        running post-kill and produced a plausible-looking final_response
-        must not have that response sent to the user just because the
-        eventual status write gets suppressed. Interrupted jobs must route
-        through the same failure-summary delivery path a real failure
-        would."""
-        import cron.scheduler as sched
-
-        job = dict(self._make_job(), deliver="telegram")
-        sched._interrupted_job_ids.add(sched._inflight_key(job["id"]))
-
-        with patch("cron.scheduler.claim_dispatch", return_value=True), \
-             patch("agent.secret_scope.set_secret_scope", return_value=None), \
-             patch("agent.secret_scope.build_profile_secret_scope", return_value=None), \
-             patch("agent.secret_scope.reset_secret_scope"), \
-             patch(
-                 "cron.scheduler.run_job",
-                 return_value=(True, "full output", "a plausible final response", None),
-             ), \
-             patch("cron.scheduler.save_job_output", return_value="/tmp/out.md"), \
-             patch(
-                 "cron.scheduler._summarize_cron_failure_for_delivery",
-                 return_value="This run was interrupted.",
-             ) as mock_summarize, \
-             patch("cron.scheduler._is_cron_silence_response", return_value=False), \
-             patch("cron.delivery_queue.enqueue", return_value={"status": "pending"}) as mock_deliver, \
-             patch("cron.scheduler.mark_job_run"):
-            result = sched.run_one_job(job)
-
-        assert result is True
-        mock_summarize.assert_called_once()
-        # The summarizer's error argument must mention the interruption,
-        # not be silently None / the agent's own (possibly absent) error.
-        assert "interrupt" in mock_summarize.call_args.args[1].lower()
-        mock_deliver.assert_called_once()
-        assert mock_deliver.call_args.kwargs["for_failure"] is True
-        delivered_content = mock_deliver.call_args.args[2]
-        assert delivered_content == "This run was interrupted."
-        assert "plausible final response" not in delivered_content
 
 
     def test_exception_path_also_honours_interrupted_flag(self):

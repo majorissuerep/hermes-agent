@@ -26,7 +26,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from hermes_cli import process_identity as pi
+from hermes_platform import child_processes as pi
 
 
 class _FakeNoSuchProcess(Exception):
@@ -135,17 +135,6 @@ def test_register_self_writes_and_prunes_dead(tmp_path):
     assert me["create_time"] == pytest.approx(50.0, abs=0.01)
 
 
-def test_register_self_survives_non_utf8_argv(tmp_path):
-    ledger = tmp_path / "spawn-ledger.json"
-    fake = _fake_psutil({999: 50.0})
-    bad_argv = ["hermes", "serve", os.fsdecode(b"/tmp/project-\xff")]  # surrogate-escaped path
-    with patch.dict(sys.modules, {"psutil": fake}), \
-         patch.object(pi, "_ledger_path", return_value=ledger), \
-         patch.object(pi.os, "getpid", return_value=999), \
-         patch.object(sys, "argv", bad_argv):
-        assert pi.register_self("serve", project_root=Path("/x/install")) is True
-    me = next(e for e in json.loads(ledger.read_text(encoding="utf-8")) if e["pid"] == 999)
-    assert me["argv"] == " ".join(bad_argv)
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits are platform-specific")
@@ -178,24 +167,6 @@ def test_register_self_inherits_spawn_tag_lineage(tmp_path):
     assert me["spawner_create"] == pytest.approx(123.0, abs=0.01)
 
 
-def test_register_self_falls_back_to_desktop_parent_env(tmp_path):
-    # Legacy Desktop: no HERMES_SPAWN, but HERMES_PARENT_PID + winms marker.
-    ledger = tmp_path / "spawn-ledger.json"
-    fake = _fake_psutil({999: 50.0})
-    env = {
-        "HERMES_PARENT_PID": "888",
-        "HERMES_PARENT_START_MARKER": "winms:1755689000123",
-    }
-    with patch.dict(sys.modules, {"psutil": fake}), \
-         patch.dict(pi.os.environ, env, clear=False), \
-         patch.object(pi.os.environ, "get", pi.os.environ.get), \
-         patch.object(pi, "_ledger_path", return_value=ledger), \
-         patch.object(pi.os, "getpid", return_value=999):
-        pi.os.environ.pop(pi.SPAWN_ENV_VAR, None)
-        pi.register_self("serve", project_root=Path("/x/install"))
-    me = json.loads(ledger.read_text(encoding="utf-8"))[0]
-    assert me["spawner_pid"] == 888
-    assert me["spawner_create"] == pytest.approx(1755689000.123, abs=0.01)
 
 
 def test_corrupt_ledger_quarantined_not_rewritten_blind(tmp_path):
@@ -271,137 +242,14 @@ def _holders(*pids):
     return [(p, "python.exe", f"python.exe -m hermes_cli.main --profile p{p} serve") for p in pids]
 
 
-def test_updater_reaps_ledger_proven_orphans():
-    from hermes_cli import update_cmd_holders
-
-    entries = [
-        _entry(200, 2.0, spawner_pid=700, spawner_create=7.0),   # spawner dead → reap
-        _entry(201, 2.1, spawner_pid=500, spawner_create=5.0),   # spawner alive → keep
-        _entry(202, 2.2, purpose="chat", spawner_pid=700, spawner_create=7.0),  # not reapable purpose
-    ]
-    fake = _fake_psutil({500: 5.0})
-    with patch.dict(sys.modules, {"psutil": fake}), \
-         patch.object(pi, "ledger_entries", return_value=entries), \
-         patch.object(pi, "spawner_is_dead", wraps=pi.spawner_is_dead):
-        assert update_cmd_holders._ledger_reapable_backend_pids(_holders(200, 201, 202, 203)) == [200]
 
 
 
 
-def test_updater_ledger_rung_never_raises():
-    from hermes_cli import update_cmd_holders
-
-    with patch.object(pi, "ledger_entries", side_effect=RuntimeError("boom")):
-        assert update_cmd_holders._ledger_reapable_backend_pids(_holders(200)) == []
 
 
-def test_desktop_ssh_backend_spawn_shape_is_desktop_owned(monkeypatch):
-    """Desktop's SSH spawn is ``env HERMES_DESKTOP=1 hermes serve --isolated ... --ssh-session-token-file F``
-    with NO token env var (its tests assert the var name never appears on the wire). Missing that
-    shape made the SSH child claim ROLE_SERVE on the remote host (the #119824 shape there)."""
-    monkeypatch.setenv("HERMES_DESKTOP", "1")
-    monkeypatch.delenv("HERMES_DASHBOARD_SESSION_TOKEN", raising=False)
-    ssh_argv = ["serve", "--isolated", "--host", "127.0.0.1", "--port", "0",
-                "--ssh-session-token-file", "/home/u/.hermes/desktop-ssh/abc.token"]
-
-    assert pi.is_desktop_owned_backend(ssh_argv) is True
-    monkeypatch.setattr(sys, "argv", ["hermes", *ssh_argv])
-    assert pi.is_desktop_owned_backend() is True
-    # The bare inherited flag (a Desktop terminal pane running `hermes serve`) is still not ownership.
-    assert pi.is_desktop_owned_backend(["serve", "--host", "127.0.0.1", "--port", "0"]) is False
 
 
 # ---------------------------------------------------------------------------
 # Host-reclaim rung: reap_orphaned_backend_owner (#121964)
 # ---------------------------------------------------------------------------
-
-def _reap(entry_pid=555, create=55.0, procs=None, kill_fn=None, **entry_kw):
-    """Run the reclaim predicate with a faked psutil world; returns (result, kills)."""
-    entry = _entry(entry_pid, create, **entry_kw)
-    kills = []
-    fake = _fake_psutil({} if procs is None else procs)
-    with patch.dict(sys.modules, {"psutil": fake}), \
-         patch.object(pi, "ledger_entries", return_value=[entry]):
-        result = pi.reap_orphaned_backend_owner(
-            entry_pid, create, kill_fn=(kills.append if kill_fn is None else kill_fn))
-    return result, kills
-
-
-def test_reclaim_reaps_dead_spawner_owner():
-    result, kills = _reap(spawner_pid=700, spawner_create=7.0, procs={555: 55.0})
-    assert result == 555
-    assert kills == [555]
-
-
-def test_reclaim_spares_live_spawner_owner():
-    result, kills = _reap(spawner_pid=500, spawner_create=5.0, procs={555: 55.0, 500: 5.0})
-    assert result is None
-    assert kills == []
-
-
-def test_reclaim_spares_unprovable_spawner():
-    # Spawner probe itself fails (permission): unprovable means never touch.
-    import types
-
-    from unittest.mock import MagicMock
-
-    def _process(pid):
-        if pid == 500:
-            raise PermissionError(pid)
-        proc = MagicMock()
-        proc.create_time.return_value = 55.0
-        return proc
-
-    fake = types.SimpleNamespace(Process=_process, NoSuchProcess=_FakeNoSuchProcess)
-    with patch.dict(sys.modules, {"psutil": fake}), \
-         patch.object(pi, "ledger_entries",
-                      return_value=[_entry(555, 55.0, spawner_pid=500, spawner_create=5.0)]):
-        assert pi.reap_orphaned_backend_owner(555, 55.0, kill_fn=lambda pid: None) is None
-
-
-def test_reclaim_reaps_null_spawner_orphan_to_init():
-    from hermes_cli import dashboard_procs
-
-    with patch.object(dashboard_procs, "_process_ppid", return_value=1), \
-         patch.object(dashboard_procs, "_lock_owned_serve_pids", return_value=set()):
-        # Ancient orphan: create_time far past vs real clock → past the lock-write grace.
-        result, kills = _reap(procs={555: 1000.0}, create=1000.0)
-    assert result == 555
-    assert kills == [555]
-
-
-def test_reclaim_spares_null_spawner_with_live_parent():
-    from hermes_cli import dashboard_procs
-
-    with patch.object(dashboard_procs, "_process_ppid", return_value=1234):
-        result, kills = _reap(procs={555: 55.0})
-    assert result is None
-    assert kills == []
-
-
-def test_reclaim_spares_lock_claimed_orphan():
-    """A valid backend.lock.json claims the PID: another session owns it, never kill."""
-    from hermes_cli import dashboard_procs
-
-    with patch.object(dashboard_procs, "_process_ppid", return_value=1), \
-         patch.object(dashboard_procs, "_lock_owned_serve_pids", return_value={555}):
-        result, kills = _reap(procs={555: 1000.0}, create=1000.0)
-    assert result is None
-    assert kills == []
-
-
-def test_reclaim_spares_interactive_purposes_and_self():
-    result, kills = _reap(purpose="chat", spawner_pid=700, spawner_create=7.0,
-                          procs={555: 55.0})
-    assert (result, kills) == (None, [])
-    with patch.object(pi.os, "getpid", return_value=555):
-        result, kills = _reap(spawner_pid=700, spawner_create=7.0, procs={555: 55.0})
-    assert (result, kills) == (None, [])
-
-
-def test_reclaim_ignores_unknown_pid_and_never_raises():
-    with patch.dict(sys.modules, {"psutil": _fake_psutil({555: 55.0})}), \
-         patch.object(pi, "ledger_entries", return_value=[_entry(555, 55.0)]):
-        assert pi.reap_orphaned_backend_owner(999, 9.0, kill_fn=lambda pid: None) is None
-    with patch.object(pi, "ledger_entries", side_effect=RuntimeError("boom")):
-        assert pi.reap_orphaned_backend_owner(555, 55.0, kill_fn=lambda pid: None) is None

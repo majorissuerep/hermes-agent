@@ -6,6 +6,7 @@ import logging
 import json
 import threading
 import time
+import sys
 from typing import Any, Dict, List, Optional
 from agent.interrupt_compat import request_hard_interrupt
 from tools.registry import tool_error
@@ -104,21 +105,6 @@ def interrupt_subagent(subagent_id: str) -> bool:
         logger.debug("interrupt_subagent(%s) failed: %s", subagent_id, exc)
         return False
 
-def _subagent_transport_matches(record, transport) -> bool:
-    """Authority follows the owning session's LIVE transport slot, read at check time.
-
-    ``owner_transport`` on the record is only the capture-time marker that a gateway session
-    commissioned the child (``None`` = no RPC authority ever). The slot is authoritative because
-    every reattach path (prompt.submit, queued drain, resume, activate, viewer failover) already
-    mutates it; a per-record copy needed a matching registry sync at each of those sites and two
-    were missed (#106663). Records whose owner is not a session dict keep the exact-object rule."""
-    from tui_gateway.transport import FanoutTransport
-
-    if record.get("owner_transport") is None:
-        return False
-    owner = record.get("owner_session_record")
-    bound = owner.get("transport") if isinstance(owner, dict) else record.get("owner_transport")
-    return bound is transport or (isinstance(bound, FanoutTransport) and bound.contains(transport))
 
 
 def steer_subagent(
@@ -142,7 +128,7 @@ def steer_subagent(
         if owner_session_id is not None and (
             record.get("owner_session_id") != owner_session_id
             or owner_transport is None
-            or not _subagent_transport_matches(record, owner_transport)
+            or record.get("owner_transport") is not owner_transport
             or owner_session_record is None
             or record.get("owner_session_record") is not owner_session_record
         ):
@@ -156,16 +142,15 @@ def steer_subagent(
             logger.debug("steer_subagent(%s) failed: %s", subagent_id, exc)
             return False
 
-def _capture_gateway_steer_authority(owner_session_id: Optional[str]) -> tuple[Any, Any]:
+def _capture_local_steer_authority(owner_session_id: Optional[str]) -> tuple[Any, Any]:
     """Exact request transport + live session generation, if any — an in-process
-    bridge, not a serializable capability. Non-gateway hosts get ``(None, None)``."""
+    bridge, not a serializable capability. Headless calls have no TUI authority."""
     if not owner_session_id:
         return None, None
-    try:
-        from tui_gateway.server import _current_session_steer_authority
-        return _current_session_steer_authority(owner_session_id)
-    except Exception:
+    runtime = sys.modules.get("tui_runtime.server")
+    if runtime is None:
         return None, None
+    return runtime._current_session_steer_authority(owner_session_id)
 
 # Registry record fields never exposed to the TUI/RPC snapshot.
 _PRIVATE_RECORD_KEYS = frozenset({"agent", "owner_session_id", "owner_transport", "owner_session_record", "accepting_steer"})

@@ -12,7 +12,7 @@ a resumed session WRITE-CAPABLE asks this guard before loading history:
 - mid-chat ``/resume`` / ``/sessions <id>`` (``_handle_resume_command``),
 - quiet one-shot resume (``hermes_cli/oneshot.py``),
 - gateway ``session.resume`` — Desktop session history and the TUI picker
-  (``tui_gateway/methods_session.py``).
+  (``tui_runtime/methods_session.py``).
 
 Detection is persisted provenance (``SessionDB.is_kanban_owned_session``: the session row's
 ``kanban`` source, checked across the compression lineage a resume would materialize) plus
@@ -32,7 +32,7 @@ def _dispatcher_owned_run() -> bool:
     run the dispatcher owns — task, run id, claim, heartbeat — may continue a worker
     transcript, so it is exempt from the guard."""
     try:
-        from gateway.session_context import get_session_env
+        from agent.session_context import get_session_env
     except ImportError:  # no gateway context (plain CLI child) — read the process env
         get_session_env = os.environ.get
     return bool(str(get_session_env("HERMES_KANBAN_TASK", "") or "").strip())

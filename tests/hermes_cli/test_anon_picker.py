@@ -15,7 +15,7 @@ import pytest
 
 from hermes_cli.anon_auth import WELCOME_CLAIM_FLAG
 from hermes_cli.auth import _save_auth_store
-from tests.hermes_cli.anon_portal import as_local_desktop_backend
+from tests.hermes_cli.anon_portal import as_local_terminal_runtime
 
 GUEST_STATE = {
     "auth_method": "anonymous",
@@ -35,7 +35,7 @@ def guest_home(monkeypatch, tmp_path):
     from tests.hermes_cli.anon_portal import install_optional_portal_provider
     install_optional_portal_provider(monkeypatch)
     monkeypatch.setenv("HERMES_SHARED_AUTH_DIR", str(tmp_path / "shared-store"))
-    as_local_desktop_backend(monkeypatch)
+    as_local_terminal_runtime(monkeypatch)
     for var in ("OPENROUTER_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "NOUS_API_KEY", "LM_API_KEY", "LM_BASE_URL"):
         monkeypatch.delenv(var, raising=False)
     _save_auth_store({"active_provider": "nous", "providers": {"nous": dict(GUEST_STATE)}})

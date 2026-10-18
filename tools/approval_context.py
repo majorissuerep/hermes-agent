@@ -104,7 +104,7 @@ def get_current_session_key(default: str = "default") -> str:
     """Return the active session key: approval contextvar → session_context → os.environ."""
     if session_key := _approval_session_key.get():
         return session_key
-    from gateway.session_context import get_session_env
+    from agent.session_context import get_session_env
     return get_session_env("HERMES_SESSION_KEY", default)
 
 
@@ -113,7 +113,7 @@ def _session_env(name: str) -> str:
     unrelated gateway/API/TUI turns in the same process; process env is the
     fallback for CLI tests and older entrypoints."""
     try:
-        from gateway.session_context import get_session_env
+        from agent.session_context import get_session_env
         return get_session_env(name, "") or ""
     except Exception:
         return os.getenv(name, "") or ""
@@ -163,13 +163,6 @@ def _is_single_query_approval_context() -> bool:
     ``approvals.single_query_mode`` makes the path deterministic. A gateway-admitted turn
     carries the same fact as the submission's ``finite`` flag (``hermes -z`` / ``chat -q``
     over the daemon): the viewer detaches on the first prompt, so nobody answers there either."""
-    try:
-        from gateway.session_finite import finite_turn_required
-    except ImportError:  # install without the gateway package: no admitted turn to carry the flag
-        pass
-    else:
-        if finite_turn_required() is True:
-            return True
     return is_truthy_value(_session_env("HERMES_SINGLE_QUERY_SESSION"))
 
 
@@ -180,24 +173,9 @@ def _no_user_can_answer() -> bool:
             or _is_unattended_platform_approval_context())
 
 
-def _is_gateway_approval_context() -> bool:
-    """True inside a gateway/API session that can answer an approval.
-
-    Legacy integrations set HERMES_GATEWAY_SESSION; concurrent paths bind
-    HERMES_SESSION_PLATFORM via contextvars. Cron is NEVER a gateway approval
-    context even when it originated from a platform (cron binds the platform for
-    delivery routing): falling through would submit a pending approval with no
-    listener and block the job indefinitely; unattended platforms likewise.
-
-    Unattended programmatic platforms (webhook, msgraph_webhook, api_server) are excluded for the same
-    reason: those adapters have no ``send_exec_approval`` and no way to receive ``/approve`` replies.
-    Submitting a pending approval there blocks the session for the full approval timeout (60-300 s) with no
-    human who can resolve it (#37284, 87509). Their dangerous-command handling is governed by
-    ``approvals.unattended_mode`` config (default deny), mirroring cron.
-    """
-    if _is_cron_approval_context() or _is_unattended_platform_approval_context():
-        return False
-    return env_var_enabled("HERMES_GATEWAY_SESSION") or bool(_get_session_platform())
+def _is_session_approval_context() -> bool:
+    """Only an attended local TUI has a persistent approval overlay."""
+    return _get_session_platform() == "tui" and not _is_cron_approval_context()
 
 
 def _resolve_cli_approval_callback(approval_callback=None):
@@ -252,13 +230,7 @@ def _get_approval_config() -> dict:
 
 
 def _get_approval_mode() -> str:
-    """Return 'manual', 'smart', or 'off' (a hosted-room policy overrides config)."""
-    try:
-        from gateway.hosted_room_execution_policy import current_room_execution_policy
-        if (room_policy := current_room_execution_policy()) is not None:
-            return room_policy.approval_mode
-    except Exception:
-        pass
+    """The active local profile's approval policy."""
     return _normalize_approval_mode(_get_approval_config().get("mode", "manual"))
 
 

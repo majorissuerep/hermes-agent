@@ -171,10 +171,9 @@ def install_portal(monkeypatch, tmp_path, fake: FakePortal | None = None) -> Fak
     return fake
 
 
-def as_local_desktop_backend(monkeypatch) -> None:
-    """This process is the backend the desktop spawned on this machine (the local spawn's credential)."""
-    monkeypatch.setenv("HERMES_DESKTOP", "1")
-    monkeypatch.setenv("HERMES_DASHBOARD_SESSION_TOKEN", "test-spawn-token")
+def as_local_terminal_runtime(monkeypatch) -> None:
+    from hermes_cli import anon_auth
+    monkeypatch.setattr(anon_auth, 'on_local_terminal_runtime', lambda: True)
 
 
 def claimed_trial(monkeypatch) -> dict:
@@ -182,8 +181,8 @@ def claimed_trial(monkeypatch) -> dict:
     free-model surface needs. Mints through the fake portal installed by ``install_portal``."""
     from hermes_cli import welcome_trial
 
-    as_local_desktop_backend(monkeypatch)
-    state = welcome_trial.claim_desktop_free_tier()
+    as_local_terminal_runtime(monkeypatch)
+    state = welcome_trial.claim_terminal_free_tier()
     assert state is not None, welcome_trial.claim_blocker()
     # This fixture explicitly selected an optional provider; the product's
     # bundled auto resolver must never adopt a retired provider implicitly.

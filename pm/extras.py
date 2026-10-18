@@ -40,24 +40,11 @@ ANCHORS: dict[str, str | tuple[str, ...]] = {
     "wake-porcupine": "pvporcupine",
     "fal": "fal_client",
     "lancedb-memory": ("lancedb", "fastembed"),
-    "messaging": "telegram",
-    "telegram": "telegram",
-    "discord": "discord",
-    "slack": "slack_bolt",
-    "matrix": ("mautrix", "asyncpg", "aiosqlite", "markdown", "aiohttp_socks"),
-    "dingtalk": "dingtalk_stream",
-    "feishu": "lark_oapi",
-    "wecom": "defusedxml",
-    "teams": "microsoft_teams.apps",
     "modal": "modal",
     "daytona": "daytona",
     "vercel": "vercel",
     "google": ("googleapiclient", "google.auth", "google_auth_oauthlib.flow", "google_auth_httplib2"),
-    "google-chat": "google.cloud.pubsub_v1",
-    "google-meet": ("playwright.sync_api", "websockets"),
     "youtube": "youtube_transcript_api",
-    "acp": "acp",
-    "web": "fastapi",
     "doc-extract": "anydoc",
     "computer-use": "mcp",
     "trace-upload": "huggingface_hub",
@@ -290,7 +277,7 @@ def legacy_selection(project_root: Path) -> list[str]:
     carried = sorted(
         # An umbrella extra shares its anchor with one member; carrying it
         # would install every sibling the user never chose.
-        extra for extra in ANCHORS if extra not in {"messaging", "voice", "wake"}
+        extra for extra in ANCHORS if extra not in {"voice", "wake"}
         # PM refuses a gated extra outside its platform even if a hand-synced venv carried it.
         # Installed first: judging a gate may cost a PM-runtime subprocess.
         if any(all(_installed_in(tree, anchor) for anchor in _anchors(extra)) for tree in trees)

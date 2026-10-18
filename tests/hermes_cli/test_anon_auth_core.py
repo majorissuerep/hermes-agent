@@ -88,13 +88,12 @@ class TestIdentityLifecycle:
         with pytest.raises(anon_auth.AuthError):
             resolve_provider("auto")
 
-    def test_a_claimed_trial_carries_inference_only_on_the_local_desktop_backend(self, portal, monkeypatch):
+    def test_a_claimed_trial_carries_existing_entitlement_to_headless(self, portal, monkeypatch):
         claimed_trial(monkeypatch)
         assert resolve_provider("auto") == "nous"
-        monkeypatch.delenv("HERMES_DASHBOARD_SESSION_TOKEN")     # a CLI shell beside the desktop
-        assert anon_auth.free_inference_active() is False
-        with pytest.raises(anon_auth.AuthError):
-            resolve_provider("auto")
+        monkeypatch.setattr(anon_auth, "on_local_terminal_runtime", lambda: False)
+        assert anon_auth.free_inference_active() is True
+        assert resolve_provider("auto") == "nous"
 
 
 class TestExplicitProvision:
@@ -328,8 +327,8 @@ class TestBootstrapNeverCreates:
 
     def test_bootstrap_on_a_fresh_machine_mints_nothing(self, portal, monkeypatch):
         monkeypatch.setattr("agent.bedrock_adapter.has_aws_credentials", lambda *_a, **_kw: False)
-        from tests.hermes_cli.anon_portal import as_local_desktop_backend
-        as_local_desktop_backend(monkeypatch)              # the trial is claimable here; boot still never claims it
+        from tests.hermes_cli.anon_portal import as_local_terminal_runtime
+        as_local_terminal_runtime(monkeypatch)              # the trial is claimable here; boot still never claims it
         record = self._fresh().run_bootstrap(announce=False)
         assert record.has_identity is False and record.free_tier_account is False
         assert portal.calls == [], "boot never reaches the portal"

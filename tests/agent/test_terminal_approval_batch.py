@@ -11,7 +11,7 @@ from unittest.mock import patch
 import pytest
 
 from run_agent import AIAgent
-from gateway.session_context import clear_session_vars
+from agent.session_context import clear_session_vars
 from tools import approval
 from tools.thread_context import propagate_context_to_thread
 
@@ -34,7 +34,7 @@ def _agent():
         patch("agent.model_metadata.fetch_model_metadata", return_value={}),
     ):
         return AIAgent(api_key="test-key", base_url="https://openrouter.ai/api/v1",
-                       quiet_mode=True, skip_context_files=True, skip_memory=True, platform="desktop")
+                       quiet_mode=True, skip_context_files=True, skip_memory=True, platform="tui")
 
 
 @pytest.mark.parametrize("read_count", [0, 2])
@@ -53,10 +53,10 @@ def test_desktop_publishes_final_commands_before_wait_and_runs_in_order(tmp_path
     key = "desktop-terminal-batch"
     agent = _agent()
     published = queue.Queue()
-    approval.register_gateway_notify(key, published.put)
-    from tui_gateway import server
+    approval.register_session_notify(key, published.put)
+    from tui_runtime import server
     monkeypatch.setattr(server, "_sessions", {key: {
-        "session_key": key, "source": "desktop", "agent": agent, "cwd": str(tmp_path),
+        "session_key": key, "source": "tui", "agent": agent, "cwd": str(tmp_path),
     }})
     tokens = server._set_session_context(key)
     calls = [_call("first", "original-first"), _call("second", "original-second")]
@@ -123,11 +123,11 @@ def test_desktop_publishes_final_commands_before_wait_and_runs_in_order(tmp_path
             assert [first["command"], second["command"]] == list(commands.values())
             assert policy == list(commands)
             assert executed == []
-            assert approval.ack_gateway_approval(key, second["request_id"])
+            assert approval.ack_session_approval(key, second["request_id"])
             assert executed == []
-            assert approval.resolve_gateway_approval(key, "once", request_id=second["request_id"]) == 1
+            assert approval.resolve_session_approval(key, "once", request_id=second["request_id"]) == 1
             assert executed == []
-            assert approval.resolve_gateway_approval(key, "once", request_id=first["request_id"]) == 1
+            assert approval.resolve_session_approval(key, "once", request_id=first["request_id"]) == 1
             worker.join(timeout=15)
             assert not worker.is_alive()
             assert errors == []
@@ -137,10 +137,10 @@ def test_desktop_publishes_final_commands_before_wait_and_runs_in_order(tmp_path
             assert "first" not in {call_id for flush in executed[0][2] for call_id in flush}
             assert [m["tool_call_id"] for m in messages] == [c.id for c in calls]
             assert str(nested) in json.loads(messages[-1]["content"])["output"]
-            assert approval.list_gateway_approvals(key) == []
+            assert approval.list_session_approvals(key) == []
         finally:
             agent.interrupt("test cleanup")
-            approval.unregister_gateway_notify(key)
+            approval.unregister_session_notify(key)
             worker.join(timeout=5)
             cleanup_vm(key)
             clear_session_vars(tokens)
@@ -175,10 +175,10 @@ def test_cancelled_preparation_drains_requests_without_reusing_once(tmp_path, mo
         except BaseException as exc:
             errors.append(exc)
 
-    approval.register_gateway_notify(key, notify)
-    from tui_gateway import server
+    approval.register_session_notify(key, notify)
+    from tui_runtime import server
     monkeypatch.setattr(server, "_sessions", {key: {
-        "session_key": key, "source": "desktop", "agent": agent, "cwd": str(tmp_path),
+        "session_key": key, "source": "tui", "agent": agent, "cwd": str(tmp_path),
     }})
     tokens = server._set_session_context(key)
     with ExitStack() as scope:
@@ -190,15 +190,15 @@ def test_cancelled_preparation_drains_requests_without_reusing_once(tmp_path, mo
         try:
             requests = [published.get(timeout=10) for _ in calls]
             assert len({r["request_id"] for r in requests}) == len(calls)
-            assert approval.resolve_gateway_approval(key, "once", request_id=requests[1]["request_id"]) == 1
+            assert approval.resolve_session_approval(key, "once", request_id=requests[1]["request_id"]) == 1
             agent.interrupt("cancel while publishing")
             worker.join(5)
             assert not worker.is_alive()
             assert errors == []
             assert [row["tool_call_id"] for row in messages] == [c.id for c in calls]
-            assert approval.list_gateway_approvals(key) == []
+            assert approval.list_session_approvals(key) == []
             assert not (tmp_path / "effect.txt").exists()
-            assert approval.resolve_gateway_approval(key, "once", request_id=requests[0]["request_id"]) == 0
+            assert approval.resolve_session_approval(key, "once", request_id=requests[0]["request_id"]) == 0
             release_notify.set()
 
             # Same command AND call id in a later run still needs fresh consent.
@@ -211,19 +211,19 @@ def test_cancelled_preparation_drains_requests_without_reusing_once(tmp_path, mo
             request = published.get(timeout=10)
             assert request["request_id"] not in {r["request_id"] for r in requests}
             assert not (tmp_path / "effect.txt").exists()
-            assert approval.resolve_gateway_approval(key, "deny", request_id=request["request_id"]) == 1
+            assert approval.resolve_session_approval(key, "deny", request_id=request["request_id"]) == 1
             retry_worker.join(5)
             assert not retry_worker.is_alive()
             assert errors == []
             assert json.loads(retry_rows[0]["content"])["status"] == "blocked"
             assert not (tmp_path / "effect.txt").exists()
-            assert approval.list_gateway_approvals(key) == []
+            assert approval.list_session_approvals(key) == []
         finally:
             release_notify.set()
             agent.interrupt("test cleanup")
             if retry_agent is not None:
                 retry_agent.interrupt("test cleanup")
-            approval.unregister_gateway_notify(key)
+            approval.unregister_session_notify(key)
             worker.join(5)
             if retry_worker is not None:
                 retry_worker.join(5)
@@ -253,10 +253,10 @@ def test_failed_command_re_gates_later_prepared_approvals(tmp_path, monkeypatch)
                 "later": f"rm -rf absent-second; printf ran > '{effect}'"}
     agent = _agent()
     published = queue.Queue()
-    approval.register_gateway_notify(key, published.put)
-    from tui_gateway import server
+    approval.register_session_notify(key, published.put)
+    from tui_runtime import server
     monkeypatch.setattr(server, "_sessions", {key: {
-        "session_key": key, "source": "desktop", "agent": agent, "cwd": str(tmp_path),
+        "session_key": key, "source": "tui", "agent": agent, "cwd": str(tmp_path),
     }})
     tokens = server._set_session_context(key)
     calls = [_call(call_id, commands[call_id]) for call_id in ("failing", "later")]
@@ -286,8 +286,8 @@ def test_failed_command_re_gates_later_prepared_approvals(tmp_path, monkeypatch)
             later_request = published.get(timeout=5)
             assert {first_request["command"], later_request["command"]} == set(commands.values())
             assert executed == []
-            assert approval.resolve_gateway_approval(key, "once", request_id=later_request["request_id"]) == 1
-            assert approval.resolve_gateway_approval(key, "once", request_id=first_request["request_id"]) == 1
+            assert approval.resolve_session_approval(key, "once", request_id=later_request["request_id"]) == 1
+            assert approval.resolve_session_approval(key, "once", request_id=first_request["request_id"]) == 1
 
             # The failing command runs and its failure is published.
             worker_join_marker = time.monotonic()
@@ -302,7 +302,7 @@ def test_failed_command_re_gates_later_prepared_approvals(tmp_path, monkeypatch)
             assert regated["command"] == commands["later"]
             assert regated["request_id"] != later_request["request_id"]
             assert not effect.exists()
-            assert approval.resolve_gateway_approval(key, "once", request_id=regated["request_id"]) == 1
+            assert approval.resolve_session_approval(key, "once", request_id=regated["request_id"]) == 1
 
             worker.join(timeout=15)
             assert not worker.is_alive()
@@ -313,10 +313,10 @@ def test_failed_command_re_gates_later_prepared_approvals(tmp_path, monkeypatch)
             assert results["failing"]["exit_code"] == 1
             assert results["later"]["exit_code"] == 0
             assert effect.exists() and effect.read_text() == "ran"
-            assert approval.list_gateway_approvals(key) == []
+            assert approval.list_session_approvals(key) == []
         finally:
             agent.interrupt("test cleanup")
-            approval.unregister_gateway_notify(key)
+            approval.unregister_session_notify(key)
             worker.join(timeout=5)
             cleanup_vm(key)
             clear_session_vars(tokens)
@@ -334,10 +334,10 @@ def test_switching_yolo_off_mid_batch_re_gates_later_commands(tmp_path, monkeypa
     agent = _agent()
     agent._flush_messages_to_session_db = lambda *a, **kw: True
     published = queue.Queue()
-    approval.register_gateway_notify(key, published.put)
-    from tui_gateway import server
+    approval.register_session_notify(key, published.put)
+    from tui_runtime import server
     monkeypatch.setattr(server, "_sessions", {key: {
-        "session_key": key, "source": "desktop", "agent": agent, "cwd": str(tmp_path)}})
+        "session_key": key, "source": "tui", "agent": agent, "cwd": str(tmp_path)}})
     tokens = server._set_session_context(key)
     calls = [_call(f"c{i}", f"rm -rf absent-{i}; touch ran-{i}") for i in range(3)]
     # The user switches YOLO off once the first command has run.
@@ -358,13 +358,13 @@ def test_switching_yolo_off_mid_batch_re_gates_later_commands(tmp_path, monkeypa
         try:
             for _ in range(2):
                 request = published.get(timeout=15)
-                assert approval.resolve_gateway_approval(key, "deny", request_id=request["request_id"]) == 1
+                assert approval.resolve_session_approval(key, "deny", request_id=request["request_id"]) == 1
             worker.join(timeout=15)
             assert not worker.is_alive() and errors == []
             assert sorted(p.name for p in tmp_path.glob("ran-*")) == ["ran-0"]
         finally:
             agent.interrupt("test cleanup")
-            approval.unregister_gateway_notify(key)
+            approval.unregister_session_notify(key)
             approval.clear_session(key)
             worker.join(timeout=5)
             cleanup_vm(key)

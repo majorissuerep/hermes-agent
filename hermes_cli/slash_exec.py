@@ -107,11 +107,11 @@ def _skill_commands() -> dict:
 
 def _exec_help(ctx: CommandContext) -> CommandReply:
     """Core gateway /help body (pre platform mention decoration)."""
-    from hermes_cli.commands import gateway_help_lines
+    from hermes_cli.commands import help_lines
     # ``allowed_commands`` (gateway, non-admin caller): only the commands the slash-access
     # policy lets this user run; skill commands are hidden too since the gate refuses them.
     allowed = ctx.options.get("allowed_commands")
-    lines = [t("gateway.help.header"), *gateway_help_lines(allowed)]
+    lines = [t("gateway.help.header"), *help_lines(allowed)]
     skill_cmds = _skill_commands() if allowed is None else {}
     try:
         if skill_cmds:
@@ -131,14 +131,14 @@ def _exec_commands(ctx: CommandContext) -> CommandReply:
 
     ``ctx.options["page_size"]`` is a surface parameter (Telegram uses 15, everything else 20).
     """
-    from hermes_cli.commands import gateway_help_lines
+    from hermes_cli.commands import help_lines
     try:
         requested_page = int((ctx.args or "").strip() or 1)
     except ValueError:
         return CommandReply(t("gateway.commands.usage"), format="markdown")
 
     allowed = ctx.options.get("allowed_commands")
-    entries = list(gateway_help_lines(allowed))
+    entries = list(help_lines(allowed))
     skill_cmds = _skill_commands() if allowed is None else {}
     try:
         if skill_cmds:

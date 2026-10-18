@@ -42,11 +42,11 @@ def test_stamp_uses_built_commit_even_with_dispatch_sha_and_refuses_mismatch(tmp
     out = tmp_path / 'stamp.json'
     env = {k: v for k, v in os.environ.items() if not k.startswith(('GITHUB_', 'HERMES_BUILD_', 'HERMES_PAYLOAD_'))}
     env.update({'GITHUB_SHA': main, 'GITHUB_REF_NAME': 'main',
-                'HERMES_BUILD_COMMIT': feature, 'HERMES_DESKTOP_VARIANT': 'bundled',
+                'HERMES_BUILD_COMMIT': feature,
                 'HERMES_HOME': str(tmp_path / 'home')})
     command = [sys.executable, '-I', '-S', str(repo / 'scripts/write_install_stamp.py'),
                '--output', str(out), '--base-version', '0.28.0', '--distance', '0',
-               '--update-mechanism', 'app-installer']
+               '--update-mechanism', 'external', '--payload', 'runtime']
 
     def run(*args, override=None):
         return subprocess.run([*command, *args], cwd=tmp_path, env={**env, **(override or {})},

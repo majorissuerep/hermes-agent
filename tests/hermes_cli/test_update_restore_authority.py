@@ -1,94 +1,37 @@
 """Maintenance must not replace the database behind a live authority."""
-import asyncio
 from contextlib import closing
-from http.server import ThreadingHTTPServer
 import json
 import os
 from pathlib import Path
 import sqlite3
 import threading
 
-from tests.gateway.fixtures.local_recovery_probe import Model, daemon, rpc, websocket
-from tests.waiting import async_wait_until
 
 
-def test_restore_refuses_live_authority_without_changing_data(tmp_path):
-    from hermes_cli.backup import create_quick_snapshot
-    from hermes_cli.config_defaults import DEFAULT_CONFIG
+def test_restore_refuses_live_terminal_without_changing_data(tmp_path):
     from hermes_cli.update_cmd_maint import _restore_state_db_from_snapshot
+    from hermes_state.runtime_ownership import ProfileOwnership
 
-    root = Path(__file__).resolve().parents[2]
-    home, user = tmp_path / 'state', tmp_path / 'user'
-    home.mkdir(mode=0o700)
-    user.mkdir()
-    peer = ThreadingHTTPServer(('127.0.0.1', 0), Model)
-    peer.requests = []
-    peer.blocked, peer.release = threading.Event(), threading.Event()
-    thread = threading.Thread(target=peer.serve_forever, daemon=True)
-    thread.start()
-    url = f'http://127.0.0.1:{peer.server_port}/v1'
-    (home / 'config.yaml').write_text(json.dumps({
-        '_config_version': DEFAULT_CONFIG['_config_version'],
-        'gateway': {'multiplex_profiles': False},
-        'model': {'provider': 'custom', 'default': 'fixture', 'base_url': url},
-        'auxiliary': {'title_generation': {'enabled': False}},
-        'platform_toolsets': {'cli': []},
-    }))
-    env = {k: os.environ[k] for k in ('PATH', 'LANG', 'TZ', 'TIRITH_ENABLED') if k in os.environ}
-    env.update(HOME=str(user), USERPROFILE=str(user), HERMES_HOME=str(home), PYTHONPATH=str(root),
-               OPENAI_API_KEY='loopback-only', OPENAI_BASE_URL=url, HERMES_ALLOW_NO_VAULT='1')
-
-    def rows():
-        with closing(sqlite3.connect(f'file:{home / "state.db"}?mode=ro', uri=True)) as db:
-            return list(db.execute('SELECT request_id,status FROM session_admissions ORDER BY rowid'))
-
-    async def exercise(desc):
-        async with websocket(home, desc) as ws:
-            created = await rpc(ws, 'session.create', request_id='create', source='tui', cwd=str(home), toolsets=[])
-            session = created['result']['session_id']
-            await rpc(ws, 'prompt.submit', session_id=session, input_id='warm', text='WARM')
-            await async_wait_until(lambda: dict(rows()).get('warm') == 'terminal', timeout=30, interval=.05,
-                                   what='the warm turn to settle')
-            snapshot = create_quick_snapshot(hermes_home=home)
-            assert snapshot, snapshot
-            await rpc(ws, 'prompt.submit', session_id=session, input_id='started', text='BLOCK_STARTED')
-            assert await asyncio.to_thread(peer.blocked.wait, 25), (home / 'restart.log').read_text()
-            await rpc(ws, 'prompt.submit', session_id=session, input_id='queued', text='FOLLOWER')
-            before = rows()
-            assert dict(before) == {'warm': 'terminal', 'started': 'started', 'queued': 'queued'}
-            import hashlib
-            bundle = [Path(str(home / 'state.db') + suffix) for suffix in ('', '-wal', '-shm')]
-            hashes = {str(p): hashlib.sha256(p.read_bytes()).hexdigest() for p in bundle if p.exists()}
-            restored = _restore_state_db_from_snapshot(home / 'state.db', home / 'state-snapshots' / snapshot / 'state.db')
-            assert hashes == {str(p): hashlib.sha256(p.read_bytes()).hexdigest() for p in bundle if p.exists()}
-            after = rows()
-            print(json.dumps({'live_restore': restored, 'before': before, 'after': after}), flush=True)
-            assert not restored and after == before
-            return snapshot
-
+    home = tmp_path / "state"
+    home.mkdir()
+    destination, source = home / "state.db", tmp_path / "snapshot.db"
+    for path, value in ((destination, "current"), (source, "snapshot")):
+        with closing(sqlite3.connect(path)) as db:
+            db.execute("CREATE TABLE marker(value TEXT)")
+            db.execute("INSERT INTO marker VALUES(?)", (value,))
+            db.commit()
+    before = destination.read_bytes(), source.read_bytes()
+    owner = ProfileOwnership()
+    owner.reserve([home])
     try:
-        with daemon(root, home, env, barrier=False) as (_proc, desc):
-            snapshot = asyncio.run(exercise(desc))
-            old_epoch = desc['authority_epoch']
-        peer.release.set()
-        assert _restore_state_db_from_snapshot(home / 'state.db', home / 'state-snapshots' / snapshot / 'state.db')
-        assert rows() == [('warm', 'terminal')]
-        with daemon(root, home, env, barrier=False) as (_, restarted):
-            assert restarted['instance_id'] != desc['instance_id']
-            assert restarted['authority_epoch'] > old_epoch
-            assert rows() == [('warm', 'terminal')]
-            later_epoch = restarted['authority_epoch']
-        # Restoring the same older snapshot must not reuse a previous owner's epoch.
-        assert _restore_state_db_from_snapshot(home / 'state.db', home / 'state-snapshots' / snapshot / 'state.db')
-        with daemon(root, home, env, barrier=False) as (_, restored_again):
-            assert restored_again['authority_epoch'] > later_epoch
-            print(json.dumps({'offline_restore_restart_epochs': [old_epoch, later_epoch, restored_again['authority_epoch']],
-                              'restart_instance_changed': restored_again['instance_id'] != restarted['instance_id']}), flush=True)
+        assert not _restore_state_db_from_snapshot(destination, source)
+        assert (destination.read_bytes(), source.read_bytes()) == before
     finally:
-        peer.release.set()
-        peer.shutdown()
-        peer.server_close()
-        thread.join(timeout=5)
+        owner.close()
+    assert _restore_state_db_from_snapshot(destination, source)
+    with closing(sqlite3.connect(destination)) as db:
+        assert db.execute("SELECT value FROM marker").fetchall() == [("snapshot",)]
+    assert source.read_bytes() == before[1]
 
 
 def test_corrupt_epoch_refuses_profile_sweep_with_separate_recovery(tmp_path, monkeypatch, capsys):
@@ -128,7 +71,7 @@ def test_corrupt_epoch_refuses_profile_sweep_with_separate_recovery(tmp_path, mo
 def test_update_restore_excludes_startup_until_publication(tmp_path, monkeypatch):
     import subprocess
     import sys
-    from gateway.runtime_ownership import ProfileOwnership
+    from hermes_state.runtime_ownership import ProfileOwnership
     from hermes_cli import backup
     from hermes_cli.update_cmd_maint import _restore_state_db_from_snapshot
 
@@ -168,10 +111,11 @@ def test_update_restore_excludes_startup_until_publication(tmp_path, monkeypatch
         env = {k: os.environ[k] for k in ('PATH', 'LANG', 'TZ', 'TIRITH_ENABLED') if k in os.environ}
         env.update(HOME=str(tmp_path / 'user'), HERMES_HOME=str(home), PYTHONPATH=str(root), HERMES_ALLOW_NO_VAULT='1')
         contender = subprocess.run([sys.executable, '-c',
-            "import logging, runpy; logging.basicConfig(level=logging.INFO); runpy.run_module('gateway.run', run_name='__main__')"],
+            "from pathlib import Path; from hermes_state.runtime_ownership import ProfileOwnership; "
+            "from hermes_constants import get_hermes_home; owner=ProfileOwnership(); owner.reserve([get_hermes_home()])"],
             cwd=root, env=env, stdin=subprocess.DEVNULL, capture_output=True,
             text=True, encoding='utf-8', timeout=25, check=False)
-        assert 'already owns profile' in contender.stdout + contender.stderr, contender
+        assert contender.returncode != 0 and 'busy' in contender.stdout + contender.stderr, contender
         assert (destination.read_bytes(), source.read_bytes()) == before
     finally:
         release.set()

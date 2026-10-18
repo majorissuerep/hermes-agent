@@ -38,23 +38,6 @@ def record_engine(store, version, digest="b" * 64):
     return binary
 
 
-def test_status_uses_pm_pin_and_ignores_legacy_tag(runtime_env, monkeypatch):
-    from hermes_cli.web_routers import local_models as lm
-
-    store, lock = runtime_env
-    section = {"enabled": True, "backend": "cpu", "tag": "b99999"}
-    monkeypatch.setattr(lm, "_runtime_section", lambda: section)
-    monkeypatch.setattr(lm, "_state_endpoint", lambda: None)
-    record_engine(store, "10362")
-    status = lm.local_models_status()
-    assert status["tag"] == "b10362"
-    assert status["configured_tag"] == "b" + lock.version("llamacpp-cpu")
-    assert status["runtime_installed"] and status["update_available"]
-    section["enabled"] = False
-    assert not lm.local_models_status()["update_available"]
-    section["enabled"] = True
-    record_engine(store, lock.version("llamacpp-cpu"), "a" * 64)
-    assert not lm.local_models_status()["update_available"]
 
 
 def test_boot_uses_previous_pm_engine_without_installing(runtime_env, monkeypatch):

@@ -16,7 +16,7 @@ CTX = None
 
 def _record(**kwargs):
     ident = CTX.current_cron_execution()
-    out = Path(os.environ["HERMES_HOME"]) / "seen.json"
+    out = Path(os.environ["HERMES_HOME"]).parent / "seen.json"
     out.write_text(json.dumps({"tool": kwargs.get("tool_name"),
                                "identity": dataclasses.asdict(ident) if ident else None}))
 
@@ -26,22 +26,8 @@ def register(ctx):
     ctx.register_hook("pre_tool_call", _record)
 '''
 
-_TICK = '''
-import json, sys
-from cron import scheduler, scheduler_authority
-from cron.executions import list_executions
-from tests.cron.conftest import owner_execution_runner
-# Cron executes inside the profile's owner; run the owner's execution seam in-process.
-scheduler_authority.run_canonical_job = owner_execution_runner()
-from hermes_cli.plugins import get_plugin_manager
-scheduler.tick(verbose=False, sync=True)
-ctx = get_plugin_manager()._plugins["cron-identity-probe"].module.CTX
-print(json.dumps({"outside": ctx.current_cron_execution(), "profile": ctx.profile_name,
-                  "executions": list_executions(job_id="probe")}, default=str))
-'''
 
-
-def test_tool_hook_in_a_ticked_job_sees_its_execution_and_none_outside(tmp_path):
+def test_tool_hook_in_a_ticked_job_sees_its_execution_and_none_outside(tmp_path, monkeypatch):
     from hermes_time import now
 
     home = tmp_path / "home"
@@ -49,7 +35,7 @@ def test_tool_hook_in_a_ticked_job_sees_its_execution_and_none_outside(tmp_path)
     plugin_dir.mkdir(parents=True)
     (plugin_dir / "plugin.yaml").write_text("name: cron-identity-probe\nversion: 0.0.1\n")
     (plugin_dir / "__init__.py").write_text(_PLUGIN)
-    note = home / "note.txt"
+    note = tmp_path / "note.txt"
     with FakeLLMServer([ToolCall("read_file", {"path": str(note)}), Text("done")]) as srv:
         write_hermes_home(home, srv.base_url,
                           extra_config="plugins:\n  enabled: [cron-identity-probe]\n")
@@ -61,15 +47,24 @@ def test_tool_hook_in_a_ticked_job_sees_its_execution_and_none_outside(tmp_path)
             "next_run_at": (now() - timedelta(minutes=1)).isoformat(),
             "enabled": True, "state": "scheduled", "deliver": "local",
             "repeat": {"times": None, "completed": 0}}]}))
-        env = {k: v for k, v in os.environ.items()
-               if not k.startswith(("HERMES_", "_HERMES_"))
-               and not k.endswith(("_API_KEY", "_TOKEN"))}
-        env.update(HERMES_HOME=str(home), PYTHONPATH=str(Path(__file__).resolve().parents[2]))
-        result = subprocess.run([sys.executable, "-c", _TICK], env=env, stdin=subprocess.DEVNULL,
-                                capture_output=True, text=True, timeout=180, check=False)
-    assert result.returncode == 0, result.stdout + result.stderr
-    report = json.loads(result.stdout.strip().splitlines()[-1])
-    seen = json.loads((home / "seen.json").read_text())
+        monkeypatch.setenv("HERMES_HOME", str(home))
+        monkeypatch.setenv("HERMES_RUNTIME_DIR", str(tmp_path / "runtime"))
+        from hermes_security import vault
+        from hermes_security.io import write_text
+        values = {name: (home / name).read_text() for name in ("config.yaml", ".env", "cron/jobs.json")}
+        vault.init_vault(home, "synthetic-cron-identity-password", _allow_existing_state=True)
+        vault.unlock(home, "synthetic-cron-identity-password")
+        for name, text in values.items():
+            write_text(home / name, text, purpose={"config.yaml": "config", ".env": "env"}.get(name, "state"))
+        from cron import scheduler
+        from cron.executions import list_executions
+        from hermes_cli.plugins import discover_plugins, get_plugin_manager
+        discover_plugins()
+        assert scheduler.tick(verbose=False, sync=True) == 1
+        ctx = get_plugin_manager()._plugins["cron-identity-probe"].module.CTX
+        report = {"outside": ctx.current_cron_execution(), "profile": ctx.profile_name,
+                  "executions": list_executions(job_id="probe")}
+    seen = json.loads((tmp_path / "seen.json").read_text())
     (execution,) = report["executions"]
 
     assert seen["tool"] == "read_file"

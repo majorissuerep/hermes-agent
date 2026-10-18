@@ -49,7 +49,7 @@ def test_compressed_result_rejoins_verbatim_tail_and_never_mutates_input():
     assert agent._compress_context.call_args.kwargs["force"] is True
 
 
-@pytest.mark.parametrize("surface", ["cli", "gateway", "tui", "acp"])
+@pytest.mark.parametrize("surface", ["cli", "tui"])
 def test_every_surface_honours_preview_without_compressing(surface, monkeypatch):
     """The prompt-cache-breaking mutation must be gated by the same ``--preview`` on all four surfaces."""
     agent, history = _agent(), _history()
@@ -60,31 +60,11 @@ def test_every_surface_honours_preview_without_compressing(surface, monkeypatch)
         cli.agent, cli.conversation_history = agent, history
         cli._manual_compress("/compress --preview")
         assert cli.conversation_history == frozen
-    elif surface == "gateway":
-        import asyncio
-        from gateway.run import GatewayRunner
-        gw = GatewayRunner.__new__(GatewayRunner)
-        gw.session_store = MagicMock()
-        entry = MagicMock(session_id="sid")
-        gw._async_session_store = MagicMock(
-            _store=gw.session_store, get_or_create_session=_coro(entry), load_transcript=_coro(history))
-        gw._run_manual_compression = MagicMock(side_effect=AssertionError("must not compress"))
-        event = MagicMock(); event.get_command_args.return_value = "--preview"
-        reply = asyncio.run(gw._handle_compress_command_inner(event))
-        assert "Preview" in reply
     elif surface == "tui":
-        from tui_gateway.server import _compress_session_history
+        from tui_runtime.server import _compress_session_history
         session = {"agent": agent, "history": history, "history_lock": threading.Lock(), "history_version": 3}
         assert _compress_session_history(session, "--preview")[0] == 0
         assert session["history"] == frozen and session["history_version"] == 3
-    else:
-        from acp_adapter.commands import SlashCommandsMixin
-        acp = SlashCommandsMixin.__new__(SlashCommandsMixin)
-        acp.session_manager = MagicMock()
-        state = MagicMock(history=history, agent=agent, session_id="acp-sid")
-        assert "Preview" in acp._cmd_compress("--preview", state)
-        assert state.history == frozen
-        acp.session_manager.save_session.assert_not_called()
     agent._compress_context.assert_not_called()
 
 

@@ -48,27 +48,6 @@ def _read_config(home: Path) -> dict:
     return data if isinstance(data, dict) else {}
 
 
-def platform_configured_on(home: Path, name: str) -> bool:
-    """Platform *name* is on in *home*'s config files as the gateway loader reads them: legacy
-    ``gateway.json`` base layer, then config.yaml's ``gateway.platforms`` / ``platforms`` /
-    ``gateway.<name>`` blocks merged in the loader's order (managed overlay and ``${VAR}`` applied),
-    so the last explicit ``enabled`` wins. A stored token with no ``enabled`` anywhere counts too.
-    Env credentials are the caller's to check. Read-only; works before the platform's plugin loads."""
-    from gateway import config_loader
-    from gateway.config import PlatformConfig
-    gw_data = config_loader.load_legacy_gateway_json(home)
-    gw_data = gw_data if isinstance(gw_data, dict) else {}
-    try:
-        yaml_cfg = config_loader.read_yaml_layers(home)
-    except Exception:  # malformed config.yaml: the gateway falls back to gateway.json alone too
-        yaml_cfg = {}
-    yaml_cfg = yaml_cfg if isinstance(yaml_cfg, dict) else {}
-    block = config_loader.merge_platform_sections(
-        yaml_cfg, yaml_cfg.get("gateway"), gw_data, also=frozenset({name})).get(name)
-    if not isinstance(block, dict):
-        return False
-    platform = PlatformConfig.from_dict(block)
-    return platform.enabled or ("enabled" not in block and bool(str(platform.token or "").strip()))
 
 
 def _toolset_listed(config: dict, names: frozenset[str], *, own_platform: str = "") -> bool:
@@ -100,8 +79,6 @@ def homeassistant_in_use(home: Path, *, process_env: bool = False) -> bool:
                 return True
         except Exception:
             pass
-    if platform_configured_on(home, "homeassistant"):
-        return True
     return _toolset_listed(
         _read_config(home), frozenset({"homeassistant", "hermes-homeassistant"}), own_platform="homeassistant")
 
@@ -126,10 +103,9 @@ def _bundled_plugin_selected(home: Path, plugin: str) -> bool:
     """*plugin*'s bundled copy was on for *home*: its key or name in ``plugins.enabled`` and neither in
     ``plugins.disabled`` (which wins, as in the loader), read with the managed overlay applied like the
     loader's config, so an administrator's pinned list counts."""
-    from gateway import config_loader
     feature = next(f for f in LEFT_CORE if f.plugin == plugin)
     try:
-        plugins = config_loader.read_yaml_layers(home).get("plugins")
+        plugins = _read_config(home).get("plugins")
     except Exception:  # malformed config.yaml: the loader enables nothing from it either
         logger.debug("left-core: unreadable config for %s", home, exc_info=True)
         return False
@@ -477,13 +453,6 @@ def migrate_all_homes(*, say: Callable[[str], None] = print) -> list[str]:
     return installed
 
 
-def _gateway_serves(home: Path) -> bool:
-    """A live gateway serves *home*: it loaded its platforms before this agent-start install."""
-    try:
-        from gateway.status import resolve_gateway_liveness
-        return resolve_gateway_liveness(profile_dir=home, use_cache=False).running
-    except Exception:
-        return False
 
 
 def recover_at_startup(*, say: Optional[Callable[[str], None]] = None) -> list[str]:
@@ -540,8 +509,6 @@ def recover_at_startup(*, say: Optional[Callable[[str], None]] = None) -> list[s
         for feature in features:
             if _install_one(home, feature, install=_install_into(home, consent=True), say=report):
                 installed.append(feature.plugin)
-                if say is not None and feature.platform and _gateway_serves(home):
-                    report(f"Restart the gateway (`hermes gateway restart`) so it serves {feature.label}.")
         return installed
     except Exception as exc:  # never take agent/gateway start down
         logger.warning("left-core plugin migration failed: %s", exc, exc_info=True)

@@ -39,7 +39,7 @@ def _leader_start_time(pid: int) -> Optional[int]:
     """Start-time fingerprint of the pgroup leader (PGID == leader PID on setsid spawn);
     ``None`` only when the reading is genuinely unavailable (already-reaped PID, no
     /proc AND no psutil) — the psutil fallback covers macOS/Windows."""
-    from gateway.status import get_process_start_time
+    from hermes_platform.processes import get_process_start_time
     try:
         return get_process_start_time(pid)
     except Exception:
@@ -80,7 +80,7 @@ def _snapshot_child_pids() -> set:
 # MCP spawn (defense-in-depth; LSP/slash_worker already use start_new_session). Matched against
 # argv[1:] because Python/Java children start with the interpreter path.
 _NON_MCP_CHILD_CMDLINE_MARKERS: tuple[str, ...] = (
-    "tui_gateway.slash_worker", "tui_gateway.entry",
+    "tui_runtime.slash_worker", "tui_runtime.entry",
     "-dorg.eclipse.equinox.launcher", "eclipse.jdt.ls", "org.eclipse.equinox.launcher_",  # jdtls
 )
 
@@ -281,7 +281,7 @@ def _signal_mcp_process(pid: int, sig: int, server_name: str, pgid: Optional[int
         current = _leader_start_time(pid)
         if current is not None:
             try:
-                from gateway.status import start_time_fingerprints_match
+                from hermes_platform.processes import start_time_fingerprints_match
                 if not start_time_fingerprints_match(expected_start, current):
                     logger.debug(
                         "Skip signalling MCP pid %d (%s): start-time mismatch — PID was recycled; "
@@ -378,9 +378,9 @@ def _kill_orphaned_mcp_children(include_active: bool = False, server_name: Optio
         logger.debug("Sent SIGTERM to orphaned MCP process %d (%s)", pid, owner)
     time.sleep(2)
     sigkill = getattr(_signal, "SIGKILL", _signal.SIGTERM)
-    from gateway.status import _pid_exists  # ``os.kill(pid, 0)`` is NOT a no-op on Windows
+    from hermes_platform.processes import pid_exists  # ``os.kill(pid, 0)`` is NOT a no-op on Windows
     for pid, owner in pids.items():
-        if _pid_exists(pid) or _group_alive(pgids.get(pid), my_pgid):  # leader or descendants survived SIGTERM
+        if pid_exists(pid) or _group_alive(pgids.get(pid), my_pgid):  # leader or descendants survived SIGTERM
             _signal_mcp_process(pid, sigkill, owner, pgids.get(pid), my_pgid, starts.get(pid))
             logger.warning("Force-killed MCP process %d (%s) after SIGTERM timeout", pid, owner)
     # These groups are reaped. Release them last, so a crash partway through the SIGTERM/SIGKILL

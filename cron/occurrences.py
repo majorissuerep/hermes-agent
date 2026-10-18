@@ -2,6 +2,7 @@
 profile-local stale-schedule catch-up counter marker."""
 from datetime import datetime, timedelta, timezone, UTC
 import logging
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -119,3 +120,20 @@ def record_catch_up_occurrence() -> None:
     from cron.jobs import _write_marker
 
     _write_marker("catch_up_occurrences", str(get_catch_up_occurrence_count() + 1), ".count_")
+
+
+def _claim_owner_is_dead(claim: dict[str, Any]) -> bool:
+    """True when the claim's ``by`` names a process on THIS host that provably no longer exists.
+    ``_machine_id()`` stamps ``host:pid[:token]``; a foreign host, an explicit HERMES_MACHINE_ID,
+    or any liveness-probe failure returns False (fail safe: only a proven death shortens the TTL)."""
+    parts = str(claim.get("by") or "").split(":")
+    if len(parts) < 2 or not parts[1].isdigit():
+        return False
+    try:
+        import socket
+        if parts[0] != socket.gethostname():
+            return False
+        from hermes_platform.processes import pid_exists
+        return not pid_exists(int(parts[1]))
+    except Exception:
+        return False

@@ -184,45 +184,8 @@ def _report_database_journal_modes(hermes_home: Path | None = None, version_info
         check_info(f"To clear the exposure: {_wal_reset_repair_hint()}")
 
 
-def _check_s6_supervision(issues: list[str]) -> None:
-    """Under our s6 /init, report static services and the ONE host gateway slot; no-op elsewhere.
-    Counterpart to :func:`_check_gateway_service_linger` (systemd-on-host)."""
-    try:
-        from hermes_cli.service_manager import S6ServiceManager, detect_service_manager
-    except Exception:
-        return
-    if detect_service_manager() != "s6":
-        return
-    _section("s6 Supervision")
-    mgr = S6ServiceManager()
-    for static in ("main-hermes", "dashboard"):  # s6-rc symlinks under /run/service/, same s6-svstat probe
-        up = mgr.is_running(static)
-        (check_ok if up else check_info)(f"{static}: up" if up else f"{static}: down (expected if not enabled via env)")
-    _report_host_gateway_slot(mgr, issues)
 
 
-def _report_host_gateway_slot(mgr, issues: list[str]) -> None:
-    """Multiplex-only: ONE gateway process serves N profiles, so report THAT process and its
-    roster. The old ``Per-profile gateways: up/total`` line described a topology we no longer
-    run — it counted supervision slots and never said which profiles were actually served."""
-    from gateway.host_topology import host_gateway_topology
-    slots = sorted(mgr.list_profile_gateways())
-    topology = host_gateway_topology()
-    if topology is None:
-        if not slots:
-            return check_info("No gateway registered yet — run `hermes gateway install`")
-        up = [p for p in slots if mgr.is_running(f"gateway-{p}")]
-        issues.append("No host gateway owns the gateway role — start the ONE host multiplexer: "
-                      "hermes --profile default gateway start")
-        return check_warn(f"No host gateway owns the gateway role ({len(up)}/{len(slots)} supervision "
-                          f"slots up: {', '.join(slots)})", "(nothing is serving these profiles)")
-    check_ok(f"Host gateway: {topology.describe()}")
-    legacy_up = sorted(p for p in slots if p != "default" and mgr.is_running(f"gateway-{p}"))
-    if legacy_up:
-        check_warn(f"LEGACY per-profile gateway slots still supervised: {', '.join(legacy_up)}",
-                   "(multiplex-only: the host gateway already serves every profile from one process)")
-        issues.append("Fold the legacy per-profile gateways into the host gateway: "
-                      "hermes --profile default gateway migrate --multiplex")
 
 
 def check_certificates(should_fix: bool = False, issues: list | None = None) -> None:
@@ -255,33 +218,6 @@ def check_certificates(should_fix: bool = False, issues: list | None = None) -> 
         check_ok("TLS default SSL context available (OpenSSL trust paths)")
 
 
-def _check_gateway_service_linger(issues: list[str]) -> None:
-    """Warn when a systemd user gateway service will stop after logout (skipped under s6: no linger concept).
-
-    Multiplex-only: the HOST gateway runs under the default profile's unit, so a doctor run from a
-    SERVED profile must still check it — gating on the active profile's own unit silently skipped
-    the check for every profile that does not own a service of its own.
-    """
-    try:
-        from hermes_cli.gateway import (
-            _SERVICE_BASE, get_systemd_linger_status, get_systemd_unit_path, is_linux,
-            user_systemd_unit_dir)
-        from hermes_cli.service_manager import detect_service_manager
-    except Exception as e:
-        return check_warn("Gateway service linger", f"(could not import gateway helpers: {e})")
-    if not is_linux() or detect_service_manager() == "s6":
-        return
-    host_unit = user_systemd_unit_dir() / f"{_SERVICE_BASE}.service"
-    if not (get_systemd_unit_path().exists() or host_unit.exists()):
-        return
-    _section("Gateway Service")
-    linger_enabled, linger_detail = get_systemd_linger_status()
-    if linger_enabled is None:
-        return check_warn("Could not verify systemd linger", f"({linger_detail})")
-    if not check_bool(linger_enabled, ("Systemd linger enabled", "(gateway service survives logout)"),
-                      ("Systemd linger disabled", "(gateway may stop after logout)")):
-        check_info("Run: sudo loginctl enable-linger $USER")
-        issues.append("Enable linger for the gateway user service: sudo loginctl enable-linger $USER")
 
 
 _TCC_CDHASH_DETAIL = (
@@ -503,88 +439,10 @@ def _check_required_packages(should_fix: bool, f: Finding) -> None:
                 _fail_and_issue(name, "(missing)", f"Repair {name}: {_python_repair_hint()}", f.issues)
 
 
-def _check_windows_gateway_autostart(should_fix: bool, f: Finding) -> None:
-    """Windows: the gateway must start at logon from ONE mechanism — a Scheduled Task and a
-    Startup-folder entry side by side launch it twice (#80569)."""
-    return
-    from hermes_cli import gateway_windows
-    redundant = gateway_windows.redundant_autostart_entries()
-    if not redundant:
-        return
-    _section("Windows Gateway Autostart")
-    if not should_fix:
-        for path in redundant:
-            check_warn("Redundant gateway login item", f"({path})")
-        f.issues.append("Remove duplicate Windows gateway autostart entries: hermes doctor --fix")
-        return
-    done, warnings = gateway_windows.reconcile_autostart_launchers()
-    for message in done:
-        check_ok(message)
-    for message in warnings:
-        check_warn(message)
-    if done and not warnings:
-        f.fixed += 1
-    if warnings:
-        f.manual_issues.extend(warnings)
 
 
-@doctor_check()
-def _check_web_dashboard_import(should_fix: bool, f: Finding) -> None:
-    """Import the dashboard web surface in a subprocess so an import-time crash lands in the report.
-
-    When starlette is updated past the fastapi pinned beside it (the CVE starlette pin ships in
-    several extras on its own), ``hermes dashboard`` dies constructing ``FastAPI(...)`` with a
-    TypeError — not an ImportError — so the module's own lazy-install fallback never fires and the
-    process exits before a single log line. Importing in a subprocess keeps a dead web surface
-    from taking the doctor down with it; lazy installs stay off so the probe never mutates the
-    environment it is diagnosing.
-    """
-    from hermes_cli.doctor import PROJECT_ROOT
-
-    env = dict(os.environ, HERMES_DISABLE_LAZY_INSTALLS="1")
-    try:
-        proc = subprocess.run(
-            [sys.executable, "-c", "import hermes_cli.web_server"],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=120,
-            cwd=str(PROJECT_ROOT),
-            env=env,
-            check=False,
-        )
-    except subprocess.TimeoutExpired:
-        _fail_and_issue(
-            "Dashboard web surface",
-            "(import probe timed out)",
-            "Repair the dashboard dependencies: `hermes pm repair`, then restart Hermes",
-            f.issues,
-        )
-        return
-    stderr = (proc.stderr or "").strip()
-    if proc.returncode == 0:
-        return check_ok("Dashboard web surface", "(imports cleanly)")
-    if "Web UI requires fastapi and uvicorn" in stderr:
-        # The optional web extra is simply absent; anyone who never opens the dashboard
-        # should not be told their install is broken.
-        return check_warn("Dashboard web surface", "(optional web extra not installed)")
-    detail = (
-        stderr.splitlines()[-1] if stderr else f"(exited with code {proc.returncode})"
-    )
-    _fail_and_issue(
-        "Dashboard web surface",
-        detail,
-        "Repair the dashboard dependencies: `hermes pm repair`, then restart Hermes",
-        f.issues,
-    )
 
 
-@doctor_check()
-def _check_gateway_supervision(should_fix: bool, f: Finding) -> None:
-    _check_gateway_service_linger(f.issues)
-    _check_s6_supervision(f.issues)
-    _check_windows_gateway_autostart(should_fix, f)
 
 
 @doctor_check()

@@ -150,7 +150,7 @@ def begin_provider_setup(surface: str, provider: Any, *, hermes_home: Any = None
             fields = provider_setup_fields(surface=surface, provider=provider, event="started")
             if fields is None:
                 return None
-            from gateway.status import get_process_start_time
+            from hermes_platform.processes import get_process_start_time
             from hermes_constants import get_hermes_home
 
             home = get_hermes_home()
@@ -195,7 +195,7 @@ def finish_provider_setup(flow: SetupFlow | None, event: str, failure_class: str
 
 
 def _reportable(record: Any) -> bool:
-    from gateway.status import runtime_status_pid_is_live
+    from hermes_platform.processes import process_record_is_live
 
     from .shared_metrics_contract import _non_negative_number
 
@@ -204,7 +204,7 @@ def _reportable(record: Any) -> bool:
     started = _non_negative_number(record.get("started_at"))
     if started is None or time.time() - started > STALE_AFTER_S:
         return True
-    return not runtime_status_pid_is_live(record)
+    return not process_record_is_live(record)
 
 
 def report_abandoned_setups(home: Path) -> None:

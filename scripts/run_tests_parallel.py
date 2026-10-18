@@ -247,6 +247,13 @@ def _apply_pytest_ignores(
     return kept
 
 
+def _require_existing_targets(targets: list[Path]) -> None:
+    missing = [target for target in targets if not target.exists()]
+    if missing:
+        print("error: test target does not exist: " + ", ".join(map(str, missing)), file=sys.stderr)
+        raise SystemExit(2)
+
+
 def _select_files(
     args: argparse.Namespace, pytest_passthrough: list[str], repo_root: Path
 ) -> tuple[list[Path], list[Path]]:
@@ -277,6 +284,7 @@ def _select_files(
             _SKIP_PARTS = set()
 
         files = _discover_files(roots)
+    _require_existing_targets(files)
     return _apply_pytest_ignores(files, pytest_passthrough, repo_root), roots
 
 
@@ -373,9 +381,8 @@ def _discover_files(roots: list[Path]) -> list[Path]:
     skip_roots = [(repo_root / "tests" / name).resolve() for name in _SKIP_PARTS]
     seen: set[Path] = set()
     out: list[Path] = []
+    _require_existing_targets(roots)
     for root in roots:
-        if not root.exists():
-            continue
         if root.is_file():
             # Explicit file: include it as-is, skip the _SKIP_PARTS filter
             # since the user named it directly.
@@ -430,7 +437,7 @@ def _kill_tree(proc: subprocess.Popen, pgid: int | None = None) -> None:
 
     if sys.platform == "win32":
         try:
-            
+
             subprocess.run(
                 ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
                 stdout=subprocess.DEVNULL,
@@ -743,8 +750,10 @@ def _parse_pytest_summary(output: str) -> dict[str, int]:
         if not line:
             continue
         # Match "N passed", "N failed", "N skipped", "N errors", "N xfailed", "N xpassed"
-        for m in re.finditer(r"(\d+)\s+(passed|failed|skipped|errors|xfailed|xpassed)", line):
+        for m in re.finditer(r"(\d+)\s+(passed|failed|skipped|errors|xfailed|xpassed|collected)", line):
             result[m.group(2)] = int(m.group(1))
+        for match in re.finditer(r"(\d+)\s+(?:tests?|items?)\s+collected\b", line):
+            result["collected"] = int(match.group(1))
         # Also match "N error" (singular — pytest uses this sometimes).
         for m in re.finditer(r"(\d+)\s+error\b", line):
             result.setdefault("errors", result.get("errors", 0) + int(m.group(1)))
@@ -1146,6 +1155,24 @@ def _print_failure_report(
             print(f"  {_format_file(file, repo_root)}")
 
 
+def _print_run_summary(*, file_count: int, tests_done: int, approx_total_tests: int,
+                       tests_passed: int, tests_failed: int, tests_skipped: int,
+                       files_crashed: int, tests_collected: int, elapsed: float,
+                       jobs: int, collection_only: bool) -> None:
+    pct = min(100, (tests_done / approx_total_tests * 100)) if approx_total_tests else 0
+    skipped_note = f", {tests_skipped} skipped" if tests_skipped else ""
+    # A crashed interpreter has no failed-test count; say so on the one line
+    # everyone reads, or "0 failed" + exit 1 looks like a runner bug.
+    crashed_note = (
+        f", {files_crashed} file{'s' if files_crashed != 1 else ''} CRASHED"
+        if files_crashed else ""
+    )
+    outcome = (f"{tests_collected} tests collected, 0 tests executed" if collection_only else
+               f"{tests_passed} tests passed, {tests_failed} failed")
+    print(f"=== Summary: {file_count} files, {outcome}{crashed_note}{skipped_note} ({pct:.0f}% complete) in {elapsed:.1f}s ({jobs} workers) ===")
+
+
+
 def main() -> int:
     _make_stdio_glyph_safe()
     parser = argparse.ArgumentParser(
@@ -1382,6 +1409,7 @@ def main() -> int:
     # Bare flags run before any explicit ``--`` passthrough so ordering is
     # intuitive (``run_tests.sh tests/foo.py -q -- --tb=long`` → ``-q --tb=long``).
     pytest_passthrough = bare_passthrough + explicit_passthrough
+    collection_only = bool(set(pytest_passthrough) & {"--collect-only", "--collectonly", "--co"})
 
     # Parse --slice (or HERMES_TEST_SLICE) early so we can exit on bad input
     # before doing any expensive discovery.
@@ -1504,10 +1532,10 @@ def main() -> int:
             if summary.get("skipped", 0):
                 skipped_files.append((fpath, summary["skipped"]))
             files_crashed += summary.get("crashed", 0)
-            tests_collected += sum(
+            tests_collected += max(summary.get("collected", 0), sum(
                 summary.get(k, 0)
                 for k in ("passed", "failed", "skipped", "errors", "xfailed", "xpassed")
-            )
+            ))
             file_times.append((fpath, subproc_wall))
             if rc == 0:
                 pass_count += 1
@@ -1554,15 +1582,10 @@ def main() -> int:
 
     elapsed = time.monotonic() - started
     print()
-    pct = min(100, (tests_done / approx_total_tests * 100)) if approx_total_tests else 0
-    skipped_note = f", {tests_skipped} skipped" if tests_skipped else ""
-    # A crashed interpreter has no failed-test count; say so on the one line
-    # everyone reads, or "0 failed" + exit 1 looks like a runner bug.
-    crashed_note = (
-        f", {files_crashed} file{'s' if files_crashed != 1 else ''} CRASHED"
-        if files_crashed else ""
-    )
-    print(f"=== Summary: {len(files)} files, {tests_passed} tests passed, {tests_failed} failed{crashed_note}{skipped_note} ({pct:.0f}% complete) in {elapsed:.1f}s ({args.jobs} workers) ===")
+    _print_run_summary(file_count=len(files), tests_done=tests_done, approx_total_tests=approx_total_tests,
+        tests_passed=tests_passed, tests_failed=tests_failed, tests_skipped=tests_skipped,
+        files_crashed=files_crashed, tests_collected=tests_collected, elapsed=elapsed,
+        jobs=args.jobs, collection_only=collection_only)
 
     # Host-OS gating note: tests marked for another OS were skipped by the
     # conftest hook, not run. Say so explicitly — a green local run on Linux
@@ -1614,7 +1637,7 @@ def main() -> int:
     clean_times = _clean_pass_durations(
         file_times, failures, _FLAKY_RESULTS,
     )
-    if clean_times:
+    if clean_times and not collection_only:
         _save_durations(clean_times, repo_root)
         print(f"  Durations cached to {_DURATIONS_FILE} ({len(clean_times)} files)")
 

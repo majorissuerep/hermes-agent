@@ -1,7 +1,7 @@
 """Regression: a blocking gateway approval wait must honor an interrupt (#8697).
 
 When an agent calls a dangerous command, the gateway approval flow blocks the
-agent's execution thread inside ``_await_gateway_decision`` on
+agent's execution thread inside ``_await_session_decision`` on
 ``threading.Event.wait()`` until the user responds or the 5-minute approval
 timeout elapses.  Before the fix, ``/stop`` (which calls
 ``AIAgent.interrupt()`` → per-thread interrupt flag) was silently ignored by
@@ -21,8 +21,8 @@ import time
 def _clear_approval_state():
     """Reset all module-level approval state between tests."""
     from tools import approval as mod
-    mod._gateway_queues.clear()
-    mod._gateway_notify_cbs.clear()
+    mod._session_queues.clear()
+    mod._session_notify_cbs.clear()
     mod._session_approved.clear()
     mod._permanent_approved.clear()
     mod._pending.clear()
@@ -93,7 +93,7 @@ class TestApprovalInterrupt:
             notified.set()
 
         def _worker():
-            result_holder["result"] = mod._await_gateway_decision(
+            result_holder["result"] = mod._await_session_decision(
                 self.SESSION_KEY, _notify_cb, approval_data
             )
             result_holder["thread_id"] = threading.get_ident()
@@ -148,7 +148,7 @@ class TestApprovalInterrupt:
             notified.set()
 
         def _worker():
-            result_holder["result"] = mod._await_gateway_decision(
+            result_holder["result"] = mod._await_session_decision(
                 self.SESSION_KEY, _notify_cb, approval_data
             )
 

@@ -24,11 +24,11 @@ import {
   panelShortcut,
   reconnectRefusal
 } from '../domain/connectorAccounts.js'
-import type { GatewayClient } from '../gatewayClient.js'
 import type { Translations } from '../i18n/types.js'
 import { useT } from '../i18n/useT.js'
 import { openExternalUrl } from '../lib/openExternalUrl.js'
 import { rpcErrorMessage } from '../lib/rpc.js'
+import type { LocalAgentClient } from '../localAgentClient.js'
 import type { Theme } from '../theme.js'
 
 import { OverlayHint, windowItems } from './overlayControls.js'
@@ -583,7 +583,7 @@ interface KeyLike {
 }
 
 interface ConnectorsOverlayProps {
-  gw: GatewayClient
+  gw: LocalAgentClient
   maxWidth?: number
   onClose: () => void
   t: Theme

@@ -804,7 +804,7 @@ def run_import(args) -> Optional[int]:
         hermes_root.mkdir(parents=True, exist_ok=True)
 
         t0 = time.monotonic()
-        from gateway.runtime_ownership import OwnershipConflict
+        from hermes_state.runtime_ownership import OwnershipConflict
         try:
             restored, restored_external, errors, skipped_runtime, db_shrunk = _import_members(
                 zf, members, prefix, hermes_root, file_count)
@@ -903,13 +903,7 @@ def run_import(args) -> Optional[int]:
             print("Note: The hermes-agent codebase was not included in the backup.")
             print("  If this is a fresh install, run: hermes update")
 
-        if restored_profiles:
-            gw_profiles = [n for n, _ in restored_profiles]
-            print("\nTo re-enable gateway services for profiles:")
-            for pname in gw_profiles:
-                print(f"  hermes -p {pname} gateway install")
 
-        _revive_gateway_after_import(hermes_root)
 
         if errors:
             print(f"Import incomplete: {len(errors)} file(s) were not restored (see Warnings above). "
@@ -922,7 +916,7 @@ def _import_members(
     zf: zipfile.ZipFile, members: list[str], prefix: str, hermes_root: Path, file_count: int
 ) -> tuple[int, int, list[str], list[str], list[tuple[str, tuple[int, int], tuple[int, int]]]]:
     """Reserve all affected profiles before publishing even the first config file."""
-    from gateway.runtime_ownership import exclusive_maintenance
+    from hermes_state.runtime_ownership import exclusive_maintenance
     root_res = hermes_root.resolve()
     homes = {hermes_root}
     for member in members:
@@ -1074,32 +1068,6 @@ def _import_members_exclusive(
     return restored, restored_external, errors, skipped_runtime, db_shrunk
 
 
-def _revive_gateway_after_import(hermes_root: Path) -> None:
-    """Start an installed gateway service after a restore, best-effort and prompt-free.
-
-    Bot tokens and cron jobs are inert without a gateway (a platform-less gateway is supported, so
-    this is safe for any backup); failures print a manual fallback, never fail the import. Only
-    revived when the restore landed in the default home or no other install exists: a sandbox or
-    profile restore must not install a second gateway on the default service name.
-    """
-    native_default = _get_platform_default_hermes_home()
-    if hermes_root != native_default and any(
-            (native_default / marker).exists() for marker in ("config.yaml", ".env", "state.db")):
-        print("\nRestored into a non-default home; leaving the gateway service alone to avoid clashing "
-              f"with the install at {native_default}.\n"
-              "To start a gateway for this home, run:  hermes gateway run")
-        return
-    try:
-        from hermes_cli.gateway import _is_service_running
-        from hermes_cli.gateway_setup_service import ensure_gateway_service
-        if not _is_service_running():
-            print()
-            ensure_gateway_service(context="import")
-    except Exception:
-        # Import boundary: the restore already succeeded; any service failure prints the
-        # manual fallback instead of failing the import.
-        logger.debug("gateway revive after import failed", exc_info=True)
-        print("\nStart the gateway to activate cron jobs and messaging:\n  hermes gateway run")
 
 
 # --- Quick state snapshots (used by /snapshot slash command and hermes backup --quick) ---
@@ -1546,7 +1514,7 @@ def restore_quick_snapshot(
     Returns True if at least one file was restored and the listed auth.json
     was not refused or skipped.
     """
-    from gateway.runtime_ownership import OwnershipConflict, exclusive_maintenance
+    from hermes_state.runtime_ownership import OwnershipConflict, exclusive_maintenance
     home = hermes_home or get_hermes_home()
     try:
         with exclusive_maintenance([home]):
@@ -1597,7 +1565,7 @@ def _restore_snapshot_entry(rel: str, src: Path, dst: Path) -> bool:
 
 def _restore_quick_snapshot_exclusive(snapshot_id: str, home: Path) -> bool:
     """Restore state from a quick snapshot while ``home`` is reserved."""
-    from gateway.runtime_ownership import exclusive_maintenance
+    from hermes_state.runtime_ownership import exclusive_maintenance
     root = _quick_snapshot_root(home)
 
     # Security: reject snapshot_id values that contain path separators or

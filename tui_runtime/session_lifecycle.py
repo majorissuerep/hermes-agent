@@ -1,0 +1,701 @@
+"""Session lifecycle: active-session slot leases, finalize/teardown/close, turn interrupt,
+WS-orphan reap scheduling, transport-scoped close. Bodies are rebound onto server.py's
+globals at install time (method_ctx.bind_module), so they reference server.py globals bare.
+"""
+
+from __future__ import annotations
+
+import logging
+
+import contextlib
+
+from .method_ctx import bind_module
+
+
+def _start_session_work(target, *, name: str, session: dict | None = None):
+    """Start a worker with the owning turn's ContextVars intact."""
+    from agent.memory_provider import spawn_context_thread
+    thread = spawn_context_thread(target, name=name)
+    if session is not None:
+        session["_run_thread"] = thread
+    thread.start()
+    return thread
+
+
+def _notify_session_boundary(event_type: str, session_id: str | None, platform: str | None = None) -> list[str]:
+    """Fire session lifecycle hooks with CLI parity; returns plugin ``on_session_finalize`` user messages."""
+    with contextlib.suppress(Exception):
+        from hermes_cli.lifecycle import finalize_session, invoke_hook, session_end_messages
+        if event_type == "on_session_finalize":
+            return session_end_messages(finalize_session(session_id=session_id, platform=_resolve_agent_platform(platform)))
+        invoke_hook(event_type, session_id=session_id, platform=_resolve_agent_platform(platform))
+    return []
+
+
+_SESSION_OWNERSHIP_UNAVAILABLE = "Hermes could not safely reserve this session. Try again."
+
+
+def _refresh_session_authority(session: dict) -> None:
+    """Own delegated unlock authority even before an agent can be built."""
+    from hermes_security.session_authority import start_session_authority
+
+    with session.setdefault("_vault_authority_lock", threading.Lock()):
+        if session.get("_finalized"):
+            raise RuntimeError("session is closed")
+        home, key = _session_home(session).resolve(), str(session.get("session_key") or "")
+        current = session.get("_vault_authority")
+        if current is not None and (current.home, current.session_id) == (home, key):
+            return
+        replacement = start_session_authority(home, key)
+        session["_vault_authority"] = replacement
+        if current is not None:
+            current.close()
+        agent = session.get("agent")
+        prior = getattr(agent, "_vault_session_authority", None)
+        if prior is not None and (prior.home, prior.session_id) != (home, key):
+            agent._vault_session_authority = start_session_authority(home, key)
+            prior.close()
+
+
+def _register_session_authority(sid: str, session: dict) -> None:
+    """A failed mint must leave neither a registered conversation nor a grant."""
+    try:
+        _refresh_session_authority(session)
+    except BaseException:
+        with _sessions_lock:
+            if _sessions.get(sid) is session:
+                _sessions.pop(sid)
+        _teardown_session(session)
+        raise
+
+
+def _close_session_authority(session: dict) -> None:
+    with session.setdefault("_vault_authority_lock", threading.Lock()):
+        authority = session.pop("_vault_authority", None)
+        if authority is not None:
+            authority.close()
+_AUTOMATIC_SESSION_END_REASONS = frozenset({"ws_orphan_reap", "ws_disconnect", "idle_timeout", "lru_evict", "tui_shutdown"})
+
+
+def _lease_metadata(live_session_id: str) -> dict:
+    """Writer identity for a lease: ``live_session_id`` is half of ``_is_same_writer``. Bot Chat delivery is
+    admitted by the session authority (gateway/session_bot), never gated on a lease flag."""
+    return {"live_session_id": live_session_id}
+
+
+def _claim_active_session_slot(
+    session_key: str, *, live_session_id: str, surface: str = "tui", profile_home: str | Path | None = None
+) -> tuple[Any, str | None]:
+    try:
+        from hermes_cli.active_sessions import try_acquire_active_session
+        return try_acquire_active_session(
+            session_id=session_key, surface=surface, config=_load_cfg(), registry_home=profile_home,
+            metadata=_lease_metadata(live_session_id),
+            track_liveness=str(surface or "").strip().lower() == "desktop")
+    except Exception as exc:
+        logger.warning("Failed to claim active session slot: %s", exc)
+        # Fail CLOSED: an errored claim has NOT proven the session unowned; lease-less = silent double-writer hole.
+        # Fail CLOSED regardless of surface: per-session exclusivity is a correctness guarantee (see
+        # PER_SESSION_EXCLUSIVE_SUBMIT), and a claim that errors out has NOT proven the session is unowned.
+        # Proceeding without a lease here is the silent double-writer hole flagged in the #94595 review
+        # (blocker 2).
+        return (None, _SESSION_OWNERSHIP_UNAVAILABLE)
+
+
+
+
+def _ensure_active_session_slot(sid: str, session: dict) -> str | None:
+    """Claim this session's cap slot on its first real turn; None when ok. session.create/resume deliberately
+    do NOT claim: tile paints, reconnect-resumes and abandoned drafts would hold invisible slots (no DB row)
+    that starve the messaging gateway sharing the cap. Anything holding a slot must be user-visible. An
+    inert borrowed token (see _install_borrowed_lease) also lands here: present = slot held upstream."""
+    if session.get("active_session_lease") is not None:
+        return None
+    key = str(session.get("session_key") or "")
+    lease, limit_message = _claim_active_session_slot(
+        key, live_session_id=sid, surface=_session_source(session), profile_home=session.get("profile_home"))
+    if limit_message is None:
+        _attach_lease(session, lease)
+        return None
+    return limit_message
+
+
+
+
+
+
+
+def _attach_lease(session: dict, lease) -> None:
+    session["active_session_lease"] = lease
+    session.pop("_lease_taken_over", None)  # owning again: its finalize ends the row like any owner
+
+
+
+
+
+
+def _lease_retry(attempts: int, fn) -> Exception | None:
+    """Call ``fn`` up to ``attempts`` times (50ms*n backoff: registry writes contend across processes); last
+    exception when every try failed, else None."""
+    for attempt in range(attempts):
+        try:
+            fn()
+            return None
+        except Exception as exc:
+            last_error = exc
+            if attempt + 1 < attempts:
+                time.sleep(0.05 * (attempt + 1))
+    return last_error
+
+
+def _release_active_session_slot(session: dict | None) -> bool:
+    """Release the session's lease (liveness-tracked leases get 3 tries); True when released."""
+    lease = session.get("active_session_lease") if session else None
+    if lease is None:
+        return True
+    if (err := _lease_retry(3 if getattr(lease, "track_liveness", False) else 1, lambda: lease.release())) is not None:
+        logger.warning("Failed to release active session slot", exc_info=err)
+        return False
+    if not (getattr(lease, "released", True) or not getattr(lease, "enabled", True)):
+        return False
+    if session.get("active_session_lease") is lease:
+        session.pop("active_session_lease", None)
+    return True
+
+
+
+
+def _own_live_lease_ids(*, exclude=None) -> set[str]:
+    """Snapshot leases still backed by this process's live session records (plus leases deferred past a
+    close for an unsettled isolated turn — still ours until the child settles)."""
+    with _sessions_lock:
+        return {str(lease.lease_id) for session in _sessions.values()
+                if (lease := session.get("active_session_lease")) is not None and lease is not exclude
+                } | set(_deferred_active_session_leases)
+
+
+@contextlib.contextmanager
+def _other_runtime_lease_guard(session_id: str, session: dict):
+    """Release this runtime and lock sibling ownership through the DB write. Yields True (another runtime owns
+    the lifecycle -> preserve) when the guard can't be loaded/entered in 3 tries: unknown ownership never ends a row."""
+    lease = session.get("active_session_lease")
+    try:
+        from hermes_cli.active_sessions import active_session_liveness_guard, release_active_session_liveness_guard
+    except Exception as exc:
+        logger.warning("Failed to load active session ownership guard; preserving session %s: %s", session_id, exc)
+        yield True
+        return
+    stack = contextlib.ExitStack()
+    active: list = []
+    own_live_lease_ids = _own_live_lease_ids(exclude=lease)
+
+    def _enter() -> None:
+        stack.close()  # drop anything a half-failed previous attempt left behind
+        if lease is not None and getattr(lease, "enabled", False):
+            guard = release_active_session_liveness_guard(lease, session_id, own_live_lease_ids=own_live_lease_ids)
+        else:
+            guard = active_session_liveness_guard(
+                session_id, registry_home=session.get("profile_home"), own_live_lease_ids=own_live_lease_ids)
+        active[:] = [stack.enter_context(guard)]
+
+    if (last_error := _lease_retry(3, _enter)) is not None:
+        stack.close()
+        logger.warning("Failed to inspect active session leases; preserving session %s: %s", session_id, last_error)
+        yield True
+        return
+    try:
+        yield active[0]
+    finally:
+        stack.close()
+        if lease is not None and getattr(lease, "released", False) and session.get("active_session_lease") is lease:
+            session.pop("active_session_lease", None)
+
+
+def _transfer_active_session_slot(sid: str, session: dict, *, new_session_id: str) -> bool:
+    if not new_session_id:
+        return False
+    lease = session.get("active_session_lease")
+    if lease is None:
+        return True
+    try:
+        from hermes_cli.active_sessions import transfer_active_session
+        if transfer_active_session(lease, session_id=new_session_id, metadata=_lease_metadata(sid)):
+            return True
+    except Exception:
+        logger.debug("Failed to transfer active session slot", exc_info=True)
+    if getattr(lease, "track_liveness", False):
+        return False
+    # Fallback (entry pruned / pid-check transiently failed): reserve the new slot BEFORE releasing the old one so
+    # a gateway at the cap can't grab the freed slot and leave this session lease-less; on failure KEEP the old lease.
+    # See #49041.
+    new_lease, limit_message = _claim_active_session_slot(
+        new_session_id, live_session_id=sid, surface=_session_source(session), profile_home=session.get("profile_home"))
+    if new_lease is None:
+        if limit_message:
+            logger.warning("Compression session lease re-anchor failed (kept old lease): sid=%s new_session_id=%s reason=%s",
+                           sid, new_session_id, limit_message)
+        return False
+    if (old := session.pop("active_session_lease", None)) is not None and (err := _lease_retry(1, old.release)):
+        logger.debug("Failed to release stale active session slot", exc_info=err)
+    session["active_session_lease"] = new_lease
+    return True
+
+
+# Sources this backend must never end in state.db: the messaging gateway owns those sessions and the TUI is only
+# a viewer (ending one causes the Groundhog Day loop, see _finalize_session). Self-created/CLI sources are NOT gateway-owned.
+# Sources the TUI backend itself creates ("tui", plus whatever a client passes as its own ``source``) and
+# the CLI's own sessions are NOT gateway-owned. See #60609.
+_NON_GATEWAY_SOURCES = frozenset({
+    "", "tui", "cli", "webui", "desktop", "cron", "kanban", "subagent", "test",
+    "local", "acp", "webhook", "api_server", "msgraph_webhook"})
+
+
+
+
+def _lifecycle_own_sid(session: dict, sid_hint: str = "") -> str:
+    """Live UI sid for ``session``: hint, stamped ``_sid``, else registry scan."""
+    own_sid = str(sid_hint or session.get("_sid") or "")
+    if not own_sid:
+        with contextlib.suppress(Exception), _sessions_lock:
+            own_sid = next((cand_sid for cand_sid, cand in _sessions.items() if cand is session), "")
+    return own_sid
+
+
+def _lock_vault_managers(session: dict) -> None:
+    """A per-session unlock ends with the session that made it; siblings in the same profile keep theirs."""
+    try:
+        from agent.vault_backends import unlock
+
+        if sid := session.get("_sid"):
+            unlock.release_session(sid)
+    except Exception:
+        logging.getLogger(__name__).debug("vault manager lock on session end failed", exc_info=True)
+
+
+def _finalize_session(session: dict | None, end_reason: str = "tui_close") -> None:
+    """Best-effort finalize hook + memory commit; mirrors the CLI exit path so a force-quit mid-turn (double
+    Ctrl-C, terminal close, SIGHUP) loses nothing."""
+    if not session or session.get("_finalized"):
+        return
+    session["_finalized"] = True
+    _lock_vault_managers(session)
+    if (history_ready := session.get("resume_history_ready")) is not None and not history_ready.is_set():
+        session["resume_history_error"] = "session resume cancelled"
+        history_ready.set()
+    _release_active_session_slot(session)
+    if (stop_event := session.get("_notif_stop")) is not None:
+        stop_event.set()
+    agent = session.get("agent")
+    with (session.get("history_lock") or contextlib.nullcontext()):
+        history = list(session.get("history", []))
+    # Persist via ``_persist_session``'s marker-based dedup (gateway-shutdown flush contract). Do NOT pass
+    # ``conversation_history``: ``session["history"]`` and ``_session_messages`` alias the SAME list after a turn, so
+    # the flush would treat every message as durable and skip it — data loss when finalize is the sole persist path.
+    if hasattr(agent, "_persist_session") and (snapshot := getattr(agent, "_session_messages", None)):
+        with contextlib.suppress(Exception):
+            agent._persist_session(snapshot)
+    # interrupted=True so crash-recovery plugins can flush state (mirrors cli.py atexit). The end-of-session
+    # hooks and the memory commit read the provider's config/credentials at call time; every caller of this
+    # chokepoint is an unscoped reaper/Timer/atexit/pool thread, so bind the SESSION's profile here — unscoped
+    # they fail closed under multiplex (tail never committed) or, on the Desktop backend serving a named
+    # profile, commit a secondary's transcript to the launch profile's memory tenant (same class as #110622).
+    with _session_profile_runtime_scope(session):
+        if agent is not None:
+            with contextlib.suppress(Exception):
+                from hermes_cli.lifecycle import invoke_hook
+                invoke_hook(
+                    "on_session_end", completed=False, interrupted=True,
+                    session_id=getattr(agent, "session_id", None) or session.get("session_key", ""),
+                    model=getattr(agent, "model", "unknown"), platform=getattr(agent, "platform", None) or "tui")
+        if agent is not None and history and hasattr(agent, "commit_memory_session"):
+            with contextlib.suppress(Exception):
+                agent.commit_memory_session(history)
+
+    session_key = session.get("session_key")
+    session_id = getattr(agent, "session_id", None) or session_key
+    # Returned to the client by ``session.close`` (the TUI shows them after its /new reset); reaper paths have no client.
+    session["_end_msgs"] = _notify_session_boundary("on_session_finalize", session_id, _session_source(session)) or []
+    # End the state.db row so it doesn't linger as a ghost in /resume. Use session_id (agent.session_id), not
+    # session_key: after compression the key may be the stale ended parent while session_id is the live continuation.
+    # Fix for #20001.
+    _lifecycle_guard = contextlib.nullcontext(bool(session.get("_lease_taken_over")))
+    with _lifecycle_guard as _other_runtime_owns_lifecycle:
+        _tui_owns_lifecycle = not _other_runtime_owns_lifecycle
+        if _other_runtime_owns_lifecycle:
+            logger.info("Preserving session %s during %s: another backend owns an active lease", session_id, end_reason)
+        if session_id:
+            # The *session's* profile state.db (app-global remote mode), not the launch profile's.
+            with contextlib.suppress(Exception), _session_db(session) as db:
+                if db is not None:
+                    # Never end gateway-originated sessions: Groundhog Day loop (gateway self-heals to the parent,
+                    # compression splits back to the reaped child, forever).
+                    if _tui_owns_lifecycle:
+                        # Automatic Desktop cleanup (ws_orphan_reap, idle_timeout, etc.) reclaims
+                        # runtime but must not end the durable row — the conversation stays open
+                        # and resumable until the user explicitly closes or archives it.  #105588
+                        db.end_session(session_id, end_reason)
+    # ``_teardown_session`` follows with ``agent.close()``, whose ``_finalize_owned_session_row`` ends the row as
+    # ``agent_close`` through the agent's own handle — every spare decision above would be undone one call later.
+    if agent is not None and not _tui_owns_lifecycle:
+        agent._end_session_on_close = False
+    # In-flight async delegations end WITH the session (no return address left). Always interrupt by THIS live UI
+    # sid; by durable session_key only when the TUI owns the lifecycle — a viewer tab must not kill gateway work.
+    with contextlib.suppress(Exception):
+        from tools.async_delegation import interrupt_for_session
+        interrupt_for_session(
+            session_key=str(session_key or "") if _tui_owns_lifecycle else "",
+            origin_ui_session_id=_lifecycle_own_sid(session), reason=end_reason)
+    # Session-persistent code kernels (execute_code) share this owner key and die at the same boundary, like the
+    # gateway's /stop and /new (approval.clear_session); otherwise each finished conversation keeps a live
+    # interpreter until kernel_idle_timeout. Only when the TUI owns the lifecycle: a viewer tab over a
+    # gateway-owned session must not kill the gateway's kernels.
+    if _tui_owns_lifecycle and session_key:
+        with contextlib.suppress(Exception):
+            from tools.approval import clear_session
+            clear_session(str(session_key))
+    # A session's in-flight background memory/skill review ends WITH the session too (#102895): the
+    # review fork is a SEPARATE AIAgent instance tracked only on the parent's
+    # _background_review_agent/_active_children (agent/background_review.py) — never on
+    # session["running"] or session["_run_thread"] — so it is invisible both to the run_thread join
+    # in _teardown_popped_session and to session.interrupt's running-gated request_hard_interrupt in
+    # _interrupt_session_turn. Every finalize path (explicit close, idle-timeout reap, ws-orphan
+    # reap, shutdown) funnels through here, so cancelling here closes the gap for all of them at
+    # once. Without it, a review whose provider degraded into a failed-tool retry loop keeps calling
+    # the model forever after the session is gone: nothing ever sets its _interrupt_requested.
+    if agent is not None:
+        with contextlib.suppress(Exception):
+            from agent.background_review import cancel_background_review_for_live_turn
+            cancel_background_review_for_live_turn(
+                agent, message=f"session ended ({end_reason})", tool_reason="session ended")
+    # Close the slash-worker in this single ``_finalized``-guarded chokepoint (a direct caller can't leak it); idempotent.
+    with contextlib.suppress(Exception):
+        if worker := session.get("slash_worker"):
+            worker.close()
+
+
+# End reasons where the BACKEND reclaimed a session the client never asked to close (else its next prompt fails
+# against a forgotten id). Client-initiated reasons (``tui_close`` etc.) are deliberately absent.
+_RECLAIM_END_REASONS = frozenset({"idle_timeout", "lru_evict", "ws_orphan_reap"})
+
+
+def _announce_session_reclaimed(session: dict, end_reason: str) -> None:
+    """Tell connected clients a session was reclaimed out from under them. Broadcast, not session-targeted: reap
+    paths run on timer threads with no contextvar binding and no live transport, so ``_emit`` would hit stdio."""
+    if end_reason not in _RECLAIM_END_REASONS:
+        return
+    try:
+        _broadcast_global_event("session.reclaimed", {
+            "session_id": str(session.get("_sid") or ""),
+            "stored_session_id": str(session.get("session_key") or ""),
+            "reason": end_reason})
+    except Exception:
+        logger.debug("session.reclaimed broadcast failed", exc_info=True)
+
+
+def _announce_cancelled_gateway_approvals(session: dict, reason: str, *, session_id: str = "") -> None:
+    """Tell connected clients pending gateway approvals are being dropped (interrupt/reap/teardown, #106678).
+
+    Broadcast, not session-targeted: reap/interrupt run on timer threads with no live transport or contextvar,
+    so ``_emit`` would miss detached clients (same as ``session.reclaimed``). Fail-open by design: a missing
+    session key, an empty queue, and a broadcast failure never raise — the deny-resolve / teardown must proceed
+    either way (silence in the notice channel must not strand the agent thread or the session teardown).
+    """
+    session_key = str(session.get("session_key") or "")
+    if not session_key:
+        return
+    try:
+        from tools.approval import list_session_approvals
+        pending = list_session_approvals(session_key)
+    except Exception:
+        logger.debug("list_session_approvals failed", exc_info=True)
+        return
+    if not pending:
+        return
+    request_ids = [str(item.get("request_id") or "") for item in pending]
+    request_ids = [rid for rid in request_ids if rid]
+    try:
+        _broadcast_global_event("approval.cancelled", {
+            "session_id": str(session_id or session.get("_sid") or ""),
+            "stored_session_id": session_key,
+            "reason": reason,
+            "cancelled_count": len(pending),
+            "request_ids": request_ids})
+    except Exception:
+        logger.debug("approval.cancelled broadcast failed", exc_info=True)
+
+
+def _teardown_session(session: dict | None, *, end_reason: str = "tui_close") -> None:
+    """Fully tear down a session: finalize, unregister notifier, close agent (``session.close`` + WS reaper). The
+    slash-worker is closed in ``_finalize_session`` (the single chokepoint), NOT here. Idempotent via ``_finalized``."""
+    if not session:
+        return
+    _finalize_session(session, end_reason=end_reason)
+    _announce_session_reclaimed(session, end_reason)
+    with contextlib.suppress(Exception):
+        # Same user-visible hole as the interrupt's deny-resolve (#106678): a pending prompt
+        # popped by unregister must not just vanish from every surface without a notice.
+        _announce_cancelled_gateway_approvals(session, end_reason)
+    with contextlib.suppress(Exception):
+        from tools.approval import unregister_session_notify
+        # One approval callback per key: after a takeover it is the new runtime's registration.
+        if (key := session.get("session_key")) and not session.get("_lease_taken_over"):
+            unregister_session_notify(key)
+    # agent.close() → shutdown_memory_provider reads the provider's config/credentials at call time; same
+    # scope rule as _finalize_session (every caller here is an unscoped reaper/atexit/pool thread).
+    with contextlib.suppress(Exception), _session_profile_runtime_scope(session):
+        if hasattr(agent := session.get("agent"), "close"):
+            agent.close()
+    _close_session_authority(session)
+
+
+def _attach_worker(sid: str, session: dict, worker) -> None:
+    """Store worker on session iff sid still maps to it, else close it (a concurrent teardown popped the session)."""
+    with _sessions_lock:
+        if _sessions.get(sid) is session:
+            session["slash_worker"] = worker
+            return
+    worker.close()
+
+
+# Wall-clock timestamps, like session last_active; retained after close/reap.
+_closed_session_activity: dict[str, float] = {}
+
+
+def _pop_session_by_id(sid: str) -> dict | None:
+    """Atomically detach one live session from the registry — the ownership claim for teardown (a concurrent
+    close/reaper no-ops). Separate from ``_teardown_session``: slow finalization must not run under the resume lock."""
+    with _sessions_lock:
+        session = _sessions.pop(sid, None)
+        if session is not None:
+            from hermes_constants import get_hermes_home
+
+            home = str(Path(session.get("profile_home") or get_hermes_home()).resolve())
+            last_active = time.time() if session.get("running") else float(session.get("last_active") or 0)
+            _closed_session_activity[home] = max(_closed_session_activity.get(home, 0), last_active)
+            session["_closing"] = True
+            session["_sid"] = sid  # out of _sessions now, so teardown can't recover the live id by scanning
+    return session
+
+
+def _teardown_popped_session(session: dict | None, *, end_reason: str = "tui_close") -> bool:
+    """Finish a close after the caller has atomically detached the session."""
+    if session is None:
+        return False
+    run_thread = session.get("_run_thread")
+    if end_reason != "tui_shutdown" and run_thread is not None and run_thread is not threading.current_thread():
+        try:
+            if run_thread.is_alive():
+                run_thread.join(timeout=_TURN_SETTLE_BEFORE_CLOSE_SECONDS)
+            if run_thread.is_alive():
+                logger.warning(
+                    "session turn thread still alive after %.1fs teardown grace", _TURN_SETTLE_BEFORE_CLOSE_SECONDS)
+        except Exception:
+            logger.debug("failed waiting for session turn thread", exc_info=True)
+    _teardown_session(session, end_reason=end_reason)
+    return True
+
+
+# lease_id -> REAL lease of a closed session whose isolated child turn has not settled yet. Still live
+# authority for the orphan sweep (``_own_live_lease_ids``); released by ``_release_deferred_active_session_lease``.
+_deferred_active_session_leases: dict[str, Any] = {}
+
+
+
+
+# A deferred lease is released by the compute-host turn's completion callback
+# (_on_compute_host_turn_done → _release_deferred_active_session_lease). If that callback
+# is lost — supervisor restart/reload, a child killed without failing its pending turns,
+# a dropped completion — the lease sits in the registry FOREVER: _own_live_lease_ids
+# vouches for it, so the orphan sweep never reclaims it, and the concurrency cap treats
+# the dead session as active (#62823 zombie slot). A deferred lease past this generous
+# ceiling (the longest legitimate isolated turn is the compression ceiling, minutes) is
+# force-released by the reaper tick instead of leaking the slot until process exit.
+_DEFERRED_ACTIVE_SESSION_LEASE_TTL_SECONDS = 1800.0
+_deferred_active_session_lease_ages: dict[str, float] = {}
+
+
+def _reap_stale_deferred_leases(now: float | None = None) -> int:
+    """Force-release deferred leases whose settlement callback never arrived. Returns the count."""
+    now = time.time() if now is None else now
+    stale = [
+        lease_id for lease_id, deferred_at in list(_deferred_active_session_lease_ages.items())
+        if now - deferred_at > _DEFERRED_ACTIVE_SESSION_LEASE_TTL_SECONDS
+    ]
+    reaped = 0
+    for lease_id in stale:
+        _deferred_active_session_lease_ages.pop(lease_id, None)
+        lease = _deferred_active_session_leases.pop(lease_id, None)
+        if lease is None:
+            continue
+        if (err := _lease_retry(3, lease.release)) is not None:
+            logger.warning("Failed to force-release stale deferred active session lease %s", lease_id,
+                           exc_info=err)
+            continue
+        logger.warning("Force-released deferred active session lease %s held past %.0fs without a "
+                       "compute-host settlement (zombie concurrency slot, #62823)",
+                       lease_id, _DEFERRED_ACTIVE_SESSION_LEASE_TTL_SECONDS)
+        reaped += 1
+    return reaped
+
+
+def _release_deferred_active_session_lease(session: dict) -> None:
+    """Settlement half of ``_settle_isolated_turn_before_close``; a no-op for sessions that never deferred."""
+    lease = session.pop("_deferred_active_session_lease", None)
+    if lease is None:
+        return
+    _deferred_active_session_leases.pop(str(lease.lease_id), None)
+    _deferred_active_session_lease_ages.pop(str(lease.lease_id), None)
+    if (err := _lease_retry(3, lease.release)) is not None:
+        logger.warning("Failed to release deferred active session slot", exc_info=err)
+
+
+def _close_session_by_id(
+    sid: str, *, end_reason: str = "tui_close", predicate: Callable[[dict], bool] | None = None) -> bool:
+    """Idempotent teardown funnel for callers with no resume race (resume-sensitive callers pop under
+    ``_session_resume_lock`` and call ``_teardown_popped_session`` after releasing it). Automatic reapers pass
+    ``predicate`` to revalidate under ``_sessions_lock`` right before the claim, so a stale scan can't close a
+    session that reattached."""
+    with _sessions_lock:  # RLock: predicate + claim in one critical section
+        current = _sessions.get(sid)
+        if predicate is not None and (current is None or not predicate(current)):
+            return False
+        session = _pop_session_by_id(sid)
+    return _teardown_popped_session(session, end_reason=end_reason)
+
+
+
+
+
+
+def _interrupt_session_turn(
+    sid: str, session: dict, *, request_id: str | None = None, orphan: bool = False,
+) -> bool:
+    """Apply the shared ``session.interrupt`` contract to one claimed session; returns whether the compute-host control
+    channel was used. The WS orphan reaper reuses this so a dead client gets the same partial-history/queue semantics.
+
+    ``orphan=True`` (reaper path) labels dropped approvals ``ws_orphan_reap``; the label comes from the
+    caller, never from request_id prefix sniffing — a future orphan caller may use another id (#106678).
+    """
+    # A manual compaction holds `running` with no run thread and its own finally releases it: Stop must not
+    # abort it nor clear `running` under it, or the next submit is admitted idle and loses its reply (#133504).
+    compressing = bool(session.get("_manual_compress_active"))
+    should_interrupt = bool(session.get("running")) and not compressing
+    run_thread_alive = False
+    run_thread_alive = (rt := session.get("_run_thread")) is not None and rt.is_alive()
+    with session["history_lock"]:
+        session["_turn_cancel_requested"] = True
+        session["queued_prompt"] = None
+        session.pop("queued_prompts", None)
+        session["_queued_prompt_generation"] = int(session.get("_queued_prompt_generation", 0)) + 1
+    if should_interrupt:
+        # Sibling of gateway/run_agent_cache.py::_interrupt_and_clear_session: a user-initiated stop of a
+        # live TUI/desktop turn is the same "loop is gone" event for plugins holding per-turn external
+        # resources. Observer-only; dispatch failures never break the interrupt.
+        # Every caller (session.interrupt RPC, orphan/idle reapers, lease takeover) is off-turn, so bind the
+        # SESSION's profile as _finalize_session does or an observer's get_hermes_home() names the launch
+        # profile (#125063). hydrate_secrets=False: observer-only, /stop must stay fast.
+        try:
+            from hermes_cli.plugins import invoke_hook as _invoke_hook
+            with _session_profile_runtime_scope(session, hydrate_secrets=False):
+                _invoke_hook(
+                    "agent_loop_stopped", session_key=session.get("session_key", ""), platform="tui",
+                    reason="user_stop", invalidation_reason="session_interrupt",
+                )
+        except Exception:
+            logger.debug("agent_loop_stopped hook dispatch failed", exc_info=True)
+    if should_interrupt:
+        from agent.interrupt_compat import request_hard_interrupt
+        request_hard_interrupt(session.get("agent"))
+    # Background delegations are detached from the turn's interrupt fan-out; a stop ends them too
+    # (own UI sid + spawner id only — a viewer tab must not kill gateway work). Each returns as an
+    # interrupted completion with its partial output.
+    with contextlib.suppress(Exception):
+        from tools.async_delegation import interrupt_for_session
+        interrupt_for_session(
+            origin_ui_session_id=_lifecycle_own_sid(session, sid), reason="user_stop",
+            parent_session_id=str(getattr(session.get("agent"), "session_id", "") or ""))
+    if not run_thread_alive and not compressing:
+        with session["history_lock"]:
+            if session.get("running"):
+                session["running"] = False
+                _clear_inflight_turn(session)
+    # Sibling of the #102895 finalize-path fix above: an explicit /stop (or the WS-orphan reaper's
+    # interrupt-at-grace) must also reach a background memory/skill review, not just the foreground
+    # turn. The review fork is invisible to `should_interrupt`/`run_thread_alive` above (both gated
+    # on the FOREGROUND turn's session["running"]/_run_thread) — a user hitting Stop while only the
+    # post-turn review is still running (the common case: the main turn already finished) would see
+    # "stopped" while the review keeps calling the model. Fires unconditionally (both compute-host
+    # and in-process turns) since the review is always local to this process.
+    if (agent_for_review := session.get("agent")) is not None:
+        with contextlib.suppress(Exception):
+            from agent.background_review import cancel_background_review_for_live_turn
+            cancel_background_review_for_live_turn(
+                agent_for_review, message="session interrupted", tool_reason="session interrupted")
+    _clear_pending(sid)
+    with contextlib.suppress(Exception):
+        # Deny-resolve every pending approval so no agent thread blocks on the queue. The
+        # deny is silent without the broadcast: a reconnecting client sees a bare 4001 on
+        # approval.pending and the prompt looks lost rather than cancelled (#106678).
+        # Announce BEFORE the queue is drained, or there is nothing left to name.
+        reason = "ws_orphan_reap" if orphan else "interrupt"
+        _announce_cancelled_gateway_approvals(session, reason, session_id=sid)
+        from tools.approval import resolve_session_approval
+        resolve_session_approval(session["session_key"], "deny", resolve_all=True)
+    return False
+
+
+def _session_has_active_delegations(sid: str, session: dict | None = None) -> bool:
+    """True when UI session ``sid`` still owns live background work — by live UI sid AND, when the TUI owns the durable
+    lifecycle (never for gateway-viewer tabs), by session_key so a delegation from an earlier tab keeps it alive.
+
+    See #60609.
+    """
+    if session is None:
+        with _sessions_lock:
+            session = _sessions.get(sid)
+    if not session:
+        return False
+    own_sid = _lifecycle_own_sid(session, sid)
+    owned_session_key = str(session.get("session_key") or "")
+    if not own_sid and not owned_session_key:
+        return False
+    try:
+        from tools.async_delegation import has_live_for_session
+        return has_live_for_session(session_key=owned_session_key, origin_ui_session_id=own_sid)
+    except Exception:
+        logger.debug("Failed to query active delegations for UI session %s", sid, exc_info=True)
+        return True  # a transient registry/import failure must not become destructive cleanup
+
+
+# One pending WS-orphan reap Timer per live sid; guarded by _sessions_lock. Cancelled by _cancel_ws_orphan_reap from
+# every resume/reuse/transport-rebind path — else a reap on a reattached session triggers a reap->broadcast->resume storm.
+
+
+
+
+
+def _reattach_refusal(rid, sid: str, session: dict) -> dict | None:
+    """Under ``_session_resume_lock``: why a reattaching RPC (resume/activate/prompt.submit) must NOT rebind
+    ``session`` — it is stale, or a client-gone interrupt is still settling and the reap Timer must keep
+    polling. None when the reattach may proceed."""
+    if _sessions.get(sid) is not session:
+        return _err(rid, 4007, "session no longer live; retry resume")
+    if session.get("_client_gone_interrupt_requested"):
+        return _err(rid, 4009, "session disconnect interrupt settling")
+    return None
+
+
+def _rebind_live_transport(sid: str, session: dict, transport: Transport) -> None:
+    """Bind the sole terminal peer to a retained local session."""
+    _attach_session_transport(session, transport)
+
+
+
+
+
+
+
+
+def register(server) -> None:
+    """Publish this module's helpers onto ``server``, rebound to its globals."""
+    bind_module(globals(), server, skip=("_",))

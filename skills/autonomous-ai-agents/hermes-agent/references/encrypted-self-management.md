@@ -25,8 +25,8 @@ hermes config check
 ```
 
 Settings go through encrypted, atomic config writers; secrets belong in the encrypted
-credential store, not `config.yaml`, argv, or chat. For MCP secret input use the
-existing `set-api-key --value-stdin` host operation. Use native memory/skill tools for
+credential store, not `config.yaml`, argv, or chat. Use the local command's
+supported stdin or interactive secret-input flow. Use native memory/skill tools for
 their stores. Source files in the checkout are ordinary code and can be edited using
 `read_file` and `patch`; runtime config, auth, databases and transcripts are not.
 

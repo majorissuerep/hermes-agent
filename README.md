@@ -1,7 +1,7 @@
 # Hermes Agent
 
-A personal AI agent for **Linux and macOS**: terminal and desktop interfaces,
-remote messaging, tools, memory, skills, scheduled work, and delegated agents.
+A local AI agent for **Linux and macOS**: an Ink TUI, terminal sub-agents,
+tools, encrypted history, memory, skills, and explicit local scheduled work.
 The priority is a small, dependable product: reliable conversations, encrypted
 state, and safe install/update/recovery. New integrations are not a goal in
 themselves; see the [product scope](website/docs/developer-guide/reliability.md#product-scope).
@@ -40,8 +40,8 @@ qualification, failure recovery, and the distinction between protocol and live t
 
 ```sh
 hermes                    # Start a conversation
-hermes setup              # Configure tools, providers, and messaging
-hermes gateway setup      # Configure a messaging gateway
+hermes setup              # Configure tools and providers
+hermes chat -q "A task"    # Run a direct local agent
 hermes update             # Update the owning installation
 hermes doctor             # Diagnose installation and configuration
 hermes secure-vault status
@@ -55,7 +55,7 @@ not plaintext edits of encrypted files. See [encrypted self-management](skills/a
 ## Guides
 
 - [Quickstart](website/docs/getting-started/quickstart.md) · [Configuration](website/docs/user-guide/configuration.md) · [CLI](website/docs/user-guide/cli.md)
-- [Messaging](website/docs/user-guide/messaging/index.md) · [Desktop](website/docs/user-guide/desktop.md)
+- [Terminal UI](website/docs/user-guide/tui.md) · [Encrypted state](website/docs/user-guide/encrypted-state.md)
 - [Tools](website/docs/user-guide/features/tools.md) · [Skills](website/docs/user-guide/features/skills.md) · [Memory](website/docs/user-guide/features/memory.md) · [MCP](website/docs/user-guide/features/mcp.md)
 - [Install/update acceptance](scripts/e2e/README.md) · [Development](CONTRIBUTING.md) · [Security](SECURITY.md)
 

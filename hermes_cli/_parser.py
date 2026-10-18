@@ -91,8 +91,7 @@ _EPILOGUE = """
 Examples:
     hermes                        Start interactive chat
     hermes chat -q "Hello"        Single query mode
-    hermes --tui                  Launch the modern TUI (or set display.interface: tui)
-    hermes --cli                  Force the classic REPL (overrides display.interface: tui)
+    hermes --tui                  Launch the terminal UI (the default)
     hermes -c                     Resume the most recent session
     hermes -c "my project"        Resume a session by name (latest in lineage)
     hermes --resume <session_id>  Resume a specific session by ID
@@ -206,11 +205,9 @@ def _add_top_level_flags(parser: argparse.ArgumentParser) -> None:
     inherited(parser, "--safe-mode", action="store_true", default=False,
               help="Troubleshooting mode: disable ALL customizations — user config, AGENTS.md/memory injection, plugins, and MCP servers (implies --ignore-user-config and --ignore-rules)")
     inherited(parser, "--tui", action="store_true", default=False,
-              help="Launch the modern TUI instead of the classic REPL")
+              help="Launch the terminal UI (the default)")
     inherited(parser, "--native", "--tui-native", dest="tui_native", action="store_true", default=False,
               help="With --tui: use native terminal scrollback and disable mouse tracking")
-    inherited(parser, "--cli", action="store_true", default=False,
-              help="Force the classic prompt_toolkit REPL (overrides display.interface=tui)")
     inherited(parser, "--dev", dest="tui_dev", action="store_true", default=False,
               help="With --tui: run TypeScript sources via tsx (skip dist build)")
 
@@ -317,11 +314,9 @@ def _build_chat_parser(subparsers) -> argparse.ArgumentParser:
     add("--source", default=None,
         help="Session source tag for filtering (default: cli). Use 'tool' for third-party integrations that should not appear in user session lists.")
     inherited(chat_parser, "--tui", action="store_true", default=SUPPRESS,
-              help="Launch the modern TUI instead of the classic REPL")
+              help="Launch the terminal UI (the default)")
     inherited(chat_parser, "--native", "--tui-native", dest="tui_native", action="store_true", default=SUPPRESS,
               help="Use native terminal scrollback and disable mouse tracking")
-    inherited(chat_parser, "--cli", action="store_true", default=SUPPRESS,
-              help="Force the classic prompt_toolkit REPL (overrides display.interface=tui)")
     inherited(chat_parser, "--dev", dest="tui_dev", action="store_true", default=SUPPRESS,
               help="With --tui: run TypeScript sources via tsx (skip dist build)")
     return chat_parser

@@ -12,6 +12,7 @@ import time
 import pytest
 
 from hermes_state import SessionDB
+from tests.hermes_state.legacy_rows import seed_topic_mode, seed_topic_binding, delivery_connection
 
 
 @pytest.fixture
@@ -96,13 +97,13 @@ class TestRekeyProfileState:
             "session_id": "sess_old",
             "origin": {"platform": "feishu", "chat_id": "chatA", "profile": "oldname"},
         }
-        db.save_gateway_routing_entry(
+        _seed_legacy_route(db,
             "agent:oldname:feishu:dm:chatA", json.dumps(entry), scope="/root/sessions")
 
         counts = db.rekey_profile_state("oldname", "newname")
         assert counts["gateway_routing"] == 1
 
-        rows = db.load_gateway_routing_entries(scope="/root/sessions")
+        rows = _legacy_routes(db, scope="/root/sessions")
         assert "agent:oldname:feishu:dm:chatA" not in rows
         assert "agent:newname:feishu:dm:chatA" in rows
         payload = json.loads(rows["agent:newname:feishu:dm:chatA"])
@@ -115,9 +116,8 @@ class TestRekeyProfileState:
             profile="oldname", host="h")
         # delivery_obligations is created lazily by the delivery ledger against the same state.db.
         monkeypatch.setenv("HERMES_HOME", str(db.db_path.parent))
-        from gateway import delivery_ledger
-        monkeypatch.setattr(delivery_ledger, "_db_path", lambda: db.db_path)
-        with delivery_ledger._connect() as conn:
+
+        with delivery_connection(db) as conn:
             now = time.time()
             conn.execute(
                 "INSERT INTO delivery_obligations (obligation_id, session_key, platform, chat_id, "
@@ -163,9 +163,9 @@ class TestRekeyProfileState:
         db._write_sql(
             "UPDATE sessions SET origin_json = ? WHERE id = ?",
             (json.dumps({"platform": "telegram", "profile": "oldname"}), "sess_old"))
-        db.enable_telegram_topic_mode(
+        seed_topic_mode(db,
             chat_id="chatA", user_id="userA", profile_name="oldname")
-        db.bind_telegram_topic(
+        seed_topic_binding(db,
             chat_id="chatA", thread_id="threadA", user_id="userA",
             session_key="agent:oldname:telegram:dm:chatA", session_id="sess_old",
             profile_name="oldname")
@@ -225,3 +225,13 @@ class TestRekeyProfileState:
             "SELECT obligation_id, session_key FROM delivery_obligations")}
         assert keys == {"ob_gone": "agent:newname:feishu:dm:chatA",
                         "ob_keep": "agent:keepme:feishu:dm:chatB"}
+
+
+def _seed_legacy_route(db, session_key, entry_json, *, scope=''):
+    db._write_sql('INSERT INTO gateway_routing(scope,session_key,entry_json,updated_at) VALUES(?,?,?,?)',
+                  (scope,session_key,entry_json,0))
+
+
+def _legacy_routes(db, *, scope=''):
+    return {row['session_key']: row['entry_json'] for row in
+            db._read_all('SELECT session_key,entry_json FROM gateway_routing WHERE scope=?', (scope,))}

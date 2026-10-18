@@ -102,23 +102,6 @@ def test_compression_child_of_null_parent_is_stamped(hermes_root):
     assert _profile_of(db_path, "s_child") == "default"
 
 
-def test_peer_self_heal_insert_is_stamped(hermes_root):
-    db_path = hermes_root / "state.db"
-    db = SessionDB(db_path=db_path)
-    try:
-        # No prior row: the #82616 self-heal INSERT creates it.
-        db.record_gateway_session_peer(
-            "s_selfheal",
-            source="telegram",
-            user_id="u1",
-            session_key="k1",
-            chat_id="c1",
-        )
-    finally:
-        db.close()
-    assert _profile_of(db_path, "s_selfheal") == "default"
-
-
 def test_legacy_backfill_still_targets_only_null(hermes_root):
     """The one-shot #94724 backfill contract is unchanged: explicit owners are
     never overwritten, and new rows no longer regenerate its input."""

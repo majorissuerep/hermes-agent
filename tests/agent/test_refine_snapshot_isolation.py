@@ -90,28 +90,3 @@ def test_cli_refine_reaches_spawn_as_explicit(monkeypatch):
 
     agent._spawn_background_review_now.assert_called_once()
     assert agent._spawn_background_review_now.call_args.kwargs["explicit"] is True
-
-
-@pytest.mark.asyncio
-async def test_gateway_refine_snapshot_does_not_alias_live_history():
-    from gateway.run import GatewayRunner
-
-    key = "agent:main:test:dm:1"
-    agent = _agent_with_real_chokepoint()
-    agent._session_messages = _nested_history()
-
-    runner = object.__new__(GatewayRunner)
-    runner._running_agents = {}
-    runner._agent_cache = {key: agent}
-    runner._agent_cache_lock = threading.Lock()
-    runner._session_key_for_source = lambda source: key
-
-    event = MagicMock()
-    event.source = object()
-    event.get_command_args.return_value = ""
-
-    await runner._handle_refine_command(event)
-
-    agent._spawn_background_review_now.assert_called_once()
-    snapshot = agent._spawn_background_review_now.call_args.kwargs["messages_snapshot"]
-    _assert_isolated(agent._session_messages, snapshot)

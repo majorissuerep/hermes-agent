@@ -272,11 +272,6 @@ class CLIStatusBarMixin:
                 snapshot["active_background_tasks"] = len(bg_tasks)
         except Exception:
             pass
-        try:
-            from hermes_cli.gateway_tools import background_counts
-            snapshot.update(background_counts())
-        except Exception:
-            pass
 
         # Standing /goal (Ralph loop): GoalManager is cached on self — no DB hit per repaint.
         # Only an *active* goal earns a segment (paused/done stay out, like the desktop).

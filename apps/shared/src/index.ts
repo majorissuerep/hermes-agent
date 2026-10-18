@@ -1,5 +1,4 @@
 export { hasAnsi, sanitizeAnsiForRender, stripAnsi } from './ansi'
-export { backendScopeKey, backendScopePrefix, LOCAL_CONNECTION_ID, registryBackendScopeKey } from './backend-scope'
 export {
   BILLING_REFUSAL_POLICY,
   type BillingRecovery,
@@ -72,8 +71,6 @@ export {
   type TranslationOverride
 } from './i18n'
 export {
-  DEFAULT_HEARTBEAT_DEADLINE_MS,
-  DEFAULT_HEARTBEAT_INTERVAL_MS,
   type GatewayRequestId,
   JSON_RPC_INTERNAL_ERROR,
   JSON_RPC_METHOD_NOT_FOUND,
@@ -89,15 +86,6 @@ export {
   type ServerRequestParams,
   wireFrameText
 } from './json-rpc-channel'
-export {
-  APPROVAL_RESPOND_TIMEOUT_MS,
-  type ConnectionState,
-  type GatewayClientOptions,
-  GatewayEventHub,
-  isGatewayWebSocketUrl,
-  JsonRpcGatewayClient,
-  type WebSocketLike
-} from './json-rpc-gateway'
 export { modelSearchText } from './model-search-text'
 export {
   DEFAULT_REASONING_EFFORT,
@@ -142,48 +130,4 @@ export {
   type ThemePresetName,
   type ThemePresetPalette
 } from './theme-presets'
-export {
-  backgroundMaterialFor,
-  clampIntensity,
-  DEFAULT_GLASS_MATERIAL,
-  DEFAULT_GLASS_SCOPE,
-  GLASS_MATERIALS,
-  GLASS_SCOPES,
-  glassActive,
-  type GlassMaterial,
-  glassMaterialForPicker,
-  glassMaterialsFor,
-  type GlassScope,
-  glassSupportedOn,
-  glassSurfaceKeep,
-  normalizeMaterial,
-  normalizeMode,
-  normalizeScope,
-  normalizeState,
-  TRANSLUCENCY_CURVE,
-  TRANSLUCENCY_MAX,
-  TRANSLUCENCY_MIN,
-  TRANSLUCENCY_OPACITY_FLOOR,
-  TRANSLUCENCY_STEP,
-  type TranslucencyMode,
-  type TranslucencyState,
-  translucencySupportedOn,
-  vibrancyFor,
-  windowOpacityFor,
-  WINDOWS_BACKGROUND_MATERIALS,
-  WINDOWS_GLASS_MIN_BUILD,
-  type WindowsBackgroundMaterial
-} from './translucency'
 export { type UpdateDebt, updateDebt, type UpdateDebtReceipt, type UpdateDebtStep } from './update-debt'
-export {
-  buildHermesWebSocketUrl,
-  type GatewayAuthMode,
-  GatewayReauthRequiredError,
-  type GatewayWsConnection,
-  type GatewayWsUrlResult,
-  type HermesWebSocketUrlOptions,
-  isGatewayReauthRequired,
-  resolveGatewayWsUrl,
-  type ResolveGatewayWsUrlDeps,
-  type WebSocketAuthParam
-} from './websocket-url'

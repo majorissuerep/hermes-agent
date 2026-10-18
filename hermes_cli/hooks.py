@@ -353,3 +353,18 @@ _ACTIONS = {
     "revoke": _cmd_revoke, "remove": _cmd_revoke, "rm": _cmd_revoke,
     "doctor": _cmd_doctor,
 }
+
+
+def register_profile_config_hooks(profile_home: Path) -> None:
+    """Register the explicit local profile's declarative shell and outbound hooks."""
+    from agent import shell_hooks, outbound_webhooks
+    from hermes_cli.config import load_config
+    from hermes_constants import set_hermes_home_override, reset_hermes_home_override
+
+    home_token = set_hermes_home_override(str(Path(profile_home).resolve()))
+    try:
+        config = load_config()
+        shell_hooks.register_from_config(config, accept_hooks=False)
+        outbound_webhooks.register_from_config(config)
+    finally:
+        reset_hermes_home_override(home_token)

@@ -1,9 +1,9 @@
 import { Box, Text, useInput, useStdout } from '@hermes/ink'
 import { useEffect, useMemo, useState } from 'react'
 
-import type { GatewayClient } from '../gatewayClient.js'
 import { useT } from '../i18n/useT.js'
 import { rpcErrorMessage } from '../lib/rpc.js'
+import type { LocalAgentClient } from '../localAgentClient.js'
 import type { Theme } from '../theme.js'
 
 import { OverlayHint, windowItems } from './overlayControls.js'
@@ -187,7 +187,7 @@ export function PetPicker({ gw, maxWidth, onClose, t }: PetPickerProps) {
 }
 
 interface PetPickerProps {
-  gw: GatewayClient
+  gw: LocalAgentClient
   maxWidth?: number
   onClose: () => void
   t: Theme

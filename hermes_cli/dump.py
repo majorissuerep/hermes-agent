@@ -99,21 +99,6 @@ def _redact(value: str) -> str:
     return mask_secret(value)
 
 
-def _gateway_status() -> str:
-    """Return a short gateway status string."""
-    try:
-        from hermes_cli.gateway import get_gateway_runtime_snapshot
-        snapshot = get_gateway_runtime_snapshot()
-        if snapshot.running:
-            mode = "manual" if snapshot.has_process_service_mismatch else snapshot.manager
-            # A supervised gateway may have no scannable PID (s6 `python -c` launcher, #125390).
-            pid = f", pid {snapshot.gateway_pids[0]}" if snapshot.gateway_pids else ""
-            return f"running ({mode}{pid})"
-        return f"stopped ({snapshot.manager})"
-    except Exception:
-        return "unknown" if sys.platform.startswith(("linux", "darwin")) else "N/A"
-
-
 def _count_skills(hermes_home: Path) -> int:
     """Count installed skills."""
     skills_dir = hermes_home / "skills"
@@ -333,7 +318,6 @@ def run_dump(args):
         f"  toolsets:           {', '.join(toolsets) if toolsets else '(default)'}",
         f"  mcp_servers:        {len(config.get('mcp', {}).get('servers', {}))}",
         f"  memory_provider:    {config.get('memory', {}).get('provider', '') or 'built-in'}",
-        f"  gateway:            {_gateway_status()}",
         f"  platforms:          {', '.join(platforms) if platforms else 'none'}",
         f"  cron_jobs:          {_cron_summary(hermes_home)}",
         f"  skills:             {_count_skills(hermes_home)}",

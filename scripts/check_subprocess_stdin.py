@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """Check that subprocess calls in TUI-context code specify stdin=.
 
-When Hermes runs in TUI mode, the gateway child process communicates with
+When Hermes runs in TUI mode, the private runtime child process communicates with
 the Node.js parent over a JSON-RPC protocol on stdin. Subprocess calls that
-inherit this fd can cause the gateway to exit with stdin EOF during tool
+inherit this fd can cause the runtime to exit with stdin EOF during tool
 execution (issue #14036, PR #39257).
 
 This script checks that all subprocess.run() and subprocess.Popen() calls
-in TUI-context files (agent/, tools/, plugins/, tui_gateway/,
+in TUI-context files (agent/, tools/, plugins/, tui_runtime/,
 optional-skills/) explicitly set stdin= to prevent fd inheritance.
 
 Exit codes:
@@ -29,12 +29,12 @@ import os
 import sys
 from pathlib import Path
 
-# Directories that run inside the TUI gateway child process.
+# Directories that run inside the TUI runtime child process.
 TUI_CONTEXT_DIRS = [
     "agent/",
     "tools/",
     "plugins/",
-    "tui_gateway/",
+    "tui_runtime/",
     # Optional-skill scripts can run inside the backend process (a command
     # builder calling a skill helper on a backend thread); their children would
     # inherit the JSON-RPC stdin too.

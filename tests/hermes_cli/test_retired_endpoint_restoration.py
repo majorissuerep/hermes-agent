@@ -8,7 +8,7 @@ def test_sealed_session_routes_drop_retired_endpoints_but_keep_custom_proxies_a_
     from hermes_cli.config import save_config
     from hermes_security import vault
     from hermes_state import SessionDB
-    from tui_gateway.server import _stored_session_runtime_overrides
+    from tui_runtime.server import _stored_session_runtime_overrides
 
     homes = [tmp_path / name for name in ("A", "B")]
     stale_urls = ("https://inference-api.nousresearch.com/v1", "https://openrouter.ai/api/v1")

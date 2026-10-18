@@ -423,7 +423,7 @@ def test_replacement_stops_only_an_orphaned_router(tmp_path, monkeypatch, owner)
     """Stale-preset replacement and the rescan bounce stop the recorded router only when its owner
     is gone; a live owner's router keeps running (its watchdog would respawn it anyway). POSIX: a
     Windows router dies with its owner's job object, so no orphan exists to stop."""
-    from gateway.status import get_process_start_time
+    from hermes_platform.processes import get_process_start_time
     from hermes_cli.local_runtime import bootstrap, endpoint, supervisor
 
     monkeypatch.setattr(supervisor, "runtimes_root", lambda: tmp_path)
@@ -473,9 +473,7 @@ def test_a_stepped_clock_never_buries_a_live_owner_of_an_older_record(monkeypatc
 
 
 def test_the_process_that_boots_the_server_stops_it_on_a_clean_exit(tmp_path):
-    """Every surface that boots the managed server (CLI, gateway, desktop backend) frees it when it
-    exits; before, only the desktop backend's shutdown handler did and every other owner orphaned
-    the router and its VRAM."""
+    """The local terminal process that boots the model runtime frees it on exit."""
     marker = tmp_path / "stopped"
     code = (
         "import sys\n"

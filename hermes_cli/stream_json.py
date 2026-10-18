@@ -37,7 +37,8 @@ def _now_ms() -> int:
 class StreamJsonEmitter:
     """Agent-callback sink that writes JSONL events to stdout and flushes each line."""
 
-    def __init__(self, model: str = "", session_id: str = ""):
+    def __init__(self, model: str = "", session_id: str = "", output=None):
+        self._output = output if output is not None else sys.stdout
         self._session_id = session_id
         self._start = time.time()
         self._tool_started: dict[str, float] = {}
@@ -102,7 +103,7 @@ class StreamJsonEmitter:
 
     def _emit(self, obj: dict) -> None:
         try:
-            sys.stdout.write(json.dumps({**obj, "timestamp": _now_ms()}, ensure_ascii=False) + "\n")
-            sys.stdout.flush()
+            self._output.write(json.dumps({**obj, "timestamp": _now_ms()}, ensure_ascii=False) + "\n")
+            self._output.flush()
         except (BrokenPipeError, OSError):
             pass  # consumer closed the pipe — nothing left to report to

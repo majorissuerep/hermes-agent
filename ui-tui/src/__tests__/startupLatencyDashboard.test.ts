@@ -34,7 +34,7 @@ describe('startup latency in a dashboard-embedded TUI', () => {
       voice: { setProcessing: vi.fn(), setRecording: vi.fn(), setVoiceEnabled: vi.fn() }
     } as any
 
-    createGatewayEventHandler(ctx)({ payload: {}, type: 'gateway.ready' } as any)
+    createGatewayEventHandler(ctx)({ payload: {}, type: 'runtime.ready' } as any)
 
     expect(request.mock.calls.filter(([method]) => method === 'shared_metrics.startup_latency')).toEqual([])
   })

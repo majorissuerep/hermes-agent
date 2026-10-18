@@ -1,3 +1,4 @@
+from hermes_cli.credential_lifecycle import save_provider_env_credential, remove_provider_env_credential
 """E2E tests for the unified provider-credential lifecycle (#51071 #59761 #62269).
 
 A provider API key can live in .env, auth.json's credential_pool, and
@@ -13,12 +14,8 @@ lands in the repo.
 import json
 
 import pytest
-from fastapi.testclient import TestClient
 
-from hermes_cli.web_server import _SESSION_TOKEN, app
 
-client = TestClient(app)
-HEADERS = {"X-Hermes-Session-Token": _SESSION_TOKEN}
 
 # Runtime-constructed fake credentials (never literal key-shaped strings).
 FAKE_ZAI_KEY = "zk-" + "a" * 24
@@ -95,10 +92,8 @@ def test_delete_clears_provider_models_cache(hermes_home):
         json.dumps({"zai": {"models": ["glm-5"], "ts": 0}}), encoding="utf-8"
     )
 
-    resp = client.request(
-        "DELETE", "/api/env", json={"key": "ZAI_API_KEY"}, headers=HEADERS
-    )
-    assert resp.status_code == 200
+    remove_provider_env_credential('ZAI_API_KEY')
+
     if cache_path.exists():
         cache = json.loads(cache_path.read_text(encoding="utf-8"))
         assert "zai" not in cache
@@ -126,11 +121,9 @@ def test_update_rotates_config_yaml_model_mirror(hermes_home):
         f"  api_key: {old}\n",
     )
 
-    resp = client.put(
-        "/api/env", json={"key": "OPENAI_API_KEY", "value": new}, headers=HEADERS
-    )
-    assert resp.status_code == 200
-    assert "model.api_key" in resp.json().get("config_updates", [])
+    resp = save_provider_env_credential('OPENAI_API_KEY',new)
+
+    assert "model.api_key" in resp.get("config_updates", [])
 
     cfg_text = hermes_home.joinpath("config.yaml").read_text(encoding="utf-8")
     assert old not in cfg_text, "stale old key left in config.yaml (#62269)"
@@ -171,13 +164,9 @@ def test_put_api_env_materializes_credential_pool_entry(hermes_home):
     # via the PUT /api/env handler we're testing.
     _write_auth(hermes_home, {})
 
-    resp = client.put(
-        "/api/env",
-        json={"key": "AI_GATEWAY_API_KEY", "value": OPENCODE_KEY_NEW},
-        headers=HEADERS,
-    )
-    assert resp.status_code == 200, resp.text
-    body = resp.json()
+    resp = save_provider_env_credential('AI_GATEWAY_API_KEY',OPENCODE_KEY_NEW)
+
+    body = resp
     assert body.get("ok") is True
     assert body.get("key") == "AI_GATEWAY_API_KEY"
 
@@ -244,11 +233,9 @@ def test_update_rotates_keyed_providers_mirror(hermes_home):
         f"    api_key: {old}\n",
     )
 
-    resp = client.put(
-        "/api/env", json={"key": "OPENAI_API_KEY", "value": new}, headers=HEADERS
-    )
-    assert resp.status_code == 200
-    assert "providers.myendpoint.api_key" in resp.json().get("config_updates", [])
+    resp = save_provider_env_credential('OPENAI_API_KEY',new)
+
+    assert "providers.myendpoint.api_key" in resp.get("config_updates", [])
 
     cfg_text = hermes_home.joinpath("config.yaml").read_text(encoding="utf-8")
     assert old not in cfg_text, "stale key in providers.<id> shadows the rotation (#62269)"
@@ -266,11 +253,9 @@ def test_delete_scrubs_keyed_providers_mirror(hermes_home):
         f"    api_key: {old}\n",
     )
 
-    resp = client.request(
-        "DELETE", "/api/env", json={"key": "OPENAI_API_KEY"}, headers=HEADERS
-    )
-    assert resp.status_code == 200
-    assert "providers.myendpoint.api_key" in resp.json()["config_scrubbed"]
+    resp = remove_provider_env_credential('OPENAI_API_KEY')
+
+    assert "providers.myendpoint.api_key" in resp["config_scrubbed"]
     cfg_text = hermes_home.joinpath("config.yaml").read_text(encoding="utf-8")
     assert old not in cfg_text, "delete must clear the credential from EVERY store"
 
@@ -289,13 +274,11 @@ def test_scrub_never_touches_providers_base_url_alias(hermes_home):
         "    model: my-model\n",
     )
 
-    resp = client.request(
-        "DELETE", "/api/env", json={"key": "OPENAI_API_KEY"}, headers=HEADERS
-    )
-    assert resp.status_code == 200
+    resp = remove_provider_env_credential('OPENAI_API_KEY')
+
     cfg_text = hermes_home.joinpath("config.yaml").read_text(encoding="utf-8")
     assert old in cfg_text, "providers.<id>.api is a base_url and must survive"
-    assert "providers.myendpoint.api" not in resp.json().get("config_scrubbed", [])
+    assert "providers.myendpoint.api" not in resp.get("config_scrubbed", [])
 
 
 # ---------------------------------------------------------------------------
@@ -314,19 +297,3 @@ def test_scrub_never_touches_providers_base_url_alias(hermes_home):
 # fell back to the first non-advanced key var — which, for a profile-shared
 # credential contributed by peer providers (ZAI_API_KEY is index >= 1
 # of zai), could be a FOREIGN tier's key.
-
-
-def test_get_api_env_passes_provider_primary_through(hermes_home):
-    """Every provider card's own index-0 credential must stay its main field."""
-    resp = client.get("/api/env", headers=HEADERS)
-    assert resp.status_code == 200, resp.text
-    env = resp.json()
-
-    # ZAI's first credential remains primary; its same-provider alias must
-    # not replace the main field. No cross-provider sharing is required.
-    assert env["GLM_API_KEY"]["provider_primary"] is True
-    assert env["ZAI_API_KEY"]["provider_primary"] is False, (
-        "ZAI_API_KEY is a fallback alias for zai; "
-        "marking it primary would re-point the card's main field away from "
-        "GLM_API_KEY"
-    )

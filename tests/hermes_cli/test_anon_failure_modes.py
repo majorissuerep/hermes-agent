@@ -15,7 +15,7 @@ import pytest
 from hermes_cli import anon_auth, anon_sign_in, free_tier_bootstrap
 from hermes_cli.auth import _load_auth_store
 
-from tests.hermes_cli.anon_portal import PORTAL, WELCOME, as_local_desktop_backend, claimed_trial, install_portal
+from tests.hermes_cli.anon_portal import PORTAL, WELCOME, as_local_terminal_runtime, claimed_trial, install_portal
 
 
 @pytest.fixture
@@ -176,9 +176,9 @@ class TestMintCooldown:
 def _failed_claim(nas, monkeypatch) -> anon_auth.AuthError:
     """The desktop's welcome-trial claim, refused by the service (boot itself never mints)."""
     from hermes_cli import welcome_trial
-    as_local_desktop_backend(monkeypatch)
+    as_local_terminal_runtime(monkeypatch)
     with pytest.raises(anon_auth.AuthError) as exc:
-        welcome_trial.claim_desktop_free_tier()
+        welcome_trial.claim_terminal_free_tier()
     return exc.value
 
 
@@ -217,7 +217,7 @@ class TestBootstrapRecord:
         _failed_claim(nas, monkeypatch)
         free_tier_bootstrap.run_bootstrap(announce=False)
         nas.raise_transport = None
-        assert welcome_trial.claim_desktop_free_tier(force=True) is not None   # the user's retry
+        assert welcome_trial.claim_terminal_free_tier(force=True) is not None   # the user's retry
         record = free_tier_bootstrap.refresh_record(announce=False)
         assert record.free_tier_account is True and record.failure_fields() == {}
         assert free_tier_bootstrap.current_record() is record

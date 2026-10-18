@@ -90,7 +90,7 @@ def session_workspace() -> str:
     """The session's working directory: the session-scoped ``TERMINAL_CWD`` (gateway,
     TUI, cron) or the process cwd (classic CLI)."""
     try:
-        from gateway.session_context import get_session_env
+        from agent.session_context import get_session_env
         cwd = get_session_env("TERMINAL_CWD", "")
     except Exception:
         cwd = ""

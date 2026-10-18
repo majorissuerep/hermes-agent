@@ -1,12 +1,12 @@
 import { Box, NoSelect, ScrollBox, type ScrollBoxHandle, Text, useInput, useStdout } from '@hermes/ink'
 import { useEffect, useRef, useState } from 'react'
 
-import type { GatewayClient } from '../gatewayClient.js'
 import type { Translations } from '../i18n/types.js'
 import { useT } from '../i18n/useT.js'
 import { openInEditor } from '../lib/editor.js'
 import { rpcErrorMessage } from '../lib/rpc.js'
 import { deriveStarmapPalette, fadeHex, fadeInk, type StarmapPalette } from '../lib/starmapPalette.js'
+import type { LocalAgentClient } from '../localAgentClient.js'
 import type { Theme } from '../theme.js'
 
 import { listRowStyle } from './overlayPrimitives.js'
@@ -64,7 +64,7 @@ interface FramesResponse {
 }
 
 interface JourneyProps {
-  gw: GatewayClient
+  gw: LocalAgentClient
   onClose: () => void
   t: Theme
 }

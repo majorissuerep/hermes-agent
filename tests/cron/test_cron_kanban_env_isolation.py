@@ -196,7 +196,6 @@ class TestKanbanGatesRespectContext:
 # run_job wiring
 # ---------------------------------------------------------------------------
 
-@pytest.mark.usefixtures("cron_owner")
 class TestRunJobKanbanIsolation:
     @staticmethod
     def _install_stubs(monkeypatch, observed: dict, agent_cls=None):
@@ -244,8 +243,6 @@ class TestRunJobKanbanIsolation:
         monkeypatch.setattr(
             sched, "_build_job_prompt", lambda job, prerun_script=None, **kw: "hi"
         )
-        monkeypatch.setattr(sched_delivery, "_resolve_origin", lambda job: None)
-        monkeypatch.setattr(sched, "_resolve_delivery_target", lambda job: None)
         monkeypatch.setattr(
             sched, "_resolve_cron_enabled_toolsets", lambda job, cfg: None
         )

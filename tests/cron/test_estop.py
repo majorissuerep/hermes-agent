@@ -131,14 +131,6 @@ def test_cron_tick_resumes_after_disengage(hermes_home, monkeypatch):
 # ── kanban dispatcher integration ───────────────────────────────────────────
 
 
-def test_kanban_dispatch_blocked_when_engaged(hermes_home):
-    from gateway.kanban_watchers_common import _kanban_dispatch_allowed
-
-    assert _kanban_dispatch_allowed() is True
-    estop.engage(reason="test")
-    assert _kanban_dispatch_allowed() is False
-    estop.disengage()
-    assert _kanban_dispatch_allowed() is True
 
 
 # ── gateway turn-start integration ──────────────────────────────────────────
@@ -164,36 +156,8 @@ class _FakeEvent:
         return None
 
 
-@pytest.mark.asyncio
-async def test_gateway_new_turn_gets_paused_reply(hermes_home):
-    from gateway.run import GatewayRunner
-
-    runner = object.__new__(GatewayRunner)
-    runner._is_user_authorized = lambda source: True  # bare-instance stub
-    estop.engage(reason="maintenance")
-    reply = await runner._handle_message(_FakeEvent())
-    assert reply is not None
-    assert "paused" in reply.lower()
-    assert "maintenance" in reply
 
 
-@pytest.mark.asyncio
-async def test_gateway_internal_events_bypass_estop(hermes_home):
-    """Internal events (in-flight work completions) must NOT be paused."""
-    from gateway.run import GatewayRunner
-
-    runner = object.__new__(GatewayRunner)
-    estop.engage()
-    event = _FakeEvent()
-    event.internal = True
-    # An internal event proceeds past the estop gate; the bare runner then
-    # blows up further down the pipeline on missing attributes — that error
-    # (anything but a paused reply) proves the gate let it through.
-    try:
-        reply = await runner._handle_message(event)
-    except Exception:
-        return
-    assert reply is None or "paused" not in (reply or "").lower()
 
 
 # ── CLI: hermes pause / hermes resume ───────────────────────────────────────
@@ -272,24 +236,6 @@ class _FakeCmdEvent(_FakeEvent):
         return ""
 
 
-@pytest.mark.asyncio
-async def test_gateway_slash_commands_bypass_estop(hermes_home):
-    """Recognized slash commands must pass the estop gate — /pause off is
-    the in-band resume path for messaging-only users, and /status, /help
-    and friends must keep working while paused."""
-    from gateway.run import GatewayRunner
-
-    runner = object.__new__(GatewayRunner)
-    runner._is_user_authorized = lambda source: True
-    estop.engage(reason="maintenance")
-    # The command proceeds past the estop gate; the bare runner then blows
-    # up further down on missing attributes — anything but the paused
-    # notice proves the gate let it through.
-    try:
-        reply = await runner._handle_message(_FakeCmdEvent())
-    except Exception:
-        return
-    assert reply is None or "hermes is paused" not in (reply or "").lower()
 
 
 class _FakePauseEvent(_FakeEvent):
@@ -303,64 +249,3 @@ class _FakePauseEvent(_FakeEvent):
 
     def get_command_args(self):
         return self._args
-
-
-@pytest.mark.asyncio
-async def test_gateway_pause_command_engages_and_resumes(hermes_home):
-    from gateway.run import GatewayRunner
-
-    runner = object.__new__(GatewayRunner)
-
-    reply = await runner._handle_pause_command(_FakePauseEvent("deploy window"))
-    assert "paused" in reply.lower()
-    assert estop.is_engaged() is True
-    assert estop.get_state()["reason"] == "deploy window"
-
-    # Re-issuing without args reports already-paused instead of clobbering.
-    reply = await runner._handle_pause_command(_FakePauseEvent(""))
-    assert "already paused" in reply.lower()
-
-    reply = await runner._handle_pause_command(_FakePauseEvent("off"))
-    assert "resumed" in reply.lower()
-    assert estop.is_engaged() is False
-
-    reply = await runner._handle_pause_command(_FakePauseEvent("off"))
-    assert "wasn't paused" in reply.lower()
-
-
-def test_pause_command_registered_for_gateway():
-    from hermes_cli.commands import GATEWAY_KNOWN_COMMANDS, resolve_command
-
-    cmd = resolve_command("pause")
-    assert cmd is not None and cmd.name == "pause"
-    assert "pause" in GATEWAY_KNOWN_COMMANDS
-    # Must be dispatchable while an agent is running (in-band emergency stop).
-    assert cmd.busy_policy == "dispatch"
-
-
-def test_profile_gateway_honors_canonical_root_estop(tmp_path, monkeypatch):
-    """fleet-analyst-class: HERMES_HOME is a profile dir; pause lives at root.
-
-    A process launched with HERMES_HOME=~/.hermes/profiles/fleet-analyst must
-    still treat ~/.hermes/ESTOP as engaged. Otherwise `hermes pause` is not
-    a global emergency stop (t_7b65ff88).
-    """
-    root = tmp_path / "hermes-root"
-    profile = root / "profiles" / "fleet-analyst"
-    profile.mkdir(parents=True)
-    monkeypatch.setenv("HERMES_HOME", str(profile))
-    estop._logged_components.clear()
-
-    assert estop.is_engaged() is False
-    (root / "ESTOP").write_text("{\"reason\": \"thundering herd\"}\n", encoding="utf-8")
-    assert estop.is_engaged() is True
-    assert estop.paused_reply() is not None
-    assert "paused" in estop.paused_reply().lower()
-    # Profile-local engage still works and is independent.
-    estop.engage(reason="local")
-    assert (profile / "ESTOP").exists()
-    assert estop.is_engaged() is True
-    (root / "ESTOP").unlink()
-    assert estop.is_engaged() is True  # still held by profile sentinel
-    estop.disengage()
-    assert estop.is_engaged() is False

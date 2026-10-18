@@ -2,7 +2,7 @@
 
 Pure functions that decide whether a command may run at all: workdir
 validation, the foreground long-lived/background-operator guidance, the
-supervised-gateway lifecycle block, and the Windows self-repo git guard.
+self-repo git guard.
 Each ``*_block`` helper returns a finished JSON error string, or None when
 the command may proceed. Split out of tools/terminal_tool.py; the origin
 module re-imports every public helper so ``tools.terminal_tool.<name>``
@@ -175,92 +175,6 @@ def _read_script_for_guard(env: Any, guard_cwd: str, script_path: str, max_bytes
     return None
 
 
-def gateway_lifecycle_block(
-    *,
-    command: str,
-    env: Any,
-    env_type: str,
-    cwd: str,
-    workdir: Optional[str],
-    session_key: str,
-) -> Optional[str]:
-    """Refuse gateway lifecycle commands issued from inside the supervised gateway.
-
-    ``systemctl``/``launchctl``/``hermes gateway restart|stop|uninstall``
-    targeting hermes-gateway would SIGTERM the gateway — and this very
-    subprocess — before completing, so the service may never come back.
-    Applies unconditionally (``force=True`` cannot bypass it). Gated on the
-    SUPERVISED-gateway probe, not the raw ``_HERMES_GATEWAY`` marker: that
-    marker leaks into every process that merely imports gateway.run (hermes
-    serve, CLI, web server), which must still be able to restart the gateway;
-    an unsupervised foreground ``hermes gateway run`` has no KeepAlive to turn
-    a self-restart into a respawn loop, so it passes too.
-    Returns the JSON error string when blocked, else None.
-    """
-    from tools.process_registry import _is_supervised_gateway_process
-    from tools.terminal_tool import _resolve_command_cwd, get_session_cwd
-
-    if not _is_supervised_gateway_process():
-        return None
-    from cron.lifecycle_guard import (
-        _MAX_REFERENCED_SCRIPT_BYTES,
-        HOST_INTERPRETER_KILL_REJECTION,
-        contains_host_interpreter_kill,
-        contains_launchctl_submit_command,
-        lifecycle_scan_root_within_budget,
-        scan_gateway_lifecycle,
-    )
-    # Keep the specific launchctl diagnostic when this optional pre-scan fits the
-    # budget. The full fail-closed guard below still runs when it does not, so
-    # oversized roots never reach shlex here.
-    if lifecycle_scan_root_within_budget(command) and contains_launchctl_submit_command(command):
-        return _blocked_json(
-            "Blocked: launchctl submit/bootstrap is restricted inside a supervised "
-            "gateway regardless of the job label, to prevent indirect gateway "
-            "restart loops. This guard does not inspect the job's KeepAlive settings "
-            "or determine whether it is independent of Hermes. Perform authorized "
-            "LaunchAgent maintenance from a separate shell outside the gateway, "
-            "not by switching launchctl verbs to bypass this rejection.",
-            "error",
-        )
-    guard_cwd_base = get_session_cwd(session_key)
-    if guard_cwd_base is None:
-        guard_cwd_base = getattr(env, "cwd", None) or cwd
-    guard_cwd = _resolve_command_cwd(
-        workdir=workdir, default_cwd=guard_cwd_base, session_key=session_key, env_type=env_type,
-        mounted_host=getattr(env, "host_cwd", None),
-        env=env,
-    )
-    unsafe, refusal = scan_gateway_lifecycle(
-        command,
-        cwd=guard_cwd,
-        read_remote_script=lambda p: _read_script_for_guard(env, guard_cwd, p, _MAX_REFERENCED_SCRIPT_BYTES),
-    )
-    if unsafe and refusal:
-        # Not a lifecycle command: a script the command EXECUTES could not be scanned (budget,
-        # size, device, live SQLite, cloud placeholder). Say so, or the model rewords and retries
-        # the same command in a loop (#113944).
-        return _blocked_json(
-            f"Blocked: the lifecycle guard could not scan this command or referenced script: {refusal}. "
-            "Nothing in the command is known to contain a gateway lifecycle command, but a "
-            "script the command executes must be scannable (a regular text file under 1 MiB) "
-            "before it can run inside the gateway process.",
-            "error",
-        )
-    if unsafe:
-        # Name the ownership-scoped route for image-name kills: the intent is almost always "stop
-        # MY background job", and re-rolling the same over-broad spelling is what takes the gateway down.
-        if lifecycle_scan_root_within_budget(command) and contains_host_interpreter_kill(command):
-            return _blocked_json(HOST_INTERPRETER_KILL_REJECTION, "error")
-        return _blocked_json(
-            "Blocked: command or referenced script cannot restart, stop, or "
-            "uninstall the gateway from inside the gateway process. The gateway would "
-            "kill this command before it could complete (SIGTERM propagates "
-            "to child processes). Run `hermes gateway restart` from a "
-            "separate shell outside the running gateway.",
-            "error",
-        )
-    return None
 
 
 def self_repo_block(

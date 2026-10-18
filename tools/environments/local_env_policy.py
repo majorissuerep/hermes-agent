@@ -98,76 +98,22 @@ def _build_provider_env_blocklist() -> frozenset:
     return frozenset(blocked)
 
 
-def _build_adapter_secret_env() -> frozenset:
-    """Secrets the messaging adapters declare, process-wide: core ``password`` messaging entries
-    of OPTIONAL_ENV_VARS, the bundled platform plugin manifests' secret entries, and the
-    secret-named keys the gateway env-override table reads (WEIXIN_TOKEN, FEISHU_ENCRYPT_KEY, ...).
-    Declared names only: a user's own ``SLACK_USER_TOKEN`` or ``LOCAL_LLM_API_KEY`` is not Hermes's.
-    A profile's user-installed platform plugins are per home: :func:`_home_adapter_secret_env`.
-    Nothing here fails soft: an unreadable bundled manifest or env table fails the import rather
-    than dropping its secrets from the policy."""
-    from hermes_cli.config import (
-        CORE_DECLARED_ENV_NAMES, OPTIONAL_ENV_VARS, PLATFORM_SECRET_ENV_SUFFIXES, platform_manifest_secret_envs)
-    from hermes_cli.profile_channels import config_env_table_keys
-    # Read in code only, declared nowhere else: the Microsoft Graph app secret and webhook
-    # clientState, and the QQ bot's speech-to-text key.
-    names: set[str] = {"MSGRAPH_CLIENT_SECRET", "MSGRAPH_WEBHOOK_CLIENT_STATE", "QQ_STT_API_KEY"}
-    names.update(name.upper() for name, meta in OPTIONAL_ENV_VARS.items()
-                 if name in CORE_DECLARED_ENV_NAMES
-                 and meta.get("category") == "messaging" and meta.get("password"))
-    names |= platform_manifest_secret_envs(source="bundled", strict=True)
-    names.update(n.upper() for n in config_env_table_keys() if n.upper().endswith(PLATFORM_SECRET_ENV_SUFFIXES))
-    return frozenset(names)
 
 
 # Provider blocklist first: it imports hermes_cli.auth before hermes_cli.config, whose import
 # discovers provider plugins that expect a fully initialized auth registry.
 _PROVIDER_ENV_BLOCKLIST = _build_provider_env_blocklist()
-_ADAPTER_SECRET_ENV = _build_adapter_secret_env()
-_HERMES_PROVIDER_ENV_BLOCKLIST = _PROVIDER_ENV_BLOCKLIST | _ADAPTER_SECRET_ENV
-
-_HOME_ADAPTER_SECRET_CACHE: dict[str, tuple] = {}
-
-
-def _home_adapter_secret_env() -> frozenset:
-    """Secrets declared by the bound profile's own user-installed platform plugins. Per home, not
-    process-wide: under multiplex profile A's plugin must neither strip a same-named value from
-    profile B's children nor be missing from A's. Cached per home and keyed on every manifest's
-    file signature, so an edit, replacement or deletion takes effect on the next spawn. A plugin
-    manifest under ``plugins/platforms/`` that cannot be read raises. A partial scan (a plugin dir
-    or flat manifest unreadable or unparsable) keeps the names this home already had and is not
-    cached, so a failed discovery never releases a known denial and recovery is seen at once."""
-    from hermes_cli.config import platform_manifest_secret_scan, platform_manifest_stamp
-    from hermes_constants import get_hermes_home, hermes_home_key
-    home = get_hermes_home()
-    key, stamp = hermes_home_key(home), platform_manifest_stamp(home)
-    cached = _HOME_ADAPTER_SECRET_CACHE.get(key)
-    if cached is None or cached[0] is None or cached[0] != stamp:
-        names, complete = platform_manifest_secret_scan(home)
-        names -= _ADAPTER_SECRET_ENV
-        if not complete and cached is not None:
-            names |= cached[1]
-        cached = (stamp if complete else None, names)
-        _HOME_ADAPTER_SECRET_CACHE[key] = cached
-    return cached[1]
+# Historical installs may leave these credentials in their environment. They remain
+# stripped as data, without loading or supporting any retired adapter.
+_RETIRED_SECRET_ENV = frozenset(['API_SERVER_KEY', 'BLUEBUBBLES_PASSWORD', 'BUZZ_AUTH_TAG', 'BUZZ_PRIVATE_KEY', 'DINGTALK_CLIENT_SECRET', 'DISCORD_BOT_TOKEN', 'EMAIL_PASSWORD', 'FEISHU_APP_SECRET', 'FEISHU_ENCRYPT_KEY', 'FEISHU_VERIFICATION_TOKEN', 'MATRIX_ACCESS_TOKEN', 'MATRIX_PASSWORD', 'MATTERMOST_TOKEN', 'MSGRAPH_CLIENT_SECRET', 'MSGRAPH_WEBHOOK_CLIENT_STATE', 'QQ_CLIENT_SECRET', 'QQ_STT_API_KEY', 'SLACK_BOT_TOKEN', 'TELEGRAM_BOT_TOKEN', 'TWILIO_AUTH_TOKEN', 'WEBHOOK_SECRET', 'WECOM_CALLBACK_CORP_SECRET', 'WECOM_CALLBACK_ENCODING_AES_KEY', 'WECOM_CALLBACK_TOKEN', 'WECOM_SECRET', 'WEIXIN_TOKEN', 'WHATSAPP_CLOUD_ACCESS_TOKEN', 'WHATSAPP_CLOUD_APP_SECRET', 'WHATSAPP_CLOUD_VERIFY_TOKEN', 'YUANBAO_APP_KEY', 'YUANBAO_APP_SECRET'])
+_HERMES_PROVIDER_ENV_BLOCKLIST = _PROVIDER_ENV_BLOCKLIST | _RETIRED_SECRET_ENV
 
 
-def _registry_adapter_secret_env() -> frozenset:
-    """Secret-named ``required_env`` of the adapters registered in the current profile scope.
-    Tier 2 only: ``required_env`` is an unchecked setup list, so a plugin naming OPENAI_API_KEY
-    must not strip it from credentialed children. No blanket fallback: a registry error surfaces
-    instead of an empty (fail-open) set."""
-    from gateway.platform_registry import platform_registry
-    from hermes_cli.config import PLATFORM_SECRET_ENV_SUFFIXES
-    return frozenset(n.upper() for n in platform_registry.required_env_names()
-                     if n.upper().endswith(PLATFORM_SECRET_ENV_SUFFIXES))
 
 
-def _registered_adapter_secret_env() -> frozenset:
-    """Per-call adapter secrets: the bound profile's user-plugin declarations (Tier 1, see
-    :func:`_home_adapter_secret_env`) plus the registered adapters' (Tier 2,
-    :func:`_registry_adapter_secret_env`)."""
-    return _registry_adapter_secret_env() | _home_adapter_secret_env()
+
+
+
 
 
 def _is_provider_env_blocklisted(name: str, _registered: frozenset | None = None) -> bool:
@@ -179,7 +125,7 @@ def _is_provider_env_blocklisted(name: str, _registered: frozenset | None = None
     upper = name.upper()
     if name in _HERMES_PROVIDER_ENV_BLOCKLIST or upper in _HERMES_PROVIDER_ENV_BLOCKLIST:
         return True
-    return upper in (_registered_adapter_secret_env() if _registered is None else _registered)
+    return False
 
 
 # First-party platform credentials (``BUZZ_*``, driving the platform-mandated ``buzz``
@@ -221,37 +167,10 @@ def _is_provider_env_blocklisted(name: str, _registered: frozenset | None = None
 _TERMINAL_FIRST_PARTY_ENV_PREFIXES = ("BUZZ_",)
 
 
-def _matches_terminal_first_party_prefix(name: str) -> bool:
-    """Pure name check (``BUZZ_*``), regardless of session context — the snapshot
-    exclusion must stay conservative even when the carve-out is inactive.
-    Case-folded: on Windows the env block is case-insensitive, so a
-    lowercase-stored ``buzz_private_key`` IS the credential; it needs the
-    carve-out (and the snapshot exclusion) just like the canonical name."""
-    return name.upper().startswith(_TERMINAL_FIRST_PARTY_ENV_PREFIXES)
 
 
-def _buzz_terminal_context_active() -> bool:
-    """True when this process/session operates as a Buzz agent: ``BUZZ_MANAGED_AGENT`` in
-    the process env (set only by Buzz Desktop's buzz-acp harness), or the live session's
-    platform is ``buzz`` via the gateway ContextVar — authoritative under a concurrent
-    multi-session host, so a sibling Telegram session resolves its OWN platform.
-
-    Gateway / CLI / cron / kanban processes never carry it. See #76243.
-    """
-    if os.environ.get("BUZZ_MANAGED_AGENT"):
-        return True
-    try:
-        from gateway.session_context import get_session_env
-
-        return get_session_env("HERMES_SESSION_PLATFORM", "").strip().lower() == "buzz"
-    except Exception:
-        return False
 
 
-def _is_terminal_first_party_env(name: str) -> bool:
-    """``name`` is a first-party platform credential (``BUZZ_*``) AND the current
-    process/session context entitles it to reach terminal children."""
-    return _matches_terminal_first_party_prefix(name) and _buzz_terminal_context_active()
 
 
 # Active-venv markers that must NOT leak: VIRTUAL_ENV/CONDA_PREFIX make uv/poetry sync
@@ -302,36 +221,11 @@ _PROFILE_GATE_ENV_MARKERS = (
 )
 # Gate owners that are not a ``Platform`` value: the cross-platform pairing gate and adapters whose
 # env prefix differs from their platform name (``qqbot`` reads ``QQ_*``).
-_EXTRA_GATE_ENV_PREFIXES = frozenset({"GATEWAY", "QQ"})
+_RETIRED_GATE_PREFIXES = frozenset({"GATEWAY", "QQ", "TELEGRAM", "DISCORD", "SLACK", "WHATSAPP", "SIGNAL", "FEISHU", "WEIXIN", "WECOM", "BUZZ"})
 
 
-@functools.lru_cache(maxsize=1)
-def _static_gate_env_prefixes() -> frozenset:
-    """Built-in ``Platform`` values plus bundled platform plugins (directory names and manifest
-    aliases) — fixed for the life of the process, so scanned once."""
-    names = set(_EXTRA_GATE_ENV_PREFIXES)
-    try:
-        from gateway.config import Platform
-        names.update(m.value for m in Platform.__members__.values())
-        bundled, aliases = Platform._scan_bundled_plugin_platforms()
-        names.update(bundled)
-        names.update(aliases)
-    except Exception:
-        pass
-    return frozenset(str(n).upper().replace("-", "_") for n in names if n)
 
 
-def _platform_gate_env_prefixes() -> frozenset:
-    """Upper-cased owners of authorization gates: the static set plus runtime-registered plugin
-    adapters (``platform_registry``, dynamic and profile-scoped, so read per call — a cheap set
-    union under the registry lock)."""
-    names = set(_static_gate_env_prefixes())
-    try:
-        from gateway.platform_registry import platform_registry
-        names.update(str(n).upper().replace("-", "_") for n in platform_registry.registered_names() if n)
-    except Exception:
-        pass
-    return frozenset(names)
 
 
 def is_profile_gate_env(name: str, _prefixes: Optional[frozenset] = None) -> bool:
@@ -344,13 +238,13 @@ def is_profile_gate_env(name: str, _prefixes: Optional[frozenset] = None) -> boo
         return False
     if not any(marker in upper for marker in _PROFILE_GATE_ENV_MARKERS):
         return False
-    prefixes = _prefixes if _prefixes is not None else _platform_gate_env_prefixes()
+    prefixes = _prefixes if _prefixes is not None else _RETIRED_GATE_PREFIXES
     return any(upper.startswith(prefix + "_") for prefix in prefixes)
 
 
 def strip_profile_gate_env(env: dict) -> dict:
     """Drop every authorization gate from *env* in place (see :func:`is_profile_gate_env`)."""
-    prefixes = _platform_gate_env_prefixes()
+    prefixes = _RETIRED_GATE_PREFIXES
     for key in [k for k in env if is_profile_gate_env(k, prefixes)]:
         del env[key]
     return env
@@ -390,5 +284,5 @@ _ALWAYS_STRIP_KEYS: frozenset[str] = frozenset({
     "HERMES_DASHBOARD_OIDC_CLIENT_SECRET", "HERMES_DASHBOARD_DRAIN_SECRET",
     # Remote-compute / infrastructure secrets
     "MODAL_TOKEN_ID", "MODAL_TOKEN_SECRET", "DAYTONA_API_KEY",
-}) | _ADAPTER_SECRET_ENV | _left_core_env(secrets_only=True)  # every declared adapter secret is Tier 1
+}) | _RETIRED_SECRET_ENV | _left_core_env(secrets_only=True)  # every declared adapter secret is Tier 1
 _ALWAYS_STRIP_FOLDED: frozenset[str] = frozenset(k.upper() for k in _ALWAYS_STRIP_KEYS)

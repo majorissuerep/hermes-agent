@@ -12,7 +12,7 @@ from unittest.mock import patch
 import pytest
 
 from tools import approval as approval_module
-from tools import approval_context, approval_gateway_wait, terminal_tool, terminal_tool_sudo
+from tools import approval_context, approval_session_wait, terminal_tool, terminal_tool_sudo
 from tools.approval_prompt import prompt_dangerous_approval
 from tools.clarify_tool import clarify_tool
 
@@ -124,14 +124,14 @@ class TestApproval:
     def test_gateway_decision_fires_pair(self, captured, monkeypatch):
         session_key = "human-input-gateway"
         monkeypatch.setattr(approval_context, "_get_approval_timeout", lambda: 5)
-        approval_module._gateway_queues.pop(session_key, None)
+        approval_module._session_queues.pop(session_key, None)
 
         def notify(data):
-            threading.Timer(0.05, approval_module.resolve_gateway_approval, (session_key, "session")).start()
+            threading.Timer(0.05, approval_module.resolve_session_approval, (session_key, "session")).start()
 
         approval_data = {"command": SECRET_COMMAND, "description": "privileged install",
                          "pattern_key": "sudo", "pattern_keys": ["sudo"]}
-        decision = approval_gateway_wait._await_gateway_decision(session_key, notify, approval_data)
+        decision = approval_session_wait._await_session_decision(session_key, notify, approval_data)
 
         assert decision["choice"] == "session"
         request, resolved = _single_pair(captured, "approval")
@@ -144,7 +144,7 @@ class TestApproval:
             raise ConnectionError("adapter offline")
 
         approval_data = {"command": "rm -rf build", "description": "d", "pattern_key": "rm", "pattern_keys": ["rm"]}
-        decision = approval_gateway_wait._await_gateway_decision("human-input-notify-fail", notify, approval_data)
+        decision = approval_session_wait._await_session_decision("human-input-notify-fail", notify, approval_data)
 
         assert decision.get("notify_failed") is True
         assert _single_pair(captured, "approval")[1]["outcome"] == "notify_failed"

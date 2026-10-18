@@ -2,7 +2,6 @@
 from types import SimpleNamespace
 
 from cron import jobs, scheduler
-from gateway import session_cron
 
 
 def test_run_error_persists_redacted_cause_but_returns_summary(tmp_path, monkeypatch):
@@ -12,16 +11,16 @@ def test_run_error_persists_redacted_cause_but_returns_summary(tmp_path, monkeyp
         except ConnectionError as cause:
             raise RuntimeError("Connection error.") from cause
 
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    from hermes_security import vault
+    vault.init_vault(tmp_path, "synthetic-diagnostics-password")
+    vault.unlock(tmp_path, "synthetic-diagnostics-password")
     monkeypatch.setattr(scheduler, "_resolve_cron_agent_setup", fail_setup)
     with jobs.use_cron_store(tmp_path):
         job = jobs.create_job(prompt="Check status", schedule="every 1h", model="local-probe", deliver="local")
-        owner = SimpleNamespace(db=SimpleNamespace(db_path=tmp_path / "state.db"))
-        token = session_cron._execution.set((owner, "diagnostic-session", job["id"], "diagnostic-fire"))
-        try:
-            success, output, response, error = scheduler.run_job(job, execution_id="diagnostic-fire")
-        finally:
-            session_cron._execution.reset(token)
-        saved = jobs.save_job_output(job["id"], output).read_text(encoding="utf-8")
+        success, output, response, error = scheduler.run_job(job, execution_id="diagnostic-fire")
+        from hermes_security.io import read_text
+        saved = read_text(jobs.save_job_output(job["id"], output), purpose="state")
         assert not success and response == "" and error == "RuntimeError: Connection error."
         assert "Traceback (most recent call last)" in saved and "fail_setup" in saved
         assert "ConnectionError" in saved and "localhost" in saved

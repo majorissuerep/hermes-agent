@@ -633,7 +633,7 @@ def test_delegate_task_background_uses_live_tui_agent_session_id(monkeypatch):
     import json
     from unittest.mock import MagicMock
     import tools.delegate_tool as dt
-    from gateway.session_context import clear_session_vars, set_session_vars
+    from agent.session_context import clear_session_vars, set_session_vars
     from tools.approval_context import reset_current_session_key, set_current_session_key
 
     parent = MagicMock()
@@ -742,24 +742,8 @@ def _make_async_evt(**over):
     return evt
 
 
-def test_gateway_formatter_renders_async_block():
-    from gateway.run import _format_gateway_process_notification
-
-    txt = _format_gateway_process_notification(_make_async_evt())
-    assert txt is not None
-    assert "ASYNC DELEGATION COMPLETE" in txt
-    assert "Found the bug in test_foo" in txt
-    assert "Investigate flaky test" in txt
 
 
-def test_gateway_cli_origin_event_left_unrouted():
-    """An empty session_key (CLI origin) is left without routing fields."""
-    from gateway.run import GatewayRunner
-
-    runner = object.__new__(GatewayRunner)
-    evt = _make_async_evt(session_key="")
-    runner._enrich_async_delegation_routing(evt)
-    assert "platform" not in evt
 
 
 def test_single_task_truncation_banner_when_max_iterations():

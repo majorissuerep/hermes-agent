@@ -49,14 +49,14 @@ def _resolve_cli_reasoning(cli) -> None:
 def stored_session_route(session_meta, *, current_model, current_provider):
     """The route a resumed session should run on, or ``None`` when the stored one is absent or
     already current. Returns ``(model, provider, base_url, api_mode, provider_changed)``; the
-    canonical row reader is ``SessionDB.session_gateway_runtime`` (``model_config.gateway_runtime``,
+    canonical row reader is ``SessionDB.session_runtime`` (``model_config.gateway_runtime``,
     else the TUI's top-level keys). Bare ``custom`` is healed because the CLI resolve path
     hard-fails on it (the TUI gateway keeps it when a base_url exists)."""
     stored_model = str((session_meta or {}).get("model") or "").strip()
     if not stored_model:
         return None
     from hermes_state import SessionDB as _SessionDB
-    runtime = _SessionDB.session_gateway_runtime(session_meta)
+    runtime = _SessionDB.session_runtime(session_meta)
     base_url = runtime.get("base_url") or None
     provider = _heal_bare_custom_provider(runtime.get("provider") or None, base_url=base_url, model=stored_model)
     provider_changed = bool(provider) and provider != current_provider
@@ -70,7 +70,7 @@ def stored_session_route(session_meta, *, current_model, current_provider):
     # A row's api_mode/base_url were written for whichever model the session last ran. Providers that
     # pick the wire per model (OpenCode Zen/Go, Copilot, Nous) re-derive both from the stored model, or a
     # resumed opencode-go session keeps a MiniMax-era anthropic_messages route for a chat_completions
-    # model (#96066) — the CLI/oneshot twin of tui_gateway's _rederive_per_model_route.
+    # model (#96066) — the CLI/oneshot twin of tui_runtime's _rederive_per_model_route.
     from hermes_cli.model_switch import model_derived_api_mode
     derived = model_derived_api_mode(provider or "", stored_model)
     if derived is not None:
@@ -261,7 +261,7 @@ def _commit_model_switch(
     snapshot = cli._snapshot_model_runtime() if one_turn else None
     if not cli._stage_and_swap_model(result, old_model):
         return
-    # A TUI slash worker replays /model on its shadow CLI; the tui_gateway mirror counts the real switch.
+    # A TUI slash worker replays /model on its shadow CLI; the tui_runtime mirror counts the real switch.
     if not getattr(cli, "is_slash_worker", False):
         from hermes_cli.observability.shared_metrics_events import record_model_switch
         record_model_switch(

@@ -876,15 +876,15 @@ class TestProtectedInstructionFiles:
                 # Buttons must not offer persistent scopes for this gate.
                 assert approval_data.get("allow_permanent") is False
                 assert approval_data.get("allow_session") is False
-                A.resolve_gateway_approval(session_key, "once")
+                A.resolve_session_approval(session_key, "once")
 
-            A.register_gateway_notify(session_key, notify)
+            A.register_session_notify(session_key, notify)
             try:
                 res = self._write(tmp_path / "AGENTS.md", "gateway approved")
                 assert not res.get("error"), res
                 assert (tmp_path / "AGENTS.md").read_text(encoding="utf-8") == "gateway approved"
             finally:
-                A.unregister_gateway_notify(session_key)
+                A.unregister_session_notify(session_key)
         finally:
             approval_context.reset_current_session_key(token)
 
@@ -898,7 +898,7 @@ class TestProtectedInstructionFiles:
         """
         import tools.approval as A
         from tools import approval_context
-        from tui_gateway.server import _approval_request_payload
+        from tui_runtime.server import _approval_request_payload
 
         session_key = "protected-files-payload-session"
         token = approval_context.set_current_session_key(session_key)
@@ -906,13 +906,13 @@ class TestProtectedInstructionFiles:
         try:
             def notify(approval_data):
                 rendered.update(_approval_request_payload(approval_data))
-                A.resolve_gateway_approval(session_key, "once")
+                A.resolve_session_approval(session_key, "once")
 
-            A.register_gateway_notify(session_key, notify)
+            A.register_session_notify(session_key, notify)
             try:
                 self._write(tmp_path / "SOUL.md", "gateway approved")
             finally:
-                A.unregister_gateway_notify(session_key)
+                A.unregister_session_notify(session_key)
         finally:
             approval_context.reset_current_session_key(token)
 

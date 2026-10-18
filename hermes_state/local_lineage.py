@@ -7,7 +7,8 @@ import json
 import time
 
 from hermes_state.local import POLICY_PREFIX
-from hermes_state.runtime import RuntimeStoreError, _epoch, _json
+from hermes_state.errors import RuntimeStoreError
+from hermes_state.ledger_values import _json
 import itertools
 
 
@@ -87,32 +88,3 @@ def advance_local_target(conn, parent_session_id, child_session_id, *, entry=Non
                  (_json(candidate), receipt['route']))
     conn.execute('UPDATE state_meta SET value=? WHERE key=?', (_json(receipt), key))
     conn.execute('UPDATE sessions SET runtime_revision=runtime_revision+1 WHERE id=?', (logical_id,))
-
-
-def reset_local_target(db, *, epoch, parent_session_id, entry):
-    def write(conn):
-        _epoch(conn, epoch)
-        parent = conn.execute('SELECT * FROM sessions WHERE id=?', (parent_session_id,)).fetchone()
-        if parent is None or parent['end_reason'] == 'compression':
-            raise RuntimeStoreError('admission_conflict')
-        saved = conn.execute('SELECT value FROM state_meta WHERE key=?',
-                             (POLICY_PREFIX + parent['chat_id'],)).fetchone()
-        if saved is None:
-            raise RuntimeStoreError('storage_unavailable')
-        receipt = json.loads(saved[0])
-        logical_id = receipt['session_id']
-        if validate_local_lineage(conn, receipt) != parent_session_id:
-            raise RuntimeStoreError('admission_conflict')
-        from hermes_state.mutation_guards import require_not_executing
-        require_not_executing(conn, list({logical_id, parent_session_id}))
-        policy = receipt['policy']
-        db._publish_child_session_row(conn, parent, parent_session_id=parent_session_id,
-            child_session_id=entry['session_id'], source=policy['source'], model=policy['model'],
-            model_config={'_reset_from': parent_session_id}, system_prompt=None,
-            cwd=policy['cwd'], profile_name=parent['profile_name'])
-        conn.execute("UPDATE sessions SET ended_at=?,end_reason='session_reset' WHERE id=?",
-                     (time.time(), parent_session_id))
-        db._bump_conversation_generation(conn, parent_session_id, 'session_reset')
-        advance_local_target(conn, parent_session_id, entry['session_id'], entry=entry)
-        conn.execute('UPDATE sessions SET runtime_generation=runtime_generation+1 WHERE id=?', (logical_id,))
-    db._execute_write(write)

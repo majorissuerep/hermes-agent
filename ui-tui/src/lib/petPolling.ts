@@ -1,4 +1,4 @@
-import type { GatewayClient } from '../gatewayClient.js'
+import type { LocalAgentClient } from '../localAgentClient.js'
 
 import { asRpcResult } from './rpc.js'
 
@@ -14,7 +14,7 @@ interface PetUpdate<TCells> {
   meta: PetMetaResult
 }
 
-type PetGateway = Pick<GatewayClient, 'request'>
+type PetGateway = Pick<LocalAgentClient, 'request'>
 
 /**
  * Suppress overlapping cosmetic polls so a slow gateway can never accumulate

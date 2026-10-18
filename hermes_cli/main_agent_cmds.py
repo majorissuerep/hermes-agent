@@ -1,10 +1,9 @@
-"""Agent-facing subcommand handlers: memory, acp, tools, insights, monitoring, skills (+trust).
+"""Agent-facing subcommand handlers: memory, tools, insights, monitoring, skills (+trust).
 
 Split out of ``hermes_cli/main.py``. Names that still live in main (``PROJECT_ROOT``, ...)
 are imported lazily inside the functions that use them (avoids an import cycle).
 """
 
-from pm import install_hint
 import sys
 
 
@@ -68,29 +67,6 @@ def cmd_memory(args):
         memory_command(args)
 
 
-# (args attribute, acp flag) — forwarded in this order.
-_ACP_FLAGS = (
-    ("acp_version", "--version"),
-    ("check", "--check"),
-    ("setup", "--setup"),
-    ("setup_browser", "--setup-browser"),
-    ("assume_yes", "--yes"))
-
-
-def cmd_acp(args):
-    """Launch Hermes Agent as an ACP server."""
-    try:
-        from acp_adapter.entry import main as acp_main
-        acp_main([flag for attr, flag in _ACP_FLAGS if getattr(args, attr, False)])
-    except ImportError as e:
-        print("The ACP server can't start: its protocol packages are missing from this install.", file=sys.stderr)
-        print("From the Hermes environment, run: "
-              f"{install_hint('acp')}", file=sys.stderr)
-        print("Then restart Hermes.", file=sys.stderr)
-        print(f"Details: {e}", file=sys.stderr)
-        sys.exit(1)
-
-
 def cmd_tools(args):
     from hermes_cli.main import _require_tty
     action = getattr(args, "tools_action", None)
@@ -138,27 +114,16 @@ def _dict_or_empty(value) -> dict:
 
 
 def cmd_monitoring(args):
-    """Gateway monitoring status: health & diagnostics export posture."""
+    """Show local opt-in OTLP configuration."""
     from hermes_cli.config import load_config
     action = getattr(args, "monitoring_action", None) or "status"
     mon = _dict_or_empty(load_config().get("monitoring"))
 
     if action == "status":
         from agent.monitoring import otlp_exporter
-        gh = _dict_or_empty(mon.get("gateway_health_export"))
         otlp = _dict_or_empty(_dict_or_empty(mon.get("export")).get("otlp"))
 
-        print("Gateway monitoring")
-        print(f"  Health export:  {'enabled' if gh.get('enabled') else 'disabled'} "
-              f"(monitoring.gateway_health_export.enabled)")
-        if gh.get("enabled"):
-            print(f"    Metrics:            {'on' if gh.get('metrics_enabled', True) else 'off'} "
-                  f"(interval {gh.get('export_interval_seconds', 60)}s)")
-            print(f"    Diagnostic events:  {'on' if gh.get('diagnostic_events_enabled', True) else 'off'}")
-            print(f"    Warning/error logs: {'on' if gh.get('warning_error_events_enabled', True) else 'off'} "
-                  f"(interval {gh.get('logs_export_interval_seconds', 5)}s)")
-            print("    Content safety:     always on "
-                  "(rendered messages are never exported; not configurable)")
+        print("Local monitoring")
         endpoint = otlp.get("endpoint") or ""
         if otlp.get("enabled") and endpoint:
             print(f"  OTLP endpoint:  {endpoint}")
@@ -166,7 +131,7 @@ def cmd_monitoring(args):
             print("  OTLP endpoint:  not configured (monitoring.export.otlp)")
         print(f"  OTel SDK:       {'installed' if otlp_exporter.is_available() else 'not installed'} "
               f"(optional extra: hermes-agent[otlp])")
-        print("\n  Scope: gateway service health + redacted diagnostics only.")
+        print("\n  Local opt-in exporters only; no background service is started.")
         print("  No prompts, messages, tool args/results, usage analytics, or traces.")
         return
 

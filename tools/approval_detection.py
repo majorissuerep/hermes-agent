@@ -369,10 +369,6 @@ DANGEROUS_PATTERNS = [
     # only when the option is spelled literally.
     (r'\b(?:rg|sort|ag|man)\b[^;|&\n]*(?<!\S)--(?:pre|hostname-bin|compress-program|pager|html)(?:\{|[*?\[])',
      "dynamic shell word may expand to arbitrary program execution flag"),
-    # Gateway lifecycle: stopping/restarting the gateway kills all running agents. Global flags
-    # between `hermes` and `gateway` (`hermes -p ade gateway restart`) are allowed so a profile flag can't slip past.
-    (r'\bhermes\s+' + _GLOBAL_FLAGS + r'gateway\s+(stop|restart)\b', "stop/restart hermes gateway (kills running agents)"),
-    (r'\bhermes\s+update\b', "hermes update (restarts gateway, kills running agents)"),
     # Docker/Podman daemon redirect — global flags or env that point the CLI at a DIFFERENT (often remote) daemon:
     # `docker -H ssh://prod stop app` looks local but operates on remote infra, so any redirect requires approval
     # regardless of subcommand. The flag must be in global position (before the subcommand) and -H/--host/--context
@@ -389,11 +385,8 @@ DANGEROUS_PATTERNS = [
     # binary are allowed so a flag can't slip past.
     (r'\bdocker(?:-compose|\s+compose)\s+' + _CONTAINER_GLOBAL_FLAGS + r'(restart|stop|kill|down)\b', "docker compose restart/stop/kill/down (container lifecycle)"),
     (r'\bdocker\s+' + _CONTAINER_GLOBAL_FLAGS + r'(restart|stop|kill)\b', "docker restart/stop/kill (container lifecycle)"),
-    # Gateway protection: never start gateway outside systemd management
-    (r'gateway\s+run\b.*(&\s*$|&\s*;|\bdisown\b|\bsetsid\b)', "start gateway outside systemd (use 'systemctl --user restart hermes-gateway')"),
-    (r'\bnohup\b.*gateway\s+run\b', "start gateway outside systemd (use 'systemctl --user restart hermes-gateway')"),
     # Self-termination protection: prevent agent from killing its own process
-    (r'\b(pkill|killall)\b.*\b(hermes|gateway|cli\.py)\b', "kill hermes/gateway process (self-termination)"),
+    (r'\b(pkill|killall)\b.*\b(hermes|cli\.py)\b', "kill hermes process (self-termination)"),
     # Self-termination via kill + $(pgrep/pidof): the substitution is opaque to the name-based
     # pattern above, so catch the structural form.
     (r'\bkill\b.*\$\(\s*(pgrep|pidof)\b', "kill process via pgrep/pidof expansion (self-termination)"),
@@ -696,7 +689,6 @@ _BASH_SHORT_OPTION_LETTERS = frozenset("ilrsDcabefhkmnptuvxBCEHPTOo")
 _MAX_DETECTION_COMMAND_CHARS, _MAX_SEPARATOR_FREE_COMMAND_CHARS, _MAX_DETECTION_SEGMENTS = 128_000, 4_096, 25_000
 _PARSER_LIMIT_DESCRIPTION = "command parser limit exceeded"
 _MALFORMED_EXEC_DESCRIPTION = "command parser limit or malformed executable payload"
-_GATEWAY_LIFECYCLE_SPLICE_DESCRIPTION = "stop/restart hermes gateway via shell-spliced verb (kills running agents)"
 
 
 def _command_parser_limit_exceeded(command: str) -> bool:
@@ -1525,24 +1517,6 @@ def _is_verification_artifact_cleanup(command: str) -> bool:
     )
 
 
-def _is_shell_token_spliced_gateway_lifecycle(command: str) -> bool:
-    """Catch gateway-lifecycle verbs spelled with quote splicing.
-    Backslash splicing (``kick\\start``) is undone by normalization, but quote splicing is not:
-    ``_deobfuscate_shell_word_for_detection`` is deliberately scoped to command-position words
-    (widening it would let quoted prose like ``git commit -m "rm -rf /"`` match), and the spliced
-    verb is an ARGUMENT, so ``launchctl kick"start" -k gui/501/ai.hermes.gateway`` auto-approved.
-    Delegates to ``cron.lifecycle_guard`` (shlex-tokenized, anchored on a hermes-gateway
-    identifier). Runs last so an ordinary pattern match keeps its more specific reason; this layer
-    only prompts — the non-bypassable block still lives in ``cron.lifecycle_guard``.
-
-    ``_normalize_command_for_detection`` strips backslash escapes, so ``kick\\start`` already reaches the
-    launchctl pattern above. See #80269.
-    """
-    try:
-        from cron.lifecycle_guard import contains_gateway_lifecycle_command
-    except Exception:
-        return False
-    return contains_gateway_lifecycle_command(command)
 
 
 def detect_dangerous_command(command: str) -> tuple:
@@ -1567,6 +1541,4 @@ def detect_dangerous_command(command: str) -> tuple:
     normalized = _normalize_command_for_detection(command)
     for description, _ in _execution_flag_findings(normalized):
         return (True, description, description)
-    if _is_shell_token_spliced_gateway_lifecycle(command):
-        return (True, _GATEWAY_LIFECYCLE_SPLICE_DESCRIPTION, _GATEWAY_LIFECYCLE_SPLICE_DESCRIPTION)
     return (False, None, None)

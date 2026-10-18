@@ -283,10 +283,10 @@ class TestFreeTierCooldownCutoff:
         for name in ("HERMES_SESSION_SOURCE", "HERMES_SINGLE_QUERY_SESSION", "HERMES_SESSION_SOURCE_EXPLICIT"):
             monkeypatch.delenv(name, raising=False)
 
-    def test_an_attended_desktop_session_ends_the_turn_and_names_the_reset(self):
+    def test_an_attended_tui_session_ends_the_turn_and_names_the_reset(self):
         from agent.turn_recovery import free_tier_cooldown_ends_turn, max_retries_exhausted_result
         err = _plain_429(90)
-        assert free_tier_cooldown_ends_turn(_agent(platform="desktop"), err, WELCOME) is True
+        assert free_tier_cooldown_ends_turn(_agent(platform="tui"), err, WELCOME) is True
         result = max_retries_exhausted_result(
             TestTerminalResultsCarryTheFreeTierBlock._terminal_agent(), err, _classify(err), attempts=1,
             is_rate_limited=True, error_msg="429", api_kwargs=None, api_messages=[], messages=[],
@@ -295,22 +295,22 @@ class TestFreeTierCooldownCutoff:
         assert "refreshes in about 2 minutes" in result["final_response"]
         assert result["free_tier"]["kind"] == "rate_limited"
 
-    def test_a_subagent_of_a_desktop_session_keeps_waiting(self):
+    def test_a_subagent_of_a_tui_session_keeps_waiting(self):
         """The child runs in a copy of the parent's context, so it reads the parent's source."""
         from agent.turn_recovery import free_tier_cooldown_ends_turn
-        from gateway.session_context import clear_session_vars, set_session_vars
-        tokens = set_session_vars(source="desktop")
+        from agent.session_context import clear_session_vars, set_session_vars
+        tokens = set_session_vars(source="tui")
         try:
             assert free_tier_cooldown_ends_turn(_agent(platform="subagent"), _plain_429(90), WELCOME) is False
         finally:
             clear_session_vars(tokens)
 
-    def test_a_gateway_admitted_finite_cli_turn_keeps_waiting(self):
-        """``hermes chat -q`` over the daemon carries its one-shot fact on the admission, not in env."""
+    def test_a_finite_cli_turn_keeps_waiting(self, monkeypatch):
         from agent.turn_recovery import free_tier_cooldown_ends_turn
-        from gateway.session_finite import finite_turn_scope
-        with finite_turn_scope(True):
-            assert free_tier_cooldown_ends_turn(_agent(platform="cli"), _plain_429(90), WELCOME) is False
+
+        monkeypatch.setenv("HERMES_SINGLE_QUERY_SESSION", "1")
+        assert free_tier_cooldown_ends_turn(_agent(platform="cli"), _plain_429(90), WELCOME) is False
+        monkeypatch.delenv("HERMES_SINGLE_QUERY_SESSION")
         assert free_tier_cooldown_ends_turn(_agent(platform="cli"), _plain_429(90), WELCOME) is True
 
     @pytest.mark.parametrize("platform", ["cron", None])
@@ -327,7 +327,7 @@ class TestFreeTierCooldownCutoff:
         """A paid 300 s Retry-After: the status line is buffered (replayed only if every retry
         fails) and the live wait line names the attempt that just failed, as on main."""
         from agent.turn_recovery import compute_error_backoff
-        agent = _backoff_agent(provider="openrouter", api_key="sk-or-test", platform="desktop")
+        agent = _backoff_agent(provider="openrouter", api_key="sk-or-test", platform="tui")
         err = _plain_429(300)
         wait = compute_error_backoff(agent, err, retry_count=1, max_retries=3, is_rate_limited=True,
                                      is_zai_coding_overload=False, base_url="https://openrouter.ai/api/v1", model="m")

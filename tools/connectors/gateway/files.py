@@ -203,20 +203,17 @@ def _stage_one(client: Any, plan: PlannedCall, raw: str, task_id: Optional[str])
 
 def _readable_file(raw: str, task_id: Optional[str]) -> str:
     """The host path of a file the model may send, by the media-delivery rule; else ``FileInputError``."""
-    from gateway.platforms.base import validate_media_delivery_path
-    from gateway.session_context import get_session_env
+    from agent.file_safety import get_model_read_block_error
 
     candidate = _backend_path(raw, task_id)
-    allowed = validate_media_delivery_path(candidate, session_key=get_session_env("HERMES_SESSION_KEY", ""))
-    if allowed:
-        return allowed
     if not Path(candidate).is_file():
         raise FileInputError("FILE_NOT_FOUND", f"{raw} is not a regular file on this machine.",
                              hint="Pass the path of an existing file.")
+    if not get_model_read_block_error(candidate):
+        return str(Path(candidate).resolve())
     raise FileInputError(
         "FILE_NOT_ALLOWED", f"{raw} may not leave this machine: the file-sending policy refuses it.",
-        hint="Files under the Hermes downloads and cache folders, or a folder listed in "
-             "gateway.media_delivery_allow_dirs, can be sent.")
+        hint="Choose a non-secret file readable by this session's local file tools.")
 
 
 def _backend_path(raw: str, task_id: Optional[str]) -> str:

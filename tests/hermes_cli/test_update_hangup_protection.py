@@ -13,7 +13,7 @@ import signal
 import sys
 
 
-from hermes_cli.main_dashboard import _UpdateOutputStream, _finalize_update_output, _install_hangup_protection
+from hermes_cli.update_output import _UpdateOutputStream, _finalize_update_output, _install_hangup_protection
 from hermes_cli.update_cmd import _log_only_write, _print_update_completion, _run_logged_subprocess
 
 
@@ -205,4 +205,3 @@ class TestRunLoggedSubprocess:
         assert "LOUD BUILD OUTPUT" in (result.stdout or "")
         assert terminal.getvalue() == ""  # not echoed to terminal
         assert "LOUD BUILD OUTPUT" in log.getvalue()  # but kept in the log
-

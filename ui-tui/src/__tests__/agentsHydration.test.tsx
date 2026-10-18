@@ -6,7 +6,7 @@ import { expect, it, vi } from 'vitest'
 
 import { $delegationState, resetDelegationState } from '../app/delegationStore.js'
 import { AgentsOverlay } from '../components/agentsOverlay.js'
-import type { GatewayClient } from '../gatewayClient.js'
+import type { LocalAgentClient } from '../localAgentClient.js'
 import { DEFAULT_THEME } from '../theme.js'
 
 it('does not undo an acknowledged pause when opening status resolves late', async () => {
@@ -23,7 +23,7 @@ it('does not undo an acknowledged pause when opening status resolves late', asyn
 
   const view = renderSync(
     <Box height={16}>
-      <AgentsOverlay gw={{ request } as unknown as GatewayClient} onClose={() => {}} t={DEFAULT_THEME} />
+      <AgentsOverlay gw={{ request } as unknown as LocalAgentClient} onClose={() => {}} t={DEFAULT_THEME} />
     </Box>,
     {
       stdout: stdout as unknown as NodeJS.WriteStream,

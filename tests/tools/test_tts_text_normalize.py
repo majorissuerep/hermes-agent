@@ -1,23 +1,4 @@
-from gateway.config import Platform, PlatformConfig
-from gateway.platforms.base import BasePlatformAdapter
 from tools.tts_text_normalize import prepare_spoken_text
-
-
-class _DummyAdapter(BasePlatformAdapter):
-    def __init__(self):
-        super().__init__(PlatformConfig(enabled=True, token="test"), Platform.TELEGRAM)
-
-    async def connect(self):
-        return True
-
-    async def disconnect(self):
-        pass
-
-    async def send(self, chat_id, content, **kwargs):
-        raise AssertionError("not used")
-
-    async def get_chat_info(self, chat_id):
-        return {"id": chat_id, "type": "dm"}
 
 
 def test_prepare_spoken_text_expands_celsius_and_weather_units():

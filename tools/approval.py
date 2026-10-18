@@ -5,7 +5,7 @@ entry points (``check_all_command_guards``, ``check_execute_code_guard``,
 ``request_tool_approval`` / ``_run_approval_gate``) and the shared human-decision engine
 behind them. Leaves: ``approval_detection`` (hardline/dangerous patterns), ``approval_context``
 (contextvars, config readers), ``approval_floors`` (pre-gate blocks, allowlist match),
-``approval_prompt`` (CLI prompt, plugin transports, MCP elicitation), ``approval_gateway_wait``
+``approval_prompt`` (CLI prompt, plugin transports, MCP elicitation), ``approval_session_wait``
 (blocking gateway round-trip), ``approval_smart`` (guardian LLM), ``approval_human_wait``.
 Leaves read facade-owned state (``_lock``, queues, denial breaker) back through ``tools.approval`` at
 call time; sibling-defined names are imported from their defining module.
@@ -24,7 +24,7 @@ from agent.i18n import t
 from tools import approval_context
 from tools.approval_context import (
     _get_session_platform, _is_cron_approval_context,
-    _is_gateway_approval_context, _is_interactive_cli, _is_single_query_approval_context,
+    _is_session_approval_context, _is_interactive_cli, _is_single_query_approval_context,
     _is_unattended_platform_approval_context, _resolve_cli_approval_callback, _should_fall_through_to_cli_approval,
     get_current_session_key,
 )
@@ -35,7 +35,7 @@ from tools.approval_floors import (
     _command_matches_permanent_allowlist, _hardline_block_result, _match_user_deny_rule, _sudo_stdin_block_result,
     _user_deny_block_result,
 )
-from tools.approval_gateway_wait import _await_gateway_decision
+from tools.approval_session_wait import _await_session_decision
 from tools.approval_prompt import _present_with_selected_transport, _transport_choice, prompt_dangerous_approval
 from tools.approval_smart import _smart_verdict
 
@@ -114,32 +114,32 @@ def _denial_breaker_addendum(session_key: str) -> str:
         "operation. Report the blocked operation to the user and either ask them to run it manually or use /approve."
     )
 
-# --- Gateway approval queue (the blocking wait loop lives in approval_gateway_wait) ---------------------------------
+# --- Gateway approval queue (the blocking wait loop lives in approval_session_wait) ---------------------------------
 
 
 # Optional free-text reason supplied with an explicit deny (``/deny <reason>``) so the agent can adapt
 # instead of only hearing "denied". Ported from qwibitai/nanoclaw#2832.
-_gateway_queues: dict[str, list] = {}        # session_key → [_ApprovalEntry, …]
-_gateway_notify_cbs: dict[str, object] = {}  # session_key → callable(approval_data)
+_session_queues: dict[str, list] = {}        # session_key → [_ApprovalEntry, …]
+_session_notify_cbs: dict[str, object] = {}  # session_key → callable(approval_data)
 
 
-def register_gateway_notify(session_key: str, cb) -> None:
+def register_session_notify(session_key: str, cb) -> None:
     """Register ``cb(approval_data: dict) -> None`` for sending approval requests. The callback
     bridges sync→async: it runs in the agent thread and must schedule the send on the loop."""
     with _lock:
-        _gateway_notify_cbs[session_key] = cb
+        _session_notify_cbs[session_key] = cb
 
 
-def unregister_gateway_notify(session_key: str) -> None:
+def unregister_session_notify(session_key: str) -> None:
     """Unregister the callback and wake ALL blocked threads for this session so
     they don't hang forever (agent run finished or interrupted)."""
     with _lock:
-        _gateway_notify_cbs.pop(session_key, None)
-        for entry in _gateway_queues.pop(session_key, []):
+        _session_notify_cbs.pop(session_key, None)
+        for entry in _session_queues.pop(session_key, []):
             entry.event.set()
 
 
-def resolve_gateway_approval(session_key: str, choice: str,
+def resolve_session_approval(session_key: str, choice: str,
                              resolve_all: bool = False,
                              reason: Optional[str] = None,
                              request_id: Optional[str] = None) -> int:
@@ -150,7 +150,7 @@ def resolve_gateway_approval(session_key: str, choice: str,
     relayed to the agent in the BLOCKED message. Returns the number resolved.
     """
     with _lock:
-        queue = _gateway_queues.get(session_key)
+        queue = _session_queues.get(session_key)
         if not queue:
             return 0
         if request_id:
@@ -164,7 +164,7 @@ def resolve_gateway_approval(session_key: str, choice: str,
         else:
             targets = [queue.pop(0)]
         if not queue:
-            _gateway_queues.pop(session_key, None)
+            _session_queues.pop(session_key, None)
         # Popping the entry and committing its outcome are ONE critical section: the waiter's
         # ``_drop_entry`` reads ``entry.result`` under this same lock after its deadline check, so a
         # choice acked to the client here can never be popped-and-lost as a timeout (#112548).
@@ -176,44 +176,44 @@ def resolve_gateway_approval(session_key: str, choice: str,
     return len(targets)
 
 
-def withdraw_gateway_approval(session_key: str, request_id: str, cause: str) -> bool:
+def withdraw_session_approval(session_key: str, request_id: str, cause: str) -> bool:
     """Withdraw one pending approval nobody can answer (the only attached client cannot render it).
     The waiter wakes at once with ``cancelled=cause`` — a withdrawal, never a user deny — instead of
     idling for the whole approvals.timeout (#112548). False when it is no longer pending."""
     with _lock:
-        queue = _gateway_queues.get(session_key, [])
+        queue = _session_queues.get(session_key, [])
         entry = next((e for e in queue if e.data.get("request_id") == request_id), None)
         if entry is None:
             return False
         queue.remove(entry)
         if not queue:
-            _gateway_queues.pop(session_key, None)
+            _session_queues.pop(session_key, None)
         entry.cancelled = cause
         entry.event.set()
     return True
 
 
-def list_gateway_approvals(session_key: str) -> list[dict]:
+def list_session_approvals(session_key: str) -> list[dict]:
     """Return replay-safe snapshots of unresolved approvals for one session."""
     with _lock:
-        return [dict(entry.data) for entry in _gateway_queues.get(session_key, [])]
+        return [dict(entry.data) for entry in _session_queues.get(session_key, [])]
 
 
-def register_gateway_settle(session_key: str, request_id: str, settle) -> bool:
+def register_session_settle(session_key: str, request_id: str, settle) -> bool:
     """Attach ``settle(reason)`` to one pending approval; it runs once when that wait ends by any path.
     False when the request is no longer pending (the surface should withdraw its prompt itself)."""
     with _lock:
-        for entry in _gateway_queues.get(session_key, []):
+        for entry in _session_queues.get(session_key, []):
             if entry.data.get("request_id") == request_id:
                 entry.settle = settle
                 return True
     return False
 
 
-def ack_gateway_approval(session_key: str, request_id: str) -> bool:
+def ack_session_approval(session_key: str, request_id: str) -> bool:
     """Record that a client received a particular pending approval request."""
     with _lock:
-        for entry in _gateway_queues.get(session_key, []):
+        for entry in _session_queues.get(session_key, []):
             if entry.data.get("request_id") == request_id:
                 entry.acknowledged = True
                 return True
@@ -223,22 +223,22 @@ def ack_gateway_approval(session_key: str, request_id: str) -> bool:
 def has_blocking_approval(session_key: str) -> bool:
     """Check if a session has one or more blocking gateway approvals waiting."""
     with _lock:
-        return bool(_gateway_queues.get(session_key))
+        return bool(_session_queues.get(session_key))
 
 
-def pending_gateway_approval_count() -> int:
+def pending_session_approval_count() -> int:
     """Unresolved gateway approvals across every session — a backend blocked on one is not idle."""
     with _lock:
-        return sum(len(queue) for queue in _gateway_queues.values())
+        return sum(len(queue) for queue in _session_queues.values())
 
 
-def get_pending_gateway_approval(session_key: str) -> dict | None:
+def get_pending_session_approval(session_key: str) -> dict | None:
     """Copy of the oldest unresolved gateway approval, for reconnecting clients
     to restore a prompt. Read-only snapshot — the queue stays authoritative."""
     if not session_key:
         return None
     with _lock:
-        queue = _gateway_queues.get(session_key)
+        queue = _session_queues.get(session_key)
         if not queue:
             return None
         return dict(queue[0].data)
@@ -295,7 +295,7 @@ def clear_session(session_key: str) -> None:
         _session_yolo.discard(session_key)
         _launch_yolo_applied.discard(session_key)
         _pending.pop(session_key, None)
-        for entry in _gateway_queues.pop(session_key, []):
+        for entry in _session_queues.pop(session_key, []):
             # Cancel blocked waits now so the old run unwinds instead of idling until timeout;
             # the prompt was withdrawn, nobody denied it.
             entry.cancelled = "the session ended before the prompt was answered"
@@ -329,8 +329,7 @@ def _yolo_active() -> bool:
     (session-scoped). Hardline / deny-rule floors run BEFORE this everywhere."""
     if _YOLO_MODE_FROZEN or is_current_session_yolo_enabled():
         return True
-    from gateway.session_finite import unattended_turn
-    return unattended_turn()
+    return False
 
 
 def _permanent_set() -> set:
@@ -543,9 +542,9 @@ def _user_approved(session_key: str, description: str) -> dict:
     return {"approved": True, "message": None, "user_approved": True, "description": description}
 
 
-def _gateway_notify_cb(session_key: str):
+def _session_notify_cb(session_key: str):
     with _lock:
-        return _gateway_notify_cbs.get(session_key)
+        return _session_notify_cbs.get(session_key)
 
 
 def _pending_result(spec, session_key: str, *, command: str, description: str,
@@ -675,7 +674,7 @@ class _GateSpec:
     # Message templates. ``{breaker}`` = the denial circuit-breaker addendum,
     # read only where a template shows it (reading it logs when tripped).
     notify_failed: str
-    gateway_refused: str      # {reason}{reason_addendum}{timeout_addendum}{breaker}
+    session_refused: str      # {reason}{reason_addendum}{timeout_addendum}{breaker}
     transport_denied: str     # {breaker}
     cli_timeout: str          # {breaker}
     cli_denied: str           # {description}{breaker}
@@ -696,7 +695,7 @@ _STOP_ACTION = (
 _COMMAND_GATE = _GateSpec(
     noun="command", transport=True, user_approved=True, redact_cli=False, pending_keys=True,
     notify_failed="BLOCKED: Failed to send approval request to user. Do NOT retry.",
-    gateway_refused="BLOCKED: Command {reason}.{reason_addendum}" + _STOP_COMMAND
+    session_refused="BLOCKED: Command {reason}.{reason_addendum}" + _STOP_COMMAND
                     + "{timeout_addendum}{breaker}",
     transport_denied=(
         "BLOCKED: User denied this command through the selected approval "
@@ -711,7 +710,7 @@ _COMMAND_GATE = _GateSpec(
 _EXECUTE_CODE_GATE = _GateSpec(
     noun="code", transport=True, user_approved=True, redact_cli=True, pending_keys=True,
     notify_failed="BLOCKED: Failed to send execute_code approval request to user. Do NOT retry.",
-    gateway_refused=(
+    session_refused=(
         "BLOCKED: execute_code script {reason}.{reason_addendum} The user has "
         "NOT consented to running this code. Do NOT retry, do NOT rephrase the "
         "script, and do NOT attempt the same outcome via a different tool.{timeout_addendum}{breaker}"
@@ -732,7 +731,7 @@ _EXECUTE_CODE_GATE = _GateSpec(
 _ACTION_GATE = _GateSpec(
     noun="action", transport=False, user_approved=False, redact_cli=False, pending_keys=False,
     notify_failed="BLOCKED: Failed to send approval request to user. Do NOT retry.",
-    gateway_refused="BLOCKED: Action {reason}.{reason_addendum}" + _STOP_ACTION
+    session_refused="BLOCKED: Action {reason}.{reason_addendum}" + _STOP_ACTION
                     + "{timeout_addendum}",
     transport_denied="",
     cli_timeout="BLOCKED: Action timed out without user response." + _STOP_ACTION
@@ -838,7 +837,7 @@ def _human_decision(spec: _GateSpec, *, command: str, description: str,
         # command still executes after approval and persistence keys off pattern_key.
         display_command = redact_sensitive_text(command)
         display_description = redact_sensitive_text(description)
-        notify_cb = _gateway_notify_cb(session_key)
+        notify_cb = _session_notify_cb(session_key)
         if notify_cb is not None:
             # Smart DENY overrides are one-operation decisions, so the UI must not offer a
             # permanent or session scope.
@@ -850,7 +849,7 @@ def _human_decision(spec: _GateSpec, *, command: str, description: str,
             }
             if smart_denied:
                 data["smart_denied"] = True
-            decision = _await_gateway_decision(session_key, notify_cb, data, surface="gateway")
+            decision = _await_session_decision(session_key, notify_cb, data, surface="gateway")
             if decision.get("notify_failed"):
                 return _denied(spec.notify_failed, pattern_key=pattern_key,
                                description=description, outcome="notify_failed", noun=spec.noun)
@@ -861,15 +860,15 @@ def _human_decision(spec: _GateSpec, *, command: str, description: str,
             if decision.get("cancelled"):
                 # The prompt was withdrawn (turn interrupted or ended) before anyone answered:
                 # still fail closed, but do not attribute a refusal to the user.
-                return deny(spec.gateway_refused, "cancelled",
+                return deny(spec.session_refused, "cancelled",
                             reason=f"approval was withdrawn before the user answered ({decision['cancelled']})",
                             reason_addendum="", timeout_addendum="", deny_reason=None)
             if not decision["resolved"]:
-                return deny(spec.gateway_refused, "timeout", reason="timed out without user response",
+                return deny(spec.session_refused, "timeout", reason="timed out without user response",
                             reason_addendum="", timeout_addendum=" Silence is not consent.",
                             deny_reason=deny_reason)
             if choice is None or choice == "deny":
-                return deny(spec.gateway_refused, "denied", reason="denied by user",
+                return deny(spec.session_refused, "denied", reason="denied by user",
                             reason_addendum=(f' Reason given by the user: "{deny_reason}".' if deny_reason else ""),
                             timeout_addendum="", deny_reason=deny_reason)
             return grant(choice)
@@ -903,7 +902,7 @@ def _human_decision(spec: _GateSpec, *, command: str, description: str,
     if choice == "cancelled":
         # The prompt never reached a human (callback raised, no callback under prompt_toolkit, interrupted
         # read): fail closed, but do not attribute a refusal to the user (#22992).
-        return deny(spec.gateway_refused, "cancelled",
+        return deny(spec.session_refused, "cancelled",
                     reason="was not approved: the approval prompt could not be delivered or was not answered "
                            f"({getattr(choice, 'cause', 'no answer')})",
                     reason_addendum="", timeout_addendum=" Silence is not consent.", deny_reason=None)
@@ -930,15 +929,15 @@ def _presence(approval_callback=None) -> tuple:
     regardless and the unattended branch resolves from ``approvals.unattended_mode`` instead of
     parking an unanswerable card (#100532)."""
     approval_callback = _resolve_cli_approval_callback(approval_callback)
-    is_cli, is_gateway = _is_interactive_cli(), _is_gateway_approval_context()
+    is_cli, is_gateway = _is_interactive_cli(), _is_session_approval_context()
     is_ask = env_var_enabled("HERMES_EXEC_ASK")
     if _is_single_query_approval_context() or _is_cron_approval_context():
         is_cli = is_gateway = is_ask = False
     elif is_ask and _is_unattended_platform_approval_context() \
-            and (_gateway_notify_cb(get_current_session_key()) is None
+            and (_session_notify_cb(get_current_session_key()) is None
                  or _get_session_platform() in approval_context._NOTIFIER_BLIND_APPROVAL_PLATFORMS):
         # start_gateway() sets HERMES_EXEC_ASK process-wide, so an api_server/webhook turn
-        # inside that gateway still reads as "ask" here even though _is_gateway_approval_context()
+        # inside that gateway still reads as "ask" here even though _is_session_approval_context()
         # already excluded the platform. /v1/runs and streaming chat register their notify
         # callback before the turn runs; a session with none has no surface that can resolve an
         # approval. webhook/msgraph_webhook are notifier-blind: the generic TurnRunner lane

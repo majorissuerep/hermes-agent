@@ -19,130 +19,10 @@ logger = logging.getLogger("tools.cronjob_tools")
 _THREAD_HORIZON_MINUTES = 60
 
 
-def _first_fire_within_thread_horizon(
-    schedule: str | dict[str, Any] | None,
-) -> bool:
-    """True when the job's first fire is close enough that the creating conversation is still
-    alive when it happens. Only near one-shots qualify; recurring jobs and one-shots beyond the
-    horizon outlive the conversation, which is what the synthetic-drop rule protects."""
-    if not schedule:
-        return False
-    parsed: Optional[dict[str, Any]]
-    if isinstance(schedule, dict):
-        parsed = schedule
-    else:
-        parsed = None
-        with contextlib.suppress(Exception):
-            from cron.jobs import parse_schedule
-
-            parsed = parse_schedule(schedule)
-    if not isinstance(parsed, dict) or parsed.get("kind") != "once":
-        return False
-    run_at = parsed.get("run_at")
-    if not run_at:
-        return False
-    try:
-        fire_at = datetime.fromisoformat(str(run_at))
-    except ValueError:
-        return False
-    now = hermes_time.now()
-    if fire_at.tzinfo is None:
-        fire_at = fire_at.replace(tzinfo=now.tzinfo)
-    # Bounded interval: an already-expired run_at gives a negative delta that would
-    # otherwise sail through a bare upper bound — a conversation that is already over
-    # must fail closed to the channel-level drop, while a fire at this instant still
-    # happens inside the live conversation and keeps the thread.
-    delta = fire_at - now
-    return timedelta(0) <= delta <= timedelta(minutes=_THREAD_HORIZON_MINUTES)
 
 
-def _origin_from_env(
-    schedule: str | dict[str, Any] | None = None,
-) -> Optional[dict[str, str]]:
-    from gateway.session_context import async_delivery_supported, get_session_env
-    origin_platform = get_session_env("HERMES_SESSION_PLATFORM")
-    origin_chat_id = get_session_env("HERMES_SESSION_CHAT_ID")
-    if not (origin_platform and origin_chat_id):
-        return None
-    # A non-push surface (api_server: request/response, ``send()`` is a stub) cannot receive a
-    # fire-time report, so an origin stamp would make ``deliver=origin`` fail silently on every
-    # fire (#69304). No origin => the home-channel fallback + creation-time notice apply.
-    if not async_delivery_supported():
-        return None
-    thread_id = get_session_env("HERMES_SESSION_THREAD_ID") or None
-    # Slack stamps every TOP-LEVEL message's own id as the session thread (a per-message
-    # KEY, not a location); persisting it would pin all future deliveries inside an
-    # ephemeral thread, so thread == creating message id is synthetic and dropped — unless
-    # the job's first fire is within the conversation's remaining lifetime: under the
-    # default reply_in_thread the exchange under a top-level message lives in exactly that
-    # thread, so a near one-shot must deliver back into it.
-    if thread_id and origin_platform == "slack":
-        message_id = get_session_env("HERMES_SESSION_MESSAGE_ID") or None
-        if message_id and str(thread_id) == str(message_id):
-            if _first_fire_within_thread_horizon(schedule):
-                logger.debug(
-                    "Cron origin: keeping synthetic Slack thread_id=%s — first fire is "
-                    "within the conversation horizon",
-                    thread_id,
-                )
-            else:
-                logger.debug(
-                    "Cron origin: dropping synthetic per-message Slack "
-                    "thread_id=%s (== creation message id)",
-                    thread_id,
-                )
-                thread_id = None
-    if thread_id:
-        logger.debug(
-            "Cron origin captured thread_id=%s for %s:%s",
-            thread_id, origin_platform, origin_chat_id)
-    return {
-        "platform": origin_platform, "chat_id": origin_chat_id,
-        "chat_name": get_session_env("HERMES_SESSION_CHAT_NAME") or None, "thread_id": thread_id,
-        # Lets a delivery mirror resolve the participant's session in per-user-isolated groups.
-        "user_id": get_session_env("HERMES_SESSION_USER_ID") or None,
-        # Workspace/server scope (Slack team, Discord guild...): Slack session keys embed it,
-        # so a continuable cron seed built without it would never resolve a scoped reply.
-        "scope_id": get_session_env("HERMES_SESSION_SCOPE_ID") or None,
-    }
 
 
-def _local_delivery_notice(job: dict[str, Any], user_deliver: Optional[str]) -> Optional[str]:
-    """Notice when a created job won't deliver anywhere: CLI/TUI sessions have no capturable
-    origin, so deliver='origin' (or omitted) saves output but never delivers it. None when the
-    user explicitly asked for ``local`` or the job resolves to a real target.
-
-    TUI/CLI sessions cannot be captured as a cron ``origin`` (no ``HERMES_SESSION_PLATFORM``/``CHAT_ID`` is
-    set for them), so a ``deliver="origin"`` request — or an omitted ``deliver`` that defaults to
-    origin-or-local — produces a job that runs and saves output to ``last_output`` but is never delivered
-    back into the session. This is by design (there is no live-delivery channel for local sessions), but
-    silently dropping the user's "tell me when it runs" intent is the trap reported in 51568. Surface it at
-    create time so the agent can relay it instead of promising a delivery that never happens. See #51568.
-    """
-    if (user_deliver or "").strip().lower() == "local":
-        return None
-    try:
-        from cron.scheduler import _resolve_delivery_targets
-        targets = _resolve_delivery_targets(job)
-        if targets:
-            # _origin_from_env() dropped a non-push origin (api_server) and the job rerouted to a
-            # home channel: tell the creating client where the report goes (#69304).
-            from gateway.session_context import async_delivery_supported, get_session_env
-            fallback = [t for t in targets if t.get("_resolved_from") == "origin_fallback"]
-            if fallback and get_session_env("HERMES_SESSION_PLATFORM") and not async_delivery_supported():
-                return ("Note: this stateless HTTP API session cannot receive cron delivery, so this "
-                        f"job will report to the home channel {fallback[0]['platform']}:"
-                        f"{fallback[0]['chat_id']} instead of back here.")
-            return None
-    except Exception:  # resolution unavailable — fall back to the origin signal
-        if job.get("origin"):
-            return None
-    return (
-        "This is a local-only cron job: its output is saved (view it with "
-        "cronjob(action='list')) but will NOT be delivered back into this "
-        "session — CLI/TUI and stateless HTTP API sessions have no live-delivery channel. To be "
-        "notified when it runs, recreate or update the job with deliver set to "
-        "a gateway-connected platform, e.g. deliver='telegram' or deliver='all'.")
 
 
 def _mode_guidance_notes(job: dict[str, Any], user_deliver: Optional[str]) -> list[str]:
@@ -163,28 +43,6 @@ def _mode_guidance_notes(job: dict[str, Any], user_deliver: Optional[str]) -> li
             "nothing at all (watchdog pattern — script should stay quiet when "
             "there is nothing to report). Non-zero exit or timeout sends an "
             "error alert. prompt/skills are ignored.")
-    _deliver = (user_deliver or "").strip().lower()
-    if _deliver:
-        if "all" in _deliver.split(","):
-            notes.append(
-                "deliver='all' resolves at fire time and never includes "
-                "bot-chat targets — channels connected later are picked up "
-                "automatically.")
-        if _deliver.startswith("bot-chat:"):
-            notes.append("Targeting another profile's Bot Chat costs that bot an agent turn per run.")
-        # platform:chat_id with no thread segment loses topic targeting.
-        for target in _deliver.split(","):
-            parts = target.strip().split(":")
-            if (
-                len(parts) == 2
-                and parts[0] not in ("bot-chat", "sms")
-                and parts[1]
-                and not parts[1].startswith("#")):
-                notes.append(
-                    f"deliver target '{target.strip()}' has no :thread_id "
-                    "segment — on thread/topic platforms the delivery lands in "
-                    "the main chat, not a topic.")
-                break
     return notes
 
 
@@ -254,58 +112,8 @@ def _normalize_deliver_param(value: Any) -> Optional[str]:
     return str(value).strip() or None
 
 
-def _validate_bot_chat_deliver(deliver: Optional[str]) -> Optional[str]:
-    """Validate ``bot-chat[:<profile>]`` deliver elements at create time: Bot Chat delivery is
-    machine-local, so the profile must exist where the scheduler fires (Desktop rosters may
-    show same-named profiles from other machines). Returns an error string or None."""
-    if not deliver:
-        return None
-    try:
-        from cron.scheduler_delivery import parse_bot_chat_deliver_token
-        from hermes_cli.profiles import normalize_profile_name, profile_exists
-    except Exception:
-        return None  # best-effort; resolution re-checks at fire time
-    for part in str(deliver).split(","):
-        profile_arg = parse_bot_chat_deliver_token(part.strip())
-        if not profile_arg:
-            continue  # not a bot-chat token, or bare token (own profile)
-        try:
-            canon = normalize_profile_name(profile_arg)
-        except Exception:
-            return f"invalid bot-chat profile name '{profile_arg}'"
-        if not profile_exists(canon):
-            return (
-                f"bot-chat delivery profile '{profile_arg}' not found on this "
-                "gateway's machine. Bot Chat delivery is machine-local — use a "
-                "profile that exists here (hermes profile list), or omit the "
-                "name (deliver='bot-chat') for the job's own profile.")
-    return None
 
 
-def _resolve_cron_context_deliver(deliver: Optional[str]) -> Optional[str]:
-    """Resolve ``origin`` to a concrete target for creates made FROM a cron run (the creating
-    session is ephemeral, so by fire time there is no origin). Non-cron sessions: unchanged.
-    Cron sessions: ``origin`` (or omitted) becomes the creating run's ``platform:chat_id[:thread]``
-    from HERMES_CRON_AUTO_DELIVER_*, or ``local`` when it has no concrete target; other
-    elements pass through. Otherwise the scheduler would guess a home channel."""
-    from gateway.session_context import get_session_env
-    from utils import is_truthy_value
-    if not is_truthy_value(get_session_env("HERMES_CRON_SESSION", "")):
-        return deliver
-
-    def _creator_target() -> str:
-        platform = get_session_env("HERMES_CRON_AUTO_DELIVER_PLATFORM", "").strip()
-        chat_id = get_session_env("HERMES_CRON_AUTO_DELIVER_CHAT_ID", "").strip()
-        if not platform or not chat_id:
-            return "local"
-        thread_id = get_session_env("HERMES_CRON_AUTO_DELIVER_THREAD_ID", "").strip()
-        return f"{platform}:{chat_id}:{thread_id}" if thread_id else f"{platform}:{chat_id}"
-
-    if deliver is None:
-        return _creator_target()
-    resolved = [_creator_target() if p.lower() == "origin" else p for p in _clean_str_list(str(deliver).split(","))]
-    # Order-preserving de-dup: 'origin,local' with a local creator -> 'local'.
-    return ",".join(dict.fromkeys(resolved)) or None
 
 
 def _same_origin(base_url: str, configured: str) -> bool:
@@ -526,27 +334,8 @@ def _format_job(job: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
-def _gateway_liveness_notice(plural: bool = False) -> dict:
-    """``gateway_running``/``warning`` payload via the shared CLI helper so CLI and tool agree
-    on "scheduler active". False -> warning (no gateway process), None -> probe failed.
 
-    Thin adapter over the shared CLI helper ``hermes_cli.cron._builtin_gateway_liveness`` (#87033) so the
-    CLI and this tool can never disagree about what "scheduler active" means. ``plural`` rewords the warning
-    for multi-job results (the ``list`` action).
-    """
-    try:
-        from hermes_cli.cron import _builtin_gateway_liveness
-        _gw = _builtin_gateway_liveness()
-    except Exception:
-        return {"gateway_running": None}
-    if _gw is False:
-        subject = "these jobs are saved" if plural else "this job is saved"
-        return {
-            "gateway_running": False,
-            "warning": (
-                f"The Hermes gateway is not running — {subject} "
-                "but will NOT fire until the gateway is started "
-                "(hermes gateway install / hermes gateway start). "
-                "Tell the user the task is scheduled but not active yet."),
-        }
-    return {"gateway_running": None if _gw is None else True}
+
+def _validate_local_delivery(deliver: Optional[str]) -> Optional[str]:
+    from cron.scheduler_delivery import local_delivery_error
+    return local_delivery_error({"deliver": deliver})

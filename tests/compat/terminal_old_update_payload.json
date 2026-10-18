@@ -1,0 +1,12 @@
+{
+  "baseline": "bde3d08f715da415da0370c32b0722175d714ee7",
+  "swap": "git",
+  "branch": "main",
+  "gateway_mode": true,
+  "had_desktop_app_before_update": true,
+  "pre_update_snapshot_id": "isolated-before-terminal-only",
+  "pre_update_version": "0.21.3",
+  "windows_gateway_resume": {"resume_needed": true, "profiles": {"work": "old-pid"}},
+  "receipt": {"update_id": "terminal-migration-test", "outcome": "running"},
+  "plan": {"install_method": "git", "expected_sha": "bde3d08f715da415da0370c32b0722175d714ee7"}
+}

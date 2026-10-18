@@ -196,55 +196,8 @@ def _render_terminal(ctx):
     _kv_flag("Sudo:", os.getenv("SUDO_PASSWORD", ""), "enabled", "disabled")
 
 
-def _render_platforms(ctx):
-    """One row per platform, judged by the gateway (same verdict as the summary's Platforms line)."""
-    _section("Messaging Platforms")
-    try:
-        from gateway.config import load_gateway_config
-        from gateway.platform_registry import platform_registry
-        cfg = load_gateway_config()
-    except Exception:
-        return
-    connected = {p.value for p in cfg.get_connected_platforms()}
-    homes = {p.value: pc.home_channel for p, pc in cfg.platforms.items() if pc.home_channel}
-    labels = {**_PLATFORM_LABELS, **{e.name: e.label for e in platform_registry.plugin_entries()}}
-    for value, label in sorted(labels.items(), key=lambda kv: kv[1].lower()):
-        home = homes.get(value)
-        _row(label, value in connected,
-             _configured(value in connected) + (f" (home: {home.chat_id})" if home else ""))
 
 
-def _render_gateway(ctx):
-    _section("Gateway Service")
-    try:
-        from hermes_cli.gateway import (
-            get_gateway_runtime_snapshot, _format_gateway_pids, named_profile_served_by_running_multiplexer)
-        from hermes_cli.gateway_multiplex_served import multiplexer_served_secondaries
-        snapshot = get_gateway_runtime_snapshot()
-        # A satellite profile has no gateway.pid of its own; the default multiplexer is its live process.
-        if not snapshot.running and named_profile_served_by_running_multiplexer():
-            _kv_flag("Status:", True, "running (via the default-profile multiplexer)", "stopped")
-            _kv("Manage with:", "hermes gateway status   # from the default profile")
-            return
-        _kv_flag("Status:", snapshot.running, "running", "stopped")
-        _kv("Manager:", snapshot.manager)
-        if snapshot.gateway_pids:
-            _kv("PID(s):", _format_gateway_pids(snapshot.gateway_pids))
-        if snapshot.running and (served := multiplexer_served_secondaries()):
-            _kv("Serves:", ", ".join(served))
-            from hermes_cli.gateway_multiplex_served import served_profile_ingress_urls
-            for name, per_platform in sorted(served_profile_ingress_urls().items()):
-                for platform, url in sorted(per_platform.items()):
-                    _kv(f"  {name}/{platform}:", url)
-        if snapshot.has_process_service_mismatch:
-            _kv("Service:", "installed but not managing the current running gateway")
-        elif snapshot.service_installed and not snapshot.service_running:
-            _kv("Service:", "installed but stopped")
-    except Exception:
-        platform = "linux" if sys.platform.startswith("linux") else sys.platform
-        status_text, manager = _GATEWAY_FALLBACK.get(platform, ("N/A", "(not supported on this platform)"))
-        _kv("Status:", color(status_text, Colors.DIM))
-        _kv("Manager:", manager)
 
 
 def _load_json(path: Path, encoding: str = "utf-8"):
@@ -352,15 +305,8 @@ def _render_footer(ctx):
     print()
 
 
-def _connected_platforms() -> list:
-    """Platforms the gateway would start (``GatewayConfig.get_connected_platforms``)."""
-    from gateway.config import load_gateway_config
-    return load_gateway_config().get_connected_platforms()
 
 
-def _connected_platform_labels() -> list:
-    from gateway.platform_registry import platform_registry
-    return [getattr(platform_registry.get(p.value), "label", p.value) for p in _connected_platforms()]
 
 
 def _authenticated_provider_names() -> list:
@@ -374,13 +320,6 @@ def _authenticated_provider_names() -> list:
         probe_custom_providers=False)]
 
 
-def _gateway_state() -> tuple:
-    from hermes_cli.gateway import get_gateway_runtime_snapshot, named_profile_served_by_running_multiplexer
-    if get_gateway_runtime_snapshot().running:
-        return True, "running"
-    if named_profile_served_by_running_multiplexer():  # satellite profile: no gateway.pid of its own
-        return True, "running (via the default-profile multiplexer)"
-    return False, "stopped"
 
 
 def _summary_row(label: str, probe, empty: str) -> None:
@@ -400,12 +339,6 @@ def _render_summary(ctx):
     _kv("Model:", _configured_model_label(ctx.config))
     _kv("Provider:", _effective_provider_label())
     _summary_row("Providers:", _authenticated_provider_names, "none connected")
-    try:
-        running, text = _gateway_state()
-        _kv_flag("Gateway:", running, text, text)
-    except Exception:
-        _kv("Gateway:", "unknown")
-    _summary_row("Platforms:", _connected_platform_labels, "none configured")
     _kv("Jobs:", _cron_summary())
     _banner(("  Run 'hermes status --full' for every section",), Colors.DIM)
     print()
@@ -414,7 +347,7 @@ def _render_summary(ctx):
 # Print order of `hermes status`; each renderer takes the shared _StatusContext.
 _SECTIONS = (
     _render_header, _render_environment, _render_api_keys, _render_auth_providers, _render_nous_gateway,
-    _render_apikey_providers, _render_terminal, _render_platforms, _render_gateway, _render_cron,
+    _render_apikey_providers, _render_terminal, _render_cron,
     _render_sessions, _render_deep, _render_footer)
 
 

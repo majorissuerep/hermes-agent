@@ -105,27 +105,6 @@ def test_stall_interrupted_cooldown_stamp_is_durable_inside_persist_window(sessi
     assert row["last_activity_provenance"] == ActivityProvenance.AGENT_COMPRESSION_COOLDOWN.value
 
 
-@pytest.mark.parametrize(
-    "provenance_name, desc",
-    [
-        ("AGENT_COMPRESSION_TIMEOUT", "session hygiene compression timed out"),
-        ("AGENT_COMPRESSION_TURNHOLD", "session hygiene compression turn-hold"),
-        ("AGENT_COMPRESSION_COOLDOWN", "session hygiene compression aborted"),
-    ],
-)
-def test_gateway_hygiene_terminal_stamps_are_durable(session, provenance_name, desc):
-    """Every gateway-hygiene terminal transition must converge the durable row too."""
-    from gateway.run import _stamp_hygiene_compression_provenance
-
-    _mid_compression_durable_stamp(session.agent, session.db, session.session_id)
-
-    _stamp_hygiene_compression_provenance(
-        session.agent, desc, getattr(ActivityProvenance, provenance_name), "test stamp failed",
-    )
-
-    row = session.db.get_session(session.session_id)
-    assert row["last_activity_description"] == desc
-    assert row["last_activity_provenance"] == getattr(ActivityProvenance, provenance_name).value
 
 
 def test_reconnect_reader_sees_terminal_state_not_in_progress(session):

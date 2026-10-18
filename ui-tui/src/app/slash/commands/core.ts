@@ -1,6 +1,6 @@
 import { forceRedraw, type MouseTrackingMode } from '@hermes/ink'
 
-import { DASHBOARD_TUI_MODE, NO_CONFIRM_DESTRUCTIVE } from '../../../config/env.js'
+import { NO_CONFIRM_DESTRUCTIVE } from '../../../config/env.js'
 import { dailyFortune, randomFortune } from '../../../content/fortunes.js'
 import { hotkeys } from '../../../content/hotkeys.js'
 import { isSectionName, nextDetailsMode, parseDetailsMode, SECTION_NAMES } from '../../../domain/details.js'
@@ -12,7 +12,6 @@ import type {
   SessionSteerResponse,
   SessionTitleResponse,
   SessionUndoResponse,
-  SlashExecResponse,
   SystemBatteryResponse
 } from '../../../gatewayTypes.js'
 import { t } from '../../../i18n/runtime.js'
@@ -24,19 +23,16 @@ import {
   isRemoteShellSession
 } from '../../../lib/terminalSetup.js'
 import type { Msg, PanelSection } from '../../../types.js'
-import { $deck, DECK_HOME, DECK_MODE } from '../../deckStore.js'
 import type { StatusBarMode } from '../../interfaces.js'
 import { patchOverlayState } from '../../overlayStore.js'
 import { patchUiState } from '../../uiStore.js'
-import { canonicalRewind, canonicalTitle } from '../canonicalSessionCommands.js'
 import type { SlashCommand, SlashRunCtx } from '../types.js'
 
 // Client display preferences: written to the profile's config.yaml by either backend (the shared
 // owner's config.set serves them profile-wide, like the sidecar). `/focus` names the session on the
 // shared owner so its tool-progress mode follows at once (the sidecar's session read it from config).
 const saveDisplayPref = (ctx: SlashRunCtx, key: string, value: string) => {
-  const session = key === 'focus' && ctx.gateway.gw?.isCanonical && ctx.sid ? { session_id: ctx.sid } : {}
-
+  const session = {}
   ctx.gateway.rpc<ConfigSetResponse>('config.set', { key, value, ...session }).catch(() => {})
 }
 
@@ -88,12 +84,9 @@ const mouseModeFromArg = (arg: string, current: MouseTrackingMode): MouseTrackin
 
 const RESET_WORDS = new Set(['reset', 'clear', 'default'])
 const CYCLE_WORDS = new Set(['cycle', 'toggle'])
-
 const PREVIEW_CHARS = 50
-
 /** Clip a queued/steered prompt for the confirmation line. */
 const previewOf = (text: string): string => `${text.slice(0, PREVIEW_CHARS)}${text.length > PREVIEW_CHARS ? '…' : ''}`
-
 export const coreCommands: SlashCommand[] = [
   {
     help: 'list commands + hotkeys',
@@ -122,74 +115,36 @@ export const coreCommands: SlashCommand[] = [
         },
         { rows: hotkeys(), title: t('help.hotkeys') }
       )
-
       ctx.transcript.panel(ctx.ui.theme.brand.helpHeader, sections)
     }
   },
-
   {
     aliases: ['exit'],
-    help: 'exit hermes (a deck session stays open — /close ends it)',
+    help: 'exit Hermes and stop this terminal runtime',
     name: 'quit',
     run: (_arg, ctx) => {
-      // In the hosted dashboard chat there is no in-page restart path after
-      // the PTY child exits, so quitting bricks the tab until a refresh. The
-      // keyboard idle-exit (Ctrl+C / Ctrl+D) and SIGINT handling already refuse
-      // to die in this mode (see useInputHandlers + entry.tsx); gate /exit and
-      // /quit on the same DASHBOARD_TUI_MODE flag. Unlike the keyboard path
-      // (which auto-starts a fresh chat), the explicit quit command refuses and
-      // instructs the user to run /new themselves.
-      if (DASHBOARD_TUI_MODE) {
-        ctx.transcript.sys(t('slashCmd.core.quit.dashboardDisabled'))
-
-        return
-      }
-
       ctx.session.die()
     }
   },
-
   {
-    help: 'close this session for good — it leaves the deck (/quit only detaches it)',
+    help: 'close this terminal session',
     name: 'close',
     run: (_arg, ctx) => {
-      const { ref } = $deck.get()
-
-      // Without the session host a session already ends with its terminal: /close is /quit.
-      if (!DECK_MODE || !ref) {
+      {
         return ctx.session.die()
       }
-
-      void ctx.gateway.rpc<{ closed: boolean }>('deck.close', { target: ref }).then(result => {
-        if (!result) {
-          return
-        }
-
-        // `hermes deck` returns to the deck (the host's deck.closed event opens it); a plain terminal exits.
-        if (!DECK_HOME) {
-          ctx.session.die()
-        }
-      })
     }
   },
-
   {
     help: 'update Hermes Agent to the latest version (exits TUI)',
     name: 'update',
     run: (_arg, ctx) => {
-      if (DASHBOARD_TUI_MODE) {
-        ctx.transcript.sys(t('slashCmd.core.update.dashboardDisabled'))
-
-        return
-      }
-
       ctx.transcript.sys(t('slashCmd.core.update.exiting'))
       // Exit code 42 signals the Python wrapper to exec `hermes update`.
       // Use dieWithCode for proper cleanup (gateway kill + Ink unmount).
       setTimeout(() => ctx.session.dieWithCode(42), 100)
     }
   },
-
   {
     aliases: ['scroll'],
     help: 'set mouse tracking preset [on|off|toggle|wheel|buttons|all]',
@@ -207,7 +162,6 @@ export const coreCommands: SlashCommand[] = [
       saveDisplayPref(ctx, 'mouse', next)
     }
   },
-
   {
     aliases: ['new'],
     help: 'start a new session',
@@ -244,7 +198,6 @@ export const coreCommands: SlashCommand[] = [
       })
     }
   },
-
   {
     help: 'force a full UI repaint',
     name: 'redraw',
@@ -253,27 +206,12 @@ export const coreCommands: SlashCommand[] = [
       ctx.transcript.sys(t('slashCmd.core.redraw.done'))
     }
   },
-
   {
     help: 'show live session info',
     name: 'status',
     run: (_arg, ctx) => {
       if (!ctx.sid) {
         return ctx.transcript.sys(t('slashCmd.core.status.noActiveSession'))
-      }
-
-      if (ctx.gateway.gw?.isCanonical) {
-        // The shared gateway serves /status as a session read; session.status is a legacy sidecar RPC.
-        ctx.gateway.gw
-          .request<SlashExecResponse>('slash.exec', { command: 'status', session_id: ctx.sid })
-          .then(r => {
-            if (!ctx.stale()) {
-              ctx.transcript.page(r?.output || t('slashCmd.core.status.empty'), t('slashCmd.core.status.pageTitle'))
-            }
-          })
-          .catch(ctx.guardedErr)
-
-        return
       }
 
       ctx.gateway
@@ -286,7 +224,6 @@ export const coreCommands: SlashCommand[] = [
         .catch(ctx.guardedErr)
     }
   },
-
   {
     help: 'set or show current session title',
     name: 'title',
@@ -296,10 +233,6 @@ export const coreCommands: SlashCommand[] = [
       }
 
       const title = arg.trim()
-
-      if (ctx.gateway.gw?.isCanonical && (!arg || title)) {
-        return canonicalTitle(title, ctx)
-      }
 
       if (!arg) {
         ctx.gateway
@@ -332,7 +265,6 @@ export const coreCommands: SlashCommand[] = [
         .catch(ctx.guardedErr)
     }
   },
-
   {
     help: 'name this session with the LLM, or set its name',
     name: 'name',
@@ -341,19 +273,21 @@ export const coreCommands: SlashCommand[] = [
       if (!ctx.sid) {
         return ctx.transcript.sys(t('slashCmd.core.title.noActiveSession'))
       }
+
       ctx.gateway
         .rpc<SessionTitleResponse>('session.title', {
           session_id: ctx.sid,
           ...(arg.trim() ? { title: arg.trim() } : { generate: true })
         })
-        .then(ctx.guarded<SessionTitleResponse>(r => {
-          patchUiState({ sessionTitle: r.title })
-          ctx.transcript.sys(t('slashCmd.core.title.set', r.title, ''))
-        }))
+        .then(
+          ctx.guarded<SessionTitleResponse>(r => {
+            patchUiState({ sessionTitle: r.title })
+            ctx.transcript.sys(t('slashCmd.core.title.set', r.title, ''))
+          })
+        )
         .catch(ctx.guardedErr)
     }
   },
-
   {
     help: 'toggle compact display',
     name: 'density',
@@ -369,7 +303,6 @@ export const coreCommands: SlashCommand[] = [
       saveDisplayPref(ctx, 'density', next ? 'on' : 'off')
     }
   },
-
   {
     aliases: ['detail'],
     help: 'control agent detail visibility (global or per-section)',
@@ -410,7 +343,6 @@ export const coreCommands: SlashCommand[] = [
         }
 
         const { [first]: _drop, ...rest } = ui.sections
-
         patchUiState({ sections: mode ? { ...rest, [first]: mode } : rest })
         transcript.sys(t('slashCmd.core.details.section', first, mode ?? t('slashCmd.core.details.reset')))
         saveDisplayPref(ctx, `details_mode.${first}`, mode ?? '')
@@ -425,13 +357,11 @@ export const coreCommands: SlashCommand[] = [
       }
 
       const sections = Object.fromEntries(SECTION_NAMES.map(section => [section, next]))
-
       patchUiState({ detailsMode: next, detailsModeCommandOverride: true, sections })
       transcript.sys(t('slashCmd.core.details.current', next, ''))
       saveDisplayPref(ctx, 'details_mode', next)
     }
   },
-
   {
     help: 'local fortune',
     name: 'fortune',
@@ -449,7 +379,6 @@ export const coreCommands: SlashCommand[] = [
       ctx.transcript.sys(t('slashCmd.core.fortune.usage'))
     }
   },
-
   {
     help: 'copy selection or assistant message',
     name: 'copy',
@@ -510,13 +439,11 @@ export const coreCommands: SlashCommand[] = [
         })
     }
   },
-
   {
     help: 'attach clipboard image',
     name: 'paste',
     run: (arg, ctx) => (arg ? ctx.transcript.sys(t('slashCmd.core.paste.usage')) : ctx.composer.attachClipboardImage())
   },
-
   {
     aliases: ['compose'],
     help: 'compose your next prompt in $EDITOR (same as Ctrl+G)',
@@ -534,7 +461,6 @@ export const coreCommands: SlashCommand[] = [
       })
     }
   },
-
   {
     help: 'configure IDE terminal keybindings for multiline + undo/redo',
     name: 'terminal-setup',
@@ -569,19 +495,16 @@ export const coreCommands: SlashCommand[] = [
         })
     }
   },
-
   {
     help: 'view gateway logs',
     name: 'logs',
     run: (arg, ctx) => {
       const text = ctx.gateway.gw.getLogTail(Math.min(80, Math.max(1, parseInt(arg, 10) || 20)))
-
       text
         ? ctx.transcript.page(text, t('slashCmd.core.logs.pageTitle'))
         : ctx.transcript.sys(t('slashCmd.core.logs.none'))
     }
   },
-
   {
     help: 'view current transcript (user + assistant messages)',
     name: 'history',
@@ -623,7 +546,6 @@ export const coreCommands: SlashCommand[] = [
       ctx.transcript.page(lines.join('\n\n'), t('slashCmd.core.history.pageTitle'))
     }
   },
-
   {
     help: 'save the current transcript to JSON',
     name: 'save',
@@ -656,7 +578,6 @@ export const coreCommands: SlashCommand[] = [
         .catch(ctx.guardedErr)
     }
   },
-
   {
     help: 'toggle focus view — show only your prompt and the final response [on|off|status]',
     name: 'focus',
@@ -685,7 +606,6 @@ export const coreCommands: SlashCommand[] = [
       saveDisplayPref(ctx, 'focus', next ? 'on' : 'off')
     }
   },
-
   {
     aliases: ['sb'],
     help: 'status bar position (on|off|top|bottom)',
@@ -712,7 +632,6 @@ export const coreCommands: SlashCommand[] = [
       saveDisplayPref(ctx, 'statusbar', next)
     }
   },
-
   {
     help: 'toggle a color-coded battery indicator in the status bar [on|off|status]',
     name: 'battery',
@@ -724,7 +643,6 @@ export const coreCommands: SlashCommand[] = [
       // indicator (and its poller) is off.
       if (mode === 'status' || mode === 'show') {
         const state = ctx.ui.battery ? 'on' : 'off'
-
         ctx.gateway
           .rpc<SystemBatteryResponse>('system.battery', {})
           .then(r => {
@@ -752,7 +670,6 @@ export const coreCommands: SlashCommand[] = [
       saveDisplayPref(ctx, 'battery', next ? 'on' : 'off')
     }
   },
-
   {
     aliases: ['q'],
     help: 'inspect or enqueue a message',
@@ -770,7 +687,6 @@ export const coreCommands: SlashCommand[] = [
       ctx.transcript.sys(t('slashCmd.core.queue.queued', previewOf(arg)))
     }
   },
-
   {
     aliases: ['s'],
     help: 'inject a message after the next tool call (no interrupt)',
@@ -795,9 +711,7 @@ export const coreCommands: SlashCommand[] = [
         .rpc<SessionSteerResponse>('session.steer', {
           session_id: ctx.sid,
           text: payload,
-          ...(ctx.gateway.gw.isCanonical && ctx.ui.info?.execution_generation !== undefined
-            ? { execution_generation: ctx.ui.info.execution_generation }
-            : {})
+          ...{}
         })
         .then(
           ctx.guarded<SessionSteerResponse>(r => {
@@ -813,17 +727,12 @@ export const coreCommands: SlashCommand[] = [
         .catch(ctx.guardedErr)
     }
   },
-
   {
     help: 'undo last exchange',
     name: 'undo',
     run: (_arg, ctx) => {
       if (!ctx.sid) {
         return ctx.transcript.sys(t('slashCmd.core.undo.nothing'))
-      }
-
-      if (ctx.gateway.gw?.isCanonical) {
-        return canonicalRewind('undo', ctx)
       }
 
       ctx.gateway.rpc<SessionUndoResponse>('session.undo', { session_id: ctx.sid }).then(
@@ -840,16 +749,10 @@ export const coreCommands: SlashCommand[] = [
       )
     }
   },
-
   {
     help: 'retry last user message',
     name: 'retry',
     run: (_arg, ctx) => {
-      // The durable transcript names the turn to retry, so a resumed session retries too.
-      if (ctx.sid && ctx.gateway.gw?.isCanonical) {
-        return canonicalRewind('retry', ctx)
-      }
-
       const last = ctx.local.getLastUserMsg()
 
       if (!last) {

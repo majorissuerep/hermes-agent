@@ -48,7 +48,6 @@ _armed_bytes: dict[Path, Optional[bytes]] = {}
 _run_start: Optional[tuple[list, tuple[str, str]]] = None
 _obligation_root: Optional[Path] = None
 # This run's stake in the shared host record (``owners``): disarm removes only this one.
-_owner: str = ""
 
 
 def _owns_live_checkout(root: Path) -> bool:
@@ -58,11 +57,8 @@ def _owns_live_checkout(root: Path) -> bool:
 
 
 def _obligation_paths(root: Path) -> list[Path]:
-    from hermes_cli.update_cmd_fleet import _fleet_restart_pending_marker_path
-    from hermes_cli.update_host_obligation import host_obligation_path
     from hermes_cli.venv_sync import completion_pending_path
-
-    return [completion_pending_path(root), _fleet_restart_pending_marker_path(), host_obligation_path()]
+    return [completion_pending_path(root)]
 
 
 def _read_or_none(path: Path) -> Optional[bytes]:
@@ -74,17 +70,8 @@ def _read_or_none(path: Path) -> Optional[bytes]:
 
 
 def arm_commit_obligations(root: Path, expected_sha: str) -> None:
-    """Owe the completion tail and the fleet restart for ``expected_sha`` BEFORE the tree moves.
-
-    Idempotent within a run (the first call snapshots what to restore on a no-op failure). An
-    unwritable install state, an unreadable record or a fleet restart neither store accepted
-    raises: nothing has moved yet, and moving without the obligation is exactly the
-    tail-never-runs state this exists to prevent.
-    """
-    global _armed_snapshot, _owner
-    import uuid
-
-    from hermes_cli.update_cmd_fleet import _write_fleet_restart_pending_marker
+    """Durably owe the local build/maintenance tail before any source file moves."""
+    global _armed_snapshot
     from hermes_cli.venv_sync import arm_completion
 
     root = Path(root)
@@ -92,24 +79,14 @@ def arm_commit_obligations(root: Path, expected_sha: str) -> None:
         return
     if _armed_snapshot is None:
         _armed_snapshot = {path: _read_or_none(path) for path in _obligation_paths(root)}
-        _owner = f"{root}|{os.getpid()}|{uuid.uuid4().hex}"
     try:
         arm_completion(root)
-        owed = _write_fleet_restart_pending_marker(expected_sha=expected_sha or "", owner=_owner)
-    finally:  # even a half-done arm: disarm must still recognise what this run wrote
+    finally:
         _armed_bytes.update({path: _read_or_none(path) for path in _armed_snapshot})
-    if not owed:
-        raise OSError("could not record the pending gateway-restart obligation")
 
 
 def disarm_commit_obligations() -> None:
-    """Restore both obligations to what this run found: the tree never left its pre-update commit.
-
-    Off the commit this run STARTED from nothing is handed back: a failed later move (CP1 refused
-    or failed after the CP0 branch switch, the upstream fork ff after the origin pull) settles on a
-    commit that is already new code, so the obligations are owed for THAT head instead of the
-    failed move's target, which the checkout does not contain and no restart could discharge.
-    """
+    """Restore the original tail debt only after proving this run's source move was undone."""
     global _armed_snapshot
     if _run_start is not None:
         git_cmd, (start_head, _branch) = _run_start
@@ -119,29 +96,21 @@ def disarm_commit_obligations() -> None:
             if root is not None:
                 _owe_for(root, head)
             return
-    from hermes_cli.update_host_obligation import host_obligation_path, release_host_obligation, replace_bytes
+    from pm.filesystem import durable_write_bytes
 
     snapshot, _armed_snapshot = _armed_snapshot, None
     armed = dict(_armed_bytes)
     _armed_bytes.clear()
-    host = host_obligation_path()
     for path, data in (snapshot or {}).items():
         try:
-            if path == host:
-                # Shared by every install of the OS user: same-SHA arms join one record, so bytes
-                # cannot tell whose it is; the ``owners`` stake can (review C2).
-                release_host_obligation(_owner)
-                continue
             if path not in armed or _read_or_none(path) != armed[path]:
-                continue  # rewritten since this run armed it (another install's update): theirs now
+                continue
             if data is None:
                 path.unlink(missing_ok=True)
             else:
-                # An unpredictable exclusive temp, never a fixed name: nothing at any guessable
-                # sibling is written through or deleted first (reviews N05, O1).
-                replace_bytes(path, data)
+                durable_write_bytes(path, data)
         except OSError:
-            pass  # an owed tail/restart left armed is a retry, never a lost obligation
+            logger.warning("Could not restore original update-tail debt at %s", path, exc_info=True)
 
 
 def owe_restore_of(root: Path, pre: str | None) -> None:
@@ -158,8 +127,8 @@ def _owe_for(root: Path, sha: str) -> None:
         arm_commit_obligations(root, sha)
     except OSError as exc:
         logger.warning("Could not re-arm the update obligations for %s: %s", sha[:10], exc)
-        print(f"  ⚠ Could not record the restart this update still owes for {sha[:10]} ({exc}); "
-              "run `hermes gateway restart` once the update is done.", file=sys.stderr)
+        print(f"  ⚠ Could not record the finishing steps owed for {sha[:10]} ({exc}); "
+              "run `hermes update` again to finish them.", file=sys.stderr)
 
 
 def debt_sha_for_move(pre: str, target: str) -> str:
@@ -181,11 +150,7 @@ def arm_commit_point(git_cmd, root: Path, expected_sha: str, **move) -> str | No
 
     ``None`` when both are durable; otherwise why not, with the obligations handed back
     (``disarm_commit_obligations``), and the caller must stop before git writes a file.
-    Linux/macOS gateways are paused first: this is every route's first checkout move.
     """
-    from hermes_cli.update_cmd_posix_pause import pause_at_commit_point
-    if refused := pause_at_commit_point():
-        return refused
     try:
         arm_commit_obligations(root, expected_sha)
         arm_tree_move(git_cmd, root, **move)
@@ -572,8 +537,7 @@ def begin_update_attempt() -> None:
     long-lived caller) that inherited the first one's snapshot and owner would hand back the
     first update's committed debt as its own undo when its move is refused (review O5).
     """
-    global _armed_snapshot, _run_start, _obligation_root, _owner
-    _owner = ""
+    global _armed_snapshot, _run_start, _obligation_root
     _armed_snapshot = None
     _armed_bytes.clear()
     _run_start = None

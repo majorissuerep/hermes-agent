@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 from tools import async_delegation as ad
 from tools.process_registry_notifications import format_process_notification
-from tui_gateway.session_notifications import _notification_event_dedup_key
+from tui_runtime.session_notifications import _notification_event_dedup_key
 
 
 def _record(status="running"):
@@ -58,12 +58,3 @@ def test_interim_notice_never_claims_or_acknowledges_the_batch_final_row(tmp_pat
     assert ad.claim_event_delivery(notice, "tui-poller") == ""
     ad.complete_event_delivery(notice, "")
     assert ad.is_interim_delegation_event(notice) and not ad.is_interim_delegation_event(final)
-
-
-def test_gateway_dedup_identity_separates_notices_from_the_final_and_from_each_other():
-    from gateway.run_notifications import GatewayNotificationsMixin
-    ident = GatewayNotificationsMixin._completion_delivery_identity
-    n0 = {"type": "async_delegation", "delegation_id": "d", "task_failure_notice": True, "results": [{"task_index": 0}]}
-    n1 = {"type": "async_delegation", "delegation_id": "d", "task_failure_notice": True, "results": [{"task_index": 1}]}
-    final = {"type": "async_delegation", "delegation_id": "d", "is_batch": True, "results": []}
-    assert len({ident(n0), ident(n1), ident(final)}) == 3

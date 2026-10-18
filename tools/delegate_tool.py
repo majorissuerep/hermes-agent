@@ -42,7 +42,7 @@ from tools.delegate_tool_progress import (
     _safe_progress, format_batch_tag, format_subagent_failure_line,
 )
 from tools.delegate_tool_registry import (
-    _CONTROL_ACTIONS, _active_subagents, _active_subagents_lock, _capture_gateway_steer_authority,
+    _CONTROL_ACTIONS, _active_subagents, _active_subagents_lock, _capture_local_steer_authority,
     _handle_control_action, _is_descendant_of, _owns_subagent_record, _register_subagent, _unregister_subagent,
     get_subagent_attribution, interrupt_subagent, is_spawn_paused, list_active_subagents, set_spawn_paused,
     steer_subagent,
@@ -130,23 +130,16 @@ def _open_child_session_db(parent_agent) -> Any:
     # and can be closed while a fire-and-forget background child is still flushing on a daemon thread —
     # every subsequent flush then hits the closed handle and the child's transcript is silently dropped
     # (#81267). It MUST point at the same database FILE as the parent's handle: parents can hold non-default
-    # per-profile handles (tui_gateway opens SessionDB(db_path=<profile>/ state.db) for non-launch
+    # per-profile handles (tui_runtime opens SessionDB(db_path=<profile>/ state.db) for non-launch
     # profiles), and a bare SessionDB() would write the child's transcript into the launch profile's db,
     # breaking parent_session_id lineage and session_search. AsyncSessionDB wrappers (gateway) forward
     # .db_path via __getattr__, so this works through them.
-    from agent.runtime_session_store import RuntimeSessionStore, WorkerPersistenceError, is_worker_process
     parent_session_db = getattr(parent_agent, "_session_db", None)
-    if is_worker_process() or isinstance(parent_session_db, RuntimeSessionStore):
-        # Missing db_path on a scoped store is NOT permission to open the
-        # launch profile. Child identity must first be reserved by the owner.
-        raise WorkerPersistenceError('worker_child_registration_required')
     if parent_session_db is None:
         return None
-    with _quiet("subagent: failed to open dedicated SessionDB; child persistence disabled", exc_info=True):
-        from hermes_state.registry import acquire
-        _parent_db_path = getattr(parent_session_db, "db_path", None)
-        return acquire(_parent_db_path) if _parent_db_path is not None else acquire()
-    return None
+    from hermes_state.registry import acquire
+    parent_db_path = parent_session_db.db_path
+    return acquire(parent_db_path)
 
 def _apply_child_cache_ttl(child) -> None:
     """A delegated child never uses the 1h cache tier. The tier is priced for a person who steps

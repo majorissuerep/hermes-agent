@@ -478,7 +478,7 @@ def test_force_prefix_is_not_plugin_passthrough(child_env, monkeypatch, builder,
 @pytest.mark.parametrize("scope", [None, {"BUZZ_PRIVATE_KEY": "fake-scoped"}])
 def test_buzz_context_and_plain_process_value(child_env, monkeypatch, managed, platform, allowed, scope):
     from agent import secret_scope as ss
-    from gateway.session_context import _SESSION_PLATFORM
+    from agent.session_context import _SESSION_PLATFORM
     from tools.code_execution_env import _scrub_child_env
     from tools.env_passthrough import register_env_passthrough, is_env_passthrough
     buzz = {"BUZZ_PRIVATE_KEY": "fake-process", "BUZZ_AUTH_TAG": "fake-tag", "BUZZ_RELAY_URL": "fake-relay"}
@@ -507,7 +507,7 @@ def test_buzz_context_and_plain_process_value(child_env, monkeypatch, managed, p
 @pytest.mark.parametrize("first_platform,first_value", [("buzz", "fake-profile-a"), ("telegram", None)], ids=["buzz", "other"])
 def test_buzz_secret_never_reaches_second_profile_via_snapshot(child_env, monkeypatch, first_platform, first_value):
     from agent import secret_scope as ss
-    from gateway.session_context import _SESSION_PLATFORM
+    from agent.session_context import _SESSION_PLATFORM
     monkeypatch.setenv("BUZZ_PRIVATE_KEY", "fake-profile-a")
     ss.set_multiplex_active(True)
     platform = _SESSION_PLATFORM.set(first_platform)
@@ -1044,7 +1044,7 @@ class TestNativeEnvironmentContracts:
         ``apps/desktop/electron/main.ts``,
         ``gateway/run.py::_ensure_windows_gateway_venv_imports``,
         ``cron/scheduler.py::_windows_cron_python_invocation``,
-        ``tui_gateway/host_supervisor.py``) shows they all inject the exact
+        ``tui_runtime/host_supervisor.py``) shows they all inject the exact
         repo root and/or the venv site-packages — none injects
         ``<repo>/tools`` or another direct child as an independent
         PYTHONPATH entry.  A user path that merely happens to live under

@@ -1945,33 +1945,6 @@ class TestSchemaInit:
 
 
 
-    def test_telegram_topic_binding_roundtrip_requires_explicit_schema(self, tmp_path):
-        db = SessionDB(db_path=tmp_path / "state.db")
-        db.create_session(
-            session_id="topic-session",
-            source="telegram",
-            user_id="208214988",
-        )
-
-        assert db.get_telegram_topic_binding(chat_id="208214988", thread_id="17585") is None
-
-        db.bind_telegram_topic(
-            chat_id="208214988",
-            thread_id="17585",
-            user_id="208214988",
-            session_key="telegram:dm:208214988:thread:17585",
-            session_id="topic-session",
-        )
-
-        binding = db.get_telegram_topic_binding(chat_id="208214988", thread_id="17585")
-        assert binding is not None
-        assert binding["chat_id"] == "208214988"
-        assert binding["thread_id"] == "17585"
-        assert binding["user_id"] == "208214988"
-        assert binding["session_key"] == "telegram:dm:208214988:thread:17585"
-        assert binding["session_id"] == "topic-session"
-        assert db.get_meta("telegram_dm_topic_schema_version") == "3"
-        db.close()
 
 
 
@@ -2679,46 +2652,18 @@ class TestListSessionsRich:
             "compression-parent",
             "compression-child",
         ]
-        db.record_gateway_session_peer(
-            "compression-child",
-            source="telegram",
-            session_key="agent:main:telegram:dm:recovered",
-            include_compression_ancestors=True,
-        )
-        assert db.get_session("compression-parent")["session_key"] == (
-            "agent:main:telegram:dm:recovered"
-        )
         assert any(
             row["orphan_id"] == "routing-orphan"
             for row in db.find_orphaned_gateway_sessions()
         )
 
-    def test_created_source_preserved_across_cross_platform_resume(self, db):
-        """``created_source`` is immutable provenance (#56439): stamped at creation and never
-        rewritten by gateway peer recording, which must keep ``source`` as live routing state."""
-        db.create_session("tui-sess", "tui")
-        db.append_message("tui-sess", "user", "created on desktop")
-
-        # /resume from Telegram: routing state moves, provenance does not.
-        db.record_gateway_session_peer(
-            "tui-sess", source="telegram", session_key="agent:main:telegram:dm:1", chat_id="1"
-        )
-        row = db.get_session("tui-sess")
-        assert row["source"] == "telegram"
-        assert row["created_source"] == "tui"
-
-        # Later upserts (any surface) never clobber the stamped provenance.
-        db.ensure_session("tui-sess", "discord")
-        assert db.get_session("tui-sess")["created_source"] == "tui"
-
-        # Self-healing insert stamps provenance from the first writer.
-        db.record_gateway_session_peer(
-            "slack-sess", source="slack", session_key="agent:main:slack:ch:2", chat_id="2"
-        )
-        assert db.get_session("slack-sess")["created_source"] == "slack"
-
-
-
+    def test_created_source_preserved_across_native_resume(self, db):
+        db.create_session('tui-session', 'tui')
+        db.append_message('tui-session', 'user', 'created on terminal')
+        db.ensure_session('tui-session', 'cli')
+        row = db.get_session('tui-session')
+        assert row['created_source'] == 'tui'
+        assert db.get_messages('tui-session')[0]['content'] == 'created on terminal'
 
 
     def test_last_active_prefers_session_activity_heartbeat(self, db):
@@ -2797,33 +2742,6 @@ class TestListSessionsRich:
         db.touch_session_activity("s1", 1_700_000_500.0, description="api")  # older than message
         assert db.list_sessions_rich()[0]["last_active"] == 1_700_000_800.0
 
-    def test_list_gateway_sessions_last_active_uses_activity_heartbeat(self, db):
-        db.create_session(
-            "gw-1",
-            "telegram",
-            session_key="agent:main:telegram:dm:c1",
-            chat_id="c1",
-            chat_type="dm",
-        )
-        db.append_message("gw-1", "user", "ping")
-        with db._lock:
-            db._conn.execute(
-                "UPDATE messages SET timestamp=? WHERE session_id=?",
-                (1_700_000_000.0, "gw-1"),
-            )
-            db._conn.commit()
-
-        heartbeat = 1_700_000_900.0
-        db.touch_session_activity(
-            "gw-1",
-            heartbeat,
-            description="compressing context",
-        )
-        rows = db.list_gateway_sessions(active_only=True)
-        assert len(rows) == 1
-        assert rows[0]["last_active"] == heartbeat
-        activity = _activity_snapshot(db, "gw-1")
-        assert activity["last_activity_description"] == "compressing context"
 
 
 
@@ -3318,34 +3236,6 @@ class TestCompressionChainProjection:
         assert db.get_compression_lineage("tip1") == ["root1", "tip1"]
         assert db.get_compression_lineage("reset1") == ["reset1"]
 
-    def test_routing_lineage_cte_agrees_with_python_walk_for_reset_fork(self, db):
-        """``record_gateway_session_peer(include_compression_ancestors=True)`` re-keys every row named by
-        ``_COMPRESSION_LINEAGE_CTE``. Resuming a reset fork of a compression-ended parent must
-        re-key only the fork: the CTE has to stop at the reset child exactly like
-        ``get_compression_lineage`` does, or the real lineage's ancestors land on the fork's peer."""
-        import hermes_state.gateway as gateway_mod
-
-        t0 = time.time() - 3600
-        db.create_session("root", "cli")
-        db._conn.execute("UPDATE sessions SET ended_at=?, end_reason='compression' WHERE id=?", (t0 + 10, "root"))
-        db.create_session("mid1", "cli", parent_session_id="root")
-        db._conn.execute("UPDATE sessions SET ended_at=?, end_reason='compression' WHERE id=?", (t0 + 20, "mid1"))
-        db.create_session("mid2", "cli", parent_session_id="mid1")
-        db._conn.execute("UPDATE sessions SET ended_at=?, end_reason='compression' WHERE id=?", (t0 + 30, "mid2"))
-        db.create_session("tip", "cli", parent_session_id="mid2")
-        db.create_session("reset", "cli", parent_session_id="mid2", model_config={"_reset_from": "mid2"})
-        db._conn.commit()
-
-        sql = gateway_mod._COMPRESSION_LINEAGE_CTE + " SELECT id FROM compression_lineage"
-        with db._read_ctx() as conn:
-            cte = {start: sorted(r[0] for r in conn.execute(sql, (start,)).fetchall()) for start in ("reset", "tip")}
-        assert cte["reset"] == sorted(db.get_compression_lineage("reset")) == ["reset"]
-        assert cte["tip"] == sorted(db.get_compression_lineage("tip")) == ["mid1", "mid2", "root", "tip"]
-
-        db.record_gateway_session_peer("reset", source="cli", user_id="u", session_key="cli:reset-chat",
-                                       chat_id="reset-chat", chat_type="dm", include_compression_ancestors=True)
-        assert db.get_session("reset")["session_key"] == "cli:reset-chat"
-        assert all(db.get_session(s)["session_key"] != "cli:reset-chat" for s in ("root", "mid1", "mid2", "tip"))
 
     def test_list_serves_full_lineage_ids_for_projected_rows(self, db):
         """The projected tip row must carry every chain id. Root and tip
@@ -5181,148 +5071,12 @@ class TestListCronJobRuns:
 
 
 
-def test_gateway_session_peer_round_trip_and_recovery(db):
-    db.create_session(
-        "gw-session",
-        "telegram",
-        user_id="user-1",
-        session_key="agent:main:telegram:dm:chat-1",
-        chat_id="chat-1",
-        chat_type="dm",
-        thread_id=None,
-    )
-    db.append_message("gw-session", "user", "hello")
-
-    row = db.get_session("gw-session")
-    assert row["session_key"] == "agent:main:telegram:dm:chat-1"
-    assert row["chat_id"] == "chat-1"
-    assert row["chat_type"] == "dm"
-
-    recovered = db.find_latest_gateway_session_for_peer(
-        source="telegram",
-        user_id="user-1",
-        session_key="agent:main:telegram:dm:chat-1",
-        chat_id="chat-1",
-        chat_type="dm",
-    )
-    assert recovered["id"] == "gw-session"
 
 
-@pytest.mark.parametrize(
-    "persisted_session_key",
-    ["agent:main:telegram:dm:chat-1", None],
-    ids=["exact-key", "peer-fallback"],
-)
-def test_gateway_session_recovery_does_not_cross_newer_reset_boundary(
-    db, persisted_session_key
-):
-    """A newer session_reset row fences recovery for the peer (#68539).
-
-    Recovery must never reach *behind* an intentional /new boundary and
-    resurrect an older still-open row — if the newest boundary row for the
-    peer is reset-ended, recovery returns nothing.
-    """
-    peer = {
-        "user_id": "user-1",
-        "session_key": persisted_session_key,
-        "chat_id": "chat-1",
-        "chat_type": "dm",
-    }
-    db.create_session("gw-before-reset", "telegram", **peer)
-    db.append_message("gw-before-reset", "user", "old context")
-    db.create_session("gw-reset", "telegram", **peer)
-    db.append_message("gw-reset", "user", "/new")
-    db.end_session("gw-reset", "session_reset")
-
-    assert db.find_latest_gateway_session_for_peer(
-        source="telegram",
-        user_id="user-1",
-        session_key="agent:main:telegram:dm:chat-1",
-        chat_id="chat-1",
-        chat_type="dm",
-    ) is None
 
 
-def test_peer_fallback_never_adopts_a_sibling_profiles_row(tmp_path, monkeypatch):
-    """#74285: the peer-tuple fallback is fenced by the store's own profile.
-
-    A Telegram DM peer tuple (chat_id == user_id, no thread) is identical for
-    every bot, so a legacy sibling-profile row sitting in this store — written
-    before the per-profile partition — must lose to the older own row, and
-    with no own row recovery must return nothing rather than the sibling's.
-    """
-    import hermes_state
-
-    root = tmp_path / "hermes"
-    root.mkdir()
-    monkeypatch.setenv("HERMES_HOME", str(root))
-    monkeypatch.setattr(hermes_state, "DEFAULT_DB_PATH", hermes_state._IMPORT_DEFAULT_DB_PATH)
-    store = SessionDB(db_path=root / "state.db")  # owner: default
-    try:
-        peer = {"user_id": "42", "chat_id": "42", "chat_type": "dm"}
-        store.create_session("sibling", "telegram", session_key="agent:bot2:telegram:dm:42",
-                             profile_name="bot2", **peer)
-        store.append_message("sibling", "user", "bot2's conversation")
-
-        def recover():
-            return store.find_latest_gateway_session_for_peer(
-                source="telegram", session_key="agent:main:telegram:dm:42", **peer
-            )
-
-        assert recover() is None  # only the sibling exists: fail closed
-
-        store.create_session("own", "telegram", session_key="agent:main:telegram:dm:42:old", **peer)
-        store.append_message("own", "user", "default's conversation")
-        store._execute_write(
-            lambda c: c.execute("UPDATE sessions SET last_activity_at = 1 WHERE id = 'own'")
-        )
-        assert recover()["id"] == "own"  # older own row beats newer sibling row
-    finally:
-        store.close()
 
 
-def test_peer_fallback_reset_boundary_is_profile_fenced(tmp_path, monkeypatch):
-    """#119121: the recovery reset fence carries the same profile predicate as the candidate.
-
-    A Telegram DM peer tuple is identical for every bot, so a sibling profile's
-    newer session_reset row used to suppress THIS profile's recoverable session.
-    The profile's own reset must still fence.
-    """
-    import hermes_state
-
-    root = tmp_path / "hermes"
-    root.mkdir()
-    monkeypatch.setenv("HERMES_HOME", str(root))
-    monkeypatch.setattr(hermes_state, "DEFAULT_DB_PATH", hermes_state._IMPORT_DEFAULT_DB_PATH)
-    store = SessionDB(db_path=root / "state.db")  # owner: default
-    try:
-        peer = {"user_id": "42", "chat_id": "42", "chat_type": "dm"}
-
-        def recover():
-            return store.find_latest_gateway_session_for_peer(
-                source="telegram", session_key="agent:main:telegram:dm:42", **peer
-            )
-
-        def reset(session_id, session_key, profile_name):
-            store.create_session(session_id, "telegram", session_key=session_key,
-                                 profile_name=profile_name, **peer)
-            store.append_message(session_id, "user", "/new")
-            store.end_session(session_id, "session_reset")
-
-        store.create_session("own", "telegram", session_key="agent:main:telegram:dm:42:old",
-                             profile_name="default", **peer)
-        store.append_message("own", "user", "default's conversation")
-        store._execute_write(
-            lambda c: c.execute("UPDATE sessions SET last_activity_at = 1 WHERE id = 'own'")
-        )
-
-        reset("sibling-reset", "agent:bot2:telegram:dm:42", "bot2")
-        assert recover()["id"] == "own"  # a sibling profile's reset is not this profile's boundary
-
-        reset("own-reset", "agent:main:telegram:dm:42:r2", "default")
-        assert recover() is None  # the profile's own reset still fences
-    finally:
-        store.close()
 
 
 def test_child_inherits_parent_profile_only_within_its_key_namespace(db):
@@ -6030,7 +5784,7 @@ class TestGatewayRoutingPkHeal:
         try:
             assert self._pk_cols(db) == ["scope", "session_key"]
             # Existing rows survive the rebuild.
-            entries = db.load_gateway_routing_entries(scope="/home/u/.hermes/sessions")
+            entries = _legacy_routes(db, scope="/home/u/.hermes/sessions")
             assert entries == {"agent:main:telegram:dm:1": "{}"}
         finally:
             db.close()
@@ -6039,12 +5793,12 @@ class TestGatewayRoutingPkHeal:
 
     def test_current_shape_left_untouched(self, tmp_path, db):
         """A DB born with the composite PK is not rebuilt (idempotence)."""
-        db.save_gateway_routing_entry("k1", "{}", scope="s")
+        _seed_legacy_route(db, "k1", "{}", scope="s")
         assert self._pk_cols(db) == ["scope", "session_key"]
         # Re-running the heal is a no-op.
         cur = db._conn.cursor()
         db._heal_gateway_routing_pk(cur)
-        assert db.load_gateway_routing_entries(scope="s") == {"k1": "{}"}
+        assert _legacy_routes(db, scope="s") == {"k1": "{}"}
 
 
 class TestApplyDatabasePragmas:
@@ -6783,3 +6537,13 @@ class TestHandoffTimestampCarry:
         second_ts = {m["content"]: m["timestamp"] for m in db.get_messages("s")}
         assert second_ts["keep me"] == first_ts["keep me"]
         assert second_ts["tail-a"] == first_ts["tail-a"]
+
+
+def _seed_legacy_route(db, session_key, entry_json, *, scope=''):
+    db._write_sql('INSERT INTO gateway_routing(scope,session_key,entry_json,updated_at) VALUES(?,?,?,?)',
+                  (scope,session_key,entry_json,0))
+
+
+def _legacy_routes(db, *, scope=''):
+    return {row['session_key']: row['entry_json'] for row in
+            db._read_all('SELECT session_key,entry_json FROM gateway_routing WHERE scope=?', (scope,))}

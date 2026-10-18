@@ -13,7 +13,6 @@ Hermes is a large repository, and most contributions touch exactly one subsystem
 | Prompt assembly | `agent/prompt_builder.py`, `agent/system_prompt.py` | [Prompt Assembly](prompt-assembly.md) |
 | Model providers & transports | `agent/transports/`, `plugins/model-providers/`, `hermes_cli/models.py` | [Adding Providers](adding-providers.md), [Model Provider Plugins](model-provider-plugin.md), [Provider Runtime](provider-runtime.md) |
 | Built-in tools | `tools/` | [Adding Tools](adding-tools.md), [Tools Runtime](tools-runtime.md) |
-| Messaging gateway | `gateway/`, `plugins/platforms/` | [Gateway Internals](gateway-internals.md), [Adding Platform Adapters](adding-platform-adapters.md) |
 | CLI | `hermes_cli/` | [Extending the CLI](extending-the-cli.md) |
 | Plugins system | `plugins/` | [Build a Hermes Plugin](plugins/index.md) |
 | Skills (bundled & optional) | `skills/`, `optional-skills/` | [Creating Skills](creating-skills.md) |
@@ -21,9 +20,7 @@ Hermes is a large repository, and most contributions touch exactly one subsystem
 | Session storage | `hermes_state/__init__.py`, `hermes_state/*.py` | [Session Storage](session-storage.md) |
 | Browser stack | `tools/browser_tool.py`, `tools/browser_supervisor.py`, `tools/browser_cdp_tool.py` | [Browser Supervisor](browser-supervisor.md) |
 | Egress firewall | `agent/proxy_sources/iron_proxy.py` | [Egress Internals](egress-internals.md) |
-| ACP (IDE integration) | `acp_adapter/` | [ACP Internals](acp-internals.md) |
-| Desktop app | `apps/desktop/` | [Desktop Plugin SDK](desktop-plugin-sdk.md), [Worktree UI Development](worktree-ui-dev.md) |
-| TUI | `ui-tui/`, `tui_gateway/` | [Worktree UI Development](worktree-ui-dev.md) |
+| TUI | `ui-tui/`, `tui_runtime/` | [Worktree UI Development](worktree-ui-dev.md) |
 | Docs site | `website/` | [Contributing](contributing.md) |
 | Tests | `tests/`, `tests-js/` | [Contributing → Before Submitting](contributing.md#before-submitting) |
 

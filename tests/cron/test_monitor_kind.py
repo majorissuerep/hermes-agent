@@ -29,7 +29,7 @@ import pytest
 
 
 @pytest.fixture
-def hermes_env(tmp_path, monkeypatch, cron_owner):
+def hermes_env(tmp_path, monkeypatch):
     """Isolate HERMES_HOME for each test so jobs/scripts/snapshots don't leak."""
     home = tmp_path / ".hermes"
     home.mkdir()
@@ -99,8 +99,6 @@ def _install_agent_stubs(monkeypatch, observed: dict):
         },
     )
 
-    monkeypatch.setattr(sched_delivery, "_resolve_origin", lambda job: None)
-    monkeypatch.setattr(sched, "_resolve_delivery_target", lambda job: None)
     monkeypatch.setattr(sched, "_resolve_cron_enabled_toolsets", lambda job, cfg: None)
     monkeypatch.setenv("HERMES_CRON_TIMEOUT", "0")
 

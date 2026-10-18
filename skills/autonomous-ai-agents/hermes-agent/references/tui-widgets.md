@@ -127,7 +127,7 @@ Contract essentials:
 - Ambient widgets must stay small (≤ ~6 rows) — the dock sits between the
   transcript and the status bar.
 - A thrown `register()` is logged and skipped; check
-  `~/.hermes/logs/tui_gateway_crash.log` if a widget never appears.
+  `~/.hermes/logs/tui_runtime_crash.log` if a widget never appears.
 
 ## Verification
 

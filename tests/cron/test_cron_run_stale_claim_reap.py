@@ -26,7 +26,7 @@ def test_one_shot_cli_path_reaps_dead_owner_row_before_returning_sync(tmp_path, 
     import sqlite3
 
     from cron import executions
-    from gateway.session_context import _SESSION_ASYNC_DELIVERY
+    from agent.session_context import _SESSION_ASYNC_DELIVERY
     from tools import cronjob_tools
 
     monkeypatch.setattr(executions, "EXECUTIONS_FILE", tmp_path / "executions.db")

@@ -94,9 +94,9 @@ class TestInboundCacheUsesSniffer:
         ],
     )
     def test_wrong_ext_repaired(self, tmp_path, data, claimed, expected_suffix):
-        from gateway.platforms.base import cache_audio_from_bytes
+        from tools.media_cache import cache_audio_from_bytes
 
-        with patch("gateway.platforms.base.AUDIO_CACHE_DIR", tmp_path):
+        with patch("tools.media_cache.get_hermes_dir", return_value=tmp_path):
             result = cache_audio_from_bytes(data, ext=claimed)
 
         saved = tmp_path / os.path.basename(result)
@@ -104,54 +104,7 @@ class TestInboundCacheUsesSniffer:
         assert saved.read_bytes() == data
 
 
-    @pytest.mark.asyncio
-    async def test_cache_audio_from_url_sniffs_too(self, tmp_path, monkeypatch):
-        """The URL download path routes through the same sniffer."""
-        from gateway.platforms import base
-
-        monkeypatch.setattr(base, "AUDIO_CACHE_DIR", tmp_path)
-
-        class _FakeResponse:
-            status_code = 200
-
-            def raise_for_status(self):
-                return None
-
-        class _FakeStreamCM:
-            async def __aenter__(self):
-                return _FakeResponse()
-
-            async def __aexit__(self, *exc):
-                return False
-
-        class _FakeClient:
-            def stream(self, *a, **k):
-                return _FakeStreamCM()
-
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, *exc):
-                return False
-
-        async def _fake_read(response, media_type):
-            return MP3_ID3  # server sent MP3 bytes despite the .ogg claim
-
-        monkeypatch.setattr(base, "_read_httpx_body_with_limit", _fake_read)
-        monkeypatch.setattr(
-            "tools.url_safety.create_ssrf_safe_async_client",
-            lambda **k: _FakeClient(),
-        )
-        monkeypatch.setattr("tools.url_safety.is_safe_url", lambda u: True)
-
-        result = await base.cache_audio_from_url("https://example.com/voice.ogg", ext=".ogg")
-        assert result.endswith(".mp3")
 
 
 class TestSignalDelegatesToCentralSniffer:
     """signal._guess_extension audio branches delegate to the shared module."""
-
-    def test_signal_uses_shared_sniffer(self):
-        from gateway.platforms import signal as signal_mod
-
-        assert signal_mod._guess_extension(M4A) == ".m4a"

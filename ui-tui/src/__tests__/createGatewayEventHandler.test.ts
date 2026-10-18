@@ -66,7 +66,7 @@ const buildCtx = (appended: Msg[]) =>
     }
   }) as any
 
-/** Deliver one server→client request (`tui_gateway/server_requests.py`) to the TUI's request handler. */
+/** Deliver one server→client request (`tui_runtime/server_requests.py`) to the TUI's request handler. */
 const serverRequest = (method: string, params: Record<string, unknown>, id = `srq-${method}`) => {
   const respond = vi.fn()
 
@@ -760,7 +760,7 @@ describe('createGatewayEventHandler', () => {
     expect(ctx.system.sys).toHaveBeenCalledWith('Chromium-family browser launched and listening on port 9222')
   })
 
-  it('annotates gateway.start_timeout with stderr tail lines so users can diagnose without /logs', () => {
+  it('annotates runtime.start_timeout with stderr tail lines so users can diagnose without /logs', () => {
     const appended: Msg[] = []
     const onEvent = createGatewayEventHandler(buildCtx(appended))
 
@@ -771,7 +771,7 @@ describe('createGatewayEventHandler', () => {
         stderr_tail:
           '[startup] timed out\nModuleNotFoundError: No module named openai\nFileNotFoundError: ~/.hermes/config.yaml'
       },
-      type: 'gateway.start_timeout'
+      type: 'runtime.start_timeout'
     } as any)
 
     const messages = getTurnState().activity.map(a => a.text)
@@ -1050,7 +1050,7 @@ describe('createGatewayEventHandler', () => {
     expect(ctx.gateway.rpc).not.toHaveBeenCalled()
   })
 
-  it('picks the polarity-matching paired palette from gateway.ready skins', async () => {
+  it('picks the polarity-matching paired palette from runtime.ready skins', async () => {
     const appended: Msg[] = []
 
     const skin = {
@@ -1125,7 +1125,7 @@ describe('createGatewayEventHandler', () => {
   it('claims wake-word ownership when the gateway becomes ready', () => {
     const ctx = buildCtx([])
 
-    createGatewayEventHandler(ctx)({ payload: {}, type: 'gateway.ready' } as any)
+    createGatewayEventHandler(ctx)({ payload: {}, type: 'runtime.ready' } as any)
 
     expect(ctx.gateway.rpc).toHaveBeenCalledWith('wake.start', { surface: 'tui' })
   })
@@ -1246,7 +1246,7 @@ describe('createGatewayEventHandler', () => {
     expect(ctx.gateway.rpc).not.toHaveBeenCalledWith('voice.record', expect.anything())
   })
 
-  it('on gateway.ready with no STARTUP_RESUME_ID and auto_resume off, forges a new session', async () => {
+  it('on runtime.ready with no STARTUP_RESUME_ID and auto_resume off, forges a new session', async () => {
     const appended: Msg[] = []
     const newSession = vi.fn()
     const resumeById = vi.fn()
@@ -1263,13 +1263,13 @@ describe('createGatewayEventHandler', () => {
       return null
     })
 
-    createGatewayEventHandler(ctx)({ payload: {}, type: 'gateway.ready' } as any)
+    createGatewayEventHandler(ctx)({ payload: {}, type: 'runtime.ready' } as any)
 
     await vi.waitFor(() => expect(newSession).toHaveBeenCalled())
     expect(resumeById).not.toHaveBeenCalled()
   })
 
-  it('on gateway.ready after a crash, resumes the recovered session once and skips forge', async () => {
+  it('on runtime.ready after a crash, resumes the recovered session once and skips forge', async () => {
     const appended: Msg[] = []
     const newSession = vi.fn()
     const resumeById = vi.fn()
@@ -1289,7 +1289,7 @@ describe('createGatewayEventHandler', () => {
 
     const onEvent = createGatewayEventHandler(ctx)
 
-    onEvent({ payload: {}, type: 'gateway.ready' } as any)
+    onEvent({ payload: {}, type: 'runtime.ready' } as any)
 
     await vi.waitFor(() => expect(resumeById).toHaveBeenCalledWith('sess-crashed'))
     expect(newSession).not.toHaveBeenCalled()
@@ -1301,7 +1301,7 @@ describe('createGatewayEventHandler', () => {
     expect(getUiState().sid).toBe('sess-recovered')
   })
 
-  it('on gateway.ready with auto_resume on and a recent session, resumes it', async () => {
+  it('on runtime.ready with auto_resume on and a recent session, resumes it', async () => {
     const appended: Msg[] = []
     const newSession = vi.fn()
     const resumeById = vi.fn()
@@ -1322,13 +1322,13 @@ describe('createGatewayEventHandler', () => {
       return null
     })
 
-    createGatewayEventHandler(ctx)({ payload: {}, type: 'gateway.ready' } as any)
+    createGatewayEventHandler(ctx)({ payload: {}, type: 'runtime.ready' } as any)
 
     await vi.waitFor(() => expect(resumeById).toHaveBeenCalledWith('sess-most-recent'))
     expect(newSession).not.toHaveBeenCalled()
   })
 
-  it('on gateway.ready with auto_resume on but no eligible session, falls back to new', async () => {
+  it('on runtime.ready with auto_resume on but no eligible session, falls back to new', async () => {
     const appended: Msg[] = []
     const newSession = vi.fn()
     const resumeById = vi.fn()
@@ -1349,13 +1349,13 @@ describe('createGatewayEventHandler', () => {
       return null
     })
 
-    createGatewayEventHandler(ctx)({ payload: {}, type: 'gateway.ready' } as any)
+    createGatewayEventHandler(ctx)({ payload: {}, type: 'runtime.ready' } as any)
 
     await vi.waitFor(() => expect(newSession).toHaveBeenCalled())
     expect(resumeById).not.toHaveBeenCalled()
   })
 
-  it('on gateway.ready when config.get rejects, falls back to new session', async () => {
+  it('on runtime.ready when config.get rejects, falls back to new session', async () => {
     const appended: Msg[] = []
     const newSession = vi.fn()
     const resumeById = vi.fn()
@@ -1372,13 +1372,13 @@ describe('createGatewayEventHandler', () => {
       return null
     })
 
-    createGatewayEventHandler(ctx)({ payload: {}, type: 'gateway.ready' } as any)
+    createGatewayEventHandler(ctx)({ payload: {}, type: 'runtime.ready' } as any)
 
     await vi.waitFor(() => expect(newSession).toHaveBeenCalled())
     expect(resumeById).not.toHaveBeenCalled()
   })
 
-  it('on gateway.ready when session.most_recent rejects, falls back to new session', async () => {
+  it('on runtime.ready when session.most_recent rejects, falls back to new session', async () => {
     const appended: Msg[] = []
     const newSession = vi.fn()
     const resumeById = vi.fn()
@@ -1399,13 +1399,13 @@ describe('createGatewayEventHandler', () => {
       return null
     })
 
-    createGatewayEventHandler(ctx)({ payload: {}, type: 'gateway.ready' } as any)
+    createGatewayEventHandler(ctx)({ payload: {}, type: 'runtime.ready' } as any)
 
     await vi.waitFor(() => expect(newSession).toHaveBeenCalled())
     expect(resumeById).not.toHaveBeenCalled()
   })
 
-  it('on gateway.ready with STARTUP_RESUME_ID set, the env wins over config auto_resume', async () => {
+  it('on runtime.ready with STARTUP_RESUME_ID set, the env wins over config auto_resume', async () => {
     const appended: Msg[] = []
     const newSession = vi.fn()
     const resumeById = vi.fn()
@@ -1418,7 +1418,7 @@ describe('createGatewayEventHandler', () => {
       config: { display: { tui_auto_resume_recent: true } }
     }))
 
-    createGatewayEventHandler(ctx)({ payload: {}, type: 'gateway.ready' } as any)
+    createGatewayEventHandler(ctx)({ payload: {}, type: 'runtime.ready' } as any)
 
     await vi.waitFor(() => expect(resumeById).toHaveBeenCalledWith('env-explicit'))
     expect(newSession).not.toHaveBeenCalled()
@@ -1433,10 +1433,10 @@ describe('createGatewayEventHandler', () => {
 
     const onEvent = createGatewayEventHandler(ctx)
 
-    onEvent({ payload: { line: 'INFO hermes.mcp: 3 servers discovered' }, type: 'gateway.stderr' } as any)
-    onEvent({ payload: { preview: 'bad framing' }, type: 'gateway.protocol_error' } as any)
+    onEvent({ payload: { line: 'INFO hermes.mcp: 3 servers discovered' }, type: 'runtime.stderr' } as any)
+    onEvent({ payload: { preview: 'bad framing' }, type: 'runtime.protocol_error' } as any)
     serverRequest('approval', { command: 'rm -rf /tmp/nope', description: 'dangerous command' })
-    onEvent({ payload: {}, type: 'gateway.ready' } as any)
+    onEvent({ payload: {}, type: 'runtime.ready' } as any)
 
     await Promise.resolve()
     await Promise.resolve()
@@ -1636,7 +1636,7 @@ describe('createGatewayEventHandler', () => {
 
     // Config fetch starts once the gateway is ready; let it resolve before any
     // spawn (mirrors real usage — config lands well before first delegation).
-    onEvent({ payload: {}, type: 'gateway.ready' } as any)
+    onEvent({ payload: {}, type: 'runtime.ready' } as any)
     await Promise.resolve()
     await Promise.resolve()
 
@@ -2242,7 +2242,7 @@ describe('createGatewayEventHandler', () => {
   })
 
   describe('session.usage', () => {
-    it('merges a live usage tick into uiState (payload.usage shape, see tui_gateway _start_usage_ticker)', () => {
+    it('merges a live usage tick into uiState (payload.usage shape, see tui_runtime _start_usage_ticker)', () => {
       patchUiState({ sid: 'sess-1' })
       const onEvent = createGatewayEventHandler(buildCtx([]))
 

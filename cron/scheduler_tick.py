@@ -3,44 +3,15 @@
 import concurrent.futures
 import contextlib
 import logging
-import time
 
 from cron import store_health
 from cron.constants import is_recurring
 
 logger = logging.getLogger("cron.scheduler")
 
-# Log the yield at most once per episode (reset when the skew changes) to avoid per-interval spam.
-_YIELD_LOG_INTERVAL_SECONDS = 3600.0
-_last_yield_log: dict[str, object] = {}
-
-
-def _log_tick_yield_once(reason: str) -> None:
-    """Log the yield at error level once per episode (skew signature)."""
-    global _last_yield_log
-    now = time.monotonic()
-    last_reason = _last_yield_log.get("reason")
-    last_at = _last_yield_log.get("at", 0.0)
-    if last_reason != reason or (now - float(last_at)) >= _YIELD_LOG_INTERVAL_SECONDS:
-        logger.error(
-            "Cron tick yielded: this process is running stale code (%s) and a "
-            "fresher gateway owns the runtime lock — jobs will fire from that "
-            "process. Restart this one to reclaim its ticks.",
-            reason)
-    _last_yield_log = {"reason": reason, "at": now}
-
-
-def tick(verbose=True, adapters=None, loop=None, sync=True, *, can_dispatch=None,
-         headless: bool = False):
-    from hermes_cli.backend_retirement import retirement
-
-    # Hold admission through the entire scan/advance/submit handoff. A predicate alone races
-    # prepare after the check but before a due job enters the running-job ledger.
-    with retirement.work() as admitted:
-        if not admitted:
-            return 0
-        return _tick_admitted(verbose, adapters, loop, sync, can_dispatch=can_dispatch,
-                              headless=headless)
+def tick(verbose=True, sync=True):
+    """Execute due local jobs under the per-home lock; no service is started."""
+    return _tick_admitted(verbose, sync)
 
 
 def _acquire_tick_lock_or_degrade(_sched):
@@ -72,40 +43,16 @@ def _advance_or_drop_recurring(_sched, due_jobs: list) -> list:
         return [j for j in due_jobs if not is_recurring(j)]
 
 
-def _pre_dispatch_housekeeping(_sched, headless: bool) -> None:
+def _pre_dispatch_housekeeping(_sched) -> None:
     """Admission reconcile, legacy upgrade drain and dead-owner reap, run under the tick lock
     before due jobs are read."""
-    from cron.scheduler_authority import reconcile_pending
-    if headless:
-        reconcile_pending(allow_connect=False)
-    else:
-        reconcile_pending()
-    # Upgrade drain for the retired CLI lane's records: never let it stop due jobs below.
-    try:
-        from cron.bot_chat_legacy import drain_legacy_pending
-        drain_legacy_pending()
-    except Exception as _legacy_exc:
-        _sched.logger.warning("Legacy Bot Chat pending drain failed: %s", _legacy_exc, exc_info=True)
     _sched._maybe_reap_dead_owners()
 
 
 def _tick_admitted(
-    verbose: bool = True, adapters=None, loop=None, sync: bool = True, *, can_dispatch=None,
-    headless: bool = False):
-    """Check and run all due jobs. File-locked so only one tick runs at a time (gateway ticker vs
-    standalone daemon / manual tick). ``can_dispatch``: optional gate; false leaves due jobs for the
-    next allowed tick. ``headless``: the tick runs outside any gateway (system crontab, ``hermes
-    cron tick``) and must refuse agent jobs rather than spawn one. Returns the number of jobs
-    executed (0 if another tick holds the lock)."""
+    verbose: bool = True, sync: bool = True):
+    """Run due local jobs under the home lock, returning the processed count."""
     from cron import scheduler as _sched
-
-    # Stale-code yield gate — BEFORE the lock race. A process whose checkout was updated under it
-    # serves mixed sys.modules (jobs die on ImportErrors); if a fresher gateway holds the runtime
-    # lock, ITS ticker dispatches. With no fresh holder (desktop-standalone) the tick proceeds.
-    _skew = _sched._should_yield_tick_to_fresh_gateway()
-    if _skew is not None:
-        _log_tick_yield_once(f"boot={_skew[0]} disk={_skew[1]}")
-        raise _sched.CronTickYielded(_skew[0], _skew[1])
 
     lock_fd = _acquire_tick_lock_or_degrade(_sched)
     if lock_fd is None:
@@ -118,11 +65,7 @@ def _tick_admitted(
             if _estop_check_paused("cron", _sched.logger):
                 return 0
 
-        if can_dispatch is not None and not can_dispatch():
-            _sched.logger.debug("Cron dispatch paused while gateway drains existing work")
-            return 0
-
-        _pre_dispatch_housekeeping(_sched, headless)
+        _pre_dispatch_housekeeping(_sched)
         # Periodic worktree GC (6h, threaded) — the only sweep gateway-only boxes get.
         try:
             _sched._maybe_run_worktree_maintenance()
@@ -131,9 +74,6 @@ def _tick_admitted(
 
         due_jobs = _sched.get_due_jobs()
         _sched._sweep_stale_inflight_for_tick(due_jobs)
-        if headless:
-            from cron.scheduler_gateway_gate import refuse_agent_jobs_without_gateway
-            due_jobs = refuse_agent_jobs_without_gateway(due_jobs)
 
         if not due_jobs:
             # Idle tick: skip config load + pool setup, but still reap crashed jobs' MCP orphans.
@@ -173,7 +113,7 @@ def _tick_admitted(
                 _max_workers if _max_workers else "unbounded")
 
         def _process_job(job: dict) -> bool:
-            return _sched._process_due_job(job, adapters, loop, verbose)
+            return _sched._process_due_job(job, verbose)
 
         # Persistent pool, non-blocking dispatch. Already-running jobs are skipped; mark_job_run
         # re-arms next_run_at on completion, so no catch-up queue is needed.

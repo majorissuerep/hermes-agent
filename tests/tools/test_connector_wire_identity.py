@@ -6,7 +6,7 @@ import logging
 
 import pytest
 
-from gateway.session_context import clear_session_vars, set_session_vars
+from agent.session_context import clear_session_vars, set_session_vars
 from hermes_cli.config import get_config_path
 from tools.connectors.gateway.client import ConnectorClient
 from tools.managed_gateway_identity import CallRef, connector_headers, user_agent
@@ -143,7 +143,7 @@ def test_each_connect_path_names_its_initiator(monkeypatch):
         transport=transport, endpoint_resolver=lambda: "https://gw.test",
         header_provider=lambda url: {"Authorization": "Bearer t"}, **kw))
 
-    for initiator in (managed.AGENT_TOOL, managed.DESKTOP_PAGE):
+    for initiator in (managed.AGENT_TOOL, managed.ACCOUNT_SETTINGS):
         operation = ConnectionOperation([Target("gmail", "connector", "connect")])
         client = managed.managed_client() if initiator == managed.AGENT_TOOL else managed.managed_client(initiator=initiator)
         managed.mint(client, operation, ["gmail"], reinitiate=False, actor=Actor.backend_watcher)

@@ -118,34 +118,12 @@ def _container_no_volume_mount(hermes_home: Optional[Path]) -> Optional[str]:
             "volume over the HERMES_HOME data directory.")
 
 
-def _network_listener_without_auth(config: Optional[dict]) -> list[str]:
-    """Warn about a network-accessible API server with no API_SERVER_KEY. Read-only against
-    config + env; overlaps the hard fail-closed guards but surfaces the posture at startup.
-    """
-    # Any error (incl. an unimportable gateway package) propagates to run_security_audit.
-    from gateway.platforms.base import is_network_accessible
-
-    plats = (config or {}).get("platforms") or {}
-    api = plats.get("api_server") if isinstance(plats, dict) else None
-    if not (isinstance(api, dict) and api.get("enabled")):
-        return []
-    extra = api.get("extra") or {}
-    host = extra.get("host") or os.environ.get("API_SERVER_HOST", "127.0.0.1")
-    key = extra.get("key") or os.environ.get("API_SERVER_KEY", "")
-    if not is_network_accessible(str(host)) or str(key).strip():
-        return []
-    return [f"OpenAI-compatible API server is network-accessible ({host}) with NO API_SERVER_KEY. It dispatches "
-            "terminal-capable agent work — an unauthenticated network endpoint is remote code execution. "
-            "Set a strong API_SERVER_KEY."]
-
-
 def run_security_audit(*, hermes_home: Optional[Path] = None, config: Optional[dict] = None) -> list[str]:
     """Run all checks and return human-readable warning strings. Pure (no logging); a check that
     raises simply contributes no finding.
     """
     findings: list[str] = []
-    for check in (_running_as_root, _ssh_password_auth_enabled, lambda: _container_no_volume_mount(hermes_home),
-                  lambda: _network_listener_without_auth(config)):
+    for check in (_running_as_root, _ssh_password_auth_enabled, lambda: _container_no_volume_mount(hermes_home)):
         try:
             r = check()
         except Exception:

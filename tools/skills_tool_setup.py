@@ -92,16 +92,6 @@ def _capture_required_environment_variables(
         return _capture_result([])
     missing_names = [entry["name"] for entry in missing_entries]
     callback = _st._turn_secret_capture.get()
-    # Messaging-platform gateway surfaces can't prompt for a secret, so they get the "unsupported"
-    # hint. Interactive gateway surfaces (desktop app / TUI) set HERMES_INTERACTIVE (same flag
-    # tools/approval.py uses) and register a callback routing to a secure secret.request overlay.
-    if callback is None and _is_gateway_surface() and not env_var_enabled("HERMES_INTERACTIVE"):
-        try:
-            from gateway.platforms.base import GATEWAY_SECRET_CAPTURE_UNSUPPORTED_MESSAGE as hint
-        except Exception:
-            hint = (f"Secure secret entry is not available. Load this skill in the local CLI to be "
-                    f"prompted, or add the key to {display_hermes_home()}/.env manually.")
-        return _capture_result(missing_names, gateway_setup_hint=hint)
     if callback is None and (callback := _st._secret_capture_callback) is None:
         return _capture_result(missing_names)
     remaining_names: list[str] = []
@@ -118,11 +108,6 @@ def _capture_required_environment_variables(
     return _capture_result(remaining_names, bool(remaining_names))
 
 
-def _is_gateway_surface() -> bool:
-    if env_var_enabled("HERMES_GATEWAY_SESSION"):
-        return True
-    from gateway.session_context import get_session_env
-    return bool(get_session_env("HERMES_SESSION_PLATFORM"))
 
 
 def _is_env_var_persisted(var_name: str, env_snapshot: dict[str, str]) -> bool:

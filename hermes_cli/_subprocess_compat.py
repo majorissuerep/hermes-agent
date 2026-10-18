@@ -656,7 +656,7 @@ def pid_exists_stdlib(pid: int) -> bool:
     For code that must run without the dependency environment: the detached gateway restart
     watcher is started by whatever interpreter the updater runs on (the bare store Python after
     the package-manager handoff), so it cannot import ``gateway.status`` (``utils`` pulls in
-    ``ruamel``). ``gateway.status._pid_exists`` prefers psutil and falls back to this.
+    ``ruamel``). ``gateway.status.pid_exists`` prefers psutil and falls back to this.
     """
     pid = int(pid)
     if IS_WINDOWS:
@@ -675,7 +675,7 @@ def pid_exists_stdlib(pid: int) -> bool:
 def _process_start_time(pid: int) -> int | None:
     """The repository's stable process-start fingerprint, if available."""
     try:
-        from gateway.status import get_process_start_time
+        from hermes_platform.processes import get_process_start_time
 
         return get_process_start_time(pid)
     except Exception:

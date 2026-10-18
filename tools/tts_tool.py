@@ -307,7 +307,7 @@ def _apply_call_overrides(tts_config: dict[str, Any], speed: Optional[float], pr
 
 def _session_platform() -> tuple:
     """``(platform, wants_opus)`` — platforms delivering voice bubbles only as Ogg/Opus want Opus."""
-    from gateway.session_context import get_session_env
+    from agent.session_context import get_session_env
     platform = get_session_env("HERMES_SESSION_PLATFORM", "").lower()
     return platform, platform in OPUS_VOICE_PLATFORMS
 

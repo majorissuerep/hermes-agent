@@ -280,19 +280,15 @@ def test_real_db_openers_honor_configured_delete(monkeypatch, tmp_path):
 
     from agent import verification_evidence
     from cron import executions
-    from gateway import delivery_ledger
-    from gateway.platforms.api_server import ResponseStore
     from hermes_cli import projects_db
     from hermes_cli import kanban_db_connect as kbc
     from hermes_state import SessionDB
-    from plugins.platforms.discord.recovery import DiscordRecoveryStore
     from tools import async_delegation
 
     observed: dict[str, str] = {}
 
     for name, connect in (
         ("async_delegation", async_delegation._connect),
-        ("delivery_ledger", delivery_ledger._connect),
         ("verification_evidence", verification_evidence._connect),
     ):
         conn = connect()
@@ -311,11 +307,6 @@ def test_real_db_openers_honor_configured_delete(monkeypatch, tmp_path):
         ).fetchone()[0].lower()
     finally:
         cron_conn.close()
-
-    discord = DiscordRecoveryStore(hermes_home=tmp_path)
-    observed["discord_recovery"] = discord.call(
-        lambda conn: conn.execute("PRAGMA journal_mode").fetchone()[0].lower()
-    )
 
     session_db = SessionDB(db_path=tmp_path / "state.db")
     try:
@@ -341,22 +332,11 @@ def test_real_db_openers_honor_configured_delete(monkeypatch, tmp_path):
     finally:
         projects_conn.close()
 
-    response_store = ResponseStore(db_path=str(tmp_path / "response_store.db"))
-    try:
-        observed["response_store"] = response_store._conn.execute(
-            "PRAGMA journal_mode"
-        ).fetchone()[0].lower()
-    finally:
-        response_store.close()
-
     assert observed == {
         "async_delegation": "delete",
-        "delivery_ledger": "delete",
         "verification_evidence": "delete",
         "cron_executions": "delete",
-        "discord_recovery": "delete",
         "session_db": "delete",
         "kanban": "delete",
         "projects": "delete",
-        "response_store": "delete",
     }

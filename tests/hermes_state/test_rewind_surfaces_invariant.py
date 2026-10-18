@@ -10,12 +10,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from gateway.config import GatewayConfig
-from gateway.session import SessionStore
 from hermes_state import SessionDB
 from hermes_state.rewind import RewindTargetUnavailableError
 
-SURFACES = ("cli", "gateway", "tui")
+SURFACES = ("cli", "tui")
 
 
 _IMAGE = {"type": "image_url", "image_url": {"url": "data:image/png;base64,QUJD"}}
@@ -43,12 +41,6 @@ def _active_rows(db: SessionDB, sid: str):
 
 def _rewind_via(surface: str, db: SessionDB, sid: str, n: int):
     """Back up ``n`` user turns through one surface; returns a truthy outcome or raises/None on refusal."""
-    if surface == "gateway":
-        store = SessionStore.__new__(SessionStore)
-        store._db_for_session_id = lambda _sid: db
-        store._lazy = lambda name, factory: factory()
-        store._clear_dirty_transcript = lambda _sid: None
-        return store.rewind_session(sid, n)
     warm = db.get_resume_conversations(sid)[0]  # the live process holds the alternation-repaired projection
     user_turns = sum(1 for m in warm if m.get("role") == "user")
     ordinal = user_turns - n
@@ -59,7 +51,8 @@ def _rewind_via(surface: str, db: SessionDB, sid: str, n: int):
         cli._prefill_input_buffer = MagicMock()
         cli.undo_last(n)
         return cli.conversation_history if len(cli.conversation_history) < len(warm) else None
-    from tui_gateway.server import _rewind_active_session_history
+    from tui_runtime import server
+    _rewind_active_session_history = server._rewind_active_session_history
     session = {"agent": SimpleNamespace(_session_messages=warm), "history": list(warm),
                "history_lock": threading.Lock(), "history_version": 0, "session_key": sid}
     return _rewind_active_session_history(session, ordinal)
@@ -68,7 +61,7 @@ def _rewind_via(surface: str, db: SessionDB, sid: str, n: int):
 @pytest.fixture()
 def db(tmp_path, monkeypatch):
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
-    from tui_gateway import server
+    from tui_runtime import server
     handle = SessionDB(db_path=tmp_path / "state.db")
     monkeypatch.setattr(server, "_db", handle)
     yield handle
@@ -128,12 +121,8 @@ def test_out_of_range_target_changes_nothing_on_every_surface(db, surface):
         # CLI /undo N and gateway /undo N clamp to the oldest turn, so their out-of-range case is a
         # transcript with no user turn at all: both refuse without touching the store.
         db.create_session(sid + "-empty", source="cli")
-        if surface == "gateway":
-            assert _rewind_via(surface, db, sid + "-empty", 1) is None
-        else:
-            with pytest.raises(RewindTargetUnavailableError):
-                db.rewind_user_turn(sid + "-empty", -1, warm_history=[])
-        assert _active_rows(db, sid + "-empty") == []
+        assert not _rewind_via("cli", db, sid + "-empty", 1)
+    assert _active_rows(db, sid + "-empty") == []
     assert _active_rows(db, sid) == before
 
 

@@ -30,6 +30,7 @@ from __future__ import annotations
 import logging
 import math
 import os
+import sys
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone, UTC
@@ -199,12 +200,9 @@ def has_guest() -> bool:
     return is_guest_state(current_nous_state())
 
 
-def on_local_desktop_backend() -> bool:
-    """This process is the backend the desktop app spawned on this machine: never an SSH, URL or
-    cloud backend, and never a gateway or shell the desktop merely launched."""
-    from hermes_cli.anon_challenge import client_surface
-    from hermes_cli.process_identity import is_local_desktop_backend
-    return client_surface() == "desktop" and is_local_desktop_backend()
+def on_local_terminal_runtime() -> bool:
+    """Welcome onboarding runs only in the private local TUI runtime, not headless children."""
+    return "tui_runtime.server" in sys.modules
 
 
 def welcome_provider_available() -> bool:
@@ -219,8 +217,7 @@ def free_inference_active(state: Any = None) -> bool:
     if not welcome_provider_available():
         return False
     state = current_nous_state() if state is None else state
-    return (is_guest_state(state) and state.get(WELCOME_CLAIM_FLAG) is True and guest_allowed()
-            and on_local_desktop_backend())
+    return (is_guest_state(state) and state.get(WELCOME_CLAIM_FLAG) is True and guest_allowed())
 
 
 def has_free_tier_account() -> bool:

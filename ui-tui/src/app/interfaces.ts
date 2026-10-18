@@ -3,7 +3,6 @@ import type { Usage } from '@hermes/shared/gateway-events'
 import type { MutableRefObject, ReactNode, RefObject, SetStateAction } from 'react'
 
 import type { PasteEvent } from '../components/textInput.js'
-import type { GatewayClient } from '../gatewayClient.js'
 import type {
   BillingCardInfo,
   BillingMutationResponse,
@@ -16,6 +15,7 @@ import type {
 import type { QueueItem } from '../hooks/useQueue.js'
 import type { ParsedVoiceRecordKey } from '../lib/platform.js'
 import type { RpcResult } from '../lib/rpc.js'
+import type { LocalAgentClient } from '../localAgentClient.js'
 import type { ActiveWidget } from '../sdk/types.js'
 import type { Theme } from '../theme.js'
 import type {
@@ -105,7 +105,7 @@ export interface GatewayRpc {
 }
 
 export interface GatewayServices {
-  gw: GatewayClient
+  gw: LocalAgentClient
   rpc: GatewayRpc
 }
 
@@ -399,9 +399,19 @@ export interface ComposerActions {
   /** Attach an image by path in as a token. */
   attachImagePath: (path: string) => void
   clearIn: () => void
-  stage?: (text: string, display?: string, destination?: SubmissionDestination, attachments?: QueueItem['attachments']) => QueueItem
+  stage?: (
+    text: string,
+    display?: string,
+    destination?: SubmissionDestination,
+    attachments?: QueueItem['attachments']
+  ) => QueueItem
   dequeue: (retry?: boolean) => QueueItem | undefined
-  enqueue: (text: string, display?: string, destination?: SubmissionDestination, attachments?: QueueItem['attachments']) => QueueItem | void
+  enqueue: (
+    text: string,
+    display?: string,
+    destination?: SubmissionDestination,
+    attachments?: QueueItem['attachments']
+  ) => QueueItem | void
   handleTextPaste: (event: PasteEvent) => MaybePromise<ComposerPasteResult | null>
   openEditor: () => Promise<void>
   prependQueue: (item: QueueItem, destination?: SubmissionDestination) => void
@@ -442,7 +452,7 @@ export interface ComposerState {
 }
 
 export interface UseComposerStateOptions {
-  gw: GatewayClient
+  gw: LocalAgentClient
   submitRef: MutableRefObject<(value: string) => void>
   sys: (text: string) => void
 }
@@ -505,7 +515,6 @@ export interface GatewayEventHandlerContext {
     colsRef: MutableRefObject<number>
     newSession: (msg?: string, title?: string) => void
     // Session carried across a transport loss or child exit, cleared after resume.
-    recoverSidRef?: MutableRefObject<null | string>
     resetSession: () => void
     resumeById: (id: string, profile?: string) => Promise<void>
     setCatalog: StateSetter<null | SlashCatalog>
@@ -585,8 +594,13 @@ export interface SlashHandlerContext {
   transcript: {
     page: (text: string, title?: string) => void
     panel: (title: string, sections: PanelSection[]) => void
-    send: (text: string, showUserMessage?: boolean, displayText?: string, expandOverride?: (value: string) => string,
-      submitOpts?: { attachments?: Array<{ path: string; mime: string }> }) => void
+    send: (
+      text: string,
+      showUserMessage?: boolean,
+      displayText?: string,
+      expandOverride?: (value: string) => string,
+      submitOpts?: { attachments?: Array<{ path: string; mime: string }> }
+    ) => void
     setHistoryItems: StateSetter<Msg[]>
     sys: (text: string) => void
     trimLastExchange: (items: Msg[]) => Msg[]

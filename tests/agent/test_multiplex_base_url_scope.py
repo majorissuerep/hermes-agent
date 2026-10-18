@@ -30,7 +30,6 @@ def test_base_urls_follow_the_scoped_key_not_default_environ(monkeypatch, second
     import plugins.browser.browserbase.provider as browserbase
     import plugins.browser.firecrawl.provider as firecrawl
     import plugins.video_gen.xai as xai_video
-    from gateway.run_turn import GatewayTurnMixin
     from hermes_cli import auth_nous
 
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
@@ -41,8 +40,6 @@ def test_base_urls_follow_the_scoped_key_not_default_environ(monkeypatch, second
     assert "default.example" not in (base or "")
     assert aux._scoped_key_env("OPENAI_BASE_URL") == ""
     assert auth_nous._nous_inference_env_override() is None
-    monkeypatch.setattr("gateway.run._load_gateway_config", dict)
-    assert GatewayTurnMixin._get_proxy_url(GatewayTurnMixin.__new__(GatewayTurnMixin)) is None
     assert "default.example" not in browserbase.BrowserbaseBrowserProvider()._get_config_or_none()["base_url"]
     assert "default.example" not in firecrawl.FirecrawlBrowserProvider()._api_url()
     # xAI video: a scoped miss stays a miss — no environ fallback-after-miss for the key or the URL.
@@ -52,7 +49,6 @@ def test_base_urls_follow_the_scoped_key_not_default_environ(monkeypatch, second
 
 def test_unscoped_single_profile_reads_keep_environ(monkeypatch):
     """Multiplex OFF (CLI / single gateway): environ IS the profile's own value — behaviour unchanged."""
-    from gateway.run_turn import GatewayTurnMixin
     from hermes_cli import auth_nous
 
     secret_scope.set_multiplex_active(False)
@@ -60,7 +56,6 @@ def test_unscoped_single_profile_reads_keep_environ(monkeypatch):
     try:
         monkeypatch.setenv("GATEWAY_PROXY_URL", "https://proxy.mine.example/")
         monkeypatch.setenv("NOUS_INFERENCE_BASE_URL", "https://nous.mine.example/v1/")
-        assert GatewayTurnMixin._get_proxy_url(GatewayTurnMixin.__new__(GatewayTurnMixin)) == "https://proxy.mine.example"
         assert auth_nous._nous_inference_env_override() == "https://nous.mine.example/v1"
     finally:
         secret_scope.reset_secret_scope(token)

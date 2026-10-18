@@ -205,7 +205,7 @@ def collect_directory_manifests() -> list[PluginManifest]:
     repo_plugins = _origin.get_bundled_plugins_dir()
     logger.debug("Scanning bundled plugins: %s", repo_plugins)
     _scan("bundled (top-level)", repo_plugins, "bundled",
-          {"memory", "context_engine", "model-providers", "cron_providers", "computer_use"})
+          {"memory", "context_engine", "model-providers", "computer_use"})
     user_dir = get_hermes_home() / "plugins"
     logger.debug("Scanning user plugins: %s", user_dir)
     _scan("user", user_dir, "user")
@@ -273,6 +273,10 @@ def gate_manifest(
     def _placeholder(error: Optional[str], level: int, message: str, *args, enabled: bool = False) -> ManifestGate:
         return ManifestGate("placeholder", enabled=enabled, error=error, log=(level, message, lookup_key, *args))
 
+    if manifest.kind in {"platform", "dashboard", "dashboard-auth"}:
+        return _placeholder("This installation supports terminal tools, not remote UI or messaging plugins",
+                            logging.WARNING, "Skipping retired plugin kind: %s")
+
     # Relay lifecycle is core-owned; an old plugin copy would compete for its registries.
     if names & LEGACY_RELAY_PLUGIN_KEYS:
         error = (
@@ -299,8 +303,6 @@ def gate_manifest(
             return ManifestGate("load_now")
         # Bundled platforms register LAZILY: eagerly importing ~20 heavy SDKs added seconds to every `hermes`
         # invocation. A deferred loader keeps every platform available on first use.
-        if manifest.kind == "platform":
-            return ManifestGate("defer")
     if enabled is None or not names & enabled:
         return _placeholder(
             f"not enabled in config (run `hermes plugins enable {lookup_key}` to activate)", logging.DEBUG,

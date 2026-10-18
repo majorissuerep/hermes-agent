@@ -27,7 +27,7 @@ from tools import approval_detection
 from tools import approval_context
 from tools import approval_smart
 from tools.thread_context import propagate_context_to_thread
-from gateway.session_context import clear_session_vars, reset_session_vars, set_session_vars
+from agent.session_context import clear_session_vars, reset_session_vars, set_session_vars
 from tests.tools._child_env_fixtures import child_env
 
 
@@ -142,7 +142,7 @@ def test_rpc_carries_authority_to_real_dispatch(child_env, monkeypatch, transpor
 def gw_session(monkeypatch):
     """A clean gateway session: HERMES_GATEWAY_SESSION set, a bound session
     key, and isolated gateway queues/callbacks. Yields the session_key."""
-    monkeypatch.setenv("HERMES_GATEWAY_SESSION", "1")
+    scope = set_session_vars(platform="tui", cron_session="")
     monkeypatch.delenv("HERMES_INTERACTIVE", raising=False)
     monkeypatch.delenv("HERMES_CRON_SESSION", raising=False)
     monkeypatch.delenv("HERMES_EXEC_ASK", raising=False)
@@ -154,17 +154,18 @@ def gw_session(monkeypatch):
     session_key = "cluster-test-session"
     token = approval_context.set_current_session_key(session_key)
     with A._lock:
-        A._gateway_queues.pop(session_key, None)
-        A._gateway_notify_cbs.pop(session_key, None)
+        A._session_queues.pop(session_key, None)
+        A._session_notify_cbs.pop(session_key, None)
         A._permanent_approved.discard("execute_code")
         A._session_approved.get(session_key, set()).discard("execute_code")
     try:
         yield session_key
     finally:
+        clear_session_vars(scope)
         approval_context.reset_current_session_key(token)
         with A._lock:
-            A._gateway_queues.pop(session_key, None)
-            A._gateway_notify_cbs.pop(session_key, None)
+            A._session_queues.pop(session_key, None)
+            A._session_notify_cbs.pop(session_key, None)
 
 
 def _register_resolver(session_key: str, result):
@@ -172,13 +173,13 @@ def _register_resolver(session_key: str, result):
     recent queued approval entry with *result* (simulating a user response)."""
     def cb(_approval_data):
         with A._lock:
-            entries = A._gateway_queues.get(session_key, [])
+            entries = A._session_queues.get(session_key, [])
             if entries:
                 entry = entries[-1]
                 entry.result = result
                 entry.event.set()
     with A._lock:
-        A._gateway_notify_cbs[session_key] = cb
+        A._session_notify_cbs[session_key] = cb
 
 
 def _register_capturing_resolver(session_key: str, result):
@@ -188,13 +189,13 @@ def _register_capturing_resolver(session_key: str, result):
     def cb(approval_data):
         seen["approval_data"] = approval_data
         with A._lock:
-            entries = A._gateway_queues.get(session_key, [])
+            entries = A._session_queues.get(session_key, [])
             if entries:
                 entries[-1].result = result
                 entries[-1].event.set()
 
     with A._lock:
-        A._gateway_notify_cbs[session_key] = cb
+        A._session_notify_cbs[session_key] = cb
     return seen
 
 

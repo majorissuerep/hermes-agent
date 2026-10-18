@@ -319,7 +319,7 @@ class MCPServerTransportMixin:
         # Machine spawn ledger (startup sweeps reap orphans after an unclean exit); best-effort.
         for _pid in new_pids:
             try:
-                from hermes_cli.process_identity import register_child
+                from hermes_platform.child_processes import register_child
                 register_child(_pid, "mcp-helper")
             except Exception:
                 logger.debug("spawn-ledger register_child failed for MCP helper pid %s", _pid, exc_info=True)
@@ -332,7 +332,7 @@ class MCPServerTransportMixin:
     def _release_spawned_children(self, new_pids: set[int]) -> None:
         """Drop the ledger entries; a child (or its pgroup) still alive means SDK teardown failed
         (common on mid-way cancel on Linux: setsid() children escape) — mark it orphaned for the sweep."""
-        from gateway.status import _pid_exists
+        from hermes_platform.processes import pid_exists
         # Groups with nothing left alive; the supervisor forgets them after the lock is released.
         # Groups still alive stay registered on purpose, so the supervisor still reaps them if this
         # process dies before the orphan sweep runs.
@@ -341,7 +341,7 @@ class MCPServerTransportMixin:
             for pid in new_pids:
                 _stdio_pids.pop(pid, None)
                 # Windows-safe pid probe; the child may be gone while descendants remain in its pgroup.
-                if _pid_exists(pid) or _pgroup_alive(_stdio_pgids.get(pid)):
+                if pid_exists(pid) or _pgroup_alive(_stdio_pgids.get(pid)):
                     _orphan_stdio_pids.add(pid)
                     _orphan_stdio_pid_servers[pid] = self.name
                 else:  # nothing to reap — drop the pgid so PID reuse can't surface stale pgroup state
@@ -380,7 +380,7 @@ class MCPServerTransportMixin:
         # outlive us. Idempotent; BREAKAWAY_OK keeps deliberate breakaway children escaping.
         # Self-guards: a cheap no-op returning False on non-Windows.
         try:
-            from hermes_cli.process_identity import attach_self_to_kill_on_close_job
+            from hermes_platform.child_processes import attach_self_to_kill_on_close_job
             attach_self_to_kill_on_close_job()
         except Exception:
             logger.debug("job-object self-attach failed before stdio spawn", exc_info=True)

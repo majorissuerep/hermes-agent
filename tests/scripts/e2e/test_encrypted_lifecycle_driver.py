@@ -62,8 +62,8 @@ def test_failed_runtime_cleanup_cannot_publish_green_or_delete_its_work(tmp_path
     rehearsal.receipt["status"] = "passed"
 
     def failed_stop(action):
-        assert action == "stop-runtime"
-        raise RuntimeError("gateway survived; " + rehearsal.password)
+        assert action == "verify-runtime-closed"
+        raise RuntimeError("local runtime survived; " + rehearsal.password)
 
     monkeypatch.setattr(rehearsal, "probe", failed_stop)
     with pytest.raises(RuntimeError, match="work retained"):
@@ -122,7 +122,8 @@ def test_git_inspection_never_enters_an_interactive_pager(tmp_path):
 
 
 @pytest.mark.platforms("posix")
-def test_interactive_driver_detaches_only_after_independent_completion(tmp_path):
+@pytest.mark.parametrize("exit_code", [0, 7])
+def test_headless_driver_requires_normal_exit_even_after_durable_output(tmp_path, exit_code):
     rehearsal = Rehearsal(Namespace(
         work_dir=tmp_path, evidence=tmp_path / "evidence", keep_work=False,
         baseline="old", candidate="new", scenario="fresh", tool_cache=None,
@@ -131,12 +132,13 @@ def test_interactive_driver_detaches_only_after_independent_completion(tmp_path)
     script = ("import getpass; from pathlib import Path; "
               "getpass.getpass('Unlock master password: '); "
               f"Path({str(marker)!r}).write_text('durable result'); "
-              "input('Interactive session stays open until EOF: ')")
-    # EOF is a successful frontend detach, just as in GatewayChatView.
-    script = "try:\n " + script + "\nexcept EOFError:\n pass\n"
+              f"raise SystemExit({exit_code})")
     try:
-        rehearsal.run("live", [sys.executable, "-c", script], prompts=1, timeout=15,
-                      completion=lambda: marker.is_file() and marker.read_text() == "durable result")
+        if exit_code:
+            with pytest.raises(RuntimeError, match="exit=7"):
+                rehearsal.run("live", [sys.executable, "-c", script], prompts=1, timeout=15)
+        else:
+            rehearsal.run("live", [sys.executable, "-c", script], prompts=1, timeout=15)
         assert marker.read_text() == "durable result"
         assert rehearsal.receipt["checks"]["live"]["passphrase_prompts"] == 1
     finally:

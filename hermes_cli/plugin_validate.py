@@ -533,7 +533,6 @@ def validate_plugin_dir(
     _check_python_dependencies(report, plugin_dir)
     recorded = _check_capabilities(report, manifest, plugin_dir, probe)
     _check_builtin_collisions(report, manifest, recorded)
-    _check_trusted_inbound(report, recorded)
     _check_security_scan(report, plugin_dir)
     check_core_override(report, plugin_dir)
     check_private_imports(report, plugin_dir)
@@ -542,17 +541,6 @@ def validate_plugin_dir(
     from hermes_cli.plugin_isolation_audit import audit_plugin_dir
     report.isolation = audit_plugin_dir(plugin_dir, manifest).to_dict()
     return report
-
-
-def _check_trusted_inbound(report: ValidationReport, recorded: Optional[dict]) -> None:
-    """Surface ``trusted_inbound`` platforms (their events skip user allowlists and pairing); one
-    naming a core platform fails, as the loader refuses it."""
-    from gateway.platform_registry import core_ships_platform
-    for name in (recorded or {}).get("trusted_inbound") or []:
-        if core_ships_platform(name):
-            report.add("trusted inbound", False, f"platform '{name}' ships with core; trusted_inbound is refused for it")
-        else:
-            report.add("trusted inbound", True, f"platform '{name}' is trusted_inbound: its events skip user allowlists and pairing")
 
 
 _LOADABLE_ENTRYPOINTS = ("__init__.py", "desktop/plugin.js", "plugin.json")

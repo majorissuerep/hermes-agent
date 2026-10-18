@@ -146,7 +146,7 @@ def _inject_context_from(job: dict, prompt: str) -> tuple[str, bool]:
             logger.warning(
                 "context_from: skipping invalid job_id %r for job_id=%r name=%r%s",
                 source_job_id, job.get("id"), job.get("name"),
-                _delivery._cron_job_origin_log_suffix(job),
+                "",
             )
             continue
         try:
@@ -156,7 +156,8 @@ def _inject_context_from(job: dict, prompt: str) -> tuple[str, bool]:
             )
             latest_output = ""
             for output_file in output_files:
-                candidate = output_file.read_text(encoding="utf-8-sig")
+                from hermes_security.io import read_text
+                candidate = read_text(output_file, purpose="state", encoding="utf-8-sig") or ""
                 # Only the run header describes suppression; script/agent payloads can
                 # quote these markers. Keep error documents useful for recovery context.
                 header = candidate.split("\n---\n", 1)[0].split("\n## Prompt", 1)[0]

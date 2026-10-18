@@ -98,12 +98,8 @@ async def test_container_session_refuses_host_rollback_on_every_surface(tmp_path
     """A host checkpoint left by an earlier local session is never restored or diffed from a
     container-backed session: CLI /rollback + /diff session, gateway /rollback + /diff session,
     and the rollback.restore RPC all answer with the backend reason instead."""
-    from gateway import run as gateway_run
-    from gateway.config import Platform
-    from gateway.platforms.event import MessageEvent
-    from gateway.session import SessionSource
     from hermes_cli.cli_commands_mixin import CLICommandsMixin
-    from tui_gateway import server
+    from tui_runtime import server
 
     host_dir = tmp_path / "workspace" / "project"
     host_dir.mkdir(parents=True)
@@ -129,15 +125,6 @@ async def test_container_session_refuses_host_rollback_on_every_surface(tmp_path
         assert "docker" in "".join(capsys.readouterr())
     CLICommandsMixin._print_session_diff(cli, str(host_dir), False)
     assert "docker" in "".join(capsys.readouterr())
-
-    runner = object.__new__(gateway_run.GatewayRunner)
-    runner._checkpoint_manager = lambda: manager
-    source = SessionSource(platform=Platform.TELEGRAM, user_id="u", chat_id="c", user_name="t", chat_type="dm")
-    for text in ("/rollback 1", "/rollback 1 --all"):
-        assert "docker" in await runner._handle_rollback_command(MessageEvent(text=text, source=source))
-    assert "docker" in await runner._handle_diff_command(MessageEvent(text="/diff session", source=source))
-    listing = await runner._handle_rollback_command(MessageEvent(text="/rollback", source=source))
-    assert "docker" in listing and "earlier local session" in listing  # listing stays visible
 
     session = {
         "agent": SimpleNamespace(_checkpoint_mgr=manager), "cwd": str(host_dir), "running": False,

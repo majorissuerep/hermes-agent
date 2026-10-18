@@ -5,7 +5,6 @@ import { AlternateScreen, Box, NoSelect, ScrollBox, Text } from '@hermes/ink'
 import { useStore } from '@nanostores/react'
 import { Fragment, memo, type MutableRefObject, useEffect, useMemo, useRef } from 'react'
 
-import { $deck, DECK_MODE } from '../app/deckStore.js'
 import { useGateway } from '../app/gatewayContext.js'
 import type { AppLayoutProps } from '../app/interfaces.js'
 import { $isBlocked, $overlayState, patchOverlayState } from '../app/overlayStore.js'
@@ -30,7 +29,7 @@ import { ActiveWidgetSlot, AmbientDock, AmbientRail, useAmbientRailWidth } from 
 
 import { AgentsOverlay } from './agentsOverlay.js'
 import { LiveAgentsPanel } from './agentsPanel.js'
-import { GoodVibesHeart, statusDeckLabel, StatusRule, StickyPromptTracker, TranscriptScrollbar } from './appChrome.js'
+import { GoodVibesHeart, StatusRule, StickyPromptTracker, TranscriptScrollbar } from './appChrome.js'
 import { FloatingOverlays, PromptZone } from './appOverlays.js'
 import { Banner, Panel, SessionPanel } from './branding.js'
 import { FpsOverlay } from './fpsOverlay.js'
@@ -45,7 +44,6 @@ import { type InputCursorSnapshot, TextInput, type TextInputMouseApi } from './t
 
 // Box geometry, kept here so the transcript's reservation math matches the
 // rendered overlay exactly.
-
 /** Blank-input hint: live STT text while dictating (stt.streaming) always wins; else a rotating
  *  placeholder on a fresh transcript, or the busy hint. */
 const composerHint = (voicePartial: string, freshTranscript: boolean, busyHint: string) =>
@@ -59,7 +57,6 @@ const KITTY_PLACEHOLDER = '\u{10eeee}'
 // Below this many columns of remaining text width, the right gutter is too
 // cramped, so the transcript collapses to reserving bottom rows instead.
 const MIN_GUTTER_BODY_COLS = 72
-
 // Petdex mascot — a small floating overlay riding the bottom-right corner just
 // above the status bar, with a little top/left breathing room. It reserves no
 // layout rows (the transcript scrolls underneath); instead it publishes its
@@ -87,7 +84,6 @@ export const PetPane = memo(function PetPane() {
   }, [grid, kitty])
 
   const active = enabled && width > 0 && height > 0
-
   useEffect(() => {
     $petBox.set(
       active
@@ -153,11 +149,12 @@ const TranscriptPane = memo(function TranscriptPane({
   nativeMode,
   progress,
   transcript
-}: Pick<AppLayoutProps, 'actions' | 'composer' | 'progress' | 'transcript'> & { nativeMode: boolean }) {
+}: Pick<AppLayoutProps, 'actions' | 'composer' | 'progress' | 'transcript'> & {
+  nativeMode: boolean
+}) {
   const ui = useStore($uiState)
   const petBox = useStore($petBox)
   const railCols = useAmbientRailWidth('left') + useAmbientRailWidth('right')
-
   // Keep transcript text clear of the floating pet, responsively:
   //  - wide terminals: reserve a right gutter so lines wrap to the pet's left
   //    (as long as enough width is left for comfortable reading);
@@ -532,9 +529,11 @@ const StatusRulePane = memo(function StatusRulePane({
   composer,
   nativeMode,
   status
-}: Pick<AppLayoutProps, 'composer' | 'status'> & { at: 'bottom' | 'top'; nativeMode: boolean }) {
+}: Pick<AppLayoutProps, 'composer' | 'status'> & {
+  at: 'bottom' | 'top'
+  nativeMode: boolean
+}) {
   const ui = useStore($uiState)
-  const deck = useStore($deck)
 
   if (ui.statusBar === 'off' || (nativeMode ? at !== 'top' : ui.statusBar !== at)) {
     return null
@@ -549,7 +548,7 @@ const StatusRulePane = memo(function StatusRulePane({
         cols={composer.cols}
         compacting={ui.compacting}
         cwdLabel={status.cwdLabel}
-        deckLabel={DECK_MODE ? statusDeckLabel(deck.ref, deck.openCount) : undefined}
+        deckLabel={undefined}
         focusView={ui.focusView}
         indicatorStyle={ui.indicatorStyle}
         lastTurnEndedAt={status.lastTurnEndedAt}
@@ -584,12 +583,10 @@ export const AppLayout = memo(function AppLayout({
 }: AppLayoutProps) {
   const overlay = useStore($overlayState)
   const ui = useStore($uiState)
-
   const cursorSnapshotRef = useRef<InputCursorSnapshot | null>(null)
   useEffect(() => {
     cursorSnapshotRef.current = null
   }, [ui.sid])
-
   // Inline mode skips AlternateScreen so the host terminal's native
   // scrollback captures rows scrolled off the top; composer + progress
   // stay anchored via normal flex-column flow.
@@ -664,7 +661,6 @@ export const AppLayout = memo(function AppLayout({
     </Shell>
   )
 })
-
 type GutterMouseEvent = {
   button: number
   localCol?: number

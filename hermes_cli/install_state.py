@@ -78,7 +78,7 @@ class Places:
 
         return cls(
             markers=tuple(_expand_all(known_dirs.machine_marker_files())),
-            sources=(_active_root, _home_globs, _shared_auth_dir, _registry_home, _service_homes, _launcher_root),
+            sources=(_active_root, _home_globs, _shared_auth_dir, _registry_home, _launcher_root),
             protected=_protected_dirs(),
         )
 
@@ -247,36 +247,8 @@ def _registry_home() -> Iterable[Path]:
     return (Path(os.path.expandvars(str(value))),) if str(value).strip() else ()
 
 
-def _service_homes() -> Iterable[Path]:
-    """Homes of this OS user's service definitions and machine-wide units.
-
-    Another account's gateway is that account's install. Legacy definitions
-    remain readable without importing a retired native Windows runtime.
-    """
-    from hermes_platform.resolver import known_dirs
-
-    for machine_wide, globs in ((False, known_dirs.gateway_service_definition_globs()),
-                                (True, known_dirs.system_gateway_service_definition_globs())):
-        for definition in _expand_all(globs):
-            yield from _definition_homes(definition, machine_wide=machine_wide)
 
 
-def _definition_homes(definition: Path, *, machine_wide: bool, follow: bool = True) -> Iterator[Path]:
-    """The homes one definition names, and those named by the launchers it starts (the Windows
-    Startup-folder fallback names only its launcher). Unreadable: none."""
-    from hermes_cli.gateway_service_owner import service_definition_homes, service_definition_launchers
-
-    try:
-        text = _read_text(definition)
-    except (OSError, UnicodeError, ValueError):
-        return
-    account = _unit_account(text) or ("root" if machine_wide else None)
-    if account is not None and not _is_this_account(account):
-        return
-    yield from (Path(home.strip().strip('"')) for home in service_definition_homes(text))
-    if follow:
-        for launcher in service_definition_launchers(text):
-            yield from _definition_homes(Path(launcher), machine_wide=False, follow=False)
 
 
 def _unit_account(unit: str) -> str | None:

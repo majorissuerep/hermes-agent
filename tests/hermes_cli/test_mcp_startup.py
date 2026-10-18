@@ -36,7 +36,6 @@ def _agent_args(**overrides) -> Namespace:
         "accept_hooks": False,
         "command": "chat",
         "cron_command": None,
-        "gateway_command": None,
         "mcp_action": None,
         "tui": False,
     }
@@ -46,7 +45,7 @@ def _agent_args(**overrides) -> Namespace:
 
 def test_prepare_agent_startup_backgrounds_blocking_mcp_for_rl(monkeypatch):
     """``hermes rl`` builds its agent in this process: discovery runs off-thread, never blocking.
-    (Chat turns run in the gateway; see the next test.)"""
+    Headless chat turns use the same native process boundary."""
     stop = threading.Event()
     calls = {"mcp": 0}
 
@@ -105,9 +104,8 @@ def test_prepare_agent_startup_backgrounds_blocking_mcp_for_rl(monkeypatch):
 
 
 @pytest.mark.parametrize("command", [None, "chat"])
-def test_chat_client_never_spawns_mcp_servers_the_gateway_owns(monkeypatch, command):
-    """A chat/`-q` client only proxies turns to the gateway: spawning every MCP server here doubled
-    them and held the discovery lock the cold-starting gateway waited on before READY."""
+def test_headless_chat_starts_its_own_bounded_mcp_discovery(monkeypatch, command):
+    """Finite native turns own their outgoing MCP clients instead of relying on a service."""
     calls = {"background": 0, "inline": 0}
     monkeypatch.setattr(main_mod, "_resolve_use_tui", lambda _args: False)
     monkeypatch.setattr(mcp_startup, "start_background_mcp_discovery",
@@ -116,19 +114,14 @@ def test_chat_client_never_spawns_mcp_servers_the_gateway_owns(monkeypatch, comm
         discover_plugins=lambda: None, start_background_plugin_discovery=lambda: None))
     monkeypatch.setitem(sys.modules, "tools.mcp_tool_discovery", types.SimpleNamespace(
         discover_mcp_tools=lambda **_k: calls.__setitem__("inline", calls["inline"] + 1)))
-    main_mod._prepare_agent_startup(_agent_args(command=command))
-    assert calls == {"background": 0, "inline": 0}
+    main_mod._prepare_agent_startup(_agent_args(command=command, query="local task"))
+    assert calls == {"background": 1, "inline": 0}
 
 
 def test_prepare_agent_startup_skips_discovery_when_chat_resolves_to_tui(
     monkeypatch,
 ):
-    """Bare ``hermes`` / ``hermes chat`` on a TTY with ``display.interface:
-    tui`` resolves to the TUI via ``_resolve_use_tui``, but does NOT pass
-    ``--tui`` or ``HERMES_TUI``. Discovery must be skipped in the wrapper:
-    the TUI gateway owns it, and the wrapper would otherwise hold a dead
-    MCP server for the entire session (3 copies per TUI instance).
-    """
+    """Interactive launch leaves discovery to the private Ink runtime child."""
     calls = {"background": 0, "inline": 0}
 
     monkeypatch.setattr(main_mod, "_resolve_use_tui", lambda _args: True)
@@ -170,12 +163,10 @@ def test_prepare_agent_startup_skips_discovery_when_chat_resolves_to_tui(
     assert mcp_startup._current_home_thread() is None
 
 
-def test_prepare_agent_startup_keeps_discovery_for_non_chat_commands(
+def test_configuration_commands_do_not_spawn_runtime_mcp_clients(
     monkeypatch,
 ):
-    """Non-chat commands never launch the TUI, so they must keep their own
-    MCP discovery even when the ambient display config resolves to TUI —
-    ``_is_tui_chat_launch`` must not consult ``_resolve_use_tui`` there."""
+    """Outgoing MCP configuration is not an agent turn or a server entry point."""
     calls = {"inline": 0}
 
     monkeypatch.setattr(main_mod, "_resolve_use_tui", lambda _args: True)
@@ -205,9 +196,9 @@ def test_prepare_agent_startup_keeps_discovery_for_non_chat_commands(
         ),
     )
 
-    main_mod._prepare_agent_startup(_agent_args(command="mcp", mcp_action="serve"))
+    main_mod._prepare_agent_startup(_agent_args(command="mcp", mcp_action="list"))
 
-    assert calls["inline"] == 1
+    assert calls["inline"] == 0
 
 
 def test_background_mcp_discovery_suppresses_interactive_oauth(monkeypatch):

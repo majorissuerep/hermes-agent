@@ -197,6 +197,9 @@ def _write_record(server: LightpandaServer) -> None:
 def launch_lightpanda(session_name: str, *, block_private_networks: bool = False) -> tuple[Optional[LightpandaServer], Optional[str]]:
     """Start ``lightpanda serve`` on a free loopback port; ``(server, None)`` once ``/json/version`` answers,
     else ``(None, error)``. stderr goes to ``<state_dir>/<session>.log`` so a chatty child never blocks on a pipe."""
+    from tools.browser_terminal import browser_in_terminal
+    if browser_in_terminal():
+        return None, "Native Lightpanda cannot run outside the selected terminal sandbox; use an explicit outgoing CDP endpoint."
     binary = find_lightpanda_binary()
     if not binary:
         if os.name == "nt":
@@ -292,7 +295,7 @@ def _is_lightpanda_process(pid: int, port, start_time) -> bool:
         if "serve" not in cmdline or str(port) not in cmdline:
             return False
         if start_time:
-            from gateway.status import get_process_start_time
+            from hermes_platform.processes import get_process_start_time
             return get_process_start_time(pid) == start_time
     except Exception:
         return False
@@ -308,7 +311,7 @@ def reap_orphaned_lightpanda() -> int:
         logger.debug("lightpanda state dir unavailable: %s", e)
         return 0
     try:
-        from gateway.status import _pid_exists
+        from hermes_platform.processes import pid_exists
     except Exception:  # pragma: no cover - defensive
         return 0
 
@@ -327,7 +330,7 @@ def reap_orphaned_lightpanda() -> int:
             with _servers_lock:
                 if session_name in _servers:
                     continue
-        elif owner_pid and _pid_exists(int(owner_pid)):
+        elif owner_pid and pid_exists(int(owner_pid)):
             continue
         pid = record.get("pid")
         if pid and _is_lightpanda_process(int(pid), record.get("port"), record.get("start_time")):

@@ -34,7 +34,7 @@ CUSTOM = "custom"
 _COMMAND_SURFACES = {
     None: "cli_slash", "chat": "cli_slash", "tools": "cli_tools", "config": "cli_config",
     "skills": "cli_config", "plugins": "cli_config",
-    "dashboard": "web", "serve": "web", "gui": "web", "desktop": "web",
+    "tui_runtime": "tui",
 }
 _SETTING_KINDS = {"memory": "memory", "curator": "curator", "compression": "compression"}
 _OFF = frozenset({"false", "off", "no", "0", "none", ""})
@@ -46,23 +46,9 @@ def set_process_surface(command: Any) -> None:
     """Called once by the ``hermes`` dispatch (``command`` is the subcommand, None for chat) or the
     TUI gateway (``"tui_gateway"``). Unknown commands clear it."""
     global _process_surface
-    _process_surface = "tui_gateway" if command == "tui_gateway" else _COMMAND_SURFACES.get(command)
+    _process_surface = _COMMAND_SURFACES.get(command)
 
 
-def current_surface() -> str | None:
-    surface = _process_surface
-    if surface == "web":
-        from .shared_metrics_setup import web_setup_surface
-
-        return web_setup_surface()
-    if surface == "tui_gateway":
-        try:
-            from tui_gateway.server import _resolve_session_platform
-
-            return _resolve_session_platform()
-        except Exception:
-            return "tui"
-    return surface
 
 
 # ---- names -----------------------------------------------------------------------------------
@@ -298,3 +284,7 @@ def record_skill_removed(name: Any) -> None:
             _emit([("skill", metric_name, "disabled")], surface)
     except Exception:
         logger.debug("Skill removal not recorded", exc_info=True)
+
+
+def current_surface() -> str | None:
+    return _process_surface

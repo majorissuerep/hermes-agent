@@ -41,7 +41,7 @@ PROJECT_ROOT = Path(__file__).parent.parent.parent
 # delivery is harmless.
 
 _LIVE_SYSTEM_GUARD_BYPASS_MARK = "live_system_guard_bypass"
-_GATEWAY_LOOKALIKE_MARK = "spawns_gateway_lookalike"
+_GATEWAY_LOOKALIKE_MARK = "spawns_gateway_lookalike"  # historical argv fixtures, not a live service
 
 # Tests may designate a temporary repo to exercise the real guard safely.
 _LIVE_GUARD_PROTECTED_GIT_ROOTS = (PROJECT_ROOT,)
@@ -80,7 +80,6 @@ def _live_system_guard(request, monkeypatch):
     import subprocess as _subprocess
 
     test_pid = _os.getpid()
-    lookalike_ok = request.node.get_closest_marker(_GATEWAY_LOOKALIKE_MARK) is not None
     # Capture the test process's existing children at fixture start —
     # any *new* children spawned by the test are also allowlisted via
     # the live psutil walk below. Static set keeps the fast path cheap.
@@ -265,40 +264,6 @@ def _live_system_guard(request, monkeypatch):
 
     from tests.git_safety import blocked_git_mutation
 
-    def _sandboxed_gateway_child(cmd_str: str, env) -> bool:
-        """The disposable-daemon fixtures (``tests/gateway/fixtures/*``, the socket-path-length
-        probes) launch the bare ``python -m gateway.run`` module entry with an explicit ``env``
-        that re-homes BOTH ``HERMES_HOME`` and ``HOME`` away from the developer's account. Such a
-        child resolves no developer unit or config, holds no live port, and is reaped by its
-        test: the orphan class the guard exists for is the ``hermes gateway run|start|restart``
-        CLI spawn against the real home, which the fixtures never use."""
-        if not isinstance(env, dict):
-            return False
-        try:
-            tokens = _shlex.split(cmd_str)
-        except ValueError:
-            tokens = cmd_str.split()
-        if "-m" not in tokens or tokens[tokens.index("-m") + 1:][:1] != ["gateway.run"]:
-            return False
-        hermes_home, home = env.get("HERMES_HOME"), env.get("HOME")
-        if not hermes_home or not home:
-            return False
-        # The developer's account home from the passwd db: tests re-point ``Path.home`` at their
-        # tmp user dir, which would make a sandboxed child look like it runs against the real one.
-        try:
-            import pwd
-            real_home = Path(pwd.getpwuid(_os.getuid()).pw_dir).resolve()
-        except (ImportError, KeyError):
-            real_home = Path.home().resolve()
-        # The child must not resolve the REAL Hermes root. Comparing HERMES_HOME against the whole
-        # account home refused every Windows sandbox: %TEMP% lives under %USERPROFILE%.
-        from hermes_state.guard import _real_platform_state_root
-        real_root = _real_platform_state_root() or real_home / ".hermes"
-        try:
-            return (Path(home).resolve() != real_home
-                    and not Path(hermes_home).resolve().is_relative_to(real_root))
-        except Exception:
-            return False
 
     def _check_subprocess_cmd(name, cmd, kwargs=None):
         git_verb = blocked_git_mutation(cmd, kwargs, _LIVE_GUARD_PROTECTED_GIT_ROOTS)
@@ -359,36 +324,6 @@ def _live_system_guard(request, monkeypatch):
                 "@pytest.mark.live_system_guard_bypass if genuinely "
                 "needed (e.g. an integration test testing the update "
                 "flow against a dedicated throwaway repo)."
-            )
-        # Block spawning a REAL gateway runtime (``python -m hermes_cli.main
-        # gateway run|start|restart``). ``_spawn_hermes_action`` launches it
-        # with start_new_session=True, so it outlives the pytest worker; the
-        # child inherits the pytest-tmp HERMES_HOME, resolves the DEVELOPER's
-        # ``hermes-gateway`` systemd unit (a tmp home hashes to no profile
-        # suffix), restarts the live gateway, and the survivors squat the
-        # webhook port. 2026-09-03: 39 such orphans lived 6 days after a
-        # sibling refactor moved the spawn seam and left tests patching the
-        # facade. The canonical matcher, never an argv substring.
-        from gateway.status import gateway_spawn_intent_subcommand
-        # A gateway launched INSIDE a container (`docker exec … hermes gateway start`) cannot
-        # reach the host's systemd unit or webhook port; tests/docker/ exists to exercise it.
-        in_container = _first_token_basename(cmd_str) in _CONTAINER_RUNTIMES
-        if (
-            not lookalike_ok
-            and not in_container
-            and gateway_spawn_intent_subcommand(cmd_str) in ("run", "start", "restart")
-            and not _sandboxed_gateway_child(cmd_str, (kwargs or {}).get("env"))
-        ):
-            raise RuntimeError(
-                f"tests/conftest.py live-system guard: blocked "
-                f"subprocess.{name}({cmd!r}) — this would spawn a REAL "
-                "hermes gateway runtime that outlives the test (it is "
-                "detached), restarts the developer's live gateway, and "
-                "holds the webhook port. Patch the spawn seam where "
-                "production reads it (hermes_cli.web_server_gateway."
-                "_spawn_hermes_action), or mark with "
-                "@pytest.mark.spawns_gateway_lookalike a test that spawns "
-                "and reaps its own stub child."
             )
 
     def _wrap_subprocess(name, real):

@@ -8,7 +8,7 @@ import pytest
 
 from hermes_cli import anon_auth
 from hermes_cli.auth import _auth_store_lock, _load_auth_store, _save_auth_store
-from tests.hermes_cli.anon_portal import as_local_desktop_backend, claimed_trial, install_portal
+from tests.hermes_cli.anon_portal import as_local_terminal_runtime, claimed_trial, install_portal
 
 
 def _jwt(**claims) -> str:
@@ -35,7 +35,7 @@ def test_a_claimed_trial_has_the_notice_pending_once_and_the_flag_persists(porta
 
 
 def test_a_connector_only_guest_has_no_notice_pending(portal, monkeypatch):
-    as_local_desktop_backend(monkeypatch)
+    as_local_terminal_runtime(monkeypatch)
     anon_auth.ensure_portal_identity(explicit=True)
 
     assert anon_auth.has_guest() and not anon_auth.guest_notice_pending()

@@ -7,8 +7,8 @@ import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 
 import type { SubmissionDestination } from '../app/submissionDestination.js'
-import type { GatewayClient } from '../gatewayClient.js'
 import { t } from '../i18n/runtime.js'
+import type { LocalAgentClient } from '../localAgentClient.js'
 
 export interface ImageAttachment { path: string; mime: string }
 export interface StagedImage extends ImageAttachment { name: string; remainder?: string }
@@ -82,7 +82,7 @@ async function extractClipboardImage(path: string): Promise<boolean> {
 }
 
 export async function stageClipboardImage(
-  gw: GatewayClient, destination: SubmissionDestination,
+  gw: LocalAgentClient, destination: SubmissionDestination,
   extract: (path: string) => Promise<boolean> = extractClipboardImage
 ): Promise<StagedImage | null> {
   const directory = await mkdtemp(join(tmpdir(), 'hermes-clipboard-'))
@@ -95,25 +95,13 @@ export async function stageClipboardImage(
   } finally { await rm(directory, { recursive: true, force: true }) }
 }
 
-export async function stageImagePath(raw: string, gw: GatewayClient, destination: SubmissionDestination): Promise<StagedImage> {
+export async function stageImagePath(raw: string, gw: LocalAgentClient, destination: SubmissionDestination): Promise<StagedImage> {
   const source = await resolveImagePath(raw)
   const bytes = await readFile(source.path)
 
   if (bytes.length > MAX_IMAGE_BYTES) { throw new Error(t('canonical.images.tooLarge')) }
   const { mime, ext } = imageFormat(bytes)
   const name = basename(source.path)
-
-  // Explicit URL attachments may target another machine, even a loopback SSH
-  // tunnel. Only discovery-owned local connections share our profile filesystem.
-  if (process.env.HERMES_TUI_GATEWAY_URL?.trim()) {
-    const result = await gw.request<{ path?: string }>('image.attach_bytes', {
-      session_id: destination.sid, filename: `${randomUUID()}${ext}`, content_base64: bytes.toString('base64')
-    })
-
-    if (!result?.path) { throw new Error(t('canonical.images.noOwnerPath')) }
-
-    return { path: result.path, mime, name, remainder: source.remainder }
-  }
 
   const directory = join(destination.profileHome, 'cache', 'images')
   await mkdir(directory, { recursive: true, mode: 0o700 })

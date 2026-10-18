@@ -28,7 +28,7 @@ def _resolve_origin(explicit: Optional[dict[str, Any]]) -> Optional[dict[str, An
     if explicit is not None:
         return explicit
     try:
-        from gateway.session_context import get_session_env
+        from agent.session_context import get_session_env
         platform = get_session_env("HERMES_SESSION_PLATFORM")
         chat_id = get_session_env("HERMES_SESSION_CHAT_ID")
         if platform and chat_id:
@@ -228,10 +228,8 @@ def handle_blueprint_command(
         )
 
     try:
-        from cron.scheduler import CronSchedulerRegistrationError, create_job_with_scheduler_registration
-        job = create_job_with_scheduler_registration(**spec)
-    except CronSchedulerRegistrationError as e:
-        return BlueprintCommandResult(e.user_message())
+        from cron.jobs import create_job
+        job = create_job(**spec)
     except Exception as e:
         logger.debug("blueprint create_job failed: %s", e)
         return BlueprintCommandResult(f"Failed to create the job: {e}")

@@ -15,8 +15,8 @@ if str(ROOT) not in sys.path:
 
 def prepare(source: Path, work: Path, cache: Path, out: Path, ref: str) -> Path:
     from hermes_cli.runtime_state import _lock
-    from scripts.bundles.desktop_prepare import git, require_source
-    from scripts.bundles.desktop_toolchain import run_preparation
+    from scripts.bundles.native_source import git, require_source
+    from scripts.bundles.native_toolchain import run_preparation
     from scripts.bundles.native_prepared import prepared_path
     from pm.lock import _write
 
@@ -57,8 +57,8 @@ def prepare(source: Path, work: Path, cache: Path, out: Path, ref: str) -> Path:
 
 
 def prepare_in_worker(request: dict) -> Path:
-    from scripts.bundles.desktop_prepare import require_source
-    from scripts.bundles.desktop_toolchain import prepare_tools
+    from scripts.bundles.native_source import require_source
+    from scripts.bundles.native_toolchain import prepare_tools
     from scripts.bundles.native import prepare_native
 
     source, work, cache, out = (Path(request[name]) for name in ("source", "work", "cache", "out"))

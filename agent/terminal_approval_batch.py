@@ -1,4 +1,4 @@
-"""Prepare desktop terminal consent without running shells ahead of their turn.
+"""Prepare local TUI terminal consent without running shells ahead of their turn.
 
 Workers keep execution middleware on its original stack. Only command approval
 runs ahead; the existing sequential executor releases each worker and persists
@@ -129,13 +129,13 @@ class _TerminalBatch:
         with approval._lock:
             self.cancelled.set()
             for session_key, entry in self.pending_approvals:
-                queue = approval._gateway_queues.get(session_key, [])
+                queue = approval._session_queues.get(session_key, [])
                 if entry in queue:
                     queue.remove(entry)
                     entry.result = "deny"
                     entry.event.set()
                 if not queue:
-                    approval._gateway_queues.pop(session_key, None)
+                    approval._session_queues.pop(session_key, None)
             self.pending_approvals.clear()
         for slot in self.slots:
             slot.release.set()
@@ -287,11 +287,11 @@ def terminal_approval_runs(agent, calls):
 
 @contextmanager
 def terminal_approval_batch(agent, calls, messages, task_id):
-    from gateway.session_context import get_session_env
+    from agent.session_context import get_session_env
     from tools import approval
     from agent.tool_executor import _parse_tool_call
-    if (len(calls) < 2 or get_session_env("HERMES_SESSION_SOURCE") != "desktop"
-            or approval._gateway_notify_cb(approval.get_current_session_key()) is None):
+    if (len(calls) < 2 or get_session_env("HERMES_SESSION_SOURCE") != "tui"
+            or approval._session_notify_cb(approval.get_current_session_key()) is None):
         yield
         return
     parsed = [_parse_tool_call(agent, call, flatten_probe=True) for call in calls]

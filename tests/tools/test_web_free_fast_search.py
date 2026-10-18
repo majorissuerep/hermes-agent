@@ -11,7 +11,7 @@ from threading import Thread
 
 import pytest
 
-from tests.hermes_cli.anon_portal import as_local_desktop_backend
+from tests.hermes_cli.anon_portal import as_local_terminal_runtime
 
 # Anonymous guest: NAS tier claim says "anonymous" — no Portal account behind the identity. It claimed
 # the desktop's welcome trial (``_write_home`` reads it on the local desktop backend).
@@ -81,7 +81,7 @@ def _write_home(home, monkeypatch, *, nous_state=None, config=None):
     home.mkdir(parents=True)
     install_optional_portal_provider(monkeypatch)
     monkeypatch.setenv("HERMES_HOME", str(home))
-    as_local_desktop_backend(monkeypatch)
+    as_local_terminal_runtime(monkeypatch)
     monkeypatch.delenv("PERPLEXITY_API_KEY", raising=False)
     monkeypatch.delenv("TOOL_GATEWAY_USER_TOKEN", raising=False)
     atomic_config_write(home / "config.yaml", {"web": {"keyless_rescue": False}, **(config or {})})
@@ -165,7 +165,7 @@ def test_free_fast_search_eligibility_follows_the_served_profile(monkeypatch, tm
     """Multiplex A→B→A: profile A holds a zero-credit Portal identity, B none; each answers from its own store."""
     from hermes_cli.nous_account import reset_nous_portal_account_info_cache
     from agent.secret_scope import set_multiplex_active
-    from gateway.run import _profile_runtime_scope
+    from tui_runtime.model_switch import _session_profile_runtime_scope
     from tools import web_tools
 
     root = tmp_path / ".hermes"
@@ -179,7 +179,7 @@ def test_free_fast_search_eligibility_follows_the_served_profile(monkeypatch, tm
         seen = []
         for home in (profile_a, profile_b, profile_a):
             reset_nous_portal_account_info_cache()
-            with _profile_runtime_scope(home):
+            with _session_profile_runtime_scope({"profile_home": str(home)}):
                 seen.append(web_tools._get_search_backend())
     finally:
         set_multiplex_active(False)

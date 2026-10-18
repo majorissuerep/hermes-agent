@@ -279,7 +279,7 @@ class TestApprovalPathsRecordHumanWait:
         result_holder = {}
 
         def _worker():
-            result_holder["result"] = approval_mod._await_gateway_decision(
+            result_holder["result"] = approval_mod._await_session_decision(
                 SESSION, lambda _data: notified.set(), approval_data
             )
 
@@ -291,7 +291,7 @@ class TestApprovalPathsRecordHumanWait:
             assert approval_human_wait.human_wait_seconds(SESSION) > 0.0
         finally:
             # Resolve the pending entry via the real production path.
-            approval_mod.resolve_gateway_approval(SESSION, "deny", resolve_all=True)
+            approval_mod.resolve_session_approval(SESSION, "deny", resolve_all=True)
             t.join(timeout=5)
         assert not t.is_alive()
         # Window closed once the wait resolved.

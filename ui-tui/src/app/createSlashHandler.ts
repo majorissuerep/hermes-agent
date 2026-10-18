@@ -1,8 +1,8 @@
 import { parseCommandDispatch, parseSlashCommand } from '@hermes/shared/slash'
 
-import type { GatewayClient } from '../gatewayClient.js'
 import type { SlashExecResponse } from '../gatewayTypes.js'
 import { rpcErrorMessage } from '../lib/rpc.js'
+import type { LocalAgentClient } from '../localAgentClient.js'
 import { launchWidget } from '../sdk/host.js'
 import { getWidgetApp } from '../sdk/registry.js'
 
@@ -17,7 +17,7 @@ import { describeSlashExecError, isUnsupportedCommand, shouldFallbackToDispatch 
 /** Shared metrics count each user-typed command once, from the client: the gateway no longer
  *  counts slash.exec, so locally handled commands (/resume, /skin, overlays) land too.
  *  Fire-and-forget; the backend canonicalizes the raw name. */
-export function reportSlashCommand(gw: GatewayClient, name: string, sid: null | string | undefined): void {
+export function reportSlashCommand(gw: LocalAgentClient, name: string, sid: null | string | undefined): void {
   if (name) {
     gw.request('shared_metrics.slash_command', { command: name, ...(sid ? { session_id: sid } : {}) }).catch(
       () => undefined

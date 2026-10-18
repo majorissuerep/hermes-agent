@@ -95,13 +95,13 @@ def _follow_job(lm, job_id: str) -> str:
 
 def _start(lm, start) -> str | None:
     """Run a route handler that starts a job; its HTTP refusal becomes a printed line."""
-    from fastapi import HTTPException
+    from hermes_cli.local_runtime.errors import LocalModelError
 
     try:
         result = start()
         if asyncio.iscoroutine(result):
             result = asyncio.run(result)
-    except HTTPException as exc:
+    except LocalModelError as exc:
         print(f"  ✗ {exc.detail}")
         return None
     return result.get("job_id")
@@ -122,7 +122,7 @@ def _model_flow_local(config, current_model=""):
     del config, current_model
     from hermes_cli.main_provider_setup import _prompt_provider_choice
     from hermes_cli.setup import prompt_yes_no
-    from hermes_cli.web_routers import local_models as lm
+    from hermes_cli.local_runtime import control as lm
 
     hw = lm.local_models_hardware()
     status = lm.local_models_status()

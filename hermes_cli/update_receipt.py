@@ -204,7 +204,7 @@ class UpdateReceipt:
             persisted["skipped"] = _str_records(
                 fresh_recovery.get("skipped", []), ("profile", "kind", "supervisor", "reason")
             )
-            # ``hermes serve`` hosts tui_gateway and is not a gateway profile, so neither the
+            # ``hermes serve`` hosts tui_runtime and is not a gateway profile, so neither the
             # per-profile buckets above nor the fleet-version matrix can describe it. Persist its
             # unit outcomes and any process that survived on the pre-update generation, or the
             # receipt keeps claiming a clean recovery the operator's box contradicts.
@@ -290,17 +290,17 @@ def _persist_running(data: dict[str, Any]) -> None:
         stored = read_run_record(str(data.get("update_id")))
         if stored is not None and stored[1].get("finished_at"):
             return
-        from hermes_cli.process_identity import _process_create_time
+        from hermes_platform.child_processes import process_create_time
 
         payload = (json.dumps({**data, "writer_pid": os.getpid(),
-                               "writer_create_time": _process_create_time(os.getpid())},
+                               "writer_create_time": process_create_time(os.getpid())},
                               indent=2, default=str) + "\n").encode("utf-8")
         _write_receipt(path, json.loads(payload))
         _write_latest(payload)
 
 
 def _owner_alive(record: dict[str, Any]) -> bool:
-    from hermes_cli.process_identity import _pid_alive_matches
+    from hermes_platform.child_processes import pid_alive_matches
 
     identities = {}
     for key, time_key in (("pid", "pid_create_time"), ("writer_pid", "writer_create_time")):
@@ -311,7 +311,7 @@ def _owner_alive(record: dict[str, Any]) -> bool:
             create_time = record.get(time_key)
             if pid not in identities or identities[pid] is None:
                 identities[pid] = create_time
-    return any(_pid_alive_matches(pid, create_time) is not False
+    return any(pid_alive_matches(pid, create_time) is not False
                for pid, create_time in identities.items())
 
 
@@ -364,9 +364,9 @@ def begin_update_receipt(*, previous: dict | None = None, correlation_id: str | 
         # A handoff receipt from an older interpreter may predate the field.
         receipt.data["correlation_id"] = receipt.data.get("correlation_id") or _launcher_correlation_id()
         with suppress(Exception):
-            from hermes_cli.process_identity import _process_create_time
+            from hermes_platform.child_processes import process_create_time
 
-            receipt.data.setdefault("pid_create_time", _process_create_time(receipt.data["pid"]))
+            receipt.data.setdefault("pid_create_time", process_create_time(receipt.data["pid"]))
         if not previous:
             reconcile_interrupted_runs()
         # The running record is about to replace latest.json: snapshot the previous record's
@@ -1038,40 +1038,16 @@ def read_receipt_for_action(action_id: str) -> Optional[dict[str, Any]]:
     return None
 
 
-def _profile_homes() -> list[tuple[str, Path]]:
-    """``(profile, home)`` for the default home plus every valid named profile dir, sorted."""
-    from hermes_cli.profiles import _get_default_hermes_home, _get_profiles_root, _PROFILE_ID_RE
-
-    homes: list[tuple[str, Path]] = []
-    default_home = _get_default_hermes_home()
-    if default_home.is_dir():
-        homes.append(("default", default_home))
-    root = _get_profiles_root()
-    if root.is_dir():
-        homes.extend(
-            (entry.name, entry)
-            for entry in sorted(root.iterdir())
-            if entry.is_dir() and entry.name != "default" and _PROFILE_ID_RE.match(entry.name)
-        )
-    return homes
+def _profile_homes(*args, **kwargs):
+    """Frozen old updater probe; terminal completion owns continuation."""
+    from hermes_cli._old_updater import stop_for_relaunch
+    stop_for_relaunch()
 
 
-def _socket_identity(home: Path) -> Optional[tuple[int, dict]]:
-    """``(pid, identity)`` declared by the gateway owning ``home``'s control socket, else None.
-
-    A live ``identify`` answer is authoritative — no PID-reuse or stale-file heuristics. Callers
-    fall back to ``gateway_state.json`` for gateways that predate the socket or whose socket
-    didn't bind.
-    """
-    try:
-        # Prefer the gateway-owned control socket (#92091): identity declared by the process itself,
-        # including its own supervisor provenance — no argv/PID inference. Scan fallback below.
-        from gateway.control_socket import identify_gateway
-
-        identity = identify_gateway(home)
-        return (int(identity.get("pid")), identity) if identity else None
-    except Exception:  # probe failure, no gateway, or an unparseable pid
-        return None
+def _socket_identity(*args, **kwargs):
+    """Frozen old updater probe; terminal completion owns continuation."""
+    from hermes_cli._old_updater import stop_for_relaunch
+    stop_for_relaunch()
 
 
 _CODE_ROOT_MAX_DEPTH = 8
@@ -1095,39 +1071,10 @@ def _updater_code_root() -> Optional[Path]:
     return _code_root_for_path(str(Path(__file__).resolve()))
 
 
-def _gateway_code_root(pid: int, home: Path) -> Optional[Path]:
-    """Resolve the checkout served by a verified live gateway when possible."""
-    # Older gateways cannot publish a new identity field, but their pid-guarded
-    # status record already carries sys.argv (whose first item is the resolved
-    # module path for ``python -m`` launches).
-    with suppress(Exception):
-        from gateway.status import read_runtime_status
-
-        record = read_runtime_status(home / "gateway_state.json") or {}
-        if int(record.get("pid")) == pid:
-            for probe in record.get("argv") or []:
-                root = _code_root_for_path(probe)
-                if root:
-                    return root
-
-    with suppress(Exception):
-        import psutil  # type: ignore
-
-        process = psutil.Process(pid)
-        with suppress(Exception):
-            root = _code_root_for_path((process.environ() or {}).get("VIRTUAL_ENV"))
-            if root:
-                return root
-        probes: list[Any] = []
-        with suppress(Exception):
-            probes.append(process.exe())
-        with suppress(Exception):
-            probes.extend(process.cmdline() or [])
-        for probe in probes:
-            root = _code_root_for_path(probe)
-            if root:
-                return root
-    return None
+def _gateway_code_root(*args, **kwargs):
+    """Frozen old updater probe; terminal completion owns continuation."""
+    from hermes_cli._old_updater import stop_for_relaunch
+    stop_for_relaunch()
 
 
 EXTERNAL_STATE = "external"
@@ -1173,97 +1120,10 @@ def _fleet_row(
 _NOT_EXPECTED_STATES = {"stopped", "startup_failed"}
 
 
-def collect_fleet_versions(
-    *, pre_restart_pids: Optional[list[int]] = None, self_restart_pending: Optional[set] = None,
-) -> list[dict[str, Any]]:
-    """Snapshot every profile's gateway code identity vs. the current tree.
-
-    ``self_restart_pending`` — pids of gateways that are ancestors of this updater and accepted a
-    self-restart request (cron update inside the gateway tree, #100179). They can only restart after
-    this process exits, so their pre-update ``code_sha`` is expected: such a row is
-    ``restart_pending`` instead of ``stale`` and does not fail the matrix (#119597). Every other
-    live gateway on the old sha keeps its ``stale`` verdict.
-
-    Rollout safety: ``down`` requires membership in ``pre_restart_pids`` — a stale state file from a
-    long-dead gateway (machine reboot, manual kill weeks ago) must NOT fail every future update.
-    Without a pre-restart snapshot (``None``/empty) dead PIDs are skipped (historical behavior).
-
-    ``stale``   — gateway stamped a code_sha that differs from the updated checkout's HEAD (it is still
-    serving pre-update modules). ``unknown`` — gateway predates the code-identity stamp (started before this
-    feature landed), identity could not be resolved, or the state file's live PID is not the
-    verified gateway for that home (``live_gateway_pid_for_home``): ``write_runtime_status`` re-stamps
-    ``pid``/``code_sha`` for whatever process writes it, so a foreign writer must never read as
-    ``current`` (#110420, sibling of #109680). ``down``    — the gateway was ALIVE when this update
-    started (``pre_restart_pids``), its runtime status still says running, but the PID is dead and no
-    successor rewrote the record: the restart phase stopped it and nothing came back. Without this row a
-    killed-and-never-replaced gateway produced NO entry at all and the matrix passed silently (Phase-1
-    verification gap, #88848/#74973 class).
-    """
-    _pre_restart = {int(p) for p in (pre_restart_pids or []) if isinstance(p, int)}
-    _pending = {int(p) for p in (self_restart_pending or ()) if isinstance(p, int)}
-    results: list[dict[str, Any]] = []
-    expected_sha = _code_identity(refresh=True).get("sha")
-    expected_root = _updater_code_root()
-    try:
-        from gateway.status import (
-            live_gateway_pid_for_home,
-            read_runtime_status,
-            runtime_status_pid_is_live,
-        )
-
-        for profile, home in _profile_homes():
-            sock = _socket_identity(home)
-            if sock is not None:
-                pid, identity = sock
-                row = _fleet_row(
-                    profile, pid, identity.get("code_sha"), identity.get("code_version"), expected_sha,
-                    served_profiles=identity.get("served_profiles"),
-                    code_root=_gateway_code_root(pid, home), expected_root=expected_root,
-                    self_restart_pending=_pending,
-                )
-                results.append({**row, "source": "socket"})
-                continue
-            record = read_runtime_status(home / "gateway_state.json")
-            if not record:
-                continue
-            try:
-                pid = int(record.get("pid"))
-            except (TypeError, ValueError):
-                continue
-            # A state file is only a fallback claim. Its SHA is evidence about
-            # its own PID only when the profile's canonical identity resolver
-            # verifies that same live gateway.
-            if live_gateway_pid_for_home(home) == pid:
-                results.append(
-                    _fleet_row(
-                        profile, pid, record.get("code_sha"), record.get("code_version"), expected_sha,
-                        served_profiles=record.get("served_profiles"),
-                        code_root=_gateway_code_root(pid, home), expected_root=expected_root,
-                        self_restart_pending=_pending,
-                    )
-                )
-                continue
-            # A live non-gateway (or a gateway for another profile) can write a
-            # plausible state file. Keep the fail-open visibility row, but never
-            # let that file's self-reported SHA or version classify or label
-            # the process — both claims have the same trust problem.
-            if runtime_status_pid_is_live(record):
-                results.append(_fleet_row(profile, pid, None, None, None))
-                continue
-            # Dead PID (or a live PID recycled by an unrelated process during the update's own
-            # churn): a DOWN row only when this exact pid was alive at update start AND the record
-            # still claims a running state — "the restart phase stopped it and nothing came back."
-            # Everything else (clean stop, startup failure, long-dead stale record) keeps the no-row
-            # behavior so the rollout can't false-positive. ``_pre_restart`` is a bare PID set, not
-            # (pid, start_time) pairs, so a recycled PID from gateway A landing in B's stale record
-            # could still mislabel B as down — inherent to the snapshot's data model.
-            # See #93258.
-            gw_state = record.get("gateway_state")
-            if pid in _pre_restart and isinstance(gw_state, str) and gw_state and gw_state not in _NOT_EXPECTED_STATES:
-                results.append(_fleet_row(profile, pid, None, record.get("code_version"), None, state="down"))
-    except Exception as exc:
-        logger.debug("Fleet version probe failed: %s", exc)
-    return results
+def collect_fleet_versions(*args, **kwargs):
+    """Frozen old updater probe; terminal completion owns continuation."""
+    from hermes_cli._old_updater import stop_for_relaunch
+    stop_for_relaunch()
 
 
 _FLEET_ROW_LINES = {

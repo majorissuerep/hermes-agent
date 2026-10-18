@@ -352,7 +352,6 @@ def test_run_one_job_records_running_then_terminal(monkeypatch):
 
     monkeypatch.setattr(scheduler, "run_job", fake_run_job)
     monkeypatch.setattr(scheduler, "save_job_output", lambda *_args: None)
-    monkeypatch.setattr(scheduler, "_deliver_result", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(scheduler, "mark_job_run", lambda *_args, **_kwargs: None)
 
     assert scheduler.run_one_job({"id": "job-3", "execution_id": "exec-3"}) is True
@@ -362,39 +361,8 @@ def test_run_one_job_records_running_then_terminal(monkeypatch):
     assert events[-1][2]["success"] is True
 
 
-def test_provider_start_recovers_interrupted_records_before_tick(monkeypatch):
-    import cron.scheduler_provider as provider
-
-    events = []
-    stop = __import__("threading").Event()
-    stop.set()
-    monkeypatch.setattr(
-        "cron.executions.recover_interrupted_executions",
-        lambda: events.append("recover") or 0,
-        raising=False,
-    )
-    monkeypatch.setattr("cron.jobs.record_ticker_heartbeat", lambda **_kwargs: events.append("heartbeat"))
-
-    provider.InProcessCronScheduler().start(stop, interval=1)
-
-    assert events[:2] == ["recover", "heartbeat"]
 
 
-def test_external_provider_start_recovers_interrupted_records(monkeypatch):
-    from plugins.cron_providers.chronos import ChronosCronScheduler
-
-    provider = ChronosCronScheduler()
-    provider._client = type("Client", (), {"arm": lambda self, **kwargs: None})()
-    events = []
-    monkeypatch.setattr(
-        "cron.executions.recover_interrupted_executions",
-        lambda: events.append("recover") or 0,
-    )
-    monkeypatch.setattr(provider, "reconcile", lambda: events.append("reconcile"))
-
-    provider.start(__import__("threading").Event())
-
-    assert events == ["recover", "reconcile"]
 
 
 class _TrackingConnection:

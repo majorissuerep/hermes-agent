@@ -470,26 +470,13 @@ def _check_npm_audit(should_fix: bool, f: Finding) -> None:
     staged = _pm_tool_path("npm")
     npm_bin = str(staged) if staged else (_safe_which("npm") if _is_termux() else None)
     if npm_bin:
-        try:
-            # Each entry: (cwd, label, extra_audit_args) PROJECT_ROOT is audited with --workspaces=false so
-            # that the apps/* glob (which pulls in Electron, node-pty, etc.) is never resolved for a routine
-            # security check. The web and ui-tui workspaces are audited separately via --workspace flags.
-            # See #38772. The WhatsApp bridge may live under a writable HERMES_HOME mirror instead of the
-            # (possibly read-only) install tree in Docker — resolve it through the shared helper so we audit
-            # the dir that actually holds node_modules. See #49561.
-            from gateway.platforms.whatsapp_common import resolve_whatsapp_bridge_dir
-            whatsapp_bridge_dir = resolve_whatsapp_bridge_dir()
-        except Exception:
-            whatsapp_bridge_dir = PROJECT_ROOT / "scripts" / "whatsapp-bridge"
         for npm_dir, label, audit_extra in (
             # NOT agent-browser: it is now a pm-managed precompiled binary
             # (see AgentBrowser in pm/packages.py) with no node_modules/lockfile
             # of its own to audit. This row is the root package.json itself
             # (js-yaml, semver, eslint tooling). See #122223.
             (PROJECT_ROOT, "Root npm package", ["--workspaces=false"]),
-            (PROJECT_ROOT, "web workspace", ["--workspace", "web"]),
             (PROJECT_ROOT, "ui-tui workspace", ["--workspace", "ui-tui"]),
-            (whatsapp_bridge_dir, "WhatsApp bridge", []),
         ):
             # Workspace-scoped audits check the root node_modules; standalone dirs check their own.
             if ((PROJECT_ROOT if audit_extra else npm_dir) / "node_modules").exists():

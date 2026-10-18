@@ -17,11 +17,11 @@ import cron.executions as executions_mod
 
 @pytest.fixture(autouse=True)
 def _ledger(monkeypatch, tmp_path):
-    import gateway.status
+    import hermes_platform.processes
 
     monkeypatch.setattr(executions_mod, "EXECUTIONS_FILE", tmp_path / "cron" / "executions.db")
     # The owner process exists for every row in this module; only the fingerprint decides.
-    monkeypatch.setattr(gateway.status, "_pid_exists", lambda pid: True)
+    monkeypatch.setattr(hermes_platform.processes, "pid_exists", lambda pid: True)
 
 
 def _seed_external_running(monkeypatch, *, claimed_start_time: int) -> str:

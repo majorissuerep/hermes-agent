@@ -5,10 +5,8 @@ from cron import jobs
 from tools import cronjob_tools
 
 
-def test_paused_creation_is_inert_until_operator_action(tmp_path, monkeypatch, make_cron_provider):
-    registered, writes = [], []
-    provider = make_cron_provider(register_job=lambda job: registered.append(job["id"]))
-    monkeypatch.setattr("cron.scheduler_provider.resolve_cron_scheduler", lambda: provider)
+def test_paused_creation_is_inert_until_operator_action(tmp_path, monkeypatch):
+    writes = []
     save = jobs.save_jobs
 
     def observe(rows):
@@ -29,7 +27,6 @@ def test_paused_creation_is_inert_until_operator_action(tmp_path, monkeypatch, m
         first = next(row for rows in writes for row in rows if row["id"] == job_id)
         assert first["enabled"] is False and first["state"] == "paused"
         assert first["paused_at"] and first["paused_reason"] and first["next_run_at"] is None
-        assert registered == [active["job_id"]]
         assert job_id not in {row["id"] for row in jobs.get_due_jobs()}
         assert jobs.claim_job_for_fire(job_id) is False
         resumed = jobs.resume_job(job_id)

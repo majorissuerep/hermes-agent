@@ -26,42 +26,9 @@ from hermes_cli.auth import AuthError
 
 
 def _run_owned_job(job, tmp_path):
-    """Run the job through the production owner bridge (cron turns execute inside the gateway
-    owner, which lends its canonical store); returns run_job's ``(success, output, final,
-    error)`` tuple."""
-    from gateway.session_contract import SessionRef
-    from gateway.session_cron import current_execution, execute
-    from hermes_state.registry import acquire, release
-
-    ref = SessionRef("test-profile", "cron-owner-session")
-    admission_id = "cron-owner-admission"
-    db = acquire(tmp_path / "state.db")
-    db.create_session(ref.session_id, source="cron")
-    authority = SimpleNamespace(
-        db=db, pending_results={},
-        sessions={ref.session_id: SimpleNamespace(source=SimpleNamespace(user_id="cron-owner"))},
-    )
-    row = {"admission_id": admission_id, "request_id": "cron-owner-request",
-           "principal_id": "cron-owner", "payload": {"text": ""}}
-    policy = SimpleNamespace(request_json=json.dumps(
-        {"cron_job": job, "extra_prompt": None, "request_id": "cron-owner-request"}))
-
-    async def run():
-        previous = current_execution()
-        try:
-            await execute(authority, ref, row, policy)
-        except RuntimeError as exc:
-            saved = authority.pending_results.get(admission_id)
-            if saved is None:
-                raise
-            assert str(exc) == saved["result"]["cron_result"][3]
-        assert current_execution() is previous
-        return tuple(authority.pending_results[admission_id]["result"]["cron_result"])
-
-    try:
-        return asyncio.run(run())
-    finally:
-        release(db)
+    """Run the actual local agent execution path."""
+    from cron.scheduler import run_job
+    return run_job(job)
 
 _CONFIG = (
     "model:\n"
@@ -95,7 +62,6 @@ def _run(tmp_path, job, *, primary_error=None):
 
     with patch("cron.scheduler._hermes_home", tmp_path), \
          patch("cron.scheduler._get_hermes_home", return_value=tmp_path), \
-         patch("cron.scheduler_delivery._resolve_origin", return_value=None), \
          patch("hermes_cli.env_loader.load_hermes_dotenv"), \
          patch("hermes_cli.env_loader.reset_secret_source_cache"), \
          patch("hermes_cli.runtime_provider.resolve_runtime_provider", side_effect=resolve), \

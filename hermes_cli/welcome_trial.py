@@ -70,7 +70,7 @@ class _Ask:
 # Cheapest first; the last one reads the disk. Each is a reason the trial cannot be claimed.
 _CLAIM_BLOCKERS: tuple[tuple[str, Callable[[_Ask], bool]], ...] = (
     ("the welcome provider is not installed", lambda _ask: not anon_auth.welcome_provider_available()),
-    ("not the desktop's local backend", lambda _ask: not anon_auth.on_local_desktop_backend()),
+    ("not the local terminal runtime", lambda _ask: not anon_auth.on_local_terminal_runtime()),
     ("guests are switched off", lambda _ask: not anon_auth.guest_allowed()),
     ("a Nous identity exists", lambda _ask: _has_nous_identity()),
     ("a provider is configured",
@@ -87,7 +87,7 @@ def claim_blocker(*, assume_fresh: bool = False, configured: Optional[bool] = No
     return next((reason for reason, blocks in _CLAIM_BLOCKERS if blocks(ask)), None)
 
 
-def claim_desktop_free_tier(*, assume_fresh: bool = False, force: bool = False) -> Optional[dict[str, Any]]:
+def claim_terminal_free_tier(*, assume_fresh: bool = False, force: bool = False) -> Optional[dict[str, Any]]:
     """Claim the trial when nothing blocks it: mint the guest, stamp the claim, mark the machine.
     Returns the claimed state, or None when the trial is not available here. A failed mint raises
     the coded ``AuthError`` from :func:`anon_auth.ensure_portal_identity` (memoised with its cooldown;
@@ -134,7 +134,7 @@ def grandfather_existing_guest() -> bool:
     """A guest from before the claim existed keeps the free model when this home already chatted on
     it. Only a guest with no ``welcome_claim`` key qualifies: every guest minted since carries the
     key, so a connector guest (``False``) never does. Records the claim once; True when it did."""
-    if not anon_auth.on_local_desktop_backend():
+    if not anon_auth.on_local_terminal_runtime():
         return False
     state = anon_auth.current_nous_state()
     if not anon_auth.is_guest_state(state) or anon_auth.WELCOME_CLAIM_FLAG in state:

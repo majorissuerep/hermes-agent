@@ -1019,7 +1019,7 @@ def _init_openai_client(agent, api_key, base_url, fallback_model, _provider_time
             print(f"🤖 AI Agent initialized with model: {agent.model}")
             if base_url:
                 print(f"🔗 Using custom base URL: {base_url}")
-            from gateway.warning_notifications import warning_notifications_enabled
+            from agent.warning_notifications import warning_notifications_enabled
             _print_key_banner(client_kwargs.get("api_key", "none"), "API key",
                               warn_missing=warning_notifications_enabled(agent.platform))
     except Exception as e:
@@ -1172,7 +1172,7 @@ def _publish_session_id(session_id: str) -> None:
     delegated construction publish a child ID process-wide.
     """
     try:
-        from gateway.session_context import set_current_session_id
+        from agent.session_context import set_current_session_id
         set_current_session_id(session_id)
     except Exception:
         try:
@@ -1613,7 +1613,7 @@ def _warn_invalid_config_int(
     _ra().logger.warning(
         "Invalid %s: %r — %s. Falling back to %s.", what, value, requirement, fallback,
     )
-    from gateway.warning_notifications import warning_notifications_enabled
+    from agent.warning_notifications import warning_notifications_enabled
     try:
         if not warning_notifications_enabled(
             getattr(agent, "_notification_platform", getattr(agent, "platform", "cli")),
@@ -2299,11 +2299,11 @@ def init_agent(
     session_id: str | None = None, tool_progress_callback: Callable[..., Any] | None = None,
     tool_start_callback: Callable[..., Any] | None = None, tool_complete_callback: Callable[..., Any] | None = None,
     thinking_callback: Callable[..., Any] | None = None, reasoning_callback: Callable[..., Any] | None = None,
-    clarify_callback: Callable[..., Any] | None = None, read_terminal_callback: Callable[..., Any] | None = None,
-    read_preview_callback: Callable[..., Any] | None = None, drive_preview_callback: Callable[..., Any] | None = None,
-    read_window_below_callback: Callable[..., Any] | None = None, connection_callback: Callable[..., Any] | None = None,
-    tour_callback: Callable[..., Any] | None = None, theme_callback: Callable[..., Any] | None = None,
-    setup_beat_callback: Callable[..., Any] | None = None,
+    clarify_callback: Callable[..., Any] | None = None, connection_callback: Callable[..., Any] | None = None,
+
+
+
+
     step_callback: Callable[..., Any] | None = None,
     stream_delta_callback: Callable[..., Any] | None = None, interim_assistant_callback: Callable[..., Any] | None = None,
     tool_gen_callback: Callable[..., Any] | None = None, status_callback: Callable[..., Any] | None = None,

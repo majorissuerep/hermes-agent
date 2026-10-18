@@ -57,14 +57,12 @@ SURFACES = (
     ("cli.gemini", "cli", "gemini", False),
     ("cli.hermes", "cli", "hermes", False),
     ("cli-code.claude", "cli", "claude", True),
-    ("desktop.claude", "desktop", "claude", False),
-    ("telegram.claude", "telegram", "claude", False),
-    ("discord.claude", "discord", "claude", False),
+    ("tui.claude", "tui", "claude", False),
+    ("subagent.claude", "subagent", "claude", False),
     ("cron.claude", "cron", "claude", False),
 )
-# Desktop resolves toolsets in tui_gateway (client-surface toolsets folded in); the gateway, cron
-# and classic CLI read the platform toolsets directly.
-TUI_GATEWAY_PLATFORMS = ("desktop",)
+# TUI resolves its actual configured toolsets through the local runtime.
+TUI_PLATFORMS = ("tui",)
 FIXED_NOW = datetime(2026, 1, 15, 12, 0, 0, tzinfo=UTC)
 # ``Conversation started:`` reads the stamp embedded in the session id.
 SESSION_ID = FIXED_NOW.strftime("%Y%m%d_%H%M%S") + "_prompt_surface"
@@ -127,8 +125,8 @@ def _scrub(text: str, home: Path) -> str:
 
 
 def _enabled_toolsets(platform: str) -> list[str]:
-    if platform in TUI_GATEWAY_PLATFORMS:
-        from tui_gateway.server import _load_enabled_toolsets
+    if platform in TUI_PLATFORMS:
+        from tui_runtime.server import _load_enabled_toolsets
         return list(_load_enabled_toolsets(platform) or [])
     from hermes_cli.config import load_config
     from hermes_cli.tools_config import _get_platform_tools

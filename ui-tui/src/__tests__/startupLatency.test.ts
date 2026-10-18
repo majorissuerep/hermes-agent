@@ -35,13 +35,13 @@ describe('startup latency metric', () => {
     resetTurnState()
   })
 
-  it('reports launch->ready once per process across repeated gateway.ready and handler remounts', () => {
+  it('reports launch->ready once per process across repeated runtime.ready and handler remounts', () => {
     // Older backends reject the unknown method; the report must not surface that.
     const request = vi.fn(async () => {
       throw new Error('method not found')
     })
 
-    const ready = { payload: {}, type: 'gateway.ready' } as any
+    const ready = { payload: {}, type: 'runtime.ready' } as any
     const onEvent = createGatewayEventHandler(buildCtx(request))
 
     onEvent(ready)

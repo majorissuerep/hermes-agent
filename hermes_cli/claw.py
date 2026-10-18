@@ -144,40 +144,6 @@ def _warn_if_openclaw_running(auto_yes: bool) -> None:
         sys.exit(0)
 
 
-def _warn_if_gateway_running(auto_yes: bool) -> None:
-    """Warn if the HOST gateway has connected platforms for this profile (token conflicts, e.g.
-    Telegram 409).
-
-    Multiplex-only: one host process serves N profiles, so a SERVED profile owns no ``gateway.pid``.
-    Gating on ``get_running_pid()`` made this destructive-action warning silently vanish for exactly
-    those profiles — the liveness ladder answers for the served case too.
-    """
-    from gateway.status import (
-        profile_platforms_from_multiplexer, read_runtime_status, resolve_gateway_liveness)
-    liveness = resolve_gateway_liveness(use_cache=False)
-    platforms: dict = {}
-    if liveness.running:
-        profile = None
-        with contextlib.suppress(Exception):
-            from hermes_cli.profiles import get_active_profile_name
-            profile = get_active_profile_name()
-        if liveness.source == "multiplexer" and profile and profile != "default":
-            # Served profile: its platforms live under `<profile>:<platform>` in the host record.
-            platforms = profile_platforms_from_multiplexer(liveness.runtime, profile)
-        else:
-            platforms = (liveness.runtime or read_runtime_status() or {}).get("platforms") or {}
-    connected = [name for name, info in platforms.items()
-                 if isinstance(info, dict) and info.get("state") == "connected"]
-    if connected and _warn_running(
-        auto_yes, "Hermes gateway is running with active connections: " + ", ".join(connected), [],
-        ("Migrating bot tokens while the gateway is active will cause "
-         "conflicts (Telegram, Discord, and Slack only allow one active "
-         "session per token).",
-         "Recommendation: stop the host gateway first with 'hermes gateway stop'."),
-        "Continue anyway?", declined="Migration cancelled. Stop the gateway and try again.",
-    ) is False:
-        sys.exit(0)
-
 
 def _find_migration_script() -> Path | None:
     """Find the openclaw_to_hermes.py script in known locations."""
@@ -273,7 +239,6 @@ def _cmd_migrate(args):
     print()
     # Migrating tokens while OpenClaw or the gateway is active causes conflicts (e.g. Telegram 409).
     _warn_if_openclaw_running(opts.yes)
-    _warn_if_gateway_running(opts.yes)
     # Ensure config.yaml exists before migration tries to read it
     if not get_config_path().exists():
         save_config(load_config())

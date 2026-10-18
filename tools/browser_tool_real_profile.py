@@ -187,14 +187,16 @@ def _launch_real_profile_chrome(real_binary: str, copy_dir: str) -> tuple[Option
     headless shares the profile's cookie store (legacy --headless does not). browser.headed /
     AGENT_BROWSER_HEADED opts into a window, except on a display-less Linux host (launch would die).
     """
+    from tools.browser_terminal import browser_in_terminal
+    if browser_in_terminal():
+        return None, "Native browser profiles cannot be launched outside the selected terminal sandbox; configure an explicit outgoing CDP endpoint instead."
     _bt = _origin()
     try:
         os.unlink(os.path.join(copy_dir, "DevToolsActivePort"))  # stale port confuses reuse probes
     except OSError:
         pass
     chrome_argv = [real_binary, f"--user-data-dir={copy_dir}", *_REAL_PROFILE_CHROME_FLAGS]
-    _session._ensure_screen_for_headed_chromium()
-    browser_env = _bt._build_browser_env()  # carries the Bot Desktop DISPLAY when one is running
+    browser_env = _bt._build_browser_env()
     _has_display = bool(browser_env.get("DISPLAY") or browser_env.get("WAYLAND_DISPLAY"))
     if not (_cloud._is_headed_mode() and (_has_display or not sys.platform.startswith("linux"))):
         chrome_argv.append("--headless=new")

@@ -49,17 +49,6 @@ def _bits(*pairs) -> list:
     return [fmt() for value, fmt in pairs if value is not None]
 
 
-def host_gateway_note() -> str:
-    """``" (the host gateway (PID 42) serving profiles default, coder)"`` when one gateway process
-    owns this host, else ``""``. Multiplex-only: the state.db holder and WAL lines used to imply a
-    gateway per profile; the truth is one shared process serving N profiles, and stopping it stops
-    every one of them."""
-    try:
-        from gateway.host_topology import host_gateway_topology
-        topology = host_gateway_topology()
-    except Exception:
-        return ""
-    return f" ({topology.describe()})" if topology is not None else ""
 
 
 def _render_state_db_stats(stats: dict, holders=None, host_note: str = "") -> list:
@@ -424,7 +413,7 @@ def _state_db_stats(issues: list, state_db_path: Path) -> None:
     with warn_on_error("state.db stats unavailable ({e})", "", report=lambda t, _d: check_info(t)):
         from hermes_state.dbfile import collect_state_db_stats, count_db_holders
         rows = _render_state_db_stats(collect_state_db_stats(state_db_path), holders=count_db_holders(state_db_path),
-                                      host_note=host_gateway_note())
+                                      host_note="")
         for _kind, _text, _detail in rows:
             if _kind != "warn":
                 check_info(_text + (f" {_detail}" if _detail else ""))
@@ -487,10 +476,8 @@ def _retired_wal_holders(f: Finding, state_db_path: Path, _DHH: str) -> bool:
     rendered = ", ".join(describe_holder_pid(pid) for pid in pids)
     check_warn(f"{_DHH}/state.db: {len(pids)} process(es) still hold a retired WAL generation ({rendered})",
                "(every new session refuses to open until they exit; health/stats probes skipped)")
-    f.issues.append(f"state.db retired WAL generation held by {rendered}{host_gateway_note()} — stop the host "
-                    f"gateway, dashboard and cron writers among them ('hermes {profile_cli_selector()}gateway "
-                    "stop' stops the ONE host process serving every profile, quit the Desktop app), do not "
-                    "delete the WAL yourself, then rerun 'hermes doctor'")
+    f.issues.append(f"state.db retired WAL generation held by {rendered} — exit the listed terminal "
+                    "runtimes and local task writers, do not delete the WAL yourself, then rerun 'hermes doctor'")
     return True
 
 
@@ -667,7 +654,7 @@ def _check_profiles(should_fix: bool, f: Finding) -> None:
     wrapper_dir = _get_wrapper_dir()
     for p in named_profiles:
         parts = [text for cond, text in (
-            (p.gateway_running, "gateway running"), (p.model, (p.model or "")[:30]),
+            (p.runtime_active, "terminal runtime active"), (p.model, (p.model or "")[:30]),
             (not (p.path / "config.yaml").exists(), "⚠ missing config"), (not (p.path / ".env").exists(), "no .env"),
             (p.alias_path is None, "no alias")) if cond]
         check_ok(f"  {p.name}: {', '.join(parts) if parts else 'configured'}")
@@ -682,9 +669,3 @@ def _check_profiles(should_fix: bool, f: Finding) -> None:
                     alias = wrapper.stem if _wrapper_path(wrapper.stem) == wrapper else wrapper.name
                     fix = f"hermes profile alias {alias} --remove" if PROFILE_ID_RE.match(alias) else f"delete {wrapper}"
                     check_warn(f"Orphan alias: {alias} → profile '{_m.group(1)}' no longer exists", f"(remove with: {fix})")
-    # Same helper as the multiplex migration preflight, so doctor names the duplicates that make
-    # `hermes gateway migrate --multiplex` refuse (and made pre-multiplex standalone gateways race).
-    from hermes_cli.gateway_migrate import duplicate_credential_findings
-    for line in duplicate_credential_findings():
-        check_warn("Duplicate platform credential across profiles", f"({line})")
-        f.manual_issues.append(line)

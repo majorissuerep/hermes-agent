@@ -6,8 +6,7 @@ import './lib/forceTruecolor.js'
 import type { FrameEvent } from '@hermes/ink'
 
 import { setRpcErrorLogSink } from './app/userMessages.js'
-import { DASHBOARD_TUI_MODE, NATIVE_MODE, TERMUX_TUI_MODE } from './config/env.js'
-import { GatewayClient } from './gatewayClient.js'
+import { NATIVE_MODE, TERMUX_TUI_MODE } from './config/env.js'
 import { messages } from './i18n/runtime.js'
 import { setupGracefulExit } from './lib/gracefulExit.js'
 import { formatBytes, type HeapDumpResult, performHeapDump } from './lib/memory.js'
@@ -15,6 +14,7 @@ import { type MemorySnapshot, startMemoryMonitor } from './lib/memoryMonitor.js'
 import { openExternalUrl } from './lib/openExternalUrl.js'
 import { recordParentLifecycle } from './lib/parentLog.js'
 import { clearNativeTuiFrame, resetTerminalModes } from './lib/terminalModes.js'
+import { LocalAgentClient } from './localAgentClient.js'
 
 if (!process.stdin.isTTY) {
   console.log(messages().chatBits.entry.noTty)
@@ -24,7 +24,6 @@ if (!process.stdin.isTTY) {
 // Start from a clean slate. If a previous TUI crashed or was kill -9'd, the
 // terminal tab can still have mouse/focus/paste modes enabled.
 resetTerminalModes()
-
 // Final backstop for terminal cleanup. setupGracefulExit() resets modes on
 // signals/uncaught errors, and die()/dieWithCode() call process.exit() after
 // Ink's unmount specifically so this handler can fire (see useMainApp.ts and
@@ -54,22 +53,16 @@ if (TERMUX_TUI_MODE || NATIVE_MODE) {
   process.stdout.write('\x1b[2J\x1b[H\x1b[3J')
 }
 
-const gw = new GatewayClient()
-
+const gw = new LocalAgentClient()
 // describeRpcError replaces raw wire errors with plain copy; keep the original in /logs.
 setRpcErrorLogSink(line => gw.recordLog(line))
 gw.start()
 
 // Resolved at call time (never at import) so a locale installed later applies.
 const dumpNotice = (snap: MemorySnapshot, dump: HeapDumpResult | null) =>
-  `${messages().chatBits.entry.memoryDump(
-    snap.level,
-    formatBytes(snap.heapUsed),
-    dump?.heapPath ?? dump?.diagPath ?? messages().chatBits.entry.dumpFailed
-  )}\n`
+  `${messages().chatBits.entry.memoryDump(snap.level, formatBytes(snap.heapUsed), dump?.heapPath ?? dump?.diagPath ?? messages().chatBits.entry.dumpFailed)}\n`
 
 let consecutiveDeadStreamErrors = 0
-
 setupGracefulExit({
   cleanups: [
     () => {
@@ -80,9 +73,7 @@ setupGracefulExit({
   ],
   onError: (scope, err) => {
     const message = err instanceof Error ? `${err.name}: ${err.message}\n${err.stack ?? ''}` : String(err)
-
     recordParentLifecycle(`${scope}: ${message.split('\n')[0]?.slice(0, 400) ?? ''}`)
-
     // A dead PTY (terminal tab closed, SSH dropped without SIGHUP) turns every
     // stdout/stderr write into EIO/EPIPE. Swallowing those here made the parent
     // a zombie: Ink's render loop throws once a second, each throw lands back
@@ -105,7 +96,7 @@ setupGracefulExit({
     try {
       process.stderr.write(`hermes-tui lifecycle ${scope}: ${message.slice(0, 2000)}\n`)
     } catch {
-      // stderr may be the dead stream itself.
+      // A closed terminal cannot receive shutdown diagnostics.
     }
   },
   onSignal: signal => {
@@ -120,7 +111,7 @@ setupGracefulExit({
   // exits. Ignore SIGINT there so Ctrl+C cannot kill the embedded TUI if raw
   // mode briefly drops and the terminal driver turns the keystroke into a
   // signal instead of input bytes. SIGTERM/SIGHUP still cleanly shut down.
-  ignoredSignals: DASHBOARD_TUI_MODE ? ['SIGINT'] : []
+  ignoredSignals: []
 })
 
 const stopMemoryMonitor = startMemoryMonitor({

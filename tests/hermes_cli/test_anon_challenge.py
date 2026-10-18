@@ -26,10 +26,6 @@ def presented(monkeypatch):
     return seen
 
 
-def _desktop_backend(monkeypatch):
-    """The backend Desktop spawned: the inherited flag plus the per-spawn credential."""
-    monkeypatch.setenv("HERMES_DESKTOP", "1")
-    monkeypatch.setenv("HERMES_DASHBOARD_SESSION_TOKEN", "spawn-token")
 
 
 def _resolve(monkeypatch):
@@ -211,20 +207,6 @@ class TestWhoWaits:
         assert "/api/anonymous/challenge/status" not in [p for _, p in nas.calls]
         assert anon_challenge.pending_challenge()["url"] == nas.challenge_url
 
-    def test_the_messaging_gateway_never_waits_on_a_challenge(self, nas, presented, monkeypatch):
-        """Nobody sits at a gateway's console, and its token reads can run on the event loop. (A
-        gateway never carries the free model, so its only challenged exchange is a managed-tool
-        token against a NAS from before the connectors purpose.)"""
-        from gateway import status
-        monkeypatch.setattr(status, "owns_gateway_runtime_lock", lambda: True)
-        monkeypatch.setattr(anon_challenge, "CHALLENGE_WAIT_SECONDS", 0.05)
-        nas.honours_purpose = False
-        nas.challenge_required = True
-        nas.challenge_never_clears = True
-        with pytest.raises(anon_auth.AuthError) as exc:
-            _connectors_token()
-        assert exc.value.code == anon_auth.ANON_CHALLENGE_REQUIRED and exc.value.retryable is True
-        assert "/api/anonymous/challenge/status" not in [p for _, p in nas.calls]
 
     def test_a_background_caller_never_prints_or_opens_a_browser(self, monkeypatch, capsys):
         import webbrowser
@@ -350,14 +332,6 @@ class TestOptionalChallenge:
         assert _connectors_token()
         assert presented == [] and announced == []
 
-    def test_the_desktop_backend_announces_it_and_waits_on_nothing(self, nas, presented, monkeypatch):
-        announced = []
-        monkeypatch.setattr(anon_challenge, "_announce", announced.append)
-        nas.optional_challenge = True
-        assert _resolve(monkeypatch)["api_key"]
-        assert [c.required for c in announced] == [False]
-        assert "/api/anonymous/challenge/status" not in [p for _, p in nas.calls]
-        assert anon_challenge.pending_challenge()["url"] == nas.challenge_url
 
     def test_replayed_offers_keep_the_original_expiry_and_old_results_cannot_end_a_retry(self, nas, monkeypatch):
         clock = [100.0]
@@ -375,20 +349,12 @@ class TestOptionalChallenge:
 
 
 class TestPresenting:
-    def test_the_desktop_backend_announces_and_never_opens_a_browser(self, monkeypatch):
-        announced, opened = [], []
-        _desktop_backend(monkeypatch)
-        monkeypatch.setattr(anon_challenge, "_announce", lambda c: announced.append(c) or True)
-        monkeypatch.setattr(anon_challenge, "_present_in_terminal", opened.append)
-        challenge = anon_challenge.BrowserChallenge(f"{PORTAL}/challenge?code=t", True, 600, 2, "m")
-        anon_challenge.present(challenge)
-        assert announced == [challenge] and opened == []
 
-    def test_the_stdio_tui_gateway_hands_the_link_to_its_client(self, monkeypatch, capsys):
-        """The TUI keeps its gateway's stderr as a log the user never sees: the challenge goes to the
+    def test_the_private_stdio_tui_runtime_hands_the_link_to_its_client(self, monkeypatch, capsys):
+        """The TUI keeps its private backend's stderr as a log the user never sees: the challenge goes to the
         client over the JSON-RPC channel instead of being printed there."""
         sent = []
-        from tui_gateway import server
+        from tui_runtime import server
         monkeypatch.setattr(server, "_stdio_is_rpc_channel", True)
         monkeypatch.setattr(server, "_broadcast_global_event", lambda event, payload: sent.append((event, payload)))
         challenge = anon_challenge.BrowserChallenge(f"{PORTAL}/challenge?code=t", True, 600, 2, "m")
@@ -401,7 +367,7 @@ class TestPresenting:
 
     def test_a_stdio_write_failure_falls_back_to_the_terminal(self, monkeypatch):
         """The stdio channel re-raises host I/O errors; the link must still reach the user."""
-        from tui_gateway import server
+        from tui_runtime import server
         opened = []
         monkeypatch.setattr(server, "_stdio_is_rpc_channel", True)
         monkeypatch.setattr(server, "_broadcast_global_event", lambda *_: (_ for _ in ()).throw(OSError(28, "ENOSPC")))

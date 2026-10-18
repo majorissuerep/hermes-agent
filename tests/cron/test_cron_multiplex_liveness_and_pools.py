@@ -77,30 +77,3 @@ class TestPerProfileJobLiveness:
         finally:
             with _Scope(home_a):
                 sched.release_running_job(job_id)
-
-
-class TestPoolReaping:
-    def test_pool_of_an_unticked_home_is_reaped(self, tmp_path):
-        """(b) Republishing the ticked set without a home drops that home's pool."""
-        from cron.scheduler_ownership import register_ticked_homes
-
-        home_a, home_b = _two_homes(tmp_path)
-        try:
-            register_ticked_homes([home_a, home_b])
-            with _Scope(home_a):
-                sched._get_parallel_pool(1)
-            with _Scope(home_b):
-                sched._get_parallel_pool(1)
-            assert len(sched._parallel_pools) == 2
-
-            # Profile B goes away (deleted / gated out); the served set is republished without it.
-            register_ticked_homes([home_a])
-            assert hermes_home_key(home_b) not in sched._parallel_pools, (
-                "an unticked home's ThreadPoolExecutor leaked for the process's lifetime"
-            )
-            assert hermes_home_key(home_b) not in sched._parallel_pool_max_workers
-            # The home still being ticked keeps its pool.
-            assert hermes_home_key(home_a) in sched._parallel_pools
-        finally:
-            register_ticked_homes([])
-            sched._shutdown_parallel_pool()

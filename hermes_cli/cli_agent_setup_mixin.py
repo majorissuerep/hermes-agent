@@ -376,7 +376,7 @@ class CLIAgentSetupMixin:
                 logger.warning(
                     "Primary provider %s (%s). Falling through to fallback: %s/%s",
                     _why_log, primary_exc, _fb_provider, _fb_model)
-                from gateway.warning_notifications import render_notification
+                from agent.warning_notifications import render_notification
                 render_notification(
                     lambda: _cprint(t("cli.startup.switching_to_fallback", reason=_why, provider=_fb_provider, model=_fb_model)),
                     platform="cli")
@@ -612,7 +612,7 @@ class CLIAgentSetupMixin:
         """Build the agent on first use; when resuming, restore history from SQLite.
         Returns True on success."""
         from cli import ChatConsole, _cprint, _prepare_deferred_agent_startup, logger
-        from hermes_cli.gateway_agent import GatewayAgent as AIAgent  # the gateway runs the turn
+        from run_agent import AIAgent
         if self.agent is not None:
             return True
 
@@ -623,19 +623,9 @@ class CLIAgentSetupMixin:
         self._install_tool_callbacks()
         if not self._ensure_runtime_credentials():
             return False
-        # No MCP discovery here: the gateway session that runs the turn owns its MCP servers.
-        from hermes_cli.cli_chat_error_copy import agent_init_failure_message
         if self._session_db is None:
-            try:
-                from hermes_cli.gateway_session_store import session_store
-                self._session_db = session_store()
-            except Exception as e:
-                logger.warning("SQLite session store not available — session will NOT be indexed: %s", e)
-        try:
-            self._ensure_gateway_session()
-        except Exception as e:  # health: allow BLE001 -- any session.create/resume failure is main's agent-init failure copy, never a traceback
-            ChatConsole().print(f"[bold red]{_escape(agent_init_failure_message(e))}[/]")
-            return False
+            from hermes_state.registry import acquire
+            self._session_db = acquire()
         if (
             self._resumed and self._session_db and not self.conversation_history
             and not self._load_resumed_history_late()):
@@ -707,9 +697,6 @@ class CLIAgentSetupMixin:
             # patch_stdout's StdoutProxy (#2262), holding lines while a response box streams so a
             # subagent/background completion notice never splits the reply mid-paragraph.
             self.agent._print_fn = self._agent_status_print
-            self.agent._finite = single_query_mode  # -q/-Q: a finite gateway admission (headless clarify)
-            from hermes_cli.gateway_tools import bind
-            bind(self.agent)  # main's dock / status bar / /stop read this session's gateway processes
             # Hydrate credits notices at session OPEN (parity with the TUI) so a depletion
             # warning shows before the first message. Idempotent + fail-open in the helper.
             try:

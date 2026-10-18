@@ -28,11 +28,6 @@ def build_profile_parser(subparsers, *, cmd_profile: Callable) -> None:
         "--clone-from", metavar="SOURCE",
         help="Source profile to clone from; implies --clone unless --clone-all is set")
     profile_create.add_argument(
-        "--clone-channels", action="store_true",
-        help="Also copy the source's messaging channels (bot tokens, allowlists, platform sections). "
-             "Two profiles holding one bot token collide; refused when the source is served by a live "
-             "multiplexed gateway.")
-    profile_create.add_argument(
         "--sync-imports", action="store_true",
         help="With --clone/--clone-from: also carry over the `hermes import-agent` sync manifest so "
              "the new profile stays registered against the same Claude Code / Codex trees "

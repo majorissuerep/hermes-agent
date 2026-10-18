@@ -107,7 +107,7 @@ def set_approval_callback(cb):
 def _current_session_key() -> str:
     """Active gateway/WebUI session key, or "" outside sessions (ContextVar with
     the ``get_session_env`` os.environ fallback for CLI/cron/tests)."""
-    from gateway.session_context import get_session_env
+    from agent.session_context import get_session_env
 
     return get_session_env("HERMES_SESSION_KEY", "")
 
@@ -115,7 +115,7 @@ def _current_session_key() -> str:
 def _current_session_profile() -> str:
     """Active session's Hermes profile name, or "" (same lookup discipline as
     :func:`_current_session_key`)."""
-    from gateway.session_context import get_session_env
+    from agent.session_context import get_session_env
 
     return get_session_env("HERMES_SESSION_PROFILE", "")
 
@@ -850,7 +850,7 @@ def _command_requires_pipe_stdin(command: str) -> bool:
 
 from tools.terminal_tool_guards import (
     _foreground_background_guidance, _safe_command_preview, _validate_workdir,
-    gateway_lifecycle_block, self_repo_block,
+    self_repo_block,
 )
 from tools.terminal_tool_background import _YIELDED_NOTE, spawn_background_process, yield_to_background_handler
 from tools.terminal_tool_result import finalize_foreground_result
@@ -1308,14 +1308,8 @@ def _pre_exec_block(
 ) -> None:
     """Raise :class:`_Rejected` with the blocked-result JSON when the command must not run.
 
-    Order matters: gateway lifecycle first (protects the running gateway),
-    then the dangerous-workdir check, then the self-repo guard (local only).
+    Validate the workdir before applying the local self-repo guard.
     """
-    blocked = gateway_lifecycle_block(
-        command=command, env=env, env_type=env_type, cwd=cwd, workdir=workdir, session_key=session_key,
-    )
-    if blocked:
-        raise _Rejected(blocked)
     if workdir:
         workdir_error = _validate_workdir(workdir)
         if workdir_error:

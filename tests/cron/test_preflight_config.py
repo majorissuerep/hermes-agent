@@ -28,7 +28,6 @@ import cron.jobs as cron_jobs
 from cron.scheduler import run_job
 import cron.scheduler as sched
 
-pytestmark = pytest.mark.usefixtures("cron_owner")
 
 
 _RUNTIME = {
@@ -72,7 +71,6 @@ def _run_job_patched(job, tmp_path, *, resolve=None, skill_view=None):
     """
     patches = [
         patch("cron.scheduler._hermes_home", tmp_path),
-        patch("cron.scheduler_delivery._resolve_origin", return_value=None),
         patch("hermes_cli.env_loader.load_hermes_dotenv"),
         patch("hermes_cli.env_loader.reset_secret_source_cache"),
         patch("tools.mcp_tool_discovery.discover_mcp_tools", return_value=[]),
@@ -124,40 +122,6 @@ class TestMissingProviderKeyBlocks:
         assert "[blocked_config]" in error
         assert "blocked" in output.lower() or "BLOCKED" in output
 
-    def test_single_alert_across_two_ticks_and_blocked_status(self, tmp_path):
-        """Two ticks of a blocked job through run_one_job deliver exactly ONE
-        alert and persist last_status='blocked_config'."""
-        job = _job(failure_deliver="slack:alerts")
-        deliveries = []
-
-        def fake_deliver(execution_id, job, content, **kwargs):
-            deliveries.append(content)
-            return {"status": "pending"}
-
-        with cron_jobs.use_cron_store(tmp_path):
-            cron_jobs.save_jobs([job])
-            for _tick in range(2):
-                fresh = next(j for j in cron_jobs.load_jobs() if j["id"] == job["id"])
-                with patch("cron.scheduler._hermes_home", tmp_path), \
-                     patch("cron.scheduler_delivery._resolve_origin", return_value=None), \
-                     patch("hermes_cli.env_loader.load_hermes_dotenv"), \
-                     patch("hermes_cli.env_loader.reset_secret_source_cache"), \
-                     patch("tools.mcp_tool_discovery.discover_mcp_tools", return_value=[]), \
-                     patch("hermes_cli.runtime_provider.resolve_runtime_provider",
-                           side_effect=_AuthErrorFactory()), \
-                     patch("cron.delivery_queue.enqueue", side_effect=fake_deliver), \
-                     patch("run_agent.AIAgent") as mock_agent_cls:
-                    ok = sched.run_one_job(fresh)
-                    assert ok is True
-                    assert mock_agent_cls.called is False
-
-            stored = next(j for j in cron_jobs.load_jobs() if j["id"] == job["id"])
-
-        assert stored["last_status"] == "blocked_config"
-        assert len(deliveries) == 1, (
-            f"expected exactly one alert across two ticks, got {len(deliveries)}: "
-            f"{deliveries!r}"
-        )
 
     def test_fallback_chain_rescues_missing_primary_key(self, tmp_path):
         """A configured fallback chain means a missing primary key does NOT
@@ -253,39 +217,11 @@ class TestHealthyJobUnaffected:
 
 
 class TestOptOut:
-    def test_preflight_false_restores_old_behavior(self, tmp_path):
-        """cron.preflight: false → job proceeds to resolution and fails the
-        old way (error status, re-alerts every tick, no blocked_config)."""
-        (tmp_path / "config.yaml").write_text(
-            "cron:\n  preflight: false\n", encoding="utf-8"
-        )
-        job = _job(failure_deliver="slack:alerts")
-        deliveries = []
-
-        def fake_deliver(execution_id, job, content, **kwargs):
-            deliveries.append(content)
-            return {"status": "pending"}
-
-        with cron_jobs.use_cron_store(tmp_path):
-            cron_jobs.save_jobs([job])
-            for _tick in range(2):
-                fresh = next(j for j in cron_jobs.load_jobs() if j["id"] == job["id"])
-                with patch("cron.scheduler._hermes_home", tmp_path), \
-                     patch("cron.scheduler_delivery._resolve_origin", return_value=None), \
-                     patch("hermes_cli.env_loader.load_hermes_dotenv"), \
-                     patch("hermes_cli.env_loader.reset_secret_source_cache"), \
-                     patch("tools.mcp_tool_discovery.discover_mcp_tools", return_value=[]), \
-                     patch("hermes_cli.runtime_provider.resolve_runtime_provider",
-                           side_effect=_AuthErrorFactory()), \
-                     patch("cron.delivery_queue.enqueue", side_effect=fake_deliver), \
-                     patch("run_agent.AIAgent") as mock_agent_cls:
-                    sched.run_one_job(fresh)
-                    assert mock_agent_cls.called is False
-
-            stored = next(j for j in cron_jobs.load_jobs() if j["id"] == job["id"])
-
-        assert stored["last_status"] == "error"
-        assert len(deliveries) == 2  # old behavior: alert every tick
+    def test_preflight_false_still_rejects_retired_delivery(self, tmp_path):
+        (tmp_path / "config.yaml").write_text("cron:\n  preflight: false\n")
+        success, _output, response, error = run_job(_job(failure_deliver="slack:alerts"))
+        assert not success and response == ""
+        assert "unsupported" in error
 
 
 class TestSkillReadiness:
@@ -336,34 +272,6 @@ class TestSkillReadiness:
             cron_jobs.save_jobs([job])
             success, _output, _final_response, _error, agent_constructed = \
                 _run_job_patched(job, tmp_path, skill_view=fake_skill_view)
-
-        assert success is True
-        assert agent_constructed is True
-
-
-class TestDeliveryPlatform:
-    def test_unknown_delivery_platform_blocks(self, tmp_path):
-        job = _job(deliver="notaplatform")
-        with cron_jobs.use_cron_store(tmp_path):
-            cron_jobs.save_jobs([job])
-            with patch("cron.scheduler_delivery._is_known_delivery_platform",
-                       return_value=False):
-                success, output, _final_response, error, agent_constructed = \
-                    _run_job_patched(job, tmp_path)
-
-        assert agent_constructed is False
-        assert success is False
-        assert error is not None and "[blocked_config]" in error
-        assert "notaplatform" in f"{error} {output}"
-
-    def test_local_delivery_never_touches_gateway_config(self, tmp_path):
-        """deliver=local jobs must not load gateway config in preflight."""
-        job = _job(deliver="local")
-        with cron_jobs.use_cron_store(tmp_path):
-            cron_jobs.save_jobs([job])
-            with patch("gateway.config.load_gateway_config",
-                       side_effect=AssertionError("gateway config loaded")):
-                success, *_rest, agent_constructed = _run_job_patched(job, tmp_path)
 
         assert success is True
         assert agent_constructed is True

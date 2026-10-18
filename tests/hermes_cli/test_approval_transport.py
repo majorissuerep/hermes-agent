@@ -252,7 +252,7 @@ def test_host_caps_hung_transport_workers():
 def _configure_manual_guard(monkeypatch, approval_module, manager, *, fallback=None):
     monkeypatch.setattr(approval_context, "_get_approval_mode", lambda: "manual")
     monkeypatch.setattr(approval_module, "_is_interactive_cli", lambda: True)
-    monkeypatch.setattr(approval_module, "_is_gateway_approval_context", lambda: False)
+    monkeypatch.setattr(approval_module, "_is_session_approval_context", lambda: False)
     monkeypatch.setattr(approval_module, "detect_hardline_command", lambda command: (False, ""))
     monkeypatch.setattr(approval_module, "_check_sudo_stdin_guard", lambda command: (False, ""))
     monkeypatch.setattr(approval_module, "_match_user_deny_rule", lambda command: None)
@@ -303,9 +303,9 @@ def test_gateway_selected_transport_does_not_require_gateway_notifier(monkeypatc
     )
     _configure_manual_guard(monkeypatch, approval, manager)
     monkeypatch.setattr(approval, "_is_interactive_cli", lambda: False)
-    monkeypatch.setattr(approval, "_is_gateway_approval_context", lambda: True)
-    monkeypatch.setattr(tools_approval_context, "_is_gateway_approval_context", lambda: True)
-    monkeypatch.setattr(approval, "_gateway_notify_cbs", {})
+    monkeypatch.setattr(approval, "_is_session_approval_context", lambda: True)
+    monkeypatch.setattr(tools_approval_context, "_is_session_approval_context", lambda: True)
+    monkeypatch.setattr(approval, "_session_notify_cbs", {})
 
     result = approval.check_all_command_guards("rm -rf /tmp/example", "local")
 
@@ -324,8 +324,8 @@ def test_execute_code_gateway_uses_selected_transport(monkeypatch):
         "phone", lambda request: seen.append(request) or request.respond("once")
     )
     monkeypatch.setattr(approval_context, "_get_approval_mode", lambda: "manual")
-    monkeypatch.setattr(approval, "_is_gateway_approval_context", lambda: True)
-    monkeypatch.setattr(tools_approval_context, "_is_gateway_approval_context", lambda: True)
+    monkeypatch.setattr(approval, "_is_session_approval_context", lambda: True)
+    monkeypatch.setattr(tools_approval_context, "_is_session_approval_context", lambda: True)
     monkeypatch.setattr(approval, "_is_cron_approval_context", lambda: False)
     monkeypatch.setattr(tools_approval_context, "_is_cron_approval_context", lambda: False)
     monkeypatch.setattr(
@@ -339,7 +339,7 @@ def test_execute_code_gateway_uses_selected_transport(monkeypatch):
     monkeypatch.setattr(
         approval_context, "_get_approval_transport_config", lambda: ("phone", None)
     )
-    monkeypatch.setattr(approval, "_gateway_notify_cbs", {})
+    monkeypatch.setattr(approval, "_session_notify_cbs", {})
 
     result = approval.check_execute_code_guard("print('ok')", "local")
 

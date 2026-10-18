@@ -14,75 +14,54 @@ import type {
   ToolsConfigureResponse
 } from '../../../gatewayTypes.js'
 import { t } from '../../../i18n/runtime.js'
-import { appendTranscriptMessage } from '../../../lib/messages.js'
 import type { PanelSection } from '../../../types.js'
 import { applyDelegationStatus, getDelegationState } from '../../delegationStore.js'
 import { patchOverlayState } from '../../overlayStore.js'
 import { getSpawnHistory, pushDiskSnapshot, setDiffPair, type SpawnSnapshot } from '../../spawnHistoryStore.js'
-import { turnController } from '../../turnController.js'
 import { noSkillsInstalled } from '../../userMessages.js'
-import { canonicalTools } from '../canonicalSessionCommands.js'
 import type { SlashCommand } from '../types.js'
-
 interface SkillInfo {
   category?: string
   description?: string
   name?: string
   path?: string
 }
-
 interface SkillsListResponse {
   skills?: Record<string, string[]>
 }
-
 interface SkillsInspectResponse {
   info?: SkillInfo
 }
-
 interface SkillsSearchResponse {
-  results?: { description?: string; name: string }[]
+  results?: {
+    description?: string
+    name: string
+  }[]
 }
-
 interface SkillsInstallResponse {
   installed?: boolean
   name?: string
 }
-
 interface SkillsBrowseItem {
   description?: string
   name: string
   source?: string
   trust?: string
 }
-
 interface SkillsBrowseResponse {
   items?: SkillsBrowseItem[]
   page?: number
   total?: number
   total_pages?: number
 }
-
 interface SkillsReloadResponse {
   output?: string
 }
-
 export const opsCommands: SlashCommand[] = [
   {
     help: 'stop background processes',
     name: 'stop',
     run: (_arg, ctx) => {
-      // Registry busy policy `interrupt_then_dispatch` (classic /stop, Desktop /stop): end the
-      // running turn first, then stop this session's processes — session-scoped on the shared
-      // owner, never the legacy registry-wide kill_all (every chat's, every profile's).
-      if (ctx.gateway.gw?.isCanonical && ctx.ui.busy && ctx.sid) {
-        void turnController.interruptTurn({
-          appendMessage: msg => ctx.transcript.setHistoryItems(prev => appendTranscriptMessage(prev, msg)),
-          gw: ctx.gateway.gw,
-          sid: ctx.sid,
-          sys: ctx.transcript.sys
-        })
-      }
-
       ctx.gateway
         .rpc<ProcessStopResponse>('process.stop', ctx.sid ? { session_id: ctx.sid } : {})
         .then(
@@ -96,23 +75,20 @@ export const opsCommands: SlashCommand[] = [
         .catch(ctx.guardedErr)
     }
   },
-
   {
     aliases: ['reload_mcp'],
     help: 'reload MCP servers in the live session (warns about prompt cache invalidation)',
     name: 'reload-mcp',
     run: (arg, ctx) => {
-      // A canonical session's MCP servers are frozen with its launch policy; the shared owner's
-      // pool is every chat's, so there is no per-session reload verb yet.
-      if (ctx.gateway.gw?.isCanonical) {
-        return ctx.transcript.sys(t('canonical.controls.notAvailable', 'reload-mcp'))
-      }
-
       // Parse arg: `now` / `always` skip the confirmation gate.
       // `always` additionally persists approvals.mcp_reload_confirm=false.
       const a = (arg || '').trim().toLowerCase()
 
-      const params: { session_id: string | null; confirm?: boolean; always?: boolean } = {
+      const params: {
+        session_id: string | null
+        confirm?: boolean
+        always?: boolean
+      } = {
         session_id: ctx.sid
       }
 
@@ -147,18 +123,16 @@ export const opsCommands: SlashCommand[] = [
         .catch(ctx.guardedErr)
     }
   },
-
   {
     help: 're-read ~/.hermes/.env into the running gateway (CLI parity)',
     name: 'reload',
     run: (_arg, ctx) => {
       // The shared gateway serves `/reload` for one session this client controls.
       ctx.gateway
-        .rpc<ReloadEnvResponse>('reload.env', ctx.gateway.gw?.isCanonical && ctx.sid ? { session_id: ctx.sid } : {})
+        .rpc<ReloadEnvResponse>('reload.env', {})
         .then(
           ctx.guarded<ReloadEnvResponse>(r => {
             const n = Number(r.updated ?? 0)
-
             ctx.transcript.sys(
               t(n === 1 ? 'slashCmd.ops.reloadEnv.reloadedOne' : 'slashCmd.ops.reloadEnv.reloadedOther', String(n))
             )
@@ -167,7 +141,6 @@ export const opsCommands: SlashCommand[] = [
         .catch(ctx.guardedErr)
     }
   },
-
   {
     help: 'manage the agent browser [connect|disconnect|status|use]',
     name: 'browser',
@@ -240,7 +213,6 @@ export const opsCommands: SlashCommand[] = [
         .catch(ctx.guardedErr)
     }
   },
-
   {
     help: 'list, diff, or restore checkpoints',
     name: 'rollback',
@@ -334,7 +306,6 @@ export const opsCommands: SlashCommand[] = [
         .catch(ctx.guardedErr)
     }
   },
-
   {
     aliases: ['tasks'],
     help: 'open the spawn-tree dashboard (live audit + kill/pause controls)',
@@ -375,7 +346,6 @@ export const opsCommands: SlashCommand[] = [
       patchOverlayState({ agents: true, agentsInitialHistoryIndex: 0 })
     }
   },
-
   {
     aliases: ['learning', 'memory-graph'],
     help: 'open your learning journey — skills + memories on a timeline',
@@ -385,7 +355,6 @@ export const opsCommands: SlashCommand[] = [
       patchOverlayState({ journey: true })
     }
   },
-
   {
     help: 'replay a completed spawn tree · `/replay [N|last|list|load <path>]`',
     name: 'replay',
@@ -471,7 +440,6 @@ export const opsCommands: SlashCommand[] = [
       patchOverlayState({ agents: true, agentsInitialHistoryIndex: index })
     }
   },
-
   {
     help: 'diff two completed spawn trees · `/replay-diff <baseline> <candidate>` (indexes from /replay list or history N)',
     name: 'replay-diff',
@@ -506,7 +474,6 @@ export const opsCommands: SlashCommand[] = [
       patchOverlayState({ agents: true, agentsInitialHistoryIndex: 0 })
     }
   },
-
   {
     aliases: ['reload_skills'],
     help: 're-scan installed skills in the live TUI gateway',
@@ -515,7 +482,6 @@ export const opsCommands: SlashCommand[] = [
       // Bound to the session so the rescan and the refreshed catalog see its
       // repo's project-local skills, not the launch environment's.
       const params = ctx.sid ? { session_id: ctx.sid } : {}
-
       ctx.gateway
         .rpc<SkillsReloadResponse>('skills.reload', params)
         .then(
@@ -547,7 +513,6 @@ export const opsCommands: SlashCommand[] = [
         .catch(ctx.guardedErr)
     }
   },
-
   {
     help: 'browse, inspect, install skills',
     name: 'skills',
@@ -574,7 +539,6 @@ export const opsCommands: SlashCommand[] = [
             const body = r?.output || t('slashCmd.ops.slashWorker.skillsNoOutput')
             const formatted = r?.warning ? `${t('slashCmd.ops.slashWorker.warning', r.warning)}\n${body}` : body
             const long = formatted.length > 180 || formatted.split('\n').filter(Boolean).length > 2
-
             long
               ? ctx.transcript.page(formatted, t('slashCmd.ops.slashWorker.skillsTitle'))
               : ctx.transcript.sys(formatted)
@@ -667,7 +631,6 @@ export const opsCommands: SlashCommand[] = [
         }
 
         sys(t('slashCmd.ops.skills.installing', query))
-
         rpc<SkillsInstallResponse>('skills.manage', { action: 'install', query })
           .then(
             ctx.guarded<SkillsInstallResponse>(r =>
@@ -691,7 +654,6 @@ export const opsCommands: SlashCommand[] = [
         }
 
         sys(t('slashCmd.ops.skills.fetching'))
-
         rpc<SkillsBrowseResponse>('skills.manage', { action: 'browse', page: pageNum })
           .then(
             ctx.guarded<SkillsBrowseResponse>(r => {
@@ -740,13 +702,11 @@ export const opsCommands: SlashCommand[] = [
       runViaSlashWorker()
     }
   },
-
   {
     help: 'manage connector accounts: list, rename, add another, reconnect, remove',
     name: 'connectors',
     run: () => patchOverlayState({ connectors: true })
   },
-
   {
     help: 'view & toggle plugins (no arg opens the hub; enable/disable <name> for direct toggle)',
     name: 'plugins',
@@ -768,21 +728,15 @@ export const opsCommands: SlashCommand[] = [
           const body = r?.output || t('slashCmd.ops.slashWorker.pluginsNoOutput')
           const text = r?.warning ? `${t('slashCmd.ops.slashWorker.warning', r.warning)}\n${body}` : body
           const long = text.length > 180 || text.split('\n').filter(Boolean).length > 2
-
           long ? ctx.transcript.page(text, t('slashCmd.ops.slashWorker.pluginsTitle')) : ctx.transcript.sys(text)
         })
         .catch(ctx.guardedErr)
     }
   },
-
   {
     help: 'enable or disable tools (client-side history reset on change)',
     name: 'tools',
     run: (arg, ctx, cmd) => {
-      if (ctx.sid && ctx.gateway.gw?.isCanonical) {
-        return canonicalTools(ctx)
-      }
-
       const [subcommand, ...names] = arg.trim().split(/\s+/).filter(Boolean)
 
       if (subcommand !== 'disable' && subcommand !== 'enable') {
@@ -796,7 +750,6 @@ export const opsCommands: SlashCommand[] = [
             const body = r?.output || t('slashCmd.ops.slashWorker.toolsNoOutput')
             const text = r?.warning ? `${t('slashCmd.ops.slashWorker.warning', r.warning)}\n${body}` : body
             const long = text.length > 180 || text.split('\n').filter(Boolean).length > 2
-
             long ? ctx.transcript.page(text, t('slashCmd.ops.slashWorker.toolsTitle')) : ctx.transcript.sys(text)
           })
           .catch(ctx.guardedErr)

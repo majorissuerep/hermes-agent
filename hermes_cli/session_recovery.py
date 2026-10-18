@@ -42,8 +42,8 @@ _TOPIC_TABLES = ("telegram_dm_topic_mode", "telegram_dm_topic_bindings")
 
 
 def _init_delivery_ledger_schema(conn: sqlite3.Connection) -> None:
-    from gateway.delivery_ledger import _initialize_schema
-    _initialize_schema(conn)
+    from hermes_state.legacy_delivery_schema import initialize_schema
+    initialize_schema(conn)
 
 
 # state.db tables created lazily by a gateway module (base ``SessionDB`` never creates them on a fresh
@@ -383,7 +383,8 @@ def _fresh_destination(output: Path, *, topic_tables: bool = False) -> sqlite3.C
     """Initialize a current-schema database at ``output`` and open it with foreign keys off."""
     with SessionDB(db_path=output) as destination_db:
         if topic_tables:
-            destination_db.apply_telegram_topic_migration()
+            from hermes_state.legacy_topic_schema import initialize_schema
+            initialize_schema(destination_db._conn)
     conn = _connect(output)
     conn.execute("PRAGMA foreign_keys=OFF")
     return conn
@@ -1212,7 +1213,7 @@ def recover_session_database(
     progress_cb: Optional[ProgressCallback] = None, allow_partial: bool = False,
 ) -> dict[str, Any]:
     """Separate-output salvage is allowed; a canonical output requires offline ownership."""
-    from gateway.runtime_ownership import OwnershipConflict, exclusive_maintenance
+    from hermes_state.runtime_ownership import OwnershipConflict, exclusive_maintenance
     from contextlib import nullcontext
     # Validate before creating any lock or output. Reserve only a canonical
     # destination, not the live source or an unrelated requested output file.

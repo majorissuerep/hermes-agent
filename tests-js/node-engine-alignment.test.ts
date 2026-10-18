@@ -17,7 +17,6 @@ function readJson<T>(relativePath: string): T {
 }
 
 const root = readJson<Manifest>('package.json')
-const desktop = readJson<Manifest>('apps/desktop/package.json')
 const lock = readJson<Lockfile>('package-lock.json')
 const pins = readJson<PmLock>('pm/lock.json').packages
 
@@ -31,7 +30,7 @@ test.each([
   ['22.22.0', true], ['22.23.1', true], ['24.11.0', true], ['24.18.2', true], ['26.0.0', true],
   ['22.21.1', false], ['23.0.0', false], ['24.0.0', false], ['24.10.9', false], ['25.2.1', false], ['26.0.0-rc.1', false],
 ] as const)('workspace Node policy for %s is %s', (version: string, accepted: boolean): void => {
-  for (const manifest of [root, desktop]) {
+  for (const manifest of [root]) {
     assert.equal(semver.satisfies(version, nodeRange(manifest)), accepted)
   }
 })
@@ -49,7 +48,7 @@ test('exact independently managed Node and npm satisfy all declared lockfile eng
     assert.ok(semver.valid(pins[tool].version), `${tool} must be an exact pin`)
   }
 
-  for (const [name, manifest] of Object.entries({ ...lock.packages, root, desktop })) {
+  for (const [name, manifest] of Object.entries({ ...lock.packages, root })) {
     for (const tool of ['node', 'npm'] as const) {
       const range = manifest.engines?.[tool]
 
@@ -62,5 +61,4 @@ test('exact independently managed Node and npm satisfy all declared lockfile eng
 
 test('lockfile workspace engine mirrors match their manifests', (): void => {
   assert.deepEqual(lock.packages[''].engines, root.engines)
-  assert.deepEqual(lock.packages['apps/desktop'].engines, desktop.engines)
 })

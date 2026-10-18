@@ -2,9 +2,9 @@ import { Box, Text, useInput, useStdout } from '@hermes/ink'
 import { useEffect, useState } from 'react'
 
 import { noSkillsInstalled } from '../app/userMessages.js'
-import type { GatewayClient } from '../gatewayClient.js'
 import { useT } from '../i18n/useT.js'
 import { rpcErrorMessage } from '../lib/rpc.js'
+import type { LocalAgentClient } from '../localAgentClient.js'
 import type { Theme } from '../theme.js'
 
 import { OverlayHint, useOverlayKeys, windowItems, windowOffset } from './overlayControls.js'
@@ -297,7 +297,7 @@ interface SkillInfo {
 }
 
 interface SkillsHubProps {
-  gw: GatewayClient
+  gw: LocalAgentClient
   maxWidth?: number
   onClose: () => void
   t: Theme

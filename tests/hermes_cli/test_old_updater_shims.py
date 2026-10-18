@@ -259,15 +259,7 @@ def test_old_updater_retains_its_code_but_loads_new_managed_uv(old_updater, fres
     assert set(tmp_path.rglob("*")) == before_files
 
 
-def test_live_windows_scan_does_not_use_the_retired_main_alias(monkeypatch, no_external_work):
-    from hermes_cli import main, process_identity, update_cmd_holders
-
-    # Routing, not OS emulation: lifecycle fallback accepts rows on any host.
-    monkeypatch.setattr(main, "_detect_venv_python_processes", no_external_work)
-    monkeypatch.setattr(process_identity, "ledger_entries", list)
-    monkeypatch.setattr(update_cmd_holders, "_psutil", lambda: None)
-    monkeypatch.setattr(
-        update_cmd_holders, "_detect_venv_python_processes",
-        lambda: [(123, "python", "python -m hermes_cli.main serve")],
-    )
-    assert update_cmd_holders._desktop_owns_gateway_lifecycle() is True
+def test_frozen_windows_lifecycle_probe_transfers_to_current_updater(fresh_child):
+    from hermes_cli import update_cmd_holders
+    with fresh_child.exits():
+        update_cmd_holders._desktop_owns_gateway_lifecycle()

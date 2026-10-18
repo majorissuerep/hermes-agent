@@ -47,7 +47,6 @@ from hermes_cli.cli_tui_mixin import CLITuiMixin
 from hermes_cli.cli_process_notifications import CLIProcessNotificationsMixin
 from hermes_cli.cli_init_mixin import CLIInitMixin
 from hermes_cli.cli_tui_runtime_mixin import CLITuiRuntimeMixin
-from hermes_cli.cli_deck_mixin import CLIDeckMixin
 # Extracted clusters (mechanical split, #116911); re-exported here so `cli.<name>` stays the seam.
 from hermes_cli.cli_shutdown import (
     _CLEANUP_STEPS,
@@ -417,14 +416,6 @@ _cli_wake_owner = None
 # One-shot finalization runs before process cleanup (plugins see the boundary while the
 # agent is attached); atexit cleanup must not finalize those sessions again.
 _single_query_finalize_attempted_session_ids: set[str | None] = set()
-# /handoff sessions belong to the gateway: finalizing them here would stamp end_reason on
-# a row the gateway just reopened, making the handoff leg vanish from history.
-# Session IDs that were handed off to the gateway via /handoff. The CLI process exits after a successful
-# handoff, but the gateway now owns the session lifecycle — _run_cleanup must NOT call finalize_session on
-# these, because doing so sets end_reason on a row the gateway just reopened and is actively writing to
-# (#88234). The race made the handoff leg vanish from session history and broke session_search recall for
-# the handed-off session.
-_handed_off_session_ids: set[str | None] = set()
 _active_agent_ref = None  # active AIAgent, for memory-provider shutdown at exit
 _deferred_agent_startup_done = False
 # Set once the TUI app starts (focus reporting + mouse tracking on); gates the on-exit
@@ -876,7 +867,7 @@ from hermes_cli.cli_chat_turn_mixin import CLIChatTurnMixin
 _PASTE_REF_RE = re.compile(r'\[Pasted text #\d+: \d+ lines \u2192 (.+?)\]')
 
 
-class HermesCLI(CLIInitMixin, CLITuiRuntimeMixin, CLIProcessNotificationsMixin, CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin, CLITuiMixin, CLIStatusBarMixin, CLIVoiceMixin, CLIModelSwitchMixin, CLISessionMixin, CLIStreamMixin, CLIModalMixin, CLITerminalMixin, CLIInfoMixin, CLILoopsMixin, CLIChatTurnMixin, CLIDeckMixin):
+class HermesCLI(CLIInitMixin, CLITuiRuntimeMixin, CLIProcessNotificationsMixin, CLIAgentSetupMixin, CLICommandsMixin, CLIBillingMixin, CLITuiMixin, CLIStatusBarMixin, CLIVoiceMixin, CLIModelSwitchMixin, CLISessionMixin, CLIStreamMixin, CLIModalMixin, CLITerminalMixin, CLIInfoMixin, CLILoopsMixin, CLIChatTurnMixin):
     """Interactive REPL for the Hermes Agent."""
 
     # Seeded -q first message (see _should_seed_interactive); run() re-creates
@@ -909,7 +900,7 @@ class HermesCLI(CLIInitMixin, CLITuiRuntimeMixin, CLIProcessNotificationsMixin, 
         self._init_runtime_state(resume)
 
 
-    def _claim_active_session(self, surface: str = "cli", *, stderr: bool = False, deck: bool = False) -> bool:
+    def _claim_active_session(self, surface: str = "cli", *, stderr: bool = False) -> bool:
         """Claim a global active-session slot for this CLI process. ``deck``: the interactive REPL, which
         consumes deck messages at idle — a one-shot ``-q`` run never would, so it must not advertise it."""
         if self._active_session_lease is not None:
@@ -923,7 +914,7 @@ class HermesCLI(CLIInitMixin, CLITuiRuntimeMixin, CLIProcessNotificationsMixin, 
                 config=self.config,
                 # Writer identity: a re-claim by this process replaces its own entry.
                 # See #94595.
-                metadata=self._deck_lease_metadata() if deck else {"live_session_id": str(self.session_id)},
+                metadata={"live_session_id": str(self.session_id)},
             )
         except Exception as exc:
             logger.warning("Failed to claim active session slot: %s", exc)
@@ -981,7 +972,7 @@ class HermesCLI(CLIInitMixin, CLITuiRuntimeMixin, CLIProcessNotificationsMixin, 
 
             notice = default_downgrade_notice()
             if notice:
-                from gateway.warning_notifications import render_notification
+                from agent.warning_notifications import render_notification
                 render_notification(lambda: self._console_print(f"[yellow]⚠ {notice}[/yellow]"), platform="cli")
         except Exception:
             logger.debug("browser backend notice failed", exc_info=True)
@@ -1131,7 +1122,7 @@ class HermesCLI(CLIInitMixin, CLITuiRuntimeMixin, CLIProcessNotificationsMixin, 
         "model": ("_handle_model_switch", True), "codex-runtime": ("_handle_codex_runtime", True),
         "retry": ("_cmd_retry", True), "prompt": ("_handle_prompt_compose_command", True),
         "undo": ("_cmd_undo", True), "save": ("save_conversation", True), "skills": ("_cmd_skills", True),
-        "platforms": ("_show_gateway_status", False), "status": ("_show_session_status", False),
+        "status": ("_show_session_status", False),
         "context": ("_show_context_breakdown", True), "egress": ("_cmd_egress", True),
         "statusbar": ("_cmd_statusbar", True), "verbose": ("_toggle_verbose", False), "yolo": ("_toggle_yolo", False),
         "compress": ("_manual_compress", True), "subscription": ("_show_subscription", False),
@@ -1193,9 +1184,6 @@ class HermesCLI(CLIInitMixin, CLITuiRuntimeMixin, CLIProcessNotificationsMixin, 
         entry = self._slash_handler(canonical)
         if entry is None:
             return self._process_unregistered_slash(cmd_original, cmd_lower)
-        from hermes_cli.gateway_setting_commands import run as run_gateway_setting
-        if run_gateway_setting(self, canonical, cmd_original):
-            return True  # a per-session setting the gateway's handler applied
         method_name, pass_arg = entry
         handler = getattr(self, method_name)
         result = handler(cmd_original) if pass_arg else handler()
@@ -1387,10 +1375,8 @@ class HermesCLI(CLIInitMixin, CLITuiRuntimeMixin, CLIProcessNotificationsMixin, 
 
     def run(self):
         """Run the interactive CLI loop with persistent input at bottom."""
-        self._ensure_gateway_session()
-        if not self._claim_active_session("cli", deck=True):
+        if not self._claim_active_session("cli"):
             return
-        self._deck_register()
 
         self._tui_print_startup()
         self._tui_init_run_state()
@@ -1575,15 +1561,6 @@ def _build_cli_from_args(model, toolsets, provider, reasoning, api_key, base_url
     return cli
 
 
-def _run_legacy_gateway():
-    """Legacy `cli.py --gateway` entry: arm the startup watchdog (before importing the gateway graph), then run it."""
-    import asyncio
-    with suppress(Exception):
-        from hermes_startup_watchdog import arm_startup_watchdog
-        arm_startup_watchdog()
-    from gateway.run import start_gateway
-    print(_t("cli.gateway.starting"))
-    asyncio.run(start_gateway())
 
 
 def _start_worktree_setup(list_tools, list_toolsets, worktree, w):
@@ -1641,135 +1618,8 @@ def _start_worktree_setup(list_tools, list_toolsets, worktree, w):
     return _join_worktree
 
 
-def main(
-    query: str | None = None,
-    q: str | None = None,
-    oneshot: bool = False,
-    image: str | None = None,
-    toolsets: str | None = None,
-    skills: str | list[str] | tuple[str, ...] | None = None,
-    model: str | None = None,
-    provider: str | None = None,
-    reasoning: str | None = None,
-    api_key: str | None = None,
-    base_url: str | None = None,
-    max_turns: int | None = None,
-    run_budget: float | None = None,
-    verbose: Optional[bool] = None,
-    quiet: bool = False,
-    compact: bool = False,
-    list_tools: bool = False,
-    list_toolsets: bool = False,
-    gateway: bool = False,
-    resume: str | None = None,
-    worktree: bool = False,
-    w: bool = False,
-    checkpoints: bool = False,
-    pass_session_id: bool = False,
-    output_format: str = "text",
-    ignore_user_config: bool = False,
-    ignore_rules: bool = False,
-):
-    """
-    Hermes Agent CLI - Interactive AI Assistant
-    
-    Args:
-        query: Query to run. On a real TTY this seeds an interactive session
-            (submitted literally as the first turn); with --oneshot/-Q or a
-            non-TTY it answers and exits. Alias: -q
-        q: Shorthand for --query
-        oneshot: With -q: force the legacy answer-and-exit single-query mode
-            even on a TTY.
-        image: Optional local image path to attach to a single query
-        toolsets: Comma-separated list of toolsets to enable (e.g., "web,terminal")
-        skills: Comma-separated or repeated list of skills to preload for the session
-        model: Model to use (default: anthropic/claude-opus-4-20250514)
-        provider: Inference provider ("auto", "openrouter", "nous", "openai-codex", "zai", "kimi-coding", "minimax", "minimax-cn")
-        reasoning: Reasoning effort for this run (none|minimal|low|medium|high|xhigh|max|ultra). Overrides agent.reasoning_effort.
-        api_key: API key for authentication
-        base_url: Base URL for the API
-        max_turns: Maximum tool-calling iterations (default: 60)
-        verbose: Enable verbose logging
-        compact: Use compact display mode
-        list_tools: List available tools and exit
-        list_toolsets: List available toolsets and exit
-        resume: Resume a previous session by its ID (e.g., 20260225_143052_a1b2c3)
-        worktree: Run in an isolated git worktree (for parallel agents). Alias: -w
-        w: Shorthand for --worktree
-    
-    Examples:
-        python cli.py                            # Start interactive mode
-        python cli.py --toolsets web,terminal    # Use specific toolsets
-        python cli.py --skills hermes-agent-dev,github-auth
-        python cli.py -q "What is Python?"       # Single query mode
-        python cli.py -q "Describe this" --image ~/storage/shared/Pictures/cat.png
-        python cli.py --list-tools               # List tools and exit
-        python cli.py --resume 20260225_143052_a1b2c3  # Resume session
-        python cli.py -w                         # Start in isolated git worktree
-        python cli.py -w -q "Fix issue #123"     # Single query in worktree
-    """
-    # UTF-8 stdio on Windows before any print (Rich box-drawing would UnicodeEncodeError on cp1252).
-    with suppress(Exception):
-        from hermes_cli.stdio import configure_windows_stdio
-        configure_windows_stdio()
-
-    os.environ["HERMES_INTERACTIVE"] = "1"  # terminal_tool: interactive sudo prompts with timeout
-
-    if gateway:
-        _run_legacy_gateway()
-        return
-
-    if not (list_tools or list_toolsets):
-        from hermes_cli.process_identity import register_self
-        from hermes_cli.shared_profile_warning import shared_profile_warning
-
-        register_self("cli")
-        warning = shared_profile_warning()
-        if warning:
-            print(_t("cli.startup.warning", warning=warning), file=sys.stderr)
-
-    _join_worktree = _start_worktree_setup(list_tools, list_toolsets, worktree, w)
-    query = query or q
-    # ``hermes chat`` already validated this; the direct Fire entry point gets the same contract.
-    if output_format == "stream-json":
-        if not query:
-            raise ValueError("--format stream-json requires -q/--query")
-        quiet = True
-    cli = _build_cli_from_args(model, toolsets, provider, reasoning, api_key, base_url, max_turns, run_budget,
-                               verbose, compact, resume, checkpoints, pass_session_id, ignore_rules, skills)
-
-    # Join the background worktree creation before anything consumes TERMINAL_CWD.
-    # A requested worktree whose setup failed aborts: never silently run without isolation.
-    wt_info = _join_worktree() if _join_worktree is not None else None
-    if _join_worktree is not None and not wt_info:
-        return
-
-    # Inject worktree context into agent's system prompt
-    if wt_info:
-        wt_note = (
-            f"\n\n[System note: You are working in an isolated git worktree at "
-            f"{wt_info['path']}. Your branch is `{wt_info['branch']}`. "
-            f"Changes here do not affect the main working tree or other agents. "
-            f"Remember to commit and push your changes, and create a PR if appropriate. "
-            f"The original repo is at {wt_info['repo_root']}.]"
-        )
-        cli.system_prompt = (cli.system_prompt or "") + wt_note
-
-    if list_tools or list_toolsets:
-        cli.show_banner()
-        (cli.show_tools if list_tools else cli.show_toolsets)()
-        sys.exit(0)
-
-    atexit.register(_run_cleanup)  # interactive mode registers again in run() (idempotent)
-    _install_single_query_signal_handlers(cli)
-
-    if query or image:
-        _run_single_query_mode(cli, query, image, quiet, oneshot, stream_json=output_format == "stream-json")
-        return
-    cli.run()
 
 
 if __name__ == "__main__":
-    import fire
-
-    fire.Fire(main)
+    from hermes_cli.main import main
+    main()

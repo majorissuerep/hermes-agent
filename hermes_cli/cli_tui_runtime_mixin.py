@@ -53,7 +53,6 @@ class CLITuiRuntimeMixin:
         for step in (
             self._check_termios_drift,
             lambda: self._drain_process_notifications("cli-idle"),
-            self._deck_idle_tick,
             self._maybe_fire_loop_tick,
             self._maybe_resume_parked_goal,
         ):
@@ -77,7 +76,6 @@ class CLITuiRuntimeMixin:
         """Route one submitted input: file drop, /resume pick, ! shell, slash command, or a chat turn."""
         from cli import _DIM, _PASTE_REF_RE, _RST, _cprint, _detect_file_drop, _looks_like_slash_command, _strip_leaked_bracketed_paste_wrappers, _strip_leaked_terminal_responses_with_meta
         from tools.process_registry_notifications import TimelineNotification
-        self._deck_note_input(user_input)
         self._tui_dock_drop_dequeued()
         user_input, is_voice_input, is_seeded_query = self._tui_unwrap_input(user_input)
         if not user_input:
@@ -143,7 +141,6 @@ class CLITuiRuntimeMixin:
                 notification_preview or user_input, images=submit_images or None, voice_input=is_voice_input)
         finally:
             self._tui_after_turn()
-            self._deck_after_turn()
 
     def _tui_run_slash_input(self, user_input: str):
         """Dispatch a slash command. Returns the pending agent seed to run as a chat turn, else None."""
@@ -257,7 +254,7 @@ class CLITuiRuntimeMixin:
             return
         notice = inventory.get("browser_backend_notice")
         if notice:
-            from gateway.warning_notifications import render_notification
+            from agent.warning_notifications import render_notification
             render_notification(lambda: self._console_print(f"[yellow]⚠ {notice}[/yellow]"), platform="cli")
 
     def _tui_print_startup(self):
@@ -271,7 +268,6 @@ class CLITuiRuntimeMixin:
             if _term_lines > 2:
                 print("\n" * (_term_lines - 1), end="", flush=True)
 
-        self._ensure_gateway_session()  # the banner shows the gateway session's id and inventory
         self.show_banner()
         self._show_security_advisories()
         self._show_startup_browser_notice()

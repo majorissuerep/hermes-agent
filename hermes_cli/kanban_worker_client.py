@@ -1,87 +1,97 @@
-"""Dispatcher subprocess: submit one claim to its profile owner; never run an agent."""
-# Spawned as a bare ``sys.executable -m``: in a PM install that interpreter carries no dependencies
-# until hermes_bootstrap selects the committed environment, so it must be the first import.
+"""One claimed card executes in this bounded, terminal-owned agent process."""
 try:
     import hermes_bootstrap
 except ModuleNotFoundError as exc:
     if exc.name != "hermes_bootstrap":
         raise
 
-import asyncio
+import json
 import os
 from pathlib import Path
 import sys
-import time
-
-# A worker the dispatcher spawns while `hermes update` drains the owner (or while the new owner is
-# still starting) waits for it instead of exiting: the condition is the host's, not the card's, and
-# a failed exit here spends the card's failure budget on an update window. Nothing is submitted
-# until an owner is ready, so waiting can never run the claim twice.
-OWNER_WAIT_S = 180.0
-_TRANSIENT_OWNER_STATES = frozenset({'draining', 'starting'})
 
 
-async def run(params, board_db):
-    from hermes_cli.gateway_client import connect_gateway, GatewayClientError, GatewayUnavailableError
-    if os.environ.get('HERMES_TUI_GATEWAY_URL'):
-        raise GatewayClientError('Kanban requires the assigned local profile owner')
-    deadline = time.monotonic() + OWNER_WAIT_S
-    while True:
+def _claim_context():
+    from hermes_cli import kanban_db as kb
+    from hermes_cli.kanban_db_connect import connect_closing
+    from hermes_cli.kanban_db_dispatch import _process_fingerprint, UNVERIFIED_WORKER_FINGERPRINT
+    from hermes_cli.profiles import resolve_profile_env
+    from hermes_constants import get_hermes_home
+
+    task_id = os.environ['HERMES_KANBAN_TASK']
+    run_id = int(os.environ['HERMES_KANBAN_RUN_ID'])
+    claim = os.environ['HERMES_KANBAN_CLAIM_LOCK']
+    path = Path(os.environ['HERMES_KANBAN_DB']).resolve(strict=True)
+    with connect_closing(path) as conn, kb.write_txn(conn):
+        task = kb.get_task(conn, task_id)
+        run = conn.execute('SELECT * FROM task_runs WHERE id=?', (run_id,)).fetchone()
+        if (task is None or run is None or task.status != 'running' or run['status'] != 'running'
+                or task.current_run_id != run_id or run['task_id'] != task.id
+                or task.claim_lock != claim or run['claim_lock'] != claim):
+            raise RuntimeError('stale_kanban_claim')
+        if Path(resolve_profile_env(task.assignee)).resolve() != get_hermes_home().resolve():
+            raise RuntimeError('kanban_profile_mismatch')
+        bound = conn.execute("SELECT payload FROM task_events WHERE task_id=? AND run_id=? AND kind='worker_bound' ORDER BY id DESC LIMIT 1", (task_id, run_id)).fetchone()
+        if bound:
+            from hermes_cli.kanban_db_dispatch import _worker_alive
+            prior = json.loads(bound[0])
+            if _worker_alive(prior.get('pid'), prior.get('started_at')):
+                raise RuntimeError('kanban_attempt_already_running')
+        kb._append_event(conn, task.id, 'worker_bound', {'pid': os.getpid(), 'claim_lock': claim,
+            'started_at': _process_fingerprint(os.getpid()) or UNVERIFIED_WORKER_FINGERPRINT}, run_id=run_id)
+        context = {'task_id': task_id, 'run_id': run_id, 'claim_lock': claim, 'db': str(path),
+            'context': kb.build_worker_context(conn, task.id), 'skills': list(task.skills or ()),
+            'goal_mode': task.goal_mode, 'goal_max_turns': task.goal_max_turns,
+            'goal_text': '\n\n'.join(part for part in (task.title, task.body) if part)}
+        if kb._retry_status_for_run(conn, task.id, run_id) == 'review':
+            context['skills'] = list(dict.fromkeys([*context['skills'], 'sdlc-review']))
+    return task, context
+
+
+def run_claim() -> int:
+    from argparse import Namespace
+    from hermes_cli.vault_gate import gate_startup
+    from hermes_cli.oneshot import _run_agent
+    from hermes_cli.kanban_worker_turns import _run_task_turns, _record_worker_result
+    from hermes_cli.turn_exit import credential_failure_flags, turn_exit_code
+    from hermes_state.runtime_ownership import ProfileOwnership
+    from hermes_constants import get_hermes_home
+    gate_startup(Namespace(command='chat'))
+    owner = ProfileOwnership()
+    owner.reserve([get_hermes_home()])
+    context = None
+    code, output = 1, ''
+    try:
+        task, context = _claim_context()
+        os.chdir(task.workspace_path)
+        def turns(agent, prompt, history):
+            return _run_task_turns(agent, {'text': prompt}, history, context)
+        output, result = _run_agent(f'Work kanban task {task.id}', model=task.model_override,
+            provider=task.provider_override, reasoning=task.reasoning_effort, conversation_runner=turns)
+        code = turn_exit_code(result, kanban_worker=True)
+        if output:
+            print(output)
+        return code
+    except Exception as exc:  # health: allow BLE001 -- bounded worker reports arbitrary provider failure through its exit/result protocol
+        code = turn_exit_code(None, kanban_worker=True, **credential_failure_flags(exc))
+        print(f'Kanban worker failed: {exc}', file=sys.stderr)
+        return code
+    finally:
         try:
-            async with connect_gateway() as client:
-                return await _submit_claim(client, params, board_db)
-        except GatewayUnavailableError as exc:
-            if exc.state not in _TRANSIENT_OWNER_STATES or time.monotonic() >= deadline:
-                raise
-            await asyncio.sleep(1)
-
-
-async def _submit_claim(client, params, board_db):
-    from hermes_cli.gateway_client import GatewayClientError
-    db = str(await asyncio.to_thread(Path(board_db).resolve))
-    accepted = await client.rpc('kanban.run', **dict(params, db=db))
-    sid, receipt = accepted['session_id'], accepted['receipt']
-    print(f'Session: {sid}', file=sys.stderr)
-    while receipt['status'] not in {'terminal', 'unknown'}:
-        await asyncio.sleep(.2)
-        receipt = await client.rpc('prompt.receipt', session_id=sid, admission_id=receipt['admission_id'])
-    if receipt['status'] == 'unknown':
-        raise GatewayClientError('Kanban execution unknown; retained by owner')
-    from gateway.session_kanban import worker_result
-    result = worker_result(board_db, params)
-    # The attempt's reply ends the log, as a one-shot worker's did: crash diagnostics quote it.
-    if result.get('last_output'):
-        print(result['last_output'])
-    return result.get('exit_code', 1)
+            if context is not None:
+                _record_worker_result(context, code, output[-500:])
+        finally:
+            owner.close()
 
 
 def main():
-    # The dead-worker sweep books this process's exit from the trailer in its log (it never
-    # reaps us), so every exit path writes it — the same contract as a quiet one-shot worker.
     from hermes_cli.quiet_single_query import KANBAN_WORKER_EXIT_TRAILER
-    rc = 1
+    code = 1
     try:
-        rc = _submit()
+        code = run_claim()
+        return code
     finally:
-        print(f'\n{KANBAN_WORKER_EXIT_TRAILER}{int(rc)}', file=sys.stderr, flush=True)
-    return rc
-
-
-def _submit():
-    try:
-        params = {'board': os.environ['HERMES_KANBAN_BOARD'], 'task_id': os.environ['HERMES_KANBAN_TASK'],
-            'run_id': int(os.environ['HERMES_KANBAN_RUN_ID']), 'claim_lock': os.environ['HERMES_KANBAN_CLAIM_LOCK']}
-        board_db = os.environ['HERMES_KANBAN_DB']
-        # Owner startup must never inherit this worker's task/tool/goal identity.
-        for key in list(os.environ):
-            if key.startswith('HERMES_KANBAN_') and key != 'HERMES_KANBAN_HOME':
-                os.environ.pop(key)
-        for key in ('HERMES_SESSION_SOURCE', 'HERMES_TENANT', 'TERMINAL_CWD'):
-            os.environ.pop(key, None)
-        return asyncio.run(run(params, board_db))
-    except (KeyError, ValueError, OSError) as exc:
-        print(f'Kanban owner refused: {exc}', file=sys.stderr)
-        return 1
+        print(f'\n{KANBAN_WORKER_EXIT_TRAILER}{code}', file=sys.stderr, flush=True)
 
 
 if __name__ == '__main__':

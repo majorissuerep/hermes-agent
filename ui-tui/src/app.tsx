@@ -4,9 +4,9 @@ import { GatewayProvider } from './app/gatewayContext.js'
 import { $uiState } from './app/uiStore.js'
 import { useMainApp } from './app/useMainApp.js'
 import { AppLayout } from './components/appLayout.js'
-import type { GatewayClient } from './gatewayClient.js'
+import type { LocalAgentClient } from './localAgentClient.js'
 
-export function App({ gw }: { gw: GatewayClient }) {
+export function App({ gw }: { gw: LocalAgentClient }) {
   const { appActions, appComposer, appProgress, appStatus, appTranscript, gateway } = useMainApp(gw)
   const { mouseTracking } = useStore($uiState)
 

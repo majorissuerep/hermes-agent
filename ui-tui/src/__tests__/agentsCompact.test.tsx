@@ -13,9 +13,9 @@ import { patchUiState, resetUiState } from '../app/uiStore.js'
 import { AgentsOverlay } from '../components/agentsOverlay.js'
 import { AgentsPanelView } from '../components/agentsPanel.js'
 import { TextInput } from '../components/textInput.js'
-import type { GatewayClient } from '../gatewayClient.js'
 import { messages } from '../i18n/runtime.js'
 import { buildAgentRows } from '../lib/agentRows.js'
+import type { LocalAgentClient } from '../localAgentClient.js'
 import { DEFAULT_THEME } from '../theme.js'
 
 it('keeps collapsed live chrome to one row without losing count or restore controls', () => {
@@ -53,7 +53,7 @@ it('opens the selected live transcript on Enter while details remain independent
 
   const view = renderSync(
     <Box height={20}>
-      <AgentsOverlay gw={{ request } as unknown as GatewayClient} onClose={() => {}} t={DEFAULT_THEME} />
+      <AgentsOverlay gw={{ request } as unknown as LocalAgentClient} onClose={() => {}} t={DEFAULT_THEME} />
     </Box>,
     {
       stdout: stdout as unknown as NodeJS.WriteStream,

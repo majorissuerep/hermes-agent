@@ -96,24 +96,7 @@ class CLIInfoMixin:
     """Informational views and reload flows for the interactive CLI: banner, help, tools, usage,
     insights, MCP/skills reload, bang shell."""
 
-    def _show_gateway_banner(self, build_welcome_banner, inventory, banner_kw, cwd, ctx_len):
-        """Main's banner from the gateway session's snapshot (the TUI banner's data): the CLI
-        enumerates nothing. The canonical id shows as main's 8-character label (display only)."""
-        from hermes_cli.gateway_session_store import session_label
-        self._defer_tool_warnings = True
-        build_welcome_banner(
-            tools=inventory["tools"], get_toolset_for_tool=inventory["get_toolset_for_tool"],
-            availability=inventory["availability"], skills_by_category=inventory["skills_by_category"],
-            **{**banner_kw, "cwd": inventory["cwd"] or cwd, "context_length": inventory["context_length"] or ctx_len,
-               "session_id": session_label(self.session_id)})
 
-    def _print_gateway_tool_warnings(self, lines):
-        """Main's ``_show_tool_availability_warnings`` lines, computed by the gateway that resolved
-        this session's tools."""
-        if lines:
-            self._console_print()
-            for line in lines:
-                self._console_print(line)
 
     def show_banner(self):
         """Display the welcome banner in Claude Code style."""
@@ -121,7 +104,6 @@ class CLIInfoMixin:
         from hermes_cli.banner import build_welcome_banner
         self.console.clear()
         ctx_len = None
-        gateway_inventory = getattr(getattr(self, "_session_db", None), "banner_inventory", lambda: None)()
         if hasattr(self, 'agent') and self.agent and hasattr(self.agent, 'context_compressor'):
             ctx_len = self.agent.context_compressor.context_length
         from agent.context_pin import is_context_pinned
@@ -148,9 +130,7 @@ class CLIInfoMixin:
                 enabled_toolsets=self.enabled_toolsets, session_id=self.session_id,
                 context_length=ctx_len, provider=self.provider, context_pinned=ctx_pinned)
 
-            if gateway_inventory is not None:
-                self._show_gateway_banner(build_welcome_banner, gateway_inventory, banner_kw, cwd, ctx_len)
-            elif snapshot is not None:
+            if snapshot is not None:
                 self._defer_tool_warnings = True
                 toolset_map = snapshot["toolset_map"]
                 build_welcome_banner(
@@ -191,9 +171,7 @@ class CLIInfoMixin:
         # Tool discovery is deferred on the Termux bare prompt path (warnings show once tools
         # init). On the snapshot fast path the check walks every check_fn (~180ms) — run it in
         # the background and let its output land above the prompt (patch_stdout-safe).
-        if isinstance((gateway_inventory or {}).get("tool_availability_warnings"), list):
-            self._print_gateway_tool_warnings(gateway_inventory["tool_availability_warnings"])
-        elif os.environ.get("HERMES_DEFER_AGENT_STARTUP") != "1":
+        if os.environ.get("HERMES_DEFER_AGENT_STARTUP") != "1":
             if getattr(self, "_defer_tool_warnings", False):
                 threading.Thread(
                     target=self._show_tool_availability_warnings,
@@ -402,18 +380,12 @@ class CLIInfoMixin:
 
     def show_tools(self):
         """Display available tools with kawaii ASCII art."""
-        from hermes_cli.gateway_tools import session_tools
-        remote = session_tools()  # the gateway session's catalog (its MCP + plugin tools included)
-        if remote is not None:
-            tools, get_toolset_for_tool = remote
-        else:
-            from cli import get_tool_definitions
-            from model_tools import get_toolset_for_tool
-            # Pre-assembly list: /tools is a discovery surface, so it must show the full catalog
-            # including tools deferred behind the tool_search bridge (users verify MCP installs here).
-            tools = get_tool_definitions(enabled_toolsets=self.enabled_toolsets,
-                                         disabled_toolsets=self.disabled_toolsets, quiet_mode=True,
-                                         skip_tool_search_assembly=True)
+        from cli import get_tool_definitions
+        from model_tools import get_toolset_for_tool
+
+        tools = get_tool_definitions(enabled_toolsets=self.enabled_toolsets,
+                                     disabled_toolsets=self.disabled_toolsets, quiet_mode=True,
+                                     skip_tool_search_assembly=True)
         if not tools:
             print(t("cli.tools.none_available"))
             return
@@ -535,10 +507,6 @@ class CLIInfoMixin:
             self._console_print(f"[dim]{t('cli.shell.exited', code=str(exit_code))}[/]")
         return True
 
-    def _show_gateway_status(self):
-        """Show status of the gateway and connected messaging platforms."""
-        from hermes_cli.cli_info_lines import platforms_lines
-        print("\n".join(platforms_lines()))
 
     def _print_random_tip(self) -> None:
         """Best-effort discovery tip (startup + /clear); never raises."""
@@ -630,9 +598,6 @@ class CLIInfoMixin:
         """`/context [all]` — 5×20 glyph grid (cell ≈ 1% of the window) plus an estimated
         per-category table; `all` appends per-skill / per-toolset costs. Read-only: same chars/4
         engine as the desktop popover (agent.context_breakdown) — no provider calls, no cache impact."""
-        from hermes_cli.gateway_side import connection_for
-        if (connection := connection_for(self)) is not None:
-            return self._show_gateway_context_breakdown(connection)
         if not self.agent:
             print(f"  {t('cli.shared.no_active_agent')}")
             return
@@ -669,27 +634,6 @@ class CLIInfoMixin:
             print(f"  {line}")
         print()
 
-    def _show_gateway_context_breakdown(self, connection):
-        """Main's ``/context`` grid and table over the gateway agent's own breakdown
-        (``session.context_breakdown``): the session's prompt, tools and transcript live there."""
-        from agent.context_breakdown import render_context_breakdown_lines
-        from agent.context_file_sources import render_context_file_lines
-        from hermes_cli.gateway_client import GatewayClientError
-        try:
-            payload = connection.call("session.context_breakdown", session_id=self.session_id)
-        except GatewayClientError as e:
-            print(f"  {t('cli.context.compute_failed', error=str(e))}")
-            return
-        if not payload.get("categories"):
-            print(f"  {t('cli.shared.no_active_agent')}")
-            return
-        file_lines = render_context_file_lines(payload.get("context_files") or [])
-        print()
-        print(f"  {t('cli.context.header', model=payload.get('model') or self.model)}")
-        print()
-        for line in render_context_breakdown_lines(payload, grid=True) + (["", *file_lines] if file_lines else []):
-            print(f"  {line}")
-        print()
 
     def _show_usage(self):
         """Rate limits + session token usage (when a live agent exists) + Nous credits.
@@ -899,33 +843,10 @@ class CLIInfoMixin:
         with self._busy_command(self._slow_command_status(cmd_original)):
             self._reload_mcp()
 
-    def _reload_gateway_mcp(self, connection):
-        """``/reload-mcp`` on the shared gateway: the gateway owns the MCP servers and the session's
-        agent, so it reconciles them with config and refreshes its agents (``reload.mcp``); main's
-        "Agent updated" line then counts the tools the gateway session now loads."""
-        from hermes_cli.gateway_client import GatewayClientError
-        if not self._command_running:
-            print(t("cli.reload_mcp.reloading"))
-        try:
-            result = connection.call("reload.mcp", session_id=self.session_id, confirm=True)
-            snapshot = connection.call("session.resume", session_id=self.session_id) or {}
-        except GatewayClientError as e:
-            print(f"  {t('gateway.reload_mcp.failed', error=str(e))}")
-            return
-        print(f"  {result.get('message') or ''}".rstrip())
-        connection.state(self.session_id).adopt_snapshot(snapshot)
-        info = snapshot.get("info") or {}
-        count = info.get("tool_count")
-        if not isinstance(count, int):
-            count = sum(len(names or []) for names in (info.get("tools") or {}).values())
-        print(f"  {t('cli.reload_mcp.agent_updated', count=str(count))}")
 
     def _reload_mcp(self):
         """Reload MCP servers: disconnect all, re-read config.yaml, reconnect, then refresh the
         agent's tool list so the model sees the updated tools on the next turn."""
-        from hermes_cli.gateway_side import connection_for
-        if (connection := connection_for(self)) is not None:
-            return self._reload_gateway_mcp(connection)
         try:
             from tools.mcp_tool_lifecycle import shutdown_mcp_servers
             from tools.mcp_tool_discovery import discover_mcp_tools
@@ -1013,8 +934,6 @@ class CLIInfoMixin:
             if not self._command_running:
                 print(t("cli.reload_skills.reloading"))
             result = reload_skills()
-            from hermes_cli.gateway_tools import reload_gateway_skills
-            reload_gateway_skills()  # the gateway that runs the turn rescans too; main's lines use the CLI diff
             added = result.get("added", [])      # [{"name", "description"}, ...]
             removed = result.get("removed", [])
             total = result.get("total", 0)

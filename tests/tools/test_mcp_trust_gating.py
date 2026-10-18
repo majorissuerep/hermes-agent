@@ -186,7 +186,7 @@ class TestTrustGateApprovalRouting:
 
     def test_api_run_callback_can_resolve_mcp_trust_gate(self, monkeypatch):
         """An API run emits and resolves the exact per-call consent request."""
-        from gateway.session_context import clear_session_vars, set_session_vars
+        from agent.session_context import clear_session_vars, set_session_vars
         from tools import approval, approval_prompt
         from tools.approval_context import (
             reset_current_session_key,
@@ -201,7 +201,7 @@ class TestTrustGateApprovalRouting:
 
         def notify(approval_data):
             seen.append(dict(approval_data))
-            assert approval.resolve_gateway_approval(
+            assert approval.resolve_session_approval(
                 session_key, "once", request_id=approval_data["request_id"]
             ) == 1
 
@@ -209,14 +209,14 @@ class TestTrustGateApprovalRouting:
             platform="api_server", session_key=session_key, async_delivery=False
         )
         key_token = set_current_session_key(session_key)
-        approval.register_gateway_notify(session_key, notify)
+        approval.register_session_notify(session_key, notify)
         try:
             assert approval_prompt.request_elicitation_consent(
                 "MCP tool 'write' on UNTRUSTED server 'srv' wants to run.",
                 "Approve once or deny.", surface="mcp-trust/srv",
             ) == "accept"
         finally:
-            approval.unregister_gateway_notify(session_key)
+            approval.unregister_session_notify(session_key)
             reset_current_session_key(key_token)
             clear_session_vars(session_tokens)
 
@@ -234,7 +234,7 @@ class TestTrustGateApprovalRouting:
         self, monkeypatch, platform, cron, single_query
     ):
         """A registered callback must not widen consent for webhook, cron, or -q workers (#111526)."""
-        from gateway.session_context import clear_session_vars, set_session_vars
+        from agent.session_context import clear_session_vars, set_session_vars
         from tools import approval, approval_prompt
         from tools.approval_context import (
             reset_current_session_key,
@@ -247,12 +247,12 @@ class TestTrustGateApprovalRouting:
             platform=platform, session_key=session_key, cron_session=cron
         )
         key_token = set_current_session_key(session_key)
-        approval.register_gateway_notify(session_key, lambda data: notified.append(data))
+        approval.register_session_notify(session_key, lambda data: notified.append(data))
         monkeypatch.setattr(approval_prompt, "prompt_dangerous_approval", lambda *_args, **_kwargs: "deny")
         gateway_waits = []
         monkeypatch.setattr(
             approval_prompt._gw,
-            "_await_gateway_decision",
+            "_await_session_decision",
             lambda *_args, **_kwargs: gateway_waits.append(_args) or {"resolved": True, "choice": "once"},
         )
         if single_query:
@@ -260,7 +260,7 @@ class TestTrustGateApprovalRouting:
         try:
             assert approval_prompt.request_elicitation_consent("write", "Approve once or deny.") == "decline"
         finally:
-            approval.unregister_gateway_notify(session_key)
+            approval.unregister_session_notify(session_key)
             reset_current_session_key(key_token)
             clear_session_vars(session_tokens)
 
@@ -273,7 +273,7 @@ class TestTrustGateApprovalRouting:
         """`hermes chat -q`, cron and unattended platforms can keep the CLI panel callback registered, but
         nobody answers it: consent declines at once instead of waiting the approval timeout (the e2e
         hang after ef1faa4cf8)."""
-        from gateway.session_context import clear_session_vars, set_session_vars
+        from agent.session_context import clear_session_vars, set_session_vars
         from tools import approval_prompt
         from tools.terminal_tool import set_approval_callback
 

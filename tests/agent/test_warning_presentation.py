@@ -38,7 +38,7 @@ def test_warning_policy_at_real_presentation_boundary(tmp_path, monkeypatch, set
 
 @pytest.mark.parametrize("platform", ["cli", "tui", "api_server", "slack", "telegram"])
 def test_canonical_policy_has_no_raw_surface_exemption(platform):
-    from gateway.warning_notifications import warning_notifications_enabled
+    from agent.warning_notifications import warning_notifications_enabled
     assert not warning_notifications_enabled(platform, {"display": {"suppress_warning_notifications": True}})
     assert warning_notifications_enabled(platform, {"display": {"warning_notifications": False}})
     assert warning_notifications_enabled(platform, {"display": {"suppress_warning_notifications": True, "platforms": {platform: {"suppress_warning_notifications": False}}}})

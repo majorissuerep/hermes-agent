@@ -155,38 +155,9 @@ def platform_metric_name(raw: object, core: frozenset[str]) -> str:
         return name
     if not name:
         return "plugin"
-    from hermes_constants import get_hermes_home
-
-    return _catalog_platform_owner(str(get_hermes_home()), name) or "plugin"
+    return "plugin"
 
 
-@functools.lru_cache(maxsize=64)
-def _catalog_platform_owner(home: str, platform: str) -> str | None:
-    """The catalog entry that installed the plugin registering ``platform`` in this profile. The
-    plugin is located from where its adapter factory's code lives (not a name it could claim), and
-    the catalog install is proven only by the installer-owned ``.install-metadata.json`` record,
-    never by anything inside the plugin tree, so a URL install cannot claim a catalog name."""
-    try:
-        import inspect
-
-        from gateway.platform_registry import platform_registry
-        from hermes_cli.plugins_provenance import read_sidecar_rows
-
-        entry = platform_registry.get(platform)
-        if entry is None or getattr(entry, "source", "") != "plugin":
-            return None
-        plugins_dir = (Path(home) / "plugins").resolve()
-        code_path = Path(inspect.getfile(entry.adapter_factory)).resolve()
-        if not code_path.is_relative_to(plugins_dir) or code_path.parent == plugins_dir:
-            return None
-        row = read_sidecar_rows(plugins_dir).get(code_path.relative_to(plugins_dir).parts[0])
-        row = row if isinstance(row, dict) else {}
-        block = row.get("catalog")
-        name = _norm(block.get("name") if isinstance(block, dict) else row.get("catalog_name"))
-        return name if name in _safe(catalog_platform_names) else None
-    except Exception:
-        logger.debug("Shared-metrics platform provenance unavailable", exc_info=True)
-        return None
 
 
 def _norm(value: object) -> str:

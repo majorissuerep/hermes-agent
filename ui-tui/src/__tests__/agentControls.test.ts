@@ -3,8 +3,8 @@ import { expect, it } from 'vitest'
 import { rosterViewport, sendAgentSteer } from '../components/agentControls.js'
 import { filterLabel, sortLabel } from '../components/agentsOverlay.js'
 import { processSummary } from '../components/agentsPanel.js'
-import type { GatewayClient } from '../gatewayClient.js'
 import { applyLocale, messages, resetLocale } from '../i18n/runtime.js'
+import type { LocalAgentClient } from '../localAgentClient.js'
 
 it('reports queued acceptance rather than claiming delivery and preserves rejected text', async () => {
   const calls: unknown[] = []
@@ -15,13 +15,13 @@ it('reports queued acceptance rather than claiming delivery and preserves reject
 
       return { status: 'queued' }
     }
-  } as unknown as GatewayClient
+  } as unknown as LocalAgentClient
 
   const queued = await sendAgentSteer(gw, 'owner', 'child', 'check tests')
   expect(queued.accepted).toBe(true)
   expect(queued.message).toBe(messages().hubs.agentControls.queued)
   expect(calls).toEqual([['subagent.steer', { session_id: 'owner', subagent_id: 'child', text: 'check tests' }]])
-  const rejected = { request: async () => ({ status: 'rejected' }) } as unknown as GatewayClient
+  const rejected = { request: async () => ({ status: 'rejected' }) } as unknown as LocalAgentClient
   const declined = await sendAgentSteer(rejected, 'owner', 'child', 'check tests')
   expect(declined.accepted).toBe(false)
   expect(declined.message).toBe(messages().hubs.agentControls.notQueued)

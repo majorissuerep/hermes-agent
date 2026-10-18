@@ -56,7 +56,7 @@ CASES = {
 
 @pytest.mark.parametrize("case", list(CASES))
 def test_repaired_reload_commit_archives_only_held_rows(tmp_path, case):
-    from gateway.run import _build_gateway_agent_history
+    from hermes_state.message_timestamps import render_user_content_with_timestamp
 
     unseen, suffix, render, late, expected, tail_count = CASES[case]
     db = SessionDB(tmp_path / "state.db")
@@ -71,7 +71,8 @@ def test_repaired_reload_commit_archives_only_held_rows(tmp_path, case):
         watermark = db.get_active_message_watermark("sid")
         repair_message_sequence(None, held)
         if render:
-            held[2:], _ = _build_gateway_agent_history(held[2:], inject_timestamps=True)
+            held[2:] = [dict(m, content=render_user_content_with_timestamp(m["content"], m.get("timestamp")))
+                        if m.get("role") == "user" else m for m in held[2:]]
         for role, content, fields in late:
             db.append_message("sid", role, content, **fields)
 

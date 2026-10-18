@@ -40,14 +40,7 @@ def _platform_default_is_valid(
     is_allowed_for_platform: Callable[[str, str], bool]) -> bool:
     if is_valid_toolset(default_toolset) and is_allowed_for_platform(default_toolset, str(platform)):
         return True
-    # Dynamic plugin platforms are resolved by toolsets.resolve_toolset() even though their synthesized
-    # hermes-<platform> name is not in TOOLSETS.
-    try:
-        from gateway.platform_registry import platform_registry
-
-        return platform_registry.is_registered(platform)
-    except Exception:
-        return False
+    return False
 
 
 def saved_toolset_resolver(config: dict) -> Callable[[str], bool]:
@@ -65,11 +58,6 @@ def saved_toolset_resolver(config: dict) -> Callable[[str], bool]:
     servers = {str(name) for name in mcp_servers} if isinstance(mcp_servers, dict) else set()
     known = servers | {f"mcp-{name}" for name in servers} | {"no_mcp"}
 
-    @cache
-    def platform_bundles() -> frozenset:
-        from hermes_cli.config import _platform_plugin_manifests
-
-        return frozenset(f"hermes-{name}" for name, _manifest in _platform_plugin_manifests())
 
     @cache
     def plugin_names() -> frozenset:
@@ -79,7 +67,7 @@ def saved_toolset_resolver(config: dict) -> Callable[[str], bool]:
         return frozenset(get_plugin_toolset_keys_nowait() | portable | {f"mcp-{name}" for name in portable})
 
     return lambda name: (validate_toolset(name) or name in known
-                         or name in platform_bundles() or name in plugin_names())
+                         or name in plugin_names())
 
 
 def validate_platform_toolsets(

@@ -109,3 +109,19 @@ def test_a_tail_child_the_job_refuses_never_runs(tmp_path, monkeypatch):
     finally:
         lock.release()
     assert not started.exists(), "the tail child ran outside the update's job"
+
+
+def test_automatic_completion_uses_terminal_tail_even_with_legacy_desktop_files(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from hermes_cli import update_custody
+    root, _ = _tail_root(tmp_path, monkeypatch)
+    obsolete = root / 'apps' / 'desktop' / 'dist'
+    obsolete.mkdir(parents=True)
+    (obsolete / 'index.html').write_text('historical artifact')
+    commands = []
+    def completed(argv, **kwargs):
+        commands.append(argv)
+        return SimpleNamespace(returncode=0)
+    monkeypatch.setattr(update_custody, 'run', completed)
+    venv_sync._finish_source_update(root, current=True, pending=root / '.update-pending')
+    assert commands[0][-3:] == ['--source', str(root), '--finish-update']

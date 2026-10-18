@@ -198,7 +198,6 @@ printf 'apt\n' > "$PAYLOAD_ABS/app/.install_method"
 # and 'bundled' readers (data cleanup) go looking for the enclosing app.
 log "Writing app/install-stamp.json"
 HERMES_PAYLOAD_TAG="$TAG" \
-HERMES_DESKTOP_VARIANT=runtime \
 python3 "$REPO_ABS/scripts/write_install_stamp.py" \
     --output "$PAYLOAD_ABS/app/install-stamp.json" \
     --commit "$COMMIT" \
@@ -206,6 +205,7 @@ python3 "$REPO_ABS/scripts/write_install_stamp.py" \
     --display-version "$PY_VERSION" \
     --distance 0 \
     --distribution apt-termux \
+    --payload runtime \
     --update-mechanism external \
     --source bundle \
     || fail "stamp write failed"

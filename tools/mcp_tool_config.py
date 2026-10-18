@@ -14,7 +14,7 @@ import sys
 import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
-from hermes_cli.stderr_timestamp import stamp_line, timestamp
+from hermes_platform.log_lines import stamp_line, timestamp
 from tools.mcp_tool_common import _env_ref_name, _prepend_path
 
 logger = logging.getLogger("tools.mcp_tool")

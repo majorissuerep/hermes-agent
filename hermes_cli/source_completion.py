@@ -29,7 +29,6 @@ _PREPARED = "--prepared"
 def complete_source_checkout(
     root: Path,
     *,
-    desktop: bool,
     assume_yes: bool,
     gateway_mode: bool = False,
     pre_update_snapshot_id: str | None = None,
@@ -37,7 +36,6 @@ def complete_source_checkout(
     completion_message: str | None = None,
     announce: str | None = None,
     followups: list[tuple[str, str]] | None = None,
-    before_build=None,
 ) -> bool:
     """Publish commands, build the products, then run post-build maintenance.
 
@@ -70,11 +68,10 @@ def complete_source_checkout(
         )
     try:
         return _complete_locked(
-            root, desktop=desktop, assume_yes=assume_yes, gateway_mode=gateway_mode,
+            root, assume_yes=assume_yes, gateway_mode=gateway_mode,
             pre_update_snapshot_id=pre_update_snapshot_id,
             pre_update_version=pre_update_version,
             completion_message=completion_message, announce=announce, followups=followups,
-            before_build=before_build,
         )
     finally:
         lock.release()
@@ -83,7 +80,6 @@ def complete_source_checkout(
 def _complete_locked(
     root: Path,
     *,
-    desktop: bool,
     assume_yes: bool,
     gateway_mode: bool,
     pre_update_snapshot_id: str | None,
@@ -91,7 +87,6 @@ def _complete_locked(
     completion_message: str | None,
     announce: str | None,
     followups: list[tuple[str, str]] | None = None,
-    before_build=None,
 ) -> bool:
     """The completion body; callers hold the update lock already."""
     from hermes_cli.source_build import build_update_products
@@ -121,9 +116,7 @@ def _complete_locked(
             owed.append((name, reason))
 
     step("launchers", lambda: publish_launchers(root))
-    if before_build is not None:
-        before_build()  # never raises: a failed restart stays owed and is retried after the build
-    step("build", lambda: build_update_products(root, desktop=desktop))
+    step("build", lambda: build_update_products(root))
     if announce:
         print(announce)
     verdict: list[bool] = []
@@ -131,7 +124,7 @@ def _complete_locked(
         assume_yes=assume_yes,
         gateway_mode=gateway_mode,
         pre_update_snapshot_id=pre_update_snapshot_id,
-        had_desktop_app_before_update=desktop,
+        had_desktop_app_before_update=False,
         pre_update_version=pre_update_version,
         completion_message=completion_message,
         followups=owed,
@@ -165,8 +158,6 @@ def main(argv: list[str] | None = None) -> int:
     prepared = _PREPARED in argv
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", type=Path, required=True)
-    parser.add_argument("--desktop", action="store_true",
-                        help="Also build the packaged desktop app.")
     parser.add_argument("--interactive", action="store_true",
                         help="Allow prompts; installers pass no flag and stay unattended.")
     parser.add_argument("--finish-update", action="store_true",
@@ -195,13 +186,13 @@ def main(argv: list[str] | None = None) -> int:
             # unsafe SQLite runtime is reported, but re-running the tail cannot fix it.
             owed: list[tuple[str, str]] = []
             complete_source_checkout(
-                root, desktop=args.desktop, assume_yes=True,
+                root, assume_yes=True,
                 completion_message=None, announce="\n✓ Code updated!", followups=owed,
             )
             ok = not owed
         else:
             ok = complete_source_checkout(
-                root, desktop=args.desktop, assume_yes=not args.interactive,
+                root, assume_yes=not args.interactive,
                 completion_message="✓ Install complete!",
             )
         return 0 if ok else 1
@@ -211,8 +202,7 @@ def main(argv: list[str] | None = None) -> int:
     # This interpreter is a bootstrap one: the work happens in the re-exec, so
     # every flag that decides WHICH tail runs has to survive into it. Losing
     # --finish-update here silently reports an update as an install.
-    passthrough = (["--desktop"] if args.desktop else []) + \
-                  (["--finish-update"] if args.finish_update else [])
+    passthrough = ["--finish-update"] if args.finish_update else []
     command = _bootstrap_command(root, passthrough)
     from hermes_cli.update_vault import child_vault
     from hermes_cli.update_lock import checkout_lock_fds

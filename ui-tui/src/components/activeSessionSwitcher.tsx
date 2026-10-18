@@ -3,7 +3,6 @@ import type { SessionListResult, SessionListRow } from '@hermes/shared/gateway-e
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { sessionScopedModelArg } from '../domain/slash.js'
-import type { GatewayClient } from '../gatewayClient.js'
 import type {
   SessionActiveItem,
   SessionActiveListResponse,
@@ -13,13 +12,13 @@ import type {
 import { messages } from '../i18n/runtime.js'
 import { useT } from '../i18n/useT.js'
 import { asRpcResult, rpcErrorMessage } from '../lib/rpc.js'
+import type { LocalAgentClient } from '../localAgentClient.js'
 import type { Theme } from '../theme.js'
 
 import { ModelPicker } from './modelPicker.js'
 import { windowOffset } from './overlayControls.js'
 import { clampOverlayWidth, listRowStyle } from './overlayPrimitives.js'
 import { TextInput } from './textInput.js'
-
 const VISIBLE = 12
 const MIN_WIDTH = 64
 const MAX_WIDTH = 128
@@ -41,18 +40,13 @@ export const sessionStatusLabel = (status: string): string => {
 }
 
 const CTRL_OFFSET = 96
-
 const shortModel = (model = '') => model.replace(/^.*\//, '') || messages().pickers.session.modelUnknown
 const ctrlChar = (letter: string) => String.fromCharCode(letter.charCodeAt(0) - CTRL_OFFSET)
-
 export const fixedSessionColumnStyle = () => ({ flexShrink: 0 })
-
 export const activeSessionCountLabel = (count: number) =>
   count === 1 ? messages().pickers.session.liveSessionsOne(1) : messages().pickers.session.liveSessionsOther(count)
-
 export const sessionsCountLabel = (liveCount: number, resumableCount: number) =>
   messages().pickers.session.counts(liveCount, resumableCount)
-
 export type SessionRowKind = 'history' | 'live' | 'new'
 
 /**
@@ -74,7 +68,6 @@ export const relativeSessionAge = (ts?: number) => {
   }
 
   const days = (Date.now() / 1000 - ts) / 86400
-
   const age = messages().pickers.session.age
 
   if (days < 1) {
@@ -111,7 +104,6 @@ export const resumeRowContextHintSegments = (): OrchestratorHintSegment[] => {
 }
 
 export type OrchestratorHintRole = 'hotkey' | 'label' | 'text'
-
 export interface OrchestratorHintSegment {
   role: OrchestratorHintRole
   text: string
@@ -155,9 +147,7 @@ export const orchestratorGlobalHotkeyHintSegments = (): OrchestratorHintSegment[
 }
 
 const hintText = (segments: readonly OrchestratorHintSegment[]) => segments.map(segment => segment.text).join('')
-
 export const orchestratorContextHint = (newSelected: boolean) => hintText(orchestratorContextHintSegments(newSelected))
-
 export const orchestratorGlobalHotkeyHint = () => hintText(orchestratorGlobalHotkeyHintSegments())
 
 export const orchestratorHintSegmentColor = (t: Theme, role: OrchestratorHintRole) => {
@@ -179,16 +169,11 @@ export const selectedSessionRowStyle = (t: Theme) => ({
   backgroundColor: listRowStyle(t, true).backgroundColor,
   color: listRowStyle(t, true).color
 })
-
 export const newSessionMarkerColor = (t: Theme, selected: boolean) =>
   selected ? selectedSessionRowStyle(t).color : t.color.label
-
 export const newSessionRowIndex = (sessionCount: number) => Math.max(0, sessionCount)
-
 export const isNewSessionRow = (index: number, sessionCount: number) => index >= newSessionRowIndex(sessionCount)
-
 export const canTypeOrchestratorPrompt = (index: number, sessionCount: number) => isNewSessionRow(index, sessionCount)
-
 export const clampOrchestratorSelection = (index: number, sessionCount: number) =>
   Math.max(0, Math.min(index, newSessionRowIndex(sessionCount)))
 
@@ -210,7 +195,17 @@ export const orchestratorVisibleRowIndexes = (sessionCount: number, selected: nu
   return Array.from({ length: count }, (_, i) => offset + i)
 }
 
-export type CloseFallback = { action: 'activate'; sessionId: string } | { action: 'new' } | { action: 'stay' }
+export type CloseFallback =
+  | {
+      action: 'activate'
+      sessionId: string
+    }
+  | {
+      action: 'new'
+    }
+  | {
+      action: 'stay'
+    }
 
 export const closeFallbackAfterClose = (
   closedId: string,
@@ -259,7 +254,14 @@ export const draftModelDisplayLabel = (value: string) => {
   return modelName ? shortModel(modelName) : messages().pickers.session.currentOrDefault
 }
 
-export type OrchestratorRowClickAction = { action: 'activate'; sessionId: string } | { action: 'select-new' }
+export type OrchestratorRowClickAction =
+  | {
+      action: 'activate'
+      sessionId: string
+    }
+  | {
+      action: 'select-new'
+    }
 
 export const orchestratorRowClickAction = (
   index: number,
@@ -348,7 +350,6 @@ export function ActiveSessionSwitcher({
   const preferredWidth = Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, (stdout?.columns ?? 80) - 6))
   const width = clampOverlayWidth(preferredWidth, maxWidth)
   const promptColumns = Math.max(20, width - 11)
-
   // Rows are [new][live…][history…]: the "+ new" row is pinned first (index 0,
   // always rendered) and the live+history list is windowed below it. `total`
   // is the count of selectable rows (incl. the new row).
@@ -371,26 +372,14 @@ export function ActiveSessionSwitcher({
         // Fetch independently (allSettled) so a failing session.list can't
         // wipe the live-session list: live sessions still render and the
         // resumable history degrades on its own.
-        const canonicalList = gw.isCanonical
-          ? gw.request<{ scope?: string; sessions?: (SessionListRow & { running?: boolean })[] }>('session.list', {
-              limit: 200
-            })
-          : null
+        const canonicalList = null
 
         const [liveRes, histRes] = await Promise.allSettled([
-          canonicalList
-            ? canonicalList.then(value => ({
-                sessions: value.sessions?.map(row => ({
-                  ...row,
-                  current: row.id === currentSessionId,
-                  status: row.running ? ('working' as const) : ('idle' as const)
-                }))
-              }))
-            : gw.request<SessionActiveListResponse>('session.active_list', { current_session_id: currentSessionId }),
+          gw.request<SessionActiveListResponse>('session.active_list', { current_session_id: currentSessionId }),
           includeHistory
             ? gw.request<SessionListResult>('session.list', {
                 limit: 200,
-                ...(canonicalList ? { scope: 'stored' } : {})
+                ...{}
               })
             : Promise.resolve(null)
         ])
@@ -405,7 +394,6 @@ export function ActiveSessionSwitcher({
         }
 
         const next = r.sessions ?? []
-
         // Surface a garbled/failed session.list rather than silently blanking
         // the resumable section; keep the last good raw history so a transient
         // failure doesn't wipe it.
@@ -429,7 +417,6 @@ export function ActiveSessionSwitcher({
         const initializeSelection = !initialSelectionAppliedRef.current
         initialSelectionAppliedRef.current = true
         const maxSel = next.length + hist.length // == total - 1 (new row is index 0)
-
         setItems(next)
         setHistory(hist)
         // Re-anchor selection to the same row by identity (the live list can
@@ -479,7 +466,6 @@ export function ActiveSessionSwitcher({
     itemsRef.current = items
     historyDisplayRef.current = history
   }, [items, history])
-
   useEffect(() => {
     void load()
     const timer = setInterval(() => void load(true, false), 1500)
@@ -600,7 +586,6 @@ export function ActiveSessionSwitcher({
   const selectedKind = rowKind(sel)
   const newSelected = selectedKind === 'new'
   const draftHasText = Boolean(draft.trim())
-
   useInput((ch, key) => {
     if (pickingModel || deleting) {
       return
@@ -718,7 +703,6 @@ export function ActiveSessionSwitcher({
   const offset = windowOffset(listLen, listSel, VISIBLE)
   const visibleCount = Math.max(0, Math.min(VISIBLE, listLen - offset))
   const visibleRows = Array.from({ length: visibleCount }, (_, k) => offset + k + 1)
-
   const newSelectedRow = sel === 0
   const newRowStyle = newSelectedRow ? selectedSessionRowStyle(t) : null
   const newRowTextColor = newRowStyle?.color
@@ -942,10 +926,9 @@ interface OrchestratorHintTextProps {
   segments: readonly OrchestratorHintSegment[]
   t: Theme
 }
-
 interface ActiveSessionSwitcherProps {
   currentSessionId: null | string
-  gw: GatewayClient
+  gw: LocalAgentClient
   maxWidth?: number
   onCancel: () => void
   onClose: (id: string) => Promise<null | SessionCloseResponse>

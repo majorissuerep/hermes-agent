@@ -121,7 +121,7 @@ def build_profile_terminal_scope(
     file is unreadable.
 
     *env_overlay* is a TRUSTED ``TERMINAL_*`` mapping captured from the launch process before
-    multiplexing began (``tui_gateway/launch_profile_policy.py``): the launch profile's
+    multiplexing began (``tui_runtime/launch_profile_policy.py``): the launch profile's
     env-only policy (``TERMINAL_ENV=ssh`` from systemd, ``op run``, a launcher bridge) has no
     file to rebuild it from, and reading live ``os.environ`` here is the leak this module
     closes. It sits where the process env sits in the standalone bridge — explicit YAML keys
@@ -188,7 +188,7 @@ def _resolve_scope_cwd_placeholder(scope: dict[str, str]) -> None:
     a directory the profile's standalone gateway would never have used."""
     if scope.get("TERMINAL_CWD"):
         return
-    from gateway.cwd_placeholder import resolve_placeholder_terminal_cwd
+    from tools.terminal_cwd import resolve_placeholder_terminal_cwd
 
     resolved = resolve_placeholder_terminal_cwd(
         configured_cwd="", terminal_backend=scope.get("TERMINAL_ENV", ""),

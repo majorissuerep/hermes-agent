@@ -507,12 +507,12 @@ class TestJobCRUD:
         assert load_jobs() == []
 
 
-    def test_default_delivery_origin(self, tmp_cron_dir):
+    def test_default_delivery_is_local_with_origin_metadata(self, tmp_cron_dir):
         job = create_job(
             prompt="Test", schedule="30m",
             origin={"platform": "telegram", "chat_id": "123"},
         )
-        assert job["deliver"] == "origin"
+        assert job["deliver"] == "local"
 
 
 class TestUpdateJob:

@@ -161,20 +161,20 @@ class TestGatewayApprovalAllowPermanent:
         """Run the gateway approval path, denying inline, and return the
         single notify payload the renderer would have received."""
         from tools.approval import (
-            register_gateway_notify,
-            resolve_gateway_approval,
-            unregister_gateway_notify,
+            register_session_notify,
+            resolve_session_approval,
+            unregister_session_notify,
         )
 
         captured = []
 
         def notify(data):
             captured.append(dict(data))
-            # The notify fires synchronously before _await_gateway_decision
+            # The notify fires synchronously before _await_session_decision
             # blocks, so resolving here releases the wait without a thread.
-            resolve_gateway_approval(session_key, "deny")
+            resolve_session_approval(session_key, "deny")
 
-        register_gateway_notify(session_key, notify)
+        register_session_notify(session_key, notify)
         token = set_current_session_key(session_key)
         os.environ["HERMES_GATEWAY_SESSION"] = "1"
         os.environ["HERMES_EXEC_ASK"] = "1"
@@ -186,7 +186,7 @@ class TestGatewayApprovalAllowPermanent:
             os.environ.pop("HERMES_EXEC_ASK", None)
             os.environ.pop("HERMES_SESSION_KEY", None)
             reset_current_session_key(token)
-            unregister_gateway_notify(session_key)
+            unregister_session_notify(session_key)
 
         assert len(captured) == 1
         return captured[0]

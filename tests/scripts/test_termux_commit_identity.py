@@ -4,8 +4,28 @@ from pathlib import Path
 import shlex
 import subprocess
 import sys
+import shutil
 
-from tests.ci.test_desktop_release_tag_admission import _BASH, _GIT, _child_env, _git, _seed_repo
+_BASH = shutil.which("bash")
+_GIT = shutil.which("git")
+
+
+def _child_env(**values):
+    return {**os.environ, **values}
+
+
+def _git(*args, cwd):
+    return subprocess.check_output([_GIT, *args], cwd=cwd, text=True).strip()
+
+
+def _seed_repo(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git("init", "-q", "-b", "main", cwd=repo)
+    (repo / "pyproject.toml").write_text('[project]\nname="fixture"\nversion="1.2.3"\n')
+    _git("add", ".", cwd=repo)
+    _git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "fixture", cwd=repo)
+    return None, repo
 
 
 ROOT = Path(__file__).resolve().parents[2]

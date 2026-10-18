@@ -98,7 +98,7 @@ class Rehearsal:
             value = value.replace(secret, "[REDACTED]")
         return value
 
-    def run(self, name, argv, *, prompts=0, timeout=1800, data=None, cwd=None, completion=None):
+    def run(self, name, argv, *, prompts=0, timeout=1800, data=None, cwd=None):
         print(f"[{self.args.scenario}] {name}", flush=True)
         started = time.monotonic()
         log = self.evidence / (name + ".log")
@@ -118,9 +118,7 @@ class Rehearsal:
         output = bytearray()
         consumed = count = 0
         last_progress = started
-        last_check = started
         last_flush = started
-        detached = False
         try:
             while True:
                 if time.monotonic() - started > timeout:
@@ -153,14 +151,6 @@ class Rehearsal:
                         os.write(master, self.password.encode() + b"\n")
                 elif proc.poll() is not None:
                     break
-                if completion and not detached and count == prompts and time.monotonic() - last_check >= 5:
-                    last_check = time.monotonic()
-                    if completion():
-                        # The public interactive CLI owns asynchronous delegation.
-                        # Detach only after the independent durable-state oracle
-                        # proves both the child and its parent's follow-up finished.
-                        os.write(master, b"\x04")
-                        detached = True
             code = proc.wait(timeout=10)
             if code or count != prompts:
                 raise RuntimeError(f"{name}: exit={code}, passphrase prompts={count}, expected={prompts}")
@@ -216,14 +206,10 @@ class Rehearsal:
             "with timeout=120; do not combine them with other commands or use execute_code. "
             "Do not simulate these actions; perform them, verify the file, and stop."
         )
-        def completed():
-            if not marker.is_file() or marker.read_text().strip() != nonce:
-                return False
-            return self.probe("live-proof", allow_pending=True)["complete"]
 
-        self.run("live-" + phase, [str(self.launcher), "chat", "--cli", "--yolo", "--accept-hooks",
+        self.run("live-" + phase, [str(self.launcher), "chat", "--yolo", "--accept-hooks",
                                    "--toolsets", "terminal,file,delegation", "--max-turns", "10",
-                                   "-q", prompt], prompts=1, timeout=660, completion=completed)
+                                   "-q", prompt], prompts=1, timeout=660)
         if not marker.is_file() or marker.read_text().strip() != nonce:
             raise RuntimeError("live LLM/delegation did not produce the independent file oracle")
         self.receipt["checks"]["live-" + phase].update(self.probe("live-proof"))
@@ -235,15 +221,11 @@ class Rehearsal:
                   f"Write exactly that marker, without decoration, to {marker} using terminal. "
                   "Recover it from conversation history, not files or configuration. "
                   "Verify the file and stop.")
-        def completed():
-            if not marker.is_file() or marker.read_text().strip() != self.resume_token:
-                return False
-            return self.probe("resume-proof", allow_pending=True)["history_verified"]
 
-        self.run("resume-candidate", [str(self.launcher), "chat", "--cli", "--yolo", "--accept-hooks",
+        self.run("resume-candidate", [str(self.launcher), "chat", "--yolo", "--accept-hooks",
                  "--resume", "e2e-retained", "--toolsets", "terminal,file", "--max-turns", "6", "-q", prompt],
                  prompts=1, timeout=420,
-                 completion=completed)
+                 )
         if not marker.is_file() or marker.read_text().strip() != self.resume_token:
             raise RuntimeError("resumed LLM conversation did not recover its retained marker")
         self.receipt["checks"]["resume-candidate"].update(self.probe("resume-proof"))
@@ -445,17 +427,17 @@ class Rehearsal:
         cleanup_error = None
         try:
             if hasattr(self, "python") and (self.home / ".hermes-vault").is_file():
-                self.probe("stop-runtime")
+                self.probe("verify-runtime-closed")
                 self.receipt["cleanup_verified"] = True
         except Exception as exc:  # health: allow BLE001 -- cleanup failure is recorded and fails an otherwise successful acceptance run
             cleanup_error = exc
             self.receipt["cleanup_error"] = self.clean(str(exc))
             if passed:
-                self.receipt.update(status="failed", error="owned gateway cleanup failed")
+                self.receipt.update(status="failed", error="local runtime cleanup verification failed")
         (self.evidence / "receipt.json").write_text(json.dumps(self.receipt, indent=2) + "\n")
         if cleanup_error is not None:
             if passed:
-                raise RuntimeError("owned gateway cleanup failed; work retained for diagnosis") from cleanup_error
+                raise RuntimeError("local runtime cleanup verification failed; work retained for diagnosis") from cleanup_error
             return
         if not self.args.keep_work:
             shutil.rmtree(self.root)

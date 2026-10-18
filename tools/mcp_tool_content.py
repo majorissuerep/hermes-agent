@@ -93,10 +93,10 @@ def _write_block_cache(writer: str, what: str, skip_label: str, *args,
     marker)``. Fail-open so one bad block never kills the tool result: gateway deps missing
     (cron without gateway) → ``unavailable``; any other cache error → warning + ``failed``."""
     try:
-        import gateway.platforms.base as _base
+        from tools import media_cache as _base
         return getattr(_base, writer)(*args, **kwargs), ""
     except ImportError:
-        logger.debug("MCP %s caching skipped — gateway.platforms.base unavailable", skip_label)
+        logger.debug("MCP %s caching skipped — media cache unavailable", skip_label)
         return None, unavailable
     except Exception as exc:
         logger.warning("MCP %s cache failed: %s", what, exc)

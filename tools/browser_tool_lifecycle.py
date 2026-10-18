@@ -160,11 +160,6 @@ def _cleanup_inactive_browser_sessions():
                                if current_time - last_time > _bt.BROWSER_SESSION_INACTIVITY_TIMEOUT]
 
     for task_id in sessions_to_cleanup:
-        with _session_owner_scope(task_id):
-            if _human_holds_shared_browser(task_id):
-                # A human took the bot's screen (login, 2FA) — the agent is idle BECAUSE they are working.
-                _update_session_activity(task_id)
-                continue
         elapsed = int(current_time - _bt._session_last_activity.get(task_id, current_time))
         _bt.logger.info("Cleaning up inactive session for task: %s (inactive for %ss)", task_id, elapsed)
         try:
@@ -189,13 +184,6 @@ def _cleanup_inactive_browser_sessions():
                 _forget_session_tracking(task_id, activity=False)
 
 
-def _human_holds_shared_browser(task_id: str) -> bool:
-    """Lease check for the janitor, under the owner's profile scope (the lease is per profile)."""
-    with _bt._cleanup_lock:
-        session_info = _bt._active_sessions.get(task_id)
-    if not session_info:
-        return False
-    return _session.human_holds_shared_browser(session_info)
 
 
 def _write_owner_pid(socket_dir: str, session_name: str) -> None:
@@ -300,15 +288,15 @@ def _owner_pid_alive(socket_dir: str, session_name: str) -> tuple[Optional[int],
     if owner_pid is None:
         return None, None
     # ``os.kill(pid, 0)`` is NOT a no-op on Windows; use the cross-platform check.
-    from gateway.status import _pid_exists
-    return owner_pid, _pid_exists(owner_pid)
+    from hermes_platform.processes import pid_exists
+    return owner_pid, pid_exists(owner_pid)
 
 
 def _terminate_verified_daemon(daemon_pid: int, session_name: str, log) -> bool:
     """Tree-kill ``daemon_pid`` if it has a start-time fingerprint (so a PID swapped
     between check and kill is refused); False (logged via ``log``) when no fingerprint.
     Raises on OS errors."""
-    from gateway.status import get_process_start_time
+    from hermes_platform.processes import get_process_start_time
     from tools.process_registry import ProcessRegistry
     daemon_start = get_process_start_time(daemon_pid)
     if daemon_start is None:
@@ -352,8 +340,8 @@ def _reap_socket_dir(socket_dir: str, session_name: str, tracked_names: set) -> 
         return False
 
     daemon_pid = _read_pid_file(pid_file)
-    from gateway.status import _pid_exists
-    if daemon_pid is None or not _pid_exists(daemon_pid):
+    from hermes_platform.processes import pid_exists
+    if daemon_pid is None or not pid_exists(daemon_pid):
         shutil.rmtree(socket_dir, ignore_errors=True)
         return False
 
@@ -561,14 +549,6 @@ def _legacy_kill_process_tree(proc: subprocess.Popen) -> None:
     for child in descendants:
         with contextlib.suppress(Exception):
             child.kill()
-
-
-def _pid_exists(pid: int) -> bool:
-    """Best-effort 'is this PID alive' (cross-platform via gateway.status; zombies count as dead)."""
-    if pid <= 0:
-        return False
-    from gateway.status import _pid_exists as _gateway_pid_exists
-    return _gateway_pid_exists(pid)
 
 
 def _unlink_older_than(directory: Path, pattern: str, max_age_hours: float, label: str) -> None:

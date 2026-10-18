@@ -77,20 +77,12 @@ def test_explanation_quiet_for_empty_reason():
     assert AIAgent._format_turn_completion_explanation("guardrail_halt") == ""
 
 
-
-
-
-
 def test_explanation_for_max_iterations_reached_prefix_match():
     """``max_iterations_reached(...)`` carries a parenthetical suffix."""
     out = AIAgent._format_turn_completion_explanation(
         "max_iterations_reached(10/10)"
     )
     assert "iteration" in out.lower()
-
-
-
-
 
 
 # --------------------------------------------------------------------------
@@ -208,7 +200,7 @@ def test_deleted_wal_cause_is_plain_first_steps_not_a_forensic_runbook():
         "session_persistence_failed", "deleted_wal"
     ).lower()
     assert "deleted_wal" in PERSISTENCE_ERROR_CAUSES
-    assert "hermes gateway stop" in out and "hermes doctor" in out
+    assert "close every local hermes session" in out and "hermes doctor" in out
     for jargon in ("manifest", "state.db-wal", "sidecar", "header_only", "--inspect-only", "generation"):
         assert jargon not in out, jargon
     assert "~/.hermes" not in out  # display_hermes_home(), never a hardcoded path
@@ -467,10 +459,6 @@ def test_explainer_disabled_via_env():
         os.environ, {"HERMES_TURN_COMPLETION_EXPLAINER": "0"}, clear=False
     ):
         assert agent._turn_completion_explainer_enabled() is False
-
-
-
-
 
 
 # --------------------------------------------------------------------------

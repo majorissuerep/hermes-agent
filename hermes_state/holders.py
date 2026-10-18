@@ -593,7 +593,6 @@ def held_store_refusal(db_path: Path, *, command: str, force_hint: Optional[str]
     holders = foreign_state_db_holders(db_path)
     if not holders:
         return None
-    from hermes_constants import profile_cli_selector
     from hermes_state.errors import STORAGE_RECOVERY_DOCS_URL
 
     by_pid: dict[int, set[str]] = {}
@@ -607,11 +606,10 @@ def held_store_refusal(db_path: Path, *, command: str, force_hint: Optional[str]
     lines += [f"  {describe_holder_pid(pid)}: {', '.join(sorted(by_pid[pid]))}" for pid in sorted(by_pid)]
     if unknown:
         lines.append(f"  cannot prove the database is quiet (holder scan incomplete: {unknown[0][:120]})")
-    profile_arg = profile_cli_selector()
     lines += [
         "Rewriting the database under a live writer is how every agent ends up refusing turns with the "
         "retired state.db-wal error. Nothing is lost.",
-        f"Stop them first (`hermes {profile_arg}gateway stop`, quit the Desktop app, pause cron), then re-run.",
+        "Close every local Hermes session and stop active jobs on this profile, then re-run.",
     ]
     if force_hint:
         lines.append(f"Override with {force_hint} if you accept the risk.")

@@ -217,7 +217,7 @@ class CLILoopsMixin:
         self.new_session(title=title)
 
     def _record_model_friction(self, signal: str, turns: int = 1) -> None:
-        # The TUI slash worker's shadow CLI has no metrics surface: tui_gateway counts what it executes.
+        # The TUI slash worker's shadow CLI has no metrics surface: tui_runtime counts what it executes.
         if self._slash_metrics_surface:
             from hermes_cli.observability.shared_metrics_model import record_model_friction
             record_model_friction(
@@ -512,23 +512,7 @@ class CLILoopsMixin:
         setattr(self, attr, mgr)
         return mgr
 
-    def _automation_connection(self):
-        """``(gateway, connection)``: on a gateway session store the managers are the gateway's
-        (``hermes_cli.gateway_automation``), and none exists until the gateway session is open, so this
-        process never opens state.db read-write nor calls the goal judge. Off the gateway (tests, the
-        TUI slash worker's shadow CLI) main's in-process managers apply."""
-        from hermes_cli.gateway_session_store import GatewaySessionStore
-        store = getattr(self, "_session_db", None)
-        if not isinstance(store, GatewaySessionStore):
-            return False, None
-        return True, store.connection if getattr(self, "_gateway_session_open", False) else None
 
-    def _automation_manager(self, attr, label, local, remote):
-        gateway, connection = self._automation_connection()
-        if gateway and connection is None:
-            return None
-        return self._session_bound_manager(
-            attr, label, (lambda: lambda sid: remote(sid, connection)) if gateway else local)
 
     def _get_goal_manager(self):
         """GoalManager bound to the current session_id (see ``_session_bound_manager``)."""
@@ -544,10 +528,7 @@ class CLILoopsMixin:
             from hermes_cli.goals import GoalManager
             return lambda sid: GoalManager(session_id=sid, default_max_turns=max_turns())
 
-        def remote(sid, connection):
-            from hermes_cli.gateway_automation import GatewayGoalManager
-            return GatewayGoalManager(sid, connection)
-        return self._automation_manager("_goal_manager", "goal manager", load, remote)
+        return self._session_bound_manager("_goal_manager", "goal manager", load)
 
     def _get_heartbeat_manager(self):
         """HeartbeatManager bound to the current session_id (see ``_session_bound_manager``)."""
@@ -555,10 +536,7 @@ class CLILoopsMixin:
             from hermes_cli.heartbeat import HeartbeatManager
             return lambda sid: HeartbeatManager(session_id=sid)
 
-        def remote(sid, connection):
-            from hermes_cli.gateway_automation import GatewayHeartbeatManager
-            return GatewayHeartbeatManager(sid, connection)
-        return self._automation_manager("_heartbeat_manager", "heartbeat manager", load, remote)
+        return self._session_bound_manager("_heartbeat_manager", "heartbeat manager", load)
 
     def _get_loop_manager(self):
         """LoopManager bound to the current session_id (see ``_session_bound_manager``)."""
@@ -566,10 +544,7 @@ class CLILoopsMixin:
             from hermes_cli.loops import LoopManager
             return lambda sid: LoopManager(session_id=sid)
 
-        def remote(sid, connection):
-            from hermes_cli.gateway_automation import GatewayLoopManager
-            return GatewayLoopManager(sid, connection)
-        return self._automation_manager("_loop_manager", "loop manager", load, remote)
+        return self._session_bound_manager("_loop_manager", "loop manager", load)
 
     def _start_heartbeat_watchdog(self):
         """Start the idle-poll daemon that injects a due heartbeat prompt into
