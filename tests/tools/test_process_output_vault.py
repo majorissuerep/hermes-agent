@@ -12,6 +12,7 @@ import pytest
 
 
 @pytest.mark.platforms("linux", "macos")
+@pytest.mark.live_system_guard_bypass
 @pytest.mark.parametrize("completion", ["exit", "cancel"])
 def test_durable_child_output_replays_after_launcher_exit(tmp_path, monkeypatch, completion):
     from hermes_security import frames
@@ -89,6 +90,9 @@ def test_durable_child_output_replays_after_launcher_exit(tmp_path, monkeypatch,
         session = registry.get(sid)
         if session is not None and not session.exited:
             registry.kill_process(sid)
+        if session is not None and session._reader_thread is not None:
+            session._reader_thread.join(timeout=5)
+            assert not session._reader_thread.is_alive()
 
 
 @pytest.mark.platforms("linux", "macos")

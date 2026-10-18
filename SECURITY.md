@@ -62,8 +62,8 @@ operators should reason about them in the same terms.
   Other backends run commands inside a container, cloud sandbox, or
   remote host.
 - **Input surface.** Any channel through which content enters the
-  agent's context: operator input, web fetches, email, gateway
-  messages, file reads, MCP server responses, tool results.
+  agent's context: operator input, web fetches, file reads, MCP
+  server responses, tool results.
 - **Trust envelope.** The set of resources an operator has implicitly
   granted Hermes Agent access to by running it — typically, whatever
   the operator's own user account can reach on the host.
@@ -139,8 +139,8 @@ outside the supported security posture.
 
 Hermes Agent filters the environment it passes to its lower-trust
 in-process components: shell subprocesses, MCP subprocesses,
-cron job scripts, and the code-execution child. Credentials like
-provider API keys and gateway tokens are stripped by default;
+cron job scripts, and the code-execution child. Provider API keys
+and other private credentials are stripped by default;
 variables explicitly declared by the operator or by a loaded
 skill are passed through.
 
@@ -185,58 +185,27 @@ itself. Bugs in Hermes Agent's plugin-install or plugin-discovery
 path that prevent the operator from seeing what they're installing
 are in scope under §3.1.
 
-### 2.6 External Surfaces
+### 2.6 Local Session Transport
 
-An **external surface** is any channel outside the local agent
-process through which a caller can dispatch agent work, resolve
-approvals, or receive agent output. Each surface has its own
-authorization model, but the rules below apply uniformly.
+This fork ships no Desktop, dashboard, messaging gateway, inbound
+ACP/MCP server, network listener, or shared session host. The Ink TUI
+owns a private `tui_runtime` child over stdio. Outgoing provider,
+SSH, browser and MCP connections do not expose remote management.
 
-**Surfaces in Hermes Agent:**
+The local user account and OS process/file permissions authorize
+access. Session IDs route work; knowing an ID does not grant access
+to another process's approvals, output, or unlocked state. A local
+child must inherit explicit home/session-scoped authority, not a
+passphrase in its environment or arguments. Closing the owning
+session revokes that authority; closing a child does not revoke its
+parent. Profiles remain independent.
 
-- **Gateway platform adapters.** Most messaging integrations ship as
-  bundled plugins under `plugins/platforms/<name>/` (Telegram, Discord,
-  Slack, email, SMS, etc.). Shared base types and a smaller set of
-  legacy/direct adapters live under `gateway/platforms/`
-  (`base.py`, Signal, API server, webhooks, …), with discovery and
-  deferred loading via `gateway/platform_registry.py`.
-- **Network-exposed HTTP surfaces.** The API server adapter, the
-  dashboard plugin, the kanban plugin's HTTP endpoints, and any
-  other plugin that binds a listening socket.
-- **Editor / IDE adapters.** The ACP adapter (`acp_adapter/`) and
-  equivalent integrations that accept requests from a local client
-  process.
-- **The TUI gateway (`tui_gateway/`).** JSON-RPC backend for the
-  Ink terminal UI, reached over local IPC.
-
-**Uniform rules:**
-
-1. **Authorization is required at every surface that crosses a
-   trust boundary.** For messaging and network HTTP surfaces, the
-   boundary is the network: authorization means an operator-
-   configured caller allowlist. For editor and local-IPC surfaces
-   (ACP, TUI gateway), the boundary is the host's user account:
-   authorization means relying on OS-level access control (file
-   permissions, loopback-only binds) and not exposing the surface
-   beyond the local user without an explicit network auth layer.
-2. **An allowlist is required for every enabled network-exposed
-   adapter.** Adapters must refuse to dispatch agent work, resolve
-   approvals, or relay output until an allowlist is set. Code paths
-   that fail open when no allowlist is configured are code bugs in
-   scope under §3.1.
-3. **Session identifiers are routing handles, not authorization
-   boundaries.** Knowing another caller's session ID does not grant
-   access to their approvals or output; authorization is always
-   re-checked against the allowlist (or OS-level equivalent).
-4. **Within the authorized set, all callers are equally trusted.**
-   Hermes Agent does not model per-caller capabilities inside a
-   single adapter. Operators who need capability separation should
-   run separate agent instances with separate allowlists.
-5. **Binding a local-only surface to a non-loopback interface is a
-   break-glass operator decision (§3.2).** The dashboard and other
-   plugin HTTP servers default to loopback; exposing them via
-   `--host 0.0.0.0` or equivalent makes public-exposure hardening
-   (§4) the operator's responsibility.
+Managed state is encrypted at rest. Unlock keys live in memory;
+local subprocesses use bounded capabilities or inherited one-shot
+FDs. Encryption does not contain code already running as the same
+user or a trusted plugin inside the unlocked process (§2.2, §2.5).
+Offline plaintext export is explicit and leaves the encrypted
+original intact. See [encrypted state](website/docs/user-guide/encrypted-state.md).
 
 ---
 
@@ -247,21 +216,20 @@ authorization model, but the rules below apply uniformly.
 - Escape from a declared OS-level isolation posture (§2.2): an
   attacker-controlled code path reaching state that the posture
   claimed to confine.
-- Unauthorized external-surface access: a caller outside the
-  configured authorization set (allowlist, or OS-level equivalent
-  for local-IPC surfaces) dispatching work, receiving output, or
-  resolving approvals (§2.6).
+- Unauthorized session access: a process outside the owning local
+  authority dispatching work, receiving output, resolving approvals,
+  or inheriting unlocked state (§2.6).
 - Credential exfiltration: leakage of operator credentials or
   session authorization material to a destination outside the
   trust envelope, via a mechanism that should have prevented it
-  (environment scrubbing bug, adapter logging, transport error
+  (environment scrubbing bug, credential logging, transport error
   that flushes credentials to an upstream, etc.).
 - Trust-model documentation violations: code behaving contrary to
   what this policy, Hermes Agent's own documentation, or reasonable
   operator expectations would predict — including cases where
   Hermes Agent has documented a stance about how its output should
-  be rendered by a consuming layer (dashboard, gateway adapter,
-  file writer, shell) and a code path breaks that stance.
+  be rendered by a consuming layer (terminal UI, file writer,
+  shell) and a code path breaks that stance.
 
 ### 3.2 Out of Scope
 
@@ -269,7 +237,7 @@ authorization model, but the rules below apply uniformly.
 policy." It does not mean "not worth reporting." Improvements to the
 in-process heuristics, hardening ideas, and UX fixes are welcome as
 regular issues or pull requests — the approval gate can always catch
-more patterns, redaction can always get smarter, adapter behavior
+more patterns, redaction can always get smarter, tool behavior
 can always be tightened. These items just don't go through the
 private-disclosure channel and don't receive advisories.
 
@@ -291,12 +259,9 @@ private-disclosure channel and don't receive advisories.
   isolation that only sandboxes shell; reports whose preconditions
   require pre-existing write access to operator-owned configuration
   or credential files (those are already inside the trust envelope).
-- **Documented break-glass settings.** Operator-selected trade-offs
-  that explicitly disable protections: `--insecure` and equivalent
-  flags on the dashboard or other components, disabled approvals,
-  local backend in production, development profiles that bypass
-  hermes-home security, and similar. Reports against those
-  configurations are not vulnerabilities — that's the flag's job.
+- **Documented operator-selected trade-offs.** Disabled approvals,
+  a local terminal backend, explicitly exported plaintext, and
+  similar choices do not provide the protections they disable.
 - **Community-contributed skills and plugins.** Third-party skills
   (including the community skills repository) and third-party
   plugins are in the operator's review surface, not Hermes Agent's
@@ -306,9 +271,6 @@ private-disclosure channel and don't receive advisories.
   Agent's skill-install or plugin-install path that prevent the
   operator from seeing what they're installing are in scope under
   §3.1.
-- **Public exposure without external controls.** Exposing the
-  gateway or API to the public internet without authentication,
-  VPN, or firewall.
 - **Tool-level read/write restrictions on a posture where shell is
   permitted.** If a path is reachable via the terminal tool, reports
   that other file tools can reach it add nothing.
@@ -327,11 +289,11 @@ that:
   permissions, never in the main config, never in version control.
   Under OpenShell, use the Provider store rather than an on-disk
   credential file.
-- Do not expose the gateway or API to the public internet without
-  VPN, Tailscale, or firewall protection. Under OpenShell, use the
-  network policy layer to restrict egress.
-- Configure a caller allowlist for every network-exposed adapter
-  you enable (§2.6).
+- Keep the private stdio transport private; do not bridge it to an
+  unauthenticated network service. Under OpenShell, use the network
+  policy layer to restrict egress.
+- Preserve encrypted backups before update/restore. Do not put
+  passphrases or raw unlock keys in scripts, logs or environment.
 - Review third-party skills and plugins before install (§2.4,
   §2.5). For skills, this means reading the Python and scripts,
   not just SKILL.md. Skills Guard reports and the install audit
@@ -346,7 +308,7 @@ that:
 
 - **Coordinated disclosure window:** 90 days from report, or until a
   fix is released, whichever comes first.
-- **Channel:** the GHSA thread or email correspondence with
-  security@nousresearch.com.
+- **Channel:** the private fork channel arranged under §1; upstream
+  GHSA/email only for a confirmed unmodified-upstream issue.
 - **Credit:** reporters are credited in release notes unless
   anonymity is requested.

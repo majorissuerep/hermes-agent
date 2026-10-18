@@ -1068,9 +1068,13 @@ class ProcessRegistry(ProcessTerminationMixin, ProcessCheckpointMixin, ProcessOu
     def _track_started(self, session: ProcessSession, reader_target, reader_name: str, extra_args=()) -> None:
         """Register before the reader can publish completion, even for an exited child."""
         from contextvars import copy_context
+        from hermes_constants import set_hermes_home_override
 
-        # Reader completion must retain the producer's multiplex profile scope.
-        reader = threading.Thread(target=copy_context().run, args=(reader_target, session, *extra_args),
+        # An env-only launcher has no override to copy. Pin its resolved home before
+        # another turn/profile changes the process environment beneath this reader.
+        context = copy_context()
+        context.run(set_hermes_home_override, get_hermes_home())
+        reader = threading.Thread(target=context.run, args=(reader_target, session, *extra_args),
                                   daemon=True, name=reader_name)
         session._reader_thread = reader
         with self._lock:

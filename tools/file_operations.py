@@ -41,6 +41,7 @@ _HOME = str(Path.home())
 _MAGIC_SIGNATURES: tuple = (
     # (prefix bytes, human name) — ordered, first match wins. Longest
     # prefixes for a shared first byte come first.
+    (b"HRMVAULT\x00", "encrypted Hermes state"),
     (b"\x89PNG\r\n\x1a\n", "PNG image data"),
     (b"\xff\xd8\xff", "JPEG image data"),
     (b"GIF87a", "GIF image data"),
@@ -691,14 +692,8 @@ class ShellFileOperations(LintMixin, SearchMixin, FileOperations):
         sample_output = _strip_terminal_fence_leaks(self._head(path, 1000).stdout)
         return self._is_likely_binary(path, sample_output), None
 
-    # UTF-16 rescue: trust a BOM first, then zero-byte PARITY (not density, so
-    # mixed Latin/CJK still detects): zeros at odd indices → UTF-16 LE, at even
-    # → BE; both parities or a single zero → real binary. Legacy 8-bit
-    # encodings (GBK, Big5) are never guessed — a wrong silent guess is worse
-    # than a clear refusal.
-    # UTF-16 rescue constants (ported from MoonshotAI/kimi-code#2647, detection derived from VS Code's
-    # encoding sniffer): sample the leading bytes; trust a BOM first, then a zero-byte parity heuristic —
-    # zeros clustering at odd indices mean UTF-16 LE (`0xAA 0x00`), at even indices UTF-16 BE (`0x00 0xAA`).
+    # UTF-16: BOM first, then zero-byte parity (odd → LE, even → BE).
+    # Do not guess legacy 8-bit encodings; a false decode hides real binary data.
     _UTF16_MAX_BYTES = 10 * 1024 * 1024
     _UTF16_SAMPLE_BYTES = 512
 
@@ -1069,9 +1064,11 @@ class ShellFileOperations(LintMixin, SearchMixin, FileOperations):
         mangled with U+FFFD and trips the binary guard. Probe the raw bytes via the backend's Python and
         transcode to UTF-8 when a BOM or the zero-byte parity heuristic identifies UTF-16.
         """
-        utf16_result = self._try_read_utf16(path, offset, limit, file_size)
-        if utf16_result is not None:
-            return utf16_result
+        # Ciphertext and other recognized binaries can randomly satisfy zero parity.
+        if identify_binary_bytes(sample_bytes or b"") == "unknown binary":
+            utf16_result = self._try_read_utf16(path, offset, limit, file_size)
+            if utf16_result is not None:
+                return utf16_result
         return ReadResult(
             is_binary=True, file_size=file_size,
             error=describe_binary_file(sample_bytes, file_size))
