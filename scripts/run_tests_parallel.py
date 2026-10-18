@@ -113,7 +113,7 @@ def _runner_scratch_root() -> str:
 # Default test discovery roots.
 _DEFAULT_ROOTS = ["tests"]
 
-# Directories to skip during discovery — these suites require real
+# Repository-root tests/ subtrees to skip during discovery — these suites require real
 # external services (a model gateway, a docker daemon with a prebuilt
 # image, etc.) and are run in their own dedicated CI jobs:
 #
@@ -362,13 +362,15 @@ def _discover_files(roots: list[Path]) -> list[Path]:
     ``.py`` files (included as-is, even if they don't match the
     ``test_*`` prefix — caller knows what they want).
 
-    Exclude any file whose path contains a component in ``_SKIP_PARTS``,
+    Exclude only repository-root ``tests/<name>`` trees in ``_SKIP_PARTS``,
     UNLESS the user explicitly named it as a root (in which case the
     user's intent overrides the skip filter). This makes
     ``scripts/run_tests.sh tests/docker/`` work locally the same way
     ``pytest tests/docker/`` does — the CI-level skip exists to keep
     the sharded matrix from blowing up, not to block targeted runs.
     """
+    repo_root = Path(__file__).resolve().parent.parent
+    skip_roots = [(repo_root / "tests" / name).resolve() for name in _SKIP_PARTS]
     seen: set[Path] = set()
     out: list[Path] = []
     for root in roots:
@@ -382,19 +384,13 @@ def _discover_files(roots: list[Path]) -> list[Path]:
                 seen.add(real)
                 out.append(root)
             continue
-        # If the explicit root itself sits inside a skipped dir (e.g.
-        # the user said ``tests/docker``), the user has overridden the
-        # skip for that subtree. Compute the set of skip-parts the user
-        # opted into, and only filter files whose path crosses a
-        # skip-part *outside* that opt-in.
-        root_skip_overrides = {
-            part for part in root.parts if part in _SKIP_PARTS
-        }
-        effective_skips = _SKIP_PARTS - root_skip_overrides
+        # Explicit roots inside a slow suite opt into that tree, not other
+        # slow suites or similarly named mirrored source directories.
+        effective_skips = [skip for skip in skip_roots if not root.resolve().is_relative_to(skip)]
         for path in root.rglob("test_*.py"):
-            if any(part in effective_skips for part in path.parts):
-                continue
             real = path.resolve()
+            if any(real.is_relative_to(skip) for skip in effective_skips):
+                continue
             if real in seen:
                 continue
             seen.add(real)

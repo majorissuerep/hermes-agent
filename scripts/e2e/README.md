@@ -54,6 +54,12 @@ Docker socket, host network, persistent volume or shared Hermes cache is mounted
 in the test pods. Each pod is limited to 4 CPUs, 8 GiB RAM and 40 GiB ephemeral
 storage. At most two scenarios execute concurrently.
 
+To place pods on a specific healthy test node, add `--kubernetes-node HOSTNAME`
+with `--backend kubernetes`. This adds a hostname selector alongside the required
+AMD64 selector; it does not bypass scheduling or retry on another node. Per-scenario
+`isolation.json` records the requested selector and actual scheduled node. Docker
+rejects this option.
+
 The gateway must be reachable **from the container**. The inner driver checks
 DNS/TCP/TLS before installation. Missing credentials and unreachable gateways
 fail; they never become skipped-green live coverage. Do not expose a private
