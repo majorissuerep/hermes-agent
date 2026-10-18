@@ -35,7 +35,7 @@ pytestmark = pytest.mark.platforms("posix")
 CONFINED_SCENARIOS = (
     "write_dotdot", "write_absolute", "write_symlink_file", "write_symlink_parent", "patch_symlink_file",
     "patch_dotdot", "v4a_add_symlink_parent", "v4a_add_absolute", "v4a_delete_symlink_parent")
-# Hermes quarantines an unparseable auth.json as auth.json.corrupt at startup; the copy holds the same secrets.
+# A previously quarantined credential copy must remain protected after a dirty home's migration.
 QUARANTINE_SCENARIOS = ("read_quarantined_auth_copy", "search_quarantined_auth_copy")
 PROTECTED_SCENARIOS = (
     "env_direct_patch", "env_symlink_patch", "env_dotdot_patch", "oauth_dangling_symlink_write",
@@ -123,7 +123,8 @@ def _confined_steps(lay: Layout) -> list[Step]:
     lay.link("linkdir", lay.out)
     lay.link("innerlink.txt", lay.ws / "inner.txt")
     lay.marks["token"] = token = H.canary("oauth-token")
-    (lay.hh / "auth.json").write_text(f'{{"providers": {{"nous": {{"access_token": "{token}"', encoding="utf-8")
+    (lay.hh / "auth.json.corrupt").write_text(
+        f'{{"providers": {{"anthropic": {{"access_token": "{token}"', encoding="utf-8")
     quarantined = (lay.hh / "auth.json.corrupt", token)
     return [
         Step("write_dotdot", "write_file", {"path": "../../outside/new-dotdot.txt", "content": "x"},

@@ -596,6 +596,7 @@ def _new_file_handler(
                 path, purpose="log", max_bytes=max_bytes, backup_count=backup_count
             )
             handler.setLevel(level)
+            handler.setFormatter(formatter)
             return handler
     except Exception:
         pass

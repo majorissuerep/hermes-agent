@@ -1,11 +1,12 @@
 """Running-process checkpoint persistence and PID-safe recovery."""
 
-import json
 import logging
 import time
 from typing import Any, Dict, List, Optional
 
 from agent.redact import redact_sensitive_text
+from hermes_security import io as state_io
+from hermes_security.errors import VaultError
 
 logger = logging.getLogger("tools.process_registry")
 
@@ -44,14 +45,15 @@ class ProcessCheckpointMixin:
                     entries.extend(item for item in extra_entries if item.get("session_id") not in tracked_ids)
                 known = {*self._running, *self._finished}
             from hermes_cli.active_sessions import _FileLock
-            from utils import atomic_json_write
             path = _checkpoint_path()
             # Every interpreter of the profile (owner, each managed worker) rewrites this file from
             # its own table; a worker's output-log handoff is its only path to the next one, so a
             # writer keeps the handoffs it does not track (read-merge-write under one file lock).
             with _FileLock(path.with_name(path.name + ".lock")):
                 entries.extend(self._foreign_handoffs(path, known))
-                atomic_json_write(path, entries)
+                state_io.write_json(path, entries, purpose="state")
+        except VaultError:
+            raise
         except Exception as e:
             logger.debug("Failed to write checkpoint file: %s", e, exc_info=True)
 
@@ -61,7 +63,7 @@ class ProcessCheckpointMixin:
         from pathlib import Path
         from tools.process_registry_output_log import _exit_path, adoptable_log
         try:
-            on_disk = json.loads(path.read_text(encoding="utf-8-sig"))
+            on_disk = state_io.read_json(path, purpose="state") or []
         except (OSError, ValueError):
             return []
         return [entry for entry in on_disk if isinstance(entry, dict) and entry.get("session_id") not in known
@@ -82,7 +84,9 @@ class ProcessCheckpointMixin:
         if not checkpoint_path.exists():
             return 0
         try:
-            entries = json.loads(checkpoint_path.read_text(encoding="utf-8-sig"))
+            entries = state_io.read_json(checkpoint_path, purpose="state") or []
+        except VaultError:
+            raise
         except Exception:
             return 0
         recovered = 0

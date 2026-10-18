@@ -100,13 +100,12 @@ def installation_command(repo_root: Path, args=(), *, module: str = "hermes_cli.
 
 #: Launcher command names — keep in lockstep with scripts/install.ps1
 #: Publish-UserCommand and hermes_cli/_install_repair.py.
-WINDOWS_BIN_LAUNCHERS = ("hermes", "hermes-acp")
+WINDOWS_BIN_LAUNCHERS = ("hermes",)
 
 #: command name -> (entry module, callable) — mirrors pyproject.toml
 #: [project.scripts].
 ENTRY_POINTS = {
     "hermes": ("hermes_cli.main", "main"),
-    "hermes-acp": ("acp_adapter.entry", "main"),
 }
 
 
@@ -553,6 +552,9 @@ def _publish_conveniences(root: Path, out_dir: Path, names, *, create: bool = Tr
         out_dir.mkdir(parents=True, exist_ok=True)
     elif not out_dir.is_dir():
         return {}
+    retired = out_dir / "hermes-acp"
+    if (retired.exists() or retired.is_symlink()) and _owns_launcher(retired, root):
+        retired.unlink()
     published = {}
     for name in names:
         target = out_dir / name
@@ -903,7 +905,7 @@ def _is_bundled_payload(root: Path) -> bool:
 
 
 def _symlink_sealed_launchers(payload_bin) -> dict:
-    """Link ~/.local/bin/{hermes,hermes-agent,hermes-acp} at a sealed
+    """Link ~/.local/bin/{hermes,hermes-agent} at a sealed
     bundle's own prebuilt shims (macOS only).
 
     Symlinks, not copies: the shims are signed as part of the app bundle,
@@ -921,7 +923,7 @@ def _symlink_sealed_launchers(payload_bin) -> dict:
     written: list[str] = []
     try:
         link_dir.mkdir(parents=True, exist_ok=True)
-        for name in ("hermes", "hermes-agent", "hermes-acp"):
+        for name in ("hermes", "hermes-agent"):
             source = payload_bin / name
             if not source.is_file():
                 continue

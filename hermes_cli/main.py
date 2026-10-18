@@ -2450,6 +2450,10 @@ def _run_oneshot_from_args(args) -> None:
     options = {name: getattr(args, name) for name in
                ("api_key", "base_url", "max_turns", "run_budget", "ignore_rules", "output_format")
                if getattr(args, name, None) is not None}
+    # -z retains its explicit unattended contract; -q keeps the configured
+    # approval and hook policy unless the caller supplied the corresponding opt-in.
+    options["yolo"] = bool(getattr(args, "oneshot", None) or getattr(args, "yolo", False))
+    options["accept_hooks"] = bool(getattr(args, "oneshot", None) or getattr(args, "accept_hooks", False))
     if getattr(args, "safe_mode", False):
         options["ignore_rules"] = True
     _run_and_exit_oneshot(prompt, model=getattr(args, "model", None),

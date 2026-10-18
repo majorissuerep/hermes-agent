@@ -7,15 +7,15 @@ from unittest.mock import MagicMock, patch
 
 from cli import HermesCLI
 
-# Command names that had an explicit branch in the pre-dispatch-table chain.
-OLD_CHAIN_COMMANDS = [
+# Native dispatch commands include explicit entries and naming-convention handlers.
+NATIVE_COMMANDS = [
     "exit", "quit", "help", "palette", "whoami", "profile", "tools", "toolsets",
-    "config", "redraw", "clear", "history", "title", "handoff", "new", "resume",
+    "config", "redraw", "clear", "history", "title", "new", "resume",
     "sessions", "model", "codex-runtime", "personality", "pet", "hatch", "retry",
     "prompt", "undo", "branch", "worktree", "save", "cron", "suggestions",
     "blueprint", "curator", "kanban", "skills", "learn", "init", "memory",
-    "platforms", "status", "context", "egress", "statusbar", "diff", "battery",
-    "timestamps", "verbose", "focus", "footer", "yolo", "approvals", "reasoning",
+    "status", "context", "egress", "statusbar", "diff", "battery",
+    "timestamps", "verbose", "focus", "yolo", "approvals", "reasoning",
     "fast", "compress", "usage", "subscription", "topup", "insights", "copy",
     "debug", "update", "version", "paste", "image", "reload", "reload-mcp",
     "reload-skills", "bundles", "browser", "plugins", "rollback", "snapshot",
@@ -25,8 +25,8 @@ OLD_CHAIN_COMMANDS = [
 ]
 
 
-def test_every_old_branch_resolves_to_a_handler():
-    for name in OLD_CHAIN_COMMANDS:
+def test_native_commands_resolve_to_a_handler():
+    for name in NATIVE_COMMANDS:
         entry = HermesCLI._slash_handler(name)
         assert entry is not None, name
         method_name, pass_arg = entry
@@ -34,7 +34,7 @@ def test_every_old_branch_resolves_to_a_handler():
         assert isinstance(pass_arg, bool)
     # explicit table entries are only the ones the naming convention can't cover
     for name, (method_name, pass_arg) in HermesCLI._SLASH_DISPATCH.items():
-        assert name in OLD_CHAIN_COMMANDS
+        assert name in NATIVE_COMMANDS
         assert (method_name, pass_arg) != (f"_handle_{name.replace('-', '_')}_command", True), name
 
 
@@ -47,7 +47,7 @@ def test_registry_names_resolve_into_the_table():
     # registry commands the CLI never handled inline must still fall through
     dispatched = {c.name for c in COMMAND_REGISTRY if HermesCLI._slash_handler(c.name)}
     # /login, /close and /sandbox have no old branch; they resolve through the naming-convention fallback.
-    assert set(OLD_CHAIN_COMMANDS) - {"exit"} <= dispatched
+    assert set(NATIVE_COMMANDS) - {"exit"} <= dispatched
     assert all(resolve_command(name).name == name for name in dispatched)
 
 
@@ -78,10 +78,6 @@ def test_dispatch_return_semantics_and_side_effects():
     c = _cli()
     assert c.process_command("/exit") is False
     c = _cli()
-    with patch.object(HermesCLI, "_handle_handoff_command", return_value=False):
-        assert c.process_command("/handoff telegram") is False
-    with patch.object(HermesCLI, "_handle_handoff_command", return_value=True):
-        assert c.process_command("/handoff telegram") is True
     with patch.object(HermesCLI, "_handle_update_command", return_value=True):
         assert c.process_command("/update") is False
     with patch.object(HermesCLI, "_handle_update_command", return_value=False):
@@ -94,3 +90,11 @@ def test_unknown_command_falls_through():
     with patch.object(HermesCLI, "_process_unregistered_slash", return_value=True) as m:
         assert c.process_command("/definitely-not-a-command x") is True
         m.assert_called_once_with("/definitely-not-a-command x", "/definitely-not-a-command x")
+
+
+def test_retired_remote_commands_are_not_advertised_or_dispatched():
+    from hermes_cli.commands import resolve_command
+
+    for name in ("footer", "handoff", "platforms"):
+        assert resolve_command(name) is None
+        assert HermesCLI._slash_handler(name) is None

@@ -1,7 +1,7 @@
 """Model-picker pricing for a config-defined twin of a priced aggregator (#120757).
 
 Tier (stated honestly): a REAL ``python -m tui_runtime`` process — the backend the TUI
-and Desktop model picker talk to — answering the ``model.options`` JSON-RPC exactly as the
+model picker talks to — answering the ``model.options`` JSON-RPC exactly as the
 picker calls it. The only fake is the vendor's price catalog: the aggregator catalog URL
 (``https://openrouter.ai/api/v1/models``) is a hard-coded https constant with no override and
 lives only in process memory, so a ``sitecustomize`` shim on the child's ``PYTHONPATH``
@@ -9,13 +9,12 @@ rewrites exactly that origin, at the ``urllib`` opener layer, to a loopback fake
 vendor's catalog shape. No Hermes function is patched. Every other egress is pinned to a
 closed loopback proxy so nothing reaches a real vendor.
 
-The config is the issue's: a ``providers:`` entry keyed ``openrouter`` pointing at the
-aggregator's base URL. Its picker row is ``custom:openrouter``; the built-in ``openrouter``
-row (credentialed from ``.env``) is the control that prices from the same catalog. Two relays
-serving a catalog model id are decoys that must NOT borrow its prices: ``myrelay`` (a plain
-``myrelay`` row) and one keyed ``deepseek`` — a built-in, non-aggregator provider name, so its
-row takes the same ``custom:<key>`` slug path as the twin. Prices must follow the upstream a
-row actually talks to, not the ``custom:`` slug shape.
+The explicit ``openrouter`` route is a priced aggregator control. A configured
+entry keyed ``zai`` deliberately shadows a currently supported built-in provider,
+so its picker row is ``custom:zai`` despite pointing at the same aggregator.
+Two relays serving a catalog model id are decoys that must NOT borrow its prices:
+``myrelay`` and a configured ``xai`` shadow. Prices follow the actual upstream,
+not a retired built-in catalog label or the shape of a picker slug.
 
 The picker is driven with ``refresh: true`` (its explicit reload: catalogs are fetched
 synchronously, so no background prewarm timing is involved). ``get_pricing_for_provider`` is
@@ -46,7 +45,7 @@ pytestmark = pytest.mark.skipif(not sys.platform.startswith("linux"), reason="su
 
 KNOWN: dict[str, tuple[str, str]] = {
     "custom_twin_priced": (
-        r"custom:openrouter row has 0/\d+ models priced",
+        r"custom:zai row has 0/\d+ models priced",
         "#120757 custom:<key> row pointing at a priced aggregator gets no picker prices"),
 }
 
@@ -60,9 +59,9 @@ CATALOG = [
 ]
 TWIN_MODELS = [mid for mid, _p, _c in CATALOG]
 RELAY_MODEL = TWIN_MODELS[-1]
-# (config key, picker slug) of each decoy relay. ``deepseek`` collides with a built-in
-# non-aggregator provider, so its row is ``custom:deepseek`` -- the twin's slug shape.
-DECOYS = [("myrelay", "myrelay"), ("deepseek", "custom:deepseek")]
+# (config key, picker slug) of each decoy relay. ``xai`` collides with a built-in
+# non-aggregator provider, so its row is ``custom:xai`` -- the twin's slug shape.
+DECOYS = [("myrelay", "myrelay"), ("xai", "custom:xai")]
 
 _SHIM = '''\
 """E2E vendor-boundary shim: route a hard-coded vendor origin to a loopback fake."""
@@ -173,14 +172,17 @@ def _home(tmp_path: Path, catalog: FakeCatalog, dead: socket.socket) -> _ShimHom
         "providers": {
             "openrouter": {"name": "OpenRouter-Full", "base_url": f"{VENDOR_ORIGIN}/api/v1",
                            "api_key": "sk-or-fake-twin", "models": TWIN_MODELS},
+            # A configured route may shadow a currently supported built-in identity.
+            "zai": {"name": "Aggregator twin", "base_url": f"{VENDOR_ORIGIN}/api/v1",
+                    "api_key": "sk-or-fake-twin", "models": TWIN_MODELS},
             # Decoys: serve a catalog model id, but are relays with no price catalog of their own.
             **{key: {"name": f"Relay {key}", "base_url": f"{catalog.origin}/relay/v1",
                      "api_key": "sk-relay-fake", "models": [RELAY_MODEL]} for key, _slug in DECOYS},
         },
     }, dotenv={"OPENROUTER_API_KEY": "sk-or-fake-builtin",
                # The picker lists a providers: entry keyed by a built-in name only while that
-               # built-in is credentialed; this makes the custom:deepseek decoy row appear.
-               "DEEPSEEK_API_KEY": "sk-ds-fake-builtin"})
+               # built-in is credentialed; this makes the custom:xai decoy row appear.
+               "XAI_API_KEY": "xai-fake-builtin", "ZAI_API_KEY": "zai-fake-builtin"})
     return h
 
 
@@ -196,7 +198,7 @@ def _priced(row: dict[str, Any] | None) -> dict[str, Any]:
 
 def _refreshed_options(tmp_path: Path) -> tuple[dict[str, Any], list[tuple[str, str]]]:
     """One picker refresh (the picker's explicit reload: fetches price catalogs synchronously,
-    so no background timing is involved) against a real gateway."""
+    so no background timing is involved) against the real local runtime."""
     dead = _closed_port()
     try:
         with FakeCatalog() as catalog:
@@ -226,8 +228,8 @@ def _dollars(text: str) -> float:
     return float(str(text).lstrip("$"))
 
 
-def test_builtin_aggregator_row_prices_from_catalog(picker) -> None:
-    """Control (green on main): the built-in aggregator row prices every catalog model it
+def test_configured_aggregator_row_prices_from_catalog(picker) -> None:
+    """The explicit aggregator route prices every catalog model it
     lists with the catalog's own $/MTok, read from the aggregator's catalog endpoint."""
     payload, requests = picker
     assert any(path.startswith("/api/v1/models") for path, _auth in requests), requests
@@ -244,7 +246,7 @@ def test_builtin_aggregator_row_prices_from_catalog(picker) -> None:
 def test_relay_without_catalog_gets_no_borrowed_prices(picker, slug: str) -> None:
     """Control (green on main): a config-defined relay that is NOT a priced aggregator serves
     a catalog model id but must not borrow the aggregator's prices -- including the
-    ``custom:deepseek`` row, whose slug has the same ``custom:<key>`` shape as the twin."""
+    ``custom:xai`` row, whose slug has the same ``custom:<key>`` shape as the twin."""
     payload, _requests = picker
     relay = _row(payload, slug)
     assert relay is not None and RELAY_MODEL in (relay.get("models") or []), payload.get("providers")
@@ -252,15 +254,15 @@ def test_relay_without_catalog_gets_no_borrowed_prices(picker, slug: str) -> Non
 
 
 def test_config_defined_twin_row_is_priced_like_the_aggregator(picker) -> None:
-    """The ``custom:openrouter`` row serves the same upstream as the built-in row; its models
+    """The ``custom:zai`` row serves the same upstream as the configured aggregator; its models
     must carry the aggregator's prices, not none."""
     payload, _requests = picker
-    twin, builtin = _row(payload, "custom:openrouter"), _row(payload, "openrouter")
+    twin, builtin = _row(payload, "custom:zai"), _row(payload, "openrouter")
     assert twin is not None and set(TWIN_MODELS) <= set(twin.get("models") or []), payload.get("providers")
     priced = _priced(twin)
     with bug_assertions(KNOWN, "custom_twin_priced"):
         assert set(priced) == set(TWIN_MODELS), (
-            f"custom:openrouter row has {len(priced)}/{len(TWIN_MODELS)} models priced "
+            f"custom:zai row has {len(priced)}/{len(TWIN_MODELS)} models priced "
             f"(pricing={twin.get('pricing')!r})")
         for mid, entry in _priced(builtin).items():
             if mid in priced:

@@ -155,7 +155,7 @@ def test_public_ink_model_picker_and_scoped_switches(tmp_path, monkeypatch, lazy
             pytest.fail("PM Node and a built Ink bundle are required for this acceptance contract")
         pytest.skip("requires PM Node and a built Ink bundle")
     monkeypatch.setenv("HERMES_NODE", node)
-    monkeypatch.setenv("HERMES_TUI_DIR", str(ROOT / "ui-tui"))
+    monkeypatch.delenv("HERMES_TUI_DIR", raising=False)
     from hermes_cli.config import ensure_hermes_home, save_config, save_env_value
     from hermes_security import migrate, vault
 

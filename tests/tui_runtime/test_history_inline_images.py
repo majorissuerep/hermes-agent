@@ -95,13 +95,12 @@ def test_resume_live_reattach_carries_the_switch(tmp_path, monkeypatch, inline_i
     record = {
         # In-memory history (no DB rows for the key): the payload projects from session["history"].
         "history": list(IMAGE_TURN), "display_history_prefix": [], "last_active": 0.0, "running": False,
-        "session_key": "live-img", "source": "desktop",
+        "session_key": "live-img", "source": "tui",
     }
     monkeypatch.setattr(srv, "_get_db", lambda: db)
     monkeypatch.setattr(srv, "_find_live_session_by_key", lambda key, *_a: ("live-sid", record))
     monkeypatch.setattr(srv, "_profile_home", lambda _p: None)
     monkeypatch.setattr(srv, "_reattach_refusal", lambda *_a: None)
-    monkeypatch.setattr(srv, "_cancel_ws_orphan_reap", lambda *_a: None)
     monkeypatch.setattr(srv, "_child_run_active", lambda *_a: False)
     known = set(srv._sessions)
     srv._sessions["live-sid"] = record

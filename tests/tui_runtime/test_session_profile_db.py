@@ -1,6 +1,6 @@
 """Session-scoped transcript ops must resolve against the session's own DB.
 
-App-global remote mode gives a session its own profile (``profile_home`` on
+The local runtime gives a session its own profile (``profile_home`` on
 the session dict, see ``session.create``), and that profile keeps its own
 ``state.db``.  ``_get_db()`` is the *launch* profile's handle, so any
 session-scoped read or write that reaches for it operates on the wrong
@@ -15,7 +15,7 @@ Every test here drives the real JSON-RPC entry point
 (``server.handle_request``).  Handler bodies live in ``tui_runtime/methods_*``
 but are rebound onto ``server.py``'s globals by
 ``method_ctx.HandlerRegistry.install()``, so calling a handler function
-directly would bypass the path the gateway actually executes.
+directly would bypass the path the terminal actually executes.
 """
 
 from __future__ import annotations
@@ -203,20 +203,9 @@ def test_undo_still_uses_the_shared_handle_without_a_profile(server, launch_db):
 
 
 def _stop_after_truncate(server, monkeypatch):
-    """Return the RPC right after the truncate branch, before the agent turn.
-
-    Isolated turns hand the prompt to the compute host and return, which is
-    the natural exit closest to the code under test; stubbing the handoff keeps
-    the test on the transcript-persistence path instead of running a model.
-    """
-    monkeypatch.setattr(server, "_session_uses_compute_host", lambda *a, **k: True)
-    monkeypatch.setattr(
-        server,
-        "_submit_prompt_to_compute_host",
-        lambda rid, sid, session, text, **_kwargs: server._ok(
-            rid, {"status": "streaming"}
-        ),
-    )
+    """Keep real rewind + accepted-user persistence, but do not start a model turn."""
+    monkeypatch.setattr(server, "_start_agent_build", lambda *_args: None)
+    monkeypatch.setattr(server, "_run_after_agent_ready", lambda *_args: None)
 
 
 def test_truncation_persists_to_the_profile_db(server, launch_db, profile_db, monkeypatch):
@@ -249,6 +238,7 @@ def test_truncation_persists_to_the_profile_db(server, launch_db, profile_db, mo
     assert _texts(pdb.get_messages_as_conversation(SESSION_KEY)) == [
         "question 1",
         "answer 1",
+        "edited question 2",
     ]
     # ...and nothing was copied into a foreign profile under this session id.
     assert launch_db.get_messages_as_conversation(SESSION_KEY) == []
@@ -289,6 +279,7 @@ def test_truncation_does_not_copy_rows_into_the_launch_profile(
     assert _texts(pdb.get_messages_as_conversation(SESSION_KEY)) == [
         "question 1",
         "answer 1",
+        "edited question 2",
     ]
 
 
@@ -324,11 +315,14 @@ def test_truncation_surfaces_the_profile_dbs_live_row_ids(
     surviving = [
         row["_row_id"]
         for row in pdb.get_messages_as_conversation(SESSION_KEY, include_row_ids=True)
-        if row["role"] == "user"
+        if row["role"] == "user" and row["content"] != "edited question 2"
     ]
     assert resp["result"]["survivor_user_row_ids"] == surviving
     # The kept prefix keeps its rows: the pre-rewind id stays valid (#82956).
     assert surviving == [user_row_ids[0]]
+    accepted = pdb.get_messages_as_conversation(SESSION_KEY, include_row_ids=True)[-1]
+    assert accepted["content"] == "edited question 2"
+    assert accepted["_row_id"] == resp["result"]["user_row_id"]
 
 
 def test_truncation_without_a_profile_uses_the_shared_handle(server, launch_db, monkeypatch):
@@ -354,6 +348,7 @@ def test_truncation_without_a_profile_uses_the_shared_handle(server, launch_db, 
     assert _texts(launch_db.get_messages_as_conversation(SESSION_KEY)) == [
         "question 1",
         "answer 1",
+        "edited question 2",
     ]
 
 
@@ -383,9 +378,6 @@ def test_context_reads_the_profile_transcript(server, launch_db, profile_db, mon
     profile_home, pdb = profile_db
     _seed(pdb)
     _register(server, [], profile_home=profile_home)
-    # /context is an isolated-session read command, gated on the compute host.
-    monkeypatch.setattr(server, "_session_uses_compute_host", lambda *a, **k: True)
-
     resp = _rpc(server, "slash.exec", {"session_id": SESSION_ID, "command": "/context"})
 
     assert not resp.get("error"), f"/context failed: {resp.get('error')}"

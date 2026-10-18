@@ -42,12 +42,6 @@ def _write_plugin(hermes_home: Path) -> None:
         "        schema={'name': 'ledger_probe_tool', 'parameters': {'type': 'object', 'properties': {}}},\n"
         "        handler=lambda args, **kwargs: 'ledger',\n"
         "    )\n"
-        "    ctx.register_platform(\n"
-        "        name='ledger_probe_platform',\n"
-        "        label='Ledger probe',\n"
-        "        adapter_factory=lambda config: object(),\n"
-        "        check_fn=lambda: True,\n"
-        "    )\n"
         "    ctx.register_cli_command(\n"
         "        'ledger-probe-cli', 'Ledger CLI', lambda parser: None,\n"
         "        handler_fn=lambda args: None,\n"
@@ -100,12 +94,6 @@ def _write_profile_probe(hermes_home: Path, marker: str) -> None:
         "        schema={'name': 'shared_profile_tool', 'parameters': {'type': 'object', 'properties': {}}},\n"
         f"        handler=lambda args, **kwargs: {marker!r},\n"
         "    )\n"
-        "    ctx.register_platform(\n"
-        "        name='shared_profile_platform',\n"
-        f"        label={marker!r},\n"
-        f"        adapter_factory=lambda config: {marker!r},\n"
-        "        check_fn=lambda: True,\n"
-        "    )\n"
     )
     (hermes_home / "config.yaml").write_text(
         yaml.safe_dump({"plugins": {"enabled": ["profile_probe"]}})
@@ -118,7 +106,6 @@ def test_load_force_reload_and_unload_remove_every_manager_registration(
 ):
     """A real temporary plugin has one live registration after each reload."""
     import hermes_cli.plugins as plugins_mod
-    from gateway.platform_registry import platform_registry
     from hermes_cli.plugins import PluginManager
     from tools.registry import registry
 
@@ -136,7 +123,6 @@ def test_load_force_reload_and_unload_remove_every_manager_registration(
     manager.discover_and_load()
 
     first_tool = registry.get_entry("ledger_probe_tool")
-    first_platform = platform_registry.get("ledger_probe_platform")
     first_hook = manager._hooks["pre_tool_call"][0]
     first_middleware = manager._middleware["tool_request"][0]
     first_command = manager._plugin_commands["ledger-probe-command"]
@@ -145,10 +131,8 @@ def test_load_force_reload_and_unload_remove_every_manager_registration(
     module_name = manager._plugins["ledger_probe"].module.__name__
 
     assert first_tool is not None
-    assert first_platform is not None
     assert set(registration.kind for registration in manager._ownership_ledger["ledger_probe"]) == {
         "tool",
-        "platform",
         "cli_command",
         "command",
         "hook",
@@ -166,9 +150,7 @@ def test_load_force_reload_and_unload_remove_every_manager_registration(
     manager.discover_and_load(force=True)
 
     second_tool = registry.get_entry("ledger_probe_tool")
-    second_platform = platform_registry.get("ledger_probe_platform")
     assert second_tool is not None and second_tool is not first_tool
-    assert second_platform is not None and second_platform is not first_platform
     assert second_tool.handler is not first_tool.handler
     assert first_hook not in manager._hooks["pre_tool_call"]
     assert first_middleware not in manager._middleware["tool_request"]
@@ -178,15 +160,9 @@ def test_load_force_reload_and_unload_remove_every_manager_registration(
     assert manager._cli_commands["ledger-probe-cli"] is not first_cli_command
     assert manager._plugin_skills["ledger_probe:ledger-probe"] is not first_skill
     assert len(manager._aux_tasks) == 1
-    assert [
-        entry
-        for entry in platform_registry.plugin_entries()
-        if entry.name == "ledger_probe_platform"
-    ] == [second_platform]
 
     assert manager.unload("ledger_probe") is True
     assert registry.get_entry("ledger_probe_tool") is None
-    assert not platform_registry.is_registered("ledger_probe_platform")
     assert "pre_tool_call" not in manager._hooks
     assert "tool_request" not in manager._middleware
     assert "ledger-probe-command" not in manager._plugin_commands
@@ -210,54 +186,6 @@ def test_load_force_reload_and_unload_remove_every_manager_registration(
     assert registry.plugin_scope_for_module(module_name) == manager.scope_key
 
 
-def test_reverse_unload_restores_an_overridden_platform_registration():
-    """Reverse teardown reveals an older entry before removing it."""
-    from gateway.platform_registry import platform_registry
-    from hermes_cli.plugins import PluginContext, PluginManager, PluginManifest
-
-    name = "ledger_override_platform"
-    scope = platform_registry.current_scope_key()
-    previous = platform_registry.snapshot_registration(name, scope=scope)
-    manager_a = PluginManager(scope_key=scope)
-    manager_b = PluginManager(scope_key=scope)
-    context_a = PluginContext(
-        PluginManifest(name="ledger_owner_a", key="ledger_owner_a"), manager_a
-    )
-    context_b = PluginContext(
-        PluginManifest(name="ledger_owner_b", key="ledger_owner_b"), manager_b
-    )
-
-    try:
-        handle_a = context_a.register_platform(
-            name=name,
-            label="Ledger A",
-            adapter_factory=lambda config: "a",
-            check_fn=lambda: True,
-        )
-        entry_a = platform_registry.get(name)
-        handle_b = context_b.register_platform(
-            name=name,
-            label="Ledger B",
-            adapter_factory=lambda config: "b",
-            check_fn=lambda: True,
-        )
-        entry_b = platform_registry.get(name)
-
-        assert handle_a is not None and handle_b is not None
-        assert entry_a is not None and entry_b is not None
-        assert entry_a is not entry_b
-
-        handle_b.dispose()
-        assert platform_registry.get(name) is entry_a
-        handle_a.dispose()
-        assert platform_registry.snapshot_registration(name, scope=scope) == previous
-    finally:
-        # The test uses a deliberately unique name, but restore any state that
-        # a surrounding test may have installed under it.
-        current = platform_registry.snapshot_registration(name, scope=scope)
-        platform_registry.restore_registration(
-            name, current, previous, scope=scope
-        )
 
 
 def test_targeted_unload_does_not_resurrect_an_older_tool_override():
@@ -587,51 +515,6 @@ def test_entrypoint_policy_uses_the_most_specific_module_prefix(tmp_path):
     ) is None
 
 
-def test_targeted_unload_does_not_resurrect_an_older_override():
-    """Removing A under B tombstones A so B cannot restore it later."""
-    from gateway.platform_registry import platform_registry
-    from hermes_cli.plugins import PluginContext, PluginManager, PluginManifest
-
-    name = "ledger_out_of_order_platform"
-    scope = platform_registry.current_scope_key()
-    previous = platform_registry.snapshot_registration(name, scope=scope)
-    manager_a = PluginManager(scope_key=scope)
-    manager_b = PluginManager(scope_key=scope)
-    context_a = PluginContext(
-        PluginManifest(name="ledger_old", key="ledger_old"), manager_a
-    )
-    context_b = PluginContext(
-        PluginManifest(name="ledger_new", key="ledger_new"), manager_b
-    )
-
-    try:
-        context_a.register_platform(
-            name=name,
-            label="old",
-            adapter_factory=lambda config: "old",
-            check_fn=lambda: True,
-        )
-        old_entry = platform_registry.get(name)
-        context_b.register_platform(
-            name=name,
-            label="new",
-            adapter_factory=lambda config: "new",
-            check_fn=lambda: True,
-        )
-        new_entry = platform_registry.get(name)
-
-        assert old_entry is not None and new_entry is not None
-        assert manager_a.unload("ledger_old") is True
-        assert platform_registry.get(name) is new_entry
-        assert name not in manager_a._plugin_platform_names
-        assert manager_b.unload("ledger_new") is True
-        assert platform_registry.get(name) is not old_entry
-        assert platform_registry.snapshot_registration(name, scope=scope) == previous
-    finally:
-        current = platform_registry.snapshot_registration(name, scope=scope)
-        platform_registry.restore_registration(
-            name, current, previous, scope=scope
-        )
 
 
 def test_manager_local_override_does_not_resurrect_after_targeted_unload():
@@ -935,241 +818,22 @@ def test_registration_transaction_excludes_concurrent_disposal(monkeypatch):
             )
 
 
-def test_deferred_platform_resolution_is_atomic_across_threads():
-    """Concurrent first lookups both observe the materialized adapter."""
-    from gateway.platform_registry import PlatformEntry, PlatformRegistry
-
-    registry = PlatformRegistry()
-    entry = PlatformEntry(
-        name="threaded_platform",
-        label="Threaded",
-        adapter_factory=lambda config: object(),
-        check_fn=lambda: True,
-        source="plugin",
-    )
-    loads = []
-    started = Event()
-    release = Event()
-
-    def load():
-        loads.append(1)
-        started.set()
-        assert release.wait(timeout=2)
-        registry.register(entry)
-
-    registry.register_deferred("threaded_platform", load)
-    with ThreadPoolExecutor(max_workers=3) as pool:
-        first = pool.submit(registry.get, "threaded_platform")
-        assert started.wait(timeout=1)
-        assert registry.is_registered("threaded_platform")
-        second = pool.submit(registry.get, "threaded_platform")
-        try:
-            second.result(timeout=0.05)
-        except TimeoutError:
-            pass
-        else:
-            raise AssertionError("concurrent lookup did not wait for materialization")
-        enumeration = pool.submit(registry.all_entries)
-        try:
-            enumeration.result(timeout=0.05)
-        except TimeoutError:
-            pass
-        else:
-            raise AssertionError("enumeration omitted an in-flight platform")
-        release.set()
-        results = [first.result(timeout=1), second.result(timeout=1)]
-        assert enumeration.result(timeout=1) == [entry]
-
-    assert results == [entry, entry]
-    assert loads == [1]
 
 
-def test_deferred_platform_recursive_lookup_does_not_deadlock():
-    """A loader that asks for its own entry fails fast until registration."""
-    from gateway.platform_registry import PlatformEntry, PlatformRegistry
-
-    registry = PlatformRegistry()
-    nested_results = []
-    entry = PlatformEntry(
-        name="recursive_platform",
-        label="Recursive",
-        adapter_factory=lambda config: object(),
-        check_fn=lambda: True,
-        source="plugin",
-    )
-
-    def load():
-        nested_results.append(registry.get("recursive_platform"))
-        registry.register(entry)
-
-    registry.register_deferred("recursive_platform", load)
-    assert registry.get("recursive_platform") is entry
-    assert nested_results == [None]
 
 
-def test_resolved_deferred_platform_restores_its_displaced_loader():
-    """Deferred-to-concrete loading remains one replacement chain."""
-    from gateway.platform_registry import platform_registry
-    from hermes_cli.plugins import PluginContext, PluginManager, PluginManifest
-
-    name = "ledger_transfer"
-    scope = platform_registry.current_scope_key()
-    previous = platform_registry.snapshot_registration(name, scope=scope)
-    old_loader = lambda: None
-    platform_registry.register_deferred(name, old_loader, scope=scope)
-    displaced = platform_registry.snapshot_registration(name, scope=scope)
-    manager = PluginManager(scope_key=scope)
-    manifest = PluginManifest(
-        name=f"{name}-platform",
-        key=f"{name}-platform",
-        source="bundled",
-        path="unused",
-    )
-
-    def load_scoped(self, loaded_manifest):
-        PluginContext(loaded_manifest, self).register_platform(
-            name=name,
-            label="Transferred",
-            adapter_factory=lambda config: object(),
-            check_fn=lambda: True,
-        )
-
-    manager._load_plugin_scoped = MethodType(load_scoped, manager)
-    try:
-        manager._register_deferred_platform(manifest)
-        entry = platform_registry.get(name)
-        assert entry is not None and entry.label == "Transferred"
-        manager.unload(manifest)
-        assert platform_registry.snapshot_registration(name, scope=scope) == displaced
-    finally:
-        current = platform_registry.snapshot_registration(name, scope=scope)
-        platform_registry.restore_registration(
-            name, current, previous, scope=scope
-        )
 
 
-def test_unload_cancels_a_deferred_platform_before_module_load():
-    """Losing the in-flight race cannot publish registrations after unload."""
-    from gateway.platform_registry import platform_registry
-    from hermes_cli.plugins import PluginContext, PluginManager, PluginManifest
-
-    name = "ledger_cancel"
-    scope = platform_registry.current_scope_key()
-    previous = platform_registry.snapshot_registration(name, scope=scope)
-    def old_loader():
-        from gateway.platform_registry import PlatformEntry
-
-        platform_registry.register(
-            PlatformEntry(
-                name=name,
-                label="Restored predecessor",
-                adapter_factory=lambda config: object(),
-                check_fn=lambda: True,
-                source="plugin",
-            ),
-            scope=scope,
-        )
-    platform_registry.register_deferred(name, old_loader, scope=scope)
-    manager = PluginManager(scope_key=scope)
-    manifest = PluginManifest(
-        name=f"{name}-platform",
-        key=f"{name}-platform",
-        source="bundled",
-        path="unused",
-    )
-
-    def load_scoped(self, loaded_manifest):
-        PluginContext(loaded_manifest, self).register_platform(
-            name=name,
-            label="Should not publish",
-            adapter_factory=lambda config: object(),
-            check_fn=lambda: True,
-        )
-
-    manager._load_plugin_scoped = MethodType(load_scoped, manager)
-    manager._register_deferred_platform(manifest)
-    try:
-        with ThreadPoolExecutor(max_workers=1) as pool:
-            with manager._discovery_lock:
-                lookup = pool.submit(platform_registry.get, name)
-                deadline = monotonic() + 1
-                while (scope, name) not in platform_registry._inflight:
-                    if monotonic() >= deadline:
-                        raise AssertionError("deferred loader never became in-flight")
-                    sleep(0.001)
-                assert manager.unload(manifest) is True
-            restored_entry = lookup.result(timeout=1)
-        assert restored_entry is not None
-        assert restored_entry.label == "Restored predecessor"
-        assert platform_registry.snapshot_registration(name, scope=scope)[0] is restored_entry
-        assert name not in manager._plugin_platform_names
-    finally:
-        current = platform_registry.snapshot_registration(name, scope=scope)
-        platform_registry.restore_registration(
-            name, current, previous, scope=scope
-        )
 
 
-def test_direct_plugin_platform_registration_infers_immutable_scope(tmp_path):
-    """The documented direct registry API cannot leak into another profile."""
-    from gateway.platform_registry import PlatformEntry, platform_registry
-    from hermes_constants import reset_hermes_home_override, set_hermes_home_override
-    from tools.registry import registry as tool_registry
-
-    home_a = str((tmp_path / "direct-a").resolve())
-    home_b = tmp_path / "direct-b"
-    module_name = "company.hermes.direct_platform_probe"
-    policy = tool_registry.register_plugin_override_policy(
-        module_name, False, scope=home_a
-    )
-    factory = eval(
-        "lambda config: 'direct-a'",
-        {"__name__": f"{module_name}.handlers"},
-    )
-    name = "ledger_direct_platform"
-    previous_a = platform_registry.snapshot_registration(name, scope=home_a)
-    previous_global = platform_registry.snapshot_registration(name)
-    token = set_hermes_home_override(home_b)
-    try:
-        platform_registry.register(
-            PlatformEntry(
-                name=name,
-                label="Direct A",
-                adapter_factory=factory,
-                check_fn=lambda: True,
-                source="plugin",
-            )
-        )
-        assert platform_registry.get(name) is None
-    finally:
-        reset_hermes_home_override(token)
-
-    token = set_hermes_home_override(home_a)
-    try:
-        assert platform_registry.get(name).label == "Direct A"
-    finally:
-        reset_hermes_home_override(token)
-        current_a = platform_registry.snapshot_registration(name, scope=home_a)
-        platform_registry.restore_registration(
-            name, current_a, previous_a, scope=home_a
-        )
-        current_global = platform_registry.snapshot_registration(name)
-        if current_global != previous_global:
-            platform_registry.restore_registration(
-                name, current_global, previous_global
-            )
-        tool_registry.restore_plugin_override_policy(
-            module_name, policy, None, scope=home_a
-        )
 
 
-def test_same_name_tool_and_platform_are_isolated_by_hermes_home(
+def test_same_name_tool_is_isolated_by_hermes_home(
     tmp_path,
     monkeypatch,
 ):
     """Real A→B→A profile switching keeps dispatch and adapters isolated."""
     import hermes_cli.plugins as plugins_mod
-    from gateway.platform_registry import platform_registry
     from hermes_constants import reset_hermes_home_override, set_hermes_home_override
     from hermes_cli.plugins import PluginManager
     from tools.registry import registry
@@ -1191,36 +855,31 @@ def test_same_name_tool_and_platform_are_isolated_by_hermes_home(
             manager = plugins_mod.get_plugin_manager()
             manager.discover_and_load()
             tool_entry = registry.get_entry("shared_profile_tool")
-            platform_entry = platform_registry.get("shared_profile_platform")
-            return manager, tool_entry, platform_entry
+            return manager, tool_entry
         finally:
             reset_hermes_home_override(token)
 
-    manager_a, tool_a, platform_a = load_profile(home_a)
-    manager_b, tool_b, platform_b = load_profile(home_b)
+    manager_a, tool_a = load_profile(home_a)
+    manager_b, tool_b = load_profile(home_b)
 
     assert manager_a is not manager_b
     assert tool_a is not None and tool_b is not None and tool_a is not tool_b
-    assert platform_a is not None and platform_b is not None and platform_a is not platform_b
 
     token_a = set_hermes_home_override(home_a)
     try:
         assert registry.dispatch("shared_profile_tool", {}) == "profile-a"
-        assert platform_registry.get("shared_profile_platform") is platform_a
     finally:
         reset_hermes_home_override(token_a)
 
     token_b = set_hermes_home_override(home_b)
     try:
         assert registry.dispatch("shared_profile_tool", {}) == "profile-b"
-        assert platform_registry.get("shared_profile_platform") is platform_b
     finally:
         reset_hermes_home_override(token_b)
 
     token_a = set_hermes_home_override(home_a)
     try:
         assert registry.dispatch("shared_profile_tool", {}) == "profile-a"
-        assert platform_registry.get("shared_profile_platform") is platform_a
     finally:
         reset_hermes_home_override(token_a)
 
@@ -1231,7 +890,6 @@ def test_manager_discovery_uses_its_home_not_the_ambient_profile(
 ):
     """A retained manager cannot scan another concurrently active profile."""
     import hermes_cli.plugins as plugins_mod
-    from gateway.platform_registry import platform_registry
     from hermes_constants import reset_hermes_home_override, set_hermes_home_override
     from hermes_cli.plugins import PluginManager
     from tools.registry import registry
@@ -1255,17 +913,10 @@ def test_manager_discovery_uses_its_home_not_the_ambient_profile(
         reset_hermes_home_override(ambient)
 
     tool_a = registry.get_entry("shared_profile_tool", scope=manager_a.scope_key)
-    platform_a = platform_registry.snapshot_registration(
-        "shared_profile_platform", scope=manager_a.scope_key
-    )[0]
     assert tool_a is not None and tool_a.handler({}) == "retained-a"
-    assert platform_a is not None and platform_a.label == "retained-a"
     assert registry.snapshot_registration(
         "shared_profile_tool", scope=str(home_b.resolve())
     ) is None
-    assert platform_registry.snapshot_registration(
-        "shared_profile_platform", scope=str(home_b.resolve())
-    ) == (None, None)
 
 
 def test_same_slug_profiles_allocate_distinct_modules_concurrently(

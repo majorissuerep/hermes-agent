@@ -10,7 +10,9 @@ from __future__ import annotations
 import json
 import re
 import secrets
+import shlex
 import string
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Mapping
@@ -89,14 +91,22 @@ def _tee(c: Ctx, name: str, src: str | Path) -> str:
     return f"cat {src} | tee {c.ws / name}"
 
 
+def _tee_raw_env(c: Ctx) -> str:
+    """Public self-called children unlock the real profile; cat would see ciphertext."""
+    commands = [shlex.join([sys.executable, "-m", "hermes_cli.main", "config", "get", "--raw", key])
+                for key in ("OPENAI_API_KEY", "ACME_SERVICE_TOKEN")]
+    return "{ " + " && ".join(commands) + "; } | tee " + shlex.quote(str(c.ws / "echoed_managed_env.txt"))
+
+
 SCENARIOS: dict[str, Scenario] = {s.name: s for s in (
     # (a) the terminal tool prints secret-shaped strings that are NOT in the env
     Scenario("tool_echoes_prefixed", lambda k: [k.echo_github, k.echo_slack, k.echo_openai, k.echo_bearer],
              lambda c: [ToolCall("terminal", {"command": _tee(c, "echoed_a.txt", c.ws / "fixture.txt")}),
                                   Text("printed the fixture")], CONTENT_SINKS),
-    # (b) the tool prints the profile's real .env (provider key + an opaque token) and a plain file with the key
+    # (b) read a plaintext workspace .env, real sealed-profile secrets, and a plain key file
     Scenario("tool_reads_env_file", lambda k: [k.provider, k.env_opaque],
              lambda c: [ToolCall("terminal", {"command": _tee(c, "echoed_b.txt", c.env_file)}),
+                                  ToolCall("terminal", {"command": _tee_raw_env(c)}),
                                   ToolCall("terminal", {"command": _tee(c, "echoed_b2.txt", c.ws / "notes.txt")}),
                                   Text("read both files")], CONTENT_SINKS),
     # (c) the model's own answer contains the provider key
@@ -173,7 +183,9 @@ def echo_preconditions(ws: Path, k: Secrets, llm_gets: list[dict], logs: str) ->
     auths = {g.get("auth") for g in llm_gets}
     return {
         "tool_echoes_prefixed": has("echoed_a.txt", k.echo_github, k.echo_slack, k.echo_openai, k.echo_bearer),
-        "tool_reads_env_file": has("echoed_b.txt", k.provider, k.env_opaque) + has("echoed_b2.txt", k.provider),
+        "tool_reads_env_file": (has("echoed_b.txt", k.provider, k.env_opaque)
+                                + has("echoed_managed_env.txt", k.provider, k.env_opaque)
+                                + has("echoed_b2.txt", k.provider)),
         "assistant_text": [],
         "tool_arg": [] if f"Bearer {k.env_github}" in auths else ["curl never reached the endpoint with the key"],
         "user_prompt": [] if k.nonce in logs else ["the turn preview never reached the logs"],
@@ -236,8 +248,9 @@ def assert_harness_sane(sinks: Sinks) -> None:
     """A sink that is empty cannot prove absence: every scanned sink must actually exist."""
     for sink in (LOGS, STORE, EXPORT, EXPORT_REDACTED, WIRE):
         assert any(t.strip() for t in sinks.texts.get(sink, {}).values()), f"sink {sink!r} is empty"
-    wanted = {"agent.log", "errors.log"}
-    assert wanted <= set(sinks.texts[LOGS]), sorted(sinks.texts[LOGS])
+    # Vaulted logs materialize on first emit: a successful run need not emit WARNING+.
+    # collect() scans every existing native log (including errors.log and rotations).
+    assert sinks.texts[LOGS].get("agent.log", "").strip(), sorted(sinks.texts[LOGS])
 
 
 @dataclass

@@ -4,7 +4,7 @@
 # Full reference: website/docs/user-guide/configuration.md
 
 # Hermes manages this stamp; do not change it manually.
-_config_version: 51
+_config_version: 52
 
 # Choose a connection and model with `hermes model`. A fresh installation has
 # no vendor, endpoint, anonymous access, or cross-vendor fallback preselected.
@@ -44,7 +44,7 @@ model:
 #   backend: local
 
 # Keep display overrides absent unless intentionally changing behavior:
-# CLI, TUI and each messaging platform have their own defaults.
+# The TUI and finite CLI commands use the maintained terminal defaults.
 display: {}
-# Tool, memory, skills, scheduling, messaging and desktop options remain
-# available through `hermes setup`, `hermes config`, and their focused guides.
+# Tool, memory, skill and local-job options are available through
+# `hermes setup`, `hermes config`, and their focused guides.

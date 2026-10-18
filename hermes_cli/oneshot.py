@@ -107,6 +107,19 @@ def _oneshot_exit_code(response: Optional[str], result: dict) -> int:
     return 0
 
 
+def _write_result_failure(result: dict, stream) -> None:
+    """A failed result is not an exception, but still needs a user-visible diagnostic."""
+    error = result.get("error")
+    if not error or not (result.get("failed") or result.get("partial") or result.get("completed") is False):
+        return
+    from agent.message_sanitization import _sanitize_surrogates
+    from agent.redact import redact_sensitive_text
+
+    diagnostic = redact_sensitive_text(str(error), force=True, redact_url_credentials=True)
+    stream.write(f"hermes: turn failed: {_sanitize_surrogates(diagnostic)}\n")
+    stream.flush()
+
+
 def _normalize_toolsets(toolsets: object = None) -> list[str] | None:
     """Split repeated/comma-separated toolset flags into a clean list (``None`` when empty)."""
     if not toolsets:
@@ -269,10 +282,6 @@ def _run_owned_oneshot(
     the CLI layer: latest/title/--continue resolution) whose transcript is loaded and continued
     by this turn. Returns the exit code; the caller owns process termination.
     """
-    # Silence every stdlib logger: AIAgent, tools and provider adapters log to stderr through the
-    # root logger. File handlers from setup_logging() keep working (level-independent).
-    logging.disable(logging.CRITICAL)
-
     # --provider without --model is ambiguous (the provider may not host the configured model, and
     # picking its catalog default hides the mismatch). Validate BEFORE the stderr redirect.
     env_model_early = os.getenv("HERMES_INFERENCE_MODEL", "").strip()
@@ -289,9 +298,12 @@ def _run_owned_oneshot(
         return 2
     use_config_toolsets = _normalize_toolsets(toolsets) is None
 
-    # Non-interactive by definition — an approval prompt would hang forever.
-    os.environ["HERMES_YOLO_MODE"] = "1"
-    os.environ["HERMES_ACCEPT_HOOKS"] = "1"
+    # Direct -z callers retain its unattended opt-ins. Shared finite -q calls
+    # pass their explicit policy and resolve unattended approvals without a prompt.
+    if (launch_options or {}).get("yolo", True):
+        os.environ["HERMES_YOLO_MODE"] = "1"
+    if (launch_options or {}).get("accept_hooks", True):
+        os.environ["HERMES_ACCEPT_HOOKS"] = "1"
     # Same finite-chat marker as `hermes chat -q` (cli.py): the session-source resolver uses it to drop an
     # inherited terminal transport label, and delegate dispatch to route detached results inline.
     os.environ["HERMES_SINGLE_QUERY_SESSION"] = "1"
@@ -357,6 +369,7 @@ def _run_owned_oneshot(
     if emitter:
         return emitter.emit_result(result, session_id=result.get("session_id", ""),
                                    exit_code=_oneshot_exit_code(response, result))
+    _write_result_failure(result, real_stderr)
     if response:
         # Lone UTF-16 surrogates would raise UnicodeEncodeError on a real stdout and abort with
         # exit 1 after the turn already completed — scrub to U+FFFD first.

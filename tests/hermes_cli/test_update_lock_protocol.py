@@ -408,7 +408,7 @@ def test_a_completion_from_another_home_never_builds_an_owned_checkout(tmp_path,
     try:
         assert holder.stdout is not None and holder.stdout.readline().strip() == "held"
         with pytest.raises(RuntimeError, match="an update is still running"):
-            source_completion.complete_source_checkout(root, desktop=False, assume_yes=True)
+            source_completion.complete_source_checkout(root, assume_yes=True)
         assert entered == [], "the completion body ran while another update owned the checkout"
     finally:
         holder.kill()

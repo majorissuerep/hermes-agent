@@ -183,7 +183,8 @@ def test_headless_terminal_result_survives_cli_exit(tmp_path):
     assert "Coordinator finished." in producer.stdout
     assert len(observed) == 1, (observed, producer.stdout, producer.stderr)
     process_id = observed[0]["session_id"]
-    assert observed[0].get("notify_on_complete") is True, observed
+    assert observed[0].get("notify_on_complete") is False, observed
+    assert observed[0].get("notify_unsupported"), observed
     # A finite local owner does not start an autonomous daemon follow-up turn.
     # Completion remains a durable, explicitly retrieved result, not a replay.
     assert follow_ups == []

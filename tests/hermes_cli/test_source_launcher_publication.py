@@ -18,8 +18,6 @@ BOOT_FILES = (
     "pm/environments.py", "pm/filesystem.py", "pm/paths.py", "hermes_cli/runtime_state.py",
     "hermes_cli/_early_recovery.py", "hermes_cli/_parser.py",
     "hermes_cli/venv_sync.py", "hermes_cli/steward.py",
-    "hermes_cli/stderr_timestamp.py",
-    "scripts/hermes-gateway",
 )
 
 
@@ -29,8 +27,6 @@ def fixture_tree(tmp_path, monkeypatch):
         destination = repo / relative
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(ROOT / relative, destination)
-    (repo / "acp_adapter").mkdir()
-    (repo / "acp_adapter" / "__init__.py").write_text("", encoding="utf-8")
     entry = (
         "import json, os, sys\n"
         "def main():\n"
@@ -40,7 +36,7 @@ def fixture_tree(tmp_path, monkeypatch):
         "    return 7\n"
         "if __name__ == '__main__':\n    sys.exit(main())\n"
     )
-    for path in (repo / "hermes_cli/main.py", repo / "acp_adapter/entry.py"):
+    for path in (repo / "hermes_cli/main.py",):
         path.write_text(entry, encoding="utf-8")
     # Windows resolves its default under LOCALAPPDATA, not HOME.
     if os.name == "nt":
@@ -262,8 +258,9 @@ def test_boot_migrates_legacy_conveniences_to_selected_runtime(tmp_path, monkeyp
 
     result = _launchers.expose_cli()
     assert result["ok"], result
-    assert set(result["written"]) == {"hermes", "hermes-acp"}
-    for name in ("hermes", "hermes-acp"):
+    assert set(result["written"]) == {"hermes"}
+    assert not (out / "hermes-acp").exists()
+    for name in ("hermes",):
         run = subprocess.run([str(out / name), "quoted argument"], cwd=tmp_path,
                              capture_output=True, text=True, timeout=30, encoding="utf-8", check=False)
         assert run.returncode == 7, run.stderr
@@ -291,47 +288,23 @@ def _command_survives_generation_collection(tmp_path, monkeypatch, surface):
         selected = select_generation(repo, value, value)
         (selected.parent / ".lease-managed").touch()
         if value == "old":
-            if surface == "legacy":
-                command = [sys.executable, "-I", str(repo / "scripts/hermes-gateway"), "--help"]
-                args = ["gateway", "--help"]
-            elif surface == "published":
-                result = subprocess.run([str(launcher), "--print-runtime-command", "--", *args],
-                                        capture_output=True, text=True, timeout=30, encoding="utf-8", check=False)
-                assert result.returncode == 0, result.stderr
-                command = json.loads(result.stdout)
-            else:
-                from hermes_cli import gateway
-                monkeypatch.setattr(gateway, "PROJECT_ROOT", repo)
-                if surface == "launchd":
-                    import plistlib
-                    from tests.hermes_cli.test_gateway_service import _osascript_exec_argv
-                    unit = gateway.generate_launchd_plist()
-                    # The job runs through osascript (#71206); exec the child it would spawn, minus the
-                    # `>> log 2>> log` tail that only means something to the shell.
-                    command = _osascript_exec_argv(plistlib.loads(unit.encode())["ProgramArguments"])[:-4]
-                    args = ["gateway", "run", "--external-supervisor"]
-                else:
-                    unit = gateway.generate_systemd_unit()
-                    command = shlex.split(next(line.removeprefix("ExecStart=") for line in unit.splitlines()
-                                               if line.startswith("ExecStart=")))
-                    args = ["gateway", "run"]
-                assert str(selected.parent) not in unit
-            if surface not in ("legacy", "systemd", "launchd"):
-                assert Path(command[0]).samefile(interpreter)
+            result = subprocess.run([str(launcher), "--print-runtime-command", "--", *args],
+                                    capture_output=True, text=True, timeout=30, check=False)
+            assert result.returncode == 0, result.stderr
+            command = json.loads(result.stdout)
+            assert Path(command[0]).samefile(interpreter)
     assert collect_generations(repo, min_age_seconds=0) == [selected.parent.parent / "old"]
     result = subprocess.run(command, cwd=tmp_path, capture_output=True, text=True, timeout=30, encoding="utf-8", check=False)
     assert result.returncode == 7, result.stderr
     receipt = result.stdout
-    if surface == "launchd":
-        # stderr_timestamp stamps the child's stdout lines ("YYYY-MM-DD HH:MM:SS,mmm ").
-        receipt = receipt.split(" ", 2)[2]
     assert json.loads(receipt)["value"] == "new"
     assert json.loads(receipt)["argv"] == args
 
 
-@pytest.mark.parametrize("surface", ["published", "systemd", "launchd", "legacy"])
+@pytest.mark.parametrize("surface", ["published"])
 @pytest.mark.platforms("posix")
 @pytest.mark.spawns_gateway_lookalike
+@pytest.mark.live_system_guard_bypass
 def test_posix_commands_survive_generation_collection(tmp_path, monkeypatch, surface):
     _command_survives_generation_collection(tmp_path, monkeypatch, surface)
 
@@ -390,24 +363,9 @@ def test_repin_without_distlib_retires_stale_native_launcher(tmp_path, monkeypat
     assert result is not None and str(new_python) in result.read_text(encoding="utf-8-sig")
 
 
-def test_dashboard_action_boots_selected_dependencies(tmp_path, monkeypatch):
-    from hermes_cli import web_server, web_server_gateway
-
-    repo, home, _ = fixture_tree(tmp_path, monkeypatch)
-    select_generation(repo, 'current', 'selected')
-    monkeypatch.setattr(web_server, "PROJECT_ROOT", repo)
-    monkeypatch.setattr(web_server_gateway, "_ACTION_LOG_DIR", home / "logs")
-    proc = web_server_gateway._spawn_hermes_action(["--version"], "gateway-restart")
-    try:
-        assert proc.wait(timeout=30) == 7
-        log = (home / "logs" / web_server_gateway._ACTION_LOG_FILES["gateway-restart"]).read_text(encoding="utf-8-sig")
-        assert json.loads(log.splitlines()[-1])["value"] == "selected"
-    finally:
-        if proc.poll() is None:
-            proc.kill()
-            proc.wait(timeout=30)
 
 
+@pytest.mark.live_system_guard_bypass
 def test_pre_pm_base_dependencies_activate_only_at_boot(tmp_path, monkeypatch):
     # The in-tree pre-PM venv is never activated; only a sealed payload's own environment is.
     repo, home, _ = fixture_tree(tmp_path, monkeypatch)
@@ -427,6 +385,7 @@ def test_pre_pm_base_dependencies_activate_only_at_boot(tmp_path, monkeypatch):
     assert json.loads(result.stdout)["value"] == "base-pth"
 
 
+@pytest.mark.live_system_guard_bypass
 def test_external_interpreter_keeps_its_owned_dependencies(tmp_path, monkeypatch):
     monkeypatch.setenv("HERMES_HOME", str(tmp_path / "home"))
     monkeypatch.setenv("HERMES_RUNTIME_DIR", str(tmp_path / "empty-store"))
@@ -436,29 +395,6 @@ def test_external_interpreter_keeps_its_owned_dependencies(tmp_path, monkeypatch
     assert result.stdout.strip() == "external-runtime-ready"
 
 
-@pytest.mark.platforms("posix")
-@pytest.mark.spawns_gateway_lookalike
-def test_service_survives_python_tool_replacement(tmp_path, monkeypatch):
-    from hermes_cli import gateway
-
-    repo, home, interpreter = fixture_tree(tmp_path, monkeypatch)
-    monkeypatch.setattr(gateway, "PROJECT_ROOT", repo)
-    select_generation(repo, "shared", "ready")
-    store = home / "tools"
-    for version in ("python-A", "python-B"):
-        python = store / version / "bin" / "python3"
-        python.parent.mkdir(parents=True)
-        python.symlink_to(interpreter)
-        (store / "facts.json").write_text(json.dumps({"packages": {"python": {"entry": version}}}), encoding="utf-8")
-        gateway._prepare_service_launcher()
-        if version == "python-A":
-            unit = gateway.generate_systemd_unit()
-            assert str(store / version) not in unit
-            command = shlex.split(next(line.split("=", 1)[1] for line in unit.splitlines() if line.startswith("ExecStart=")))
-    shutil.rmtree(store / "python-A")
-    result = subprocess.run(command, cwd=tmp_path, capture_output=True, text=True, timeout=30, encoding="utf-8", check=False)
-    assert result.returncode == 7, result.stderr
-    assert json.loads(result.stdout)["value"] == "ready"
 
 
 @pytest.mark.platforms("posix")
@@ -546,6 +482,7 @@ def _torn_by_a_killed_merge(tmp_path, monkeypatch):
 
 @pytest.mark.platforms("posix")
 @pytest.mark.parametrize("surface", ["launcher", "runtime-command"])
+@pytest.mark.live_system_guard_bypass
 def test_a_merge_killed_writing_hermes_constants_is_repaired_by_the_next_launch(tmp_path, monkeypatch, surface):
     """C1 recovery reachability: the launcher reaches the repair before importing any other
     checkout module, so a torn ``hermes_constants.py`` is put back instead of killing every launch."""
@@ -579,6 +516,7 @@ def test_a_merge_killed_writing_hermes_constants_is_repaired_by_the_next_launch(
 
 
 
+@pytest.mark.live_system_guard_bypass
 def test_update_import_probe_uses_selected_dependencies(tmp_path, monkeypatch):
     from hermes_cli import update_cmd, update_cmd_validation
 
@@ -630,32 +568,6 @@ def test_stage_launcher_ignores_an_inherited_runtime_directory(tmp_path, monkeyp
     assert "python-foreign" not in wrapper
 
 
-@pytest.mark.platforms("posix")
-def test_service_launcher_binds_the_tree_store_despite_inherited_runtime_override(tmp_path, monkeypatch):
-    from hermes_cli import gateway
-
-    repo, home, interpreter = fixture_tree(tmp_path, monkeypatch)
-    monkeypatch.setattr(gateway, "PROJECT_ROOT", repo)
-    store = home / "tools"
-    tree_python = store / "python-A" / "bin" / "python3"
-    tree_python.parent.mkdir(parents=True)
-    tree_python.symlink_to(interpreter)
-    (store / "facts.json").write_text(
-        json.dumps({"packages": {"python": {"entry": "python-A"}}}), encoding="utf-8")
-    foreign_store = tmp_path / "foreign" / "tools"
-    foreign_store.mkdir(parents=True)
-    foreign_python = foreign_store / "python-foreign" / "bin" / "python3"
-    foreign_python.parent.mkdir(parents=True)
-    foreign_python.symlink_to(interpreter)
-    (foreign_store / "facts.json").write_text(
-        json.dumps({"packages": {"python": {"entry": "python-foreign"}}}), encoding="utf-8")
-    monkeypatch.setenv("HERMES_RUNTIME_DIR", str(foreign_store))
-
-    gateway._prepare_service_launcher()
-
-    wrapper = (repo / ".hermes" / "bin" / "hermes").read_text(encoding="utf-8-sig")
-    assert "python-A" in wrapper
-    assert "python-foreign" not in wrapper
 
 
 @pytest.mark.platforms("posix")
@@ -722,3 +634,15 @@ def test_publication_uses_the_runtime_store_when_the_tree_records_none(tmp_path,
     assert len(written) == len(_launchers.WINDOWS_BIN_LAUNCHERS)
     for path in written:
         assert shlex.quote(str(python)) in Path(path).read_text(encoding="utf-8-sig")
+
+
+def test_native_publication_preserves_an_unrelated_acp_command(tmp_path, monkeypatch):
+    repo, _home, _python = fixture_tree(tmp_path, monkeypatch)
+    out = tmp_path / "user-bin"
+    out.mkdir()
+    foreign = out / "hermes-acp"
+    body = '#!/bin/sh\nexec /other/application --acp "$@"\n'
+    foreign.write_text(body)
+    _launchers._publish_conveniences(repo, out, ("hermes",))
+    assert foreign.read_text() == body
+    assert (out / "hermes").is_file()

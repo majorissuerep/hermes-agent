@@ -161,6 +161,9 @@ def _make_dispatcher(args):
     from cli import HermesCLI
     from hermes_cli.commands import resolve_command
 
+    # CLI import loads the owning encrypted .env before MCP interpolates credentials.
+    _prepare_slash_worker_runtime()
+
     class SlashDispatcher(HermesCLI):
         """Dispatch settings/help without becoming a conversation owner."""
 
@@ -199,8 +202,6 @@ def main():
     # load left a reparenting window before main() could snapshot PPID), but ahead
     # of MCP discovery: importing cli loads ~/.hermes/.env and sets HERMES_QUIET,
     # which MCP ``${VAR}`` interpolation in the runtime prep depends on.
-    _prepare_slash_worker_runtime()
-
     with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
         # --provider pins the CLI to the parent agent's resolved provider (a MoA session's virtual
         # "moa" provider included). Without it HermesCLI re-resolves from config and dispatches the

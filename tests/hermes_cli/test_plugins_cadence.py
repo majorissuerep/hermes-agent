@@ -86,31 +86,3 @@ def test_auto_apply_selects_only_updateable_git_and_persists_receipt(homed, enab
     assert applied == (['gitplug'] if enabled else [])
     assert receipt.latest()['outcome'] == 'updates-available'
     assert 'broken' in caplog.text and 'trust-update-url' in caplog.text
-
-
-@pytest.mark.parametrize('failed', [False, True])
-def test_housekeeping_runs_real_cadence_and_backs_off(homed, monkeypatch, caplog, failed):
-    import gateway.run as gateway
-    from hermes_cli import plugins_updates, plugins_cmd
-    from pm import receipt
-
-    calls, applied = [], []
-    def checks(directory):
-        calls.append(directory)
-        if failed:
-            raise OSError('offline')
-        return [_Result('plug', update_available=True)]
-    monkeypatch.setattr(plugins_updates, 'run_checks', checks)
-    monkeypatch.setattr(plugins_cmd, '_plugins_dir', lambda: homed / 'plugins')
-    monkeypatch.setattr(plugins_cmd, 'cmd_update', lambda name, **kwargs: applied.append((name, kwargs)))
-    monkeypatch.setattr(cad, 'auto_apply_enabled', lambda *_: True)
-    for _ in range(2):
-        gateway._housekeeping_chore('Plugin update check', gateway._housekeeping_plugin_update_check)
-    assert calls == [homed / 'plugins']
-    assert applied == ([] if failed else [('plug', {'interactive': False})])
-    saved = receipt.latest()
-    assert saved['outcome'] == ('failed' if failed else 'updates-available')
-    assert saved['exit_code'] == int(failed)
-    assert (homed / 'plugin-update-checks/last-run').is_file()
-    if failed:
-        assert saved['warnings'][0]['message'] in caplog.text

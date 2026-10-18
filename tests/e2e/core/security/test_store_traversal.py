@@ -113,8 +113,17 @@ class Store:
         from hermes_security.io import read_text
 
         d = self.hermes_home / "memories"
-        return "".join(read_text(p, purpose="memory", encoding="utf-8")
-                       for p in d.glob("*") if p.is_file()) if d.is_dir() else ""
+        if not d.is_dir():
+            return ""
+        chunks = []
+        for path in d.glob("*"):
+            if not path.is_file():
+                continue
+            # Native advisory-lock sidecars are plaintext metadata, not vault documents.
+            # Still scan their bytes: an unexpected canary there must not disappear.
+            chunks.append(path.read_bytes().decode("utf-8", errors="replace") if path.suffix == ".lock"
+                          else read_text(path, purpose="memory", encoding="utf-8"))
+        return "".join(chunks)
 
 
 @pytest.fixture(scope="module")

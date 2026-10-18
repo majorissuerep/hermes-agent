@@ -1,7 +1,7 @@
 """Transport abstraction for the tui_runtime JSON-RPC server.
 
-A :class:`Transport` forwards a JSON-serialisable dict to its peer, so one dispatcher runs over stdio
-(``tui_runtime.entry``) or WebSocket (``tui_runtime.ws``). The request's transport lives in a
+A :class:`Transport` forwards a JSON-serialisable dict over the terminal's private stdio channel.
+The request's transport lives in a
 ``ContextVar`` so pool-dispatched handlers write to the right peer; with nothing bound
 ``server.write_json`` falls back to the module-level :class:`StdioTransport`, which resolves
 ``_real_stdout`` lazily so tests that monkey-patch it keep working.
@@ -9,8 +9,6 @@ A :class:`Transport` forwards a JSON-serialisable dict to its peer, so one dispa
 
 from __future__ import annotations
 
-from collections import deque
-from dataclasses import dataclass, field
 import contextlib
 import contextvars
 import errno
@@ -128,13 +126,3 @@ class StdioTransport:
 
     def close(self) -> None:
         return None
-
-
-@dataclass(eq=False)
-class _FanoutPeer:
-    transport: Transport
-    pending: deque = field(default_factory=deque)
-    pending_bytes: int = 0
-    writing: bool = False
-    attached: bool = True
-    generation: int = 0

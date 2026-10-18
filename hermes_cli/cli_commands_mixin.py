@@ -2047,7 +2047,7 @@ class CLICommandsMixin(CLICommandsSessionToolsMixin):
             with suppress(Exception):
                 _cp(_dim_line(line))
 
-    # ---- persisted display toggles: /approvals, /footer, /timestamps ----------------------
+    # ---- persisted display toggles: /approvals, /timestamps ----------------------
     def _handle_approvals_command(self, cmd_original: str) -> None:
         """Show or persist the profile-wide dangerous-command approval mode."""
         from hermes_cli.approval_mode import run_approval_mode_command
@@ -2057,7 +2057,7 @@ class CLICommandsMixin(CLICommandsSessionToolsMixin):
 
     def _toggle_setting(self, arg: str, current: bool, *, usage: str, status_line: str,
                         config_key: str, label: str, failed: str):
-        """Shared /footer + /timestamps flow: status query, usage error, or save + report.
+        """Persisted display-toggle flow: status query, usage error, or save + report.
         Returns the new bool state when it was saved (None otherwise)."""
         from hermes_cli.colors import Colors as _Colors
         new_state = _toggle_target(arg, current)
@@ -2073,17 +2073,6 @@ class CLICommandsMixin(CLICommandsSessionToolsMixin):
         else:
             _cp(f"  {_t('toggle.save_failed', setting=failed)}")
         return new_state
-
-    def _handle_footer_command(self, cmd_original: str) -> None:
-        """Toggle or inspect ``display.runtime_footer.enabled`` (``/footer [on|off|status]``)."""
-        from hermes_cli.config import load_config
-        footer_cfg = (((load_config() or {}).get("display") or {}).get("runtime_footer") or {})
-        fields = footer_cfg.get("fields") or ["model", "context_pct", "cwd"]
-        self._toggle_setting(
-            _command_arg(cmd_original, lower=True), bool(footer_cfg.get("enabled", False)),
-            usage=_t("footer.usage"), status_line=f"\n  {_t('footer.fields', fields=', '.join(fields))}",
-            config_key="display.runtime_footer.enabled", label=_t("footer.label"), failed="runtime_footer",
-        )
 
     def _handle_timestamps_command(self, cmd_original: str) -> None:
         """Toggle or inspect ``display.timestamps`` (``/timestamps [on|off|status]``). When on,
