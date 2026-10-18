@@ -100,7 +100,7 @@ def two_profile_homes(tmp_path, monkeypatch):
 
 
 def _discover_and_call(homes: dict, tool: str, args: dict) -> dict:
-    from tui_runtime.model_switch import _session_profile_runtime_scope
+    from tui_runtime.server import _session_profile_runtime_scope
     from tools.mcp_tool_discovery import discover_mcp_tools
     from tools.registry import registry
 

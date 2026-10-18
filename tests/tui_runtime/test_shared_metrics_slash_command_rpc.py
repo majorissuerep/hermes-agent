@@ -21,4 +21,4 @@ def test_client_reports_the_command_and_gateway_hops_do_not_count(monkeypatch):
     assert _request("shared_metrics.slash_command", {"command": "branch"})["result"] == {"ok": True}
     assert _request("slash.exec", {"command": "branch", "session_id": "s1"})["result"] == {"output": "ok"}
 
-    assert calls == [{"command": "branch", "surface": "desktop"}]
+    assert calls == [{"command": "branch", "surface": "tui"}]

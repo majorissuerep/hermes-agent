@@ -139,50 +139,6 @@ def test_find_entry_for_model_resolves_split_ids():
     assert variant.quant == "UD-Q4_K_XL"
 
 
-def test_catalog_and_preset_agree_on_identical_model_facts(tmp_path, monkeypatch):
-    from types import SimpleNamespace
-
-    from hermes_cli.local_runtime import bootstrap, catalog, presets
-    from hermes_cli.local_runtime.context_policy import (
-        RUNTIME_OVERHEAD_BYTES, posture_profile, ub_logits_bytes)
-    from hermes_cli.local_runtime.estimator import ctx_bytes
-    from hermes_cli.web_routers.local_models import _catalog_row
-
-    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
-    monkeypatch.setattr("hermes_cli.web_routers.local_models._engine_too_old", lambda tag: False)
-    for entry in catalog.CATALOG:
-        variant = entry.variants[0]
-        profile = entry.profile(variant)
-        path = tmp_path / f"{variant.model_id}.gguf"
-        monkeypatch.setattr(presets, "read_gguf_header", lambda p: SimpleNamespace(sampling_defaults={}))
-        monkeypatch.setattr(presets, "profile_from_gguf", lambda h: profile)
-        # The catalog prices the whole download; the preset prices what is on disk. Agreement is
-        # the contract once every companion the download fetches has arrived.
-        for companion in (entry.mmproj, entry.mtp_head):
-            if companion is not None:
-                asset = bootstrap.assets_dir() / companion.local_name
-                asset.parent.mkdir(parents=True, exist_ok=True)
-                asset.touch()
-        for vram in (16, 24, 32, 48):
-            for uma in (False, True):
-                machine = HardwareBudget(int(vram * GIB * 0.8), vram * GIB,
-                                         0 if uma else 32 * GIB, uma)
-                row = _catalog_row(entry, machine, None, None, set())
-                preset = presets.preset_for_model(path, machine, set())
-                assert row["fits"] == (preset.refusal is None)
-                if preset.refusal:
-                    continue
-                assert row["start_window"] == preset.window
-                assert row["spilled"] == preset.spilled
-                mtp = entry.mtp_capable
-                overhead = (RUNTIME_OVERHEAD_BYTES + entry.companion_bytes
-                            + ub_logits_bytes(profile.n_vocab, mtp_capable=mtp,
-                                              mtp_prefill=preset.keys.get("ubatch-size") == "2048" and mtp))
-                posture = posture_profile(profile, mtp_capable=mtp,
-                                          mtp_prefill=preset.keys.get("ubatch-size") == "2048" and mtp)
-                need = profile.weights_bytes + ctx_bytes(posture, preset.window) + overhead
-                assert preset.spilled == (need > machine.usable_vram_bytes)
-                assert need <= machine.usable_vram_bytes + machine.ram_available_bytes
 
 
 def test_hybrid_long_context_stays_cheap():

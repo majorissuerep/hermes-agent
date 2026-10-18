@@ -117,13 +117,14 @@ def test_profile_dotenv_key_counts_as_explicit_when_process_env_lacks_it(tmp_pat
     monkeypatch.setattr(lpp, "_snapshot", None)
 
     from hermes_cli.auth import is_provider_explicitly_configured
-    from hermes_cli.web_server_profiles import _config_profile_scope
-
+    from hermes_constants import reset_hermes_home_override, set_hermes_home_override
     assert is_provider_explicitly_configured("zai") is False
-    with _config_profile_scope("content-studio"):
+    token = set_hermes_home_override(str(studio))
+    try:
         assert is_provider_explicitly_configured("zai") is True
-    with _config_profile_scope(None):
-        assert is_provider_explicitly_configured("zai") is False
+    finally:
+        reset_hermes_home_override(token)
+    assert is_provider_explicitly_configured("zai") is False
 
 
 def test_dotenv_key_counts_when_shell_exports_the_var_empty(tmp_path, monkeypatch):

@@ -63,9 +63,9 @@ def test_purge_identity_refuses_a_same_name_profile_created_after_the_delete(pro
     create_profile("gone", no_alias=True)
     scope = str(profile_env / ".hermes" / "sessions")
     db = SessionDB(profile_env / ".hermes" / "state.db")
-    db.save_gateway_routing_entry(
-        "agent:gone:feishu:dm:chatA",
-        json.dumps({"session_key": "agent:gone:feishu:dm:chatA"}), scope=scope)
+    db.insert_gateway_routing_rows_if_absent([
+        (scope, "agent:gone:feishu:dm:chatA",
+         json.dumps({"session_key": "agent:gone:feishu:dm:chatA"}), 1.0)])
     db.close()
 
     with pytest.raises(SystemExit) as exc:
@@ -75,7 +75,7 @@ def test_purge_identity_refuses_a_same_name_profile_created_after_the_delete(pro
     check = SessionDB(profile_env / ".hermes" / "state.db")
     try:
         # The recreated profile still owns its routing key.
-        assert set(check.load_gateway_routing_entries(scope=scope)) == {
+        assert {r["session_key"] for r in check.list_gateway_routing_rows() if r["scope"] == scope} == {
             "agent:gone:feishu:dm:chatA"}
     finally:
         check.close()

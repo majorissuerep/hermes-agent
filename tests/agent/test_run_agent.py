@@ -2168,15 +2168,9 @@ class TestAgentRuntimePostHookOwnershipSync:
         ("session_search", {"query": "needle"}),
         ("memory", {"action": "view", "target": "memory"}),
         ("clarify", {"questions": [{"question": "Continue?"}]}),
-        ("read_terminal", {}),
-        ("desktop_preview", {"action": "read"}),
-        ("drive_preview", {"action": "elements"}),
-        ("annotate_preview", {"action": "clear"}),
-        ("read_window_below", {}),
         ("manage_connections", {"action": "install", "connectors": [{"name": "linear", "mcp": True}]}),
         ("setup_mcp", {"server": "linear", "action": "install"}),
         ("manage_catalog", {"action": "search", "query": "blender"}),
-        ("gui_tour", {"action": "stop"}),
         ("delegate_task", {"goal": "Check the child path"}),
     )
 
@@ -2210,26 +2204,6 @@ class TestAgentRuntimePostHookOwnershipSync:
         )
         monkeypatch.setattr(
             "tools.clarify_tool.clarify_tool",
-            lambda **kwargs: '{"ok":true}',
-        )
-        monkeypatch.setattr(
-            "tools.read_terminal_tool.read_terminal_tool",
-            lambda **kwargs: '{"ok":true}',
-        )
-        monkeypatch.setattr(
-            "tools.read_preview_tool.read_preview_tool",
-            lambda **kwargs: '{"ok":true}',
-        )
-        monkeypatch.setattr(
-            "tools.drive_preview_tool.drive_preview_tool",
-            lambda **kwargs: '{"ok":true}',
-        )
-        monkeypatch.setattr(
-            "tools.annotate_preview_tool.annotate_preview_tool",
-            lambda **kwargs: '{"ok":true}',
-        )
-        monkeypatch.setattr(
-            "tools.read_window_tool.read_window_below_tool",
             lambda **kwargs: '{"ok":true}',
         )
         # manage_connections / setup_mcp shim: no card on this fake agent, so the MCP leg runs the

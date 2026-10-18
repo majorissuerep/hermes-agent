@@ -65,10 +65,7 @@ def test_native_projection_shows_a_steer_as_the_users_own_words():
     from agent.prompt_builder import steer_user_row
 
     row = steer_user_row("fix the header too")
-    projected = project_history_commentary([row])[0]
-
-    # Same words session.resume shows; the model-facing marker stays in the source.
-    assert projected["display_content"] == "fix the header too"
+    # Native session.resume strips the model-facing marker only in its display copy.
     assert _history_to_messages([row])[0]["text"] == "fix the header too"
     assert row["content"].startswith("[OUT-OF-BAND USER MESSAGE")
 

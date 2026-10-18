@@ -32,7 +32,7 @@ def breaker_session(monkeypatch):
     (user denies the smart-DENY override) so the guard returns a definitive
     BLOCKED message — the channel the breaker text rides on.
     """
-    monkeypatch.setenv("HERMES_GATEWAY_SESSION", "1")
+    monkeypatch.setenv("HERMES_SESSION_PLATFORM", "tui")
     monkeypatch.delenv("HERMES_INTERACTIVE", raising=False)
     monkeypatch.delenv("HERMES_CRON_SESSION", raising=False)
     monkeypatch.delenv("HERMES_EXEC_ASK", raising=False)

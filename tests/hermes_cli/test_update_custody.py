@@ -17,6 +17,8 @@ import time
 from pathlib import Path
 
 import pytest
+from tests.hermes_cli.update_test_support import isolated_command_checkout as isolated_command_checkout  # noqa: PLC0414 -- register the shared autouse fixture
+
 
 from hermes_cli import update_lock as ul
 
@@ -264,14 +266,14 @@ def test_a_swallowed_refusal_is_what_the_update_reports(tmp_path, monkeypatch, c
     monkeypatch.setattr(main, "_install_hangup_protection", lambda **kw: None)
     monkeypatch.setattr(main, "_finalize_update_output", lambda state: None)
 
-    def impl(args, gateway_mode):
+    def impl(args, gateway_mode=False):
         ur.begin_update_receipt()
         with contextlib.suppress(OSError):  # a reader that swallows it, as _git_stdout does
             raise update_custody._refuse(["git", "rev-parse"], OSError(6, "The handle is invalid"))
         print("✗ Could not resolve HEAD")  # the downstream error it turned into
         raise SystemExit(1)
 
-    monkeypatch.setattr(update_cmd, "_cmd_update_impl", impl)
+    monkeypatch.setattr("hermes_cli.terminal_update.update_source", impl)
     with ur.update_receipt_scope(), pytest.raises(SystemExit) as stop:
         main.cmd_update(SimpleNamespace(gateway=False))
     assert stop.value.code == 1

@@ -135,33 +135,3 @@ def test_computer_use_cache_files_owner_only(tmp_path, monkeypatch):
     assert path.read_bytes() == b"frame"
     assert _mode(path.parent) == 0o700
     assert _mode(path) == 0o600
-
-
-@pytest.mark.parametrize("getter_name", ["get_image_cache_dir", "get_video_cache_dir",
-                                         "get_audio_cache_dir", "get_document_cache_dir",
-                                         "get_screenshot_cache_dir"])
-def test_gateway_media_cache_dirs_created_owner_only(tmp_path, monkeypatch, getter_name):
-    """The gateway's inbound-media caches (photos/voice notes/documents users sent)
-    land 0700 at creation and heal a legacy 0755 dir."""
-    import gateway.platforms.base as gw
-    home = tmp_path / "hh"
-    _no_managed(monkeypatch, home)
-    monkeypatch.setattr(gw, "get_hermes_dir", lambda new, old: home / new)
-    for name in gw._CACHE_DIR_IMPORT_DEFAULTS:
-        monkeypatch.setattr(gw, name, None, raising=False)
-    cache_dir = getattr(gw, getter_name)()
-    assert _mode(cache_dir) == 0o700
-    os.chmod(cache_dir, 0o755)
-    assert _mode(getattr(gw, getter_name)()) == 0o700
-
-
-def test_gateway_media_cache_files_owner_only(tmp_path, monkeypatch):
-    """Inbound media bytes written into the gateway cache land 0600."""
-    import gateway.platforms.base as gw
-    home = tmp_path / "hh"
-    _no_managed(monkeypatch, home)
-    monkeypatch.setattr(gw, "get_hermes_dir", lambda new, old: home / new)
-    for name in gw._CACHE_DIR_IMPORT_DEFAULTS:
-        monkeypatch.setattr(gw, name, None, raising=False)
-    path_str = gw.cache_image_from_bytes(b"\x89PNG\r\n\x1a\n" + b"photo bytes" * 8)
-    assert _mode(path_str) == 0o600

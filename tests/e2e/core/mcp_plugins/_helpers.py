@@ -1,6 +1,6 @@
 """Shared harness for the MCP + plugin conformance suite.
 
-Every test drives a REAL Hermes process (``hermes chat -q`` or the ``tui_gateway``
+Every test drives a REAL Hermes process (``hermes chat -q`` or the ``tui_runtime``
 stdio host) against the recording fake LLM provider and one or more REAL MCP
 servers built with the installed ``mcp`` SDK (``mcp_fixture_server.py``), over
 stdio or streamable HTTP. Fakes sit only at boundaries we do not own (the LLM
@@ -26,8 +26,10 @@ from typing import Any, Callable, Iterator
 import pytest
 import hermes_yaml as yaml
 
-from tests.e2e.core.parity._helpers import hermes_argv, kill_tagged, tagged_pids, wait_until
+from tests.e2e.core.mcp_plugins._native_process import hermes_argv, tagged_pids, wait_until
 from tests.fakes.fake_llm_provider import FakeLLMServer, Text, ToolCall, write_hermes_home
+from tests.e2e.vault_home import seal_fixture_home
+from tests.e2e.vault_home import run_unlocked
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 FIXTURE_SERVER = Path(__file__).with_name("mcp_fixture_server.py")
@@ -47,7 +49,6 @@ __all__ = [
     "calls_received",
     "http_server_cfg",
     "inbound",
-    "kill_tagged",
     "payload",
     "run_chat_q",
     "script",
@@ -106,6 +107,8 @@ class E2EHome:
         """Hermetic child env: fake HOME (so no ``~/.hermes`` of the real user is reachable)."""
         import pwd  # the suite is Linux-gated
 
+        seal_fixture_home(self.hermes_home)
+
         real_root = Path(pwd.getpwuid(os.getuid()).pw_dir, ".hermes").resolve()  # windows-footgun: ok — module is skipif(not linux)
         fixture = self.hermes_home.resolve()
         assert fixture != real_root and fixture.parent != real_root / "profiles", fixture
@@ -116,7 +119,7 @@ class E2EHome:
             "HOME": str(self.home), "HERMES_HOME": str(self.hermes_home), "PYTHONPATH": str(REPO_ROOT),
             "PYTHONUNBUFFERED": "1", "NO_COLOR": "1", "TERM": "dumb",
             "PARITY_TREE_TAG": self.tag,  # orphan-scan tag inherited by the whole tree
-            "HERMES_STATE_DB_GUARD_BYPASS": "1", "HERMES_ALLOW_NO_VAULT": "1",  # child HOME is tmp_path by construction
+            "HERMES_STATE_DB_GUARD_BYPASS": "1",  # child HOME is tmp_path by construction
         })
         env.update(self.extra_env)
         env.update(extra or {})
@@ -127,9 +130,11 @@ class E2EHome:
         return self.hermes_home / "config.yaml"
 
     def update_config(self, mutate: Callable[[dict], None]) -> None:
-        cfg = yaml.safe_load(self.config_path.read_text(encoding="utf-8"))
+        from hermes_security.vault import get_vault
+        owner = get_vault(self.hermes_home)
+        cfg = yaml.safe_load(owner.read_bytes(self.config_path, purpose="config").decode("utf-8"))
         mutate(cfg)
-        self.config_path.write_text(yaml.safe_dump(cfg, sort_keys=False), encoding="utf-8")
+        owner.write_bytes(self.config_path, yaml.safe_dump(cfg, sort_keys=False).encode("utf-8"), purpose="config")
 
 
 def _select_test_dependencies(eh: E2EHome) -> None:
@@ -157,6 +162,7 @@ def build_home(root: Path, base_url: str, *, mcp_servers: dict[str, dict] | None
     cfg["updates"] = {"check": False}
     cfg.update(extra or {})
     eh.config_path.write_text(yaml.safe_dump(cfg, sort_keys=False), encoding="utf-8")
+    seal_fixture_home(hermes_home)
     return eh
 
 
@@ -257,7 +263,7 @@ def call_tool(body: dict[str, Any], name: str, args: dict[str, Any] | str) -> To
 
 def run_chat_q(eh: E2EHome, prompt: str, *, timeout: float = TURN_TIMEOUT,
                env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
-    return subprocess.run(hermes_argv("chat", "-q", prompt, "-Q"), cwd=eh.project, env=eh.env(env),
+    return run_unlocked(hermes_argv("chat", "-q", prompt, "-Q"), cwd=eh.project, env=eh.env(env),
                           capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL, check=False)
 
 
@@ -301,4 +307,3 @@ def provider(responder: Callable[[dict[str, Any]], Any]) -> Iterator[FakeLLMServ
         yield srv
     finally:
         srv.stop()
-

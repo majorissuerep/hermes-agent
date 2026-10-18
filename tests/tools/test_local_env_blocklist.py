@@ -131,214 +131,20 @@ def test_adapter_and_provider_profile_secrets_never_reach_children(child_env, mo
     assert all(is_env_passthrough(name) for name in OPERATOR_SECRETS)
 
 
-def _user_platform_plugin(home, name, secret):
-    plugin = home / "plugins" / "platforms" / name
-    plugin.mkdir(parents=True)
-    (plugin / "plugin.yaml").write_text(
-        f"name: {name}\nkind: platform\nrequires_env:\n  - name: {secret}\n    password: true\n",
-        encoding="utf-8")
 
 
-def test_user_platform_plugin_secrets_belong_to_their_own_profile(child_env, monkeypatch):
-    """A profile's user-installed platform plugin declares secrets for that profile only: bound to
-    it, the name is stripped from every child and refused for passthrough; bound to a sibling
-    profile, the sibling's own same-named value is its user variable and reaches its children."""
-    from hermes_constants import reset_hermes_home_override, set_hermes_home_override
-    from tools.env_passthrough import is_env_passthrough, register_env_passthrough
-    a, b = child_env / "profiles" / "a", child_env / "profiles" / "b"
-    _user_platform_plugin(a, "chatx", "CHATX_SIGNING_SECRET")
-    b.mkdir(parents=True)
-    monkeypatch.setenv("CHATX_SIGNING_SECRET", "fake-value")
-    register_env_passthrough(["CHATX_SIGNING_SECRET"])
-    seen = {}
-    for home in (a, b):
-        token = set_hermes_home_override(home)
-        try:
-            seen[home.name] = (
-                "CHATX_SIGNING_SECRET" in local.hermes_subprocess_env(inherit_credentials=True),
-                "CHATX_SIGNING_SECRET" in local._make_run_env({}),
-                is_env_passthrough("CHATX_SIGNING_SECRET"))
-        finally:
-            reset_hermes_home_override(token)
-    assert seen == {"a": (False, False, False), "b": (True, True, True)}
-    # An in-place manifest edit (no directory mtime change) takes effect on the next spawn.
-    manifest = a / "plugins" / "platforms" / "chatx" / "plugin.yaml"
-    manifest.write_text(manifest.read_text(encoding="utf-8") + "  - name: CHATX_WEBHOOK_KEY\n", encoding="utf-8")
-    os.utime(manifest, ns=(manifest.stat().st_atime_ns, manifest.stat().st_mtime_ns + 10**9))
-    monkeypatch.setenv("CHATX_WEBHOOK_KEY", "fake-value")
-    token = set_hermes_home_override(a)
-    try:
-        assert "CHATX_WEBHOOK_KEY" not in local.hermes_subprocess_env(inherit_credentials=True)
-        # Removing the plugin releases its names.
-        manifest.unlink()
-        assert "CHATX_WEBHOOK_KEY" in local.hermes_subprocess_env(inherit_credentials=True)
-    finally:
-        reset_hermes_home_override(token)
 
 
-@pytest.mark.skipif(os.name == "nt" or os.geteuid() == 0,  # windows-footgun: ok — short-circuits on nt
-                    reason="needs POSIX permissions as non-root")
-@pytest.mark.parametrize("layout", ["platforms", "flat"])
-def test_a_failed_rescan_keeps_the_denials_it_already_knew(child_env, monkeypatch, layout):
-    """healthy -> unreadable -> recovered: a plugin the scan cannot read right now still declared
-    its secret a moment ago, and the value may already be in the process or profile overlay."""
-    from hermes_constants import reset_hermes_home_override, set_hermes_home_override
-    home = child_env / "profiles" / "a"
-    if layout == "platforms":
-        _user_platform_plugin(home, "chatx", "CHATX_SIGNING_SECRET")
-        plugin_dir = home / "plugins" / "platforms" / "chatx"
-        locked = plugin_dir  # unsearchable dir: skipped, the scan is partial
-    else:
-        plugin_dir = home / "plugins" / "chatx"
-        plugin_dir.mkdir(parents=True)
-        (plugin_dir / "plugin.yaml").write_text(
-            "name: chatx\nkind: platform\nrequires_env:\n  - name: CHATX_SIGNING_SECRET\n    password: true\n",
-            encoding="utf-8")
-        locked = plugin_dir / "plugin.yaml"  # unreadable flat manifest: skipped, the scan is partial
-    monkeypatch.setenv("CHATX_SIGNING_SECRET", "fake-value")
-    token = set_hermes_home_override(home)
-    try:
-        def stripped():
-            return "CHATX_SIGNING_SECRET" not in local.hermes_subprocess_env(inherit_credentials=True)
-        assert stripped()
-        locked.chmod(0)
-        try:
-            assert stripped()
-            assert stripped()  # and again, from the uncached partial result
-        finally:
-            locked.chmod(0o755 if layout == "platforms" else 0o644)
-        assert stripped()
-    finally:
-        reset_hermes_home_override(token)
 
 
-def test_a_partial_scan_is_rescanned_on_the_next_spawn(child_env, monkeypatch):
-    """A manifest read that fails once (same file signature afterwards) must not pin the partial
-    result: the next spawn reads it and strips the secret."""
-    import builtins
-    from hermes_constants import reset_hermes_home_override, set_hermes_home_override
-    home = child_env / "profiles" / "a"
-    plugin_dir = home / "plugins" / "chatx"
-    plugin_dir.mkdir(parents=True)
-    manifest = plugin_dir / "plugin.yaml"
-    manifest.write_text(
-        "name: chatx\nkind: platform\nrequires_env:\n  - name: CHATX_SIGNING_SECRET\n    password: true\n",
-        encoding="utf-8")
-    real_open, failures = builtins.open, [1]
-
-    def flaky_open(path, *args, **kwargs):
-        if failures and Path(path) == manifest:
-            failures.pop()
-            raise PermissionError(13, "denied", str(path))
-        return real_open(path, *args, **kwargs)
-
-    monkeypatch.setattr(builtins, "open", flaky_open)
-    monkeypatch.setenv("CHATX_SIGNING_SECRET", "fake-value")
-    token = set_hermes_home_override(home)
-    try:
-        local.hermes_subprocess_env(inherit_credentials=True)
-        assert not failures  # the failed read happened
-        assert "CHATX_SIGNING_SECRET" not in local.hermes_subprocess_env(inherit_credentials=True)
-    finally:
-        reset_hermes_home_override(token)
 
 
-@pytest.mark.platforms("posix")  # symlinks
-def test_a_symlinked_home_alias_shares_its_profiles_plugin_declarations(child_env, monkeypatch):
-    from hermes_constants import reset_hermes_home_override, set_hermes_home_override
-    from tools.environments import local_env_policy as policy
-    home = child_env / "profiles" / "a"
-    _user_platform_plugin(home, "chatx", "CHATX_SIGNING_SECRET")
-    alias = child_env / "a-alias"
-    alias.symlink_to(home, target_is_directory=True)
-    monkeypatch.setenv("CHATX_SIGNING_SECRET", "fake-value")
-    sizes = []
-    for bound in (home, alias):
-        token = set_hermes_home_override(bound)
-        try:
-            assert "CHATX_SIGNING_SECRET" not in local.hermes_subprocess_env(inherit_credentials=True)
-        finally:
-            reset_hermes_home_override(token)
-        sizes.append(len(policy._HOME_ADAPTER_SECRET_CACHE))
-    assert sizes[0] == sizes[1]
 
 
-@pytest.mark.skipif(os.name == "nt" or os.geteuid() == 0,  # windows-footgun: ok — short-circuits on nt
-                    reason="needs POSIX permissions as non-root")
-def test_unreadable_platform_manifest_fails_closed(tmp_path):
-    """A manifest that cannot be read might declare secrets, so the policy scan raises rather than
-    returning a set without them. A malformed one declares nothing and is skipped."""
-    from hermes_cli.config import platform_manifest_secret_envs
-    _user_platform_plugin(tmp_path, "chatx", "CHATX_SIGNING_SECRET")
-    broken = tmp_path / "plugins" / "platforms" / "broken"
-    broken.mkdir()
-    (broken / "plugin.yaml").write_text("name: [unclosed\n", encoding="utf-8")
-    assert platform_manifest_secret_envs(tmp_path, strict=True) == {"CHATX_SIGNING_SECRET"}
-    manifest = tmp_path / "plugins" / "platforms" / "chatx" / "plugin.yaml"
-    manifest.chmod(0)
-    try:
-        with pytest.raises(PermissionError):
-            platform_manifest_secret_envs(tmp_path, strict=True)
-    finally:
-        manifest.chmod(0o644)
-    # Not provably a platform's, so no reason to fail: an unsearchable plugin dir (a root-owned
-    # plugin in a volume) or an unreadable flat plugins/* manifest.
-    locked = [tmp_path / "plugins" / "lockedx", tmp_path / "plugins" / "memx"]
-    for d in locked:
-        d.mkdir()
-    (locked[1] / "plugin.yaml").write_text("kind: memory\n", encoding="utf-8")
-    locked[0].chmod(0)
-    (locked[1] / "plugin.yaml").chmod(0)
-    try:
-        assert platform_manifest_secret_envs(tmp_path, strict=True) == {"CHATX_SIGNING_SECRET"}
-    finally:
-        locked[0].chmod(0o755)
-        (locked[1] / "plugin.yaml").chmod(0o644)
-    # An unlistable platforms root is skipped the same way.
-    other = tmp_path / "other"
-    _user_platform_plugin(other, "chaty", "CHATY_SIGNING_SECRET")
-    (other / "plugins" / "platforms").chmod(0o300)
-    try:
-        assert platform_manifest_secret_envs(other, strict=True) == frozenset()
-    finally:
-        (other / "plugins" / "platforms").chmod(0o755)
 
 
-def test_manifest_scan_follows_plugin_discovery_and_sees_mtime_preserving_edits(tmp_path):
-    """A __dunder__ dir is never a plugin, so it declares nothing; a rewrite that keeps the
-    manifest's size and mtime (cp -p, rsync -t) still changes the stamp."""
-    from hermes_cli.config import platform_manifest_secret_envs, platform_manifest_stamp
-    _user_platform_plugin(tmp_path, "__cache__", "CACHED_SIGNING_SECRET")
-    _user_platform_plugin(tmp_path, "chatx", "CHATX_SIGNING_SECRET")
-    assert platform_manifest_secret_envs(tmp_path) == {"CHATX_SIGNING_SECRET"}
-    manifest = tmp_path / "plugins" / "platforms" / "chatx" / "plugin.yaml"
-    before, st = platform_manifest_stamp(tmp_path), manifest.stat()
-    manifest.write_text(manifest.read_text(encoding="utf-8").replace("CHATX_SIGNING", "CHATX_SIGNINGX"),
-                        encoding="utf-8")
-    os.utime(manifest, ns=(st.st_atime_ns, st.st_mtime_ns))
-    assert manifest.stat().st_mtime_ns == st.st_mtime_ns
-    assert platform_manifest_stamp(tmp_path) != before
 
 
-def test_unreadable_bundled_manifest_fails_the_policy_instead_of_dropping_it(monkeypatch):
-    """The import-time read keeps the bundled secret set only when every bundled manifest was
-    read; otherwise the policy's strict re-read raises rather than building without them."""
-    import builtins
-    import hermes_cli.config as cfg
-    target = next(path for _name, path, _kind, _st in cfg._platform_manifest_paths(source="bundled") if path)
-    real_open = builtins.open
-
-    def denying_open(file, *args, **kwargs):
-        if str(file) == str(target):
-            raise PermissionError(13, "Permission denied", str(file))
-        return real_open(file, *args, **kwargs)
-
-    monkeypatch.setattr(cfg, "OPTIONAL_ENV_VARS", dict(cfg.OPTIONAL_ENV_VARS))
-    monkeypatch.setattr(builtins, "open", denying_open)
-    assert cfg._inject_platform_plugin_env_vars() is None
-    monkeypatch.setattr(cfg, "BUNDLED_PLATFORM_SECRET_ENVS", None)
-    with pytest.raises(PermissionError):
-        cfg.platform_manifest_secret_envs(source="bundled", strict=True)
 
 
 def test_inheriting_child_gets_provider_keys_but_never_adapter_secrets(child_env, monkeypatch):
@@ -351,72 +157,8 @@ def test_inheriting_child_gets_provider_keys_but_never_adapter_secrets(child_env
     assert observed == {**dict.fromkeys(ADAPTER_SECRETS), **{k: "fake-" + k for k in granted}}
 
 
-def test_runtime_adapter_secret_follows_the_bound_profiles_registry(child_env, monkeypatch):
-    from gateway.platform_registry import PlatformEntry, platform_registry
-    from tools.env_passthrough import is_env_passthrough, register_env_passthrough
-    home_a, home_b = child_env / "hermes", child_env / "profile-b"
-    home_a.mkdir(exist_ok=True)
-    home_b.mkdir()
-    name = "ACME_CHAT_SIGNING_SECRET"  # declared by a user adapter; no OPTIONAL_ENV_VARS entry
-    monkeypatch.setenv(name, "fake-secret")
-    monkeypatch.setenv("MY_APP_KEY", "operator")
-    scope_a = platform_registry.current_scope_key()
-    # Registered after the policy module was imported, in profile A only.
-    platform_registry.register(PlatformEntry(name="acme-chat", label="Acme", adapter_factory=lambda c: None,
-                                             check_fn=lambda: True, required_env=[name]), scope=scope_a)
-
-    def child_sees():
-        return observe_child(local.hermes_subprocess_env(), [name, "MY_APP_KEY"])
-
-    try:
-        assert child_sees() == {name: None, "MY_APP_KEY": "operator"}
-        register_env_passthrough([name])
-        assert not is_env_passthrough(name)
-        monkeypatch.setenv("HERMES_HOME", str(home_b))  # B has no such adapter: operator-owned
-        assert child_sees() == {name: "fake-secret", "MY_APP_KEY": "operator"}
-        monkeypatch.setenv("HERMES_HOME", str(home_a))
-        assert child_sees() == {name: None, "MY_APP_KEY": "operator"}
-    finally:
-        platform_registry.unregister("acme-chat", scope=scope_a)
-    assert child_sees() == {name: "fake-secret", "MY_APP_KEY": "operator"}
 
 
-@pytest.mark.parametrize("declared_by", ["skill", "config"])
-def test_passthrough_accepted_before_an_adapter_owns_the_name_stops_forwarding_it(
-        child_env, monkeypatch, declared_by):
-    from agent import secret_scope as ss
-    from gateway.platform_registry import PlatformEntry, platform_registry
-    from tools.code_execution_env import _scrub_child_env
-    from tools.env_passthrough import register_env_passthrough
-    name, names = "ACME_CHAT_SIGNING_SECRET", ["ACME_CHAT_SIGNING_SECRET", "MY_APP_KEY"]
-    monkeypatch.setenv(name, "fake-secret")
-    monkeypatch.setenv("MY_APP_KEY", "operator")
-    if declared_by == "skill":
-        register_env_passthrough(names)
-    else:
-        home = child_env / "hermes"
-        home.mkdir(exist_ok=True)
-        (home / "config.yaml").write_text("terminal:\n  env_passthrough: [{}]\n".format(", ".join(names)), encoding="utf-8")
-    builders = [lambda: local._make_run_env({}), lambda: local._sanitize_subprocess_env(dict(os.environ)),
-                lambda: _scrub_child_env(dict(os.environ))]
-    assert [observe_child(b(), names) for b in builders] == [
-        {name: "fake-secret", "MY_APP_KEY": "operator"}] * 3  # accepted while operator-owned
-
-    scope = platform_registry.current_scope_key()
-    platform_registry.register(PlatformEntry(name="acme-chat", label="Acme", adapter_factory=lambda c: None,
-                                             check_fn=lambda: True, required_env=[name]), scope=scope)
-    try:
-        assert [observe_child(b(), names) for b in builders] == [{name: None, "MY_APP_KEY": "operator"}] * 3
-        # A routed profile's value lives only in its scope; the stale declaration must not add it back.
-        monkeypatch.delenv(name)
-        token = ss.set_secret_scope({name: "scoped-secret", "MY_APP_KEY": "scoped-operator"})
-        try:
-            assert [observe_child(b(), names) for b in (builders[0], builders[2])] == [
-                {name: None, "MY_APP_KEY": "scoped-operator"}] * 2
-        finally:
-            ss.reset_secret_scope(token)
-    finally:
-        platform_registry.unregister("acme-chat", scope=scope)
 
 
 @pytest.mark.parametrize("builder", ["foreground", "background", "factory", "nonterminal"])
@@ -474,62 +216,8 @@ def test_force_prefix_is_not_plugin_passthrough(child_env, monkeypatch, builder,
         assert "AUXILIARY_VISION_API_KEY" not in factories[builder]()
 
 
-@pytest.mark.parametrize("managed,platform,allowed", [(True, "telegram", True), (False, "buzz", True), (False, "telegram", False)])
-@pytest.mark.parametrize("scope", [None, {"BUZZ_PRIVATE_KEY": "fake-scoped"}])
-def test_buzz_context_and_plain_process_value(child_env, monkeypatch, managed, platform, allowed, scope):
-    from agent import secret_scope as ss
-    from agent.session_context import _SESSION_PLATFORM
-    from tools.code_execution_env import _scrub_child_env
-    from tools.env_passthrough import register_env_passthrough, is_env_passthrough
-    buzz = {"BUZZ_PRIVATE_KEY": "fake-process", "BUZZ_AUTH_TAG": "fake-tag", "BUZZ_RELAY_URL": "fake-relay"}
-    for k, v in buzz.items():
-        monkeypatch.setenv(k, v)
-    if managed:
-        monkeypatch.setenv("BUZZ_MANAGED_AGENT", "1")
-    platform_token = _SESSION_PLATFORM.set(platform)
-    ss.set_multiplex_active(True)
-    scope_token = ss.set_secret_scope(scope) if scope is not None else None
-    try:
-        register_env_passthrough(buzz)
-        assert not any(is_env_passthrough(k) for k in buzz)
-        for result in (local._make_run_env({}), local._sanitize_subprocess_env(dict(os.environ))):
-            assert {k: result.get(k) for k in buzz} == (buzz if allowed else dict.fromkeys(buzz))
-        for result in (local.hermes_subprocess_env(), _scrub_child_env(os.environ)):
-            assert not set(buzz) & result.keys()
-    finally:
-        if scope_token is not None:
-            ss.reset_secret_scope(scope_token)
-        ss.set_multiplex_active(False)
-        _SESSION_PLATFORM.reset(platform_token)
 
 
-@pytest.mark.platforms("linux", "macos", "windows")
-@pytest.mark.parametrize("first_platform,first_value", [("buzz", "fake-profile-a"), ("telegram", None)], ids=["buzz", "other"])
-def test_buzz_secret_never_reaches_second_profile_via_snapshot(child_env, monkeypatch, first_platform, first_value):
-    from agent import secret_scope as ss
-    from agent.session_context import _SESSION_PLATFORM
-    monkeypatch.setenv("BUZZ_PRIVATE_KEY", "fake-profile-a")
-    ss.set_multiplex_active(True)
-    platform = _SESSION_PLATFORM.set(first_platform)
-    env = None
-    try:
-        env = local.LocalEnvironment(cwd=str(child_env), timeout=30)
-        snap = Path(env._snapshot_path)
-        assert snap.exists()
-        assert "BUZZ_PRIVATE_KEY" not in snap.read_text(encoding="utf-8")
-        assert observe_terminal(env, ["BUZZ_PRIVATE_KEY"]) == {"BUZZ_PRIVATE_KEY": first_value}
-        assert "fake-profile-a" not in snap.read_text(encoding="utf-8")
-        monkeypatch.delenv("BUZZ_PRIVATE_KEY")
-        _SESSION_PLATFORM.reset(platform)
-        platform = _SESSION_PLATFORM.set("telegram")
-        assert observe_terminal(env, ["BUZZ_PRIVATE_KEY"]) == {"BUZZ_PRIVATE_KEY": None}
-        assert "BUZZ_PRIVATE_KEY" in env._snapshot_passthrough_names
-        assert "BUZZ_PRIVATE_KEY" not in snap.read_text(encoding="utf-8")
-    finally:
-        if env is not None:
-            env.cleanup()
-        _SESSION_PLATFORM.reset(platform)
-        ss.set_multiplex_active(False)
 
 
 @pytest.mark.parametrize("scoped,expected", [({"SERVICE_TOKEN": "fake-routed"}, "fake-routed"), ({}, None)])

@@ -151,11 +151,14 @@ def _run_in_custody(argv: list, root: Path, **kwargs) -> int:
     lock = sys.modules.get("hermes_cli.update_lock")
     bind, resume = (getattr(lock, name, None) for name in ("bind_child_to_update_tree", "resume_suspended_child"))
     if os.name != "nt" or bind is None or resume is None or getattr(lock, "_HELD", None) is None:
+        custody_fds = _checkout_custody(root).get("pass_fds", ())
+        if custody_fds:
+            kwargs["pass_fds"] = tuple(dict.fromkeys((*kwargs.get("pass_fds", ()), *custody_fds)))
         # Unbounded for the same reason as the Windows wait below (review L7): the takeover is
         # the rest of a committed update (sync + build), and it holds the checkout lock fd, so the
         # checkout stays locked for as long as it runs, even past this updater's death.
         # health: allow HX006 -- unbounded by design: the update's own supervised child
-        return subprocess.run(argv, **kwargs, **_checkout_custody(root)).returncode  # noqa: PLW1510 -- forwarding wrapper: callers pass subprocess kwargs via **kwargs (check may arrive through it); an explicit check=False would raise TypeError
+        return subprocess.run(argv, **kwargs).returncode  # noqa: PLW1510 -- forwarding wrapper: callers pass subprocess kwargs via **kwargs (check may arrive through it); an explicit check=False would raise TypeError
     proc = subprocess.Popen(argv, creationflags=lock.CREATE_SUSPENDED, **kwargs)
     try:
         refusal = bind(proc)

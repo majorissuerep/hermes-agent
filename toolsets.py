@@ -123,11 +123,9 @@ TOOLSETS = {
     "context_engine": _ts("Runtime tools exposed by the active context engine"),
     "session_search": _ts("Search and recall past conversations with summarization", ["session_search"]),
     "connections": _ts("Remote connector discovery, execution, and account authorization", ["manage_connections"]),
+    "catalog": _ts("Opt-in catalog installation through a local TUI approval card", ["manage_catalog"],
+                   platforms=frozenset({"tui"})),
 
-    # GUI-renderer affordances, enabled per desktop-sourced SESSION by the GUI
-    # gateway (tui_gateway/server.py::_load_enabled_toolsets) — never by a
-    # process env var, which is blind to a desktop client on a remote backend.
-    # ``platforms``: the session platforms this toolset exists for (TOOLSET_SESSION_PLATFORMS).
     "clarify": _ts("Ask the user clarifying questions (multiple-choice or open-ended)", ["clarify"]),
     "code_execution": _ts("Run Python scripts that call tools programmatically (reduces LLM round trips)", ["execute_code"]),
     "delegation": _ts("Spawn subagents with isolated context for complex subtasks", ["delegate_task"]),

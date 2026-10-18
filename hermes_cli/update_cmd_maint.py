@@ -739,8 +739,7 @@ def _run_pre_update_backup(args) -> Optional[str]:
 
 
 def _sweep_bytecode_after_update(branch: str) -> None:
-    """Clear stale ``__pycache__`` (else gateway restart ImportErrors on names absent from old
-    bytecode), re-stamp the fingerprint, refresh the bootstrap cache scripts.
+    """Clear stale ``__pycache__`` and stamp the new checkout fingerprint.
 
     Never fails the committed update: a failed sweep is a ``bytecode_sweep`` follow-up and the
     fingerprint stays un-stamped, so the launch-time sweep (fingerprint mismatch) retries it.
@@ -755,11 +754,6 @@ def _sweep_bytecode_after_update(branch: str) -> None:
         _m()._record_bytecode_fingerprint()
     except Exception as exc:  # health: allow BLE001 -- owed to the next launch's fingerprint sweep
         record_followup("bytecode_sweep", str(exc) or type(exc).__name__)
-    try:
-        _m()._refresh_bootstrap_cache_scripts(branch)
-    except Exception as exc:  # health: allow BLE001 -- refreshed again by the next update
-        record_followup("bootstrap_scripts", str(exc) or type(exc).__name__,
-                        retry="the next `hermes update` refreshes them")
 
 
 def _profile_skill_sync_status(r) -> str:

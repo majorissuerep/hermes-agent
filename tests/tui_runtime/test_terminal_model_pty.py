@@ -169,7 +169,8 @@ def test_public_ink_model_picker_and_scoped_switches(tmp_path, monkeypatch, lazy
     thread.start()
     url = f"http://127.0.0.1:{server.server_port}/v1"
     save_env_value("MODEL_PTY_KEY", "synthetic-fixture-key")
-    save_config({"model": {"provider": "custom:fixture", "default": "fixture-alpha",
+    save_config({"onboarding": {"profile_build": "off"},
+        "model": {"provider": "custom:fixture", "default": "fixture-alpha",
             "base_url": url, "context_length": 64000},
         "providers": {"fixture": {"name": "Fixture Endpoint", "base_url": url,
             "key_env": "MODEL_PTY_KEY", "api_mode": "chat_completions",

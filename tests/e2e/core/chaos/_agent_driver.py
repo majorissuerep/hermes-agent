@@ -29,6 +29,9 @@ def _emit(**payload: object) -> None:
 
 
 def main(spec_path: str) -> None:
+    from hermes_security.handoff import adopt_inherited_key
+
+    assert adopt_inherited_key()
     spec = json.loads(open(spec_path, encoding="utf-8").read())
 
     from hermes_cli.config import load_config

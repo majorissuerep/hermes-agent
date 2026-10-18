@@ -26,7 +26,8 @@ from pathlib import Path
 from typing import Callable
 
 from tests.e2e.core.terminal._vt import Screen
-from tests.fakes.fake_llm_provider import FakeLLMServer, write_hermes_home
+from tests.fakes.fake_llm_provider import FakeLLMServer
+from tests.e2e.vault_home import connect_state, spawn_unlocked, write_encrypted_home
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 
@@ -112,7 +113,7 @@ class PtyHermes:
         assert operator not in (self.hermes_home.resolve(), *self.hermes_home.resolve().parents), (
             f"sandbox {self.hermes_home} sits inside the operator's Hermes home")
         if llm is not None:
-            write_hermes_home(self.hermes_home, llm.base_url, extra_config=extra_config)
+            write_encrypted_home(self.hermes_home, llm.base_url, extra_config=extra_config)
         self.llm = llm
         self.screen = Screen(rows, cols)
         self.raw = bytearray()
@@ -123,13 +124,13 @@ class PtyHermes:
         env.update(
             HOME=str(self.home), HERMES_HOME=str(self.hermes_home), PYTHONPATH=str(REPO_ROOT),
             TMPDIR=str(root / "tmp"), TERM="xterm-256color", COLORTERM="truecolor",
-            PYTHONUNBUFFERED="1", HERMES_STATE_DB_GUARD_BYPASS="1", HERMES_ALLOW_NO_VAULT="1",
+            PYTHONUNBUFFERED="1", HERMES_STATE_DB_GUARD_BYPASS="1",
         )
         master, slave = os.openpty()
         self._set_winsize(master, rows, cols)
         self.master = master
         self.pts = os.ttyname(slave)
-        self.proc = subprocess.Popen(
+        self.proc = spawn_unlocked(
             [sys.executable, "-c", _SESSION_LEADER, sys.executable, "-m", "hermes_cli.main", *argv_tail],
             stdin=slave, stdout=slave, stderr=slave, cwd=str(root / "work"), env=env,
             start_new_session=True, close_fds=True)
@@ -285,16 +286,13 @@ class PtyHermes:
     def leftover_processes(self, timeout: float = 15.0) -> list[str]:
         """Processes still alive in the child's session, or seen as its descendants, after exit.
 
-        The profile's ``gateway run`` is not a leftover: ``hermes chat`` attaches to it and it
-        keeps serving (cron, messaging, the next client) after the client exits; ``close()`` still
-        tears it down with the rest of this harness's tree."""
-        from gateway.status import looks_like_gateway_command_line
+        Every owned descendant must close; there is no persistent management daemon."""
 
         def alive() -> list[int]:
             pids = set(session_members(self.sid))
             # Same pid AND same start time: a recycled pid is not our leftover.
             pids |= {pid for pid, started in self.seen_members if _start_time(pid) == started}
-            return sorted(pid for pid in pids if not looks_like_gateway_command_line(cmdline(pid)))
+            return sorted(pids)
         try:
             poll(lambda: not alive(), timeout=timeout, what="the PTY session to empty")
         except AssertionError:
@@ -347,7 +345,7 @@ class PtyHermes:
         db = self.hermes_home / "state.db"
         if not db.exists():
             return []
-        conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+        conn = connect_state(db)
         try:
             rows = conn.execute(
                 "SELECT session_id, role, COALESCE(content, '') FROM messages "

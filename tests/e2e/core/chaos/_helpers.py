@@ -1,7 +1,7 @@
 """Shared oracle helpers for the chaos (agent-turn liveness) E2E lane.
 
 The chaos suites drive a REAL Hermes surface (AIAgent child process, GatewayRunner,
-tui_gateway JSON-RPC subprocess) against ``tests/fakes/fake_llm_provider`` in a fault
+tui_runtime JSON-RPC subprocess) against ``tests/fakes/fake_llm_provider`` in a fault
 mode and then check the same liveness invariants everywhere:
 
 * bounded termination — the turn ends (answer or surfaced error) within the
@@ -20,7 +20,7 @@ from __future__ import annotations
 import json
 import os
 import signal
-import sqlite3
+from tests.e2e.vault_home import connect_state, seal_fixture_home
 import sys
 import time
 import uuid
@@ -105,6 +105,7 @@ def write_chaos_home(root: Path, base_url: str, **cfg: Any) -> tuple[Path, Path]
     hermes_home.mkdir(parents=True, exist_ok=True)
     (hermes_home / "config.yaml").write_text(chaos_config(base_url, **cfg), encoding="utf-8")
     (hermes_home / ".env").write_text("OPENAI_API_KEY=sk-fake-chaos\n", encoding="utf-8")
+    seal_fixture_home(hermes_home)
     return home, hermes_home
 
 
@@ -129,7 +130,7 @@ def hermetic_env(home: Path, hermes_home: Path, tag: str) -> dict[str, str]:
         "CHAOS_TAG": tag,
         # HOME *is* the tmp root, so the live-DB guard (pytest ancestry) would read the
         # tmp state.db as "production"; the documented child opt-out is safe here.
-        "HERMES_STATE_DB_GUARD_BYPASS": "1", "HERMES_ALLOW_NO_VAULT": "1",
+        "HERMES_STATE_DB_GUARD_BYPASS": "1",
         "TZ": "UTC",
         "NO_COLOR": "1",
     })
@@ -259,9 +260,8 @@ def persisted_messages(state_db: Path, session_id: str | None = None) -> list[di
     """Active message rows from a real state.db, oldest first, OpenAI-shaped.
 
     With ``session_id=None`` the newest session that has messages is used."""
-    conn = sqlite3.connect(f"file:{state_db}?mode=ro", uri=True, timeout=10)
+    conn = connect_state(state_db)
     try:
-        conn.row_factory = sqlite3.Row
         if session_id is None:
             row = conn.execute(
                 "SELECT session_id FROM messages ORDER BY id DESC LIMIT 1").fetchone()
@@ -285,7 +285,7 @@ def persisted_messages(state_db: Path, session_id: str | None = None) -> list[di
 
 
 def integrity_ok(state_db: Path) -> str:
-    conn = sqlite3.connect(f"file:{state_db}?mode=ro", uri=True, timeout=10)
+    conn = connect_state(state_db)
     try:
         return conn.execute("PRAGMA integrity_check").fetchone()[0]
     finally:

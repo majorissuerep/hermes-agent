@@ -171,7 +171,7 @@ class TestRoutedForeignHomeScope:
         guard the desktop backend and routed turns use) installs the home override +
         secret scope together. Inside it, a miss must not borrow launch env, while
         the foreign profile's own .env resolves and the adapter-facing reader agrees."""
-        from tui_runtime.model_switch import _session_profile_runtime_scope
+        from tui_runtime.server import _session_profile_runtime_scope
 
         foreign = tmp_path / "profiles" / "team_b"
         foreign.mkdir(parents=True)
@@ -208,7 +208,7 @@ class TestScopeSetupRecovery:
     the caller's context."""
 
     def test_profile_runtime_scope_setup_failure_restores_override(self, monkeypatch, tmp_path):
-        from tui_runtime.model_switch import _session_profile_runtime_scope
+        from tui_runtime.server import _session_profile_runtime_scope
         from hermes_constants import get_hermes_home_override
 
         foreign = tmp_path / "profiles" / "b"
@@ -217,7 +217,7 @@ class TestScopeSetupRecovery:
         def boom(home):
             raise RuntimeError("corrupt profile home")
 
-        monkeypatch.setattr("agent.secret_scope.build_profile_secret_scope", boom)
+        monkeypatch.setattr("tui_runtime.server.build_profile_secret_scope", boom)
         with pytest.raises(RuntimeError):
             with _session_profile_runtime_scope({"profile_home": str(foreign)}, hydrate_secrets=False):
                 pass

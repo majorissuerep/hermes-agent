@@ -105,7 +105,48 @@ def _build_provider_env_blocklist() -> frozenset:
 _PROVIDER_ENV_BLOCKLIST = _build_provider_env_blocklist()
 # Historical installs may leave these credentials in their environment. They remain
 # stripped as data, without loading or supporting any retired adapter.
-_RETIRED_SECRET_ENV = frozenset(['API_SERVER_KEY', 'BLUEBUBBLES_PASSWORD', 'BUZZ_AUTH_TAG', 'BUZZ_PRIVATE_KEY', 'DINGTALK_CLIENT_SECRET', 'DISCORD_BOT_TOKEN', 'EMAIL_PASSWORD', 'FEISHU_APP_SECRET', 'FEISHU_ENCRYPT_KEY', 'FEISHU_VERIFICATION_TOKEN', 'MATRIX_ACCESS_TOKEN', 'MATRIX_PASSWORD', 'MATTERMOST_TOKEN', 'MSGRAPH_CLIENT_SECRET', 'MSGRAPH_WEBHOOK_CLIENT_STATE', 'QQ_CLIENT_SECRET', 'QQ_STT_API_KEY', 'SLACK_BOT_TOKEN', 'TELEGRAM_BOT_TOKEN', 'TWILIO_AUTH_TOKEN', 'WEBHOOK_SECRET', 'WECOM_CALLBACK_CORP_SECRET', 'WECOM_CALLBACK_ENCODING_AES_KEY', 'WECOM_CALLBACK_TOKEN', 'WECOM_SECRET', 'WEIXIN_TOKEN', 'WHATSAPP_CLOUD_ACCESS_TOKEN', 'WHATSAPP_CLOUD_APP_SECRET', 'WHATSAPP_CLOUD_VERIFY_TOKEN', 'YUANBAO_APP_KEY', 'YUANBAO_APP_SECRET'])
+_RETIRED_SECRET_ENV = frozenset({
+    'A2A_PUSH_SECRET',
+    'API_SERVER_KEY',
+    'BLUEBUBBLES_PASSWORD',
+    'BUZZ_AUTH_TAG',
+    'BUZZ_PRIVATE_KEY',
+    'BUZZ_RELAY_URL',
+    'DINGTALK_CLIENT_SECRET',
+    'DISCORD_BOT_TOKEN',
+    'EMAIL_PASSWORD',
+    'FEISHU_APP_SECRET',
+    'FEISHU_ENCRYPT_KEY',
+    'FEISHU_VERIFICATION_TOKEN',
+    'GATEWAY_ALLOW_ALL_USERS',
+    'HASS_TOKEN',
+    'HASS_URL',
+    'MATRIX_ACCESS_TOKEN',
+    'MATRIX_PASSWORD',
+    'MATTERMOST_TOKEN',
+    'MSGRAPH_CLIENT_SECRET',
+    'MSGRAPH_WEBHOOK_CLIENT_STATE',
+    'PHOTON_SIDECAR_TOKEN',
+    'QQ_CLIENT_SECRET',
+    'QQ_STT_API_KEY',
+    'SLACK_BOT_TOKEN',
+    'TEAMS_GRAPH_ACCESS_TOKEN',
+    'TEAMS_INCOMING_WEBHOOK_URL',
+    'TELEGRAM_BOT_TOKEN',
+    'TELEGRAM_WEBHOOK_SECRET',
+    'TWILIO_AUTH_TOKEN',
+    'WEBHOOK_SECRET',
+    'WECOM_CALLBACK_CORP_SECRET',
+    'WECOM_CALLBACK_ENCODING_AES_KEY',
+    'WECOM_CALLBACK_TOKEN',
+    'WECOM_SECRET',
+    'WEIXIN_TOKEN',
+    'WHATSAPP_CLOUD_ACCESS_TOKEN',
+    'WHATSAPP_CLOUD_APP_SECRET',
+    'WHATSAPP_CLOUD_VERIFY_TOKEN',
+    'YUANBAO_APP_KEY',
+    'YUANBAO_APP_SECRET',
+})
 _HERMES_PROVIDER_ENV_BLOCKLIST = _PROVIDER_ENV_BLOCKLIST | _RETIRED_SECRET_ENV
 
 
@@ -126,51 +167,6 @@ def _is_provider_env_blocklisted(name: str, _registered: frozenset | None = None
     if name in _HERMES_PROVIDER_ENV_BLOCKLIST or upper in _HERMES_PROVIDER_ENV_BLOCKLIST:
         return True
     return False
-
-
-# First-party platform credentials (``BUZZ_*``, driving the platform-mandated ``buzz``
-# CLI) carved out of the TERMINAL scrub only (``_make_run_env``,
-# ``_sanitize_subprocess_env``); execute_code, hermes_subprocess_env, docker and
-# env_passthrough registration stay sealed (GHSA-rhgp-j443-p4rf). CONTEXT-GATED via
-# ``_buzz_terminal_context_active``: a Telegram/CLI/cron session on a host that also
-# runs a Buzz gateway must not get the signing key. Values are used directly, never
-# scope-resolved (UnscopedSecretError under multiplex); the snapshot treats them as
-# profile-scoped. Prefix-based so future BUZZ_* names need no code change.
-# First-party platform credentials the agent's own platform adapters need in terminal children (e.g. the
-# ``BUZZ_*`` vars for the Buzz messaging platform, which drive the platform-mandated ``buzz`` CLI:
-# BUZZ_PRIVATE_KEY, BUZZ_AUTH_TAG, BUZZ_RELAY_URL, and the other BUZZ_* names). These are the agent's OWN
-# credentials — a Buzz community agent is expected to operate the ``buzz`` CLI — so they are carved out of
-# the terminal scrub. CONTEXT-GATED: the carve-out applies ONLY when this process/session is actually
-# operating as a Buzz agent — either the process is a Buzz-ACP managed agent (``BUZZ_MANAGED_AGENT`` is set,
-# only by Buzz Desktop's buzz-acp harness; see #76243 / #78511) or the current session's platform is
-# ``buzz`` (the gateway's ``HERMES_SESSION_PLATFORM`` ContextVar; concurrency safe under a multi-session
-# host). A Telegram/CLI/cron session on a host that also runs a Buzz gateway does NOT get BUZZ_PRIVATE_KEY
-# in its terminal children — blanket passthrough of a signing key to every terminal child on the host would
-# be wrong (maintainer triage note on #76243: don't expose the key to unrelated shell commands).
-# ``_sanitize_subprocess_env`` is also consumed by search workers (e.g. the ddgs web-search subprocess), the
-# computer-use driver binary, and user-script runners (bang ``!`` commands, quick commands, cron scripts,
-# webhook-filter scripts), so those children receive the vars too — matching the approved background/PTY
-# scope. Every other surface stays sealed — execute_code scrubbing, :func:`hermes_subprocess_env` (browser /
-# TUI host / copilot-executor spawns), docker children, and ``env_passthrough`` registration (skills/config
-# still cannot register these names). The GHSA-rhgp-j443-p4rf seal is preserved because no registration path
-# is opened; this is a scrub-path exemption, not an allowlist addition. First-party matches use the merged
-# env value directly — they are the process's own env values and are never scope-resolved (a profile secret
-# scope under multiplex would otherwise raise UnscopedSecretError at passthrough-resolution call sites);
-# only skill/config passthrough names resolve through the profile secret scope. The snapshot mechanism
-# treats these names like profile-scoped passthrough names (see
-# ``LocalEnvironment._additional_profile_scoped_passthrough_names``) so they never persist in the shared
-# terminal snapshot across profiles. Contrast with CLAUDE_CODE_OAUTH_TOKEN above, which is discarded from
-# the blocklist entirely because it is NOT a Hermes credential; these ARE Hermes-managed first-party
-# platform credentials, so they stay IN the blocklist for every non-terminal surface. See issue #78026 (Buzz
-# agents could not use ``buzz`` from the terminal tool) and #76243 (Buzz Desktop managed agent wakes but
-# cannot reply).
-_TERMINAL_FIRST_PARTY_ENV_PREFIXES = ("BUZZ_",)
-
-
-
-
-
-
 
 
 # Active-venv markers that must NOT leak: VIRTUAL_ENV/CONDA_PREFIX make uv/poetry sync
@@ -221,7 +217,7 @@ _PROFILE_GATE_ENV_MARKERS = (
 )
 # Gate owners that are not a ``Platform`` value: the cross-platform pairing gate and adapters whose
 # env prefix differs from their platform name (``qqbot`` reads ``QQ_*``).
-_RETIRED_GATE_PREFIXES = frozenset({"GATEWAY", "QQ", "TELEGRAM", "DISCORD", "SLACK", "WHATSAPP", "SIGNAL", "FEISHU", "WEIXIN", "WECOM", "BUZZ"})
+_RETIRED_GATE_PREFIXES = frozenset({"GATEWAY", "IRC", "QQ", "TELEGRAM", "DISCORD", "SLACK", "WHATSAPP", "SIGNAL", "FEISHU", "WEIXIN", "WECOM", "BUZZ"})
 
 
 

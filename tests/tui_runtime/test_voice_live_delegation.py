@@ -86,37 +86,3 @@ class TestSessionCreation:
         with pytest.raises(ValueError):
             voice_live.create_webrtc_session("v=0 offer")
         assert voice_live.resolve_gpt_live_status()["available"] is False
-
-
-class TestVoiceLiveTurnNote:
-    @pytest.fixture
-    def busy_session(self):
-        session = _session()
-        server._sessions["sid"] = session
-        yield session
-        server._sessions.pop("sid", None)
-
-    def test_live_surface_recorded_and_noted_with_spoken_context(self, busy_session):
-        """The persisted row is the user's words; the transcript window reaches the model only."""
-        server._methods["prompt.submit"](
-            "r1", {"session_id": "sid", "text": "what's the weather", "queued": True, "surface": "voice-live",
-                   "voice_context": "Voice assistant: Hi\nUser: what's the weather"})
-
-        assert busy_session["client_surface"] == "voice-live"
-        note = server._hud_surface_note(busy_session)
-        assert note.startswith(voice_live.VOICE_LIVE_TURN_NOTE)
-        assert "User: what's the weather" in note
-
-    def test_voice_context_ignored_off_the_live_surface(self, busy_session):
-        server._methods["prompt.submit"](
-            "r1", {"session_id": "sid", "text": "x", "queued": True, "voice_context": "User: smuggled"})
-
-        assert busy_session["voice_live_context"] == ""
-        assert server._hud_surface_note(busy_session) == ""
-
-    def test_plain_window_submit_clears_the_live_surface(self, busy_session):
-        server._methods["prompt.submit"]("r1", {"session_id": "sid", "text": "x", "queued": True, "surface": "voice-live"})
-        server._methods["prompt.submit"]("r2", {"session_id": "sid", "text": "y", "queued": True})
-
-        assert busy_session["client_surface"] == ""
-        assert server._hud_surface_note(busy_session) == ""

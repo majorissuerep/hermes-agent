@@ -319,11 +319,11 @@ def test_cron_tick_invokes_local_scheduler_once(monkeypatch):
     refused, never spawned for."""
     calls = []
     monkeypatch.setattr("cron.scheduler.tick",
-                        lambda verbose=False: calls.append(verbose))
+                        lambda verbose=False, sync=False: calls.append((verbose, sync)))
 
     cron_cli.cron_tick()
 
-    assert calls == [True]
+    assert calls == [(True, True)]
 
 
 def test_cron_create_failure_returns_nonzero(monkeypatch, capsys):
@@ -488,7 +488,7 @@ class TestSlashCronListLastStatus:
         return capsys.readouterr().out
 
     def test_delivery_failed_names_the_delivery_error(self, tmp_cron_dir, capsys):
-        create_job(prompt="Nightly brief", schedule="every 1h", deliver="telegram:1")
+        create_job(prompt="Nightly brief", schedule="every 1h")
         jobs = load_jobs()
         jobs[0]["last_run_at"] = "2026-09-01T07:00:00+00:00"
         jobs[0]["last_status"] = "delivery_failed"

@@ -66,11 +66,8 @@ _STORE_OPENERS = (
     ("cron.executions", "_connect"),
     ("cron.incidents", "_connect"),
     ("cron.notepad", "_connect"),
-    ("cron.delivery_queue", "_connect"),
-    ("gateway.delivery_ledger", "_connect"),
     ("tools.async_delegation", "_connect"),
     ("hermes_cli.projects_db", "connect"),
-    ("gateway.hosted_rooms_common", "open_sqlite"),
 )
 
 
@@ -87,7 +84,6 @@ def test_every_store_opens_through_the_canonical_open_db(monkeypatch, tmp_path, 
         monkeypatch.setattr(module._executions, "EXECUTIONS_FILE", tmp_path / "executions.db")
     if module_name == "agent.verification_evidence":
         monkeypatch.setattr(module, "_db_path", lambda: tmp_path / "ve.db")
-    if module_name in ("gateway.delivery_ledger", "tools.async_delegation"):
         monkeypatch.setattr(module, "_db_path", lambda: tmp_path / "state.db")
 
     calls = []

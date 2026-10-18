@@ -18,10 +18,9 @@ from tools import approval as approval_mod
 def leaked_presence(monkeypatch):
     monkeypatch.setenv("HERMES_INTERACTIVE", "1")
     monkeypatch.setenv("HERMES_EXEC_ASK", "1")
-    monkeypatch.setenv("HERMES_GATEWAY_SESSION", "1")
+    monkeypatch.setenv("HERMES_SESSION_PLATFORM", "tui")
     monkeypatch.delenv("HERMES_CRON_SESSION", raising=False)
     monkeypatch.delenv("HERMES_SINGLE_QUERY_SESSION", raising=False)
-    monkeypatch.delenv("HERMES_SESSION_PLATFORM", raising=False)
 
 
 def test_cron_context_clears_leaked_presence(monkeypatch, leaked_presence):

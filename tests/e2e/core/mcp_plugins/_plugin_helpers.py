@@ -1,5 +1,5 @@
 """Plugin-side helpers for the MCP + plugin suite: portable (Agent Plugins v1) packages on disk,
-and a ``tui_gateway`` stdio host (the Ink TUI's backend) driven over JSON-RPC in an ``E2EHome``."""
+and a ``tui_runtime`` stdio host (the Ink TUI's backend) driven over JSON-RPC in an ``E2EHome``."""
 
 from __future__ import annotations
 
@@ -14,8 +14,9 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from tests.e2e.core.mcp_plugins._helpers import FIXTURE_SERVER, TURN_TIMEOUT, E2EHome, tagged_pids
-from tests.e2e.core.parity._drive_rpc import READY_TIMEOUT, RpcClient, StreamCapture
-from tests.e2e.core.parity._helpers import terminate
+from tests.e2e.core.mcp_plugins._native_process import READY_TIMEOUT, RpcClient, StreamCapture
+from tests.e2e.core.mcp_plugins._native_process import terminate
+from tests.e2e.vault_home import spawn_unlocked
 
 PLUGIN_SCHEMA = "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json"
 MCP_SCHEMA = "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json"
@@ -73,8 +74,8 @@ class TuiHost:
 
 @contextlib.contextmanager
 def tui_host(eh: E2EHome, env: dict[str, str] | None = None) -> Iterator[TuiHost]:
-    """``python -m tui_gateway.entry`` exactly as the Ink TUI spawns it, in the fake home."""
-    proc = subprocess.Popen([sys.executable, "-m", "tui_gateway.entry"], cwd=eh.project, env=eh.env(env),
+    """``python -m tui_runtime.entry`` exactly as the Ink TUI spawns it, in the fake home."""
+    proc = spawn_unlocked([sys.executable, "-m", "tui_runtime"], cwd=eh.project, env=eh.env(env),
                             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                             text=True, bufsize=1)
     cap = StreamCapture().start(proc)
@@ -86,7 +87,10 @@ def tui_host(eh: E2EHome, env: dict[str, str] | None = None) -> Iterator[TuiHost
 
     try:
         rpc = RpcClient(send, cap.stdout_lines)
-        rpc.wait_event("gateway.ready", timeout=READY_TIMEOUT)
+        try:
+            rpc.wait_event("runtime.ready", timeout=READY_TIMEOUT)
+        except AssertionError as exc:
+            raise AssertionError(f"Local runtime failed startup (rc={proc.poll()}): {cap.stderr[-2000:]}") from exc
         yield TuiHost(proc, cap, rpc)
     finally:
         if proc.poll() is None:

@@ -115,34 +115,3 @@ class TestEntryAndWsWiring:
 
         entry.main()
         assert started["n"] == 1
-
-    def test_handle_ws_starts_heartbeat_refresher(self, monkeypatch):
-        import asyncio
-
-        from tui_runtime import server, ws as ws_mod
-
-        started = {"n": 0}
-        monkeypatch.setattr(
-            server, "_start_backend_heartbeat_refresher",
-            lambda: started.__setitem__("n", started["n"] + 1),
-        )
-        monkeypatch.setattr(server, "resolve_skin", lambda: "default")
-        monkeypatch.setattr(server, "_ensure_skin_watcher", lambda: None)
-        monkeypatch.setattr(server, "register_live_transport", lambda *_a, **_k: None)
-        monkeypatch.setattr(server, "_WS_ORPHAN_REAP_GRACE_S", 0)
-
-        class FakeWS:
-            async def accept(self):
-                pass
-
-            async def send_text(self, line):
-                pass
-
-            async def receive_text(self):
-                raise ws_mod._WebSocketDisconnect()
-
-            async def close(self):
-                pass
-
-        asyncio.run(ws_mod.handle_ws(FakeWS()))
-        assert started["n"] == 1

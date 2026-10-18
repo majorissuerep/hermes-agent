@@ -513,14 +513,6 @@ def register(ctx):
         reloaded = approval.check_all_command_guards(
             "rm -rf /tmp/hermes-approval-transport-fixture-reloaded", "local"
         )
-        gateway_token = approval_context.set_hermes_interactive_context(False)
-        monkeypatch.setenv("HERMES_GATEWAY_SESSION", "1")
-        try:
-            gateway_routed = approval.check_all_command_guards(
-                "rm -rf /tmp/hermes-approval-transport-fixture-gateway", "local"
-            )
-        finally:
-            approval_context.reset_hermes_interactive_context(gateway_token)
         hardline = approval.check_all_command_guards("rm -rf /", "local")
     finally:
         approval_context.reset_hermes_interactive_context(token)
@@ -533,14 +525,12 @@ def register(ctx):
     ]
     assert routed["approved"] is True
     assert reloaded["approved"] is True
-    assert gateway_routed["approved"] is True
     assert records[0]["request_id"]
     assert records[0]["digest"]
     assert records[0]["surface"] == "cli"
     assert records[0]["timeout_seconds"] == 2
-    assert records[2]["surface"] == "gateway"
     assert hardline["approved"] is False
-    assert len(records) == 3
+    assert len(records) == 2
 
 
 def test_hardline_blocks_before_selected_transport(monkeypatch):

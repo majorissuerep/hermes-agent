@@ -58,7 +58,7 @@ def test_retained_result_lookup_does_not_initialize_session_store(tmp_path, monk
     assert not db_path.exists(), "Reading retained results initialized canonical storage"
 
 
-def test_headless_terminal_result_survives_cli_exit(tmp_path, request):
+def test_headless_terminal_result_survives_cli_exit(tmp_path):
     """Real CLI, tool dispatch, shell child and fresh reader; only the LLM is local."""
     home = tmp_path / "profile"
     home.mkdir()
@@ -162,26 +162,17 @@ def test_headless_terminal_result_survives_cli_exit(tmp_path, request):
            "USERPROFILE": str(tmp_path), "TERMINAL_CWD": str(tmp_path),
            "OPENAI_BASE_URL": url, "OPENAI_API_KEY": "local-test-only",
            "PYTHONPATH": str(REPO_ROOT)}
-    # The canonical CLI detaches from a long-lived daemon. Own that daemon in
-    # the fixture so it cannot outlive the temporary profile/SQLite files.
-    from tests.gateway.fixtures.local_recovery_probe import daemon
-    owner = daemon(REPO_ROOT, home, env, barrier=False)
-    owner.__enter__()
-    request.addfinalizer(lambda: owner.__exit__(None, None, None))
+    from tests.e2e.vault_home import seal_fixture_home
+    from tests.e2e.vault_home import run_unlocked
+    seal_fixture_home(home)
+    env.pop("HERMES_ALLOW_NO_VAULT", None)
     try:
-        producer = subprocess.run([
-            sys.executable, "-c",
-            "import cli; cli.main(query='Run the background review', quiet=True, "
-            "oneshot=True, provider='custom', model='test-model', api_key='local-test-only', "
-            f"base_url={url!r}, toolsets='terminal', max_turns=3, ignore_rules=True)",
+        producer = run_unlocked([
+            sys.executable, "-m", "hermes_cli.main", "chat", "-q", "Run the background review", "-Q",
+            "--provider", "custom", "--model", "test-model", "--base-url", url,
+            "--toolsets", "terminal", "--max-turns", "3", "--yolo", "--ignore-rules",
         ], cwd=tmp_path, env=env, stdin=subprocess.DEVNULL,
             capture_output=True, text=True, encoding="utf-8", timeout=60, check=False)
-        # The canonical CLI is a finite client: it exits on its turn's terminal event while
-        # the daemon that owns the child keeps its watcher. The owned completion is admitted
-        # there as a follow-up turn, so the model must stay reachable until it arrives.
-        deadline = time.monotonic() + 30
-        while not follow_ups and time.monotonic() < deadline:
-            time.sleep(0.1)
     finally:
         release.touch()
         server.shutdown()
@@ -193,16 +184,14 @@ def test_headless_terminal_result_survives_cli_exit(tmp_path, request):
     assert len(observed) == 1, (observed, producer.stdout, producer.stderr)
     process_id = observed[0]["session_id"]
     assert observed[0].get("notify_on_complete") is True, observed
-    # The owned notify_on_complete completion resumes as ONE follow-up turn on the owning
-    # daemon session, carrying the child's real output and exit code to the model. It is an
-    # [IMPORTANT: Background process ...] event, not an [ASYNC DELEGATION ...] event, and the
-    # same history entry can appear in several provider requests without being delivered twice.
-    assert len(follow_ups) == 1, follow_ups
-    assert follow_ups[0].startswith(f"[IMPORTANT: Background process {process_id} exited (exit code 7).")
-    assert "SYNTHETIC_REVIEW_COMPLETE" in follow_ups[0]
+    # A finite local owner does not start an autonomous daemon follow-up turn.
+    # Completion remains a durable, explicitly retrieved result, not a replay.
+    assert follow_ups == []
 
     consumer = textwrap.dedent('''
         import json, sys
+        from hermes_security.handoff import adopt_inherited_key
+        adopt_inherited_key()
         import tools.process_registry as pr
         from tools.registry import registry
         result = registry.get_entry("process_manage").handler(
@@ -213,13 +202,16 @@ def test_headless_terminal_result_survives_cli_exit(tmp_path, request):
                           "replayed": not pr.process_registry.completion_queue.empty()}))
     ''')
     def read_result(profile):
-        result = subprocess.run([sys.executable, "-c", consumer, process_id],
+        result = run_unlocked([sys.executable, "-c", consumer, process_id],
                                 cwd=tmp_path, env={**env, "HERMES_HOME": str(profile)},
                                 check=True, stdin=subprocess.DEVNULL, capture_output=True,
                                 text=True, encoding="utf-8", timeout=30)
         return json.loads(result.stdout)
 
-    receipt = json.loads((home / "logs" / "process-results" / f"{process_id}.json").read_text(encoding="utf-8"))
+    from hermes_security import io as state_io
+    receipt_path = home / "logs" / "process-results" / f"{process_id}.json"
+    assert b"SYNTHETIC_REVIEW_COMPLETE" not in receipt_path.read_bytes()
+    receipt = state_io.read_json(receipt_path, purpose="state")
     assert receipt["parent_session_id"]  # CLI owner must be stamped before its reader starts.
     env["HERMES_SESSION_ID"] = receipt["parent_session_id"]
     recovered = read_result(home)
@@ -228,7 +220,10 @@ def test_headless_terminal_result_survives_cli_exit(tmp_path, request):
     assert "SYNTHETIC_REVIEW_COMPLETE" in recovered["result"]["output"]
     assert "review stderr" in recovered["result"]["output"]
     assert recovered["replayed"] is False
-    assert read_result(tmp_path / "other-profile")["result"]["status"] == "not_found"
+    other_home = tmp_path / "other-profile"
+    other_home.mkdir()
+    seal_fixture_home(other_home)
+    assert read_result(other_home)["result"]["status"] == "not_found"
 
 
 def test_receipts_are_bounded_redacted_and_session_scoped(tmp_path, monkeypatch):
@@ -243,6 +238,9 @@ def test_receipts_are_bounded_redacted_and_session_scoped(tmp_path, monkeypatch)
     from agent.session_context import scoped_current_session_id
     from tools.process_registry_results import load_completed_results
     monkeypatch.setenv("HERMES_SESSION_ID", "owner-session")
+    from hermes_constants import get_hermes_home
+    from tests.e2e.vault_home import seal_fixture_home
+    seal_fixture_home(get_hermes_home())
     sessions = []
     registry = ProcessRegistry()
     for index in range(3):
@@ -260,11 +258,8 @@ def test_receipts_are_bounded_redacted_and_session_scoped(tmp_path, monkeypatch)
     from hermes_constants import get_hermes_home
     paths = list((get_hermes_home() / "logs" / "process-results").glob("*.json"))
     assert len(paths) == 2
-    assert all(secret not in path.read_text(encoding="utf-8") for path in paths)
-    for path in paths:
-        raw = path.read_bytes()
-        assert not raw.startswith(b"\xef\xbb\xbf")
-        path.write_bytes(b"\xef\xbb\xbf" + raw)
+    assert all(path.read_bytes().startswith(b"HRMVAULT\x00") for path in paths)
+    assert all(secret.encode() not in path.read_bytes() for path in paths)
     fresh = ProcessRegistry()
     assert fresh.get(sessions[0].id) is None
     recovered = fresh.get(sessions[-1].id)
@@ -303,6 +298,8 @@ def test_receipts_are_bounded_redacted_and_session_scoped(tmp_path, monkeypatch)
     # Multiplex readers must keep the producer's profile on native threads.
     from hermes_constants import set_hermes_home_override, reset_hermes_home_override
     profile = tmp_path / "thread-profile"
+    profile.mkdir()
+    seal_fixture_home(profile)
     token = set_hermes_home_override(profile)
     try:
         with scoped_current_session_id("thread-owner"):

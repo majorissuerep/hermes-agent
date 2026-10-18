@@ -39,6 +39,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 import pytest
+from tests.e2e.vault_home import spawn_unlocked
 
 from tests.e2e.core.chaos._helpers import (
     API_MAX_RETRIES,
@@ -342,7 +343,7 @@ class Run:
         env = hermetic_env(home, hermes_home, self.tag)
         env["TERMINAL_CWD"] = str(work)
         stderr = open(self.root / "driver.stderr", "wb")
-        self.proc = subprocess.Popen(
+        self.proc = spawn_unlocked(
             [python_exe(), "-m", "tests.e2e.core.chaos._agent_driver", str(spec)],
             cwd=str(work), env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=stderr,
         )

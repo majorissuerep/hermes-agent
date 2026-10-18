@@ -16,7 +16,6 @@ def layout(tmp_path, monkeypatch):
     home = user / "hermes-data"
     source = home / "workspace" / "custom-source"
     store = home / "machine" / "tool-store"
-    userdata = user / "desktop-data"
     witnesses = [source / "hermes_cli" / "__init__.py", store / "python" / "python.exe",
                  home / "installs" / "other-install" / "facts.json", home / "bin" / "hermes.cmd",
                  home / "profiles" / "sibling" / "config.yaml",
@@ -34,7 +33,6 @@ def layout(tmp_path, monkeypatch):
     monkeypatch.setenv("HERMES_RUNTIME_DIR", str(store))
     monkeypatch.setattr(uninstall, "get_project_root", lambda: source)
     monkeypatch.setattr(uninstall, "get_hermes_home", lambda: home)
-    monkeypatch.setattr("hermes_cli.gui_uninstall.desktop_userdata_dir", lambda: userdata)
     return home, witnesses, data
 
 
@@ -156,3 +154,35 @@ def test_data_only_works_from_a_self_contained_runtime_without_an_app(layout, mo
     uninstall.run_data_uninstall(SimpleNamespace(yes=True))
     assert all(not path.exists() for path in data)
     assert (project / "install-stamp.json").is_file() and (package / "venv").is_dir()
+
+
+@pytest.mark.platforms("posix")
+def test_data_wipe_preserves_the_held_maintenance_lock_inode(layout, monkeypatch):
+    from hermes_cli import data_cleanup
+    from hermes_state.runtime_ownership import OwnershipConflict, ProfileOwnership
+    home, _, _ = layout
+    lock = home / "runtime.lock"
+    lock.touch()
+    inode = lock.stat().st_ino
+    real_remove = data_cleanup.remove_data
+    observed = []
+
+    def remove_while_fenced(plan):
+        result = real_remove(plan)
+        contender = ProfileOwnership()
+        try:
+            with pytest.raises(OwnershipConflict):
+                contender.reserve([home])
+            observed.append(lock.stat().st_ino)
+        finally:
+            contender.close()
+        return result
+
+    monkeypatch.setattr(data_cleanup, "remove_data", remove_while_fenced)
+    uninstall.run_data_uninstall(SimpleNamespace(yes=True))
+    assert observed == [inode] and lock.stat().st_ino == inode
+    contender = ProfileOwnership()
+    try:
+        contender.reserve([home])
+    finally:
+        contender.close()

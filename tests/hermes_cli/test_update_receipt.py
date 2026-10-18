@@ -15,6 +15,8 @@ import sys
 from types import SimpleNamespace
 
 import pytest
+from tests.hermes_cli.update_test_support import isolated_command_checkout as isolated_command_checkout  # noqa: PLC0414 -- register the shared autouse fixture
+
 
 import hermes_cli.update_receipt as ur
 from hermes_cli import update_cmd, update_cmd_maint
@@ -192,12 +194,12 @@ class TestCommandBoundaryFinalization:
 
         from hermes_cli import main as hermes_main
 
-        def _fake_impl(args, gateway_mode):
+        def _fake_impl(args, gateway_mode=False):
             ur.begin_update_receipt()
             ur.record_step("windows_preflight", False, "hermes.exe holds venv")
             sys.exit(2)
 
-        monkeypatch.setattr(update_cmd, "_cmd_update_impl", _fake_impl)
+        monkeypatch.setattr("hermes_cli.terminal_update.update_source", _fake_impl)
         monkeypatch.setattr(
             hermes_main, "detect_install_method", lambda *a, **k: "git", raising=False
         )

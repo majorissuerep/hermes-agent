@@ -401,9 +401,6 @@ def _background_agent_kwargs(agent, task_id: str) -> dict:
         "side_agent": True}
 
 
-def _ephemeral_preview_agent_kwargs(agent, task_id: str) -> dict:
-    return {**_background_agent_kwargs(agent, task_id),
-            "enabled_toolsets": ["terminal", "file"], "session_db": None, "skip_memory": True}
 
 
 @contextlib.contextmanager
@@ -425,89 +422,12 @@ def _side_agent_session_db(parent_db):
         release_or_close(db)
 
 
-def _preview_restart_history(session: dict, max_messages: int = 24, max_tool_chars: int = 1200) -> list[dict]:
-    """Distill recent parent history for the ephemeral preview-restart agent (else it guesses
-    app/cwd/port from the bare URL): last ``max_messages`` back to the last user turn, tool
-    results truncated to ``max_tool_chars``."""
-    try:
-        with session["history_lock"]:
-            history = list(session.get("history") or [])
-    except Exception:
-        history = list(session.get("history") or [])
-    if not history:
-        return []
-    last_user = next((i for i in range(len(history) - 1, -1, -1) if history[i].get("role") == "user"), None)
-    start = max(0, len(history) - max_messages)
-    if last_user is not None:
-        start = min(start, last_user)
-    trimmed: list[dict] = []
-    for msg in history[start:]:
-        if not isinstance(msg, dict) or msg.get("role") not in ("user", "assistant", "tool", "system"):
-            continue
-        copy = {k: v for k, v in msg.items() if k != "reasoning"}
-        content = copy.get("content")
-        if msg.get("role") == "tool" and isinstance(content, str) and len(content) > max_tool_chars:
-            copy["content"] = content[:max_tool_chars] + f"\n... (truncated, original {len(content)} chars)"
-        trimmed.append(copy)
-    return trimmed
 
 
-def _preview_tool_result_preview(name: str, result: str) -> str:
-    try:
-        data = json.loads(result)
-    except Exception:
-        data = None
-    if not isinstance(data, dict):
-        return ""
-    if name == "terminal":
-        if output := str(data.get("output") or "").strip():
-            return output[-1200:]
-        if data.get("session_id"):
-            return f"Background process started: {data.get('session_id')}"
-        if data.get("exit_code") is not None:
-            return f"terminal exited with code {data.get('exit_code')}"
-    return str(data.get("error") or "").strip()[:1200]
 
 
-def _preview_restart_callbacks(parent: str, task_id: str) -> dict:
-    started_at: dict[str, float] = {}
-
-    def progress(message: str, level: str = "info") -> None:
-        if text := str(message or "").strip():
-            _emit("preview.restart.progress", parent, {"task_id": task_id, "level": level, "text": text})
-
-    def tool_start(tool_call_id: str, name: str, args: dict) -> None:
-        started_at[tool_call_id] = time.time()
-        ctx = _tool_ctx(name, args)
-        progress(f"Running {name}{f': {ctx}' if ctx else ''}")
-
-    def tool_complete(tool_call_id: str, name: str, _args: dict, result: str) -> None:
-        duration_s = time.time() - started_at.get(tool_call_id, time.time())
-        summary = _tool_summary(name, result, duration_s) or f"Finished {name}{f' in {_fmt_tool_duration(duration_s)}' if duration_s else ''}"
-        output = _preview_tool_result_preview(name, result)
-        progress(summary + (f"\n{output}" if output else ""))
-
-    def tool_progress(event_type: str, name: str | None = None, preview: str | None = None, **_kwargs) -> None:
-        if preview or name:
-            progress(str(preview) if preview else f"{event_type.replace('.', ' ')}: {name}")
-
-    _restart_status = _restart_status_factory(parent, progress)
-    return {
-        "tool_start_callback": tool_start, "tool_complete_callback": tool_complete,
-        "tool_progress_callback": tool_progress,
-        "tool_gen_callback": lambda name: progress(f"Preparing {name}"),
-        "status_callback": _restart_status}
 
 
-def _restart_status_factory(parent: str, progress):
-    """Restart-panel status rows: automatic warnings honor the TUI policy like the main agent's sink."""
-    def _restart_status(kind, text=None):
-        from agent.warning_notifications import is_warning_status
-        message = text if text is not None else kind
-        if is_warning_status(kind, message) and not _agent_presentation_enabled(parent, diagnostic=True):
-            return
-        progress(message)
-    return _restart_status
 
 
 def _rebuild_session_agent(sid: str, session: dict, **kwargs):

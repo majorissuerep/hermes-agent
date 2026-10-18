@@ -765,7 +765,7 @@ def _apply_request_middleware(
 def _pre_dispatch_guards(function_name: str, function_args: dict[str, Any], skip_pre_tool_call_hook: bool,
                          ids: _CallIds, middleware_trace: list[dict[str, Any]],
                          ) -> tuple[dict[str, Any], Optional[tuple[Any, str, Optional[str]]]]:
-    """Plugin pre_tool_call hook, then ACP edit approval.
+    """Apply the native pre-tool hook before dispatch.
 
     ``(args, None)`` to proceed (args possibly plugin-modified), or
     ``(args, (result, error_type, error_message))`` when blocked.
@@ -786,17 +786,6 @@ def _pre_dispatch_guards(function_name: str, function_args: dict[str, Any], skip
         if block_message is not None:
             return function_args, (tool_error(block_message), "plugin_block", block_message)
 
-    # ACP/Zed edit approval before any file mutation. The requester is bound
-    # via ContextVar only for ACP sessions, so CLI/gateway paths are unaffected.
-    try:
-        from acp_adapter.edit_approval import maybe_require_edit_approval
-        edit_block_message = maybe_require_edit_approval(function_name, function_args)
-        if edit_block_message is not None:
-            return function_args, (edit_block_message, "edit_approval_denied", None)
-    except Exception as _edit_approval_err:
-        logger.debug("ACP edit approval guard error: %s", _edit_approval_err)
-        if function_name in {"write_file", "patch"}:
-            return function_args, (tool_error("Edit approval denied: approval guard failed"), "edit_approval_error", None)
     return function_args, None
 
 

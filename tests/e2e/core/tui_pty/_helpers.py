@@ -16,7 +16,6 @@ the tmux server and every process of the pane's session by session id, never by 
 from __future__ import annotations
 
 import contextlib
-import json
 import os
 import re
 import shlex
@@ -38,7 +37,7 @@ import pytest
 from tests.e2e.core._pending_fixes import known_failure
 from tests.e2e.core.terminal._pty import cmdline, poll, session_members
 from tests.e2e.core.terminal._vt import Screen
-from tests.fakes.fake_llm_provider import write_hermes_home
+from tests.e2e.vault_home import connect_state, fixture_password, write_encrypted_home
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 TITLE = "Scripted session title"
@@ -238,7 +237,7 @@ class TmuxTui:
             sock = Path(self._sock_dir) / "s"
         self.sock = str(sock)
         if write_home:
-            write_hermes_home(self.hermes_home, base_url, extra_config=BASE_CONFIG + extra_config)
+            write_encrypted_home(self.hermes_home, base_url, extra_config=BASE_CONFIG + extra_config)
         for sub in ("tmp", "work"):
             (root / sub).mkdir(parents=True, exist_ok=True)
         conf = root / "tmux.conf"
@@ -250,10 +249,9 @@ class TmuxTui:
                if not k.startswith(("HERMES_", "TMUX", "OPENAI_", "OPENROUTER_", "ANTHROPIC_"))}
         env.update(HOME=str(self.home), HERMES_HOME=str(self.hermes_home), PYTHONPATH=str(REPO_ROOT),
                    TMPDIR=str(root / "tmp"), LANG="C.UTF-8", LC_ALL="C.UTF-8", PYTHONUNBUFFERED="1",
-                   HERMES_STATE_DB_GUARD_BYPASS="1", HERMES_ALLOW_NO_VAULT="1", HERMES_TUI_INLINE="1" if inline else "0",
+                   HERMES_STATE_DB_GUARD_BYPASS="1", HERMES_TUI_INLINE="1" if inline else "0",
                    HERMES_TUI_DIR=str(tui_dir or private_tui_dir(root)))
         env.update(env_extra or {})
-        self._gateway_home = env["HERMES_HOME"]  # env_extra may point several TUIs at one home
         argv = [sys.executable, "-m", "hermes_cli.main", "--tui", *args]
         subprocess.run(["tmux", "-S", self.sock, "-f", str(conf), "new-session", "-d", "-s", "p",
                         "-x", str(cols), "-y", str(rows), "-c", str(root / "work"), *argv],
@@ -269,6 +267,13 @@ class TmuxTui:
         self._zombie_since = self._reap_nudged = 0.0
         self.reap_nudges = 0
         self.seen: set[int] = set()
+        password = fixture_password(Path(env["HERMES_HOME"]))
+        poll(lambda: "Unlock master password:" in "\n".join(self.rows()),
+             timeout=60, what="public vault unlock prompt")
+        subprocess.run(["tmux", "-S", self.sock, "load-buffer", "-b", "vault-unlock", "-"],
+                       input=password.encode(), check=True, timeout=10, capture_output=True)
+        self.tmux("paste-buffer", "-b", "vault-unlock", "-d", "-t", "p")
+        self.tmux("send-keys", "-t", "p", "Enter")
 
     # -- tmux ------------------------------------------------------------------------------------
 
@@ -526,13 +531,6 @@ class TmuxTui:
                     os.kill(pid, signal.SIGKILL)  # windows-footgun: ok — Linux-only suite
                 except (ProcessLookupError, PermissionError):
                     pass
-        # The TUI's auto-spawned gateway daemon detaches from the pane's session: stop it too, so
-        # nothing outlives the test and the next TUI on this home starts cold.
-        with contextlib.suppress(OSError, ValueError, KeyError, ProcessLookupError):
-            lock = json.loads(Path(self._gateway_home, "gateway.lock").read_text())
-            if lock["hermes_home"] == self._gateway_home:
-                os.kill(int(lock["pid"]), signal.SIGTERM)  # windows-footgun: ok — Linux-only suite
-                poll(lambda: not _alive(int(lock["pid"])), timeout=15, what="sandbox gateway exit")
         return survivors
 
     # -- persisted state -------------------------------------------------------------------------
@@ -541,7 +539,7 @@ class TmuxTui:
         db = self.hermes_home / "state.db"
         if not db.exists():
             return []
-        conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=10)
+        conn = connect_state(db)
         try:
             return conn.execute(sql, args).fetchall()
         except sqlite3.OperationalError:

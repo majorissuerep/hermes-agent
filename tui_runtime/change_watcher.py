@@ -222,65 +222,16 @@ def _projects_sig():
         for name in ("projects.db", "projects.db-wal"))
 
 
-def _pairing_sig():
-    """Newest mtime across every profile's pairing ledgers (legacy ``pairing/`` and
-    ``platforms/pairing/``): the gateway process writes pending codes, so the files are the only
-    shared signal (a pairing request moves nothing in gateway_state.json)."""
-    entries = []
-    for root in _pairing_roots(_watcher_home()):
-        with contextlib.suppress(OSError):
-            # Only the ledgers: _rate_limits.json moves on every unauthorized DM.
-            entries += [
-                e for e in root.iterdir() if e.name.endswith(("-pending.json", "-approved.json"))]
-    return _newest_mtime_ns(entries)
 
 
-# Live-profile pairing roots, cached on (home, ``profiles/`` dir mtime) with a TTL. The liveness
-# probe costs ~14 stats per profile; on the 2 s tick that was the watcher's share of the idle
-# profile-tree burn (#114041 §2/§3). The profile SET only moves when a dir is added or removed —
-# which bumps the parent's mtime — while a marker/tombstone landing inside one is caught by the TTL.
-_PAIRING_ROOTS_TTL_S = 30.0
-_pairing_roots_cache: tuple[Path, int | None, float, list] | None = None
 
 
-def _pairing_roots(home: Path) -> list:
-    global _pairing_roots_cache
-    profiles_dir = home / "profiles"
-    dir_mtime, now = _watcher_mtime_ns(profiles_dir), time.monotonic()
-    cached = _pairing_roots_cache
-    if cached is not None and cached[0] == home and cached[1] == dir_mtime and now - cached[2] < _PAIRING_ROOTS_TTL_S:
-        return cached[3]
-    from hermes_constants import named_profile_is_live
-    roots = [home / "pairing", home / "platforms" / "pairing"]
-    with contextlib.suppress(OSError):
-        for profile_dir in profiles_dir.iterdir():
-            if named_profile_is_live(profile_dir):
-                roots += [profile_dir / "pairing", profile_dir / "platforms" / "pairing"]
-    _pairing_roots_cache = (home, dir_mtime, now, roots)
-    return roots
 
 
 # Newest outbox-envelope mtime EVER seen (monotone): a drain empties the outbox,
 # and falling back to None would fire a spurious pending event after every drain.
-_bot_relay_outbox_seen = 0
 
 
-def _bot_relay_outbox_sig():
-    """Newest mtime across pending bot-relay outbox envelopes (monotone). Written by the AGENT
-    process, so the files are the only shared signal; the Desktop reacts with a debounced drain.
-
-    Envelopes are written by the AGENT process (``message_agent`` → ``tools.bot_relay.enqueue_envelope``) —
-    a different process that never touches this gateway's transports — so the files are the only shared
-    signal, exactly like the pairing store. See #92760, #93091.
-    """
-    global _bot_relay_outbox_seen
-    home = _watcher_home()
-    root = home.parent.parent if home.parent.name == "profiles" else home
-    with contextlib.suppress(OSError):
-        for entry in (root / "bot_relay" / "outbox").iterdir():
-            if entry.name.endswith(".json"):
-                _bot_relay_outbox_seen = max(_bot_relay_outbox_seen, _watcher_mtime_ns(entry) or 0)
-    return _bot_relay_outbox_seen or None
 
 
 # event → (check interval, signature fn, payload fn). Signatures are stat-cheap; the interval
@@ -294,11 +245,8 @@ _CHANGE_WATCHES: dict[str, tuple[float, Any, Any]] = {
     # Projects created/switched by CLI or agent tooling write projects.db without any
     # state.db movement, so sessions.changed never fires and the desktop Projects
     # sidebar goes stale until a manual refresh (#56757).
-    "platforms.changed": (2.0, lambda: _home_mtime_ns("gateway_state.json"), dict),
     "projects.changed": (2.0, _projects_sig, dict),
-    "pairing.changed": (2.0, _pairing_sig, dict),
-    # 1s so a queued DM envelope reaches the Desktop's push-triggered drain fast.
-    "bot_relay.outbox.pending": (1.0, _bot_relay_outbox_sig, dict)}
+}
 
 # state.db moves on every append of a streaming turn and gateway_state.json on
 # in-flight bookkeeping; the floor coalesces bursts to one broadcast per window,

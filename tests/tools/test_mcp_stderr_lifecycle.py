@@ -49,9 +49,6 @@ def test_rename_profile_releases_cached_log_handle(tmp_path, monkeypatch):
     home = tmp_path / ".hermes"
     home.mkdir()
     monkeypatch.setenv("HERMES_HOME", str(home))
-    monkeypatch.setattr(profiles, "_cleanup_gateway_service", lambda *_: None)
-    monkeypatch.setattr(profiles, "_notify_multiplexer", lambda *_: None)
-    monkeypatch.setattr(profiles, "_live_default_multiplexer", lambda: False)
     old_dir = profiles.create_profile("mcp-log-old", no_alias=True)
     token = set_hermes_home_override(old_dir)
     try:

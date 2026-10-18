@@ -129,9 +129,11 @@ def _maybe_schedule_auto_continue(sid: str, session: dict, session_key: str) -> 
         except Exception as exc:
             _notif_log_failure("auto-continue dispatch failed", exc)
             _notif_release_turn(session)  # rebound from session_notifications
-    if _start_session_work(kickoff, name=f"auto-continue-{sid}") is None:
+    try:
+        _start_session_work(kickoff, name=f"auto-continue-{sid}")
+    except Exception:
         session["_auto_continue_scheduled"] = False
-        return None
+        raise
     logger.info("auto-continue scheduled for session %s (attempt %d, interrupted %.0fs ago, writer pid %s: %s, "
                 "reader pid %s)", session_key, attempt, age, marker.get("writer_pid"), writer_state, os.getpid())
     return {"attempt": attempt, "interrupted_at": marker["started_at"]}

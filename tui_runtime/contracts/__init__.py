@@ -10,7 +10,7 @@ from . import (
     events,
     i18n,
     liveness,
-    profiles_vault_complete_foreign_subagents,
+    vault_complete_subagents,
     projects_pets,
     prompt_voice,
     server_requests,

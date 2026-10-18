@@ -5,7 +5,6 @@ import time
 
 import pytest
 
-from gateway.hosted_rooms import local_authority_gateway_id
 from hermes_cli import install_identity
 from hermes_cli.install_identity import read_or_create_install_id
 
@@ -112,7 +111,7 @@ def test_independent_first_callers_return_the_single_committed_identity(tmp_path
         "_INSTALL_ID_CACHE",
         {"root": None, "value": None},
     )
-    assert local_authority_gateway_id() == f"install:{persisted}"
+    assert read_or_create_install_id(tmp_path) == persisted
 
 
 def test_concurrent_corrupt_file_repair_returns_one_committed_identity(tmp_path):

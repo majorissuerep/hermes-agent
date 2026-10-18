@@ -5,14 +5,13 @@ adopted as live PIDs. Each producer writes its own file so independent one-shot
 parents cannot overwrite each other's results in the running-PID checkpoint.
 """
 
-import json
 import logging
 import re
 import sqlite3
 import time
 
 from hermes_constants import get_hermes_home
-from utils import atomic_json_write
+from hermes_security import io as state_io
 
 logger = logging.getLogger("tools.process_registry")
 
@@ -60,7 +59,7 @@ def save_completed_result(session) -> None:
         from hermes_constants import assert_named_profile_home_live
         assert_named_profile_home_live(directory)
         directory.mkdir(mode=0o700, parents=True, exist_ok=True)
-        atomic_json_write(directory / f"{session.id}.json", record, mode=0o600)
+        state_io.write_json(directory / f"{session.id}.json", record, purpose="state")
         _result_paths()
     except OSError:
         # Preserve live delivery on disk failure, but never silently claim durability.
@@ -102,7 +101,7 @@ def load_completed_results(prefix: str = "") -> dict:
         if not path.stem.startswith(prefix):
             continue
         try:
-            record = json.loads(path.read_text(encoding="utf-8-sig"))
+            record = state_io.read_json(path, purpose="state")
             if record["id"] != path.stem or not re.fullmatch(r"proc_[\w]+", record["id"]):
                 continue
             if not _owns_result(owner, record.get("parent_session_id")):

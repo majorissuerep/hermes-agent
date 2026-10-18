@@ -43,11 +43,11 @@ def _admit_turn(monkeypatch, tmp_path, session, config_text: str) -> None:
     for name in ("_apply_pending_model_switch", "_sync_agent_model_with_config", "_sync_agent_compression_with_config"):
         monkeypatch.setattr(server, name, lambda sid, session: None)
 
-    def stop(sid, session):
+    def stop(session):
         raise _StopAfterSync()
 
-    monkeypatch.setattr(server, "_sync_bot_capabilities", stop)
-    st = server._TurnRun(agent=None, one_turn_restore=None, terminal_callback=None, receipt_committed=False)
+    monkeypatch.setattr(server, "_adopt_out_of_band_turns", stop)
+    st = server._TurnRun(agent=None, one_turn_restore=None)
     with pytest.raises(_StopAfterSync):
         server._prepare_turn_input("sid", session, st, "hello", [])
 

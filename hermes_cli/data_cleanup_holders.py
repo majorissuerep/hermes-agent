@@ -5,6 +5,11 @@ from contextlib import ExitStack, contextmanager
 from pathlib import Path
 import time
 
+from hermes_state.runtime_ownership import exclusive_maintenance
+from hermes_cli.active_sessions import _FileLock, _prune_dead, _read_entries
+from hermes_cli.runtime_state import _lock
+from tools.checkpoint_pruning import store_lock
+
 
 def _refuse_cron_writers(home: Path) -> None:
     from contextlib import closing
@@ -42,11 +47,6 @@ def _refuse_cron_writers(home: Path) -> None:
 @contextmanager
 def quiescent_home(home: Path):
     """Hold existing writer locks through deletion; do not remove their inodes."""
-    from hermes_state.runtime_ownership import exclusive_maintenance
-    from hermes_cli.active_sessions import _FileLock, _prune_dead, _read_entries
-    from hermes_cli.runtime_state import _lock
-    from tools.checkpoint_pruning import store_lock
-
     home = home.resolve()
     with ExitStack() as stack:
         stack.enter_context(store_lock(home / "checkpoints"))

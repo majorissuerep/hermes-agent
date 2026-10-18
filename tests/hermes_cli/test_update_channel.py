@@ -10,6 +10,8 @@ import json
 from pathlib import Path
 
 import pytest
+from tests.hermes_cli.update_test_support import isolated_command_checkout as isolated_command_checkout  # noqa: PLC0414 -- register the shared autouse fixture
+
 
 from hermes_cli.update_channel import (
     CHANNEL_MAIN,
@@ -239,7 +241,7 @@ class TestSetChannelCLI:
             return _deny
 
         monkeypatch.setattr(
-            "hermes_cli.update_cmd._cmd_update_impl", _sentinel
+            "hermes_cli.terminal_update.update_source", _sentinel
         )
         for name in ("Popen", "run", "call", "check_call", "check_output"):
             monkeypatch.setattr(subprocess, name, _denied(f"subprocess.{name}"))
@@ -355,7 +357,7 @@ class TestSetChannelCLI:
         monkeypatch.setattr(main, "PROJECT_ROOT", tmp_path)
         def unexpected_update(*args, **kwargs):
             pytest.fail("metadata command entered the real updater")
-        monkeypatch.setattr(update_cmd, "_cmd_update_impl", unexpected_update)
+        monkeypatch.setattr("hermes_cli.terminal_update.update_source", unexpected_update)
 
     def test_stable_switch_warns_about_state_without_requiring_a_newer_release(self, tmp_path, monkeypatch, capsys):
         from hermes_cli.main import cmd_update

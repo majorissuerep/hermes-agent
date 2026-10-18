@@ -1,7 +1,7 @@
 """C17 prompt-cache prefix byte-stability + usage accounting across REAL processes and surfaces.
 
 One durable session is driven for 10+ turns through fresh processes of the real entrypoints that
-can continue it — the ``tui_gateway`` stdio JSON-RPC server (what the TUI/Desktop spawn) and the
+can continue it — the ``tui_runtime`` stdio JSON-RPC server (what the TUI/Desktop spawn) and the
 ``hermes chat -q --resume`` oneshot CLI — switching process and working directory between turns,
 with a parallel tool batch and (gateway journeys) one manual ``session.compress`` on the way.
 
@@ -22,12 +22,14 @@ from pathlib import Path
 
 import pytest
 
+from tests.e2e.vault_home import write_encrypted_home
+
 from tests.e2e.core.history._helpers import (
     NO_BACKGROUND_REVIEW,
     OFFLINE_CONFIG,
     Script,
     Spawned,
-    TuiGateway,
+    TuiRuntimeProcess,
     assert_replay_equals_persisted,
     assert_rows_exactly_once,
     assert_usage_matches,
@@ -41,7 +43,7 @@ from tests.e2e.core.history._helpers import (
     tools_breaks,
     views,
 )
-from tests.fakes.fake_llm_provider import FakeLLMServer, Text, ToolCall, write_hermes_home
+from tests.fakes.fake_llm_provider import FakeLLMServer, Text, ToolCall
 
 # A hop is (surface, cwd, turns); a turn is its prompt, "TOOLS:<prompt>" (parallel tool batch
 # first) or "/compress" (gateway only). Every hop is a FRESH process.
@@ -49,7 +51,7 @@ Hop = tuple[str, str, list[str]]
 
 JOURNEYS: dict[str, list[Hop]] = {
     # Same surface, four gateway processes, two cwds, compaction mid-way, resume after it.
-    "tui_gateway_restarts": [
+    "tui_runtime_restarts": [
         ("gw", "a", ["gw1 first turn", "TOOLS:gw1 runs a parallel batch", "gw1 third turn"]),
         ("gw", "b", ["gw2 resumed turn", "gw2 another turn"]),
         ("gw", "a", ["gw3 turn before compress", "/compress", "gw3 turn after compress", "gw3 more"]),
@@ -95,7 +97,7 @@ def world(tmp_path):
     script = Script()
     spawned = Spawned()
     with FakeLLMServer(script) as srv:
-        write_hermes_home(hermes_home, srv.base_url, extra_config=OFFLINE_CONFIG + NO_BACKGROUND_REVIEW)
+        write_encrypted_home(hermes_home, srv.base_url, extra_config=OFFLINE_CONFIG + NO_BACKGROUND_REVIEW)
         yield {"srv": srv, "script": script, "home": home, "hermes_home": hermes_home,
                "cwds": cwds, "spawned": spawned}
         leaked = spawned.reap()
@@ -131,7 +133,7 @@ def run_journey(world: dict, hops: list[Hop]) -> tuple[str, list[tuple[int, str]
         opened_at = len(srv.main_requests())
         env = child_env(world["home"], home, cwd)
         if surface == "gw":
-            with TuiGateway(env, cwd, world["spawned"]) as gw:
+            with TuiRuntimeProcess(env, cwd, world["spawned"]) as gw:
                 live = gw.resume(sid) if sid else gw.create()
                 for turn in turns:
                     if turn == "/compress":

@@ -231,14 +231,8 @@ method("prompt.btw", params=SideAgentParams, result=TaskIdResult,
        doc="Side question over a snapshot of the live conversation; the answer arrives as btw.complete.")
 
 
-class PreviewRestartParams(SessionParams):
-    url: str
-    cwd: str | None = None
-    context: str | None = None  # the preview pane's console output
 
 
-method("preview.restart", params=PreviewRestartParams, result=TaskIdResult,
-       doc="Spawn a hidden agent that brings the desktop preview's dev server back up.")
 
 
 # ── batch clarify locks / proxied request answers ─────────────────────────────────────────────

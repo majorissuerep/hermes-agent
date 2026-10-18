@@ -65,8 +65,8 @@ def test_auto_title_thread_runs_in_the_turns_profile_scope(served_home, monkeypa
     assert seen == {"home": str(b), "key": "b-key"}
 
 
-def test_ws_orphan_reap_tears_down_under_the_sessions_profile(served_home, monkeypatch):
-    """The reap Timer (empty context) → ``_teardown_popped_session``: memory commit + ``agent.close`` run
+def test_terminal_teardown_thread_runs_under_the_sessions_profile(served_home, monkeypatch):
+    """A fresh thread → ``_teardown_popped_session``: memory commit + ``agent.close`` run
     under ``session['profile_home']``, so the provider reads B's config/credentials, not the launch's."""
     from tui_runtime import server
 
@@ -78,22 +78,18 @@ def test_ws_orphan_reap_tears_down_under_the_sessions_profile(served_home, monke
     agent.session_id = "sess-b"
     agent.commit_memory_session = lambda history: _observe_scope(seen_commit, threading.Event())
     agent.close = lambda: _observe_scope(seen_close, done)
-    sid = "ws-b"
     session = {
         "agent": agent, "history": [{"role": "user", "content": "x"}], "history_lock": threading.Lock(),
-        "session_key": "sess-b", "profile_home": str(b), "transport": server._detached_ws_transport,
+        "session_key": "sess-b", "profile_home": str(b),
         "last_active": 0.0,
     }
-    monkeypatch.setattr(server, "_WS_ORPHAN_REAP_GRACE_S", 0.01)
-    monkeypatch.setattr(server, "_ws_session_is_orphaned", lambda s: s is session)
-    with server._sessions_lock:
-        server._sessions[sid] = session
+    worker = threading.Thread(target=server._teardown_popped_session,
+                              args=(session,), kwargs={"end_reason": "terminal_closed"})
     try:
-        server._schedule_ws_orphan_reap(sid)
-        assert done.wait(timeout=10), "reap timer never tore the session down"
+        worker.start()
+        assert done.wait(timeout=10), "terminal teardown never closed the session"
     finally:
-        with server._sessions_lock:
-            server._sessions.pop(sid, None)
+        worker.join(10)
     assert seen_commit == {"home": str(b), "key": "b-key"}
     assert seen_close == {"home": str(b), "key": "b-key"}
     assert Path(get_hermes_home()) == a  # the test thread's own context is untouched

@@ -796,9 +796,9 @@ def register(server) -> None:
     bind_module(globals(), server, skip=("_",))
 
 
-def _diagnostic_event(event: dict) -> bool:
-    kind = event.get("kind")
-    payload = event.get("payload") or {}
+def _diagnostic_event(event) -> bool:
+    kind = event.kind
+    payload = event.payload or {}
     if kind in {"crashed", "timed_out", "gave_up"}:
         return True
     if kind in {"blocked", "block_loop_detected"}:

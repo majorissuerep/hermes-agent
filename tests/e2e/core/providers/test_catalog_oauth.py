@@ -52,6 +52,9 @@ KNOWN: dict[str, Known] = {
 }
 
 _PASSTHROUGH_ENV = frozenset({"PATH", "LANG", "LANGUAGE", "USER", "LOGNAME", "SHELL", "TZ"})
+from tests.e2e.vault_home import seal_fixture_home, run_unlocked
+from hermes_security import io as state_io
+
 _SECRET_SUFFIXES = ("_API_KEY", "_TOKEN", "_SECRET", "_ACCESS_KEY")
 
 
@@ -73,15 +76,17 @@ class Home:
             "updates:\n  check: false\n"
             "agent:\n  api_max_retries: 1\n  auto_recovery_cycles: 0\n")
 
+        seal_fixture_home(self.hermes_home)
+
     @property
     def auth_path(self) -> Path:
         return self.hermes_home / "auth.json"
 
     def seed_auth(self, store: dict[str, Any]) -> None:
-        self.auth_path.write_text(json.dumps(store, indent=2), encoding="utf-8")
+        state_io.write_json(self.auth_path, store, purpose="auth")
 
     def auth(self) -> dict[str, Any]:
-        return json.loads(self.auth_path.read_text(encoding="utf-8"))
+        return state_io.read_json(self.auth_path, purpose="auth")
 
     def env(self, extra: dict[str, str] | None = None) -> dict[str, str]:
         env = {k: v for k, v in os.environ.items()
@@ -92,7 +97,7 @@ class Home:
             "TMPDIR": str(self.home), "HERMES_SHARED_AUTH_DIR": str(self.home / "shared"),
             "CODEX_HOME": str(self.home / ".codex"),
             # Child HOME is the fixture home, so its state.db is tmp_path's (guard's documented escape).
-            "HERMES_STATE_DB_GUARD_BYPASS": "1", "HERMES_ALLOW_NO_VAULT": "1",
+            "HERMES_STATE_DB_GUARD_BYPASS": "1",
             # A turn boots the gateway; like every gateway harness, the hermetic run opts out of
             # lazy installs (PM downloads).
             "HERMES_DISABLE_LAZY_INSTALLS": "1",
@@ -102,7 +107,7 @@ class Home:
 
     def run(self, argv: list[str], extra_env: dict[str, str] | None = None,
             timeout: float = TURN_TIMEOUT) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
+        return run_unlocked(
             [sys.executable, "-m", "hermes_cli.main", *argv], cwd=str(self.home), env=self.env(extra_env),
             stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=timeout, check=False)
 

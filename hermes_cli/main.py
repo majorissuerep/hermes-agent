@@ -157,13 +157,15 @@ def _run_and_exit_oneshot(
             rc = 1
         else:
             rc = exc.code
-    except BaseException:
+    except BaseException as exc:
         # ``run_oneshot`` already maps agent failures to an int rc; anything
         # still escaping means it malfunctioned. Print it but never fall
         # through to interpreter teardown (the SIGABRT path this routine fixes).
         import traceback
         try:
-            traceback.print_exc()
+            from hermes_constants import emit_partial_update_hint
+            if not emit_partial_update_hint(exc):
+                traceback.print_exc()
         except Exception:
             pass
         rc = 1
@@ -1509,7 +1511,9 @@ _CHAT_PASSTHROUGH = (
 def cmd_chat(args):
     """Launch the terminal UI or execute one local headless turn."""
     from hermes_cli.main_query_file import _read_query_file
+    from hermes_cli.stream_json import stream_json_requested
     _read_query_file(args)
+    stream_json_requested(args)
     _apply_safe_mode(args)
     _apply_user_config_bypass(args)
     _guard_noninteractive_user_config(args)

@@ -165,7 +165,7 @@ def test_free_fast_search_eligibility_follows_the_served_profile(monkeypatch, tm
     """Multiplex A→B→A: profile A holds a zero-credit Portal identity, B none; each answers from its own store."""
     from hermes_cli.nous_account import reset_nous_portal_account_info_cache
     from agent.secret_scope import set_multiplex_active
-    from tui_runtime.model_switch import _session_profile_runtime_scope
+    from tui_runtime.server import _session_profile_runtime_scope
     from tools import web_tools
 
     root = tmp_path / ".hermes"

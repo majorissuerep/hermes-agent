@@ -113,37 +113,3 @@ def _patched_usage(data):
     from unittest.mock import patch
     from agent import learning_graph
     return patch.object(learning_graph, "_load_usage", lambda: data)
-
-
-class TestWebRouterProvenanceTwin:
-    """The /api/skills set-based twin must classify external mounts as 'external' while a
-    local hand-made skill stays 'agent' (the regression this guards: hub > bundled > agent
-    with no external tier flattened mounts into 'agent').
-
-    ``get_skills`` resolves its imports inside the function body, so monkeypatching router
-    module attributes cannot intercept them; drive the real app through TestClient instead
-    (same harness as test_web_server_skills_profiles.py)."""
-
-    @pytest.fixture
-    def client(self, external_home, monkeypatch):
-        try:
-            from starlette.testclient import TestClient
-        except ImportError:
-            pytest.skip("fastapi/starlette not installed")
-
-        import hermes_state
-        from hermes_constants import get_hermes_home
-        from hermes_cli.web_server import app, _SESSION_HEADER_NAME, _SESSION_TOKEN
-
-        monkeypatch.setattr(hermes_state, "DEFAULT_DB_PATH", get_hermes_home() / "state.db")
-        c = TestClient(app)
-        c.headers[_SESSION_HEADER_NAME] = _SESSION_TOKEN
-        return c
-
-    def test_router_labels_external_vs_agent(self, client, external_home):
-        _write_local_skill(external_home, "my-local")
-        resp = client.get("/api/skills")
-        assert resp.status_code == 200, resp.text
-        by_name = {s["name"]: s["provenance"] for s in resp.json()}
-        assert by_name.get("ext-skill") == "external"
-        assert by_name.get("my-local") == "agent"

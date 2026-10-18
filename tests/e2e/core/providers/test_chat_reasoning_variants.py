@@ -10,7 +10,7 @@
 * DeepSeek-style ``reasoning_content`` is echoed on the assistant tool-call message,
   within the turn and after ``--resume``.
 * A long Nous Portal session replays every earlier turn's ``reasoning_details`` verbatim
-  and keeps answering, driven through one long-lived ``tui_gateway`` backend.
+  and keeps answering, driven through one long-lived ``tui_runtime`` backend.
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ from tests.e2e.core.providers._openai_helpers import (
     db_messages,
     oneshot,
 )
-from tests.e2e.core.providers._openai_tui import TuiGateway
+from tests.e2e.core.providers._openai_tui import NativeRuntime
 from tests.fakes.providers.chat_variants import CText, CTools, FakeChatVariantServer
 
 pytestmark = pytest.mark.skipif(not sys.platform.startswith("linux"), reason="subprocess harness is Linux-gated")
@@ -126,7 +126,7 @@ def test_long_session_replays_every_turns_reasoning_to_the_portal(tmp_path) -> N
     answers: list[str] = []
     with FakeChatVariantServer(script) as srv:
         h.write(_impersonated_config("inference-api.nousresearch.com"), dotenv={"OPENAI_API_KEY": "sk-fake"})
-        gw = TuiGateway(h, _proxy_env(srv))
+        gw = NativeRuntime(h, _proxy_env(srv))
         try:
             created = gw.call("session.create", {"cols": 120})
             sid, stored_id = created["session_id"], created["stored_session_id"]

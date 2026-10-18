@@ -1,12 +1,8 @@
-"""Contextual first-touch onboarding hints, and the entry points of desktop first-run onboarding.
+"""Contextual first-touch hints for local terminal sessions.
 
 Each hint is shown once per install the *first* time a user hits a behavior
 fork, tracked in ``config.yaml`` under ``onboarding.seen.<flag>``. Kept tiny and
-dependency-free so both the CLI and gateway can import it.
-
-First-run onboarding (one chat in the default profile, driven by ``setup_beat``) lives in the
-siblings: ``onboarding_flow`` (beats and the run record, pure), ``onboarding_text`` (the words),
-``onboarding_facts`` (the safe facts) and ``onboarding_record`` (where the run is stored).
+dependency-free so native CLI and TUI turns share the same consent rules.
 """
 
 from __future__ import annotations
@@ -28,28 +24,6 @@ PROFILE_BUILD_FLAG = "profile_build_offered"
 
 # Busy-input hints are keyed by the effective busy_input_mode that was just
 # applied so the message matches reality; "interrupt" is the default branch.
-_BUSY_INPUT_HINTS_GATEWAY = {
-    "queue": (
-        "💡 First-time tip — I queued your message instead of interrupting. Send `/busy interrupt` to make new messages "
-        "stop the current task immediately, or `/busy status` to check. This notice won't appear again."
-    ),
-    "steer": (
-        "💡 First-time tip — I steered your message into the current run; it will arrive after the next tool "
-        "call instead of interrupting. Send `/busy interrupt` or `/busy queue` to change this, or `/busy "
-        "status` to check. This notice won't appear again."
-    ),
-    "redirect": (
-        "💡 First-time tip — I redirected the current run using your message. Completed work stays in "
-        "context, and `/stop` still cancels the task. Send `/busy queue` to wait for a separate turn, or "
-        "`/busy status` to check. This notice won't appear again."
-    ),
-}
-_BUSY_INPUT_HINT_GATEWAY_DEFAULT = (
-    "💡 First-time tip — I just interrupted my current task to answer you. Send `/busy queue` to queue "
-    "follow-ups for after the current task instead, `/busy steer` to inject them mid-run without "
-    "interrupting, or `/busy status` to check. This notice won't appear again."
-)
-
 _BUSY_INPUT_HINTS_CLI = {
     "queue": (
         "(tip) Your message was queued for the next turn. Use /busy interrupt to make Enter stop the current "
@@ -70,19 +44,9 @@ _BUSY_INPUT_HINT_CLI_DEFAULT = (
 )
 
 
-def busy_input_hint_gateway(mode: str) -> str:
-    """Hint shown the first time a user messages while the agent is busy (markdown)."""
-    return _BUSY_INPUT_HINTS_GATEWAY.get(mode, _BUSY_INPUT_HINT_GATEWAY_DEFAULT)
-
-
 def busy_input_hint_cli(mode: str) -> str:
     """CLI version of the busy-input hint (plain text, no markdown)."""
     return _BUSY_INPUT_HINTS_CLI.get(mode, _BUSY_INPUT_HINT_CLI_DEFAULT)
-
-
-def tool_progress_hint_gateway() -> str:
-    return ("💡 First-time tip — that tool took a while and I'm streaming every step. If the progress messages "
-            "feel noisy, send `/verbose` to cycle modes (all → new → off). This notice won't appear again.")
 
 
 def tool_progress_hint_cli() -> str:
@@ -147,18 +111,16 @@ def first_contact_turn_note(
     *,
     session_history_empty: bool,
     install_has_prior_sessions: bool,
-    onboarding_run_active: bool = False,
 ) -> Optional[str]:
     """Return a one-shot sidecar note for the install's first-ever message.
 
-    Matches the gateway first-contact path: when ``profile_build`` is ``ask``
+    When ``profile_build`` is ``ask``
     and the offer has not been latched yet, return the opt-in profile-build
     directive and persist ``onboarding.seen.profile_build_offered``. Otherwise
     return the plain intro note. Returns ``None`` when this is not the first
     contact (non-empty session history or prior sessions exist on the install).
-    ``onboarding_run_active``: the chat is running first-run onboarding, whose opening replaces this note.
     """
-    if not session_history_empty or install_has_prior_sessions or onboarding_run_active:
+    if not session_history_empty or install_has_prior_sessions:
         return None
     try:
         if (
@@ -235,7 +197,6 @@ __all__ = [
     "PROFILE_BUILD_FLAG",
     "TOOL_PROGRESS_FLAG",
     "busy_input_hint_cli",
-    "busy_input_hint_gateway",
     "detect_openclaw_residue",
     "first_contact_turn_note",
     "is_seen",
@@ -244,5 +205,4 @@ __all__ = [
     "profile_build_directive",
     "profile_build_mode",
     "tool_progress_hint_cli",
-    "tool_progress_hint_gateway",
 ]

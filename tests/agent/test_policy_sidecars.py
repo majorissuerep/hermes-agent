@@ -231,7 +231,7 @@ def test_guard_blocks_all_dispatch_paths_and_preserves_the_human_approval_bounda
 
 
 def test_profiles_and_real_turns_keep_policy_cache_and_route_state_separate(tmp_path, monkeypatch, endpoint):
-    from tui_runtime.model_switch import _session_profile_runtime_scope
+    from tui_runtime.server import _session_profile_runtime_scope
     from agent.secret_scope import is_multiplex_active, set_multiplex_active
     from agent.policy_sidecars import get_sidecars
     from run_agent import AIAgent

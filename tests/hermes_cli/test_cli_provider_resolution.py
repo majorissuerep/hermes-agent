@@ -286,8 +286,7 @@ def test_runtime_resolution_failure_is_not_sticky(monkeypatch):
 
     monkeypatch.setattr("hermes_cli.runtime_provider.resolve_runtime_provider", _runtime_resolve)
     monkeypatch.setattr("hermes_cli.runtime_provider.format_runtime_provider_error", lambda exc: str(exc))
-    monkeypatch.setattr("hermes_cli.gateway_agent.GatewayAgent", _DummyAgent)
-    monkeypatch.setattr("hermes_cli.gateway_session_store.session_store", lambda: None)  # no live gateway
+    monkeypatch.setattr("run_agent.AIAgent", _DummyAgent)
 
     shell = cli.HermesCLI(model="gpt-5", compact=True, max_turns=1)
 
@@ -881,4 +880,3 @@ def test_custom_endpoint_key_env_is_a_valid_posix_name_for_ip_endpoints():
 
     for identity in ("127.0.0.1_8080", "0.0.0.0", "10.0.0.7:11434", "", "-–-"):
         assert _ENV_VAR_NAME_RE.match(custom_endpoint_key_env(identity)), identity
-

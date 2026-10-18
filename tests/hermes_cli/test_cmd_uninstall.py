@@ -17,7 +17,6 @@ def test_data_entrypoints_preserve_runtime(layout, monkeypatch, entry):
         pytest.fail("data-only dispatch reached code removal")
 
     monkeypatch.setattr(uninstall, "run_uninstall", no_code_removal)
-    monkeypatch.setattr(uninstall, "run_gui_uninstall", no_code_removal)
     monkeypatch.setattr(main, "_require_tty", no_code_removal)
     if entry == "module":
         assert uninstall.main(["--mode", "data"]) == 0
@@ -63,15 +62,3 @@ def test_module_subprocess_removes_only_the_disposable_home(layout, tmp_path):
     assert all(not path.exists() for path in data)
     assert not (home / "skills").exists()
     assert not (home / "SOUL.md").exists()
-
-
-def test_module_uses_the_desktop_instances_explicit_data_path(layout, tmp_path):
-    _, _, _ = layout
-    ordinary = tmp_path / "user" / "desktop-data"
-    variant = tmp_path / "variant-desktop-data"
-    for directory in (ordinary, variant):
-        directory.mkdir()
-        (directory / "preferences.json").write_text("{}", encoding="utf-8")
-    assert uninstall.main(["--mode", "data", "--desktop-userdata", str(variant)]) == 0
-    assert not variant.exists()
-    assert (ordinary / "preferences.json").read_text(encoding="utf-8") == "{}"

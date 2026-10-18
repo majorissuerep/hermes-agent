@@ -219,7 +219,7 @@ def _session_toolsets(session) -> tuple:
     """``(enabled, disabled)`` a session's read-back RPCs must reflect: the live agent's sets once built,
     else what that session's profile would build with — ``_load_enabled_toolsets`` under the session's
     profile scope, the same read ``_build_agent``/``_refresh_live_sessions`` make and the key
-    ``profiles.configure`` pins. A session whose agent is not built yet (``session.create`` with no
+    local profile pins. A session whose agent is not built yet (``session.create`` with no
     prompt) otherwise read back as "everything enabled" (#117977). ``None`` = all toolsets.
     No session → the launch profile's config."""
     agent = session.get("agent") if session else None

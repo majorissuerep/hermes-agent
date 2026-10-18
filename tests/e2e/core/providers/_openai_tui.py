@@ -1,5 +1,5 @@
-"""Minimal stdio JSON-RPC driver for a REAL ``python -m tui_gateway.entry`` process —
-the backend the Ink TUI and Desktop talk to (one long-lived agent across turns)."""
+"""Minimal stdio JSON-RPC driver for a REAL ``python -m tui_runtime`` process —
+the private backend the Ink TUI talks to (one long-lived agent across turns)."""
 
 from __future__ import annotations
 
@@ -13,18 +13,19 @@ from pathlib import Path
 from typing import Any, Callable
 
 from tests.e2e.core.providers._openai_helpers import HarnessError, Home
+from tests.e2e.vault_home import spawn_unlocked
 
 
-class TuiGateway:
+class NativeRuntime:
     def __init__(self, h: Home, extra_env: dict[str, str] | None = None) -> None:
         env = h.env({"TERMINAL_ENV": "local", "TERMINAL_CWD": str(h.project), "HERMES_YOLO_MODE": "1",
                      **(extra_env or {})})
-        self.stderr_path = h.root / f"tui-gateway-{time.monotonic_ns()}.log"
+        self.stderr_path = h.root / f"tui-runtime-{time.monotonic_ns()}.log"
         self._stderr = open(self.stderr_path, "wb")
-        self.proc = subprocess.Popen([sys.executable, "-m", "tui_gateway.entry"], cwd=h.project, env=env,
+        self.proc = spawn_unlocked([sys.executable, "-m", "tui_runtime"], cwd=h.project, env=env,
                                      stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=self._stderr, bufsize=0)
         if self.proc.stdin is None or self.proc.stdout is None:
-            raise HarnessError("tui_gateway spawned without stdio pipes")
+            raise HarnessError("tui_runtime spawned without stdio pipes")
         self._stdin, self._stdout = self.proc.stdin, self.proc.stdout
         self._ids = itertools.count(1)
         self._cv = threading.Condition()
@@ -107,6 +108,6 @@ class TuiGateway:
     def tail(self, n: int = 3000) -> str:
         try:
             self._stderr.flush()
-            return "\n--- tui_gateway stderr ---\n" + Path(self.stderr_path).read_bytes()[-n:].decode(errors="replace")
+            return "\n--- tui_runtime stderr ---\n" + Path(self.stderr_path).read_bytes()[-n:].decode(errors="replace")
         except (OSError, ValueError):
             return ""

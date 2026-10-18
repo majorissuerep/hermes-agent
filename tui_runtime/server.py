@@ -101,7 +101,6 @@ _stdout_lock = threading.Lock()
 _cfg_lock = threading.Lock()
 # Shared profile UI metadata is updated concurrently by Desktop, mobile and pool RPCs; its
 # compare/check/write transaction needs its own lock, not the unrelated config cache lock.
-_profile_ui_meta_lock = threading.Lock()
 _sessions_lock = threading.RLock()  # reentrant: _close_session_by_id may run under callers that already hold it
 _cfg_cache: dict | None = None
 _cfg_sig: tuple | None = None
@@ -142,9 +141,7 @@ _LONG_HANDLERS = frozenset({
     "pet.cells", "pet.gallery", "pet.generate", "pet.hatch", "pet.info", "pet.select", "pet.thumb",
     "learning.frames", "plugins.manage", "plugins.catalog.lookup", "reload.mcp", "mcp.servers.test",
     "mcp.servers.oauth.start",
-    "process.list", "profiles.configure", "profiles.create", "profiles.describe", "profiles.get_asset",
-    "profiles.list", "profiles.set_asset", "bot_relay.roster.sync", "bot_relay.outbox.drain",
-    "bot_relay.deliver", "bot_relay.reply", "image.generate", "projects.discover_repos",
+    "process.list", "image.generate", "projects.discover_repos",
     "projects.record_repos", "projects.for_cwd", "projects.tree", "projects.project_sessions",
     "setup.runtime_check", "setup.status", "free_tier.provision", "voice.toggle", "voice.record", "voice.tts", "wake.start",
     "wake.status", "session.active_list", "session.branch", "session.compress", "session.list",
@@ -986,7 +983,7 @@ def _clarify_timeout_seconds() -> float | None:
     """Clarify wait for the TUI/desktop bridge from the canonical config (gateway/CLI parity); 300s
     historical default if config can't be read; ``<= 0`` = unlimited → None (never auto-skip)."""
     with contextlib.suppress(Exception):
-        from tools.clarify_gateway import get_clarify_timeout
+        from tools.clarify_session import get_clarify_timeout
         timeout = get_clarify_timeout()
         return timeout if timeout > 0 else None
     return 300
@@ -1926,7 +1923,7 @@ from . import (
     session_transports as _session_transports, prompt_turn as _prompt_turn, billing_view as _billing_view,
     methods_complete as _methods_complete, methods_config as _methods_config,
     methods_config_set as _methods_config_set, methods_images as _methods_images,
-    methods_profiles as _methods_profiles, methods_prompt as _methods_prompt, methods_session as _methods_session,
+    methods_prompt as _methods_prompt, methods_session as _methods_session,
     methods_tools as _methods_tools, methods_tools_plugin_servers as _methods_tools_plugin_servers,
     methods_session_control as _methods_session_control, methods_subagents as _methods_subagents,
     methods_vault as _methods_vault, methods_free_tier as _methods_free_tier,
@@ -1941,7 +1938,7 @@ for _m in (
     _prompt_attachments, _session_history, _agent_callbacks, _session_auto_continue, _plugin_inject, _rpc_dispatch,
     _methods_complete_helpers, _methods_slash, _methods_voice, _methods_browser,
     _methods_session, _methods_prompt, _methods_config,
-    _methods_config_set, _methods_complete, _methods_tools, _methods_tools_plugin_servers, _methods_profiles, _methods_images,
+    _methods_config_set, _methods_complete, _methods_tools, _methods_tools_plugin_servers, _methods_images,
     _prompt_turn, _billing_view,
     _methods_session_control, _methods_subagents, _methods_vault, _methods_free_tier, _methods_connectors,
     _methods_connectors_account,

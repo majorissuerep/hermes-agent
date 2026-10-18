@@ -181,7 +181,8 @@ def _env(tmp_path: Path, codex_url: str, token: FakeTokenServer, dead_port: int)
 
 
 def _auth(h: Home) -> dict[str, Any]:
-    return json.loads((h.hermes_home / "auth.json").read_text(encoding="utf-8"))
+    from hermes_security import io as state_io
+    return state_io.read_json(h.hermes_home / "auth.json", purpose="auth")
 
 
 def _answer(run) -> str:

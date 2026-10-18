@@ -10,7 +10,7 @@ Proven here:
 
 * encrypted reasoning items are replayed verbatim, in output order, on the next API call
   of the same turn, on the next user turn after a process restart (``--resume`` from
-  state.db), and across turns of one long-lived ``tui_gateway`` session;
+  state.db), and across turns of one long-lived ``tui_runtime`` session;
 * parallel ``function_call`` items round-trip: every call gets exactly one
   ``function_call_output`` with its own ``call_id`` and its own result, persisted once;
 * a stale encrypted blob rejected with HTTP 400 ``invalid_encrypted_content`` is
@@ -40,7 +40,7 @@ from tests.e2e.core.providers._openai_helpers import (
     responses_provider_config,
     tool_call_args,
 )
-from tests.e2e.core.providers._openai_tui import TuiGateway
+from tests.e2e.core.providers._openai_tui import NativeRuntime
 from tests.fakes.fake_llm_provider import FakeLLMServer
 from tests.fakes.providers.openai_responses import (
     FakeResponsesServer,
@@ -171,14 +171,14 @@ def test_rejected_encrypted_replay_is_stripped_and_primary_retried(tmp_path, rej
         assert run.proc.returncode == 0 and _answer(run) == "RECOVERED-ON-PRIMARY", run.describe()
 
 
-def test_tui_gateway_session_replays_reasoning_across_turns(tmp_path) -> None:
+def test_tui_runtime_session_replays_reasoning_across_turns(tmp_path) -> None:
     """One long-lived backend (the Desktop/TUI shape): turn 2's request carries turn 1's
     blob without any restart, and the fallback chat endpoint is never touched."""
     h = Home(tmp_path)
     script = [Turn([Reasoning("ENC-T1"), Message("TUI-ONE")]), Turn([Reasoning("ENC-T2"), Message("TUI-TWO")])]
     with FakeResponsesServer(script) as srv:
         h.write(responses_provider_config(srv.base_url))
-        gw = TuiGateway(h)
+        gw = NativeRuntime(h)
         try:
             sid = gw.call("session.create", {"cols": 120})["session_id"]
             assert "TUI-ONE" in gw.turn(sid, "hello")

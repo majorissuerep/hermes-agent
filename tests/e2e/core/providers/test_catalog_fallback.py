@@ -35,7 +35,7 @@ def _fb_known(name: str) -> Known:
                  "#121359 fallback entry ignores its base_url; goes to the vendor host", _FB_CELLS)
 
 
-KNOWN: dict[str, Known] = {n: _fb_known(n) for n in ("anthropic", "openrouter")}
+KNOWN: dict[str, Known] = {n: _fb_known(n) for n in ("anthropic",)}
 
 
 def _drive(primary: Row, fallback: Row, root: Path) -> dict:

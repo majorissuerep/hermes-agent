@@ -9,6 +9,8 @@ import sys
 import venv
 
 import pytest
+from tests.hermes_cli.update_test_support import isolated_command_checkout as isolated_command_checkout  # noqa: PLC0414 -- register the shared autouse fixture
+
 
 from hermes_cli import update_completion
 
@@ -265,12 +267,12 @@ def _run_cmd_update(monkeypatch, request, capsys):
     monkeypatch.setattr(main, "_install_hangup_protection", lambda **kw: None)
     monkeypatch.setattr(main, "_finalize_update_output", lambda state: None)
 
-    def complete(args, gateway_mode):
+    def complete(args, gateway_mode=False):
         update_receipt.begin_update_receipt()
         request["receipt"] = update_receipt._current.get().data
         update_cmd._complete_source_update(request)
 
-    monkeypatch.setattr(update_cmd, "_cmd_update_impl", complete)
+    monkeypatch.setattr("hermes_cli.terminal_update.update_source", complete)
     try:
         main.cmd_update(SimpleNamespace(gateway=True))
         code = 0
@@ -455,7 +457,7 @@ def test_interrupt_after_child_success_demotes_gateway_marker_at_boundary(transi
                 raise KeyboardInterrupt()
             return result
 
-    def complete(args, gateway_mode):
+    def complete(args, gateway_mode=False):
         update_receipt.begin_update_receipt()
         request["receipt"] = update_receipt._current.get().data
         monkeypatch.setattr(subprocess, "Popen", capture_child)
@@ -463,7 +465,7 @@ def test_interrupt_after_child_success_demotes_gateway_marker_at_boundary(transi
 
     stdout = Interrupt()
     monkeypatch.setattr(sys, "stdout", stdout)
-    monkeypatch.setattr(update_cmd, "_cmd_update_impl", complete)
+    monkeypatch.setattr("hermes_cli.terminal_update.update_source", complete)
     # Was KeyboardInterrupt + a ``failed`` receipt: Ctrl-C after the commit point is an interrupt
     # (exit 130), and the receipt keeps the truth the child already wrote (C3, item 5).
     with pytest.raises(SystemExit) as error:

@@ -49,4 +49,4 @@ def test_account_reads_and_connects_name_the_desktop(remote_backend, monkeypatch
     connected = _dispatch("connectors.connect", {"owner": {"type": "account"}, "connectors": ["gmail"]})
     assert "result" in connected, connected
     assert user_agent().split(" (")[1].startswith("cli;")  # nothing leaks out of the request
-    assert [agent.split(" (")[1].split(";")[0] for agent in agents] == ["desktop", "desktop"]
+    assert [agent.split(" (")[1].split(";")[0] for agent in agents] == ["tui", "tui"]

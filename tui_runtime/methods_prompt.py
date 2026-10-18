@@ -1034,64 +1034,6 @@ def _(rid, params: dict) -> dict:
         rid, session, task_id, parent, "btw.complete", body, extra={"question": text})
 
 
-@method("preview.restart")
-def _(rid, params: dict) -> dict:
-    session, err = _sess(params, rid)
-    if err:
-        return err
-    url, cwd, context = (str(params.get(k) or "").strip() for k in ("url", "cwd", "context"))
-    if not url:
-        return _err(rid, 4012, "url required")
-    task_id = f"preview_{uuid.uuid4().hex[:6]}"
-    parent = params.get("session_id", "")
-    parent_history = _preview_restart_history(session)
-    prompt = "\n".join(
-        line
-        for line in [
-            "The desktop preview pane cannot load a local server URL.",
-            f"Preview URL: {url}",
-            f"Current working directory: {cwd or '(unknown)'}",
-            f"Preview console:\n{context}" if context else "",
-            _PREVIEW_RESTART_HISTORY_NOTE if parent_history else None,
-            *_PREVIEW_RESTART_RULES]
-        if line)
-    # A malformed client path (embedded NUL, etc.) is "no validated cwd".
-    try:
-        preview_cwd = os.path.abspath(os.path.expanduser(cwd)) if cwd else ""
-        if preview_cwd and not os.path.isdir(preview_cwd):
-            preview_cwd = ""
-    except Exception:
-        preview_cwd = ""
-
-    def body():
-        from run_agent import AIAgent
-        from tools.terminal_tool import register_task_env_overrides
-        if preview_cwd:
-            register_task_env_overrides(task_id, {"cwd": preview_cwd})
-        history_note = (
-            f" (with {len(parent_history)} parent-session messages of context)"
-            if parent_history else "")
-        _emit(
-            "preview.restart.progress", parent,
-            {"task_id": task_id, "text": f"Starting hidden restart agent{history_note}"})
-        # Deliberately NOT closed via AIAgent.close(): it would kill the background
-        # server this task exists to leave running.
-        result = AIAgent(
-            **_ephemeral_preview_agent_kwargs(session["agent"], task_id),
-            **_preview_restart_callbacks(parent, task_id),
-        ).run_conversation(
-            user_message=prompt, task_id=task_id, conversation_history=parent_history or None)
-        return _final_response_text(result)
-
-    def cleanup():
-        with contextlib.suppress(Exception):
-            from tools.terminal_tool import clear_task_env_overrides
-            clear_task_env_overrides(task_id)
-
-    # Pin the validated preview cwd, else the parent workspace — never an invalid path.
-    return _spawn_side_agent(
-        rid, session, task_id, parent, "preview.restart.complete", body,
-        cwd=preview_cwd, cleanup=cleanup)
 
 
 @method("clarify.lock")
@@ -1207,14 +1149,14 @@ def _pdf_page_range(rid, params):
     return first_page, last_page, None
 
 
-# ── side agents (background / btw / preview.restart) ────────────────────────
+# ── side agents (background / btw) ────────────────────────
 
 def _final_response_text(result) -> str:
     return (result.get("final_response", str(result)) if isinstance(result, dict) else str(result))
 
 
 def _spawn_side_agent(
-    rid, session, task_id, parent, event, body, *, cwd="", extra=None, cleanup=None):
+    rid, session, task_id, parent, event, body, *, extra=None):
     """Run ``body()`` on a daemon thread under the session's profile home (the ContextVar
     doesn't propagate across threads) and cwd; its text — or ``error: <exc>`` — lands on
     ``parent`` as ``event`` with ``task_id`` (+ ``extra``).  Replies ``{task_id}``."""
@@ -1224,15 +1166,11 @@ def _spawn_side_agent(
         # ``parent`` is the caller's live sid (``_sess`` admitted it): bind it as the UI owner so
         # prompts this worker raises (skill secrets) reach the session whose profile it runs under.
         session_tokens = _set_session_context(
-            task_id, cwd=(cwd or _session_cwd(session)), ui_session_id=parent)
+            task_id, cwd=_session_cwd(session), ui_session_id=parent)
         # Bug #50233: ephemeral agent threads don't inherit the session's ContextVar scopes (set on the
         # session-create thread), so a side turn under a non-default profile ran against the wrong home.
         # Bind the profile's home + secrets + terminal policy for the whole body, exactly as a prompt turn
-        # does: home alone left terminal_tool on the launch process's ambient TERMINAL_* (a docker
-        # secondary's background/btw/preview agent ran local). NOTE: we deliberately do NOT close this
-        # agent through task-wide process cleanup — the whole point of preview.restart is to leave a
-        # background server running under this task_id, and AIAgent.close() would kill every process for
-        # the task_id and tear down the very server the restart just started.
+        # does: home alone left terminal_tool on the launch process's ambient TERMINAL_*.
         try:
             with _session_profile_runtime_scope(session):
                 text = body()
@@ -1240,12 +1178,9 @@ def _spawn_side_agent(
         except Exception as e:
             _emit(event, parent, {"task_id": task_id, **extra, "text": f"error: {e}"})
         finally:
-            if cleanup is not None:
-                cleanup()
             _clear_session_context(session_tokens)
 
-    if _start_session_work(run, name=f"side-agent-{task_id}") is None:
-        return _err(rid, 5035, "backend is retiring; reconnect to continue")
+    _start_session_work(run, name=f"side-agent-{task_id}")
     return _ok(rid, {"task_id": task_id})
 
 
@@ -1260,26 +1195,7 @@ def _side_agent_args(rid, params, prefix):
     return session, text, parent, f"{prefix}_{uuid.uuid4().hex[:6]}", None
 
 
-_PREVIEW_RESTART_RULES = (
-    "Restart exactly the app intended for the Preview URL, not Hermes Desktop itself.",
-    "The Preview URL and port are the target. Preserve that target unless you conclude it is impossible.",
-    "If the prior conversation shows a specific command that bound this URL/port, prefer re-running THAT exact command (in the same cwd) over guessing a new one.",
-    "First inspect what process, if any, owns the Preview URL port. If a stale server exists, inspect its cwd and prefer that cwd over the Hermes/Desktop process cwd.",
-    "The Current working directory is only a hint. Do not assume it is the preview app root when the port owner or files indicate another root.",
-    "If the console shows a module-script MIME error for src/main.tsx or similar, a static server is serving source files. Do not restart python -m http.server or any dumb static server for that app.",
-    "For module-script MIME failures, inspect package.json/vite config in the candidate app root and start the real dev server/bundler (for example npm/pnpm/yarn dev) so module transforms happen.",
-    "Before declaring success, verify the Preview URL responds with the intended app, not Hermes Desktop. If it serves Hermes/Desktop UI or another unrelated app, stop that process and report failure.",
-    "Do not modify files. Do not ask the user unless blocked.",
-    "Prefer existing project scripts or commands when they are clear.",
-    "If a stale process owns the needed port, handle it safely.",
-    "Start long-running servers detached/in the background, then return immediately.",
-    "Do not run a foreground dev server command that blocks this background task.",
-    "Keep the final response short: what command/server was started, or why it could not be restarted.",
-)
 
-_PREVIEW_RESTART_HISTORY_NOTE = (
-    "The conversation history above is from the user's main session — including the commands you (the assistant) previously ran to start servers, edit files, or check ports. Use it to figure out exactly which server should be running at this Preview URL. The user did not start a brand new task; recover what they had working."
-)
 
 
 # ── batch clarify locks ─────────────────────────────────────────────────────

@@ -142,7 +142,7 @@ def _prepare_cli_with_active_session(tmp_path):
 
 @pytest.fixture(autouse=True)
 def _reset_session_id_context():
-    from gateway.session_context import _UNSET, _VAR_MAP
+    from agent.session_context import _UNSET, _VAR_MAP
 
     yield
     os.environ.pop("HERMES_SESSION_ID", None)
@@ -308,5 +308,3 @@ def test_new_session_with_title(capsys):
 
     captured = capsys.readouterr()
     assert "My Test Session" in captured.out
-
-

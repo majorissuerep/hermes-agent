@@ -443,7 +443,7 @@ class TestTerminalIntegration:
             assert var not in result
             assert "PATH" in result
 
-    def test_passthrough_cannot_register_buzz_vars(self, monkeypatch):
+    def test_passthrough_cannot_register_retired_platform_secrets(self, monkeypatch):
         """GHSA-rhgp-j443-p4rf seal stays intact for the BUZZ_* first-party
         platform credentials: even though they pass through to terminal
         children in a Buzz agent context (issue #78026), env_passthrough
@@ -462,10 +462,9 @@ class TestTerminalIntegration:
             assert not is_env_passthrough(var), (
                 f"{var} should be refused passthrough registration"
             )
-            # Terminal sanitizer still passes BUZZ_* through to terminal
-            # children by the first-party carve-out...
+            # Retired platform credentials stay sealed even with an old managed-agent marker.
             result = _sanitize_subprocess_env({var: "value", "PATH": "/usr/bin"})
-            assert result.get(var) == "value"
+            assert var not in result
             # ...but the execute_code child never sees them.
             from tools.code_execution_env import _scrub_child_env
 

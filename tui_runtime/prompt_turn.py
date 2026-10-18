@@ -582,6 +582,23 @@ def _adopt_store_tail_without_row_ids(session: dict, history: list, version: int
 
 
 
+def _install_has_prior_sessions(session: dict) -> bool:
+    with _session_db(session) as db:
+        return db.session_count_ge(2)
+
+
+def _stage_first_contact_onboarding_note(session: dict, agent, history_empty: bool) -> None:
+    from agent.onboarding import first_contact_turn_note
+
+    with _session_profile_runtime_scope(session):
+        note = first_contact_turn_note(
+            _load_cfg(), _active_config_path(), session_history_empty=history_empty,
+            install_has_prior_sessions=_install_has_prior_sessions(session))
+    if note:
+        existing = getattr(agent, "_turn_context_notes", "")
+        agent._turn_context_notes = "\n\n".join(part for part in (existing, note.strip()) if part)
+
+
 def _prepare_turn_input(sid: str, session: dict, st: _TurnRun, text: Any, images: list[str]):
     """Bind scopes, sync the agent, snapshot history, build the run message; returns
     ``(prompt, run_message, cols, streamer)`` or None when @-expansion was refused.
@@ -621,8 +638,7 @@ def _prepare_turn_input(sid: str, session: dict, st: _TurnRun, text: Any, images
     with session["history_lock"]:
         st.history = list(session["history"])
         st.history_version = int(session.get("history_version", 0))
-    # Install-first-message onboarding (#82750): gateway parity for the TUI/Desktop
-    # surface — no-op unless this is the install's very first message ever.
+    _stage_first_contact_onboarding_note(session, agent, not st.history)
     cwd = _session_cwd(session)
     _register_session_cwd(session)
     cols = session.get("cols", 80)
@@ -1111,7 +1127,7 @@ def _run_prompt_submit(
             # still run its turn, but its stamp stays (#106459).
             if registered is session:
                 _reopen_routed_session_row(routing_db, sid, session)
-            can_start = _start_session_work(run, name=f"prompt-turn-{sid}", session=session) is not None
+            _start_session_work(run, name=f"prompt-turn-{sid}", session=session)
     if not can_start:
         with session["history_lock"]:
             session["running"] = False

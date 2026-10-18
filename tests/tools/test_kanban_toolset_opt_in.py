@@ -21,7 +21,7 @@ def _names(selection, disabled=None):
     }
 
 
-@pytest.mark.parametrize("surface", ["cli", "http", "rpc"])
+@pytest.mark.parametrize("surface", ["cli", "rpc"])
 def test_saved_opt_in_roundtrip_reaches_schema_and_board(surface, tmp_path, monkeypatch):
     """Exercise the real config writer, availability gate, skills gate and handler."""
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
@@ -38,23 +38,10 @@ def test_saved_opt_in_roundtrip_reaches_schema_and_board(surface, tmp_path, monk
 
     before = _names(selected())  # Warm both cache layers before enabling.
     assert not before
-    client = None
-    if surface == "http":
-        from fastapi import FastAPI
-        from fastapi.testclient import TestClient
-        from hermes_cli.web_routers.tools import router
-
-        app = FastAPI()
-        app.include_router(router)
-        client = TestClient(app)
 
     def toggle(enabled):
         action = "enable" if enabled else "disable"
-        if surface == "http":
-            response = client.put("/api/tools/toolsets/kanban", json={"enabled": enabled})
-            assert response.status_code == 200, response.text
-            assert response.json()["enabled"] is enabled
-        elif surface == "rpc":
+        if surface == "rpc":
             from tui_runtime.server import _methods
 
             response = _methods["tools.configure"]("kanban-opt-in", {"action": action, "names": ["kanban"]})
@@ -63,39 +50,35 @@ def test_saved_opt_in_roundtrip_reaches_schema_and_board(surface, tmp_path, monk
         else:
             _apply_toolset_change(load_config(), "cli", ["kanban"], action)
 
+    toggle(True)
+    enabled_names = _names(selected())
+    assert {"kanban_list", "kanban_create", "kanban_complete"} <= enabled_names
+    assert not _names(selected("telegram")), "CLI opt-in leaked to Telegram"
+    assert "file" in selected()
+    # A second profile in the same process must not borrow this grant or
+    # poison the first profile's cached schema on return.
+    from hermes_constants import set_hermes_home_override, reset_hermes_home_override
+    other_home = tmp_path / "profiles" / "observer"
+    token = set_hermes_home_override(other_home)
     try:
-        toggle(True)
-        enabled_names = _names(selected())
-        assert {"kanban_list", "kanban_create", "kanban_complete"} <= enabled_names
-        assert not _names(selected("telegram")), "CLI opt-in leaked to Telegram"
-        assert "file" in selected()
-        # A second profile in the same process must not borrow this grant or
-        # poison the first profile's cached schema on return.
-        from hermes_constants import set_hermes_home_override, reset_hermes_home_override
-        other_home = tmp_path / "profiles" / "observer"
-        token = set_hermes_home_override(other_home)
-        try:
-            save_config({"platform_toolsets": {"cli": ["file"]}})
-            assert not _names(selected())
-        finally:
-            reset_hermes_home_override(token)
-        assert _names(selected()) == enabled_names
-        from agent.skill_utils import _detect_kanban
-        assert _detect_kanban(), "Saved opt-in still hides the Kanban playbook"
-        result = json.loads(registry.dispatch("kanban_create", {"title": "opt-in roundtrip", "assignee": "default"}))
-        assert result.get("ok"), result
-        from hermes_cli.kanban_db_connect import connect_closing
-        from hermes_cli.kanban_db import get_task
-        with connect_closing() as conn:
-            assert get_task(conn, result["task_id"]).title == "opt-in roundtrip"
-        toggle(False)
+        save_config({"platform_toolsets": {"cli": ["file"]}})
         assert not _names(selected())
-        assert not _detect_kanban()
-        assert "file" in selected()
-        assert enabled_names, "Changing config must not mutate an already-built schema"
     finally:
-        if client is not None:
-            client.close()
+        reset_hermes_home_override(token)
+    assert _names(selected()) == enabled_names
+    from agent.skill_utils import _detect_kanban
+    assert _detect_kanban(), "Saved opt-in still hides the Kanban playbook"
+    result = json.loads(registry.dispatch("kanban_create", {"title": "opt-in roundtrip", "assignee": "default"}))
+    assert result.get("ok"), result
+    from hermes_cli.kanban_db_connect import connect_closing
+    from hermes_cli.kanban_db import get_task
+    with connect_closing() as conn:
+        assert get_task(conn, result["task_id"]).title == "opt-in roundtrip"
+    toggle(False)
+    assert not _names(selected())
+    assert not _detect_kanban()
+    assert "file" in selected()
+    assert enabled_names, "Changing config must not mutate an already-built schema"
 
 
 @pytest.mark.parametrize("legacy", [False, True])

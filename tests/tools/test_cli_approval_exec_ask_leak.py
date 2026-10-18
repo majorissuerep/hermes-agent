@@ -155,31 +155,6 @@ class TestExecuteCodeGuardCliApprovalSurvivesExecAskLeak:
         assert result.get("status") == "pending_approval"
         assert result.get("approval_pending") is True
 
-    def test_cli_callback_used_for_platform_marker_leak_without_exec_ask(
-        self, monkeypatch
-    ):
-        """The other half of the leak: a session platform marker, no ask-mode.
-
-        ``_is_session_approval_context()`` is true whenever
-        ``HERMES_SESSION_PLATFORM`` is set, so the whole-script gate is
-        reached with ``HERMES_EXEC_ASK`` entirely absent. That path must
-        show the CLI panel too, not a silent pending approval.
-        """
-        monkeypatch.delenv("HERMES_EXEC_ASK", raising=False)
-        monkeypatch.setenv("HERMES_SESSION_PLATFORM", "telegram")
-        calls = []
-
-        def _cb(command, description, **kwargs):
-            calls.append((command, description))
-            return "once"
-
-        set_approval_callback(_cb)
-        result = check_execute_code_guard("print('marker')", "local")
-
-        assert calls, "CLI approval callback was never invoked"
-        assert result.get("approved") is True
-        assert result.get("status") != "pending_approval"
-        assert result.get("approval_pending") is not True
 
 
 class TestExecuteCodeGuardCliDenialBreakerParity:

@@ -4,7 +4,7 @@ Two operator/agent-facing name lookups must stay inside the thing they name:
 
 * ``/memory`` and ``/skills`` ``approve|reject|diff <id>`` (#119997): the id names a record staged under
   ``<HERMES_HOME>/pending/<subsystem>/``. A ``../`` or absolute id must not read, delete or apply any
-  file outside that directory. Driven through the real ``tui_gateway`` stdio backend (``slash.exec``),
+  file outside that directory. Driven through the real ``tui_runtime`` stdio backend (``slash.exec``),
   after real staged writes: the fake model calls the ``memory`` and ``skill_manage`` tools with
   ``memory.write_approval`` / ``skills.write_approval`` on, so the store directories exist exactly as
   they do for a user.
@@ -30,10 +30,10 @@ import pytest
 from tests.e2e.core._pending_fixes import known_gate
 from tests.e2e.core.security import _helpers as H
 from tests.e2e.core.security._traversal import digest, result_json, tool_text
-from tests.e2e.core.tenancy._helpers import TuiBackend
+from tests.e2e.core.security._stdio import NativeRuntime
 from tests.fakes.fake_llm_provider import FakeLLMServer, Text, ToolCall
 
-pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="POSIX absolute-path spellings and process groups")
+pytestmark = pytest.mark.platforms("posix")
 
 _ISSUE_STORE = "#119997 pending id is used as a path: ../ or absolute ids reach files outside pending/<subsystem>/"
 _ISSUE_DELETE = "#120528 skill_manage delete skips the pin/essential guard for a category/name spelling"
@@ -85,7 +85,7 @@ def _tool_results(srv: FakeLLMServer) -> list[dict[str, Any]]:
             for m in srv.main_requests()[-1]["messages"] if m.get("role") == "tool"]
 
 
-def _slash(b: TuiBackend, sid: str, command: str) -> str:
+def _slash(b: NativeRuntime, sid: str, command: str) -> str:
     reply = b.call("slash.exec", {"session_id": sid, "command": command}, timeout=90)
     assert "result" in reply, f"slash.exec {command!r} failed: {reply.get('error')}"
     return str(reply["result"].get("output", ""))
@@ -96,7 +96,7 @@ def _slash(b: TuiBackend, sid: str, command: str) -> str:
 
 @dataclass
 class Store:
-    b: TuiBackend
+    b: NativeRuntime
     sid: str
     hermes_home: Path
     outside: Path
@@ -110,8 +110,11 @@ class Store:
         return {p.stem for p in d.glob("*.json")} if d.is_dir() else set()
 
     def memory_blob(self) -> str:
+        from hermes_security.io import read_text
+
         d = self.hermes_home / "memories"
-        return "".join(p.read_text(encoding="utf-8", errors="replace") for p in d.glob("*")) if d.is_dir() else ""
+        return "".join(read_text(p, purpose="memory", encoding="utf-8")
+                       for p in d.glob("*") if p.is_file()) if d.is_dir() else ""
 
 
 @pytest.fixture(scope="module")
@@ -128,7 +131,7 @@ def store(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Store]:
                for i, t in enumerate(skill_texts)]
     with FakeLLMServer([*script, Text("staged")], api_key=key) as srv:
         H.write_home(home / ".hermes", srv.base_url, api_key=key, config=_STORE_CONFIG)
-        b = TuiBackend(home, root / "tui.log")
+        b = NativeRuntime(home, root / "tui.log")
         try:
             sid = b.ok("session.create", {})["session_id"]
             b.turn(sid, "stage five writes")
@@ -231,7 +234,7 @@ def deletes(tmp_path_factory: pytest.TempPathFactory) -> Iterator[DeleteRun]:
         H.write_home(home / ".hermes", srv.base_url, api_key=key)
         pin = H.run_hermes(["curator", "pin", "my-skill"], home, timeout=90)
         assert pin.returncode == 0, f"hermes curator pin failed: {pin.stdout}\n{pin.stderr[-2000:]}"
-        b = TuiBackend(home, root / "tui.log")
+        b = NativeRuntime(home, root / "tui.log")
         try:
             sid = b.ok("session.create", {})["session_id"]
             for step, (scenario, name, rel) in enumerate(_DELETE_STEPS, start=1):

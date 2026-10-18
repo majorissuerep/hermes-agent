@@ -10,6 +10,8 @@ import argparse
 import json
 
 import pytest
+from tests.hermes_cli.update_test_support import isolated_command_checkout as isolated_command_checkout  # noqa: PLC0414 -- register the shared autouse fixture
+
 
 from hermes_cli import main as cli_main
 from hermes_cli import update_cmd_holders
@@ -54,7 +56,7 @@ def test_list_venv_holders_empty_list_exits_zero_without_updating(monkeypatch, c
     def _boom(*_a, **_k):  # the mutating update body must never run behind the read-only flag
         raise AssertionError("update body ran")
 
-    monkeypatch.setattr("hermes_cli.update_cmd._cmd_update_impl", _boom)
+    monkeypatch.setattr("hermes_cli.terminal_update.update_source", _boom)
 
     assert cli_main.cmd_update(_args()) is None
     assert json.loads(capsys.readouterr().out) == []

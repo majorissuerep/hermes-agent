@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import json
 import os
-import sqlite3
 import subprocess
 import sys
 import time
@@ -23,6 +22,9 @@ from typing import Any, Callable
 
 import hermes_yaml as yaml
 from hermes_cli.config_defaults import DEFAULT_CONFIG
+
+from tests.e2e.vault_home import connect_state, run_unlocked, seal_fixture_home, spawn_unlocked
+from hermes_security import io as state_io
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 TURN_TIMEOUT = 180.0
@@ -71,7 +73,7 @@ class NativeHome:
             "TERM": "dumb",
             # The child's ~/.hermes/state.db IS the tmp home's db; under a pytest ancestor the
             # live-DB guard would refuse it. Documented child escape hatch; path is tmp by construction.
-            "HERMES_STATE_DB_GUARD_BYPASS": "1", "HERMES_ALLOW_NO_VAULT": "1",
+            "HERMES_STATE_DB_GUARD_BYPASS": "1",
             # Never reach real AWS/GCP metadata endpoints or shared config from a fake home.
             "AWS_EC2_METADATA_DISABLED": "true",
             "AWS_CONFIG_FILE": str(self.home / ".aws" / "config"),
@@ -107,6 +109,7 @@ def make_home(root: Path, model: dict[str, Any], *, env_file: dict[str, str] | N
     (nh.hermes_home / "config.yaml").write_text(yaml.safe_dump(cfg, sort_keys=False), encoding="utf-8")
     lines = [f"{k}={v}" for k, v in (env_file or {}).items()]
     (nh.hermes_home / ".env").write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+    seal_fixture_home(nh.hermes_home)
     return nh
 
 
@@ -129,15 +132,13 @@ def run_chat(nh: NativeHome, prompt: str, *, resume: str | None = None, env: dic
     if resume:
         argv += ["--resume", resume]
     started = time.monotonic()
-    proc = subprocess.run(argv, cwd=nh.project, env=nh.env(env), capture_output=True, text=True,
+    proc = run_unlocked(argv, cwd=nh.project, env=nh.env(env), capture_output=True, text=True,
                           timeout=timeout, stdin=subprocess.DEVNULL, check=False)
     return ChatResult(proc.returncode, proc.stdout, proc.stderr, time.monotonic() - started)
 
 
-def _connect(nh: NativeHome) -> sqlite3.Connection:
-    conn = sqlite3.connect(f"file:{nh.db_path}?mode=ro", uri=True, timeout=10)
-    conn.row_factory = sqlite3.Row
-    return conn
+def _connect(nh: NativeHome) -> Any:
+    return connect_state(nh.db_path)
 
 
 def session_ids(nh: NativeHome) -> list[str]:

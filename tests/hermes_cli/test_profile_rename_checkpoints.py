@@ -52,8 +52,7 @@ def test_rename_preserves_profile_local_checkpoint_history(profile_env, tmp_path
     finally:
         reset_hermes_home_override(token)
 
-    with patch("hermes_cli.profiles.check_alias_collision", return_value="skip"), \
-         patch("hermes_cli.profiles._live_default_multiplexer", return_value=False):
+    with patch("hermes_cli.profiles.check_alias_collision", return_value="skip"):
         new_dir = rename_profile("oldname", "newname")
 
     new_workdir = new_dir / "project"
@@ -101,7 +100,6 @@ def test_retry_after_partial_rekey_keeps_checkpoints_taken_under_new_name(profil
         reset_hermes_home_override(token)
 
     with patch("hermes_cli.profiles.check_alias_collision", return_value="skip"), \
-         patch("hermes_cli.profiles._live_default_multiplexer", return_value=False), \
          patch.object(maintenance, "_delete_ref", return_value=False):  # old ref survives: partial rekey
         new_dir = rename_profile("oldname", "newname")
 

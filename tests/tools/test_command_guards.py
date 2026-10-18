@@ -31,7 +31,7 @@ def _clean_state():
     approval_module._pending.clear()
     approval_module._permanent_approved.clear()
     saved = {}
-    for k in ("HERMES_INTERACTIVE", "HERMES_GATEWAY_SESSION", "HERMES_EXEC_ASK", "HERMES_YOLO_MODE"):
+    for k in ("HERMES_INTERACTIVE", "HERMES_SESSION_PLATFORM", "HERMES_EXEC_ASK", "HERMES_YOLO_MODE"):
         if k in os.environ:
             saved[k] = os.environ.pop(k)
     yield
@@ -40,7 +40,7 @@ def _clean_state():
     approval_module._permanent_approved.clear()
     for k, v in saved.items():
         os.environ[k] = v
-    for k in ("HERMES_INTERACTIVE", "HERMES_GATEWAY_SESSION", "HERMES_EXEC_ASK", "HERMES_YOLO_MODE"):
+    for k in ("HERMES_INTERACTIVE", "HERMES_SESSION_PLATFORM", "HERMES_EXEC_ASK", "HERMES_YOLO_MODE"):
         os.environ.pop(k, None)
 
 
@@ -78,7 +78,7 @@ class TestCliPrompt:
     def test_dangerous_command_deny(self):
         os.environ["HERMES_INTERACTIVE"] = "1"
         cb = MagicMock(return_value="deny")
-        result = check_all_command_guards("rm -rf /tmp", "local", approval_callback=cb)
+        result = check_all_command_guards("rm -rf /unrelated-data", "local", approval_callback=cb)
         assert result["approved"] is False
         cb.assert_called_once()
         assert cb.call_args[1]["allow_permanent"] is True
@@ -176,13 +176,13 @@ class TestGatewayApprovalAllowPermanent:
 
         register_session_notify(session_key, notify)
         token = set_current_session_key(session_key)
-        os.environ["HERMES_GATEWAY_SESSION"] = "1"
+        os.environ["HERMES_SESSION_PLATFORM"] = "tui"
         os.environ["HERMES_EXEC_ASK"] = "1"
         os.environ["HERMES_SESSION_KEY"] = session_key
         try:
             check_all_command_guards(command, "local")
         finally:
-            os.environ.pop("HERMES_GATEWAY_SESSION", None)
+            os.environ.pop("HERMES_SESSION_PLATFORM", None)
             os.environ.pop("HERMES_EXEC_ASK", None)
             os.environ.pop("HERMES_SESSION_KEY", None)
             reset_current_session_key(token)

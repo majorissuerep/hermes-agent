@@ -826,33 +826,6 @@ class TestForkBombDetection:
         assert dangerous is False
 
 
-class TestGatewayProtection:
-    """Prevent agents from starting the gateway outside systemd management."""
-
-    def test_gateway_run_backgrounded_detected(self):
-        cmd = "kill 1605 && cd ~/.hermes/hermes-agent && source venv/bin/activate && python -m hermes_cli.main gateway run --replace &disown; echo done"
-        dangerous, _key, desc = detect_dangerous_command(cmd)
-        assert dangerous is True
-        assert "systemctl" in desc
-        for variant in (
-            "python -m hermes_cli.main gateway run --replace &",
-            "nohup python -m hermes_cli.main gateway run --replace",
-        ):
-            assert detect_dangerous_command(variant)[0] is True, variant
-
-
-    def test_systemctl_restart_flagged(self):
-        """systemctl restart kills running agents and should require approval."""
-        cmd = "systemctl --user restart hermes-gateway"
-        dangerous, _key, desc = detect_dangerous_command(cmd)
-        assert dangerous is True
-        assert "stop/restart" in desc
-
-
-    def test_pkill_unrelated_not_flagged(self):
-        """pkill targeting unrelated processes should not be flagged."""
-        dangerous, _key, _desc = detect_dangerous_command("pkill -f nginx")
-        assert dangerous is False
 
 
 
@@ -876,7 +849,7 @@ class TestWebhookApprovalExclusion:
         from tools.approval import _is_session_approval_context
 
         monkeypatch.delenv("HERMES_CRON_SESSION", raising=False)
-        monkeypatch.delenv("HERMES_GATEWAY_SESSION", raising=False)
+        monkeypatch.delenv("HERMES_SESSION_PLATFORM", raising=False)
         monkeypatch.setenv("HERMES_SESSION_PLATFORM", "webhook")
 
         assert _is_session_approval_context() is False
@@ -887,7 +860,7 @@ class TestWebhookApprovalExclusion:
         from tools.approval_context import _UNATTENDED_APPROVAL_PLATFORMS
 
         monkeypatch.delenv("HERMES_CRON_SESSION", raising=False)
-        monkeypatch.delenv("HERMES_GATEWAY_SESSION", raising=False)
+        monkeypatch.delenv("HERMES_SESSION_PLATFORM", raising=False)
         for platform in _UNATTENDED_APPROVAL_PLATFORMS:
             monkeypatch.setenv("HERMES_SESSION_PLATFORM", platform)
             assert _is_session_approval_context() is False, platform
@@ -897,8 +870,8 @@ class TestWebhookApprovalExclusion:
         from tools.approval import _is_session_approval_context
 
         monkeypatch.delenv("HERMES_CRON_SESSION", raising=False)
-        monkeypatch.setenv("HERMES_GATEWAY_SESSION", "1")
-        monkeypatch.setenv("HERMES_SESSION_PLATFORM", "telegram")
+        monkeypatch.setenv("HERMES_SESSION_PLATFORM", "tui")
+        monkeypatch.setenv("HERMES_SESSION_PLATFORM", "tui")
 
         assert _is_session_approval_context() is True
 
@@ -907,7 +880,7 @@ class TestWebhookApprovalExclusion:
         from tools.approval import _is_session_approval_context
 
         monkeypatch.setenv("HERMES_CRON_SESSION", "1")
-        monkeypatch.setenv("HERMES_SESSION_PLATFORM", "telegram")
+        monkeypatch.setenv("HERMES_SESSION_PLATFORM", "tui")
 
         assert _is_session_approval_context() is False
 
@@ -916,7 +889,7 @@ class TestWebhookApprovalExclusion:
         from tools.approval import _is_session_approval_context
 
         monkeypatch.delenv("HERMES_CRON_SESSION", raising=False)
-        monkeypatch.delenv("HERMES_GATEWAY_SESSION", raising=False)
+        monkeypatch.delenv("HERMES_SESSION_PLATFORM", raising=False)
         monkeypatch.delenv("HERMES_SESSION_PLATFORM", raising=False)
 
         assert _is_session_approval_context() is False
@@ -941,7 +914,7 @@ class TestWebhookApprovalExclusion:
 
         self._isolate(monkeypatch)
         monkeypatch.delenv("HERMES_CRON_SESSION", raising=False)
-        monkeypatch.delenv("HERMES_GATEWAY_SESSION", raising=False)
+        monkeypatch.delenv("HERMES_SESSION_PLATFORM", raising=False)
         monkeypatch.delenv("HERMES_INTERACTIVE", raising=False)
         monkeypatch.setenv("HERMES_SESSION_PLATFORM", "webhook")
         monkeypatch.setenv("HERMES_SESSION_KEY", "test-webhook-session")
@@ -957,7 +930,7 @@ class TestWebhookApprovalExclusion:
 
         self._isolate(monkeypatch)
         monkeypatch.delenv("HERMES_CRON_SESSION", raising=False)
-        monkeypatch.delenv("HERMES_GATEWAY_SESSION", raising=False)
+        monkeypatch.delenv("HERMES_SESSION_PLATFORM", raising=False)
         monkeypatch.delenv("HERMES_INTERACTIVE", raising=False)
         monkeypatch.setenv("HERMES_SESSION_PLATFORM", "webhook")
         monkeypatch.setenv("HERMES_SESSION_KEY", "test-webhook-session")
@@ -973,7 +946,7 @@ class TestWebhookApprovalExclusion:
         from tools.approval import check_all_command_guards
 
         monkeypatch.delenv("HERMES_CRON_SESSION", raising=False)
-        monkeypatch.delenv("HERMES_GATEWAY_SESSION", raising=False)
+        monkeypatch.delenv("HERMES_SESSION_PLATFORM", raising=False)
         monkeypatch.delenv("HERMES_INTERACTIVE", raising=False)
         monkeypatch.setenv("HERMES_SESSION_PLATFORM", "webhook")
         monkeypatch.setenv("HERMES_SESSION_KEY", "test-webhook-session")
@@ -987,7 +960,7 @@ class TestWebhookApprovalExclusion:
 
         self._isolate(monkeypatch)
         monkeypatch.delenv("HERMES_CRON_SESSION", raising=False)
-        monkeypatch.delenv("HERMES_GATEWAY_SESSION", raising=False)
+        monkeypatch.delenv("HERMES_SESSION_PLATFORM", raising=False)
         monkeypatch.delenv("HERMES_INTERACTIVE", raising=False)
         monkeypatch.setenv("HERMES_SESSION_PLATFORM", "api_server")
         monkeypatch.setenv("HERMES_SESSION_KEY", "test-api-session")
@@ -1002,7 +975,7 @@ class TestWebhookApprovalExclusion:
 
         self._isolate(monkeypatch)
         monkeypatch.delenv("HERMES_CRON_SESSION", raising=False)
-        monkeypatch.delenv("HERMES_GATEWAY_SESSION", raising=False)
+        monkeypatch.delenv("HERMES_SESSION_PLATFORM", raising=False)
         monkeypatch.delenv("HERMES_INTERACTIVE", raising=False)
         monkeypatch.delenv("HERMES_EXEC_ASK", raising=False)
         monkeypatch.setenv("HERMES_SESSION_PLATFORM", "webhook")
@@ -1134,77 +1107,6 @@ class TestPgrepKillExpansion:
         assert dangerous is False
 
 
-class TestLaunchctlGatewayLifecycle:
-    """launchctl stop/kickstart/bootout/unload against the Hermes service
-    label achieves the same effect as `hermes gateway stop|restart` and
-    must require the same approval. See issue #33071.
-    """
-
-    def test_launchctl_against_hermes_label_detected(self):
-        for cmd in (
-            "launchctl stop ai.hermes.gateway",
-            "launchctl kickstart -k system/ai.hermes.gateway",
-            "launchctl bootout system/ai.hermes.gateway",
-            "launchctl unload ~/Library/LaunchAgents/ai.hermes.gateway.plist",
-        ):
-            dangerous, _, _desc = detect_dangerous_command(cmd)
-            assert dangerous is True, cmd
-
-    def test_unrelated_labels_not_flagged(self):
-        """Read-only inspection, and lifecycle ops on non-Hermes labels, are
-        out of scope for the gateway-lifecycle guard."""
-        for cmd in (
-            "launchctl print system/com.apple.WindowServer",
-            "launchctl stop com.example.unrelated",
-        ):
-            dangerous, _, _ = detect_dangerous_command(cmd)
-            assert dangerous is False, cmd
-
-    def test_quote_spliced_verbs_detected(self):
-        """#80269: the shell joins ``kick"start"`` into the literal verb
-        ``kickstart`` before execution, so the spliced form runs exactly as
-        the gated one. Backslash splices already normalized here; quote
-        splices sit in an argument position that word-scoped deobfuscation
-        deliberately does not touch, so they auto-approved.
-        """
-        for cmd in (
-            'launchctl kick"start" -k gui/501/ai.hermes.gateway',
-            "launchctl kick'start' -k gui/501/ai.hermes.gateway",
-            'launchctl boot"out" gui/501/ai.hermes.gateway',
-            'launchctl bootout gui/501/ai.hermes."gateway"',
-            'hermes gateway re"start"',
-            'systemctl re"start" hermes-gateway',
-        ):
-            dangerous, _, _ = detect_dangerous_command(cmd)
-            assert dangerous is True, cmd
-
-    def test_spliced_detection_does_not_flag_prose_or_other_services(self):
-        """The splice pass must not widen the blast radius: it is anchored on
-        a hermes-gateway identifier, so quoted prose and non-gateway hermes
-        services stay auto-approved."""
-        for cmd in (
-            'launchctl kick"start" -k gui/501/ai.hermes.update-checker',
-            'echo "restart the payment gateway"',
-            'git commit -m "document the api gateway restart flow"',
-        ):
-            dangerous, _, _ = detect_dangerous_command(cmd)
-            assert dangerous is False, cmd
-    def test_label_built_before_verb_detected(self):
-        """2026-08-02 incident: the label was defined in a shell for-loop
-        BEFORE the `launchctl bootout` call, referenced only via a `$label`
-        variable at the point of the verb. The old sequential regex required
-        "hermes"/"ai.hermes" to appear AFTER the verb and missed this
-        entirely, restarting 4 gateways with zero approval."""
-        cmd = (
-            "uid=$(id -u); for item in 'ai.hermes.gateway-apollo:/a.plist' "
-            "'ai.hermes.gateway:/Users/botuser/Library/LaunchAgents/ai.hermes.gateway.plist'; "
-            "do label=${item%%:*}; plist=${item#*:}; "
-            'launchctl bootout "gui/$uid/$label"; '
-            'launchctl bootstrap "gui/$uid" "$plist"; done'
-        )
-        dangerous, _, desc = detect_dangerous_command(cmd)
-        assert dangerous is True, cmd
-        assert "launchd" in desc.lower()
 
 
 class TestQuotedCommandWordVariants:
@@ -1546,7 +1448,7 @@ class TestApprovalTimeoutIsNotConsent:
 
         self._saved_env = {
             k: os.environ.get(k)
-            for k in ("HERMES_GATEWAY_SESSION", "HERMES_CRON_SESSION",
+            for k in ("HERMES_SESSION_PLATFORM", "HERMES_CRON_SESSION",
                       "HERMES_YOLO_MODE",
                       "HERMES_SESSION_KEY", "HERMES_INTERACTIVE")
         }
@@ -1556,7 +1458,7 @@ class TestApprovalTimeoutIsNotConsent:
         # _is_session_approval_context(); a leaked value from a parent cron
         # process would force the cron path and break these gateway tests.
         os.environ.pop("HERMES_CRON_SESSION", None)
-        os.environ["HERMES_GATEWAY_SESSION"] = "1"
+        os.environ["HERMES_SESSION_PLATFORM"] = "tui"
         os.environ["HERMES_SESSION_KEY"] = self.SESSION_KEY
 
     def teardown_method(self):

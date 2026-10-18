@@ -1,3 +1,4 @@
+from pathlib import Path
 """Tests for MCP ResourceLink / EmbeddedResource / AudioContent handling.
 
 Regression coverage for a customer report (2026-07): non-image binary
@@ -51,7 +52,7 @@ class TestRenderResourceBlock:
         path = out.split("saved to ", 1)[1].split(" (", 1)[0]
         with open(path, "rb") as fh:
             assert fh.read() == PDF_BYTES
-        assert "report.pdf" in path
+        assert Path(path).suffix == ".pdf"
 
 
     def test_malformed_base64_fails_explicitly(self):

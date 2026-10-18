@@ -10,12 +10,14 @@ from __future__ import annotations
 
 import threading
 import types
+import secrets
 
 import pytest
 
 from agent.onboarding import PROFILE_BUILD_FLAG, profile_build_directive
 from hermes_yaml import safe_dump, safe_load
 from tui_runtime import server
+from hermes_security import io, migrate
 
 
 def _session(agent, history=None):
@@ -34,6 +36,9 @@ def onboarding_home(monkeypatch, tmp_path):
         safe_dump({"onboarding": {"profile_build": "ask"}})
     )
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    assert migrate.migrate_home(tmp_path, secrets.token_urlsafe(24)).ok
+    monkeypatch.setattr(server, "_hermes_home", tmp_path)
+    monkeypatch.setattr(server, "_cfg_cache", None)
     return tmp_path
 
 
@@ -49,8 +54,9 @@ def test_stages_profile_build_directive_on_first_contact(monkeypatch, onboarding
     agent = types.SimpleNamespace()
     _stage(_session(agent), agent, history_empty=True)
 
-    assert agent._gateway_turn_context_notes == profile_build_directive().strip()
-    loaded = safe_load((onboarding_home / "config.yaml").read_text())
+    assert agent._turn_context_notes == profile_build_directive().strip()
+    loaded = safe_load(io.read_text(onboarding_home / "config.yaml", purpose="config"))
+    assert (onboarding_home / "config.yaml").read_bytes().startswith(b"HRMVAULT\x00")
     assert loaded["onboarding"]["seen"][PROFILE_BUILD_FLAG] is True
 
 
@@ -62,8 +68,8 @@ def test_skips_first_contact_when_prior_sessions_exist(monkeypatch, onboarding_h
     agent = types.SimpleNamespace()
     _stage(_session(agent), agent, history_empty=True)
 
-    assert getattr(agent, "_gateway_turn_context_notes", "") == ""
-    loaded = safe_load((onboarding_home / "config.yaml").read_text())
+    assert getattr(agent, "_turn_context_notes", "") == ""
+    loaded = safe_load(io.read_text(onboarding_home / "config.yaml", purpose="config"))
     assert "seen" not in loaded.get("onboarding", {})
 
 
@@ -78,16 +84,16 @@ def test_skips_first_contact_when_history_not_empty(monkeypatch, onboarding_home
         history_empty=False,
     )
 
-    assert getattr(agent, "_gateway_turn_context_notes", "") == ""
+    assert getattr(agent, "_turn_context_notes", "") == ""
 
 
 def test_skips_when_offer_already_latched(monkeypatch, onboarding_home):
     """``onboarding.seen.profile_build_offered`` set: the plain intro rides
     instead of the directive, exactly as the gateway path behaves."""
-    (onboarding_home / "config.yaml").write_text(
+    io.write_text(onboarding_home / "config.yaml",
         safe_dump(
             {"onboarding": {"profile_build": "ask", "seen": {PROFILE_BUILD_FLAG: True}}}
-        )
+        ), purpose="config"
     )
     monkeypatch.setattr(server, "_install_has_prior_sessions", lambda _s: False)
 
@@ -96,7 +102,7 @@ def test_skips_when_offer_already_latched(monkeypatch, onboarding_home):
 
     from agent.onboarding import PLAIN_INTRO_NOTE
 
-    assert agent._gateway_turn_context_notes == PLAIN_INTRO_NOTE.strip()
+    assert agent._turn_context_notes == PLAIN_INTRO_NOTE.strip()
 
 
 def test_installs_prior_sessions_probe_counts_the_install(monkeypatch):

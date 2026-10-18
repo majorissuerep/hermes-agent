@@ -43,13 +43,13 @@ from pathlib import Path
 
 root, checkout, mode = Path(sys.argv[1]), sys.argv[2], sys.argv[3]
 envs = json.loads((root / "envs.json").read_text(encoding="utf-8"))
-ARGV = [sys.executable, "-m", "hermes_cli.main", "update", "--yes", "--branch", "main", "--no-gateway-restart"]
+ARGV = [sys.executable, "-m", "hermes_cli.main", "update", "--yes", "--branch", "main"]
 # A running server's "is an update in flight" probe, in a fresh process of another home.
 READER = """
 import json, sys
 sys.path.insert(0, sys.argv[1])
-from hermes_cli.web_server_skew_exit import _update_in_progress
-print(json.dumps({"skew_reader": _update_in_progress()}))
+from hermes_cli.update_lock import update_in_progress
+print(json.dumps({"skew_reader": update_in_progress(install_root=sys.argv[1])}))
 """
 
 

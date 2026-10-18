@@ -1,6 +1,6 @@
 """tools.list / tools.show read back the SESSION's effective toolsets (#117977).
 
-``profiles.configure`` pins ``platform_toolsets.cli`` in the profile's own config.yaml — the key the
+Local profile configuration pins ``platform_toolsets.cli`` in its own config.yaml — the key the
 agent build reads through ``_load_enabled_toolsets`` under the session's profile scope. The read-back
 RPCs consulted only a BUILT agent; a session whose agent had not been built yet (``session.create``
 with no prompt, exactly the editor's flow) read back as "everything enabled", and a session-less call
@@ -14,17 +14,15 @@ import hermes_yaml as yaml
 import pytest
 
 from tui_runtime import server
-from tui_runtime.methods_profiles import _save_toolset_pin
 
 LAUNCH_PIN = ["web", "browser", "terminal"]
 WORKER_PIN = ["file", "clarify"]
 
 
 def _pin(home, names):
-    """Write the pin the way ``profiles.configure`` does (its writer, into that home's config.yaml)."""
+    """Seed the local profile's toolset pin, independent of any editor interface."""
     home.mkdir(parents=True, exist_ok=True)
-    _save_toolset_pin({}, names, save_config=lambda cfg: (home / "config.yaml").write_text(
-        yaml.safe_dump(cfg), encoding="utf-8"))
+    (home / "config.yaml").write_text(yaml.safe_dump({"platform_toolsets": {"cli": names}}), encoding="utf-8")
 
 
 @pytest.fixture

@@ -2,20 +2,17 @@
 
 Why: normal prompt turns bind ``session['profile_home']`` via
 ``set_hermes_home_override`` before ``run_conversation`` so the turn runs against
-the correct profile home. The two ephemeral RPC paths — ``prompt.background`` and
-``preview.restart`` — spawn a fresh ``AIAgent`` on a NEW thread, and the
+the correct profile home. The ``prompt.background`` path spawns a fresh ``AIAgent``
+on a NEW thread, and the
 ``HERMES_HOME`` ContextVar set on the session-create thread does NOT propagate to
-those threads. Without an explicit re-bind, a background/preview-restart turn under
+those threads. Without an explicit re-bind, a background turn under
 a non-default profile would run against the wrong home. This module locks in:
 
   1. ``prompt.background`` re-binds ``profile_home`` for the ephemeral turn.
-  2. ``preview.restart`` re-binds ``profile_home`` for the ephemeral turn AND does
-     NOT close the ephemeral agent (a task-wide ``AIAgent.close()`` would kill the
-     background server the restart just started — maintainer problem #1).
-  3. Both paths RESTORE the override after the turn (reset token from set), exactly
+  2. The worker RESTORES the override after the turn (reset token from set), exactly
      like the normal prompt turn, and skip the bind entirely when no profile is set.
 
-How to test: run this module with pytest; each test drives the real RPC handler
+Each test drives the real RPC handler
 from ``tui_runtime.server._methods`` with ``threading.Thread`` patched to run the
 target inline, then asserts on the recorded override set/reset calls and the agent.
 """
@@ -64,9 +61,6 @@ def override_calls():
         patch("tui_runtime.server.set_hermes_home_override", return_value="TOK") as m_set, \
         patch("tui_runtime.server.reset_hermes_home_override") as m_reset, \
         patch("tui_runtime.server._background_agent_kwargs", return_value={}), \
-        patch("tui_runtime.server._ephemeral_preview_agent_kwargs", return_value={}), \
-        patch("tui_runtime.server._preview_restart_callbacks", return_value={}), \
-        patch("tui_runtime.server._preview_restart_history", return_value=[]), \
         patch("tui_runtime.server._set_session_context", return_value=None), \
         patch("tui_runtime.server._clear_session_context"), \
         patch("tui_runtime.server._session_cwd", return_value="/tmp"), \
@@ -101,29 +95,3 @@ class TestBackgroundProfileOverride:
 
         override_calls["set"].assert_called_once_with(PROFILE_HOME)
         override_calls["reset"].assert_called_once_with("TOK")
-
-class TestPreviewRestartProfileOverride:
-    def test_preview_binds_and_restores_profile_home(self, fake_session, override_calls):
-        """preview.restart binds profile_home for the ephemeral turn and restores it."""
-        _run(
-            "preview.restart",
-            {"url": "http://localhost:5173", "cwd": "", "session_id": "ui1"},
-            fake_session,
-        )
-
-        override_calls["set"].assert_called_once_with(PROFILE_HOME)
-        override_calls["reset"].assert_called_once_with("TOK")
-        override_calls["agent"].run_conversation.assert_called_once()
-
-    def test_preview_does_not_close_agent(self, fake_session, override_calls):
-        """The restarted preview server must survive: the ephemeral agent is NOT
-        closed via task-wide process cleanup (maintainer problem #1)."""
-        _run(
-            "preview.restart",
-            {"url": "http://localhost:5173", "cwd": "", "session_id": "ui1"},
-            fake_session,
-        )
-
-        # A task-wide AIAgent.close() would kill every process for this task_id,
-        # tearing down the very background server the restart just launched.
-        override_calls["agent"].close.assert_not_called()

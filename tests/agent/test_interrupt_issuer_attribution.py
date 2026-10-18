@@ -133,7 +133,7 @@ def test_soft_interrupt_with_tool_reason_is_attributed_to_the_system():
 
             with (
                 patch.object(tab, "_TerminalBatch", _Batch),
-                patch("agent.session_context.get_session_env", return_value="desktop"),
+                patch("agent.session_context.get_session_env", return_value="tui"),
                 patch("tools.approval._session_notify_cb", lambda _k: object()),
                 patch.object(te, "_parse_tool_call", _parse),
                 tab.terminal_approval_batch(agent, [1, 2], [], "t"),

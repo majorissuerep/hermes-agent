@@ -29,7 +29,7 @@ from tests.e2e.core._pending_fixes import known_gate
 from tests.e2e.core.security import _helpers as H
 from tests.e2e.core.security._traversal import digest, result_json, run_tool_calls
 
-pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="POSIX symlinks and ../ spellings")
+pytestmark = pytest.mark.platforms("posix")
 
 
 CONFINED_SCENARIOS = (
@@ -238,7 +238,12 @@ def protected(tmp_path_factory: pytest.TempPathFactory) -> Run:
 def _hidden_breach(step: Step, text: str) -> str | None:
     path, mark = step.subject
     # a vacuous pass is impossible: the protected file must still hold the canary the tool must not return
-    assert mark in path.read_text(encoding="utf-8", errors="replace"), f"{path} no longer holds its canary"
+    from hermes_security import io, migrate
+
+    home = io._home_for(path)
+    value = (io.read_text(path, purpose=migrate._purpose_for(path.relative_to(home)))
+             if home is not None else path.read_text(encoding="utf-8"))
+    assert mark in value, f"{path} no longer holds its canary"
     return "the tool result carries the protected file's content" if mark in text else None
 
 

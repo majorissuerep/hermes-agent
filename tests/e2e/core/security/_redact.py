@@ -11,16 +11,13 @@ import json
 import re
 import secrets
 import string
-import subprocess
-import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
 import pytest
 
-from tests.e2e.core.delivery._fake_platform import GatewayProcess, read_jsonl, wait_until
-from tests.e2e.core.security._helpers import REPO_ROOT, BoundaryBreach, db_blob, files_containing, run_hermes
+from tests.e2e.core.security._helpers import BoundaryBreach, db_blob, files_containing, run_hermes
 from tests.fakes.fake_llm_provider import Error, Response, Text, ToolCall
 
 
@@ -57,16 +54,15 @@ def core(value: str) -> str:
 
 
 # Sinks a scenario is held to; the table below documents which ones the contract covers.
-LOGS, STORE, EXPORT, EXPORT_REDACTED, WIRE, PLATFORM = (
-    "logs", "store", "export", "export --redact", "next provider request", "platform wire")
-CONTENT_SINKS = (LOGS, STORE, EXPORT, EXPORT_REDACTED, WIRE, PLATFORM)
+LOGS, STORE, EXPORT, EXPORT_REDACTED, WIRE = (
+    "logs", "store", "export", "export --redact", "next provider request")
+CONTENT_SINKS = (LOGS, STORE, EXPORT, EXPORT_REDACTED, WIRE)
 # The session database keeps tool arguments and the user's own prompt as executed (docs:
 # user-guide/security.md "The session database itself still holds the command as it was executed");
 # the provider replay of the model's own tool call and the default (non --redact) export read it back.
-RAW_BY_DESIGN_SINKS = (LOGS, EXPORT_REDACTED, PLATFORM)
+RAW_BY_DESIGN_SINKS = (LOGS, EXPORT_REDACTED)
 # Test-id spelling of each sink: one cell per (scenario, sink), so a KNOWN names exactly one sink.
-SINK_IDS = {LOGS: "logs", STORE: "store", EXPORT: "export", EXPORT_REDACTED: "export_redact", WIRE: "next_request",
-            PLATFORM: "platform"}
+SINK_IDS = {LOGS: "logs", STORE: "store", EXPORT: "export", EXPORT_REDACTED: "export_redact", WIRE: "next_request"}
 
 
 @dataclass(frozen=True)
@@ -117,7 +113,7 @@ SCENARIOS: dict[str, Scenario] = {s.name: s for s in (
     # (f) the provider echoes the request's key back in an error body
     Scenario("provider_error_echo", lambda k: [k.provider],
              lambda c: [Error(401, f"Incorrect API key provided: {c.keys.provider} ({c.keys.nonce})")],
-             (LOGS, STORE, EXPORT, EXPORT_REDACTED, PLATFORM)),
+             (LOGS, STORE, EXPORT, EXPORT_REDACTED)),
 )}
 
 
@@ -191,12 +187,10 @@ class Sinks:
 
     texts: dict[str, dict[str, str]] = field(default_factory=dict)  # sink -> {location: text}
 
-    def hits(self, sink: str, needles: list[str], only: str = "") -> list[str]:
-        """``only`` narrows a per-chat sink (the platform journal) to one scenario's chat."""
+    def hits(self, sink: str, needles: list[str]) -> list[str]:
+        """Find secret cores in a decoded native sink."""
         out = []
         for loc, text in self.texts.get(sink, {}).items():
-            if only and loc != only and sink == PLATFORM:
-                continue
             for n in needles:
                 at = text.find(core(n))
                 if at >= 0:
@@ -205,10 +199,22 @@ class Sinks:
         return out
 
 
-def collect(home: Path, requests: list[dict], platform_journal: Path | None = None) -> Sinks:
+def collect(home: Path, requests: list[dict]) -> Sinks:
+    from hermes_security import frames, io
+
     hh = home / ".hermes"
-    logs = {str(p.relative_to(hh / "logs")): p.read_text(encoding="utf-8", errors="replace")
-            for p in sorted((hh / "logs").rglob("*")) if p.is_file()}
+    logs = {}
+    for path in sorted((hh / "logs").rglob("*")):
+        if not path.is_file() or path.suffix == ".lock":
+            continue
+        raw = path.read_bytes()
+        if raw.startswith(b"HRMVAULT\0"):
+            text = io.read_text(path, purpose="state")
+        elif ".log" in path.suffixes:
+            text = b"".join(frames.read_frames(path, purpose="log")).decode("utf-8")
+        else:
+            text = raw.decode("utf-8", errors="replace")
+        logs[str(path.relative_to(hh / "logs"))] = text
     store = {"state.db (decoded rows)": db_blob(hh / "state.db")}
     for p in sorted(hh.rglob("*")):  # raw bytes: WAL, FTS shadow pages, sessions/, caches
         if p.is_file() and p.name != ".env" and "logs" not in p.relative_to(hh).parts:
@@ -222,24 +228,15 @@ def collect(home: Path, requests: list[dict], platform_journal: Path | None = No
         exports[name] = (out / name).read_text(encoding="utf-8")
     wire = {f"request #{i} ({r['kind']})": json.dumps(r["body"]) for i, r in enumerate(requests)
             if r["kind"] in ("main", "aux")}
-    platform: dict[str, str] = {}  # every post AND every intermediate edit (streamed text), per chat
-    chat_of: dict[str, str] = {}
-    for rec in read_jsonl(platform_journal) if platform_journal is not None else []:
-        chat = chat_of.setdefault(rec["message_id"], str(rec.get("chat_id", "?")))
-        platform[f"chat {chat}"] = platform.get(f"chat {chat}", "") + json.dumps(rec) + "\n"
     return Sinks({LOGS: logs, STORE: store, EXPORT: {"plain.jsonl": exports["plain.jsonl"]},
-                  EXPORT_REDACTED: {"redacted.jsonl": exports["redacted.jsonl"]}, WIRE: wire, PLATFORM: platform})
+                  EXPORT_REDACTED: {"redacted.jsonl": exports["redacted.jsonl"]}, WIRE: wire})
 
 
-def chat_for(name: str) -> str:
-    return f"c-{name}"
-
-
-def assert_harness_sane(sinks: Sinks, *, gateway: bool = False) -> None:
+def assert_harness_sane(sinks: Sinks) -> None:
     """A sink that is empty cannot prove absence: every scanned sink must actually exist."""
-    for sink in (LOGS, STORE, EXPORT, EXPORT_REDACTED, WIRE) + ((PLATFORM,) if gateway else ()):
+    for sink in (LOGS, STORE, EXPORT, EXPORT_REDACTED, WIRE):
         assert any(t.strip() for t in sinks.texts.get(sink, {}).values()), f"sink {sink!r} is empty"
-    wanted = {"agent.log", "errors.log"} | ({"gateway.log"} if gateway else set())
+    wanted = {"agent.log", "errors.log"}
     assert wanted <= set(sinks.texts[LOGS]), sorted(sinks.texts[LOGS])
 
 
@@ -258,15 +255,13 @@ def cell_id(scenario: str, sink: str) -> str:
     return f"{scenario}-{SINK_IDS[sink]}"
 
 
-def cells(known: Mapping[str, Any], *, platform: bool) -> list[Any]:
-    """One ``pytest.param(scenario, sink)`` per sink a scenario is held to (``platform``: the surface has a
-    platform wire). A KNOWN key is a cell id (:func:`cell_id`) and gates ONLY that sink (``known_gate``), so
+def cells(known: Mapping[str, Any]) -> list[Any]:
+    """One ``pytest.param(scenario, sink)`` per sink a scenario is held to.
+    A KNOWN key is a cell id (:func:`cell_id`) and gates ONLY that sink (``known_gate``), so
     a new leak of the same scenario into any other sink is a plain red, never absorbed by the known gap."""
     out, ids = [], set()
     for name, scenario in SCENARIOS.items():
         for sink in scenario.sinks:
-            if sink == PLATFORM and not platform:
-                continue
             cid = cell_id(name, sink)
             ids.add(cid)
             out.append(pytest.param(name, sink, id=cid))
@@ -280,46 +275,10 @@ def check(world: World, scenario: str, sink: str) -> None:
     missing = world.pre[scenario]
     assert not missing, (f"{scenario}: the secret never travelled, so absence proves nothing: {missing}\n"
                          f"{world.runs[scenario]}")
-    leaks = world.sinks.hits(sink, SCENARIOS[scenario].secrets(world.keys), only=f"chat {chat_for(scenario)}")
+    leaks = world.sinks.hits(sink, SCENARIOS[scenario].secrets(world.keys))
     if leaks:
         raise BoundaryBreach(f"{scenario}: secret reached the redacted sink {sink!r}:\n  " + "\n  ".join(leaks))
 
 
-# Gateway ------------------------------------------------------------------------------------------
-
-
-class LoggingGateway(GatewayProcess):
-    """The delivery suite's real GatewayRunner child, with the gateway's file logging installed the way
-    ``start_gateway`` does (agent.log / errors.log / gateway.log under the child's HERMES_HOME)."""
-
-    def start(self) -> LoggingGateway:
-        assert self.proc is None
-        self.boots += 1
-        ready_before = len(read_jsonl(self.spool / "ready.jsonl"))
-        with open(self.log, "wb") as log:
-            self.proc = subprocess.Popen(
-                [sys.executable, "-m", "tests.e2e.core.security._redact", "serve", str(self.spool)],
-                cwd=str(REPO_ROOT), env=self.env(), stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
-        self.pids.append(self.proc.pid)
-        pid = self.proc.pid
-        rec = wait_until(lambda: next((r for r in read_jsonl(self.spool / "ready.jsonl")[ready_before:]
-                                       if r["pid"] == pid), None),
-                         "gateway child ready", timeout=240, proc=self.proc, log=self.log)
-        import socket
-        self.sock = socket.create_connection(("127.0.0.1", rec["port"]), timeout=120)
-        self._rfile = self.sock.makefile("rb")
-        return self
-
-
 def files_with(root: Path, needles: list[str]) -> list[str]:
     return files_containing(root, [core(n) for n in needles])
-
-
-if __name__ == "__main__":  # pragma: no cover - gateway child entry
-    if len(sys.argv) >= 3 and sys.argv[1] == "serve":
-        from hermes_logging import setup_logging
-
-        setup_logging(mode="gateway")
-        from tests.e2e.core.delivery._fake_platform import _serve
-
-        _serve(Path(sys.argv[2]))

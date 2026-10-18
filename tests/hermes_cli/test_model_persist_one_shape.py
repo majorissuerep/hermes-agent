@@ -58,9 +58,6 @@ def _via_cli(home):
     mixin._commit_model_switch(stub, _RESULT, persist_global=True)
 
 
-def _via_gateway(home):
-    from gateway.slash_commands_model import _persist_model_switch_to_config
-    asyncio.run(_persist_model_switch_to_config(_RESULT, home / "config.yaml"))
 
 
 def _via_tui(home):
@@ -70,13 +67,10 @@ def _via_tui(home):
         "sid", session, "claude-haiku --provider anthropic --global", confirm_expensive_model=True)
 
 
-def _via_dashboard(home):
-    from hermes_cli.web_server_config import _apply_model_assignment_sync
-    _apply_model_assignment_sync("main", "anthropic", "claude-haiku", "", "")
 
 
-@pytest.mark.parametrize("surface", [_via_cli, _via_gateway, _via_tui, _via_dashboard],
-                         ids=["cli", "gateway", "tui", "dashboard"])
+@pytest.mark.parametrize("surface", [_via_cli, _via_tui],
+                         ids=["internal-dispatch", "tui"])
 def test_every_persist_surface_writes_the_same_model_block(seeded_home, monkeypatch, surface):
     monkeypatch.setattr("hermes_cli.model_switch.switch_model", lambda **_kw: _RESULT)
     monkeypatch.setattr("cli.HermesCLI._persist_model_switch_to_session", lambda *a, **k: None)
@@ -162,15 +156,15 @@ def test_provider_switch_drops_the_key_env_pointer_but_a_same_route_repick_keeps
     assert block["key_env"] == "HERMES_CUSTOM_LMSTUDIO_API_KEY"
 
 
-def test_gateway_persists_to_the_profile_config_it_was_given(tmp_path, monkeypatch):
+def test_native_selection_persists_to_the_profile_config_it_was_given(tmp_path, monkeypatch):
     """Multiplexed gateway: the write lands in the routed profile's config.yaml, never the
     process-level HERMES_HOME."""
-    from gateway.slash_commands_model import _persist_model_switch_to_config
+    from hermes_cli.model_switch import persist_model_selection
     process_home, profile_home = tmp_path / "default", tmp_path / "profiles" / "named"
     for home in (process_home, profile_home):
         home.mkdir(parents=True)
         (home / "config.yaml").write_text("model:\n  default: old\n  provider: openai-codex\n")
     monkeypatch.setenv("HERMES_HOME", str(process_home))
-    asyncio.run(_persist_model_switch_to_config(_RESULT, profile_home / "config.yaml"))
+    persist_model_selection(_RESULT, profile_home / "config.yaml")
     assert _model_block(profile_home)["default"] == "claude-haiku"
     assert _model_block(process_home)["default"] == "old"

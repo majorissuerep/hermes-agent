@@ -18,7 +18,6 @@ def test_delete_profile_after_stdio_probe(tmp_path, monkeypatch):
     home.mkdir()
     monkeypatch.setenv("HERMES_HOME", str(home))
     # Do not manage host services or scan unrelated developer processes in this test.
-    monkeypatch.setattr(profiles, "_cleanup_gateway_service", lambda *_: None)
     monkeypatch.setattr(profiles, "_stop_profile_backends", lambda *_: None)
     monkeypatch.setattr(profiles, "_notify_multiplexer", lambda *_: None)
     profile = profiles.create_profile("mcp-probe-delete", no_alias=True)

@@ -6,10 +6,10 @@ provider on ONE shared ``state.db`` — once per journal mode Hermes deploys (WA
 production ``apply_wal_with_fallback`` picks on a WAL-reset-vulnerable SQLite, see ``_helpers``) — while other
 processes write to, read and open/close the same file:
 
-* a gateway-like agent with rolling micro-compaction on (every turn folds the oldest exchange into a summary
+* a native-agent agent with rolling micro-compaction on (every turn folds the oldest exchange into a summary
   and commits it through ``archive_and_compact``);
 * a TUI-like agent that runs ``/compress here 2`` mid-session (in-place manual compaction, kept tail);
-* a plain gateway writer on another session, a dashboard reader, and a CLI-style open/close churner.
+* a plain native writer on another session, a inspection reader, and a CLI-style open/close churner.
 
 Fault matrix: clean, ``kill -9`` of the micro-compacting agent mid-turn, and ``kill -9`` timed into its
 compaction (the summary stream / commit window). A fresh process then resumes the session and runs more
@@ -33,6 +33,7 @@ import json
 import random
 import re
 import sqlite3
+from hermes_security import sqlite as vault_sqlite
 import sys
 import threading
 import time
@@ -64,7 +65,6 @@ pytestmark = [
 
 Q_TOKEN = re.compile(r"TA[a-z]+\d+N\d+Q")
 MICRO_CONFIG = "compression:\n  micro_compact: true\n  target_ratio: 0.1\n  protect_last_n: 4\n"
-DB_CONFIG = "database:\n  journal_mode: wal\n"
 ANSWER_FILLER = "lorem " * 1200  # big enough that the compressible window is non-empty at 64K context
 
 
@@ -85,7 +85,7 @@ def _responder(record: dict):
 
 
 class _Aux:
-    """Summaries for compaction; flags every micro-compaction summary request of the gateway agent."""
+    """Summaries for compaction; flags every micro-compaction summary request of the native agent."""
 
     def __init__(self):
         self.summaries = 0
@@ -125,16 +125,22 @@ def rig(request, tmp_path_factory):
     server = FakeLLMServer(_responder, aux=aux)
     server.start()
     ch = Chamber(tmp_path_factory.mktemp(f"compaction-{request.param}"), journal=request.param)
-    ctx = "  context_length: 128000\n"
-    write_hermes_home(ch.hermes_home, server.base_url, extra_config=MICRO_CONFIG + DB_CONFIG)
-    tui_home = ch.root / "tui-home"
-    write_hermes_home(tui_home / ".hermes", server.base_url, extra_config=DB_CONFIG)
-    for home in (ch.hermes_home, tui_home / ".hermes"):
-        cfg = home / "config.yaml"
-        cfg.write_text(cfg.read_text(encoding="utf-8").replace(ctx, "  context_length: 64000\n"), encoding="utf-8")
-    yield Rig(ch, server, aux, {"HOME": str(tui_home), "HERMES_HOME": str(tui_home / ".hermes")})
-    ch.shutdown()
-    server.stop()
+    from tests.e2e.vault_home import seal_fixture_home
+    try:
+        ctx = "  context_length: 128000\n"
+        db_config = f"database:\n  journal_mode: {request.param}\n"
+        write_hermes_home(ch.hermes_home, server.base_url, extra_config=MICRO_CONFIG + db_config)
+        tui_home = ch.root / "tui-home"
+        write_hermes_home(tui_home / ".hermes", server.base_url, extra_config=db_config)
+        for home in (ch.hermes_home, tui_home / ".hermes"):
+            cfg = home / "config.yaml"
+            cfg.write_text(cfg.read_text(encoding="utf-8").replace(ctx, "  context_length: 64000\n"), encoding="utf-8")
+            seal_fixture_home(home)
+        yield Rig(ch, server, aux, {"HOME": str(tui_home), "HERMES_HOME": str(tui_home / ".hermes")})
+    finally:
+        ch.shutdown()
+        server.stop()
+
 
 
 class _GrowOnly(threading.Thread):
@@ -212,7 +218,7 @@ def _resume_problems(rig: Rig, sid: str, runs: list[str], first_request: int) ->
 
 
 def _compacted_rows(ch: Chamber, sid: str) -> int:
-    conn = sqlite3.connect(f"file:{ch.db}?mode=ro", uri=True, timeout=30.0)
+    conn = vault_sqlite.connect(f"file:{ch.db}?mode=ro", uri=True, timeout=30.0)
     try:
         return conn.execute("SELECT count(*) FROM messages WHERE session_id = ? AND compacted = 1",
                             (sid,)).fetchone()[0]
@@ -240,8 +246,8 @@ def test_compaction_episode(rig, fault):
         _agent(rig, gw, sid=gw_sid, tag="g", turns=5)
         _agent(rig, tui, sid=tui_sid, tag="t", turns=5, compress_at=3, keep=2, env=rig.tui_env)
         micro = next(e for e in ch.events(gw) if e.get("event") == "ready")["micro"]
-        assert micro, f"{ctx} gateway agent did not load micro_compact from its config"
-        ch.spawn("writer", plain, tag="p", sessions=[f"{fault}-plain"], source="telegram", pace=0.01)
+        assert micro, f"{ctx} native agent did not load micro_compact from its config"
+        ch.spawn("writer", plain, tag="p", sessions=[f"{fault}-plain"], source="cli", pace=0.01)
         ch.spawn("reader", reader, pace=0.05)
         ch.spawn("churn", f"{fault}-churn", iterations=30)
 
@@ -262,7 +268,7 @@ def test_compaction_episode(rig, fault):
         ch.request_stop(plain)
         _reap_ok(ch, plain)
 
-        # A fresh process resumes the gateway session and keeps going (micro-compaction still on).
+        # A fresh process resumes the native session and keeps going (micro-compaction still on).
         first = len(rig.server.main_requests())
         resumed = f"{fault}-agent-gw-resume"
         _agent(rig, resumed, sid=gw_sid, tag="g", turns=1, resume=True)

@@ -29,7 +29,7 @@ _KILL_DEADLINE_S = 5
 @pytest.fixture
 def unscoped(monkeypatch):
     # No systemd scope: stopping one would reap the escapee and hide the hang.
-    monkeypatch.setattr(module, "_is_supervised_gateway_process", lambda: False)
+    monkeypatch.delenv("INVOCATION_ID", raising=False)
 
 
 def _wait_for(predicate, timeout):

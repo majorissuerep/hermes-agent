@@ -111,10 +111,10 @@ def _stray_hits(logs: dict[str, Path], since: dict[str, int] | None = None) -> d
     return {name: text for name, text in hits.items() if text}
 
 
-def test_gateway_after_update_never_touches_a_stray_venv(updated):
+def test_native_runtime_after_update_never_touches_a_stray_venv(updated):
     sb, logs = updated["sb"], updated["logs"]
     mark = _marks(logs)
-    gw = P.Gateway(sb, P.lazy_env(sb), sb.root / "hygiene-gateway.log")
+    gw = P.NativeRuntime(sb, P.lazy_env(sb), sb.root / "hygiene-gateway.log")
     seen: dict[int, tuple[str, list[str], dict[str, str]]] = {}
     try:
         gw.wait_running()

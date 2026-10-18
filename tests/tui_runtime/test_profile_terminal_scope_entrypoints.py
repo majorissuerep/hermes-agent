@@ -2,7 +2,7 @@
 
 ``tools/terminal_tool.py`` no longer bridges a profile's ``terminal.*`` into ``os.environ`` under a
 home override, so every secondary-profile entrypoint must bind the owning terminal scope itself:
-side workers (``prompt.background`` / ``prompt.btw`` / ``preview.restart``) and agent builds
+side workers (``prompt.background`` / ``prompt.btw``) and agent builds
 (eager resume, ``session.branch``) used to bind only the home (+ secrets) and ran a
 ``terminal.backend: docker`` secondary on the launch process's ``local`` backend.
 
@@ -52,8 +52,7 @@ def _observe(got):
 def _run_side_worker(session, body):
     done = threading.Event()
     with patch.object(server, "_emit", lambda *a, **k: done.set()):
-        server._spawn_side_agent(1, session, "side-task", "parent", "background.complete", body,
-                                 cwd=session["cwd"])
+        server._spawn_side_agent(1, session, "side-task", "parent", "background.complete", body)
         assert done.wait(15), "side worker did not finish"
 
 
@@ -115,7 +114,7 @@ class _StopAfterPolicy(Exception):
 def _launch_turn_policy(launch_home):
     """Run ``_prepare_turn_input`` for a launch-profile turn up to the terminal-scope bind; returns
     the policy the terminal tool would use, with every bound scope released afterwards."""
-    st = server._TurnRun(agent=None, one_turn_restore=None, terminal_callback=None, receipt_committed=False)
+    st = server._TurnRun(agent=None, one_turn_restore=None)
 
     def stop(*a):
         raise _StopAfterPolicy()

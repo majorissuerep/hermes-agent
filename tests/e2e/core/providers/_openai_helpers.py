@@ -1,7 +1,7 @@
 """Shared harness for the OpenAI-dialect provider wire-conformance suite.
 
 Every test drives REAL Hermes processes (``hermes -z`` oneshot, ``--resume``, the
-``tui_gateway`` stdio server) against a loopback fake of the vendor HTTP API
+``tui_runtime`` stdio server) against a loopback fake of the vendor HTTP API
 (``tests/fakes/providers``) and asserts on the next wire request Hermes sends, the
 user-visible answer, and persisted ``state.db`` rows. Homes are hermetic: a fake HOME
 whose ``.hermes`` is the HERMES_HOME, an allowlisted env with no credentials.
@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import json
 import os
-import sqlite3
 import subprocess
 import sys
 import time
@@ -23,6 +22,9 @@ from typing import Any, Callable, Iterator, Mapping
 import hermes_yaml as yaml
 
 from tests.e2e.core._pending_fixes import known_gate
+
+from tests.e2e.vault_home import connect_state, run_unlocked, seal_fixture_home, spawn_unlocked
+from hermes_security import io as state_io
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 TURN_TIMEOUT = 150.0
@@ -131,7 +133,7 @@ class Home:
             "HOME": str(self.home), "HERMES_HOME": str(self.hermes_home), "PYTHONPATH": str(REPO_ROOT),
             "PYTHONUNBUFFERED": "1", "NO_COLOR": "1", "TERM": "dumb",
             # The child's state.db lives under tmp_path; the live-DB guard's documented child escape hatch.
-            "HERMES_STATE_DB_GUARD_BYPASS": "1", "HERMES_ALLOW_NO_VAULT": "1",
+            "HERMES_STATE_DB_GUARD_BYPASS": "1",
         })
         env.update(extra or {})
         return env
@@ -148,13 +150,14 @@ class Home:
             "".join(f"{k}={v}\n" for k, v in (dotenv or {}).items()), encoding="utf-8")
         if auth is not None:
             (self.hermes_home / "auth.json").write_text(json.dumps(auth), encoding="utf-8")
+        seal_fixture_home(self.hermes_home)
         return self
 
     def update_config(self, mutate: Callable[[dict], None]) -> None:
         path = self.hermes_home / "config.yaml"
-        cfg = yaml.safe_load(path.read_text(encoding="utf-8"))
+        cfg = yaml.safe_load(state_io.read_text(path, purpose="config"))
         mutate(cfg)
-        path.write_text(yaml.safe_dump(cfg, sort_keys=False), encoding="utf-8")
+        state_io.write_text(path, yaml.safe_dump(cfg, sort_keys=False), purpose="config")
 
 
 def _deep_merge(dst: dict, src: dict) -> None:
@@ -214,7 +217,7 @@ def oneshot(h: Home, prompt: str, *args: str, resume: str | None = None, timeout
     argv = ["-z", prompt, "--usage-file", str(usage_file), *args]
     if resume:
         argv += ["--resume", resume]
-    proc = subprocess.run(hermes_argv(*argv), cwd=h.project, env=h.env(env), capture_output=True,
+    proc = run_unlocked(hermes_argv(*argv), cwd=h.project, env=h.env(env), capture_output=True,
                           text=True, encoding="utf-8", errors="replace", timeout=timeout, stdin=subprocess.DEVNULL, check=False)
     usage = json.loads(usage_file.read_text(encoding="utf-8")) if usage_file.exists() else {}
     return Run(proc, usage)
@@ -246,8 +249,7 @@ def db_messages(h: Home, session_id: str | None = None) -> list[dict[str, Any]]:
     """Active message rows (oldest first), read-only; every session when ``session_id`` is None."""
     if not h.db_path.exists():
         return []
-    con = sqlite3.connect(f"file:{h.db_path}?mode=ro", uri=True, timeout=10)
-    con.row_factory = sqlite3.Row
+    con = connect_state(h.db_path)
     try:
         sql = "SELECT * FROM messages WHERE active = 1"
         params: tuple = ()

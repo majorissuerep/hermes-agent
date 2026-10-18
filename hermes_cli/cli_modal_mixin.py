@@ -1006,7 +1006,7 @@ class CLIModalMixin:
         ``{"answers": {qid: raw | None}, "outcome"}`` (None = skipped): ``submitted`` when every
         question is locked, ``timed_out`` when the deadline expires, ``cancelled`` on an interrupt."""
         from cli import CLI_CONFIG, _DIM, _RST, _cprint
-        from tools.clarify_gateway import resolve_clarify_timeout
+        from tools.clarify_session import resolve_clarify_timeout
 
         timeout = resolve_clarify_timeout(CLI_CONFIG)
         response_queue = queue.Queue()

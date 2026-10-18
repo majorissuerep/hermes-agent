@@ -18,7 +18,7 @@ from __future__ import annotations
 from pydantic import Field
 
 from .base import JsonValue, Payload, WireEnum
-from .common import MessageReaction, SessionLiveInfo, SubagentStatus, ToolLabel, ToolLabelKind, Usage
+from .common import SessionLiveInfo, SubagentStatus, ToolLabel, ToolLabelKind, Usage
 from .config_free_tier_control import FreeTierChallengePayload, SessionControlSnapshot
 from .registry import event
 
@@ -48,15 +48,15 @@ class SkinPayload(OpenPayload):
     help_header: str = ""
 
 
-class GatewayReadyPayload(Payload):
-    """``tui_runtime/entry.py`` (stdio) / ``tui_runtime/ws.py`` (WebSocket) first frame."""
+class RuntimeReadyPayload(Payload):
+    """The private stdio child's first frame."""
 
     skin: SkinPayload
     change_events: bool
     replay_epoch: str
 
 
-event("runtime.ready", GatewayReadyPayload,
+event("runtime.ready", RuntimeReadyPayload,
       doc="First frame of a connection: the resolved skin, the change-event capability and the replay epoch.")
 event("skin.changed", SkinPayload,
       doc="The active skin moved (name switch or live colour edit); repaint from this palette.")
@@ -97,13 +97,8 @@ class ErrorPayload(Payload):
 event("error", ErrorPayload, doc="A session-level failure outside a turn (agent init, model switch, compression, resume).")
 
 
-class NoticePayload(Payload):
-    """``tui_runtime/model_switch.py`` capability-refresh notice."""
-
-    message: str
 
 
-event("notice", NoticePayload, doc="Informational one-liner for the session (capabilities refreshed).")
 
 
 # ── turn stream ───────────────────────────────────────────────────────────────────────────────
@@ -310,15 +305,8 @@ class ReviewSummaryPayload(Payload):
 event("review.summary", ReviewSummaryPayload, doc="Background review of the last turn finished.")
 
 
-class AgentPrintPayload(Payload):
-    """A session-authority local-viewer turn: one line the agent printed through ``_print_fn``
-    (subagent completion, compaction, errors, budget notices), which main's classic CLI rendered
-    through ``_agent_status_print``."""
-
-    text: str
 
 
-event("agent.print", AgentPrintPayload, doc="A status line the agent printed during a local viewer's turn.")
 
 
 # ── tools ─────────────────────────────────────────────────────────────────────────────────────
@@ -415,16 +403,8 @@ event("notification.show", NotificationShowPayload, doc="Show / replace a keyed 
 event("notification.clear", NotificationClearPayload, doc="Withdraw the notice with this key.")
 
 
-class TipShowPayload(Payload):
-    """``tools/tip_tool.py``."""
-
-    selector: str
-    text: str
-    title: str | None = None
-    side: str | None = None
 
 
-event("tip.show", TipShowPayload, doc="Point at a desktop element with a one-line tip bubble.")
 
 
 # ── session lifecycle ─────────────────────────────────────────────────────────────────────────
@@ -516,18 +496,10 @@ class SideAgentCompletePayload(Payload):
 
 event("background.complete", SideAgentCompletePayload, doc="A /background side agent finished.")
 event("btw.complete", SideAgentCompletePayload, doc="A /btw side question was answered.")
-event("preview.restart.complete", SideAgentCompletePayload, doc="The hidden preview-restart agent finished.")
 
 
-class PreviewRestartProgressPayload(Payload):
-    """``methods_prompt`` restart body + ``agent_callbacks._preview_restart_callbacks``."""
-
-    task_id: str
-    text: str
-    level: str | None = None
 
 
-event("preview.restart.progress", PreviewRestartProgressPayload, doc="Progress line from the preview-restart agent.")
 
 
 # ── subagents (tool_progress._progress_subagent) ──────────────────────────────────────────────
@@ -620,41 +592,18 @@ event("moa.phase", MoaPhasePayload, doc="MoA phase transition (currently only ``
 # ── desktop GUI (tools/desktop_ui emitters) ──────────────────────────────────────────────────
 
 
-class PreviewOpenPayload(Payload):
-    """``tools/open_preview_tool.py``."""
-
-    url: str
-    label: str = ""
 
 
-class PreviewClosePayload(Payload):
-    """``tools/preview_tool.py`` / ``tools/close_preview_tool.py``; ``url`` '' closes every tab."""
-
-    url: str = ""
 
 
-event("preview.open", PreviewOpenPayload, doc="Open a URL / file in the desktop preview pane.")
-event("preview.close", PreviewClosePayload, doc="Close the preview pane or one tab.")
 
 
-class PaneRevealPayload(OpenPayload):
-    """``tools/focus_pane_tool.py``."""
-
-    pane: str
 
 
-event("pane.reveal", PaneRevealPayload, doc="Focus / reveal a named desktop pane.")
 
 
-class MessageReactionPayload(Payload):
-    """``tools/react_to_message_tool.py``."""
-
-    row_id: int
-    reactions: list[MessageReaction]
-    role: str
 
 
-event("message.reaction", MessageReactionPayload, doc="The agent reacted to a message; paint it live.")
 
 
 class TerminalOutputPayload(Payload):
@@ -685,26 +634,10 @@ event("browser.progress", BrowserProgressPayload, doc="Browser (CDP) connect / i
 # ── browser controller (gateway/browser_control_broker frames re-enveloped as events) ─────────
 
 
-class BrowserControllerCommandPayload(Payload):
-    """``gateway/browser_control_broker.py`` FRAME_COMMAND params."""
-
-    command_id: str
-    action: str
-    arguments: dict[str, JsonValue]
-    controller_id: str | None = None
-    browser_profile_id: str | None = None
-    tool_call_id: str | None = None
 
 
-class BrowserControllerCancelPayload(Payload):
-    """``gateway/browser_control_broker.py::_cancel_frame``."""
-
-    command_id: str
-    tool_call_id: str | None = None
 
 
-event("browser.controller.command", BrowserControllerCommandPayload, doc="Dispatch one browser action to the attached controller.")
-event("browser.controller.cancel", BrowserControllerCancelPayload, doc="Withdraw a pending controller command.")
 
 
 # ── voice ─────────────────────────────────────────────────────────────────────────────────────
@@ -794,26 +727,58 @@ class ChangeSignalPayload(OpenPayload):
 
 event("cron.changed", ChangeSignalPayload, doc="cron/jobs.json moved; refetch the cron list.")
 event("sessions.changed", ChangeSignalPayload, doc="state.db moved; refetch the session list.")
-event("platforms.changed", ChangeSignalPayload, doc="gateway_state.json moved; refetch platform status.")
 event("projects.changed", ChangeSignalPayload, doc="projects.db moved; refetch the project list + tree.")
-event("pairing.changed", ChangeSignalPayload, doc="Pairing state moved; refetch pairing.")
 
 
 __all__ = [
-    "BillingBlock", "BillingStepUpVerificationPayload", "BrowserControllerCancelPayload",
-    "BrowserControllerCommandPayload", "BrowserProgressPayload", "ChangeSignalPayload", "ErrorPayload",
-    "ErrorSurface", "FreeTierChallengePayload", "GatewayReadyPayload",
-    "MessageCompletePayload", "MessageInterimPayload", "MessageReaction", "MessageReactionPayload", "MoaAggregatingPayload",
-    "MoaPhasePayload", "MoaProgressPayload", "MoaReferencePayload", "NoticePayload",
-    "NotificationClearPayload", "NotificationShowPayload", "OpenPayload", "PaneRevealPayload",
-    "PetChangedPayload", "PetGenerateProgressPayload", "PetHatchProgressPayload", "PreviewClosePayload",
-    "PreviewOpenPayload", "PreviewRestartProgressPayload", "ReactionPayload", "ResumePhaseStatus",
-    "ReviewSummaryPayload", "SessionControlSnapshot", "SessionControlUpdatePayload",
-    "SessionReclaimedPayload", "SessionResumeProgressPayload", "SessionTitlePayload", "SessionUsagePayload",
-    "SetupReadyPayload", "SideAgentCompletePayload", "SkinPayload", "StatusUpdatePayload",
-    "StreamDeltaPayload", "SubagentEventPayload", "SubagentOutputTailEntry", "TerminalClosePayload",
-    "TerminalOutputPayload", "TipShowPayload", "TodoUpdatedPayload", "ToolCompletePayload",
-    "ToolGeneratingPayload", "ToolLabel", "ToolLabelKind", "ToolOutputRiskPayload", "ToolStartPayload",
-    "TurnStatus", "VoicePartialPayload", "VoiceStatusPayload",
-    "VoiceTranscriptPayload", "WakeDetectedPayload",
+    "BillingBlock",
+    "BillingStepUpVerificationPayload",
+    "BrowserProgressPayload",
+    "ChangeSignalPayload",
+    "ErrorPayload",
+    "ErrorSurface",
+    "FreeTierChallengePayload",
+    "MessageCompletePayload",
+    "MessageInterimPayload",
+    "MoaAggregatingPayload",
+    "MoaPhasePayload",
+    "MoaProgressPayload",
+    "MoaReferencePayload",
+    "NotificationClearPayload",
+    "NotificationShowPayload",
+    "OpenPayload",
+    "PetChangedPayload",
+    "PetGenerateProgressPayload",
+    "PetHatchProgressPayload",
+    "ReactionPayload",
+    "ResumePhaseStatus",
+    "ReviewSummaryPayload",
+    "RuntimeReadyPayload",
+    "SessionControlSnapshot",
+    "SessionControlUpdatePayload",
+    "SessionReclaimedPayload",
+    "SessionResumeProgressPayload",
+    "SessionTitlePayload",
+    "SessionUsagePayload",
+    "SetupReadyPayload",
+    "SideAgentCompletePayload",
+    "SkinPayload",
+    "StatusUpdatePayload",
+    "StreamDeltaPayload",
+    "SubagentEventPayload",
+    "SubagentOutputTailEntry",
+    "TerminalClosePayload",
+    "TerminalOutputPayload",
+    "TodoUpdatedPayload",
+    "ToolCompletePayload",
+    "ToolGeneratingPayload",
+    "ToolLabel",
+    "ToolLabelKind",
+    "ToolOutputRiskPayload",
+    "ToolStartPayload",
+    "TurnStatus",
+    "VoicePartialPayload",
+    "VoiceStatusPayload",
+    "VoiceTranscriptPayload",
+    "WakeDetectedPayload",
 ]

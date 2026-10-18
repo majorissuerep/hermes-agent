@@ -162,14 +162,14 @@ def _pop_turn_note(agent: Any, attr: str) -> str:
     return note if isinstance(note, str) else ""
 
 
-def consume_gateway_turn_context_notes(agent: Any) -> str:
-    """Pop the gateway's per-turn must-deliver notes."""
-    return _pop_turn_note(agent, "_gateway_turn_context_notes")
+def consume_turn_context_notes(agent: Any) -> str:
+    """Pop native per-turn must-deliver notes."""
+    return _pop_turn_note(agent, "_turn_context_notes")
 
 
 def consume_surface_switch_note(agent: Any) -> str:
     """Pop the surface-switch note staged by the system-prompt restore (#104414); rides the same
-    user-message channel as the gateway notes, behind the cached prefix."""
+    user-message channel as the per-turn notes, behind the cached prefix."""
     return _pop_turn_note(agent, "_surface_switch_note")
 
 
@@ -856,7 +856,7 @@ def _merge_gateway_notes(
     tool result carried, then the surface-switch correction. Multimodal (list) content can't take the
     string sidecar — append a durable text part instead."""
     _turn_notes = "\n\n".join(
-        part for part in (consume_gateway_turn_context_notes(agent), pop_plugin_notices(agent),
+        part for part in (consume_turn_context_notes(agent), pop_plugin_notices(agent),
                           consume_surface_switch_note(agent),
                           consume_skills_index_note(agent)) if part
     )

@@ -1,23 +1,11 @@
-"""Harness for the multi-process SQLite torture chamber (issue class C1: state.db integrity).
+"""Multi-process encrypted SQLCipher contention harness.
 
-One real ``state.db`` under ``tmp_path``, in either journal mode Hermes deploys (see ``JOURNAL_MODES``); every
-role is a separate OS process running ``_roles.py`` against it (see that module for the journal/report
-protocol). This module owns:
-
-* journal-mode selection through the PRODUCTION decision path: the ``delete`` arm pins the version the
-  children's ``hermes_state.wal.is_sqlite_wal_reset_vulnerable()`` probe sees to a WAL-reset-vulnerable
-  SQLite (the one CI's uv CPython 3.11.14 bundles), so ``apply_wal_with_fallback`` itself picks DELETE
-  exactly as it does for every user on such a build — the same DELETE store its network/FUSE fallbacks end
-  in; nothing in the harness issues a journal-mode pragma;
-
-* process lifecycle (spawn / ready / stop / SIGTERM / SIGKILL, PIDs recorded, nothing else touched);
-* a background ``/proc/<pid>/fd`` monitor over OUR children that records any ``(deleted)`` main-file descriptor
-  (a store swapped under a live holder) and, in WAL mode, any ``(deleted)`` ``-wal``/``-shm`` — the
-  kernel-level signature of a WAL generation unlinked under a live holder;
-* the invariant checks, done in the test process with short-lived bare ``sqlite3`` connections only (the
-  test process never imports ``hermes_state``, so it never becomes a foreign holder of the file).
-
-Reuses the conformance harness's deadline polling / SIGKILL reaping (``tests/conformance/persistence``).
+Each synthetic home is sealed before child startup. One-shot inherited descriptors
+carry vault authority to owned children; no key or passphrase is stored on disk.
+DELETE is selected through real database.journal_mode configuration; WAL eligibility
+uses the SQLCipher-linked SQLite version, never a mocked runtime version. Native
+SessionDB and keyed direct connections exercise one encrypted store. Kernel FD
+monitoring retains the unlink/race oracle across close, SIGTERM and SIGKILL.
 """
 
 from __future__ import annotations
@@ -28,6 +16,8 @@ import random
 import signal
 import sqlite3
 import subprocess
+from tests.e2e.vault_home import spawn_unlocked
+from hermes_security import sqlite as vault_sqlite
 import sys
 import threading
 import time
@@ -35,7 +25,9 @@ import zlib
 from pathlib import Path
 
 from hermes_cli.sqlite_runtime import is_sqlite_wal_reset_vulnerable
-from tests.conformance.persistence._harness import REPO_ROOT, kill9_and_reap, wait_for
+from tests.waiting import wait_until
+
+REPO_ROOT = Path(__file__).resolve().parents[4]
 
 ROLES = Path(__file__).with_name("_roles.py")
 DEFAULT_SEED = 20260923
@@ -43,8 +35,6 @@ SEED_ENV = "HERMES_SQLITE_TORTURE_SEED"
 
 JOURNAL_MODES = ("wal", "delete")
 # Read ONLY by _roles.py in each child: the SQLite version its production version probe reports.
-SQLITE_PIN_ENV = "HERMES_E2E_SQLITE_VERSION_PIN"
-VULNERABLE_SQLITE = "3.50.4"  # bundled by uv's CPython 3.11.14 (the unit CI job): Hermes runs DELETE there
 # DELETE mode holds an EXCLUSIVE lock for every commit's journal+db fsyncs and has no writer fairness: an unpaced
 # append loop starves every other writer and reader. Gateway/TUI writers are paced by turns in the field.
 DELETE_WRITER_PACE = 0.02
@@ -52,7 +42,8 @@ DELETE_WRITER_PACE = 0.02
 
 def linked_sqlite_is_wal_capable() -> bool:
     """The production predicate on the SQLite this interpreter (and so every child) links."""
-    return not is_sqlite_wal_reset_vulnerable(sqlite3.sqlite_version_info)
+    from sqlcipher3 import dbapi2 as sqlcipher
+    return not is_sqlite_wal_reset_vulnerable(sqlcipher.sqlite_version_info)
 
 
 def skip_unless_deployable(journal: str) -> None:
@@ -60,7 +51,7 @@ def skip_unless_deployable(journal: str) -> None:
     if journal == "wal" and not linked_sqlite_is_wal_capable():
         import pytest
 
-        pytest.skip(f"linked SQLite {sqlite3.sqlite_version} runs Hermes in DELETE mode; the delete arm covers it")
+        pytest.skip("linked SQLCipher SQLite runs Hermes in DELETE mode; the delete arm covers it")
 
 
 def base_seed() -> int:
@@ -80,7 +71,7 @@ def child_env(home: Path, hermes_home: Path) -> dict:
         "PYTHONUNBUFFERED": "1",
         # The child's HERMES_HOME *is* this chamber's private home, which the live-DB guard reads as
         # "the real Hermes root"; HOME/HERMES_HOME above already keep it off the production install.
-        "HERMES_STATE_DB_GUARD_BYPASS": "1", "HERMES_ALLOW_NO_VAULT": "1",
+        "HERMES_STATE_DB_GUARD_BYPASS": "1",
         "PYTHONPATH": os.pathsep.join(p for p in (str(REPO_ROOT), os.environ.get("PYTHONPATH", "")) if p),
     })
     return env
@@ -97,13 +88,14 @@ class Chamber:
         self.hermes_home = self.home / ".hermes"
         self.hermes_home.mkdir(parents=True, exist_ok=True)
         # The config default in BOTH arms: the delete arm is a default-config user on a vulnerable SQLite.
-        (self.hermes_home / "config.yaml").write_text("database:\n  journal_mode: wal\n", encoding="utf-8")
+        (self.hermes_home / "config.yaml").write_text(
+            f"database:\n  journal_mode: {journal}\n", encoding="utf-8")
+        from tests.e2e.vault_home import seal_fixture_home
+        seal_fixture_home(self.hermes_home)
         self.db = self.hermes_home / "state.db"
         self.work = root / "work"
         self.work.mkdir(exist_ok=True)
         self.env = child_env(self.home, self.hermes_home)
-        if journal == "delete" and linked_sqlite_is_wal_capable():
-            self.env[SQLITE_PIN_ENV] = VULNERABLE_SQLITE
         self.writer_pace = DELETE_WRITER_PACE if journal == "delete" else 0.0
         self.procs: dict[str, subprocess.Popen] = {}
         self.writer_runs: list[str] = []
@@ -124,7 +116,7 @@ class Chamber:
         payload = {"workdir": str(self.work), "name": name, "db": str(self.db),
                    "stop": str(self.work / f"{name}.stop"), "busy_ok": self.mode == "delete", **args}
         stderr = open(self.work / f"{name}.stderr", "wb")
-        proc = subprocess.Popen(
+        proc = spawn_unlocked(
             [sys.executable, str(ROLES), role, json.dumps(payload)],
             cwd=str(REPO_ROOT), env={**self.env, **(env or {})}, stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL, stderr=stderr,
@@ -141,7 +133,7 @@ class Chamber:
         by ``_roles.py cli`` so the journal-mode seam applies to it too)."""
         stderr = open(self.work / f"{name}.stderr", "wb")
         payload = {"workdir": str(self.work), "name": name, "argv": list(argv)}
-        proc = subprocess.Popen(
+        proc = spawn_unlocked(
             [sys.executable, str(ROLES), "cli", json.dumps(payload)], cwd=str(REPO_ROOT), env=self.env,
             stdin=subprocess.DEVNULL, stdout=open(self.work / f"{name}.stdout", "wb"), stderr=stderr,
         )
@@ -168,9 +160,23 @@ class Chamber:
     def wait_acks(self, name: str, n: int, *, deadline: float = 60.0) -> None:
         self._wait(name, lambda: len(self.journal(name)[1]) >= n, f"{n} acks from {name}", deadline)
 
+    @staticmethod
+    def _kill_and_reap(proc: subprocess.Popen) -> None:
+        if proc.poll() is None:
+            proc.kill()
+        proc.wait(timeout=60)
+
     def _wait(self, name: str, predicate, what: str, deadline: float) -> None:
         try:
-            wait_for(predicate, deadline=deadline, what=what, child=self.procs.get(name))
+            def ready():
+                if predicate():
+                    return True
+                child = self.procs.get(name)
+                if child is not None and child.poll() is not None:
+                    raise AssertionError(f"{name} exited early with {child.returncode}")
+                return False
+
+            wait_until(ready, timeout=deadline, what=what)
         except AssertionError as exc:
             tail = [e for e in self.events(name) if e.get("event") == "error"][-1:]
             raise AssertionError(f"{exc}\n{name} stderr:\n{self.stderr(name)}\n{tail}") from None
@@ -183,7 +189,7 @@ class Chamber:
         try:
             rc = proc.wait(timeout=deadline)
         except subprocess.TimeoutExpired:
-            kill9_and_reap(proc)
+            self._kill_and_reap(proc)
             raise AssertionError(f"{name} did not exit within {deadline}s\n{self.stderr(name)}") from None
         finally:
             proc._stderr_file.close()  # type: ignore[attr-defined]
@@ -198,7 +204,7 @@ class Chamber:
 
     def kill9(self, name: str) -> None:
         proc = self.procs[name]
-        kill9_and_reap(proc)
+        self._kill_and_reap(proc)
         proc._stderr_file.close()  # type: ignore[attr-defined]
 
     def live(self) -> list[tuple[str, subprocess.Popen]]:
@@ -213,7 +219,7 @@ class Chamber:
             try:
                 proc.wait(timeout=max(0.1, end - time.monotonic()))
             except subprocess.TimeoutExpired:
-                kill9_and_reap(proc)
+                self._kill_and_reap(proc)
             f = getattr(proc, "_stderr_file", None)
             if f is not None and not f.closed:
                 f.close()
@@ -300,12 +306,12 @@ class Chamber:
         return intents, acked
 
 
-# -- invariants (bare sqlite3, short-lived connections) --------------------------------------------------
+# -- invariants (keyed SQLCipher, short-lived connections) --------------------------------------------------
 
 
 def _connect(db: Path, *, ro: bool = True) -> sqlite3.Connection:
     uri = f"file:{db}?mode=ro" if ro else f"file:{db}"
-    return sqlite3.connect(uri, uri=True, timeout=30.0)
+    return vault_sqlite.connect(uri, uri=True, timeout=30.0)
 
 
 def integrity_rows(db: Path) -> list[str]:

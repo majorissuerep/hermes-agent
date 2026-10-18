@@ -1304,179 +1304,6 @@ export interface ModelDisconnectResult {
   name: string
   disconnected: boolean
 }
-export interface ProfilesListParams {
-  profile?: string | null
-  include_sessions?: boolean | string | null
-}
-/** ``bot_mode_protocol`` tells clients this backend injects the teammate protocol itself; ``install_id`` (as on ``/api/status``) names the machine that answered. */
-export interface ProfilesListResult {
-  profiles?: ProfileRow[]
-  install_id?: string
-}
-/** One roster row; the session fields are present only with ``include_sessions``. */
-export interface ProfileRow {
-  name: string
-  path: string
-  is_default?: boolean
-  model?: string | null
-  provider?: string | null
-  description?: string
-  display_name?: string
-  skill_count?: number
-  previous_names?: string[]
-  last_session?: ProfileSessionPreview | null
-  worker_session?: ProfileWorkerSession | null
-  ui_meta_revisions?: Record<string, number>
-  ui_meta?: Record<string, unknown> | null
-  has_avatar?: boolean
-}
-/** Newest human-facing session of a profile (``_latest_profile_session_rows``). */
-export interface ProfileSessionPreview {
-  id: string
-  title?: string
-  preview?: string
-  started_at?: number
-  last_active?: number
-  message_count?: number
-  live_message_count?: number | null
-}
-/** Newest kanban/tool worker row, so rosters can show a profile as working. */
-export interface ProfileWorkerSession {
-  id: string
-  source?: string
-  title?: string
-  last_active?: number
-}
-/** ``clone_from`` omitted = fresh profile + bundled skills; ``mirror_credentials`` defaults on so a headless bot has a provider. */
-export interface ProfilesCreateParams {
-  profile?: string | null
-  name: string
-  description?: string | null
-  clone_from?: string | null
-  clone_all?: boolean | string | null
-  clone_channels?: boolean | string | null
-  no_skills?: boolean | string | null
-  no_alias?: boolean | string | null
-  soul?: string | null
-  model?: string | null
-  provider?: string | null
-  share_auth?: boolean | string | null
-  mirror_credentials?: boolean | string | null
-}
-export interface ProfilesCreateResult {
-  ok?: boolean
-  name: string
-  path: string
-  soul_written?: boolean
-  model_set?: boolean
-  mirrored: ProfileMirrored
-}
-/** What was copied from the launch profile; ``auth`` is ``"shared"`` under ``share_auth``. */
-export interface ProfileMirrored {
-  env?: boolean
-  auth?: boolean | 'shared'
-  model_inherited?: boolean
-  voice?: boolean
-}
-export interface ProfileNameParams {
-  profile?: string | null
-  name?: string | null
-}
-/** Editor snapshot; ``toolsets_pinned`` says whether ``tools.enabled_toolsets`` is explicit. */
-export interface ProfilesDescribeResult {
-  name: string
-  description?: string
-  soul?: string
-  model: ProfileModelPin
-  skills?: CapabilityEntry[]
-  toolsets?: ToolsetEntry[]
-  toolsets_pinned?: boolean
-  mcp_servers?: McpServerEntry[]
-}
-export interface ProfileModelPin {
-  provider?: string
-  default?: string
-}
-export interface CapabilityEntry {
-  name: string
-  enabled?: boolean
-}
-export interface ToolsetEntry {
-  name: string
-  enabled?: boolean
-  label?: string
-  description?: string
-  tool_count?: number
-}
-export interface McpServerEntry {
-  name: string
-  enabled?: boolean
-  transport?: string
-}
-/** Sections are independent; ``ui_meta_expected_revisions`` is a per-key compare-and-swap. */
-export interface ProfilesConfigureParams {
-  profile?: string | null
-  name?: string | null
-  ui_meta?: Record<string, unknown> | null
-  ui_meta_expected_revisions?: Record<string, number> | null
-  soul?: string | null
-  description?: string | null
-  model?: string | null
-  provider?: string | null
-  confirm_expensive_model?: boolean | string | null
-  disabled_skills?: string[] | null
-  enabled_toolsets?: string[] | null
-  enabled_mcp_servers?: string[] | null
-}
-/** ``confirm_required`` mirrors ``config.set``: a guarded model pick wrote nothing yet. */
-export interface ProfilesConfigureResult {
-  ok: boolean
-  applied: ProfilesConfigureApplied
-  confirm_required?: boolean | null
-  confirm_message?: string | null
-}
-/** Per-section outcome; only the sections the request carried are present. */
-export interface ProfilesConfigureApplied {
-  ui_meta?: boolean | null
-  ui_meta_revisions?: Record<string, number> | null
-  ui_meta_conflicts?: Record<string, UiMetaConflict> | null
-  soul?: boolean | null
-  description?: boolean | null
-  model?: boolean | null
-  skills?: boolean | null
-  toolsets?: boolean | null
-  mcp_servers?: boolean | null
-}
-export interface UiMetaConflict {
-  expected?: unknown
-  actual?: number
-}
-/** ``data`` is a data URL or bare base64 (PNG/JPEG/WebP, sniffed); ``clear`` deletes instead. */
-export interface ProfilesSetAssetParams {
-  profile?: string | null
-  name?: string | null
-  asset?: string | null
-  data?: string | null
-  clear?: boolean | string | null
-}
-export interface ProfilesSetAssetResult {
-  ok?: boolean
-  asset: string
-  size?: number
-  removed?: number | null
-}
-export interface ProfilesGetAssetParams {
-  profile?: string | null
-  name?: string | null
-  asset?: string | null
-}
-/** Absent is ``found: false``, not an error. */
-export interface ProfilesGetAssetResult {
-  found: boolean
-  mime?: string | null
-  size?: number | null
-  data?: string | null
-}
 export interface VaultListResult {
   items?: VaultItem[]
 }
@@ -1851,13 +1678,6 @@ export interface SideAgentParams {
 /** The side agent runs detached; its answer lands on the parent session as an event carrying this ``task_id``. */
 export interface TaskIdResult {
   task_id: string
-}
-export interface PreviewRestartParams {
-  session_id: string
-  profile?: string | null
-  url: string
-  cwd?: string | null
-  context?: string | null
 }
 export interface ClarifyLockParams {
   request_id: string
@@ -3551,8 +3371,8 @@ export interface ConnectionUpdatePayload {
 }
 /** ``tools/connectors/contract.py::Actor``. */
 export type ConnectionActor = 'user' | 'backend_watcher' | 'clock'
-/** ``tui_runtime/entry.py`` (stdio) / ``tui_runtime/ws.py`` (WebSocket) first frame. */
-export interface GatewayReadyPayload {
+/** The private stdio child's first frame. */
+export interface RuntimeReadyPayload {
   skin: SkinPayload
   change_events: boolean
   replay_epoch: string
@@ -3588,10 +3408,6 @@ export interface SetupReadyPayload {
 }
 /** Every ``_emit("error", …)`` site sets exactly ``message``. */
 export interface ErrorPayload {
-  message: string
-}
-/** ``tui_runtime/model_switch.py`` capability-refresh notice. */
-export interface NoticePayload {
   message: string
 }
 /** ``message.start``. Empty from the TUI gateway's emitters and for an ordinary admission; ``gateway/session_authority._stamp_claim`` adds an automation admission's async-result card (``session_automation.admission_display``: a background-process completion) and its model text, so a viewer that did not submit the turn paints the same header the submitter would. */
@@ -3713,10 +3529,6 @@ export interface ReactionPayload {
 export interface ReviewSummaryPayload {
   text: string
 }
-/** A session-authority local-viewer turn: one line the agent printed through ``_print_fn`` (subagent completion, compaction, errors, budget notices), which main's classic CLI rendered through ``_agent_status_print``. */
-export interface AgentPrintPayload {
-  text: string
-}
 /** ``tool_progress._on_tool_start`` (+ ``agent_callbacks._mirror_subagent_to_child`` rows with ``preview`` and empty ``args``). ``todos``/``revision`` are NOT set by the emitter; kept optional because tool.start rows may pass through connector redaction unchanged. */
 export interface ToolStartPayload {
   tool_id: string
@@ -3770,13 +3582,6 @@ export interface NotificationShowPayload {
 export interface NotificationClearPayload {
   key: string
 }
-/** ``tools/tip_tool.py``. */
-export interface TipShowPayload {
-  selector: string
-  text: string
-  title?: string | null
-  side?: string | null
-}
 /** ``server._hydrate_resume_history``. */
 export interface SessionResumeProgressPayload {
   phase: string
@@ -3812,12 +3617,6 @@ export interface SideAgentCompletePayload {
   task_id: string
   text: string
   question?: string | null
-}
-/** ``methods_prompt`` restart body + ``agent_callbacks._preview_restart_callbacks``. */
-export interface PreviewRestartProgressPayload {
-  task_id: string
-  text: string
-  level?: string | null
 }
 /** ``tool_progress._progress_subagent`` — every ``subagent.*`` frame; identity fields are optional because older emitters omit them and the TUI spawn tree falls back to flat rendering. */
 export interface SubagentEventPayload {
@@ -3873,26 +3672,6 @@ export interface MoaPhasePayload {
   refs_total?: number | null
   aggregator?: string | null
 }
-/** ``tools/open_preview_tool.py``. */
-export interface PreviewOpenPayload {
-  url: string
-  label?: string
-}
-/** ``tools/preview_tool.py`` / ``tools/close_preview_tool.py``; ``url`` '' closes every tab. */
-export interface PreviewClosePayload {
-  url?: string
-}
-/** ``tools/focus_pane_tool.py``. */
-export interface PaneRevealPayload {
-  pane: string
-  [key: string]: unknown
-}
-/** ``tools/react_to_message_tool.py``. */
-export interface MessageReactionPayload {
-  row_id: number
-  reactions: MessageReaction[]
-  role: string
-}
 /** ``session_notifications`` process_registry.on_output. */
 export interface TerminalOutputPayload {
   process_id: string
@@ -3905,20 +3684,6 @@ export interface TerminalClosePayload {
 export interface BrowserProgressPayload {
   message: string
   level: string
-}
-/** ``gateway/browser_control_broker.py`` FRAME_COMMAND params. */
-export interface BrowserControllerCommandPayload {
-  command_id: string
-  action: string
-  arguments: Record<string, unknown>
-  controller_id?: string | null
-  browser_profile_id?: string | null
-  tool_call_id?: string | null
-}
-/** ``gateway/browser_control_broker.py::_cancel_frame``. */
-export interface BrowserControllerCancelPayload {
-  command_id: string
-  tool_call_id?: string | null
 }
 /** ``methods_voice._vr_on_status``; states come from the recorder (idle / listening / transcribing …). */
 export interface VoiceStatusPayload {
@@ -4162,26 +3927,12 @@ export interface RpcMethods {
   'plugins.list': { params: PluginsListParams; result: PluginsListResult }
   /** Plugins Hub backend: list installed plugins, toggle, git-install, re-pin a catalog install, or remove a user install. */
   'plugins.manage': { params: PluginsManageParams; result: PluginsManageResult }
-  /** Spawn a hidden agent that brings the desktop preview's dev server back up. */
-  'preview.restart': { params: PreviewRestartParams; result: TaskIdResult }
   /** Kill one background process the caller's session owns and return its output snapshot. */
   'process.kill': { params: ProcessKillParams; result: ProcessKillResult }
   /** Background processes owned by the caller's session (desktop status stack poll). */
   'process.list': { params: ProcessListParams; result: ProcessListResult }
   /** ``/stop``: on the shared owner, kill the background processes ``session_id`` owns (required); a standalone sidecar kills every process it holds. Answers the count killed. */
   'process.stop': { params: ProcessStopParams; result: ProcessStopResult }
-  /** Editor Save: apply any subset of a profile's sections and report each one. */
-  'profiles.configure': { params: ProfilesConfigureParams; result: ProfilesConfigureResult }
-  /** Create a profile (ws twin of POST /api/profiles), mirroring launch credentials by default. */
-  'profiles.create': { params: ProfilesCreateParams; result: ProfilesCreateResult }
-  /** Everything the profile editor shows: soul, model pin, skills, toolsets, MCP servers. */
-  'profiles.describe': { params: ProfileNameParams; result: ProfilesDescribeResult }
-  /** A profile asset as a data URL. */
-  'profiles.get_asset': { params: ProfilesGetAssetParams; result: ProfilesGetAssetResult }
-  /** Roster of profiles with previews so a client paints without N follow-up calls. */
-  'profiles.list': { params: ProfilesListParams; result: ProfilesListResult }
-  /** Store or clear a profile asset (avatar) atomically. */
-  'profiles.set_asset': { params: ProfilesSetAssetParams; result: ProfilesSetAssetResult }
   /** Structured project facts for a cwd so UIs don't re-sniff the workspace. */
   'project.facts': { params: ProjectFactsParams; result: ProjectFactsResult }
   /** Run a task on a fresh agent in the background; the answer arrives as background.complete. */
@@ -4447,16 +4198,9 @@ export const RPC_METHODS = [
   'plugins.catalog.lookup',
   'plugins.list',
   'plugins.manage',
-  'preview.restart',
   'process.kill',
   'process.list',
   'process.stop',
-  'profiles.configure',
-  'profiles.create',
-  'profiles.describe',
-  'profiles.get_asset',
-  'profiles.list',
-  'profiles.set_asset',
   'project.facts',
   'prompt.background',
   'prompt.btw',
@@ -4574,8 +4318,6 @@ export const SERVER_REQUEST_METHODS = [
 
 // ── Notifications (`event` frames) ──
 export interface BackendGatewayEventMap {
-  /** A status line the agent printed during a local viewer's turn. */
-  'agent.print': AgentPrintPayload
   /** Output chunk from an agent-owned background process. */
   'agent.terminal.output': TerminalOutputPayload
   /** Pending gateway approvals were dropped by interrupt/reap/teardown; the wait resolved as deny (not a user refusal). */
@@ -4584,10 +4326,6 @@ export interface BackendGatewayEventMap {
   'background.complete': SideAgentCompletePayload
   /** Device-flow URL + code for the billing scope step-up; the client opens the browser. */
   'billing.step_up.verification': BillingStepUpVerificationPayload
-  /** Withdraw a pending controller command. */
-  'browser.controller.cancel': BrowserControllerCancelPayload
-  /** Dispatch one browser action to the attached controller. */
-  'browser.controller.command': BrowserControllerCommandPayload
   /** Browser (CDP) connect / install progress line. */
   'browser.progress': BrowserProgressPayload
   /** A /btw side question was answered. */
@@ -4608,8 +4346,6 @@ export interface BackendGatewayEventMap {
   'message.delta': MessageDeltaPayload
   /** Interim assistant commentary (text beside tool calls) sealed as its own segment. */
   'message.interim': MessageInterimPayload
-  /** The agent reacted to a message; paint it live. */
-  'message.reaction': MessageReactionPayload
   /** A turn began streaming; an automation turn carries its async-result card. */
   'message.start': MessageStartPayload
   /** The MoA aggregator started. */
@@ -4620,32 +4356,16 @@ export interface BackendGatewayEventMap {
   'moa.progress': MoaProgressPayload
   /** One MoA reference model's output. */
   'moa.reference': MoaReferencePayload
-  /** Informational one-liner for the session (capabilities refreshed). */
-  notice: NoticePayload
   /** Withdraw the notice with this key. */
   'notification.clear': NotificationClearPayload
   /** Show / replace a keyed out-of-band notice (toast or status bar). */
   'notification.show': NotificationShowPayload
-  /** Pairing state moved; refetch pairing. */
-  'pairing.changed': ChangeSignalPayload
-  /** Focus / reveal a named desktop pane. */
-  'pane.reveal': PaneRevealPayload
   /** The active pet / its spritesheet changed (watcher). */
   'pet.changed': PetChangedPayload
   /** Pet base-draft generation progress. */
   'pet.generate.progress': PetGenerateProgressPayload
   /** Pet hatch (row drawing) progress. */
   'pet.hatch.progress': PetHatchProgressPayload
-  /** gateway_state.json moved; refetch platform status. */
-  'platforms.changed': ChangeSignalPayload
-  /** Close the preview pane or one tab. */
-  'preview.close': PreviewClosePayload
-  /** Open a URL / file in the desktop preview pane. */
-  'preview.open': PreviewOpenPayload
-  /** The hidden preview-restart agent finished. */
-  'preview.restart.complete': SideAgentCompletePayload
-  /** Progress line from the preview-restart agent. */
-  'preview.restart.progress': PreviewRestartProgressPayload
   /** projects.db moved; refetch the project list + tree. */
   'projects.changed': ChangeSignalPayload
   /** Affection reaction detected in the user's message (hearts etc.). */
@@ -4659,7 +4379,7 @@ export interface BackendGatewayEventMap {
   /** Background review of the last turn finished. */
   'review.summary': ReviewSummaryPayload
   /** First frame of a connection: the resolved skin, the change-event capability and the replay epoch. */
-  'runtime.ready': GatewayReadyPayload
+  'runtime.ready': RuntimeReadyPayload
   /** Persisted goal / loop / heartbeat state changed. */
   'session.control.update': SessionControlUpdatePayload
   /** Live session settings snapshot (``server._session_info``); also the ``info`` of create/resume/activate. */
@@ -4696,8 +4416,6 @@ export interface BackendGatewayEventMap {
   'terminal.close': TerminalClosePayload
   /** Legacy thinking-text chunk (thinking_callback). */
   'thinking.delta': StreamDeltaPayload
-  /** Point at a desktop element with a one-line tip bubble. */
-  'tip.show': TipShowPayload
   /** Full todo snapshot after a todo tool ran. */
   'todo.updated': TodoUpdatedPayload
   /** A tool call finished: parsed result, summary, optional diff / todo snapshot. */
@@ -4721,13 +4439,10 @@ export interface BackendGatewayEventMap {
 }
 export type BackendGatewayEventName = keyof BackendGatewayEventMap
 export const GATEWAY_EVENT_TYPES = [
-  'agent.print',
   'agent.terminal.output',
   'approval.cancelled',
   'background.complete',
   'billing.step_up.verification',
-  'browser.controller.cancel',
-  'browser.controller.command',
   'browser.progress',
   'btw.complete',
   'connection.request',
@@ -4738,25 +4453,16 @@ export const GATEWAY_EVENT_TYPES = [
   'message.complete',
   'message.delta',
   'message.interim',
-  'message.reaction',
   'message.start',
   'moa.aggregating',
   'moa.phase',
   'moa.progress',
   'moa.reference',
-  'notice',
   'notification.clear',
   'notification.show',
-  'pairing.changed',
-  'pane.reveal',
   'pet.changed',
   'pet.generate.progress',
   'pet.hatch.progress',
-  'platforms.changed',
-  'preview.close',
-  'preview.open',
-  'preview.restart.complete',
-  'preview.restart.progress',
   'projects.changed',
   'reaction',
   'reasoning.available',
@@ -4782,7 +4488,6 @@ export const GATEWAY_EVENT_TYPES = [
   'subagent.tool',
   'terminal.close',
   'thinking.delta',
-  'tip.show',
   'todo.updated',
   'tool.complete',
   'tool.generating',

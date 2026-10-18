@@ -99,25 +99,6 @@ def test_shared_correction_policy_across_tools(workdir, monkeypatch, engine, con
         assert "escape-drift auto-corrected" in result["note"]
 
 
-@pytest.mark.parametrize("content,old,new,expected", _SHARED_CASES,
-                         ids=["backslash_free", "quote", "ambiguous"])
-def test_approval_preview_agrees_with_patch(workdir, content, old, new, expected):
-    from acp_adapter.edit_approval import build_edit_proposal
-    target = workdir / "preview.txt"
-    target.write_text(content)
-    arguments = dict(path=str(target), old_string=old, new_string=new)
-    if expected is None:
-        with pytest.raises(ValueError, match="intentional backslashes"):
-            build_edit_proposal("patch", arguments)
-        result = _patch_tool(**arguments, task_id="t-preview")
-        assert result.get("success") is not True
-        assert target.read_text() == content
-    else:
-        proposal = build_edit_proposal("patch", arguments)
-        assert target.read_text() == content
-        result = _patch_tool(**arguments, task_id="t-preview")
-        assert result["success"] is True
-        assert proposal.new_text == target.read_text() == expected
 
 
 class TestPatchEndToEnd:

@@ -11,7 +11,7 @@ import pytest
 
 from agent.tool_executor import execute_tool_calls_sequential
 from run_agent import AIAgent
-from tools.clarify_gateway import resolve_clarify_timeout
+from tools.clarify_session import resolve_clarify_timeout
 
 
 @pytest.fixture(autouse=True)
@@ -305,7 +305,7 @@ def test_sequential_timeout_does_not_cut_clarify_human_wait(
     agent = _make_agent(tmp_path)
     monkeypatch.setenv("HERMES_CONCURRENT_TOOL_TIMEOUT_S", "1.0")
     monkeypatch.setattr(
-        "tools.clarify_gateway.get_clarify_timeout",
+        "tools.clarify_session.get_clarify_timeout",
         lambda: clarify_timeout,
     )
 

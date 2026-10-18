@@ -1157,7 +1157,7 @@ def _print_failure_report(
 
 def _print_run_summary(*, file_count: int, tests_done: int, approx_total_tests: int,
                        tests_passed: int, tests_failed: int, tests_skipped: int,
-                       files_crashed: int, tests_collected: int, elapsed: float,
+                       files_crashed: int, tests_collected: int, files_failed: int, elapsed: float,
                        jobs: int, collection_only: bool) -> None:
     pct = min(100, (tests_done / approx_total_tests * 100)) if approx_total_tests else 0
     skipped_note = f", {tests_skipped} skipped" if tests_skipped else ""
@@ -1167,7 +1167,7 @@ def _print_run_summary(*, file_count: int, tests_done: int, approx_total_tests: 
         f", {files_crashed} file{'s' if files_crashed != 1 else ''} CRASHED"
         if files_crashed else ""
     )
-    outcome = (f"{tests_collected} tests collected, 0 tests executed" if collection_only else
+    outcome = (f"{tests_collected} tests collected, 0 tests executed, {files_failed} files failed" if collection_only else
                f"{tests_passed} tests passed, {tests_failed} failed")
     print(f"=== Summary: {file_count} files, {outcome}{crashed_note}{skipped_note} ({pct:.0f}% complete) in {elapsed:.1f}s ({jobs} workers) ===")
 
@@ -1584,7 +1584,7 @@ def main() -> int:
     print()
     _print_run_summary(file_count=len(files), tests_done=tests_done, approx_total_tests=approx_total_tests,
         tests_passed=tests_passed, tests_failed=tests_failed, tests_skipped=tests_skipped,
-        files_crashed=files_crashed, tests_collected=tests_collected, elapsed=elapsed,
+        files_crashed=files_crashed, tests_collected=tests_collected, files_failed=fail_count, elapsed=elapsed,
         jobs=args.jobs, collection_only=collection_only)
 
     # Host-OS gating note: tests marked for another OS were skipped by the

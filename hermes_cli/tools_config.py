@@ -175,7 +175,8 @@ def _checklist_toolset_keys(platform: str) -> set[str]:
 
 
 def _platform_default_toolset(platform: str) -> str:
-    """Composite toolset a platform falls back to (plugin platforms derive ``hermes-<platform>``)."""
+    """Composite defaults; the private TUI shares the user's terminal configuration."""
+    platform = "cli" if platform == "tui" else platform
     return PLATFORMS[platform]["default_toolset"] if platform in PLATFORMS else f"hermes-{platform}"
 
 
@@ -553,6 +554,7 @@ def _platform_toolsets_explicitly_saved(config: dict, platform: str) -> bool:
     falls back to the platform default. Callers use this to tell an explicit zero-tool
     selection (fail closed, #82010) from an absent one ("no restriction").
     """
+    platform = "cli" if platform == "tui" else platform
     platform_toolsets = config.get("platform_toolsets") or {}
     raw = platform_toolsets.get(platform)
     return isinstance(_coerce_platform_toolsets_value(raw, platform), list)
@@ -560,6 +562,7 @@ def _platform_toolsets_explicitly_saved(config: dict, platform: str) -> bool:
 
 def _get_platform_tools(config: dict, platform: str, *, include_default_mcp_servers: bool = True) -> set[str]:
     """Resolve which individual toolset names are enabled for a platform."""
+    platform = "cli" if platform == "tui" else platform
     platform_toolsets = config.get("platform_toolsets") or {}
     toolset_names = _coerce_platform_toolsets_value(platform_toolsets.get(platform), platform)
     # An explicitly saved list (even a composite like ``hermes-discord``) is an opt-in to the platform's

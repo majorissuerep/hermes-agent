@@ -10,9 +10,9 @@ is not the installer's. Then:
   updates; it reports the workspace copy instead (gated on #122425 and #122627);
 * ``hermes doctor`` on that healthy install reports nothing wrong with the command installation
   (#124050 is the false positive class) and ``hermes pm status`` reports the update as a success;
-* real drift is caught and healed: a user uninstalls fastapi (the ``web`` extra the dashboard
+* real drift is caught and healed: a user uninstalls pydantic (a required core package the native runtime
   imports) from the selected environment. ``hermes doctor`` must say so, and ``hermes pm repair``
-  must bring the dashboard's import back;
+  must bring the native runtime's import back;
 * a dependency update that cannot resolve after the tree moved is an owed follow-up (contract C3,
   A6): ``hermes update`` exits 0 but says loudly that the dependencies are not installed yet, the
   receipt names the ``dependencies`` follow-up, the source-update tail stays armed for the next
@@ -122,33 +122,33 @@ def test_pm_status_receipt_reports_the_successful_update(updated):
 
 @pytest.fixture(scope="module")
 def drifted(updated):
-    """The user removes fastapi (the ``web`` extra) from the selected environment by hand."""
+    """The user removes pydantic (a required core package) from the selected environment by hand."""
     sb = updated["sb"]
-    assert P.managed_imports(sb, "fastapi")["fastapi"] == "ok", "harness: fastapi not installed to begin with"
+    assert P.managed_imports(sb, "pydantic")["pydantic"] == "ok", "harness: pydantic not installed to begin with"
     uv = next((sb.hermes_home / "tools").glob("uv-*/uv"), None) or I.real_uv()
-    P.ok(sb.run([str(uv), "pip", "uninstall", "--python", sb.python, "fastapi"]), "harness: uninstall failed")
-    assert P.managed_imports(sb, "fastapi")["fastapi"] != "ok", "harness: fastapi still importable"
+    P.ok(sb.run([str(uv), "pip", "uninstall", "--python", sb.python, "pydantic"]), "harness: uninstall failed")
+    assert P.managed_imports(sb, "pydantic")["pydantic"] != "ok", "harness: pydantic still importable"
     doctor = sb.cli("doctor", timeout=300)
     repair = sb.cli("pm", "repair")
     return {"sb": sb, "doctor": doctor, "repair": repair}
 
 
-def test_doctor_reports_web_extra_drift(drifted):
+def test_doctor_reports_native_dependency_drift(drifted):
     cp = drifted["doctor"]
     assert I.TRACEBACK not in cp.stdout + cp.stderr, I.describe(cp)
     flagged = [line for line in cp.stdout.splitlines()
-               if re.search(r"(?i)fastapi|dashboard|web extra|\bweb\b.*(missing|not installed)", line)
+               if re.search(r"(?i)pydantic|dependency.*(missing|not installed)", line)
                and line.lstrip().startswith(("⚠", "✗"))]
-    assert flagged, ("hermes doctor is silent about fastapi missing from the selected environment "
+    assert flagged, ("hermes doctor is silent about pydantic missing from the selected environment "
                      f"(rc={cp.returncode})\n" + I.describe(cp))
 
 
 def test_pm_repair_heals_the_drift(drifted):
     sb, rp = drifted["sb"], drifted["repair"]
     assert rp.returncode == 0, "hermes pm repair failed on a drifted environment:\n" + P.diagnostics(sb, rp)
-    imports = P.managed_imports(sb, "fastapi", "hermes_cli.web_server")
+    imports = P.managed_imports(sb, "pydantic", "tui_runtime")
     assert set(imports.values()) == {"ok"}, (
-        f"`hermes pm repair` exited 0 but the dashboard still cannot import: {imports}\n" + P.diagnostics(sb, rp))
+        f"`hermes pm repair` exited 0 but the native runtime still cannot import: {imports}\n" + P.diagnostics(sb, rp))
 
 
 def test_failed_dependency_update_is_an_owed_followup(updated):

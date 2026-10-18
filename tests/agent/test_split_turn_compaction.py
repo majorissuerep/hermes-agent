@@ -301,7 +301,7 @@ def test_restated_reply_keeps_splitting_on_later_compactions() -> None:
     """
     compressor = _make_compressor(protect_first_n=3)
     compressor.tail_token_budget = 1_000
-    messages = _oversized_active_turn(_gateway_reply(_ACTIVE_REQUEST), 30)
+    messages = _oversized_active_turn(_ACTIVE_REQUEST, 30)
     for cycle in range(3):
         with patch.object(compressor, "_generate_summary", return_value=None):
             compressed = compressor.compress(messages, current_tokens=90_000)

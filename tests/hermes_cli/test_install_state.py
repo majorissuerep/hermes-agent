@@ -148,42 +148,8 @@ def test_claiming_marks_the_machine_and_the_next_probe_sees_it(machine):
     assert install_state.existing_install()
 
 
-def test_gateway_service_definitions_name_their_homes(tmp_path, monkeypatch):
-    home = tmp_path / "gw-home"
-    unit = tmp_path / "hermes-gateway.service"
-    unit.write_text(f'[Service]\nEnvironment="HERMES_HOME={home}"\n', encoding="utf-8")
-    vbs = tmp_path / "Hermes_Gateway.vbs"
-    vbs.write_text(f'env.Item("HERMES_HOME") = "{home}-win"\r\n', encoding="utf-8")
-    from hermes_platform.resolver import known_dirs
-    monkeypatch.setattr(known_dirs, "gateway_service_definition_globs", lambda: (str(tmp_path / "*Gateway*"),
-                                                                                str(tmp_path / "*gateway*")))
-
-    assert set(install_state._service_homes()) == {home, Path(f"{home}-win")}
 
 
-@pytest.mark.platforms("posix")
-def test_a_gateway_service_counts_only_for_the_account_it_runs_as(tmp_path, monkeypatch):
-    """A machine-wide unit is another account's install unless it runs as this one (``User=``, root
-    when it names none): that account's gateway must not cost a new desktop user the trial."""
-    import getpass
-
-    from hermes_platform.resolver import known_dirs
-
-    me = getpass.getuser()
-    units = {"mine": f"User={me}\n", "theirs": "User=nobody\n" if me != "nobody" else "User=root\n", "root": ""}
-    for name, identity in units.items():
-        (tmp_path / f"hermes-gateway-{name}.service").write_text(
-            f'[Service]\n{identity}Environment="HERMES_HOME={tmp_path / name}"\n', encoding="utf-8")
-    monkeypatch.setattr(known_dirs, "gateway_service_definition_globs",
-                        lambda: (str(tmp_path / "hermes-gateway-[mt]*.service"),))
-    monkeypatch.setattr(known_dirs, "system_gateway_service_definition_globs",
-                        lambda: (str(tmp_path / "hermes-gateway-root.service"),), raising=False)
-
-    homes = set(install_state._service_homes())
-
-    assert tmp_path / "mine" in homes
-    assert tmp_path / "theirs" not in homes
-    assert (tmp_path / "root" in homes) == (me == "root")
 
 
 def test_a_state_db_another_process_holds_locked_is_not_use(machine, monkeypatch):

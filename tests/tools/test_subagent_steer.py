@@ -636,7 +636,7 @@ class TestSubagentSteerRPC:
         srv._sessions["owner-session"] = owner_record
 
         def capture(rid, _params):
-            transport, record = delegate_tool._capture_gateway_steer_authority(
+            transport, record = delegate_tool._capture_local_steer_authority(
                 "owner-session"
             )
             return srv._ok(
@@ -686,7 +686,7 @@ class TestSubagentSteerRPC:
         transport_token = bind_transport(owner_transport)
         record_token = srv._current_runtime_session_record.set(original_record)
         try:
-            assert delegate_tool._capture_gateway_steer_authority("owner-session") == (
+            assert delegate_tool._capture_local_steer_authority("owner-session") == (
                 None,
                 None,
             )
@@ -731,9 +731,8 @@ class TestSubagentSteerRPC:
         finally:
             _unregister_subagent("sid-rpc-param-spoof")
 
-    def test_session_transport_rebinding_moves_ownership_to_the_live_slot(self):
-        """Authority is the owning session's CURRENT transport slot (7befa11bf25 reversed the
-        original never-transfer rule): the reattached peer steers, the displaced one cannot."""
+    def test_session_transport_rebinding_does_not_transfer_child_authority(self):
+        """The captured stdio owner cannot be replaced by changing a session transport slot."""
         original_transport = self._Transport()
         rebound_transport = self._Transport()
         owner_record = {
@@ -751,7 +750,7 @@ class TestSubagentSteerRPC:
         )
         owner_record["transport"] = rebound_transport
         try:
-            for transport, expected in ((original_transport, "rejected"), (rebound_transport, "queued")):
+            for transport, expected in ((original_transport, "rejected"), (rebound_transport, "rejected")):
                 envelope = self._call(
                     {
                         "session_id": "owner-session",
@@ -762,7 +761,7 @@ class TestSubagentSteerRPC:
                     session_record=owner_record,
                 )
                 assert envelope["result"]["status"] == expected
-            assert agent.steered == ["rebound authority"]
+            assert agent.steered == []
         finally:
             _unregister_subagent("sid-rpc-rebound")
 

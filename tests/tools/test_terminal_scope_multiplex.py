@@ -91,7 +91,7 @@ def test_routed_turn_reads_every_terminal_consumer_from_profile(
     terminal_tool config, container key resolution, docker media translation,
     file_tools/runtime_cwd cwd anchors, and the browser/env_probe backend
     checks — with none of launch profile A's docker policy showing through."""
-    from tui_runtime.model_switch import _session_profile_runtime_scope
+    from tui_runtime.server import _session_profile_runtime_scope
     import tools.terminal_tool as tt
     from agent import runtime_cwd
     from tools import browser_tool, env_probe, file_tools_paths
@@ -126,7 +126,7 @@ def test_routed_turn_reads_every_terminal_consumer_from_profile(
 def test_profile_omitting_keys_gets_defaults_not_launch_values(tmp_path):
     """#101132/#95470: a docker profile that does NOT set docker_volumes or
     docker_shared_container_key must not inherit the launch profile's."""
-    from tui_runtime.model_switch import _session_profile_runtime_scope
+    from tui_runtime.server import _session_profile_runtime_scope
     import tools.terminal_tool as tt
 
     home = _profile(tmp_path, "bee", "terminal:\n  backend: docker\n")
@@ -143,7 +143,7 @@ def test_profile_omitting_keys_gets_defaults_not_launch_values(tmp_path):
 def test_persistent_docker_routed_profile_keeps_one_container(tmp_path):
     """Persistent Docker is profile-scoped: a routed profile's session-less (cron) work must key the
     SAME container as its session-bound work, and never another profile's."""
-    from tui_runtime.model_switch import _session_profile_runtime_scope
+    from tui_runtime.server import _session_profile_runtime_scope
     import tools.terminal_tool as tt
     from agent.session_context import clear_session_vars, reset_session_vars, set_session_vars
 
@@ -182,7 +182,7 @@ def test_malformed_profile_config_refuses_execution(tmp_path):
 
 
 def test_gateway_runtime_scope_resets_on_error(tmp_path):
-    from tui_runtime.model_switch import _session_profile_runtime_scope
+    from tui_runtime.server import _session_profile_runtime_scope
 
     home = _profile(tmp_path, "qa", "terminal:\n  backend: local\n")
     with pytest.raises(RuntimeError):
@@ -236,7 +236,7 @@ def test_config_list_and_dict_values_are_json_not_repr(tmp_path):
     assert json.loads(scope["TERMINAL_DOCKER_ENV"]) == {"FOO": "bar"}
     assert json.loads(scope["TERMINAL_DOCKER_EXTRA_ARGS"]) == ["--network=host"]
 
-    from tui_runtime.model_switch import _session_profile_runtime_scope
+    from tui_runtime.server import _session_profile_runtime_scope
     import tools.terminal_tool as tt
 
     with _session_profile_runtime_scope({"profile_home": str(home)}):

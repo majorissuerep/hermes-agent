@@ -16,7 +16,6 @@ import contextlib
 import hashlib
 import json
 import os
-import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -33,6 +32,8 @@ import hermes_yaml as yaml
 from tests.e2e.core._pending_fixes import known_failure
 from tests.e2e.core._pm_dependencies import select_test_dependencies
 from tests.fakes.providers.catalog_fake import USAGE_IN, USAGE_OUT, CatalogFake, Recorded
+
+from tests.e2e.vault_home import connect_state, seal_fixture_home, spawn_unlocked
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 # Hard bound per child. A row that talks to its vendor host instead of the fake ends on its own:
@@ -201,7 +202,7 @@ def hermetic_env(home: Path, extra: dict[str, str]) -> dict[str, str]:
         "HOME": str(home), "HERMES_HOME": str(home / ".hermes"), "PYTHONPATH": str(REPO_ROOT),
         "PYTHONUNBUFFERED": "1", "NO_COLOR": "1", "TERM": "dumb",
         # The child's HOME is tmp_path; this is the state-db guard's documented child escape hatch.
-        "HERMES_STATE_DB_GUARD_BYPASS": "1", "HERMES_ALLOW_NO_VAULT": "1",
+        "HERMES_STATE_DB_GUARD_BYPASS": "1",
     })
     env.update(extra)
     return env
@@ -216,6 +217,7 @@ def write_home(root: Path, model: dict[str, Any], extra_cfg: dict[str, Any] | No
            "agent": {"api_max_retries": 1, "auto_recovery_cycles": 0}, "updates": {"check": False},
            **(extra_cfg or {})}
     (home / ".hermes" / "config.yaml").write_text(yaml.safe_dump(cfg, sort_keys=False), encoding="utf-8")
+    seal_fixture_home(home / ".hermes")
     select_test_dependencies(home / ".hermes", REPO_ROOT)
     return home
 
@@ -224,7 +226,7 @@ def run_hermes(home: Path, cwd: Path, env_extra: dict[str, str], *args: str,
                timeout: float = TURN_TIMEOUT) -> subprocess.CompletedProcess:
     """Run the real CLI; a child that outlives ``timeout`` is killed (rc -9, reason in stderr)."""
     with tempfile.TemporaryFile("w+", encoding="utf-8") as out, tempfile.TemporaryFile("w+", encoding="utf-8") as err:
-        proc = subprocess.Popen([sys.executable, "-m", "hermes_cli.main", *args], cwd=cwd,
+        proc = spawn_unlocked([sys.executable, "-m", "hermes_cli.main", *args], cwd=cwd,
                                 env=hermetic_env(home, env_extra), stdout=out, stderr=err, text=True,
                                 stdin=subprocess.DEVNULL)
         try:
@@ -242,9 +244,8 @@ def session_usage(home: Path) -> dict[str, Any] | None:
     db = home / ".hermes" / "state.db"
     if not db.exists():
         return None
-    con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    con = connect_state(db)
     try:
-        con.row_factory = sqlite3.Row
         row = con.execute("SELECT input_tokens, output_tokens, estimated_cost_usd, cost_status "
                           "FROM sessions ORDER BY started_at DESC LIMIT 1").fetchone()
         return dict(row) if row else None

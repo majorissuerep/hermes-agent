@@ -207,28 +207,8 @@ def test_drop_rewrites_merged_inflight_prefix_to_followup_only():
     assert session.get("queued_prompt") == {"text": "Q", "transport": "ws-1"}
 
 
-def test_enqueue_keeps_an_authored_copy_of_the_inflight_text():
-    """A relayed DM with the live prompt's text is another sender's message, not a self-duplicate."""
-    author = {"id": "bot:scout", "name": "scout", "is_bot": True}
-    session = _session()
-    session["inflight_turn"] = {"user": "status?", "assistant": "", "streaming": True, "error": ""}
-
-    server._enqueue_prompt(session, "status?", "ws-1", turn_author=author)
-
-    assert session.get("queued_prompt") == {"text": "status?", "transport": "ws-1", "turn_author": author}
 
 
-def test_drop_leaves_an_authored_entry_that_shares_the_inflight_prefix_intact():
-    """Authored envelopes never went through the text merge, so a shared prefix is the sender's own words."""
-    author = {"id": "bot:scout", "name": "scout", "is_bot": True}
-    text = "P\n\nand the rollback plan"
-    session = _session()
-    session["inflight_turn"] = {"user": "P", "assistant": "", "streaming": True, "error": ""}
-    session["queued_prompt"] = {"text": text, "transport": "ws-1", "turn_author": author}
-
-    server._drop_queued_duplicates_of_inflight_user(session)
-
-    assert session.get("queued_prompt") == {"text": text, "transport": "ws-1", "turn_author": author}
 
 
 def test_hard_interrupt_queue_path_scrubs_stale_inflight_self_duplicate(monkeypatch):
@@ -656,12 +636,11 @@ def test_drain_fires_queued_prompt_and_claims_running(monkeypatch):
     assert session["transport"] == "ws-9"
 
 
-def test_drain_compute_host_forwards_queued_image_paths(monkeypatch):
+def test_drain_native_turn_forwards_queued_image_paths(monkeypatch):
     captured = {}
-    monkeypatch.setattr(server, "_session_uses_compute_host", lambda _session: True)
     monkeypatch.setattr(
         server,
-        "_submit_prompt_to_compute_host",
+        "_run_prompt_submit",
         lambda rid, sid, session, text, **kwargs: captured.update(
             rid=rid, sid=sid, text=text, image_paths=kwargs.get("image_paths")
         )
@@ -685,11 +664,10 @@ def test_drain_compute_host_forwards_queued_image_paths(monkeypatch):
 
 
 def test_drain_preserves_queued_prompt_when_session_is_closing(monkeypatch):
-    """A compute-host completion must not dispatch a successor after close."""
-    monkeypatch.setattr(server, "_session_uses_compute_host", lambda _session: True)
+    """A terminal turn completion must not dispatch a successor after close."""
     monkeypatch.setattr(
         server,
-        "_submit_prompt_to_compute_host",
+        "_run_prompt_submit",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(
             AssertionError("closing session must not dispatch")
         ),
@@ -725,8 +703,8 @@ def test_drain_does_not_dispatch_a_prompt_cancelled_after_claim(monkeypatch):
     )
     monkeypatch.setattr(
         server,
-        "_session_uses_compute_host",
-        lambda _session: session.__setitem__("_queued_prompt_generation", 1) or False,
+        "_attach_session_transport",
+        lambda _session, _transport: session.__setitem__("_queued_prompt_generation", 1),
     )
     monkeypatch.setattr(
         server,
@@ -743,11 +721,11 @@ def test_drain_does_not_dispatch_a_prompt_cancelled_after_claim(monkeypatch):
 
 def test_drain_restores_claimed_prompt_when_generation_bumps_mid_claim(monkeypatch):
     """Single-item queue: generation cancel must not empty the queue."""
-    session = _session(queued_prompt={"text": "follow-up Q", "transport": None})
+    session = _session(queued_prompt={"text": "follow-up Q", "transport": "stdio"})
     monkeypatch.setattr(
         server,
-        "_session_uses_compute_host",
-        lambda _session: session.__setitem__("_queued_prompt_generation", 1) or False,
+        "_attach_session_transport",
+        lambda _session, _transport: session.__setitem__("_queued_prompt_generation", 1),
     )
     monkeypatch.setattr(
         server,
@@ -757,7 +735,7 @@ def test_drain_restores_claimed_prompt_when_generation_bumps_mid_claim(monkeypat
 
     assert server._drain_queued_prompt("r1", "sid", session) is True
     assert session["running"] is False
-    assert session.get("queued_prompt") == {"text": "follow-up Q", "transport": None}
+    assert session.get("queued_prompt") == {"text": "follow-up Q", "transport": "stdio"}
     assert not session.get("queued_prompts")
 
 

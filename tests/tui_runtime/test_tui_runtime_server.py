@@ -14724,7 +14724,8 @@ def test_ensure_session_db_row_false_when_store_unavailable(monkeypatch):
     monkeypatch.setattr(server, "_db", None)
     monkeypatch.setattr(server, "_db_error", None)
 
-    assert server._ensure_session_db_row({"session_key": "k1"}) is False
+    with pytest.raises(RuntimeError, match="utf-8 boom"):
+        server._ensure_session_db_row({"session_key": "k1"})
 
 
 def test_ensure_session_db_row_true_when_row_persisted(monkeypatch):
@@ -14926,9 +14927,10 @@ def test_session_list_honors_params_profile_opens_profile_db(monkeypatch, tmp_pa
     monkeypatch.setattr(server, "_profile_home", lambda p: profile_home if p == "mlperf" else None)
     monkeypatch.setattr(server, "_get_db", lambda: LaunchDB())
     monkeypatch.setattr(
-        "hermes_cli.web_server_sessions._open_session_db_at_path",
+        "hermes_state.SessionDB",
         lambda db_path, *, read_only: ProfileDB(db_path=db_path),
     )
+    monkeypatch.setattr(server, "_bootstrap_served_profile_store", lambda _path: None)
 
     resp = server.handle_request(
         {
@@ -14961,7 +14963,7 @@ def test_session_most_recent_honors_params_profile(monkeypatch, tmp_path):
         def list_sessions_rich(self, **kwargs):
             return [
                 {"id": "tool-noise", "source": "tool", "title": "t", "started_at": 9},
-                {"id": "ml-tip", "source": "desktop", "title": "M", "started_at": 3},
+                {"id": "ml-tip", "source": "tui", "title": "M", "started_at": 3},
             ]
 
         def close(self):
@@ -14970,9 +14972,10 @@ def test_session_most_recent_honors_params_profile(monkeypatch, tmp_path):
     monkeypatch.setattr(server, "_profile_home", lambda p: profile_home if p == "mlperf" else None)
     monkeypatch.setattr(server, "_get_db", lambda: LaunchDB())
     monkeypatch.setattr(
-        "hermes_cli.web_server_sessions._open_session_db_at_path",
+        "hermes_state.SessionDB",
         lambda db_path, *, read_only: ProfileDB2(db_path=db_path),
     )
+    monkeypatch.setattr(server, "_bootstrap_served_profile_store", lambda _path: None)
 
     resp = server.handle_request(
         {
@@ -18883,7 +18886,7 @@ def _idle_evictable_session(now):
     return {
         "running": False,
         "agent_ready": ready,
-        "transport": server._detached_ws_transport,  # dead/detached
+        "transport": None,  # no live terminal owner
         "last_active": old,
         "created_at": old,
     }
@@ -20299,7 +20302,7 @@ def test_clarify_callback_uses_configured_timeout(monkeypatch):
 def test_clarify_timeout_seconds_maps_non_positive_to_unlimited(monkeypatch, configured, expected):
     """A ``<= 0`` clarify timeout means unlimited and reaches the server request as None
     (wait(None) waits forever) rather than an immediate wait(0) skip."""
-    monkeypatch.setattr("tools.clarify_gateway.get_clarify_timeout", lambda: configured)
+    monkeypatch.setattr("tools.clarify_session.get_clarify_timeout", lambda: configured)
 
     assert server._clarify_timeout_seconds() == expected
 
@@ -21503,9 +21506,8 @@ def _join_turn_thread(sess, timeout=10.0):
             return
 
 
-@pytest.mark.parametrize("turn_isolation", [False, True])
 def test_prompt_submit_consecutive_rewinds_with_returned_survivor_row_ids(
-    monkeypatch, tmp_path, turn_isolation
+    monkeypatch, tmp_path
 ):
     """#83202 review (consecutive-rewind staleness): replace_messages re-inserts
     the surviving prefix as NEW rows, so the pre-rewind client row ids die on
@@ -21537,12 +21539,7 @@ def test_prompt_submit_consecutive_rewinds_with_returned_survivor_row_ids(
     monkeypatch.setattr(
         server,
         "_load_cfg",
-        lambda: {"dashboard": {"turn_isolation": turn_isolation}},
-    )
-    monkeypatch.setattr(
-        server,
-        "_submit_prompt_to_compute_host",
-        lambda *_args, **_kwargs: server._ok("host", {"status": "streaming"}),
+        dict,
     )
     monkeypatch.setattr(server, "_start_agent_build", lambda *a, **k: None)
     monkeypatch.setattr(server, "_start_inflight_turn", lambda *a, **k: None)

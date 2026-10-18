@@ -58,14 +58,14 @@ def _missing_config_name_error(name: str = "resolve_turn_limit") -> ImportError:
 
 
 def _install_boom(monkeypatch, boom):
-    """``hermes chat`` runs main's ``cli.main``; ``-z`` keeps the gateway transport launcher."""
-    monkeypatch.setitem(sys.modules, "cli", types.SimpleNamespace(main=lambda **_kw: boom(None)))
-    monkeypatch.setattr("hermes_cli.gateway_chat.launch_from_args", boom)
+    monkeypatch.setattr("hermes_cli.oneshot.run_oneshot", lambda *args, **kwargs: boom(None))
 
 
 @pytest.fixture
 def main_mod(monkeypatch):
     import hermes_cli.main as mod
+    monkeypatch.setattr(mod, "_cleanup_oneshot_runtime", lambda: None)
+    monkeypatch.setattr(mod, "_exit_after_oneshot", lambda code: (_ for _ in ()).throw(SystemExit(code)))
 
     monkeypatch.setattr(mod, "_has_any_provider_configured", lambda: True)
     monkeypatch.setattr(mod, "_sync_bundled_skills_for_startup", lambda: None)
@@ -118,7 +118,7 @@ def test_cmd_chat_prints_update_hint_when_config_helper_is_missing(
 
 
 @pytest.mark.parametrize("entry", ["cmd_chat", "_run_oneshot_from_args"])
-def test_cmd_chat_still_reraises_unrelated_import_errors(main_mod, monkeypatch, entry):
+def test_unrelated_import_errors_use_native_failure_exit(main_mod, monkeypatch, entry):
     exc = ImportError("cannot import name 'dumps' from 'requests'")
     exc.name = "requests"
 
@@ -127,7 +127,7 @@ def test_cmd_chat_still_reraises_unrelated_import_errors(main_mod, monkeypatch, 
 
     _install_boom(monkeypatch, boom)
 
-    with pytest.raises(ImportError) as excinfo:
+    with pytest.raises(SystemExit) as excinfo:
         getattr(main_mod, entry)(_chat_args())
 
-    assert excinfo.value is exc
+    assert excinfo.value.code == 1

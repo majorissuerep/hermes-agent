@@ -26,6 +26,8 @@ from typing import Any, Callable
 
 import pytest
 
+from tests.e2e.vault_home import write_encrypted_home
+
 from tests.e2e.core.history._helpers import (
     NO_BACKGROUND_REVIEW,
     Script,
@@ -54,7 +56,6 @@ from tests.fakes.fake_llm_provider import (
     Hang,
     Text,
     ToolCall,
-    write_hermes_home,
 )
 
 # ---------------------------------------------------------------------------------------------
@@ -184,7 +185,7 @@ def world(tmp_path, monkeypatch):
     script = Script()
     spawned = Spawned()
     with FakeLLMServer(script) as srv:
-        write_hermes_home(hermes_home, srv.base_url, extra_config=OFFLINE_CONFIG + NO_BACKGROUND_REVIEW)
+        write_encrypted_home(hermes_home, srv.base_url, extra_config=OFFLINE_CONFIG + NO_BACKGROUND_REVIEW)
         monkeypatch.setenv("OPENAI_API_KEY", "sk-fake-e2e")
         yield {"srv": srv, "script": script, "home": home, "hermes_home": hermes_home,
                "workdir": workdir, "spawned": spawned}
@@ -196,7 +197,7 @@ def world(tmp_path, monkeypatch):
 def test_transcript_ledger(world, name):
     srv, script, hermes_home = world["srv"], world["script"], world["hermes_home"]
     if name in SCENARIO_CONFIG:
-        write_hermes_home(hermes_home, srv.base_url,
+        write_encrypted_home(hermes_home, srv.base_url,
                           extra_config=OFFLINE_CONFIG + NO_BACKGROUND_REVIEW + SCENARIO_CONFIG[name])
     typed = [arg for kind, arg in scenario(name, Script()) if kind == "turn"]
     assert not [(a, b) for a in typed for b in typed if a != b and a in b], "scenario inputs must be unique"
@@ -283,7 +284,7 @@ def test_transcript_ledger(world, name):
 
 def test_micro_compaction_resumed_display_shows_each_input_once(world):
     srv, script, hermes_home = world["srv"], world["script"], world["hermes_home"]
-    write_hermes_home(hermes_home, srv.base_url,
+    write_encrypted_home(hermes_home, srv.base_url,
                       extra_config=OFFLINE_CONFIG + NO_BACKGROUND_REVIEW + SCENARIO_CONFIG["micro_compaction"])
     session = InProcessSession(srv.base_url, hermes_home, "ledger-micro-display")
     inputs: list[str] = []

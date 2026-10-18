@@ -90,7 +90,7 @@ class TestSurfaceSwitch:
             agent.tools = tools
         agent._platform_hint_overrides = None
         agent._surface_switch_note = ""
-        agent._gateway_turn_context_notes = ""
+        agent._turn_context_notes = ""
         _restore_or_build_system_prompt(
             agent, None, history if history is not None else [{"role": "user", "content": "hi"}]
         )
@@ -129,7 +129,7 @@ class TestSurfaceSwitch:
         agent.platform = "tui"
         agent._platform_hint_overrides = None
         agent._surface_switch_note = ""
-        agent._gateway_turn_context_notes = ""
+        agent._turn_context_notes = ""
         _restore_or_build_system_prompt(agent, None, [{"role": "user", "content": "hi"}])
         assert agent._surface_switch_note.startswith(f"{_SURFACE_SWITCH_NOTE_PREFIX}tui{_SURFACE_NAME_END}")
 
@@ -608,36 +608,6 @@ class TestPerResponseSessionWritePath:
             assert "is null" not in caplog.text
 
 
-def test_null_stored_prompt_does_not_take_the_stale_probe_path(tmp_path):
-    """A NULL system_prompt row already rebuilds. The capability probe must not gate it."""
-    from hermes_state import SessionDB
-    from agent.conversation_loop import _bot_chat_prompt_stale
-
-    agent = SimpleNamespace(
-        _bot_mode_protocol=True,
-        _session_title_hint="Bot Chat",
-        _session_db=None,
-        session_id="test-session-id",
-    )
-    with patch(
-        "tools.bot_mode_probe.stored_prompt_capability_stale", return_value=False
-    ) as probe:
-        assert _bot_chat_prompt_stale(agent, None) is False
-        probe.assert_not_called()
-
-    with SessionDB(db_path=tmp_path / "state.db") as db:
-        db.create_session("test-session-id", source="tui")
-        row = db.get_session("test-session-id")
-        assert row is not None and row["system_prompt"] is None
-        restoring = _make_agent(session_db=db, prebuilt_prompt="BUILT")
-        with patch(
-            "tools.bot_mode_probe.stored_prompt_capability_stale", return_value=False
-        ) as probe:
-            _restore_or_build_system_prompt(
-                restoring, None, [{"role": "user", "content": "hi"}]
-            )
-        probe.assert_not_called()
-        restoring._build_system_prompt.assert_called_once()
 
 
 if __name__ == "__main__":

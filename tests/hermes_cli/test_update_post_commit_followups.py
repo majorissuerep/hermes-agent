@@ -11,6 +11,8 @@ import os
 import subprocess
 
 import pytest
+from tests.hermes_cli.update_test_support import isolated_command_checkout as isolated_command_checkout  # noqa: PLC0414 -- register the shared autouse fixture
+
 
 from hermes_cli import update_receipt
 
@@ -229,12 +231,12 @@ def test_interrupt_after_the_run_closed_as_success_never_tells_the_gateway_1(tmp
     monkeypatch.setattr(main, "_finalize_update_output", lambda state: None)
     monkeypatch.setattr(update_owning_install, "retarget_to_owning_install", lambda root: None)  # not the target
 
-    def committed_then_interrupted(args, gateway_mode):
+    def committed_then_interrupted(args, gateway_mode=False):
         update_receipt.begin_update_receipt()
         update_receipt.finalize_update_receipt("success")
         raise KeyboardInterrupt()
 
-    monkeypatch.setattr(update_cmd, "_cmd_update_impl", committed_then_interrupted)
+    monkeypatch.setattr("hermes_cli.terminal_update.update_source", committed_then_interrupted)
     with pytest.raises(KeyboardInterrupt):
         main.cmd_update(SimpleNamespace(gateway=True))
     assert _latest(tmp_path)["outcome"] == "success"
@@ -251,11 +253,11 @@ def test_a_failure_before_the_run_closed_still_tells_the_gateway_1(tmp_path, mon
     monkeypatch.setattr(main, "_finalize_update_output", lambda state: None)
     monkeypatch.setattr(update_owning_install, "retarget_to_owning_install", lambda root: None)  # not the target
 
-    def interrupted_while_open(args, gateway_mode):
+    def interrupted_while_open(args, gateway_mode=False):
         update_receipt.begin_update_receipt()
         raise KeyboardInterrupt()
 
-    monkeypatch.setattr(update_cmd, "_cmd_update_impl", interrupted_while_open)
+    monkeypatch.setattr("hermes_cli.terminal_update.update_source", interrupted_while_open)
     with pytest.raises(KeyboardInterrupt):
         main.cmd_update(SimpleNamespace(gateway=True))
     assert (tmp_path / ".update_exit_code").read_text(encoding="utf-8").strip() == "1"

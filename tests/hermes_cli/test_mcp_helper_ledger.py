@@ -22,7 +22,7 @@ from unittest.mock import patch
 import psutil
 import pytest
 
-from hermes_cli import process_identity as pi
+from hermes_platform import child_processes as pi
 
 pytestmark = pytest.mark.platforms("posix")  # uses POSIX sleep children
 

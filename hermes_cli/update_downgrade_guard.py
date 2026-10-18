@@ -1,4 +1,4 @@
-"""Refuse an update whose target predates the gateway runtime while a state.db already depends on it.
+"""Refuse an update whose target predates the historical session ledger while stored data depends on it.
 
 Releases before the gateway cutover know nothing of the runtime ledgers (``session_admissions`` /
 ``worker_executions``, ``ON DELETE RESTRICT``) and stamp the same ``schema_version``, so moving the
@@ -95,11 +95,11 @@ def downgrade_refusal(git_cmd, root: Path, target_ref: str, home: Path | None = 
     ledgered = [(name, h) for name, h in profiles if _has_ledger_rows(h / "state.db")]
     if not ledgered or not target_predates_runtime(git_cmd, root, target_ref):
         return None
-    lines = [f"✗ Refusing to move this install to {target_ref[:12]}: that release predates the gateway runtime "
-             "these session stores now use. Downgrading is unsupported.",
-             *(f"  {h / 'state.db'} has gateway runtime history." for _name, h in ledgered),
+    lines = [f"✗ Refusing to move this install to {target_ref[:12]}: that release predates the historical session ledger "
+             "these session stores contain. Downgrading is unsupported.",
+             *(f"  {h / 'state.db'} has historical runtime-ledger rows." for _name, h in ledgered),
              "  The older release could not delete or prune those sessions.",
-             "  To go back anyway: run `hermes gateway stop`, check out the older release with git, then put back "
+             "  To go back anyway: Close every local Hermes session/task, check out the older release with git, then put back "
              "each store's copy from before the upgrade:"]
     for name, h in ledgered:
         snapshot = _pre_runtime_snapshot(h)

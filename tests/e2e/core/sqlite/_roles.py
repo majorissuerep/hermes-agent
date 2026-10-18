@@ -1,18 +1,8 @@
-"""Child-process roles for the SQLite torture chamber.
+"""Owned child roles for the encrypted SQLCipher contention chamber.
 
-Run as ``python _roles.py <role> <json-args>``. Every role is a real OS process that opens the shared
-``state.db`` through the production ``SessionDB`` (or, for the non-hermes opener, a bare ``sqlite3``
-connection) and reports through append-only files, so a ``kill -9`` loses nothing it already reported:
-
-* ``<name>.journal`` — writers: ``I <tok> <sid> <nrows>`` before an append, ``A <tok>`` once it returned.
-* ``<name>.report`` — JSON lines: ``ready`` / ``stats`` / ``error`` / ``closed`` events.
-
-Tokens are single FTS words (``TK`` + alnum) so the test can look every acknowledged append up by content,
-through ``messages`` and through the FTS indexes.
-
-Journal-mode seam: with ``HERMES_E2E_SQLITE_VERSION_PIN`` set, the production version probe
-``hermes_state.wal.is_sqlite_wal_reset_vulnerable()`` reports that SQLite version instead of the linked one;
-the real range predicate and ``apply_wal_with_fallback`` then decide the journal mode as they would there.
+Native SessionDB writers and keyed direct readers share one real encrypted store.
+Append-only acknowledgement journals survive child termination. Each child must
+consume its parent's sealed vault descriptor before opening state.
 """
 
 from __future__ import annotations
@@ -21,6 +11,7 @@ import json
 import os
 import signal
 import sqlite3
+from hermes_security import sqlite as vault_sqlite
 import sys
 import time
 import traceback
@@ -56,19 +47,6 @@ class Out:
         os.write(self.report_fd, (json.dumps(event) + "\n").encode())
 
 
-def _apply_sqlite_version_pin() -> None:
-    pin = os.environ.get("HERMES_E2E_SQLITE_VERSION_PIN")
-    if not pin:
-        return
-    import hermes_state.wal
-
-    pinned = tuple(int(p) for p in pin.split("."))
-    probe = hermes_state.wal.is_sqlite_wal_reset_vulnerable
-
-    def is_sqlite_wal_reset_vulnerable(version_info=None):
-        return probe(pinned if version_info is None else version_info)
-
-    hermes_state.wal.is_sqlite_wal_reset_vulnerable = is_sqlite_wal_reset_vulnerable
 
 
 def _patient(a: dict, out: Out, op: str, fn, *, deadline: float = 90.0):
@@ -109,7 +87,7 @@ def _stopping(stop_file: Path) -> bool:
 
 
 def role_writer(a: dict, out: Out) -> int:
-    """Long-lived writer (gateway- or TUI-like): appends until told to stop, journaling intent + ack."""
+    """Long-lived writer (headless or TUI-like): appends until told to stop, journaling intent + ack."""
     from hermes_state import SessionDB
 
     db_path, stop_file = Path(a["db"]), Path(a["stop"])
@@ -196,7 +174,7 @@ def role_reader(a: dict, out: Out) -> int:
 
 def role_churn(a: dict, out: Out) -> int:
     """`hermes sessions list` / doctor / cron-guard shape: open, read, close — ``iterations`` times in one
-    process, alternating the production SessionDB with a bare sqlite3 opener (sqlite3 shell, backup tool).
+    process, alternating the production SessionDB with a keyed direct SQLCipher opener (backup/inspection tool).
     The fd count must not grow with the number of cycles."""
     from hermes_state import SessionDB
 
@@ -212,7 +190,7 @@ def role_churn(a: dict, out: Out) -> int:
             db.close()
 
     def _raw_cycle() -> None:
-        conn = sqlite3.connect(str(db_path), timeout=30.0)
+        conn = vault_sqlite.connect(str(db_path), timeout=30.0)
         try:
             conn.execute("SELECT count(*) FROM messages").fetchone()
         finally:
@@ -237,7 +215,7 @@ def role_opener(a: dict, out: Out) -> int:
 
     def _open_count_close() -> int:
         if a.get("raw"):
-            conn = sqlite3.connect(str(db_path), timeout=30.0)
+            conn = vault_sqlite.connect(str(db_path), timeout=30.0)
             try:
                 return conn.execute("SELECT count(*) FROM messages").fetchone()[0]
             finally:
@@ -263,7 +241,7 @@ def role_opener(a: dict, out: Out) -> int:
 
 
 def _raw_count(db_path: Path) -> int:
-    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=30.0)
+    conn = vault_sqlite.connect(f"file:{db_path}?mode=ro", uri=True, timeout=30.0)
     try:
         return conn.execute("SELECT count(*) FROM messages").fetchone()[0]
     finally:
@@ -375,7 +353,9 @@ ROLES = {
 
 def main() -> int:
     role, args = sys.argv[1], json.loads(sys.argv[2])
-    _apply_sqlite_version_pin()
+    from hermes_security.handoff import adopt_inherited_key
+    if not adopt_inherited_key():
+        raise RuntimeError("fixture child did not inherit its encrypted vault authority")
     if role != "cli":  # the CLI keeps its own SIGTERM handling
         signal.signal(signal.SIGTERM, _on_sigterm)
     out = Out(Path(args["workdir"]), args["name"])

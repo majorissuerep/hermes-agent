@@ -45,7 +45,7 @@ def test_canonical_policy_has_no_raw_surface_exemption(platform):
 
 
 def test_destination_snapshot_owns_policy_and_reader_failure_never_breaks_emission(monkeypatch):
-    from gateway import warning_notifications
+    from agent import warning_notifications
     emitter = Emitter()
     emitted = []
     emitter._print_fn = lambda *a, **k: None

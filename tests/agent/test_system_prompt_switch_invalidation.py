@@ -113,7 +113,7 @@ def _turn_agent(db, model: str, provider: str, prose: str = "") -> MagicMock:
     agent._session_db = db
     agent._platform_hint_overrides = None
     agent._surface_switch_note = ""
-    agent._gateway_turn_context_notes = ""
+    agent._turn_context_notes = ""
     agent.enabled_toolsets = agent.disabled_toolsets = None
     agent._build_system_prompt = MagicMock(side_effect=lambda _sm: f"You are Hermes Agent.\n\n{prose}{_timestamp_line(agent)}")
     return agent

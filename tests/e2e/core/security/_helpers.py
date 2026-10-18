@@ -1,7 +1,6 @@
 """Shared harness for the security-boundary E2E suite.
 
-Every scenario runs real Hermes processes (``hermes`` CLI, ``hermes serve``, the gateway,
-``tui_gateway``) with HOME=<tmp>/home and HERMES_HOME=<tmp>/home/.hermes, every credential env var
+Every scenario runs real native Hermes CLI/private ``tui_runtime`` processes with HOME=<tmp>/home and HERMES_HOME=<tmp>/home/.hermes, every credential env var
 stripped, and the model served by ``tests/fakes/fake_llm_provider.FakeLLMServer``. Assertions read
 the boundary's observable outcome: files on disk, state.db rows, logs, and the next wire request.
 
@@ -17,12 +16,13 @@ import pwd
 import secrets
 import signal
 import socket
-import sqlite3
 import subprocess
 import sys
-import time
 from pathlib import Path
 from typing import Any, Callable, Iterable
+
+from tests.e2e.vault_home import connect_state, seal_fixture_home, spawn_unlocked
+from tests.waiting import wait_until
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 
@@ -70,7 +70,7 @@ def hermetic_env(home: Path, extra: dict[str, str] | None = None) -> dict[str, s
         no_proxy="127.0.0.1,localhost",
         # the live-DB guard treats $HOME/.hermes/state.db of a pytest descendant as production;
         # this HOME is the test's own tmp dir (asserted above).
-        HERMES_STATE_DB_GUARD_BYPASS="1", HERMES_ALLOW_NO_VAULT="1",
+        HERMES_STATE_DB_GUARD_BYPASS="1",
         HERMES_ACCEPT_HOOKS="1",
     )
     env.update(extra or {})
@@ -101,6 +101,7 @@ def write_home(hermes_home: Path, base_url: str, *, api_key: str, config: str = 
     )
     lines = {"OPENAI_API_KEY": api_key, **(env or {})}
     (hermes_home / ".env").write_text("".join(f"{k}={v}\n" for k, v in lines.items()), encoding="utf-8")
+    seal_fixture_home(hermes_home)
     return hermes_home
 
 
@@ -111,14 +112,7 @@ def free_port() -> int:
 
 
 def poll(pred: Callable[[], Any], timeout: float, what: str, interval: float = 0.1) -> Any:
-    deadline = time.monotonic() + timeout
-    while True:
-        got = pred()
-        if got:
-            return got
-        if time.monotonic() > deadline:
-            raise AssertionError(f"timed out after {timeout}s waiting for {what}")
-        time.sleep(interval)
+    return wait_until(pred, timeout=timeout, what=what, interval=interval)
 
 
 def kill_group(proc: subprocess.Popen, sig: int = signal.SIGKILL) -> None:
@@ -131,7 +125,7 @@ def kill_group(proc: subprocess.Popen, sig: int = signal.SIGKILL) -> None:
 def run_hermes(argv: list[str], home: Path, *, timeout: float = 120.0, cwd: Path | None = None,
                extra_env: dict[str, str] | None = None, stdin: str | None = None) -> subprocess.CompletedProcess:
     """``python -m hermes_cli.main <argv>`` in its own process group; the group is always reaped."""
-    proc = subprocess.Popen(
+    proc = spawn_unlocked(
         [sys.executable, "-m", "hermes_cli.main", *argv], cwd=str(cwd or home), env=hermetic_env(home, extra_env),
         stdin=subprocess.PIPE if stdin is not None else subprocess.DEVNULL,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True,
@@ -149,25 +143,26 @@ def run_hermes(argv: list[str], home: Path, *, timeout: float = 120.0, cwd: Path
 def run_python(code: str, home: Path, *args: str, timeout: float = 120.0,
                extra_env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
     """A fresh interpreter importing the worktree's Hermes under the hermetic env."""
-    return subprocess.run([sys.executable, "-c", code, *args], cwd=str(home), env=hermetic_env(home, extra_env),
-                          capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL, check=False)
+    from tests.e2e.vault_home import run_unlocked
+
+    preamble = "from hermes_security.handoff import adopt_inherited_key; adopt_inherited_key();\n"
+    return run_unlocked([sys.executable, "-c", preamble + code, *args], cwd=str(home),
+                        env=hermetic_env(home, extra_env), capture_output=True, text=True,
+                        timeout=timeout, stdin=subprocess.DEVNULL)
 
 
 def db_blob(db: Path) -> str:
     """Every text/blob cell of every table of a SQLite file (read-only), for substring scans."""
     if not db.exists():
         return ""
-    con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    con = connect_state(db)
     try:
         parts: list[str] = []
         tables = [r[0] for r in con.execute("select name from sqlite_master where type='table'")]
         for t in tables:
-            try:
-                for row in con.execute(f'select * from "{t}"'):
-                    parts += [c.decode("utf-8", "replace") if isinstance(c, bytes) else str(c)
-                              for c in row if c is not None]
-            except sqlite3.DatabaseError:
-                continue
+            for row in con.execute(f'select * from "{t}"'):
+                parts += [c.decode("utf-8", "replace") if isinstance(c, bytes) else str(c)
+                          for c in row if c is not None]
         return "\n".join(parts)
     finally:
         con.close()

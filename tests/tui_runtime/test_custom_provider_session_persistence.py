@@ -510,43 +510,9 @@ class TestOverridesHaveRoutableProvider:
 # Regression: GH #89497 (room bots hang then report "out of Nous credits").
 
 
-class TestRoomPlumbingRuntimeOverrides:
-    def test_marked_row_returns_no_overrides(self):
-        """A row carrying the room_plumbing marker never restores a stored
-        provider pin — resume falls back to the profile's CURRENT config."""
-        from tui_runtime.server import _stored_session_runtime_overrides
+class TestStoredRuntimeOverrides:
 
-        row = {
-            "model": "openai/gpt-5.6-luna-pro",
-            "billing_provider": 'zai',
-            "model_config": json.dumps(
-                {"model": "openai/gpt-5.6-luna-pro", "provider": 'zai', "room_plumbing": True}
-            ),
-        }
-        assert _stored_session_runtime_overrides(row) == {}
 
-    def test_marked_row_dict_model_config(self):
-        from tui_runtime.server import _stored_session_runtime_overrides
-
-        row = {
-            "model": "openai/gpt-5.6-luna-pro",
-            "model_config": {"model": "openai/gpt-5.6-luna-pro", "provider": 'zai', "room_plumbing": True},
-        }
-        assert _stored_session_runtime_overrides(row) == {}
-
-    def test_legacy_group_title_shape_still_skipped(self):
-        """Rows from older desktop builds (hidden + "Group:" title, no
-        marker) keep the legacy guard: they also rebuild from current config."""
-        from tui_runtime.server import _stored_session_runtime_overrides
-
-        row = {
-            "title": "Group: Ceo, Product Designer, Cfo, COO, CTO, Coding",
-            "hidden": 1,
-            "model": "openai/gpt-5.6-luna-pro",
-            "billing_provider": 'zai',
-            "model_config": json.dumps({"model": "openai/gpt-5.6-luna-pro", "provider": 'zai'}),
-        }
-        assert _stored_session_runtime_overrides(row) == {}
 
     def test_normal_row_still_restores_stored_runtime(self):
         """The intended stored-runtime restore is untouched for normal 1:1
@@ -766,25 +732,6 @@ class TestFollowProfileConfigRuntimeOverrides:
 
 
 
-    def test_legacy_bot_chat_title_backfills_contract(self):
-        """Canonical Bot Chats created BEFORE the marker existed carry no
-        follow_profile_config, but they are still the plugin-owned forever-DM
-        (identified by the exact title "Bot Chat"). They must also rebuild
-        from the profile's CURRENT config — the live-report shape where every
-        pre-existing Bot Chat stayed pinned to a deleted provider."""
-        from tui_runtime.server import _stored_session_runtime_overrides
-
-        for hidden in (0, 1):
-            row = {
-                "title": "Bot Chat",
-                "hidden": hidden,
-                "model": "openai/gpt-5.6-luna-pro",
-                "billing_provider": 'zai',
-                "model_config": json.dumps(
-                    {"model": "openai/gpt-5.6-luna-pro", "provider": 'zai'}
-                ),
-            }
-            assert _stored_session_runtime_overrides(row) == {}
 
     def test_bot_chat_prefix_title_is_not_backfilled(self):
         """Only the EXACT canonical title matches the legacy backfill — a

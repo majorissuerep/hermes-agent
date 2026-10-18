@@ -7,7 +7,7 @@ import threading
 import pytest
 
 
-@pytest.mark.parametrize("surface", ["gateway", "tui", "cli"])
+@pytest.mark.parametrize("surface", ["tui", "cli"])
 def test_explicit_reload_updates_same_name_schema_and_retains_history(surface, monkeypatch):
     import model_tools
     from tools import mcp_tool
@@ -31,13 +31,7 @@ def test_explicit_reload_updates_same_name_schema_and_retains_history(surface, m
     monkeypatch.setattr(mcp_tool_discovery, "discover_mcp_tools", lambda: [name])
     monkeypatch.setattr(mcp_tool, "_servers", {})
 
-    if surface == "gateway":
-        from gateway.run import GatewayRunner
-        runner = GatewayRunner.__new__(GatewayRunner)
-        runner._agent_cache_lock = threading.RLock()
-        runner._agent_cache = {"conversation": (agent, 0)}
-        runner._mcp_reload_refresh_cached_agents(False, None)
-    elif surface == "tui":
+    if surface == "tui":
         import tui_runtime.server as srv
         session = {"agent": agent, "history": history, "history_lock": threading.RLock(),
                    "running": False, "profile_home": None}

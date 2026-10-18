@@ -96,19 +96,6 @@ class TestClassification:
         for name in BRIDGE_TOOL_NAMES:
             assert not is_deferrable_tool_name(name)
 
-    def test_gui_surface_tools_never_defer(self):
-        """Session-gated GUI tools stay direct and stay off the global core list."""
-        from tools.registry import discover_builtin_tools, registry
-        from tools.tool_search import _DIRECT_SURFACE_TOOLSETS, is_deferrable_tool_name
-        from toolsets import _HERMES_CORE_TOOLS
-
-        discover_builtin_tools()
-        surface = [n for n, ts in registry.get_tool_to_toolset_map().items()
-                   if ts in _DIRECT_SURFACE_TOOLSETS]
-        assert surface
-        for name in surface:
-            assert not is_deferrable_tool_name(name), name
-            assert name not in _HERMES_CORE_TOOLS
 
 
     def test_defer_override_restores_legacy_direct_gui(self):

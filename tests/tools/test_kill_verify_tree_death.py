@@ -11,6 +11,7 @@ from contextlib import suppress
 from unittest.mock import MagicMock, patch
 
 import pytest
+import psutil
 
 from tools.process_registry import ProcessRegistry, ProcessSession
 
@@ -43,7 +44,7 @@ def test_kill_with_surviving_root_keeps_session_running():
     try:
         _, _, save = _paused_registry_calls()
         with patch.object(ProcessRegistry, "_host_pid_is_ours", return_value=True), \
-             patch("psutil.Process", side_effect=Exception("gone")):
+             patch("psutil.Process", side_effect=psutil.NoSuchProcess(s.pid)):
             result = reg.kill_process(s.id)
     finally:
         patch.stopall()
@@ -93,7 +94,7 @@ def test_kill_with_dead_tree_still_reports_killed():
     try:
         _, _, _save = _paused_registry_calls()
         with patch.object(ProcessRegistry, "_host_pid_is_ours", return_value=False), \
-             patch("psutil.Process", side_effect=Exception("gone")):
+             patch("psutil.Process", side_effect=psutil.NoSuchProcess(s.pid)):
             result = reg.kill_process(s.id)
     finally:
         patch.stopall()

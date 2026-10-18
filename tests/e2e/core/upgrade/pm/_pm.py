@@ -2,7 +2,7 @@
 
 Built on ``_helpers`` (bwrap sandbox, allowlisted env) and ``_install_helpers`` (local bare origin,
 HEAD's own ``scripts/install.sh``). Every cell starts from a real install and then drives the real
-user entry points (``hermes update``, ``hermes pm ...``, ``hermes doctor``, ``hermes gateway ...``).
+user entry points (``hermes update``, ``hermes pm ...``, ``hermes doctor``, ``hermes chat -q ...``).
 
 What a PM install looks like on disk, and what the cells read back:
 
@@ -156,24 +156,19 @@ def arm_pending_tail(sb: I.Sandbox) -> None:
     pending_marker(sb).write_text("source update tail not finished\n", encoding="utf-8")
 
 
-class Gateway:
-    """``hermes gateway run`` in the sandbox (the user's foreground/systemd ``ExecStart``)."""
+class NativeRuntime:
+    """Private terminal runtime in a bounded disposable sandbox."""
 
     def __init__(self, sb: I.Sandbox, env: dict[str, str], log: Path, argv0: list[str] | None = None):
         self.sb, self.log = sb, log
-        (sb.hermes_home / "gateway_state.json").unlink(missing_ok=True)
         self._out = log.open("w")
         self.proc = subprocess.Popen(
-            H.sandbox_argv([*(argv0 or []), sb.hermes, "gateway", "run"], writable=[sb.root]),
-            env=env, cwd=str(sb.root), stdin=subprocess.DEVNULL, stdout=self._out, stderr=subprocess.STDOUT,
+            H.sandbox_argv([*(argv0 or []), sb.python, "-m", "tui_runtime"], writable=[sb.root]),
+            env=env, cwd=str(sb.root), stdin=subprocess.PIPE, stdout=self._out, stderr=subprocess.STDOUT,
             text=True, start_new_session=True)
 
     def state(self) -> str:
-        try:
-            return json.loads((self.sb.hermes_home / "gateway_state.json").read_text(encoding="utf-8")).get(
-                "gateway_state", "")
-        except (OSError, ValueError):
-            return ""
+        return "running" if '"runtime.ready"' in self.output() else ""
 
     def wait_running(self, timeout: float = 600) -> float:
         t0 = time.monotonic()
@@ -185,11 +180,11 @@ class Gateway:
             time.sleep(0.25)
         rc = self.proc.poll()
         self.stop()
-        raise AssertionError(f"gateway never reported running (rc={rc}, state={self.state()!r})\n"
-                             f"--- gateway output ---\n{self.output()[-5000:]}")
+        raise AssertionError(f"native runtime never reported ready (rc={rc}, state={self.state()!r})\n"
+                             f"--- runtime output ---\n{self.output()[-5000:]}")
 
     def pids(self) -> list[int]:
-        """Host pids of every process in the gateway's sandbox (bwrap and its descendants)."""
+        """Host pids of every process in the private runtime sandbox (bwrap and its descendants)."""
         children: dict[int, list[int]] = {}
         for d in Path("/proc").iterdir():
             if d.name.isdigit():
@@ -211,7 +206,7 @@ class Gateway:
         return self.log.read_text(encoding="utf-8", errors="replace")
 
     def stop(self) -> None:
-        """SIGTERM like ``systemctl stop``; SIGKILL the sandbox if it does not exit."""
+        """Stop the owned runtime sandbox; reap it before returning."""
         if self.proc.poll() is None:
             try:
                 os.killpg(self.proc.pid, signal.SIGTERM)

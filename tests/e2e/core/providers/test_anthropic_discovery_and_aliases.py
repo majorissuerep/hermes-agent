@@ -78,7 +78,9 @@ def _discover(r: Rig, relay: AnthropicMessagesServer | None, *, via: str) -> lis
         extra = {}
     else:
         extra = {"ANTHROPIC_BASE_URL": relay.base_url.removesuffix("/anthropic")}
-    proc = subprocess.run([sys.executable, "-c", _DISCOVERY_PROBE], cwd=r.project, env=r.env(extra),
+    from tests.e2e.vault_home import run_unlocked
+    probe = "from hermes_security.handoff import adopt_inherited_key; adopt_inherited_key();\n" + _DISCOVERY_PROBE
+    proc = run_unlocked([sys.executable, "-c", probe], cwd=r.project, env=r.env(extra),
                           capture_output=True, text=True, timeout=120, stdin=subprocess.DEVNULL, check=False)
     assert proc.returncode == 0, proc.stderr[-2000:]
     line = next(ln for ln in proc.stdout.splitlines() if ln.startswith("IDS="))
@@ -113,7 +115,8 @@ def test_model_discovery_probes_the_configured_anthropic_endpoint(rig, via: str)
 
 def _oauth_rig(rig, script) -> Rig:
     r = rig(script)
-    (r.hermes_home / ".env").write_text(f"ANTHROPIC_TOKEN={OAUTH_TOKEN}\n", encoding="utf-8")
+    from hermes_security import io as state_io
+    state_io.write_text(r.hermes_home / ".env", f"ANTHROPIC_TOKEN={OAUTH_TOKEN}\n", purpose="env")
     return r
 
 
@@ -147,7 +150,8 @@ def test_oauth_wire_names_map_back_to_real_tools(rig) -> None:
     results = _tool_results(mains[1]["body"])
     assert any("WIRE-FILE-CONTENT-93" in res for res in results), results
     memory_md = r.hermes_home / "memories" / "MEMORY.md"
-    assert memory_md.exists() and note in memory_md.read_text(encoding="utf-8"), (
+    from hermes_security import io as state_io
+    assert memory_md.exists() and note in state_io.read_text(memory_md, purpose="memory"), (
         f"aliased context_notes call did not reach the memory tool: {results}")
     assert not r.srv.schema_errors(), r.srv.schema_errors()
 

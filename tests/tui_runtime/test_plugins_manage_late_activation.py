@@ -57,7 +57,7 @@ def test_plugins_manage_install_rescans_fires_on_plugin_loaded_and_exposes_mcp_s
     assert [e["name"] for e in events[-1]] == ["late-mcp"]  # fired from inside the rescan, newcomer only
     servers = [row["name"] for row in result["activation"]["live_now"]["mcp_servers"]]
     assert servers == ["worker"]  # exactly the mcp.json name, as mcp.servers.* know it
-    assert result["gateway_reloaded"] is False and result["restart_required"] is True
+    assert result["restart_required"] is True
     # The invariant that was broken: a later NON-forced discovery (what reload.mcp runs) sees the servers.
     from tools.mcp_tool_config import _portable_mcp_servers
     merged: dict = {}

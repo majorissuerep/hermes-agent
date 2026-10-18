@@ -23,6 +23,9 @@ import hermes_yaml as yaml
 
 from tests.fakes.providers.anthropic_messages import ApiError, AnthropicMessagesServer, Reply, Response, Text, ToolUse
 
+from tests.e2e.vault_home import connect_state, run_unlocked, seal_fixture_home, spawn_unlocked
+from hermes_security import io as state_io
+
 REPO_ROOT = Path(__file__).resolve().parents[4]
 TAG_VAR = "OAUTH_E2E_TAG"
 
@@ -57,7 +60,7 @@ class FakeHome:
             "PYTHONPATH": str(REPO_ROOT), "PYTHONUNBUFFERED": "1", "NO_COLOR": "1", "TERM": "dumb",
             TAG_VAR: self.tag,
             # The child's ~/.hermes/state.db IS the tmp home's db; see parity/_helpers.py.
-            "HERMES_STATE_DB_GUARD_BYPASS": "1", "HERMES_ALLOW_NO_VAULT": "1",
+            "HERMES_STATE_DB_GUARD_BYPASS": "1",
         })
         env.update(extra or {})
         return env
@@ -65,14 +68,20 @@ class FakeHome:
     def write_config(self, cfg: dict[str, Any]) -> None:
         base = {"updates": {"check": False}, "display": {"compact": True}}
         base.update(cfg)
-        (self.hermes_home / "config.yaml").write_text(yaml.safe_dump(base, sort_keys=False), encoding="utf-8")
+        path = self.hermes_home / "config.yaml"
+        from hermes_security.vault import vault_exists
+        if vault_exists(self.hermes_home):
+            state_io.write_text(path, yaml.safe_dump(base, sort_keys=False), purpose="config")
+        else:
+            path.write_text(yaml.safe_dump(base, sort_keys=False), encoding="utf-8")
+            seal_fixture_home(self.hermes_home)
 
     def write_auth(self, store: dict[str, Any]) -> None:
-        self.auth_path.write_text(json.dumps(store, indent=2), encoding="utf-8")
+        state_io.write_json(self.auth_path, store, purpose="auth")
         self.auth_path.chmod(0o600)
 
     def read_auth(self) -> dict[str, Any]:
-        return json.loads(self.auth_path.read_text(encoding="utf-8"))
+        return state_io.read_json(self.auth_path, purpose="auth")
 
 
 def make_home(root: Path) -> FakeHome:
@@ -89,7 +98,7 @@ def hermes_argv(*args: str) -> list[str]:
 
 def run_hermes(fh: FakeHome, args: list[str], *, extra_env: dict[str, str] | None = None,
                timeout: float = 120.0) -> subprocess.CompletedProcess:
-    return subprocess.run(hermes_argv(*args), env=fh.env(extra_env), cwd=str(fh.root), stdin=subprocess.DEVNULL,
+    return run_unlocked(hermes_argv(*args), env=fh.env(extra_env), cwd=str(fh.root), stdin=subprocess.DEVNULL,
                           capture_output=True, text=True, timeout=timeout, check=False)
 
 
@@ -97,7 +106,7 @@ def spawn_hermes(fh: FakeHome, args: list[str], *, extra_env: dict[str, str] | N
                  log: Path) -> subprocess.Popen:
     out = open(log, "w", encoding="utf-8")
     try:
-        return subprocess.Popen(hermes_argv(*args), env=fh.env(extra_env), cwd=str(fh.root),
+        return spawn_unlocked(hermes_argv(*args), env=fh.env(extra_env), cwd=str(fh.root),
                                 stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT, text=True)
     finally:
         out.close()

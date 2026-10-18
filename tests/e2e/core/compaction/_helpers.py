@@ -23,12 +23,13 @@ import base64
 import json
 import random
 import re
-import sqlite3
 import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Iterable
+
+from tests.e2e.vault_home import connect_state, seal_fixture_home
 
 from tests.fakes.fake_llm_provider import MODEL_ID, Error, FakeLLMServer, Hang, Text, ToolCall
 import itertools
@@ -149,6 +150,7 @@ def write_home(hermes_home: Path, base_url: str, extra_config: str) -> None:
         encoding="utf-8",
     )
     (hermes_home / ".env").write_text("OPENAI_API_KEY=sk-fake-e2e\n", encoding="utf-8")
+    seal_fixture_home(hermes_home)
 
 
 # ---------------------------------------------------------------------------------------------------
@@ -323,9 +325,8 @@ def norm_list(msgs: Iterable[dict[str, Any]]) -> list[tuple]:
 
 
 def db_rows(db_path: Path, session_id: str) -> list[dict[str, Any]]:
-    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=30)
+    conn = connect_state(db_path)
     try:
-        conn.row_factory = sqlite3.Row
         rows = conn.execute(
             "SELECT id, role, content, tool_call_id, tool_calls, active, compacted FROM messages "
             "WHERE session_id = ? ORDER BY id", (session_id,)).fetchall()

@@ -35,7 +35,7 @@ class TestParseSince:
 
 class TestParseLineTimestamp:
     def test_standard_format(self):
-        ts = _parse_line_timestamp("2026-04-11 10:23:45 INFO gateway.run: msg")
+        ts = _parse_line_timestamp("2026-04-11 10:23:45 INFO agent.turn_loop: msg")
         assert ts == datetime(2026, 4, 11, 10, 23, 45)
 
     def test_iso_t_separated_update_and_handoff_stamps(self):
@@ -49,7 +49,7 @@ class TestParseLineTimestamp:
 
 class TestExtractLevel:
     def test_info(self):
-        assert _extract_level("2026-01-01 00:00:00 INFO gateway.run: msg") == "INFO"
+        assert _extract_level("2026-01-01 00:00:00 INFO agent.turn_loop: msg") == "INFO"
 
 # ---------------------------------------------------------------------------
 # Logger name extraction (new for component filtering)
@@ -57,26 +57,22 @@ class TestExtractLevel:
 
 class TestExtractLoggerName:
     def test_standard_line(self):
-        line = "2026-04-11 10:23:45 INFO gateway.run: Starting gateway"
-        assert _extract_logger_name(line) == "gateway.run"
+        line = "2026-04-11 10:23:45 INFO agent.turn_loop: Starting gateway"
+        assert _extract_logger_name(line) == "agent.turn_loop"
 
     def test_no_match(self):
         assert _extract_logger_name("random text") is None
 
 class TestLineMatchesComponent:
 
-    def test_gateway_nested(self):
-        # Migrated platform adapters log under plugins.platforms.* (#41112) and
-        # must still resolve to the gateway component. Use the real expanded
-        # gateway prefixes (COMPONENT_PREFIXES["gateway"]) the CLI passes, not a
-        # bare ("gateway",), since the logger name no longer literally starts
-        # with "gateway".
+    def test_nested_agent_component(self):
+        # Nested agent modules use the native component prefix set.
         from hermes_logging import COMPONENT_PREFIXES
-        line = "2026-04-11 10:23:45 INFO plugins.platforms.telegram.adapter: msg"
-        assert _line_matches_component(line, COMPONENT_PREFIXES["gateway"])
+        line = "2026-04-11 10:23:45 INFO agent.compression: msg"
+        assert _line_matches_component(line, COMPONENT_PREFIXES["agent"])
 
     def test_unparseable_line(self):
-        assert not _line_matches_component("random text", ("gateway",))
+        assert not _line_matches_component("random text", ("agent",))
 
 # ---------------------------------------------------------------------------
 # Combined filter
@@ -92,12 +88,12 @@ class TestMatchesFilters:
 
     def test_combined_filters(self):
         """All filters must pass for a line to match."""
-        line = "2026-04-11 10:00:00 WARNING [sess_1] gateway.run: connection lost"
+        line = "2026-04-11 10:00:00 WARNING [sess_1] agent.turn_loop: connection lost"
         assert _matches_filters(
             line,
             min_level="WARNING",
             session_filter="sess_1",
-            component_prefixes=("gateway",),
+            component_prefixes=("agent",),
         )
         # Fails component filter
         assert not _matches_filters(
@@ -139,9 +135,9 @@ class TestReadTail:
         log_file = tmp_path / "errors.log"
         log_file.write_text("".join([
             "orphan tail of a record that started before the window\n",
-            f"{old} ERROR gateway.run: old failure\n", *frames, "ValueError: old\n",
+            f"{old} ERROR agent.turn_loop: old failure\n", *frames, "ValueError: old\n",
             f"{new} INFO tools.x: multi-line info\n", "  info continuation\n",
-            f"{new} ERROR gateway.run: new failure\n", *frames, "ValueError: new\n",
+            f"{new} ERROR agent.turn_loop: new failure\n", *frames, "ValueError: new\n",
         ]))
         since = datetime.now() - timedelta(hours=1)
         from hermes_logging import COMPONENT_PREFIXES
@@ -151,11 +147,11 @@ class TestReadTail:
 
         assert read(since=since) == "".join([
             f"{new} INFO tools.x: multi-line info\n", "  info continuation\n",
-            f"{new} ERROR gateway.run: new failure\n", *frames, "ValueError: new\n",
+            f"{new} ERROR agent.turn_loop: new failure\n", *frames, "ValueError: new\n",
         ])
-        new_failure = "".join([f"{new} ERROR gateway.run: new failure\n", *frames, "ValueError: new\n"])
+        new_failure = "".join([f"{new} ERROR agent.turn_loop: new failure\n", *frames, "ValueError: new\n"])
         assert read(since=since, min_level="WARNING") == new_failure
-        assert read(since=since, component_prefixes=COMPONENT_PREFIXES["gateway"]) == new_failure
+        assert read(since=since, component_prefixes=COMPONENT_PREFIXES["agent"]) == new_failure
         # No time/level filter: the orphan lines before the first stamp stay visible.
         assert read(session_filter="orphan") == "orphan tail of a record that started before the window\n"
 
@@ -193,30 +189,13 @@ def _update_log_line() -> str:
     return f"\n=== hermes update started {dt.datetime.now().isoformat(timespec='seconds')} ===\n".lstrip()
 
 
-def _handoff_log_line() -> str:
-    """A desktop-update-handoff.log line from scripts/desktop-update/posix.sh's log()."""
-    import subprocess
-
-    line = subprocess.run(
-        ["bash", "-c", 'log() { echo "$(date +%Y-%m-%dT%H:%M:%S%z) $1"; }; log "update| → Checking if desktop app needs rebuilding..."'],
-        capture_output=True, text=True, check=True,
-    ).stdout
-    return line.rstrip("\n")
-
-
 def _log_file_samples() -> dict:
     """One line per LOG_FILES entry, produced by that file's real writer where Python can run it."""
     return {
         "agent": _python_log_line("run_agent"),
         "errors": _python_log_line("run_agent"),
-        "gateway": _python_log_line("gateway.run"),
-        "gui": _python_log_line("hermes_cli.web_server"),
-        # Written by TypeScript; apps/desktop/electron/desktop-log-line.test.ts pins the same shape.
-        "desktop": "2026-09-28 13:18:46,062 [hermes] [boot] ready",
         "mcp": _mcp_output_line(),
-        # update.log mirrors raw update output; handoff lines carry the shim's ISO-8601 stamp.
         "update": _update_log_line(),
-        "handoff": _handoff_log_line(),
     }
 
 
@@ -226,7 +205,7 @@ def test_every_log_file_writes_a_stamp_hermes_logs_since_can_read():
     for name, line in samples.items():
         assert _parse_line_timestamp(line) is not None, (name, line)
     # gateway.error.log (launchd stderr, not in LOG_FILES) uses the shared stamper.
-    from hermes_cli.stderr_timestamp import stamp_line
+    from hermes_platform.log_lines import stamp_line
     assert _parse_line_timestamp(stamp_line("raw gateway stderr")) is not None
 
 
@@ -244,7 +223,7 @@ def test_update_logs_are_read_from_the_root_home_under_a_profile(tmp_path, monke
     monkeypatch.setenv("HERMES_HOME", str(profile))
 
     assert log_file_path("update") == root / "logs" / "update.log"
-    assert log_file_path("handoff") == root / "logs" / "desktop-update-handoff.log"
+    assert log_file_path("handoff") is None
     assert log_file_path("agent") == profile / "logs" / "agent.log"
     tail_log("update", num_lines=5)
     assert "✓ Update complete!" in capsys.readouterr().out

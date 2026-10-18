@@ -234,19 +234,6 @@ def test_a_replayed_file_without_a_link_passes_through():
     assert entry["response"] == replay and storage.requests == []
 
 
-def test_strict_mode_refuses_a_fresh_file_but_resends_a_downloaded_one(tmp_path, monkeypatch):
-    monkeypatch.setenv("HERMES_MEDIA_DELIVERY_STRICT", "1")
-    monkeypatch.setenv("HERMES_MEDIA_TRUST_RECENT_FILES", "0")
-    output = {"name": "invoice.pdf", "mimetype": "application/pdf", "url": DOWNLOAD_URL}
-    downloaded = _execute(Gateway(data=output), Storage(content=b"%PDF received"), {"id": "1"})["response"]["path"]
-
-    refused = _execute(Gateway(), Storage(), {"attachment": str(_pdf(tmp_path / "fresh.pdf"))})
-    gateway, storage = Gateway(), Storage()
-    resent = _execute(gateway, storage, {"attachment": downloaded})
-
-    assert refused["error"]["code"] == "FILE_NOT_ALLOWED"
-    assert resent["response"] == {"sent": True}
-    assert [put["data"] for put in storage.requests] == [b"%PDF received"]
 
 
 def test_a_search_hit_shows_paths_so_execute_needs_no_schema_lookup(tmp_path):
@@ -330,3 +317,19 @@ def test_a_storage_descriptor_from_the_model_is_refused_with_a_hint():
     entry = _execute(Gateway(), Storage(), {"attachment": {"name": "a", "mimetype": "b", "s3key": "x"}})
 
     assert entry["error"]["code"] == "FILE_NOT_ALLOWED" and "path" in entry["error"]["hint"]
+
+
+@pytest.mark.platforms("posix")
+def test_docker_upload_never_falls_back_to_unmounted_host_or_escaped_symlink(tmp_path, monkeypatch):
+    outside = _pdf(tmp_path / "private" / "outside.pdf")
+    mounted = tmp_path / "mounted"
+    mounted.mkdir()
+    (mounted / "escaped.pdf").symlink_to(outside)
+    monkeypatch.setenv("TERMINAL_ENV", "docker")
+    monkeypatch.setenv("TERMINAL_DOCKER_VOLUMES", json.dumps([f"{mounted}:/data"]))
+    for path in (str(outside), "/data/escaped.pdf"):
+        gateway, storage = Gateway(), Storage()
+        result = _execute(gateway, storage, {"attachment": path})
+        assert result["error"]["code"] == "FILE_NOT_ALLOWED"
+        assert all(route == "schemas" for route in gateway.routes())
+        assert storage.requests == []

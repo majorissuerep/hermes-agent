@@ -69,10 +69,10 @@ def test_unreadable_profiles_dir_fails_closed_and_says_so(two_profile_host, monk
     """Silently returning False left the guard off for the process lifetime with zero log lines."""
     from hermes_cli import profiles as profiles_mod
 
-    def _boom(multiplex):
+    def _boom(**kwargs):
         raise PermissionError("profiles/ is unreadable")
 
-    monkeypatch.setattr(profiles_mod, "profiles_to_serve", _boom)
+    monkeypatch.setattr(profiles_mod, "list_profiles", _boom)
 
     assert launch_profile_policy.activate_multi_profile_hosting_eagerly() is True
     assert secret_scope.is_multiplex_active()

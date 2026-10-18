@@ -10,7 +10,7 @@ from contextlib import closing
 
 import pytest
 
-import hermes_state.runtime as rt
+from tests.hermes_state.legacy_rows import seed_admission
 from hermes_cli import update_downgrade_guard as guard
 from hermes_state import SessionDB
 
@@ -41,10 +41,8 @@ def repo(tmp_path):
 def _ledgered_store(home):
     home.mkdir(parents=True, exist_ok=True)
     with closing(SessionDB(home / "state.db")) as db:
-        epoch = rt.begin_runtime_epoch(db, instance_id="owner")
         db.create_session("s", source="cli")
-        rt.admit_session_input(db, epoch=epoch, principal_id="p", session_id="s", request_id="r",
-                               payload={"text": "x"})
+        seed_admission(db, "s", payload={"text": "x"})
 
 
 def _pre_cutover_snapshot(home, snap_id):
@@ -79,7 +77,7 @@ def test_a_pre_runtime_target_is_refused_before_the_move_with_the_snapshot_that_
     out = capsys.readouterr().out
     assert "Downgrading is unsupported" in out and str(home / "state.db") in out
     assert "/snapshot restore 20261001-000000-pre-update" in out and "20261008" not in out
-    assert "hermes gateway stop" in out and "No update was applied" in out
+    assert "Close every local Hermes session" in out and "No update was applied" in out
 
 
 def test_forward_updates_and_stores_without_ledger_rows_are_never_refused(repo, tmp_path, monkeypatch):

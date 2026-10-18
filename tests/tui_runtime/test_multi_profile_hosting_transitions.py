@@ -43,23 +43,6 @@ def two_homes(tmp_path, monkeypatch):
     return root, b
 
 
-def test_send_keeps_external_source_value_over_raw_dotenv(two_homes, monkeypatch):
-    """B's ``.env`` and B's secret manager both define SHARED_TOKEN; the installed scope (manager
-    wins) survives ``_load_hermes_env`` for the routed ``send``."""
-    from hermes_cli import env_loader
-    from hermes_cli.send_cmd import _load_hermes_env
-
-    _root, b = two_homes
-    # B's secret manager already hydrated for this process (a hydrated home is not re-pulled).
-    monkeypatch.setattr(env_loader, "_SECRET_SOURCE_VALUES_BY_HOME",
-                        {str(b.resolve()): {"SHARED_TOKEN": "b-manager-fresh"}})
-    monkeypatch.setattr(env_loader, "_APPLIED_HOMES", {str(b.resolve())})
-    with server._session_profile_runtime_scope({"profile_home": str(b)}):
-        from agent.secret_scope import current_secret_scope, get_secret
-        assert get_secret("SHARED_TOKEN") == "b-manager-fresh"
-        _load_hermes_env()
-        assert get_secret("SHARED_TOKEN") == "b-manager-fresh"
-        assert current_secret_scope()["B_ONLY_TOKEN"] == B_VAL
 
 
 def test_launch_body_survives_first_secondary_activation(two_homes):
@@ -89,31 +72,6 @@ def test_launch_body_survives_first_secondary_activation(two_homes):
     assert seen == {"before": ENV_VAL, "multiplex_now": True, "after": ENV_VAL, "b_leak": None}
 
 
-def test_launch_body_survives_first_secondary_activation_on_the_dashboard(two_homes, monkeypatch):
-    pytest.importorskip("fastapi")
-    from agent.secret_scope import get_secret
-    from hermes_cli import web_server_profiles as wsp
-
-    _root, b = two_homes
-    monkeypatch.setattr(wsp, "_resolve_profile_dir", lambda name: b)
-    entered, activated = threading.Event(), threading.Event()
-    seen: dict = {}
-
-    def launch_request():
-        with wsp._config_profile_scope(None):
-            seen["before"] = get_secret("INJECTED_TOKEN")
-            entered.set()
-            assert activated.wait(10)
-            seen["after"] = get_secret("INJECTED_TOKEN")
-
-    t = threading.Thread(target=launch_request)
-    t.start()
-    assert entered.wait(10)
-    with wsp._config_profile_scope("b") as scoped:
-        assert scoped == b and get_secret("B_ONLY_TOKEN") == B_VAL
-    activated.set()
-    t.join(10)
-    assert seen == {"before": ENV_VAL, "after": ENV_VAL}
 
 
 def test_release_resets_every_scope_when_one_reset_fails(two_homes, monkeypatch):

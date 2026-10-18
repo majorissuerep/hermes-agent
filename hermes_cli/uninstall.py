@@ -477,6 +477,8 @@ def _uninstall_profile(profile) -> None:
 def run_data_uninstall(args):
     """Erase this home's data, preserving installed runtimes and sibling profiles."""
     from hermes_cli.data_cleanup import plan_data_removal, remove_data
+    # Load coordination dependencies before snapshotting targets: config imports can initialize home files.
+    from hermes_cli.data_cleanup_holders import quiescent_home
 
     home = get_hermes_home()
     try:
@@ -500,8 +502,6 @@ def run_data_uninstall(args):
         return
     if not bool(getattr(args, "yes", False)) and not _confirm_yes("to remove this home's data"):
         return
-    from hermes_cli.data_cleanup_holders import quiescent_home
-
     try:
         with quiescent_home(plan.home):
             removed, failed = remove_data(plan)

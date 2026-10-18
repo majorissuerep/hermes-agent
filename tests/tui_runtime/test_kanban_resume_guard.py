@@ -42,7 +42,6 @@ def server():
         mod._close_session_by_id(sid, end_reason="test_cleanup")
     from tui_runtime import server_requests
     server_requests.reset_for_tests()
-    mod._live_transports.clear()
 
 
 class _KanbanDB:

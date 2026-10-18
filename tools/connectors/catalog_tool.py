@@ -1,4 +1,4 @@
-"""``manage_catalog``: a desktop chat's catalog search and install-through-the-card.
+"""``manage_catalog``: a local TUI's opt-in catalog search and approval card.
 
 ``search`` reads the plugin catalog (the Plugins tab's resolver) and the skills hub and says what is
 already installed in this chat's profile. ``install`` opens the same connection operation
@@ -21,7 +21,7 @@ _ITEM_KEYS = frozenset({"kind", "id"})
 SEARCH_LIMIT = 10
 
 NOT_HERE = (
-    "manage_catalog is available only in the Hermes desktop app, where the approval card can be drawn. "
+    "manage_catalog requires the local Ink TUI approval card. "
     "Tell the user to install from a terminal instead: `hermes plugins install <id>` for a plugin, "
     "`hermes skills install <id>` for a skill."
 )
@@ -108,7 +108,7 @@ def manage_catalog(
     card_surface: bool = False,
     installer: Any = None,
 ) -> str:
-    """``card_surface``: the session is a desktop chat, the one surface that draws catalog rows."""
+    """``card_surface`` means the native TUI session can render and answer catalog rows."""
     error = _check_args(args)
     if error:
         return tool_error(error)

@@ -23,7 +23,7 @@ def gateway_session(monkeypatch):
     mod._session_approved.clear()
     for k in ("HERMES_CRON_SESSION", "HERMES_YOLO_MODE", "HERMES_INTERACTIVE"):
         monkeypatch.delenv(k, raising=False)
-    monkeypatch.setenv("HERMES_GATEWAY_SESSION", "1")
+    monkeypatch.setenv("HERMES_SESSION_PLATFORM", "tui")
     monkeypatch.setenv("HERMES_SESSION_KEY", SESSION_KEY)
     # ``--yolo`` is frozen at import from HERMES_YOLO_MODE; a host shell running yolo must not
     # auto-approve the gate under test.

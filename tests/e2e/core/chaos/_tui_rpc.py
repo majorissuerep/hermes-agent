@@ -1,4 +1,4 @@
-"""Stdio JSON-RPC driver for a REAL ``python -m tui_gateway.entry`` subprocess.
+"""Stdio JSON-RPC driver for a REAL ``python -m tui_runtime.entry`` subprocess.
 
 This is the process the Ink TUI and Desktop talk to: newline-delimited JSON-RPC 2.0 on
 stdin/stdout, responses carry the request ``id``, server-pushed events are
@@ -18,19 +18,20 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
-from tests.e2e.core.chaos._helpers import REPO_ROOT, python_exe
+from tests.e2e.core.chaos._helpers import python_exe
+from tests.e2e.vault_home import spawn_unlocked
 
 
 class RpcError(AssertionError):
     pass
 
 
-class TuiGatewayProcess:
+class TuiRuntimeProcess:
     def __init__(self, env: dict[str, str], cwd: Path, stderr_path: Path) -> None:
         self._stderr_fh = open(stderr_path, "wb")
         self.stderr_path = stderr_path
-        self.proc = subprocess.Popen(
-            [python_exe(), "-X", "faulthandler", "-m", "tui_gateway.entry"],
+        self.proc = spawn_unlocked(
+            [python_exe(), "-X", "faulthandler", "-m", "tui_runtime"],
             cwd=str(cwd),
             env=env,
             stdin=subprocess.PIPE,
@@ -173,7 +174,7 @@ class Heartbeat:
     """Issue cheap existing RPCs (round-robin) every ``interval`` s on their own thread and
     record each round-trip latency — the dispatcher must keep answering while a turn is wedged."""
 
-    def __init__(self, gw: TuiGatewayProcess, calls: list[tuple[str, dict[str, Any]]], *,
+    def __init__(self, gw: TuiRuntimeProcess, calls: list[tuple[str, dict[str, Any]]], *,
                  interval: float = 0.15, per_call_timeout: float = 30.0) -> None:
         self.gw, self.calls = gw, calls
         self.interval, self.per_call_timeout = interval, per_call_timeout
@@ -231,7 +232,6 @@ def env_for_gateway(base_env: dict[str, str], work: Path) -> dict[str, str]:
     # The child's HOME *is* the tmp root, so the live-DB guard (pytest ancestry) would
     # take our tmp state.db for "production"; the documented child opt-out is safe here.
     env["HERMES_STATE_DB_GUARD_BYPASS"] = "1"
-    env["HERMES_ALLOW_NO_VAULT"] = "1"
     env["PWD"] = str(work)
     tmp = work.parent / "tmp"
     tmp.mkdir(exist_ok=True)

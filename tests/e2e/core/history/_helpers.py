@@ -1,7 +1,7 @@
 """Transcript-ledger harness for the conversation-history (C3) and prompt-cache (C17) suites.
 
 Everything real except the model: a real ``AIAgent`` + ``SessionDB`` on disk in-process, the
-real ``tui_gateway`` stdio JSON-RPC server and the real ``hermes chat -q`` oneshot CLI as
+real ``tui_runtime`` stdio JSON-RPC server and the real ``hermes chat -q`` oneshot CLI as
 subprocesses, all pointed at one recording ``FakeLLMServer``. The invariants below read the
 three durable/observable projections of a conversation and cross-check them:
 
@@ -17,7 +17,6 @@ import hashlib
 import json
 import os
 import queue
-import re
 import sqlite3
 import subprocess
 import sys
@@ -25,6 +24,8 @@ import threading
 import time
 from pathlib import Path
 from typing import Any, Iterable
+
+from tests.e2e.vault_home import connect_state, spawn_unlocked
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 
@@ -99,9 +100,7 @@ def first_divergence(a: str, b: str) -> str:
 
 
 def db_connect(hermes_home: Path) -> sqlite3.Connection:
-    con = sqlite3.connect(f"file:{hermes_home / 'state.db'}?mode=ro", uri=True, timeout=30)
-    con.row_factory = sqlite3.Row
-    return con
+    return connect_state(hermes_home / 'state.db')
 
 
 def views(hermes_home: Path, sid: str) -> tuple[list[dict], list[dict]]:
@@ -327,7 +326,7 @@ def child_env(home: Path, hermes_home: Path, workdir: Path) -> dict[str, str]:
         HERMES_TEST_ISOLATION=str(hermes_home),
         # The child's state.db IS this test's sandbox db; the live-DB guard would refuse it
         # because a pytest ancestor is present.
-        HERMES_STATE_DB_GUARD_BYPASS="1", HERMES_ALLOW_NO_VAULT="1",
+        HERMES_STATE_DB_GUARD_BYPASS="1",
         PYTHONPATH=str(REPO_ROOT), PYTHONUNBUFFERED="1", NO_COLOR="1", TMPDIR=str(home),
         TZ="UTC", LANG="C.UTF-8", PYTHONHASHSEED="0",
     )
@@ -354,16 +353,13 @@ class Spawned:
         return leaked
 
 
-_SID_RE = re.compile(r"^session_id:\s*(\S+)\s*$", re.MULTILINE)
-
-
 def run_oneshot(env: dict[str, str], cwd: Path, prompt: str, spawned: Spawned, *,
                 resume: str | None = None, timeout: float = 180.0) -> tuple[str, str]:
     """``hermes chat -q PROMPT -Q [--resume SID]`` in a fresh process -> (stdout, durable sid)."""
     cmd = [sys.executable, "-m", "hermes_cli.main", "chat", "-q", prompt, "-Q"]
     if resume:
         cmd += ["--resume", resume]
-    p = spawned.add(subprocess.Popen(cmd, cwd=str(cwd), env={**env, "PWD": str(cwd)}, stdin=subprocess.DEVNULL,
+    p = spawned.add(spawn_unlocked(cmd, cwd=str(cwd), env={**env, "PWD": str(cwd)}, stdin=subprocess.DEVNULL,
                                      stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8"))
     try:
         out, err = p.communicate(timeout=timeout)
@@ -372,17 +368,18 @@ def run_oneshot(env: dict[str, str], cwd: Path, prompt: str, spawned: Spawned, *
         out, err = p.communicate(timeout=10)
         raise AssertionError(f"oneshot did not finish in {timeout}s; stderr tail: {err[-2000:]}")
     assert p.returncode == 0, f"oneshot rc={p.returncode}; stderr tail: {err[-3000:]}"
-    sids = _SID_RE.findall(err)
-    assert sids, f"oneshot printed no session_id line; stderr tail: {err[-2000:]}"
-    return out, sids[-1]
+    with db_connect(Path(env["HERMES_HOME"])) as conn:
+        row = conn.execute("SELECT id FROM sessions ORDER BY started_at DESC, rowid DESC LIMIT 1").fetchone()
+    assert row, "successful headless turn must persist its session"
+    return out, row[0]
 
 
-class GatewayError(RuntimeError):
+class RuntimeRpcError(RuntimeError):
     pass
 
 
-class TuiGateway:
-    """The real ``python -m tui_gateway.entry`` stdio JSON-RPC server (what the TUI spawns)."""
+class TuiRuntimeProcess:
+    """The real ``python -m tui_runtime.entry`` stdio JSON-RPC server (what the TUI spawns)."""
 
     def __init__(self, env: dict[str, str], cwd: Path, spawned: Spawned, *, ready_timeout: float = 120.0):
         self.env, self.cwd, self.spawned, self.ready_timeout = env, str(cwd), spawned, ready_timeout
@@ -395,20 +392,14 @@ class TuiGateway:
         self._wlock = threading.Lock()
         self.stored: dict[str, str] = {}
 
-    def __enter__(self) -> TuiGateway:
-        # A ``hermes chat -q`` hop leaves the always-on gateway owning this home, and the standalone
-        # stdio entry refuses a home a gateway owns (it would be a second state.db writer). Stop
-        # the owner first so each "gw" hop is still a fresh process on the same durable store.
-        subprocess.run([sys.executable, "-m", "hermes_cli.main", "gateway", "stop"], cwd=self.cwd,
-                       env={**self.env, "PWD": self.cwd}, stdin=subprocess.DEVNULL,
-                       capture_output=True, text=True, encoding="utf-8", timeout=120, check=False)
-        self.proc = self.spawned.add(subprocess.Popen(
-            [sys.executable, "-m", "tui_gateway.entry"], cwd=self.cwd, env={**self.env, "PWD": self.cwd},
+    def __enter__(self) -> TuiRuntimeProcess:
+        self.proc = self.spawned.add(spawn_unlocked(
+            [sys.executable, "-m", "tui_runtime"], cwd=self.cwd, env={**self.env, "PWD": self.cwd},
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             text=True, encoding="utf-8", bufsize=1))
         threading.Thread(target=self._read_stdout, daemon=True).start()
         threading.Thread(target=self._read_stderr, daemon=True).start()
-        self.wait_event("gateway.ready", timeout=self.ready_timeout)
+        self.wait_event("runtime.ready", timeout=self.ready_timeout)
         return self
 
     def __exit__(self, *_exc: object) -> None:
@@ -472,7 +463,7 @@ class TuiGateway:
         finally:
             self._pending.pop(rid, None)
         if "error" in frame:
-            raise GatewayError(f"{method}: {frame['error']}")
+            raise RuntimeRpcError(f"{method}: {frame['error']}")
         return frame.get("result")
 
     def mark(self) -> int:
@@ -511,7 +502,7 @@ class TuiGateway:
         while True:
             try:
                 return self.call(method, params, timeout=timeout)
-            except GatewayError as exc:
+            except RuntimeRpcError as exc:
                 if "4009" not in str(exc) or time.monotonic() > deadline:
                     raise
             time.sleep(0.2)

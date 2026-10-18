@@ -338,9 +338,15 @@ def _run_owned_oneshot(
         # Control-flow exceptions (Ctrl-C / sys.exit inside the agent) re-raise to the parent.
         if isinstance(failure, (KeyboardInterrupt, SystemExit)):
             _write_usage_file(usage_file, result, failure=repr(failure))
+            if emitter:
+                code = 130 if isinstance(failure, KeyboardInterrupt) else failure.code
+                code = code if isinstance(code, int) else 1
+                return emitter.emit_result({"interrupted": isinstance(failure, KeyboardInterrupt)}, exit_code=code)
             raise failure
         _write_usage_file(usage_file, result, failure=str(failure))
         real_stderr.write(f"hermes -z: agent failed: {failure}\n")
+        from hermes_constants import emit_partial_update_hint
+        emit_partial_update_hint(failure, file=real_stderr)
         real_stderr.flush()
         if emitter:
             emitter.emit_result({"failed": True, "error": str(failure)}, exit_code=1)

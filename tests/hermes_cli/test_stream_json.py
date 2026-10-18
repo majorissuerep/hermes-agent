@@ -43,53 +43,33 @@ def test_emitter_event_stream_is_valid_jsonl(capsys):
 
 
 def _run_stream_json_chat(monkeypatch, capsys, run_turn, credentials_ok=True):
-    """parser → cmd_chat → gateway transport with a deterministic fake authority peer.
+    """Real native oneshot output boundary with deterministic agent callbacks."""
+    from hermes_cli import oneshot
 
-    ``run_turn(peer)`` plays the authority: it queues the execution events a turn would publish and
-    returns the terminal ``message.complete`` payload (or raises ``KeyboardInterrupt`` for Ctrl-C).
-    """
-    import asyncio
-    from contextlib import asynccontextmanager
+    def run_agent(*args, launch_options, **kwargs):
+        emitter = launch_options["emitter"]
+        if not credentials_ok:
+            raise ValueError("missing credentials")
+        emitter.bind_session("session-123")
 
-    import hermes_cli.main as cli_entry
-    from hermes_cli import gateway_chat, gateway_chat_startup
-    from hermes_cli._parser import build_top_level_parser
+        class Peer:
+            def emit(self, kind, payload):
+                if kind == "message.delta":
+                    emitter.on_text_delta(payload["text"])
+                elif kind == "tool.start":
+                    emitter.on_tool_progress("tool.started", payload["tool_name"],
+                                             args=payload["args"], tool_call_id=payload["tool_call_id"])
+                elif kind == "tool.complete":
+                    emitter.on_tool_progress("tool.completed", payload["tool_name"],
+                                             preview=payload["result"], tool_call_id=payload["tool_call_id"])
 
-    class Peer:
-        def __init__(self):
-            self.events = asyncio.Queue()
+        result = run_turn(Peer())
+        return result["text"], {"final_response": result["text"], "completed": True,
+                                "session_id": "session-123"}
 
-        def emit(self, kind, payload, admission="adm-1"):
-            self.events.put_nowait({"method": "event", "params": {
-                "type": kind, "session_id": "session-123", "admission_id": admission, "payload": payload}})
-
-        async def rpc(self, method, **params):
-            if method == "runtime.describe":
-                return {"session_create": {"sources": ["cli"], "parameters": ["cwd", "model", "request_id", "source"]}}
-            if method == "session.create":
-                return {"stored_session_id": "session-123", "info": {"model": "test-model"}}
-            if method == "prompt.receipt":  # the settled result the exit code is judged from
-                return {"status": "terminal", "result": {"completed": True, "final_response": "hello"}}
-            assert method == "prompt.submit"
-            self.emit("message.complete", {**run_turn(self), "admission_id": "adm-1"})
-            return {"admission_id": "adm-1"}
-
-    @asynccontextmanager
-    async def connected():
-        yield Peer()
-
-    monkeypatch.setattr(gateway_chat, "connect_gateway", connected)
-    monkeypatch.setattr(gateway_chat_startup, "ensure_launch_provider", lambda _args: credentials_ok)
-    monkeypatch.setattr(cli_entry, "_resolve_use_tui", lambda _args: pytest.fail("TUI resolution consulted"))
-    monkeypatch.setattr(cli_entry, "_confirm_startup_expensive_model_override", lambda _a: None)
-    monkeypatch.setattr(cli_entry, "_warn_retired_xai_models", lambda: None)
-    monkeypatch.setattr("hermes_cli.quiet_single_query.continue_quiet_notify_completions", lambda *_a, **_k: None)
-
-    parser, _, _ = build_top_level_parser()
-    args = parser.parse_args(["chat", "-q", "hello", "--format", "stream-json"])
-    with pytest.raises(SystemExit) as exc_info:
-        cli_entry.cmd_chat(args)
-    return exc_info.value.code, _events(capsys)
+    monkeypatch.setattr(oneshot, "_run_agent", run_agent)
+    code = oneshot.run_oneshot("hello", model="test-model", launch_options={"output_format": "stream-json"})
+    return code, _events(capsys)
 
 
 def _ok_turn(peer):

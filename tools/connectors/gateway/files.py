@@ -228,7 +228,34 @@ def _backend_path(raw: str, task_id: Optional[str]) -> str:
             "FILE_NOT_ALLOWED", f"Files in the {backend} terminal backend are not on this machine, "
             "so they cannot be sent as a connector file input.",
             hint="Use a file on this machine, or switch to the local or Docker terminal backend.")
-    return str(_resolve_path_for_task(raw, task))
+    path = str(_resolve_path_for_task(raw, task))
+    return _docker_host_path(path) if backend == "docker" else path
+
+
+def _docker_host_path(path: str) -> str:
+    """Read only the host subtree explicitly bound into the selected Docker backend."""
+    from pathlib import PurePosixPath
+    from tools.credential_files import get_cache_directory_mounts
+    from tools.environments.docker import _split_volume_spec
+    from tools.terminal_tool import _get_env_config
+
+    mounts = {PurePosixPath(mount["container_path"]): Path(mount["host_path"]).resolve()
+              for mount in get_cache_directory_mounts()}
+    for spec in _get_env_config().get("docker_volumes", []):
+        if split := _split_volume_spec(spec):
+            host, target = split
+            mounts[PurePosixPath(target)] = Path(host).expanduser().resolve()
+    for target in sorted(mounts, key=lambda item: len(item.parts), reverse=True):
+        try:
+            relative = PurePosixPath(path).relative_to(target)
+        except ValueError:
+            continue
+        root = mounts[target]
+        candidate = root.joinpath(*relative.parts).resolve()
+        if candidate.is_relative_to(root):
+            return str(candidate)
+        raise FileInputError("FILE_NOT_ALLOWED", "The Docker file escapes its configured host mount.")
+    raise FileInputError("FILE_NOT_ALLOWED", "The Docker file is not in a configured readable host mount.")
 
 
 def _read_bytes(raw: str, path: str) -> bytes:

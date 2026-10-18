@@ -534,30 +534,6 @@ def _migrate_to_39(results: dict[str, Any], quiet: bool) -> None:
             "Video Generation (Nous Subscription or FAL).")
 
 
-def _migrate_to_41(results: dict[str, Any], quiet: bool) -> None:
-    # 40 → 41: drop the plugin-era "## Messaging other agents" append from every SOUL.md. The
-    # server injects the live Bot Mode section in Bot Chat sessions; the frozen SOUL copy taxed
-    # every other session (~600 tok) and shadowed the live roster in Bot Chat itself.
-    from hermes_constants import get_hermes_home
-    from tools.bot_mode_probe import _PROTOCOL_HEADING, _hermes_root, _roster, strip_legacy_protocol
-
-    cleaned: list[str] = []
-    for name, profile_dir in _roster(_hermes_root(get_hermes_home())):
-        soul = profile_dir / "SOUL.md"
-        try:
-            text = soul.read_text(encoding="utf-8-sig") if soul.is_file() else ""
-            if _PROTOCOL_HEADING in text:
-                soul.write_text(strip_legacy_protocol(text), encoding="utf-8")
-                cleaned.append(name)
-        except OSError:
-            continue
-    if cleaned:
-        results["config_added"].append(f"removed legacy Bot Mode section from SOUL.md ({', '.join(cleaned)})")
-        if not quiet:
-            print(f"  ✓ Removed the plugin-era 'Messaging other agents' section from SOUL.md "
-                  f"({', '.join(cleaned)}) — Bot Chat sessions now get the live roster instead.")
-
-
 def _migrate_to_45(results: dict[str, Any], quiet: bool) -> None:
     # 44 → 45: append `connections` to every saved `platform_toolsets` list that predates it
     # (an explicit list treats absence as unchecked). Skipped when `known_builtin_toolsets`
@@ -780,7 +756,7 @@ MIGRATIONS: tuple[tuple[int, Callable[[dict[str, Any], bool], None]], ...] = (
         added="model_catalog.ttl_hours 1 → ttl_minutes 20 (default)",
         message="  ✓ Model catalog now refreshes every 20 minutes (model_catalog.ttl_minutes)",
         extra_guard=lambda raw: "ttl_minutes" not in raw)),
-    (41, _migrate_to_41),
+    # v41's retired interface roster rewrite is read-time cleanup now; never rewrite user prose.
     # 41 → 42: cron.model_drift_guard is gone. Unpinned jobs now run on their creation snapshot
     # instead of failing closed when the global model changes, so the toggle has nothing to gate.
     (42, functools.partial(
@@ -850,14 +826,12 @@ MIGRATIONS: tuple[tuple[int, Callable[[dict[str, Any], bool], None]], ...] = (
 )
 
 #: Steps triggered by a legacy key or identifier (a renamed or retired key, a removed plugin or
-#: toolset, the plugin-era SOUL.md section): they carry its setting to where the runtime reads it
+#: toolset): they carry its setting to where the runtime reads it
 #: or drop what nothing reads, which is right however old the file is. A config.yaml with no
 #: ``_config_version`` is current-schema content that was never stamped (installers seed it from
 #: hermes_cli/data/config.yaml.example; targeted writers never stamp), so it gets only these: every other step
 #: decides by a value or an absence that, in such a file, is the user's own choice. v13 is left
 #: out: it clears OPENAI_MODEL from .env, a generic name Hermes never reads but the user's tools may.
-#: v41 is left out too: it rewrites profile SOUL.md on a heading match, an artifact whose
-#: provenance the config stamp says nothing about.
 LEGACY_KEY_STEPS = frozenset({12, 14, 16, 17, 29, 33, 38, 39, 42, 43, 46, 50, 51})
 
 #: Legacy-key steps that run on every migration pass whatever the stamp says, because a stamp at

@@ -179,6 +179,16 @@ def _manage_connections(agent, args: dict, ctx: InlineToolContext) -> Any:
     return result
 
 
+def _manage_catalog(agent, args: dict, ctx: InlineToolContext) -> Any:
+    from tools.connectors.catalog_tool import manage_catalog
+
+    return manage_catalog(
+        args, session_id=getattr(agent, "session_id", None), tool_call_id=ctx.tool_call_id,
+        connection_callback=getattr(agent, "connection_callback", None),
+        card_surface=getattr(agent, "platform", None) == "tui",
+    )
+
+
 def _scope_in_connected_mcp_servers(agent, result: Any) -> None:
     """Add the MCP servers this call connected to the agent's toolset selection.
 
@@ -219,8 +229,6 @@ _RAW_INLINE_TOOL_EXECUTORS: dict[str, InlineToolExecutor] = {
         "tools.todo_tool", "todo_tool", ("todos", "todos"), ("merge", "merge", False),
         store=lambda agent, ctx: agent._todo_store,
     ),
-    # Bot Mode teammate DM is injected, not registered: only a canonical Bot
-    # Chat session carries the schema, and the tool re-gates on the title.
     "session_search": _session_search,
     "memory": _memory,
     "clarify": _tool(
@@ -228,6 +236,7 @@ _RAW_INLINE_TOOL_EXECUTORS: dict[str, InlineToolExecutor] = {
         callback=lambda agent, ctx: agent.clarify_callback,
     ),
     "manage_connections": _manage_connections,
+    "manage_catalog": _manage_catalog,
     "setup_mcp": _setup_mcp_shim,
     "delegate_task": lambda agent, args, ctx: agent._dispatch_delegate_task(args),
 }
@@ -243,9 +252,7 @@ INLINE_TOOL_EXECUTORS: dict[str, InlineToolExecutor] = {
     name: _coerced(name, executor) for name, executor in _RAW_INLINE_TOOL_EXECUTORS.items()
 }
 
-# ``invoke_tool`` (concurrent path) consults the memory manager right after these three
-# names and before the remaining inline tools; ``message_agent`` falls through to the
-# registry there (Bot Mode DM is only injected into the sequential path's schema).
+# ``invoke_tool`` consults the memory manager after these names, before the remaining tools.
 INVOKE_TOOL_PRE_MEMORY_MANAGER_NAMES = frozenset({"todo_list", "session_search", "memory"})
 
 
@@ -253,13 +260,11 @@ def resolve_invoke_tool_executor(agent, function_name: str) -> Optional[InlineTo
     """Inline executor for ``invoke_tool`` (concurrent path), or None for registry dispatch.
 
     Precedence: todo_list/session_search/memory, then memory-manager tools, then the
-    remaining inline tools (``message_agent`` excluded).
+    remaining inline tools.
     """
     if function_name in INVOKE_TOOL_PRE_MEMORY_MANAGER_NAMES:
         return INLINE_TOOL_EXECUTORS[function_name]
     memory_manager = agent._memory_manager
     if memory_manager and memory_manager.has_tool(function_name):
         return lambda agent, args, ctx: agent._memory_manager.handle_tool_call(function_name, args)
-    if function_name == "message_agent":
-        return None
     return INLINE_TOOL_EXECUTORS.get(function_name)

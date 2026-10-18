@@ -1,11 +1,10 @@
 """SQLite torture chamber: state.db integrity under real multi-process load (issue class C1).
 
 One ``state.db`` per journal mode Hermes deploys — WAL, and DELETE (what it runs on a WAL-reset-vulnerable
-SQLite and on network/FUSE homes; selected by the production ``apply_wal_with_fallback`` through a pinned
-version probe in every child, see ``_helpers``); every role is its own OS process running the production
+SQLite and on network/FUSE homes; selected by the production journal-mode configuration in every child, see ``_helpers``); every role is its own OS process running the production
 ``SessionDB``:
-a gateway-like writer, a TUI-like writer, a dashboard-like reader that opens at startup and lives across
-episodes, short-lived openers (production ``SessionDB`` and bare ``sqlite3``, plus the real
+a native-agent writer, a TUI-like writer, a inspection reader that opens at startup and lives across
+episodes, short-lived openers (production ``SessionDB`` and keyed SQLCipher, plus the real
 ``hermes sessions list`` / ``sessions stats`` CLI), FTS rebuild/optimize maintenance, and
 ``repair_state_db_schema``. Each episode injects one fault class — ``kill -9`` mid-write, SIGTERM graceful
 close, POSIX lock cancellation by a stray in-process open/close, chmod flips, concurrent FTS rebuilds,
@@ -35,12 +34,13 @@ import contextlib
 import os
 import random
 import sqlite3
+from hermes_security import sqlite as vault_sqlite
 import sys
 import time
 
 import pytest
 
-from tests.conformance.persistence._harness import wait_for
+from tests.waiting import wait_until
 from tests.e2e.core.sqlite._helpers import (
     JOURNAL_MODES,
     SEED_ENV,
@@ -91,7 +91,7 @@ def _stop_reader(ch: Chamber) -> None:
 
 def _writers(ch: Chamber, ep: str, **kw) -> tuple[str, str]:
     gw, tui = f"{ep}-gw", f"{ep}-tui"
-    ch.spawn("writer", gw, tag="g", sessions=["gw-a", "gw-b", "gw-c"], source="telegram", batch_every=7, **kw)
+    ch.spawn("writer", gw, tag="g", sessions=["gw-a", "gw-b", "gw-c"], source="cli", batch_every=7, **kw)
     ch.spawn("writer", tui, tag="t", sessions=["tui-a"], source="tui", batch_every=5, **kw)
     ch.wait_event(gw, "ready")
     ch.wait_event(tui, "ready")
@@ -145,10 +145,10 @@ def ep_kill9_writer_midwrite(ch, ep, rng):
     gw, tui = _writers(ch, ep)
     ch.spawn("churn", f"{ep}-churn", iterations=400)
     ch.wait_acks(gw, rng.randint(20, 60))
-    ch.kill9(gw)  # gateway dies mid-append: the in-flight row is either whole or absent
+    ch.kill9(gw)  # native writer dies mid-append: the in-flight row is either whole or absent
     ch.kill9(f"{ep}-churn")  # and a CLI dies holding the file open
     gw2 = f"{ep}-gw2"
-    ch.spawn("writer", gw2, tag="g", sessions=["gw-a", "gw-b"], source="telegram", batch_every=3)
+    ch.spawn("writer", gw2, tag="g", sessions=["gw-a", "gw-b"], source="cli", batch_every=3)
     bg = _background(ch, ep, churn=0)
     ch.wait_acks(gw2, rng.randint(30, 60))
     ch.wait_acks(tui, 40)
@@ -167,7 +167,7 @@ def ep_sigterm_graceful_close(ch, ep, rng):
         assert ch.reap(name) == 0, ch.stderr(name)
         assert any(e.get("event") == "closed" for e in ch.events(name)), f"{name} never closed cleanly"
     gw2 = f"{ep}-gw2"
-    ch.spawn("writer", gw2, tag="g", sessions=["gw-a"], source="telegram")
+    ch.spawn("writer", gw2, tag="g", sessions=["gw-a"], source="cli")
     ch.wait_acks(gw2, 30)
     _reap_all(ch, bg)
     _stop_all(ch, [gw2])
@@ -177,7 +177,7 @@ def ep_sigterm_graceful_close(ch, ep, rng):
 def ep_lock_cancellation(ch, ep, rng):
     """Plugins, tool reads of ~/.hermes and header probes open+close state.db inside the writer process,
     which cancels its POSIX locks; a sibling's last close must still not end the writer's WAL generation.
-    Field topology: the gateway (+ a TUI) are the only long-lived holders — no dashboard reader pinning the
+    Field topology: the headless agent (+ a TUI) are the only long-lived holders — no inspection reader pinning the
     file — so a short-lived CLI's close is the last close SQLite can see."""
     _stop_reader(ch)
     gw, tui = _writers(ch, ep, stray_every=rng.randint(2, 4))
@@ -266,7 +266,7 @@ def ep_repair_live_then_offline(ch, ep, rng):
 def ep_fts_corruption_fail_open(ch, ep, rng):
     """A corrupt FTS index must not cost a canonical write; repair + the next open restore search."""
     _stop_reader(ch)
-    conn = sqlite3.connect(str(ch.db), timeout=30.0)
+    conn = vault_sqlite.connect(str(ch.db), timeout=30.0)
     try:
         conn.execute("UPDATE messages_fts_data SET block = X'DEADBEEFDEADBEEFDEADBEEFDEADBEEF'")
         conn.commit()
@@ -294,7 +294,7 @@ def ep_kill9_everything(ch, ep, rng):
         if ch.procs[name].poll() is None:
             ch.kill9(name)
     gw2 = f"{ep}-gw2"
-    ch.spawn("writer", gw2, tag="g", sessions=["gw-a", "tui-a"], source="telegram", batch_every=4)
+    ch.spawn("writer", gw2, tag="g", sessions=["gw-a", "tui-a"], source="cli", batch_every=4)
     _ensure_reader(ch)
     ch.wait_acks(gw2, 30)
     _stop_all(ch, [gw2])
@@ -381,8 +381,8 @@ def test_torture_episode(chamber, episode):
 
 
 def test_long_lived_reader_saw_every_episode_grow_only(chamber):
-    """The dashboard reader lives across episodes: it never saw a session shrink and never errored."""
-    wait_for(lambda: any(e.get("event") == "stats" for e in chamber.events(chamber.reader_name)),
+    """The inspection reader lives across episodes: it never saw a session shrink and never errored."""
+    wait_until(lambda: any(e.get("event") == "stats" for e in chamber.events(chamber.reader_name)),
              what="reader stats")
     errors = [(n, e) for n, e in chamber.errors() if n.startswith("reader")]
     assert not errors, errors

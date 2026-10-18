@@ -63,33 +63,3 @@ def test_commit_version_banner_uses_stamp_not_shared_checkout(commit_build, monk
     assert "commit-build" in label
     assert get_version_info().source == "commit-build"
     git.assert_not_called()
-
-
-@pytest.mark.parametrize("managed", [False, True])
-def test_commit_backend_update_routes_refuse_before_checks_or_spawns(commit_build, monkeypatch, tmp_path, managed):
-    from starlette.testclient import TestClient
-    import hermes_cli.web_server as server
-    import hermes_cli.web_server_gateway as gateway
-    from hermes_cli import banner, source_check
-    from hermes_constants import get_hermes_home
-
-    monkeypatch.setattr(server, "PROJECT_ROOT", commit_build)
-    monkeypatch.setattr(gateway, "_ACTION_LOG_DIR", tmp_path / "logs")
-    monkeypatch.setattr("hermes_cli.web_server_files._dashboard_local_update_managed_externally", lambda: managed)
-    spawn = Mock(side_effect=AssertionError("no updater process"))
-    monkeypatch.setattr(gateway, "_spawn_hermes_action", spawn)
-    check = Mock(side_effect=AssertionError("no update check"))
-    monkeypatch.setattr(source_check, "check_for_updates", check)
-    cache = get_hermes_home() / ".update_check"
-    cache.write_text("source checkout cache")
-    client = TestClient(server.app)
-    client.headers[server._SESSION_HEADER_NAME] = server._SESSION_TOKEN
-    result = client.get("/api/hermes/update/check?force=true")
-    assert result.status_code == 200
-    assert result.json()["message"] == MESSAGE
-    assert result.json()["can_apply"] is False
-    assert result.json()["current_version"] == "1.2.3+gabcdef12"
-    assert client.post("/api/hermes/update").json()["message"] == MESSAGE
-    assert cache.read_text() == "source checkout cache"
-    check.assert_not_called()
-    spawn.assert_not_called()

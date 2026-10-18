@@ -64,15 +64,6 @@ def test_context_local_session_agentless(monkeypatch):
     assert "Conversation:" in out
 
 
-def test_context_compute_host_route_unchanged(monkeypatch):
-    """Guard: the isolated/compute-host route the gate was built for still works."""
-    monkeypatch.setattr(server, "_session_uses_compute_host", lambda *a, **k: True)
-    monkeypatch.setattr(server, "_session_db", _no_db)
-
-    out = server._live_slash_command_output("sid-1", _live_session(object()), "context", "")
-
-    assert out is not None
-    assert "Conversation:" in out
 
 
 def test_tools_local_still_falls_through(monkeypatch):

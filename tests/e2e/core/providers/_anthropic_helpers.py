@@ -16,7 +16,6 @@ import ctypes
 import json
 import os
 import signal
-import sqlite3
 import subprocess
 import sys
 import time
@@ -29,6 +28,9 @@ import hermes_yaml as yaml
 
 from tests.fakes.providers.anthropic_messages import MODEL_ID, AnthropicMessagesServer, Response, Responder
 from tests.fakes.providers.oauth_token_server import TLSInterceptProxy, make_test_ca
+
+from tests.e2e.vault_home import connect_state, run_unlocked, seal_fixture_home, spawn_unlocked
+from hermes_security import io as state_io
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 TAG_VAR = "ANTHROPIC_E2E_TAG"
@@ -66,22 +68,22 @@ class Rig:
             "HTTPS_PROXY": self.proxy.url, "https_proxy": self.proxy.url,
             "NO_PROXY": loopback, "no_proxy": loopback, "SSL_CERT_FILE": str(self.ca_pem),
             # The child's ~/.hermes/state.db IS the tmp home's db (see parity/_helpers.py).
-            "HERMES_STATE_DB_GUARD_BYPASS": "1", "HERMES_ALLOW_NO_VAULT": "1",
+            "HERMES_STATE_DB_GUARD_BYPASS": "1",
         })
         env.update(extra or {})
         return env
 
     def config(self) -> dict[str, Any]:
-        return yaml.safe_load((self.hermes_home / "config.yaml").read_text(encoding="utf-8"))
+        return yaml.safe_load(state_io.read_text(self.hermes_home / "config.yaml", purpose="config"))
 
     def update_config(self, mutate: Callable[[dict[str, Any]], None]) -> None:
         cfg = self.config()
         mutate(cfg)
-        (self.hermes_home / "config.yaml").write_text(yaml.safe_dump(cfg, sort_keys=False), encoding="utf-8")
+        state_io.write_text(self.hermes_home / "config.yaml", yaml.safe_dump(cfg, sort_keys=False), purpose="config")
 
     def run(self, *args: str, timeout: float = TURN_TIMEOUT, extra_env: dict[str, str] | None = None,
             ) -> subprocess.CompletedProcess:
-        return subprocess.run(hermes_argv(*args), cwd=self.project, env=self.env(extra_env), capture_output=True,
+        return run_unlocked(hermes_argv(*args), cwd=self.project, env=self.env(extra_env), capture_output=True,
                               text=True, timeout=timeout, stdin=subprocess.DEVNULL, check=False)
 
     def stop(self) -> None:
@@ -94,12 +96,13 @@ class Rig:
         log = self.hermes_home / "logs" / "agent.log"
         if not log.exists():
             return "<no agent.log>"
-        lines = log.read_text(encoding="utf-8", errors="replace").splitlines()
+        from hermes_security import frames
+        lines = b"".join(frames.read_frames(log, purpose="log")).decode("utf-8", errors="replace").splitlines()
         return "\n".join(ln for ln in lines if pattern.lower() in ln.lower())[-chars:]
 
     # persisted state ------------------------------------------------------------
-    def _db(self) -> sqlite3.Connection:
-        return sqlite3.connect(f"file:{self.hermes_home / 'state.db'}?mode=ro", uri=True)
+    def _db(self) -> Any:
+        return connect_state(self.hermes_home / "state.db")
 
     def session_ids(self) -> list[str]:
         with self._db() as db:
@@ -107,7 +110,6 @@ class Rig:
 
     def messages(self, session_id: str) -> list[dict[str, Any]]:
         with self._db() as db:
-            db.row_factory = sqlite3.Row
             return [dict(r) for r in db.execute(
                 "select * from messages where session_id = ? order by id", (session_id,))]
 
@@ -155,6 +157,7 @@ def start_rig(root: Path, script: list[Response] | Responder, *, config: dict[st
         cfg[key] = {**cfg.get(key, {}), **value} if isinstance(value, dict) else value
     (rig.hermes_home / "config.yaml").write_text(yaml.safe_dump(cfg, sort_keys=False), encoding="utf-8")
     (rig.hermes_home / ".env").write_text("ANTHROPIC_API_KEY=sk-ant-api03-e2e-fake-key\n", encoding="utf-8")
+    seal_fixture_home(rig.hermes_home)
     return rig
 
 

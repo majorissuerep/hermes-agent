@@ -1,8 +1,8 @@
 """Restarts never build or accumulate dependency generations (PM lifecycle, failure class 5; #123340).
 
-A current install relaunched over and over (the CLI, and the gateway a service manager restarts)
+A current install relaunched over and over (the CLI, and the native query a service manager restarts)
 must reuse the selected generation: no dependency sync, no source-update tail, no new generation.
-A gateway started while a source-update tail is still owed (``source-completion-pending``) may
+A native query started while a source-update tail is still owed (``source-completion-pending``) may
 finish that tail once, on its first start, and must neither build a generation nor re-run the tail
 on later starts (#123340: it re-ran it, building a new generation, on every restart).
 """
@@ -53,8 +53,8 @@ def test_restarts_never_build_or_accumulate_generations(home, provider):
     assert P.generations(sb) == before, f"plain relaunches changed the generation set: {before} -> {P.generations(sb)}"
 
 
-def test_gateway_restarts_with_an_owed_tail_do_not_rebuild(home):
-    """#123340: a gateway started with ``source-completion-pending`` present re-ran the tail (and
+def test_native_queries_with_an_owed_tail_do_not_rebuild(home, provider):
+    """#123340: a native query started with ``source-completion-pending`` present re-ran the tail (and
     built a generation) on every start. The first start may finish the tail; none may add a
     generation, and later starts must owe nothing."""
     sb = home["sb"]
@@ -62,14 +62,10 @@ def test_gateway_restarts_with_an_owed_tail_do_not_rebuild(home):
     before = P.generations(sb)
     boots = []
     for n in range(3):
-        gw = P.Gateway(sb, P.lazy_env(sb), sb.root / f"gc-gateway-{n}.log")
-        try:
-            gw.wait_running()
-        finally:
-            gw.stop()
+        cp = P.turn(sb, provider, f"owed-tail relaunch {n}")
         boots.append({"gens": P.generations(sb), "pending": P.pending_marker(sb).exists(),
-                      "tail": "finishing an interrupted source update" in gw.output()})
+                      "tail": "finishing an interrupted source update" in cp.stdout + cp.stderr})
     grown = [b["gens"] for b in boots if b["gens"] != before]
-    assert not grown, f"gateway restarts built dependency generations: {before} -> {grown}\n" + P.diagnostics(sb)
-    assert not boots[0]["pending"], f"the first gateway start left the owed tail pending: {boots}"
-    assert not any(b["tail"] for b in boots[1:]), f"every gateway start re-runs the source-update tail: {boots}"
+    assert not grown, f"native query restarts built dependency generations: {before} -> {grown}\n" + P.diagnostics(sb)
+    assert not boots[0]["pending"], f"the first native query start left the owed tail pending: {boots}"
+    assert not any(b["tail"] for b in boots[1:]), f"every native query start re-runs the source-update tail: {boots}"

@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import os
 import signal
-import sqlite3
 import subprocess
 import sys
 import threading
@@ -26,6 +25,8 @@ import time
 from pathlib import Path
 
 import pytest
+from hermes_security import sqlite
+from tests.e2e.vault_home import connect_state, spawn_unlocked
 
 from tests.e2e.core.compaction._helpers import (
     GOOD_SUMMARY_TOKEN,
@@ -44,6 +45,8 @@ HIGH_THRESHOLD = 60_000
 KILL_DEADLINE_SECONDS = 120.0
 
 CHILD = r'''
+from hermes_security.handoff import adopt_inherited_key
+assert adopt_inherited_key()
 import os, sys, time
 from pathlib import Path
 repo, db_path, session_id, base_url, point, sentinel = sys.argv[1:7]
@@ -90,7 +93,7 @@ def _child_env(home: Path) -> dict:
     # child-process escape hatch is safe because every path here lives under tmp_path.
     env = {k: v for k, v in os.environ.items() if not k.endswith("_API_KEY")}
     env.update(HOME=str(home), HERMES_HOME=str(home / ".hermes"), PYTHONPATH=str(REPO), PYTHONUNBUFFERED="1",
-               HERMES_STATE_DB_GUARD_BYPASS="1", HERMES_ALLOW_NO_VAULT="1")
+               HERMES_STATE_DB_GUARD_BYPASS="1")
     return env
 
 
@@ -107,7 +110,7 @@ def _poll(pred, deadline: float, what: str, child: subprocess.Popen) -> None:
 
 
 def _integrity(db_path: Path) -> str:
-    conn = sqlite3.connect(db_path, timeout=30)
+    conn = sqlite.connect(db_path, timeout=30)
     try:
         return conn.execute("PRAGMA integrity_check").fetchone()[0]
     finally:
@@ -138,7 +141,7 @@ def test_kill9_mid_compaction_leaves_state_consistent_and_resumable(make_scenari
     sentinel = tmp_path / "in-commit"
     script = tmp_path / "child.py"
     script.write_text(CHILD, encoding="utf-8")
-    child = subprocess.Popen(
+    child = spawn_unlocked(
         [sys.executable, str(script), str(REPO), str(sc.db_path), sc.session_id, server.base_url, point, str(sentinel)],
         env=_child_env(home), cwd=str(tmp_path), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     try:
@@ -160,7 +163,7 @@ def test_kill9_mid_compaction_leaves_state_consistent_and_resumable(make_scenari
     assert rows_after == rows_before, (
         f"kill -9 at {point} left a partial compaction: {len(rows_before)} rows before, {len(rows_after)} after; "
         f"live {len(active_rows(rows_before))} -> {len(active_rows(rows_after))}")
-    conn = sqlite3.connect(f"file:{sc.db_path}?mode=ro", uri=True)
+    conn = connect_state(sc.db_path)
     try:
         count = conn.execute("SELECT message_count FROM sessions WHERE id = ?", (sc.session_id,)).fetchone()[0]
     finally:
@@ -168,7 +171,7 @@ def test_kill9_mid_compaction_leaves_state_consistent_and_resumable(make_scenari
     assert count == len(active_rows(rows_after)), "session message_count disagrees with the live rows"
 
     # Resumable: a fresh agent reclaims the dead holder's lease, compacts, and continues.
-    from tui_gateway.server import _compress_session_history
+    from tui_runtime.server import _compress_session_history
 
     sc.install()
     sc.resume_from_db()

@@ -42,7 +42,6 @@ class TestTUIPerModelReasoningConfig:
         result = tui_server._load_reasoning_config()
         assert result is not None
         assert result["effort"] == "high"
-
     def test_spelling_tolerant_match(self, monkeypatch):
         """Override matches even with different spelling (provider prefix)."""
         fake_cfg = {
@@ -59,23 +58,3 @@ class TestTUIPerModelReasoningConfig:
         result = tui_server._load_reasoning_config()
         assert result is not None
         assert result["effort"] == "high"
-
-    def test_parity_with_gateway_loader(self, monkeypatch):
-        """TUI and gateway loaders return identical results for same config."""
-        import gateway.run as gateway_run
-
-        fake_cfg = {
-            "model": {"default": "openrouter/anthropic/claude-sonnet-4.6"},
-            "agent": {
-                "reasoning_effort": "low",
-                "reasoning_overrides": {
-                    "claude-sonnet-4.6": "high",
-                },
-            },
-        }
-        monkeypatch.setattr(tui_server, "_load_cfg", lambda: fake_cfg)
-        monkeypatch.setattr(gateway_run, "_load_gateway_config", lambda: fake_cfg)
-
-        tui_result = tui_server._load_reasoning_config()
-        gw_result = gateway_run.GatewayRunner._load_reasoning_config()
-        assert tui_result == gw_result
