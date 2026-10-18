@@ -191,6 +191,10 @@ class Docker(Container):
 
 
 class Kubernetes(Container):
+    def __init__(self, name: str, namespace: str | None, *, node: str | None = None):
+        super().__init__(name, namespace)
+        self.node = node
+
     def kubectl(self):
         return ["kubectl", "--namespace", self.namespace]
 
@@ -208,6 +212,8 @@ class Kubernetes(Container):
                                             "capabilities": {"drop": ["NET_RAW"]}},
                         "resources": {"requests": {"cpu": "2", "memory": "4Gi", "ephemeral-storage": "10Gi"},
                                       "limits": {"cpu": "4", "memory": "8Gi", "ephemeral-storage": "40Gi"}}}]}}
+        if self.node:
+            pod["spec"]["nodeSelector"]["kubernetes.io/hostname"] = self.node
         command([*self.kubectl(), "create", "-f", "-"], data=json.dumps(pod).encode())
         command([*self.kubectl(), "wait", "--for=condition=Ready", "pod/" + self.name,
                  "--timeout=300s"], timeout=310)
@@ -218,6 +224,7 @@ class Kubernetes(Container):
     def identity(self):
         value = json.loads(command([*self.kubectl(), "get", "pod", self.name, "-o", "json"]))
         return {"pod_uid": value["metadata"]["uid"], "image_id": value["status"]["containerStatuses"][0]["imageID"],
+                "node_name": value["spec"]["nodeName"], "node_selector": value["spec"]["nodeSelector"],
                 "backend": "kubernetes"}
 
     def close(self):
@@ -228,8 +235,9 @@ class Kubernetes(Container):
 def run_scenario(args, scenario, archive, ca_package, provenance, credential):
     output = args.evidence / scenario
     output.mkdir()
-    container = {"docker": Docker, "kubernetes": Kubernetes}[args.backend](
-        "hermes-e2e-" + secrets.token_hex(4) + "-" + scenario, args.namespace)
+    name = "hermes-e2e-" + secrets.token_hex(4) + "-" + scenario
+    container = (Kubernetes(name, args.namespace, node=args.kubernetes_node)
+                 if args.backend == "kubernetes" else Docker(name, args.namespace))
     isolation = {**provenance, "scenario": scenario, "status": "running", "cleanup_verified": False}
     started = False
     try:
@@ -292,9 +300,12 @@ def main():
     parser.add_argument("--candidate", required=True)
     parser.add_argument("--evidence", type=Path, required=True)
     parser.add_argument("--namespace", help="Existing dedicated test namespace (Kubernetes only)")
+    parser.add_argument("--kubernetes-node", help="Dedicated test node hostname (Kubernetes only)")
     parser.add_argument("--max-parallel", type=int, choices=(1, 2), default=2)
     parser.add_argument("--credentials-stdin", action="store_true")
     args = parser.parse_args()
+    if args.kubernetes_node and args.backend != "kubernetes":
+        parser.error("--kubernetes-node requires --backend kubernetes")
     inherited_credential = {
         key: os.environ.pop("E2E_LLM_" + key.upper(), "")
         for key in ("provider", "model", "base_url", "api_key", "api_mode")}
