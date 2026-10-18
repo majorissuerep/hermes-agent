@@ -226,38 +226,28 @@ def _render_cron(ctx):
 
 def _render_sessions(ctx):
     _section("Sessions")
-    # Gateway session count: state.db is the source of truth; fall back to sessions.json for
-    # pre-migration installs.
-    try:
-        from hermes_state import SessionDB
-        db = SessionDB(db_path=get_hermes_home() / "state.db", read_only=True)
-        try:
-            gateway_rows = db.list_gateway_sessions(active_only=True) or []
-        finally:
-            db.close()
-    except Exception:
-        gateway_rows = []
+    import sqlite3
+    from hermes_security.errors import VaultError
 
-    if gateway_rows:
-        _kv("Active:", f"{len(gateway_rows)} session(s)")
-        freshest = max((float(r.get("last_active") or 0) for r in gateway_rows), default=0.0)
-        if freshest > 0:
-            from hermes_cli.timefmt import relative_time
-            print(f"  Last activity:{relative_time(freshest):>13}")
-    elif not (sessions_file := get_hermes_home() / "sessions" / "sessions.json").exists():
-        _kv("Active:", 0)
-    else:
+    count, recent = 0, []
+    path = get_hermes_home() / "state.db"
+    if path.is_file():
         try:
-            data = _load_json(sessions_file, encoding="utf-8-sig")
-            entries = [k for k in data if not str(k).startswith("_")] if isinstance(data, dict) else []
-            _kv("Active:", f"{len(entries)} session(s)")
-        except Exception:
-            _kv("Active:", "(error reading sessions file)")
+            from hermes_state import SessionDB
+            db = SessionDB(db_path=path, read_only=True)
+            try:
+                count = db.session_count(exclude_children=True)
+                recent = db.list_sessions_rich(limit=1, order_by_last_active=True)
+            finally:
+                db.close()
+        except (OSError, sqlite3.DatabaseError, VaultError):
+            count = None
+    _kv("Stored:", "(unavailable)" if count is None else f"{count} session(s)")
+    if recent and (freshest := float(recent[0].get("last_active") or 0)) > 0:
+        from hermes_cli.timefmt import relative_time
+        print(f"  Last activity:{relative_time(freshest):>13}")
 
-    # Slot usage, only when max_concurrent_sessions is set. The cap is shared across CLI,
-    # desktop/TUI and the messaging gateway, so the surface that gets rejected is rarely the one
-    # holding the slots — without this the only way to find out is reading
-    # runtime/active_sessions.json by hand.
+    # Live terminal/headless slot ownership is distinct from saved conversation history.
     try:
         from hermes_cli.active_sessions import (
             active_session_registry_snapshot, format_age, resolve_max_concurrent_sessions)
@@ -288,15 +278,6 @@ def _render_deep(ctx):
             _kv_flag("OpenRouter:", response.status_code == 200, "reachable", f"error ({response.status_code})")
         except Exception as e:
             _kv("OpenRouter:", f"{check_mark(False)} error: {e}")
-    try:  # gateway port, informational: in use == gateway likely running
-        import socket
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(1)
-        port_in_use = sock.connect_ex(('127.0.0.1', 18789)) == 0
-        sock.close()
-        _kv("Port 18789:", 'in use' if port_in_use else 'available')
-    except OSError:
-        pass
 
 
 def _render_footer(ctx):

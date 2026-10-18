@@ -25,16 +25,13 @@ def hermes_home(tmp_path, monkeypatch):
         "2026-04-12 17:00:02 WARNING agent: high token usage\n"
     )
     (logs_dir / "errors.log").write_text(
-        "2026-04-12 17:00:05 ERROR gateway.run: connection lost\n"
+        "2026-04-12 17:00:05 ERROR agent.provider: connection lost\n"
     )
-    (logs_dir / "gateway.log").write_text(
-        "2026-04-12 17:00:10 INFO gateway.run: started\n"
+    (logs_dir / "mcp-stderr.log").write_text(
+        "2026-04-12 17:00:10 INFO agent.provider: started\n"
     )
-    (logs_dir / "gui.log").write_text(
-        "2026-04-12 17:00:12 INFO hermes_cli.web_server: dashboard request\n"
-    )
-    (logs_dir / "desktop.log").write_text(
-        "2026-04-12 17:00:15 INFO desktop: backend spawned\n"
+    (logs_dir / "update.log").write_text(
+        "2026-04-12 17:00:15 INFO hermes_cli.update: build complete\n"
     )
 
     return home
@@ -120,12 +117,7 @@ class TestCaptureLogSnapshot:
 
 
 class TestMissingLogNote:
-    """A missing log explains itself when the writer isn't this backend.
-
-    `hermes debug share` runs on the backend, so a desktop connected to a
-    remote/docker/SSH backend can never contribute desktop.log. Reporting a
-    bare absence sends triage after a client-side bug it cannot see.
-    """
+    """Native missing, present and empty logs remain distinguishable."""
 
     def test_backend_written_log_reports_plain_absence(self, hermes_home):
         from hermes_cli.debug import _capture_log_snapshot
@@ -136,43 +128,33 @@ class TestMissingLogNote:
         assert snap.full_text is None
         assert snap.tail_text == "(file not found)"
 
-    def test_client_written_log_names_its_writer_and_path(self, hermes_home):
+
+    def test_present_update_log_is_captured_normally(self, hermes_home):
+        """A local backend still reads update.log — the note is only for a miss."""
         from hermes_cli.debug import _capture_log_snapshot
 
-        (hermes_home / "logs" / "desktop.log").unlink()
+        snap = _capture_log_snapshot("update", tail_lines=10)
+        assert "build complete" in snap.tail_text
+        assert "file not found" not in snap.tail_text
 
-        snap = _capture_log_snapshot("desktop", tail_lines=10)
-        assert snap.full_text is None
-        assert "not on this host" in snap.tail_text
-        # The reader needs the path to collect by hand on the client machine.
-        assert str(hermes_home / "logs" / "desktop.log") in snap.tail_text
-
-    def test_present_client_log_is_captured_normally(self, hermes_home):
-        """A local backend still reads desktop.log — the note is only for a miss."""
-        from hermes_cli.debug import _capture_log_snapshot
-
-        snap = _capture_log_snapshot("desktop", tail_lines=10)
-        assert "backend spawned" in snap.tail_text
-        assert "not on this host" not in snap.tail_text
-
-    def test_empty_client_log_is_empty_not_absent(self, hermes_home):
+    def test_empty_update_log_is_empty_not_absent(self, hermes_home):
         """An empty file means the app ran and logged nothing — a different fact."""
         from hermes_cli.debug import _capture_log_snapshot
 
-        (hermes_home / "logs" / "desktop.log").write_text("", encoding="utf-8")
+        (hermes_home / "logs" / "update.log").write_text("", encoding="utf-8")
 
-        snap = _capture_log_snapshot("desktop", tail_lines=10)
+        snap = _capture_log_snapshot("update", tail_lines=10)
         assert snap.tail_text == "(file empty)"
 
-    def test_report_carries_the_note_for_a_remote_backend(self, hermes_home):
+    def test_report_carries_missing_update_note(self, hermes_home):
         """The uploaded report — what people paste into support — must explain it."""
         from hermes_cli.debug import collect_debug_report
 
-        (hermes_home / "logs" / "desktop.log").unlink()
+        (hermes_home / "logs" / "update.log").unlink()
 
         report = collect_debug_report(log_lines=10, dump_text="dump\n")
-        assert "--- desktop.log" in report
-        assert "not on this host" in report
+        assert "--- update.log" in report
+        assert "file not found" in report
 
 
 
@@ -208,7 +190,7 @@ class TestCaptureLogSnapshotRedaction:
             f"2026-04-12 17:00:00 INFO config: api_key={_REDACT_FIXTURE_TOKEN} loaded\n"
         )
         (logs_dir / "errors.log").write_text("", encoding="utf-8")
-        (logs_dir / "gateway.log").write_text("", encoding="utf-8")
+        (logs_dir / "mcp-stderr.log").write_text("", encoding="utf-8")
         return home
 
     def test_default_redacts_tail_and_full_text(self, hermes_home_with_secret):
@@ -263,7 +245,7 @@ class TestCaptureLogSnapshotRedaction:
 
         log_path = hermes_home_with_secret / "logs" / "agent.log"
         log_path.write_text(
-            "2026-04-12 17:00:00 INFO gateway.run: "
+            "2026-04-12 17:00:00 INFO agent.provider: "
             "inbound message: platform=bluebubbles "
             "user=person@example.com chat=iMessage;-;person@example.com msg='hello'\n"
         )
@@ -337,8 +319,8 @@ class TestRunDebugShare:
 
 
 
-    def test_share_uploads_five_pastes(self, hermes_home, capsys):
-        """Successful share uploads report + agent.log + gateway.log + gui.log + desktop.log."""
+    def test_share_uploads_report_and_three_native_full_logs(self, hermes_home, capsys):
+        """Successful share uploads report + agent.log + mcp-stderr.log + update.log + update.log."""
         from hermes_cli.debug import run_debug_share
 
         args = MagicMock()
@@ -361,18 +343,17 @@ class TestRunDebugShare:
             run_debug_share(args)
 
         out = capsys.readouterr().out
-        # Should have 5 uploads: report, agent.log, gateway.log, gui.log, desktop.log
-        assert call_count[0] == 5
+        # Report plus the three native full-log sinks.
+        assert call_count[0] == 4
         assert "paste.rs/paste1" in out  # Report
         assert "paste.rs/paste2" in out  # agent.log
-        assert "paste.rs/paste3" in out  # gateway.log
-        assert "paste.rs/paste4" in out  # gui.log
-        assert "paste.rs/paste5" in out  # desktop.log
+        assert "paste.rs/paste3" in out  # mcp-stderr.log
+        assert "paste.rs/paste4" in out  # update.log
         assert "Report" in out
         assert "agent.log" in out
-        assert "gateway.log" in out
-        assert "gui.log" in out
-        assert "desktop.log" in out
+        assert "mcp-stderr.log" in out
+        assert "update.log" in out
+        assert "update.log" in out
 
         # Each log paste should start with the dump header
         agent_paste = uploaded_content[1]
@@ -380,13 +361,10 @@ class TestRunDebugShare:
         assert "--- full agent.log ---" in agent_paste
         gateway_paste = uploaded_content[2]
         assert "--- hermes dump ---" in gateway_paste
-        assert "--- full gateway.log ---" in gateway_paste
+        assert "--- full mcp-stderr.log ---" in gateway_paste
         gui_paste = uploaded_content[3]
         assert "--- hermes dump ---" in gui_paste
-        assert "--- full gui.log ---" in gui_paste
-        desktop_paste = uploaded_content[4]
-        assert "--- hermes dump ---" in desktop_paste
-        assert "--- full desktop.log ---" in desktop_paste
+        assert "--- full update.log ---" in gui_paste
 
 
 
@@ -412,8 +390,8 @@ class TestRunDebugShareRedaction:
             f"2026-04-12 17:00:00 INFO config: api_key={_REDACT_FIXTURE_TOKEN} loaded\n"
         )
         (logs_dir / "errors.log").write_text("", encoding="utf-8")
-        (logs_dir / "gateway.log").write_text(
-            f"2026-04-12 17:00:01 INFO gateway.run: token {_REDACT_FIXTURE_TOKEN}\n"
+        (logs_dir / "mcp-stderr.log").write_text(
+            f"2026-04-12 17:00:01 INFO agent.provider: token {_REDACT_FIXTURE_TOKEN}\n"
         )
         return home
 

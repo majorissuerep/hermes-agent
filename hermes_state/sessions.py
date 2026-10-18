@@ -14,7 +14,6 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 from agent.session_activity import (
     ActivityProvenance, bound_activity_description, normalize_activity_provenance,
 )
-from hermes_startup_watchdog import report_startup_progress
 from hermes_state.errors import SessionActiveWriteGuardError
 from hermes_state.common import (
     _LISTABLE_CHILD_SQL, _RECOVERABLE_END_REASONS,
@@ -1970,10 +1969,6 @@ class SessionSessionsMixin:
             if last and now - last < min_interval_hours * 3600:
                 result["skipped"] = True
                 return result
-            # Startup-watchdog lease: the archive sweep is I/O-bound (near-zero CPU),
-            # which the watchdog's CPU fallback misreads as a parked deadlock.
-            # No-op when the watchdog is not armed; never raises.
-            report_startup_progress(900.0, phase="state_db_auto_archive")
             archived = result["archived"] = self.archive_stale_sessions(idle_days, exclude_pinned=exclude_pinned)
             # Record even a zero-archive run so we don't re-sweep every call.
             self.set_meta("last_auto_archive", str(now))

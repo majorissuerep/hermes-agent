@@ -312,13 +312,8 @@ _BASE_SECURITY_ARGS = [
     "--tmpfs", "/tmp:rw,nosuid,size=512m",  # no-tmp: ok — container tmpfs mount spec
     "--tmpfs", "/var/tmp:rw,noexec,nosuid,size=256m"]
 
-# Fork-bomb guard, applied only when the pids cgroup controller is available. The pids cgroup counts
-# THREADS, and a sandbox that hosts the Bot Screen runs a desktop in here: measured on
-# hermes-sandbox:desktop, the idle container is 2 tasks, Xvnc + Xfce + dbus 44, one Chromium with one
-# tab 212, plus the agent's own agent-browser Chromium with two tabs 488. The old 256 was hit in normal
-# use and every further `docker exec` (browser command, cua-driver, thumbnail, CDP forward) died with
-# runc's "procReady not received". 2048 leaves room for a working browser and is still three orders of
-# magnitude under the host's pid_max.
+# The pids controller counts browser threads too. Keep enough room for native
+# headless Chromium and terminal children, while bounding fork-bomb resource use.
 _DEFAULT_PIDS_LIMIT = "2048"
 
 # Docker's 64 MB /dev/shm default crashes Chromium/Playwright tabs and PyTorch
@@ -909,7 +904,7 @@ class DockerEnvironment(BaseEnvironment):
         # A container built from another image. Explicitly configured image (config.yaml /
         # TERMINAL_DOCKER_IMAGE): the user changed it, so the old container is not their sandbox any
         # more — recreate (the image is immutable after creation). Default image: a default flip
-        # (nikolaik base -> hermes-sandbox:desktop) must not replace a sandbox someone has state in;
+        # (a change of the pinned terminal base) must not replace a sandbox someone has state in;
         # keep it and let the CLI / Screen pane ask. Same rule Modal (snapshot wins) and Daytona
         # (labeled sandbox wins) already apply.
         actual_image = self._container_image(container_id)

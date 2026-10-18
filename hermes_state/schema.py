@@ -18,7 +18,6 @@ from typing import Dict, List, Optional, Sequence
 
 
 from hermes_constants import get_hermes_home
-from hermes_startup_watchdog import report_startup_progress
 from utils import safe_json_loads
 from hermes_state.common import (
     DEFERRED_INDEX_SQL, FTS_CJK_STALE_KEY, FTS_REBUILD_DEFERRAL_KEY, FTS_STALE_KEY, FTS_SQL,
@@ -912,17 +911,6 @@ class SessionSchemaMixin:
         """Create tables and FTS if missing, reconcile columns, run data migrations. Column
         additions are declarative via _reconcile_columns(), so reordered migrations can
         never skip a column; schema_version remains for data migrations only."""
-        # Startup-watchdog lease: on multi-GB files this is I/O-bound (near-zero CPU), which
-        # the watchdog's CPU fallback would misread as a parked deadlock.
-        # Declare a startup-watchdog progress lease before potentially long synchronous work: on multi-GB
-        # state.db files the reconciliation + version-gated data migrations below are legitimately slow and
-        # can be I/O-bound (near-zero CPU), which the watchdog's CPU fallback would misread as a parked
-        # deadlock (OOF-298 / PR #89750). Single lease is deliberate: this is the one pre-loop phase that
-        # can legitimately exceed the 300s default deadline (multi-GB DBs), and the lease is clamped to
-        # _MAX_LEASE_S=900. Honest worst case: a genuinely wedged DB init delays supervisor respawn by up to
-        # the lease duration. Per-chunk renewal would shrink that, but adds complexity to the migration
-        # loops for a rare failure mode.
-        report_startup_progress(600.0, phase="state_db_init_schema")
         cursor = self._conn.cursor()
         cursor.executescript(SCHEMA_SQL)
 
@@ -996,8 +984,6 @@ class SessionSchemaMixin:
     def _run_data_migrations(self, cursor: sqlite3.Cursor, current_version: int, fts5_available: bool) -> None:
         """Version-gated chain for DATA migrations only (row backfills); column additions never
         belong here. Advances schema_version at the end unless FTS5 is unavailable."""
-        # Renew the lease: the chain can rewrite whole tables on large DBs.
-        report_startup_progress(600.0, phase="state_db_data_migrations")
         # (v10 trigram backfill and v11 inline FTS re-index were superseded by v23 and removed.)
         # v11 (SUPERSEDED by v23): re-index FTS5 tables to cover tool_name + tool_calls in inline mode
         # (#16751). v23 drops and rebuilds both FTS tables in external-content form, so running the v11

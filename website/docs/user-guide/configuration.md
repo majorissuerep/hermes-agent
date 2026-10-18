@@ -12,9 +12,8 @@ After a dependency change, reactivate the checkout and restart Hermes.
 
 All settings are stored in the `~/.hermes/` directory for easy access.
 
-:::tip Easiest path to a working `config.yaml`
-Run `hermes setup --portal` — one OAuth gets you a model provider and all four Tool Gateway tools without hand-editing YAML. Portal subscribers also get 10% off token-billed providers. See [Nous Portal](../integrations/nous-portal.md).
-:::
+Run `hermes setup` to choose a supported provider. Use `/model` inside the TUI
+to switch the current session without changing older conversation messages.
 
 ## Directory Structure
 
@@ -22,13 +21,13 @@ Run `hermes setup --portal` — one OAuth gets you a model provider and all four
 ~/.hermes/
 ├── config.yaml     # Settings (model, terminal, TTS, compression, etc.)
 ├── .env            # API keys and secrets
-├── auth.json       # OAuth provider credentials (Nous Portal, etc.)
+├── auth.json       # OAuth provider credentials
 ├── SOUL.md         # Primary agent identity (slot #1 in system prompt)
 ├── memories/       # Persistent memory (MEMORY.md, USER.md)
 ├── skills/         # Agent-created skills (managed via skill_manage tool)
 ├── cron/           # Scheduled jobs
-├── sessions/       # Gateway sessions
-└── logs/           # Logs (errors.log, gateway.log — secrets auto-redacted)
+├── state.db        # Encrypted session history (SQLCipher)
+└── logs/           # Local agent/errors/update logs — secrets auto-redacted
 ```
 
 ## Managing Configuration
@@ -47,11 +46,16 @@ hermes config get model
 hermes config set model anthropic/claude-opus-4
 hermes config set terminal.backend docker
 hermes config unset terminal.backend
-hermes config set OPENROUTER_API_KEY sk-or-...  # Saves to .env
+hermes config set ANTHROPIC_API_KEY sk-ant-... # Saves to encrypted .env
 ```
 
 :::tip
-The `hermes config set` command automatically routes values to the right file — every `UPPER_SNAKE` name (`OPENROUTER_API_KEY`, `DISCORD_HOME_CHANNEL`, `TELEGRAM_GROUP_ALLOWED_USERS`, `HERMES_TIMEZONE`, …) is an environment variable and is saved to `.env`, never to `config.yaml`; dotted settings go to `config.yaml`. Any other `UPPER_SNAKE` name is saved to `.env` as-is (it is exported to the process environment for plugins and skills); names on the env writer's denylist (`HERMES_YOLO_MODE`, `PATH`, …) are refused. A known key written under the wrong prefix (`gateway.discord.foo`, where `discord.foo` is itself a known key) is refused with a did-you-mean before anything is written; pass `--force` to write it anyway. Any other unknown path under a known section (a typo such as `agent.max_turnz`, or a runtime-read key with no seeded default) is written together with a did-you-mean notice, since the schema alone cannot tell the two apart. `hermes config get` on such a path prints the value from your file together with a stderr notice that Hermes may not read it, so a leftover key cannot silently pass for a live setting.
+The `hermes config set` command routes `UPPER_SNAKE` names such as
+`ANTHROPIC_API_KEY` to the encrypted `.env`; dotted settings go to encrypted
+`config.yaml`. Names on the environment writer's denylist (`HERMES_YOLO_MODE`,
+`PATH`, …) are refused. Unknown settings such as `agent.max_turnz` produce a
+notice: saving an old or misspelled key does not make it an active setting.
+Prefer these commands over editing ciphertext or placing secrets in YAML.
 :::
 
 ## Configuration Precedence
@@ -75,9 +79,8 @@ cannot override, via a system-level managed directory. See
 
 ## Runtime Limits
 
-Long-running Hermes server surfaces (including the gateway and
-`hermes serve --isolated`) apply the configured `RLIMIT_NOFILE` soft limit
-during startup when the operating system supports it:
+The local TUI runtime applies the configured `RLIMIT_NOFILE` soft limit during
+startup when the operating system supports it:
 
 ```yaml
 runtime:
@@ -91,10 +94,15 @@ sandboxes
 where the limit cannot be changed, startup continues without changing the
 limit.
 
+`max_concurrent_sessions` limits active local conversations across processes.
+Its default `null` (also `0`) leaves the cap unbounded; it does not delete stored
+history. `max_live_sessions` bounds the private TUI runtime's in-memory records,
+without evicting another live process's session.
+
 ## Database Settings
 
 The `database:` section controls how Hermes opens its SQLite state database
-(`state.db`), which stores sessions, messages, and gateway routing:
+(`state.db`), which stores local sessions and messages:
 
 ```yaml
 database:
@@ -136,6 +144,46 @@ holds the file and verifies the converted header). Under that warning it names t
 processes currently holding the database (`<db> is held by PID <n> (<command>)`)
 so you know what to stop; when the holder scan is partial or unavailable it says
 `cannot prove the database is quiet` instead of giving an all-clear.
+
+Session search has two additional settings:
+
+```yaml
+sessions:
+  cjk_fts: true       # Use the optional CJK tokenizer when installed.
+  search_slow_ms: 1000 # Log searches taking this long; 0 logs every search.
+```
+
+## Local Jobs and Monitoring
+
+Jobs run only when invoked locally with `hermes cron run` or `hermes cron tick`;
+there is no background messaging service or inbound scheduling endpoint.
+
+```yaml
+cron:
+  catch_up_missed: true       # Allow eligible missed recurring jobs on a local tick.
+  allow_agent_scheduling: false # Prevent unattended jobs from scheduling more jobs.
+  preflight: true            # Check credentials and required skills before inference.
+  max_parallel_jobs: null    # Concurrent due jobs per tick; 1 serializes them.
+  failure_repeat_alert_hours: 6 # Deduplicate repeated failures; runs remain recorded.
+```
+
+Monitoring is opt-in. It exports operational health, not prompts, history, or
+tool contents. Without both `monitoring.export.otlp.enabled: true` and an
+endpoint, nothing is sent. Set header values through secret environment names,
+not inline credentials:
+
+```yaml
+monitoring:
+  export:
+    otlp:
+      enabled: false
+      endpoint: ""
+      headers_env: {} # e.g. Authorization: OTLP_AUTHORIZATION
+```
+
+`monitoring.export.otlp.endpoint` is the collector URL;
+`monitoring.export.otlp.headers_env` maps HTTP header names to secret environment
+variable names resolved for the owning profile.
 
 ## Environment Variable Substitution
 
@@ -232,9 +280,9 @@ terminal:
   home_mode: auto   # auto | real | profile — subprocess HOME policy
   env_passthrough: []  # Env var names to forward to sandboxed execution (terminal + execute_code)
   sync_back_max_bytes: 2147483648  # Remote backends: refuse to extract a state archive larger than this (bytes)
-  singularity_image: "docker://nousresearch/hermes-sandbox:desktop"  # Container image for Singularity backend
-  modal_image: "nousresearch/hermes-sandbox:desktop"                 # Container image for Modal backend
-  daytona_image: "nousresearch/hermes-sandbox:desktop"               # Container image for Daytona backend
+  singularity_image: "docker://nikolaik/python-nodejs:python3.13-nodejs26@sha256:b1599384efb3fb5f0e25930a9b9e8bd895cf78bb6dbb5f705f22c024db65f5dc"  # Container image for Singularity backend
+  modal_image: "nikolaik/python-nodejs:python3.13-nodejs26@sha256:b1599384efb3fb5f0e25930a9b9e8bd895cf78bb6dbb5f705f22c024db65f5dc"                 # Container image for Modal backend
+  daytona_image: "nikolaik/python-nodejs:python3.13-nodejs26@sha256:b1599384efb3fb5f0e25930a9b9e8bd895cf78bb6dbb5f705f22c024db65f5dc"               # Container image for Daytona backend
 ```
 
 `terminal.temp_dir` controls where Hermes puts session temp artifacts on the
@@ -359,7 +407,7 @@ terminal:
   # Any other image works for shell work; the screen then needs bot_desktop.placement: gateway.
   # Writing this key is a decision: a persisted container on another image is recreated on the next
   # terminal call. Left unset, an existing container is kept and the CLI / Screen pane ask first.
-  docker_image: "nousresearch/hermes-sandbox:desktop"
+  docker_image: "nikolaik/python-nodejs:python3.13-nodejs26@sha256:b1599384efb3fb5f0e25930a9b9e8bd895cf78bb6dbb5f705f22c024db65f5dc"
   docker_mount_cwd_to_workspace: false  # Mount launch dir into /workspace
   docker_run_as_host_user: false   # See "Running container as host user" below
   docker_snap_compat: false        # See "Snap-packaged Docker (AppArmor)" below
@@ -591,7 +639,7 @@ Runs commands in a [Singularity/Apptainer](https://apptainer.org) container. Des
 ```yaml
 terminal:
   backend: singularity
-  singularity_image: "docker://nousresearch/hermes-sandbox:desktop"
+  singularity_image: "docker://nikolaik/python-nodejs:python3.13-nodejs26@sha256:b1599384efb3fb5f0e25930a9b9e8bd895cf78bb6dbb5f705f22c024db65f5dc"
   container_cpu: 1                 # CPU cores
   container_memory: 5120           # MB
   container_persistent: true       # Writable overlay persists across sessions
@@ -2119,11 +2167,11 @@ This controls both the `text_to_speech` tool and spoken replies in voice mode (`
 ```yaml
 display:
   tool_progress: all      # off | new | all | verbose
-  tool_progress_command: false  # Enable /verbose slash command in messaging gateway
   focus_view: false       # CLI focus view (/focus) — reduced output, display-only
-  platforms: {}           # Per-platform display overrides (see below)
-  interim_assistant_messages: true  # Gateway: send natural mid-turn assistant updates as separate messages
-  suppress_warning_notifications: false  # Opt-in: hide automatic warning/diagnostic notices (see messaging guide)
+  interim_assistant_messages: true # Show intermediate assistant narration
+  suppress_warning_notifications: false # Opt-in: hide automatic diagnostics, never command outcomes
+  background_process_notifications: concise # concise | all | off
+  tui_status_indicator: kaomoji # kaomoji | emoji | unicode | ascii; /indicator changes it
   show_commentary: true   # Codex models: deliver commentary-channel progress narration as visible mid-turn updates
   skin: default           # Built-in or custom CLI skin (see user-guide/features/skins)
   personality: ""         # Legacy cosmetic field still surfaced in some summaries
@@ -2145,9 +2193,6 @@ display:
   tool_preview_length: 0  # Max chars for tool call previews (0 = no limit, show full paths/commands)
   turn_summary: true      # CLI only: print a one-line post-turn accounting footer after each interactive turn
   spinner_token_flow: true # CLI only: append live cumulative turn tokens to the spinner timer
-  runtime_footer:         # Gateway: append a runtime-context footer to final replies
-    enabled: false
-    fields: ["model", "context_pct", "cwd"]
   status_bar:             # CLI/TUI: choose which status-bar fields are visible
     fields: []            # empty = show the default set; see below
   file_mutation_verifier: true    # Append an advisory footer when write_file/patch calls failed this turn
@@ -2181,7 +2226,9 @@ The tally is observed from the tool-progress feed the CLI already receives, so i
 
 The count is per-turn (session totals are baselined at turn start) and updates as each API call in the turn reports usage. Nothing renders before the first usage report lands, so you never see a misleading `↓ 0 tok`.
 
-Both keys are display-only and CLI-only: they are suppressed in quiet mode, when `display.tool_progress` is `off`, in single-query/`-Q` batch runs, and in gateway/messaging surfaces (those use `display.runtime_footer` instead). Set either key to `false` to turn it off.
+Both keys are display-only and CLI-only: they are suppressed in quiet mode,
+when `display.tool_progress` is `off`, and in single-query/`-Q` batch runs. Set
+either key to `false` to turn it off.
 
 ### File-mutation verifier
 

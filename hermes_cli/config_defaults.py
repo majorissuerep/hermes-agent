@@ -7,12 +7,13 @@ docs of config.yaml.
 from hermes_cli.config_auxiliary_defaults import AUXILIARY_DEFAULTS
 from hermes_cli.config_sidecar_defaults import GUARD_DEFAULTS, ROUTING_DEFAULTS
 
-#: Image every container terminal backend (docker/modal/daytona/singularity) uses unless the
-#: user pins one. LEGACY_SANDBOX_IMAGES are the plain defaults that preceded the desktop stack
-#: (the 3.14 pin shipped between the two without a migration); a saved config still holding one
-#: is the template copied, and the config migration unsets it, never a user's own pin.
-DEFAULT_SANDBOX_IMAGE = "nousresearch/hermes-sandbox:desktop"
-LEGACY_SANDBOX_IMAGES = ("nikolaik/python-nodejs:python3.11-nodejs20", "nikolaik/python-nodejs:python3.14-nodejs22")
+#: Existing public terminal-only base. The optional headless-browser sandbox
+#: image is built separately; never default to an unpublished tag or remote desktop.
+DEFAULT_SANDBOX_IMAGE = "nikolaik/python-nodejs:python3.13-nodejs26@sha256:b1599384efb3fb5f0e25930a9b9e8bd895cf78bb6dbb5f705f22c024db65f5dc"
+LEGACY_SANDBOX_IMAGES = (
+    "nikolaik/python-nodejs:python3.11-nodejs20",
+    "nikolaik/python-nodejs:python3.14-nodejs22",
+)
 LEGACY_SANDBOX_IMAGE = LEGACY_SANDBOX_IMAGES[0]
 # Vercel Sandbox managed image (Vercel deprecated its `runtime` presets in Aug 2026).
 DEFAULT_VERCEL_IMAGE = "vercel/sandbox/universal:latest"
@@ -39,10 +40,10 @@ DEFAULT_CONFIG = {
     },
     # Soft fd limit for long-running server processes; clamped to OS hard limit. 0/false/null = off.
     "runtime": {"nofile_soft_limit": 4096},
-    # Global active chat session cap across CLI, TUI/dashboard, and messaging. None/0 = unbounded.
+    # Global active local session cap. None/0 = unbounded.
     "max_concurrent_sessions": None,
-    # Soft LRU cap on in-memory TUI/desktop/dashboard sessions. Above it the gateway evicts the
-    # least-recently-active DETACHED sessions (no live client); reopening re-resumes from disk.
+    # Soft LRU cap on in-memory TUI sessions. Closed transports may be evicted;
+    # a live local session is never taken over.
     # 0/null disables.
     "max_live_sessions": 16,
     "session": {
@@ -51,7 +52,7 @@ DEFAULT_CONFIG = {
         # terminal's session (tmux/kitty/wezterm pane, tty). false = resume globally most-recent.
         "terminal_continue": True,
     },
-    # Where the TUI/desktop gateway stages session file attachments (uploads, pasted
+    # Where the TUI stages session file attachments (uploads, pasted
     # text). "hermes-home" (default) keeps <profile home>/attachments — the dir
     # container backends bind-mount, so @file: refs resolve in the sandbox (#76577).
     # "workspace" opts into <session workspace>/.hermes/attachments: staging lands
@@ -181,10 +182,6 @@ DEFAULT_CONFIG = {
         # (per-window WARNINGs still fire).
         # See #96870.
         "sanitizer_heal_escalation_threshold": 3,
-        # Seconds of continuous reconnect failure before a platform gets needs_attention flagged in
-        # gateway status (`hermes status` / fleet monitoring). Retries never stop — a signal, not a
-        # circuit breaker. 0 = disable.
-        "reconnect_attention_after": 7200,
         # Freshness window (seconds) for the auto-continue note. After a crash/restart mid-run the
         # next user message gets "[System note: your previous turn was interrupted...]" prepended;
         # only when the last persisted transcript row is younger than this, so stale markers don't
@@ -265,9 +262,8 @@ DEFAULT_CONFIG = {
         # go first because n/nvm/asdf write PATH exports there without an interactivity guard. Turn
         # off if an rc file misbehaves when sourced non-interactively (exits on TTY check).
         "auto_source_bashrc": True,
-        # The default sandbox for every container backend: the nikolaik/python-nodejs base
-        # (Python 3.13 / Node 26) plus a display stack, so Bot Screen, computer_use and the
-        # bot's browser run INSIDE the sandbox and the pane can watch them (see bot_desktop).
+        # Pinned terminal-only base. Sandbox browser use additionally requires
+        # agent-browser + Chromium inside the chosen image; it never falls back to the host.
         "docker_image": DEFAULT_SANDBOX_IMAGE,
         "docker_forward_env": [],
         # Exact key-value env pairs set inside Docker containers (unlike docker_forward_env, which
@@ -407,11 +403,6 @@ DEFAULT_CONFIG = {
             "rewrite_loopback_urls": False,
             "loopback_host_alias": "host.docker.internal",
         },
-        # Authenticated browser-extension controller lane: a registered extension can become the
-        # exact controller for a session's browser_* tools (fail-closed once bound). Local API
-        # registration also requires the API server bearer key. developer_mode gates the privileged
-        # browser_cdp / browser_evaluate capabilities.
-        "extension_control": {"enabled": False, "developer_mode": False},
     },
     # Filesystem checkpoints: snapshot the working directory once per turn (on the first
     # write_file/patch call); restore with /rollback. Opt-in via `hermes chat --checkpoints` or
@@ -758,9 +749,6 @@ DEFAULT_CONFIG = {
         # Codex Responses commentary channel: true delivers completed commentary as mid-turn interim
         # updates; false routes it to reasoning (visible only with show_reasoning).
         "show_commentary": True,
-        "tool_progress_command": False,  # enable /verbose command in messaging gateway
-        # display.tool_progress_overrides is deprecated (use display.platforms); a user-set value is
-        # still honored at runtime and folded into platforms by migration.
         "tool_preview_length": 0,  # max chars for tool call previews (0 = no limit)
         # Human-phrased status labels for built-in tools ("Reading <file>") in CLI spinner and
         # gateway/desktop tool-progress; custom/plugin/MCP tools use the raw preview.
@@ -770,42 +758,6 @@ DEFAULT_CONFIG = {
         "turn_summary": True,
         # CLI-only: cumulative turn output tokens on the live spinner ("· ↓ 1.2k tok").
         "spinner_token_flow": True,
-        # Gateway tool-progress grouping where edits are supported: "accumulate" edits one bubble |
-        # "separate" one message per tool (noisier). Needs tool_progress enabled. Per-platform:
-        # display.platforms.<platform>.tool_progress_grouping.
-        "tool_progress_grouping": "accumulate",
-        # Custom long-running status phrases. Defaults: gateway/assets/status_phrases.yaml.
-        # `path`/`paths` = HERMES_HOME-relative YAML files/dirs (or conventional status_phrases.yaml
-        # / status_phrases/*.yaml). Keys: status, generic. mode: "append" (default) | "replace".
-        # Per-platform: display.platforms.<platform>.status_phrases.
-        "status_phrases": {},
-        # Reasoning summary rendering: "code" (💭 fenced block) | "blockquote" ("> ") | "subtext"
-        # ("-# " Discord small grey text; Discord's default). Per-platform via
-        # display.platforms.<platform>.reasoning_style.
-        "reasoning_style": "code",
-        # Auto-delete EphemeralReply system notices ("✨ New session started!", …) after N seconds
-        # where deletion is supported (Telegram; others ignore). Agent responses are never touched.
-        # 0 = disabled.
-        "ephemeral_system_ttl": 0,
-        # Per-platform display/streaming overrides; unset keys fall through to the global. Telegram
-        # has smooth native draft streaming (on); Discord/Slack only edit-based streaming, which
-        # flickers (off). Gap-fillers only: explicit user values win, and the global
-        # streaming.enabled master switch still gates everything.
-        "platforms": {
-            "telegram": {"streaming": True},
-            "discord": {"streaming": False},
-            "slack": {"streaming": False},
-            # WeCom native streaming (msgtype "stream" via aibot_respond_msg).
-            "wecom": {"streaming": True},
-        },
-        # Gateway runtime footer on the FINAL message, e.g. `model · 68% · ~/projects/hermes`.
-        # Per-platform: display.platforms.<platform>.runtime_footer.
-        "runtime_footer": {
-            "enabled": False,
-            # order shown; drop any to hide. Opt-in extras: latency, served_model (alias → the
-            # deployment a routing proxy reported / Hermes' fallback route).
-            "fields": ["model", "context_pct", "cwd"],
-        },
         # CLI/TUI status bar fields. Non-empty = only listed fields show (built-in order kept,
         # config controls visibility not ordering); empty = default set. Available: model,
         # context_detail, context_pct, cache_hit, latency, tps, compressions, bg_tasks,
@@ -1057,8 +1009,6 @@ DEFAULT_CONFIG = {
             "keyword": "jarvis",
         },
     },
-
-    "human_delay": {"mode": "off", "min_ms": 800, "max_ms": 2500},
 
     # Context engine — how the context window is managed near the token limit. "compressor" =
     # built-in lossy summarization; or a plugin name (e.g. "lcm") installed in
@@ -1466,45 +1416,9 @@ DEFAULT_CONFIG = {
         # cron.model > model.default (the main agent model). An unpinned job follows the main
         # model on every run; cron.model decouples the whole fleet from chat. "" = fall through.
         "model": "",
-        # Inference provider paired with cron.model (NOT the scheduler provider below). "" = resolve
+        # Inference provider paired with cron.model. "" = resolve
         # from global config.
         "model_provider": "",
-        # Cron SCHEDULER provider (WHEN a due job fires). "" = built-in in-process 60s ticker. Name
-        # an installed provider (plugins/cron_providers/<name>/ or $HERMES_HOME/plugins/ <name>/),
-        # e.g. "chronos" (NAS-mediated managed cron for scale-to-zero). An unknown or unavailable
-        # provider falls back to the built-in so cron never loses its trigger.
-        "provider": "",
-        # Chronos settings; consulted only when provider == "chronos". All non-secret — the agent
-        # holds NO scheduler credentials (provision reuses the Nous Portal token).
-        "chronos": {
-            # NAS/portal base URL that arms/cancels one-shots and mints the inbound fire JWT (used
-            # as the expected issuer).
-            "portal_url": "https://portal.nousresearch.com",
-            # This agent's publicly reachable base URL; NAS POSTs {callback_url}/api/cron/fire. ""
-            # -> Chronos unavailable, resolver falls back to the built-in ticker.
-            "callback_url": "",
-            "expected_audience": "",  # Expected JWT audience (e.g. "agent:{instance_id}").
-            # NAS JWKS URL for verifying the fire JWT signature. "" -> the fire endpoint refuses all
-            # tokens (never an unsigned decode).
-            "nas_jwks_url": "",
-        },
-        # Wrap delivered cron responses with a task-name header and "The agent cannot see this
-        # message" footer. False = clean output.
-        "wrap_response": True,
-        "delivery": {  # Delivery behaviour for cron output sent through a live gateway adapter.
-            # Mark cron deliveries FINAL so the platform pushes them (Telegram's "important" mode
-            # otherwise sends with disable_notification=True and briefs look undelivered). False =
-            # silent, no-push deliveries.
-            "notify": True,
-        },
-        # Make cron deliveries CONTINUABLE (user can reply to a brief with it in context). False
-        # keeps deliveries isolated to the job's session; per-job `attach_to_session` overrides.
-        # Thread-capable platforms (Telegram topics, Discord/Slack threads) get a seeded thread per
-        # job via create_handoff_thread; DM-only platforms mirror the brief into the target DM
-        # session. Appended at a turn boundary via mirror_to_session, cached system prompt
-        # untouched. User-written bare platforms address home conversations, unlike `all`
-        # broadcast expansions, which do not gain mirror eligibility.
-        "mirror_delivery": False,
         # Max due jobs run in parallel per tick. None/0 = unbounded (thread count only); 1 = serial.
         # Env override: HERMES_CRON_MAX_PARALLEL.
         "max_parallel_jobs": None,
@@ -1518,10 +1432,6 @@ DEFAULT_CONFIG = {
         # timeout of its own against a wedged sqlite3.connect, and an unbounded hang wedges the
         # job's dispatch guard forever. Env: HERMES_CRON_SESSION_DB_TIMEOUT. 0 = unlimited.
         "session_db_timeout_seconds": 10,
-        # Timeout (seconds) per media attachment send during gateway delivery; large attachments
-        # (long TTS audio, big exports) need more than 30s. Env: HERMES_CRON_MEDIA_SEND_TIMEOUT.
-        # Keep in sync with cron.scheduler._DEFAULT_MEDIA_SEND_TIMEOUT.
-        "media_send_timeout_seconds": 300,
         # Managed systemd gateway with no user session (containers, no linger): false runs
         # cron jobs as a direct external subprocess (warns once; no cgroup isolation), true
         # fails closed with the enable-linger remedy. Kanban always requires a scope.
@@ -1717,7 +1627,7 @@ DEFAULT_CONFIG = {
         # TCP timeout before falling back. True skips IPv6 entirely.
         "force_ipv4": False,
     },
-    # Gateway monitoring: service health + redacted operational diagnostics exported over OTLP to an
+    # Local job health + redacted operational diagnostics exported over OTLP to an
     # operator endpoint (OTEL Collector, DataDog, ...). Content-free by construction: no prompts,
     # messages, tool args/results, session history, usage analytics, audit logs, or trajectories.
     # Nothing is collected or sent until enabled with an endpoint.
@@ -1726,21 +1636,6 @@ DEFAULT_CONFIG = {
         # mint a fresh UUID on first use; clear it to rotate. Carries no account identity.
         "install_id": "",
         "export": {"otlp": {"enabled": False, "endpoint": "", "headers_env": {}}},
-    },
-    "streaming": {
-        "enabled": False,  # When false, each response is delivered as one final message.
-        # auto = native drafts where supported (Telegram DMs, Bot API 9.5+), edits elsewhere
-        # (Discord, Slack, Matrix, Telegram groups); draft = drafts with edit fallback; edit =
-        # progressive editMessageText only; off = disabled.
-        "transport": "auto",
-        # Minimum seconds between progressive edits (Telegram's ~1 edit/s flood envelope).
-        "edit_interval": 0.8,
-        # Flush the buffer once this many chars accumulate, so short replies feel instant.
-        "buffer_threshold": 24,
-        "cursor": " \u2589",  # Cursor glyph appended to the in-progress message.
-        # Telegram only: when >0, if the preview was visible at least this many seconds the final
-        # edit is sent as a fresh message so the timestamp reflects completion.
-        "fresh_final_after_seconds": 0.0,
     },
     # Automatic cleanup of ~/.hermes/state.db, which otherwise grows without bound and slows FTS5
     # inserts, /resume listing, and insights queries.
@@ -2101,7 +1996,7 @@ DEFAULT_CONFIG = {
         # Extra ports detection probes for an external llama-server (besides 8080).
         "detect_ports": [],
     },
-    "_config_version": 51,  # Config schema version - bump this when adding new required fields
+    "_config_version": 52,  # Config schema version - bump this when adding new required fields
 }
 
 

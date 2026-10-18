@@ -247,3 +247,50 @@ def test_the_closure_is_pres_committed_bytes_read_in_one_cat_file_spawn(tmp_path
     for rel in RECOVERY_CLOSURE:
         assert (closure / rel).read_bytes() == f"# {rel} at pre\n".encode()
     assert spawns == ["ls-tree", "cat-file"]
+
+
+@pytest.mark.platforms("posix")
+@pytest.mark.live_system_guard_bypass  # Actual launches are confined to the fixture-owned Git repo.
+@pytest.mark.parametrize("entry", ["launcher", "runtime-command"])
+def test_corrupt_recovery_never_falls_through_to_another_installs_bootstrap(tmp_path, entry):
+    """A missing selected-tree bootstrap must not resolve through an installed .pth."""
+    import venv
+
+    root, env, _, _ = _killed_mid_write(tmp_path, "hermes_bootstrap.py")
+    (closure,) = (root / ".git/hermes-update-recovery").iterdir()
+    shutil.rmtree(closure.parent)
+    oid = subprocess.check_output(
+        ["git", "-C", str(root), "rev-parse", f"{closure.name}:hermes_cli/_early_recovery.py"],
+        env=env, text=True).strip()
+    obj = root / ".git/objects" / oid[:2] / oid[2:]
+    obj.chmod(0o644)
+    obj.write_bytes(zlib.compress(b"blob 8\0foreign!"))
+    foreign = tmp_path / "other-install"
+    foreign.mkdir()
+    ran = tmp_path / "FOREIGN_BOOTSTRAP_RAN"
+    (foreign / "hermes_bootstrap.py").write_text(f"open({str(ran)!r}, 'w').close()\n")
+    python_home = tmp_path / "isolated-python"
+    venv.EnvBuilder(with_pip=False).create(python_home)
+    site = next((python_home / "lib").glob("python*/site-packages"))
+    (site / "foreign-install.pth").write_text(str(foreign) + "\n")
+    launcher = _launchers._mint_shell_launcher(
+        "hermes", tmp_path / "bin", python_home / "bin/python",
+        _launchers._launcher_script("hermes", root, None))
+    argv = [str(launcher)] if entry == "launcher" else _launchers.runtime_command(
+        root, python=python_home / "bin/python", code="print('APP_REACHED')")
+    result = subprocess.run(argv, cwd=tmp_path, env=env, capture_output=True,
+                            text=True, timeout=10, check=False)
+    assert not ran.exists(), result.stdout + result.stderr
+    assert result.returncode != 0
+    assert "APP_REACHED" not in result.stdout
+    assert (root / ".git/hermes-update-pull").is_file()
+    assert not (root / ".git/hermes-update-recovery").exists()
+
+
+def test_native_runtime_repair_preserves_canonical_entry_identity(tmp_path):
+    from hermes_platform.process_argv import inline_bootstrap_argv
+
+    command = _launchers.runtime_command(tmp_path, ["chat", "-q", "hello"])
+    assert inline_bootstrap_argv(command) == [command[0], "-m", "hermes_cli.main", "chat", "-q", "hello"]
+    foreign = [*command[:3], "print('foreign wrapper'); " + command[3], *command[4:]]
+    assert inline_bootstrap_argv(foreign) is None

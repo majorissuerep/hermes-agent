@@ -238,11 +238,11 @@ def _cleanup_quarantined_exes(scripts_dir: Path | None = None) -> None:
 
 
 def _configured_features_missing_deps() -> list[tuple[str, str, str]]:
-    """Check configured platforms/MCP in the fresh, selected update-build child.
+    """Check outgoing MCP support in the fresh, selected update-build child.
 
     PM preserves recorded extras atomically, but configuration can reference an
     unselected SDK. Never call this in the updater's stale import graph (#10651).
-    Rows are ``(label, hint, candidate extra)``: a platform's SDK is the extra named after it.
+    Rows are ``(label, hint, candidate extra)`` for configured local capabilities.
     """
     missing: list[tuple[str, str, str]] = []
     try:
@@ -259,8 +259,7 @@ def _configured_features_missing_deps() -> list[tuple[str, str, str]]:
 def _install_configured_features_missing_deps(project_root: Path) -> None:
     """Add the extras configured features need to the dependency environment (#124228).
 
-    Recorded extras never follow config, so an enabled platform whose SDK is not
-    selected would come up without its adapter after the gateway restart.
+    A configured outgoing MCP client must be available to the selected terminal runtime.
     """
     import pm
     from pm.extras import extra_supported
@@ -280,7 +279,7 @@ def _install_configured_features_missing_deps(project_root: Path) -> None:
         else:
             missing = [row for row in missing if row[2].replace("_", "-") not in extras]
     if missing:
-        print("  ⚠ Configured features whose dependencies are still missing — the gateway will fail to load them on restart:")
+        print("  ⚠ Configured features whose dependencies are still missing — local terminal sessions cannot load them:")
         for feature, hint, _extra in missing:
             print(f"    - {feature}: {hint}")
 

@@ -1,17 +1,9 @@
-"""Approval gate for the default sandbox image change (nikolaik base → hermes-sandbox:desktop).
+"""Local approval gate for changing a persisted terminal sandbox image.
 
-A persisted Docker sandbox is state the user built up; a default flip must not replace it under
-them. ``DockerEnvironment`` keeps a container whose image differs from an UNPINNED default and
-this module is where the user decides: approve (pin the new image; the next terminal use
-recreates the container — ``/root`` and ``/workspace`` are host mounts and carry over, system
-packages get reinstalled, 3.11 venvs need a rebuild) or keep (pin the image the container runs,
-which also ends the notice). Surfaces: the interactive CLI startup offer here, the Screen pane's
-switch action (``display.switchSandboxImage``) and the plain ``hermes config set``. Headless
-surfaces (gateway, cron) never decide; they keep the sandbox and log.
-
-Modal restores its snapshot and Daytona reuses its labeled sandbox regardless of the configured
-image, so existing sandboxes there are untouched without any gate; only fresh ones get the new
-image.
+An unpinned default change never discards an existing writable container layer.
+The interactive CLI offers a choice; headless use keeps the existing sandbox and
+logs an actionable configuration command. User-pinned images retain their normal
+explicit replacement semantics. Modal and Daytona keep their existing snapshots.
 """
 
 from __future__ import annotations
@@ -107,11 +99,11 @@ def explain_lines(switch: PendingSwitch) -> list[str]:
     n = len(switch.containers)
     return [
         f"Your Docker sandbox ({n} container{'s' if n != 1 else ''}) runs {switch.current_image}.",
-        f"The default sandbox image is now {switch.target_image}: Python 3.13, Node 26, and a desktop",
-        "so Bot Screen, computer_use and the browser run inside the sandbox instead of on this machine.",
+        f"The terminal-only default sandbox image is now {switch.target_image}.",
+        "No display server or remote desktop is included. Browser tools require a sandbox-local browser stack.",
         "Switching recreates the container on the next terminal call. Files in /root and /workspace",
         "stay (they live on this machine); packages installed with apt/pip/npm -g inside the container",
-        "are reinstalled on demand; Python 3.11 virtualenvs need a rebuild.",
+        "are not preserved; install required packages again after switching. Rebuild incompatible virtualenvs.",
     ]
 
 

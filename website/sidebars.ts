@@ -126,7 +126,6 @@ const sidebars: SidebarsConfig = {
             'user-guide/features/credential-vault',
             'user-guide/features/sandbox',
             'user-guide/features/computer-use',
-            'user-guide/features/bot-screen',
             'user-guide/features/vision',
             'user-guide/features/image-generation',
             'user-guide/features/spotify',

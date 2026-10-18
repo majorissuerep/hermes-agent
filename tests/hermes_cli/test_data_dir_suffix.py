@@ -62,9 +62,7 @@ print(json.dumps(result))
 @pytest.mark.platforms("linux", "macos", "windows")
 def test_startup_readers_use_the_suffixed_home(tmp_path, monkeypatch):
     from hermes_constants import get_process_hermes_home
-    from hermes_cli.dashboard_procs import _hermes_home_dir
     from hermes_cli.env_loader import load_hermes_dotenv
-    from hermes_startup_watchdog import get_startup_watchdog_dump_path
 
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "AppData" / "Local"))
@@ -77,8 +75,6 @@ def test_startup_readers_use_the_suffixed_home(tmp_path, monkeypatch):
 
     load_hermes_dotenv(project_env=tmp_path / "absent.env", load_external_secrets=False)
     assert os.environ.get("SUFFIX_TEST_CREDENTIAL") == "suffixed"
-    assert _hermes_home_dir() == home
-    assert get_startup_watchdog_dump_path() == home / "logs" / "gateway-startup-watchdog.log"
 
 
 def test_suffix_does_not_change_explicit_or_context_home(tmp_path, monkeypatch):

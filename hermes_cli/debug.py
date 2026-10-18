@@ -30,9 +30,7 @@ _USER_AGENT = "hermes-agent/debug-share"
 _MAX_LOG_BYTES = 512_000  # per log file for upload (paste.rs caps at ~1 MB)
 _AUTO_DELETE_SECONDS = 21600  # 6 hours
 
-# Pending-deletion tracking: the gateway cron ticker calls ``_sweep_expired_pastes`` hourly and
-# ``hermes debug`` sweeps on entry (CLI-only users). Replaced a fork-and-sleep subprocess that
-# leaked ~20 MB per share.
+# ``hermes debug`` sweeps expired-paste records on entry; no sleeping child or service is needed.
 
 
 def _pending_file() -> Path:
@@ -115,13 +113,6 @@ with `hermes debug delete`.
 Use --local to view the report without uploading.
 """
 
-_GATEWAY_PRIVACY_NOTICE = (
-    "⚠️ **Privacy notice:** This uploads system info + recent log tails "
-    "(may contain conversation fragments) to a public paste service. "
-    "Full logs are NOT included from the gateway — use `hermes debug share` "
-    "from the CLI for full log uploads.\n"
-    "Pastes auto-delete after 6 hours (dpaste.com fallback pastes: kept for "
-    "1 day, cannot be deleted).")
 
 
 def _extract_paste_id(url: str) -> Optional[str]:
@@ -220,25 +211,9 @@ class LogSnapshot:
 def _primary_log_path(log_name: str) -> Optional[Path]:
     """Where *log_name* would live if present. Doesn't check existence."""
     from hermes_cli.logs import log_file_path
-    return log_file_path(log_name)  # update/handoff: the ROOT home's, whatever profile is active
+    return log_file_path(log_name)  # update belongs to the root home even under a named profile.
 
 
-# Logs written by a client process, invisible to a remote/docker/SSH backend running `debug
-# share`; a bare "(file not found)" would read as "the app logged nothing" and misdirect triage.
-_CLIENT_SIDE_LOGS = {
-    "desktop": (
-        "written by Hermes Desktop on the machine running the app, not by this "
-        "backend. If the desktop connects to a remote/docker/SSH backend, collect "
-        "it on that client machine")}
-
-
-def _missing_log_note(log_name: str) -> str:
-    """Explain a missing log instead of stating a bare absence."""
-    reason = _CLIENT_SIDE_LOGS.get(log_name)
-    if reason is None:
-        return "(file not found)"
-    primary = _primary_log_path(log_name)
-    return f"(not on this host: {reason}{f' — expected at {primary}' if primary else ''})"
 
 
 def _resolve_log_path(log_name: str) -> Optional[Path]:
@@ -302,7 +277,7 @@ def _capture_log_snapshot(
     log_path = _resolve_log_path(log_name)
     if log_path is None:
         primary = _primary_log_path(log_name)
-        tail = "(file empty)" if primary and primary.exists() else _missing_log_note(log_name)
+        tail = "(file empty)" if primary and primary.exists() else "(file not found)"
         return LogSnapshot(path=None, tail_text=tail, full_text=None)
 
     try:
@@ -340,8 +315,13 @@ def _capture_log_snapshot(
 
 # Logs the debug report tails, in output order. ``agent`` gets the full ``--lines`` budget;
 # the rest are capped at 100 lines. Every log but ``errors`` is also uploaded in full.
-_REPORT_LOGS = ("agent", "errors", "gateway", "gui", "desktop", "update", "handoff")
-_FULL_LOGS = ("agent", "gateway", "gui", "desktop", "update", "handoff")
+_REPORT_LOGS = ("agent", "errors", "update", "mcp")
+_FULL_LOGS = ("agent", "mcp", "update")
+
+
+def _full_log_filenames() -> tuple[str, ...]:
+    from hermes_cli.logs import LOG_FILES
+    return tuple(LOG_FILES[name] for name in _FULL_LOGS)
 
 
 def _tail_budget(name: str, log_lines: int) -> int:
@@ -379,8 +359,7 @@ def collect_debug_report(
     buf.write(dump_text or _capture_dump())
     if log_snapshots is None:
         log_snapshots = _capture_default_log_snapshots(log_lines)
-    # In-process sanitiser heal counters: populated only inside a process that ran agent turns
-    # (gateway /debug share); a fresh CLI's errors.log tail carries the same escalation lines.
+    # A fresh terminal's errors.log tail also carries sanitizer escalation lines.
     with contextlib.suppress(Exception):
         # See #96870.
         from agent.agent_runtime_helpers import get_sanitizer_heal_stats
@@ -462,18 +441,7 @@ def build_debug_share(
     failures: list[str] = []
     # The summary report is required (raises so callers can fall back); full logs are optional.
     urls = {"Report": upload_to_pastebin(report, expiry_days=expiry)}
-    # Full logs to upload (the source of this list is checked by tests to ensure
-    # new logs aren't silently skipped).
-    for label in (
-        "agent.log",
-        "gateway.log",
-        "gui.log",
-        "desktop.log",
-        # Update-failure diagnostics: the only files holding the root cause
-        # of a failed update/Desktop rebuild (#100874).
-        "update.log",
-        "desktop-update-handoff.log",
-    ):
+    for label in _full_log_filenames():
         content = bundle.get(label)
         if not content:
             continue
@@ -517,14 +485,8 @@ def run_debug_share(args):
         print("Collecting debug report...")
         bundle = collect_share_bundle(log_lines=log_lines, redact=redact)
         print(bundle["report"])
-        for title, label in (
-            ("FULL agent.log", "agent.log"),
-            ("FULL gateway.log", "gateway.log"),
-            ("FULL gui.log", "gui.log"),
-            ("FULL desktop.log", "desktop.log"),
-            ("FULL update.log", "update.log"),
-            ("FULL desktop-update-handoff.log", "desktop-update-handoff.log"),
-        ):
+        for label in _full_log_filenames():
+            title = f"FULL {label}"
             body = bundle.get(label)
             if body:
                 print(f"\n\n{'=' * 60}")
@@ -570,10 +532,8 @@ _NOUS_PRIVACY_NOTICE = """\
     NOT a public paste service. The following is included:
   • System info (OS, Python/Hermes version, provider, which API keys are
     configured — NOT the actual keys)
-  • Full agent.log, gateway.log, and desktop.log (up to 512 KB each — likely
-    contains conversation content, tool outputs, and file paths), plus
-    update.log and desktop-update-handoff.log when present (update/hand-off
-    output — the root cause of update failures)
+  • Full agent.log, mcp-stderr.log and update.log when present (up to 512 KB
+    each; may contain conversations, tool output, paths and update diagnostics)
 
   • The bundle is viewable only by Nous staff (and allowlisted Discord mods)
     via a Google-login-gated viewer.

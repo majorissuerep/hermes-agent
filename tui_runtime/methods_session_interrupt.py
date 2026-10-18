@@ -16,8 +16,7 @@ def _resume_wake_after_interrupt() -> None:
 
     ``_wake_resume_if_owner`` no-ops unless that object holds the lease, so an
     in-progress capture owned by someone else is not stolen. Interrupt already
-    silenced TTS before it can return an error; this matches that cut. A
-    ``not_interrupted`` hosted-task mismatch must not call it.
+    silenced TTS before it can return an error; this matches that cut.
     """
     with _voice_sid_lock:
         voice_owner = _voice_wake_owner
@@ -31,8 +30,7 @@ def _resume_wake_after_interrupt() -> None:
 
 # ── interrupt / steer / redirect ─────────────────────────────────────
 def _note_user_input(session: dict) -> None:
-    """Mark the running turn as touched by the user (also covers compute-host turns, whose agent
-    flag never reaches this process); popped by the turn's own finally."""
+    """Mark the running turn as touched by the user; popped by the turn's own finally."""
     with session["history_lock"]:
         if session.get("running"):
             session["_turn_user_input"] = True
@@ -43,7 +41,6 @@ def _note_user_input(session: dict) -> None:
 @method("session.interrupt")
 def _(rid, params: dict) -> dict:
     _tts_stream_stop()  # keypress barge-in also silences streaming TTS (voice is process-global)
-    resume_wake = True
     try:
         session, err = _sess_nowait(params, rid)
         if err:
@@ -52,7 +49,7 @@ def _(rid, params: dict) -> dict:
         _note_user_input(session)
         # No agent wait: a turn parked on the deferred build already honors _turn_cancel_requested. Waiting here
         # failed Stop with 5032 once the build failed or outlived 30s (and started a build for a lazy session), so
-        # the Desktop, which interrupts before session.close, could not delete such a session (#133262).
+        # the terminal could not stop or close such a session (#133262).
         _interrupt_session_turn(sid, session)
         # Retire the crash-recovery marker NOW: until the run thread's finally, a backend exit looks like a crash
         # and session.resume auto-continues the turn the user just stopped (the extra key covers compression
@@ -62,11 +59,10 @@ def _(rid, params: dict) -> dict:
         _retire_turn_marker(session, active_marker_key)
         return _ok(rid, {"status": "interrupted"})
     finally:
-        if resume_wake:
-            try:
-                _resume_wake_after_interrupt()
-            except Exception:
-                logger.debug("session.interrupt wake resume failed", exc_info=True)
+        try:
+            _resume_wake_after_interrupt()
+        except Exception:
+            logger.debug("session.interrupt wake resume failed", exc_info=True)
 
 
 def _apply_correction(rid, session: dict, verb: str, text: str, accepted_status: str) -> dict:

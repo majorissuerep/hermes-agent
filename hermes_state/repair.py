@@ -21,7 +21,6 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from hermes_constants import get_hermes_home
-from hermes_startup_watchdog import report_startup_progress
 from hermes_state.holders import read_only_db_uri
 from hermes_state.common import (
     _acquire_db_flock, _clear_lock_holder_record, _describe_lock_holder, _read_lock_holder_record,
@@ -870,9 +869,6 @@ def repair_state_db_schema(db_path: Path, *, backup: bool = True) -> dict[str, A
     See #50502.
     """
     report: dict[str, Any] = {"repaired": False, "strategy": None, "backup_path": None, "error": None}
-    # Startup-watchdog lease: repair is I/O-bound (near-zero CPU), which the watchdog's CPU fallback would
-    # misread as a parked deadlock. One lease (clamped to _MAX_LEASE_S=900) beats per-chunk renewal complexity.
-    report_startup_progress(900.0, phase="state_db_repair")
     db_path = Path(db_path)
     # Path.exists() on 3.13+ is os.path.exists() semantics: it swallows
     # EACCES, so a permission-denied DB misreported as "does not exist" and

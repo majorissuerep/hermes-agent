@@ -43,10 +43,10 @@ jobs:
           config: .hadolint.yaml
           failure-threshold: warning
 
-      - name: Lint Dockerfile (hadolint, sandbox desktop image)
+      - name: Lint Dockerfile (hadolint, terminal sandbox image)
         uses: hadolint/hadolint-action@54c9adbab1582c2ef04b2016b760714a4bfde3cf # v3.1.0
         with:
-          dockerfile: docker/sandbox-desktop.Dockerfile
+          dockerfile: docker/sandbox-terminal.Dockerfile
           config: .hadolint.yaml
           failure-threshold: warning
 

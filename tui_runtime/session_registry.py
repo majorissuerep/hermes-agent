@@ -425,7 +425,7 @@ def _lazy_resume_info(cwd: str, *, model: str = "", provider: str = "", profile:
 
 def _deferred_session_record(
     session_key: str, *, cols: int, cwd: str, history: list, lease, source: str = "tui",
-    close_on_disconnect: bool = False, display_history_prefix: list | None = None,
+    display_history_prefix: list | None = None,
     profile_home: Path | None = None, lazy: bool = False, model_override=None,
     resume_runtime_overrides: dict | None = None, todo_state: dict | None = None,
     explicit_cwd: bool = False) -> dict:
@@ -433,7 +433,7 @@ def _deferred_session_record(
     now = time.time()
     return {
         "agent": None, "agent_error": None, "agent_ready": threading.Event(), "attached_images": [],
-        "close_on_disconnect": close_on_disconnect, "active_session_lease": lease, "cols": cols,
+        "active_session_lease": lease, "cols": cols,
         "created_at": now, "cwd": cwd, "display_history_prefix": display_history_prefix or [],
         "edit_snapshots": {}, "explicit_cwd": bool(explicit_cwd), "history": history,
         "history_lock": threading.Lock(), "history_version": 0, "image_counter": 0,

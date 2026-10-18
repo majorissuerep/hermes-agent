@@ -86,7 +86,7 @@ The strongest isolation is not running commands on your machine at all. The term
 ```yaml
 terminal:
   backend: docker
-  docker_image: "nousresearch/hermes-sandbox:desktop"
+  docker_image: "nikolaik/python-nodejs:python3.13-nodejs26@sha256:b1599384efb3fb5f0e25930a9b9e8bd895cf78bb6dbb5f705f22c024db65f5dc"
   docker_forward_env: []  # Explicit allowlist only; empty keeps secrets out of the container
 ```
 

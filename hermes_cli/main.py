@@ -3,7 +3,7 @@
 
 Usage:
     hermes                     # Interactive chat (default)
-    hermes chat / gateway / setup / status / cron / doctor / update / ...
+    hermes chat / setup / status / cron / doctor / update / ...
     hermes --version           # Show version and update status
     hermes <cmd> --help        # Per-command help
 """
@@ -50,17 +50,6 @@ import itertools
 # A literal ``~``/``$VAR`` in HERMES_HOME (fish, or any quoted value) must become absolute
 # before the first reader — otherwise it resolves against cwd and scaffolds <cwd>/~/.hermes.
 _startup_fast.normalize_hermes_home_env()
-
-# Startup-liveness watchdog: for gateway runs, arm BEFORE the heavy import
-# graph below — an import-time deadlock (native-extension init, contended
-# import lock) is exactly the "wedged before the event loop, no logs, live
-# PID" class it exists for. ``hermes_startup_watchdog`` is stdlib-only so it
-# cannot itself wedge. The match requires the ADJACENT pair ``gateway run``
-# (wherever global flags like ``-p <profile>`` put it) so unrelated commands
-# mentioning both words never arm a 300s hard-exit timer. Foreground runs arm
-# too — a pre-loop wedge is just as dead without a supervisor; GatewayRunner
-# disarms once the event loop is live.
-
 
 
 def _exit_after_oneshot(rc: object) -> None:
@@ -162,6 +151,9 @@ def _run_and_exit_oneshot(
         # still escaping means it malfunctioned. Print it but never fall
         # through to interpreter teardown (the SIGABRT path this routine fixes).
         import traceback
+        import logging
+
+        logging.getLogger(__name__).exception("Hermes command failed before shutdown")
         try:
             from hermes_constants import emit_partial_update_hint
             if not emit_partial_update_hint(exc):

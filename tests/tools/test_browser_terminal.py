@@ -18,6 +18,31 @@ def test_unsupported_selected_sandbox_refuses_before_host_browser_discovery(monk
     assert "browser_cmd" not in result
 
 
+def test_missing_sandbox_browser_cli_refuses_with_image_prerequisite(monkeypatch):
+    from tools import browser_tool_session as session
+    from tools import browser_terminal as target
+    from tools.environments import streams
+
+    env = SimpleNamespace()
+    monkeypatch.setattr(target, "terminal_backend", lambda: "docker")
+    monkeypatch.setattr(target, "terminal_environment", lambda **_: env)
+    probes = []
+
+    def run_in(owner, argv, **kwargs):
+        assert owner is env
+        probes.append(argv)
+        return SimpleNamespace(returncode=127)
+
+    monkeypatch.setattr(streams, "run_in", run_in)
+    monkeypatch.setattr(session._install, "_find_agent_browser", lambda: pytest.fail("host CLI discovery"))
+    result = session._browser_command_preflight()
+    assert result["success"] is False
+    assert "agent-browser is missing inside the selected sandbox" in result["error"]
+    assert "sandbox-terminal.Dockerfile" in result["error"]
+    assert len(probes) == 1
+    assert "browser_cmd" not in result
+
+
 def test_failed_selected_terminal_command_has_no_host_fallback(monkeypatch):
     from tools import browser_tool_session as session
     from tools import browser_terminal as target

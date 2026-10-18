@@ -138,7 +138,7 @@ def test_orphan_kwarg_labels_ws_orphan_reap_without_client_gone_prefix(captured,
 
 
 def test_teardown_with_pending_broadcasts_approval_cancelled(captured, session, pending_entry):
-    """close_on_disconnect / idle reclaim can drop the queue via unregister without an interrupt."""
+    """Session close / idle reclaim can drop the queue via unregister without an interrupt."""
     server._teardown_session(session, end_reason="ws_orphan_reap")
 
     cancelled = _cancelled_events(captured)

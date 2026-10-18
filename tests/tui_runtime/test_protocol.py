@@ -86,10 +86,6 @@ def test_unknown_method(server):
     assert resp["error"]["code"] == -32601
 
 
-
-
-
-
 @pytest.mark.parametrize("kind", ["legacy", "hard-only", "dynamic-getattr"])
 def test_session_interrupt_uses_explicit_stop_compatibility(server, monkeypatch, kind):
     calls = []
@@ -137,8 +133,6 @@ def test_session_interrupt_uses_explicit_stop_compatibility(server, monkeypatch,
 
 
 # ── write_json ────────────────────────────────────────────────
-
-
 
 
 def test_live_session_payload_replays_pending_approval(server, monkeypatch):
@@ -203,8 +197,6 @@ def test_live_session_payload_replays_open_requests(server):
                                          "params": {"session_id": "runtime-session", "question": "Which?", "choices": ["a", "b"]}}]
     assert payload["open_requests"][0]["params"] is not req.params
     assert "open_requests" not in other
-
-
 
 
 # ── _emit ────────────────────────────────────────────────────────────
@@ -310,79 +302,6 @@ def test_send_returns_an_answer_committed_after_the_deadline_expired(capture, mo
     assert not server_requests._open
 
 
-def _silent_ws():
-    """A WebSocket client build that predates server→client requests: receives the frame, never answers."""
-    from tui_runtime.ws import WSTransport
-
-    class _SilentWS(WSTransport):
-        def __init__(self):
-            self._ws, self._loop, self._peer, self._auth_identity = object(), None, "test", None
-            self.frames: list[dict] = []
-
-        def write(self, obj):
-            self.frames.append(obj)
-            return True
-
-        def close(self):
-            pass
-
-    return _SilentWS()
-
-
-def _ws_session(server, sid, peer):
-    server._sessions[sid] = {"session_key": sid, "transport": peer, "history": [], "history_lock": threading.Lock(),
-                             "agent_ready": None}
-
-
-def test_server_request_fails_fast_for_a_ws_client_that_never_advertised(server):
-    """A WebSocket client that never sent ``client.capabilities`` cannot answer, so send() returns the
-    error-response shape (None) at once instead of stalling the agent for the deadline (#112548).
-    The frame is never written; nothing is left open for a reconnect replay."""
-    from tui_runtime import server_requests
-
-    peer = _silent_ws()
-    _ws_session(server, "ws-old", peer)
-    t0 = time.monotonic()
-    assert server_requests.send("clarify", "ws-old", {"question": "q?", "choices": None, "multi_select": False},
-                                timeout=5) is None
-    assert time.monotonic() - t0 < 1
-    assert peer.frames == []
-    assert server_requests.open_requests("ws-old") == []
-    settled = []
-    server_requests.send_async("approval", "ws-old", {"request_id": "r1", "command": "rm", "description": "",
-                                                      "pattern_key": "", "pattern_keys": []}, settled.append)
-    assert settled == [None]
-
-
-def test_server_request_waits_for_a_ws_client_that_advertised(server):
-    """``client.capabilities {server_requests: true}`` on the connection marks it answerable: the frame is
-    written and the wait is a real one (here: answered by the response frame)."""
-    from tui_runtime import server_requests
-    from tui_runtime.transport import bind_transport, reset_transport
-
-    peer = _silent_ws()
-    _ws_session(server, "ws-new", peer)
-    token = bind_transport(peer)
-    try:
-        response = server.handle_request({"id": 1, "method": "client.capabilities", "params": {"server_requests": True}})
-    finally:
-        reset_transport(token)
-    assert "clarify" in response["result"]["server_requests"]
-
-    box = {}
-    thread = threading.Thread(target=lambda: box.setdefault("r", server_requests.send("sudo", "ws-new", {}, timeout=5)),
-                              daemon=True)
-    thread.start()
-    req = _wait_open(server_requests)
-    assert peer.frames[-1]["id"] == req.id
-    assert server.dispatch({"jsonrpc": "2.0", "id": req.id, "result": {"value": "yes"}}) is None
-    thread.join(timeout=5)
-    assert box["r"] == {"value": "yes"}
-    # Disconnect forgets the advertisement; the next connection must advertise again.
-    server.unregister_live_transport(peer)
-    assert server_requests.answers_requests(peer) is False
-
-
 def test_server_request_error_response_fails_fast(server):
     """A client that advertised but has no handler for the method answers -32601: that error frame settles
     send() to None at once instead of the agent waiting for the deadline."""
@@ -400,89 +319,7 @@ def test_server_request_error_response_fails_fast(server):
     assert box["result"] is None
 
 
-def _two_window_session(server, sid):
-    """A session two advertised Desktop windows are attached to (a FanoutTransport of WS peers)."""
-    import asyncio
-
-    from tui_runtime import server_requests
-    from tui_runtime.transport import FanoutTransport
-
-    # The fanout awaits a WS peer's batched send (write_many_async) on its loop.
-    loop = asyncio.new_event_loop()
-    threading.Thread(target=loop.run_forever, daemon=True).start()
-    windows = (_silent_ws(), _silent_ws())
-    for window in windows:
-        async def _write_many_async(frames, window=window):
-            return all([window.write(frame) for frame in frames])
-        window._loop, window.write_many_async = loop, _write_many_async
-        server_requests.advertise(window, True)
-    _ws_session(server, sid, FanoutTransport(*windows))
-    return windows
-
-
-def _not_shown(req):
-    from tui_runtime import server_requests
-    return {"jsonrpc": "2.0", "id": req.id, "error": {"code": server_requests.NOT_SHOWN_CODE, "message": "not here"}}
-
-
-def test_window_owned_request_refuses_at_once_when_no_window_shows_the_session(server):
-    """#119333: every attached window says it does not show the session → preview.read resolves with the
-    distinct not-shown refusal now, instead of the agent waiting out the 45s bridge deadline."""
-    from tui_runtime import server_requests
-
-    windows = _two_window_session(server, "s-none")
-    box = {}
-    thread = threading.Thread(target=lambda: box.setdefault("r", server._ask("preview.read", "s-none", {}, timeout=30)),
-                              daemon=True)
-    thread.start()
-    req = _wait_open(server_requests)
-    t0 = time.monotonic()
-    assert server.dispatch(_not_shown(req), windows[0]) is None
-    # A replayed decline from the same window is still one window's vote.
-    server.dispatch(_not_shown(req), windows[0])
-    time.sleep(0.05)
-    assert thread.is_alive()
-    server.dispatch(_not_shown(req), windows[1])
-    thread.join(timeout=2)
-    assert not thread.is_alive() and time.monotonic() - t0 < 2
-    assert json.loads(box["r"]) == {"success": False, "error": server_requests.NOT_SHOWN_MESSAGE}
-    assert server_requests.open_requests("s-none") == []
-
-
-def test_window_owned_request_decline_does_not_beat_the_owner_window(server):
-    """#113348 stays fixed: one bystander window declining leaves the request open for the window that
-    shows the session, and its answer is the result."""
-    from tui_runtime import server_requests
-
-    bystander, owner = _two_window_session(server, "s-own")
-    box = {}
-    thread = threading.Thread(target=lambda: box.setdefault("r", server._ask("preview.read", "s-own", {}, timeout=5)),
-                              daemon=True)
-    thread.start()
-    req = _wait_open(server_requests)
-    server.dispatch(_not_shown(req), bystander)
-    # An unattributed decline (proxied / relayed frame) is not a window's vote either.
-    assert server_requests.resolve_response(_not_shown(req)) is True
-    time.sleep(0.05)
-    assert thread.is_alive() and [r["id"] for r in server_requests.open_requests("s-own")] == [req.id]
-    server.dispatch({"jsonrpc": "2.0", "id": req.id, "result": {"value": '{"text": "page"}'}}, owner)
-    thread.join(timeout=2)
-    assert box["r"] == '{"text": "page"}'
-
-
-def test_client_capabilities_advertises_counting_not_shown_declines(server):
-    from tui_runtime.transport import bind_transport, reset_transport
-
-    peer = _silent_ws()
-    token = bind_transport(peer)
-    try:
-        response = server.handle_request({"id": 1, "method": "client.capabilities", "params": {"server_requests": True}})
-    finally:
-        reset_transport(token)
-    assert response["result"]["declines_not_shown"] is True
-
-
-@pytest.mark.parametrize("method", ["secret", "sudo", "terminal.read", "tour"])
+@pytest.mark.parametrize("method", ["secret", "sudo"])
 def test_server_request_timeout_emits_one_request_cancel(capture, method):
     from tui_runtime import server_requests
     _server, buf = capture
@@ -725,8 +562,6 @@ def test_approval_respond_4001_when_nothing_resolves(server, monkeypatch):
 
 
 # ── Session lookup ───────────────────────────────────────────────────
-
-
 
 
 # ── session.resume payload ────────────────────────────────────────────
@@ -1058,7 +893,7 @@ def test_enforce_session_cap_evicts_oldest_detached_only(server, monkeypatch):
         ev.set()
         return ev
 
-    detached = server._detached_ws_transport
+    detached = types.SimpleNamespace(_closed=True)
     live = object()  # no _closed attr -> live transport, never evictable
 
     server._sessions.clear()
@@ -1081,101 +916,6 @@ def test_enforce_session_cap_evicts_oldest_detached_only(server, monkeypatch):
     # 4 sessions, cap 2 -> evict 2. Only detached+idle+built are eligible, oldest
     # first; the running one and the live-transport one are exempt.
     assert evicted == ["old_detached", "new_detached"]
-
-
-@pytest.mark.parametrize("closed_transport", [False, True])
-def test_idle_reaper_rearms_missing_ws_orphan_timer(server, monkeypatch, tmp_path, closed_transport):
-    """A detached lane cannot keep its lease forever if initial timer setup was lost."""
-    from hermes_cli.active_sessions import (
-        active_session_registry_snapshot,
-        try_acquire_active_session,
-    )
-
-    home = tmp_path / ".hermes"
-    monkeypatch.setenv("HERMES_HOME", str(home))
-    sid = "detached-without-reaper"
-    sibling_sid = "live-sibling"
-    orphan_lease, message = try_acquire_active_session(
-        session_id=sid,
-        surface="desktop",
-        config={},
-        registry_home=home,
-        track_liveness=True,
-    )
-    assert orphan_lease is not None and message is None
-    sibling_lease, message = try_acquire_active_session(
-        session_id=sibling_sid,
-        surface="desktop",
-        config={},
-        registry_home=home,
-        track_liveness=True,
-    )
-    assert sibling_lease is not None and message is None
-
-    def _session(session_key, lease, transport):
-        return {
-            "active_session_lease": lease,
-            "created_at": time.time(),
-            "history": [],
-            "history_lock": threading.Lock(),
-            "last_active": time.time(),
-            "session_key": session_key,
-            "source": "tui",
-            "transport": transport,
-        }
-
-    server._sessions.clear()
-    class ClosedTransport:
-        _closed = True
-
-    dead_transport = ClosedTransport() if closed_transport else server._detached_ws_transport
-    server._sessions.update({
-        sid: _session(sid, orphan_lease, dead_transport),
-        sibling_sid: _session(sibling_sid, sibling_lease, object()),
-    })
-    server._pending_ws_reaps.clear()
-    monkeypatch.setattr(server, "_WS_ORPHAN_REAP_GRACE_S", 0.05)
-    monkeypatch.setattr(server, "_SESSION_TTL_S", 3600.0)
-    monkeypatch.setattr(server, "_flush_dirty_sessions", lambda: 0)
-    monkeypatch.setattr(server, "_enforce_session_cap", lambda: None)
-
-    server._reap_idle_sessions()
-
-    deadline = time.monotonic() + 2.0
-    while (sid in server._sessions or not orphan_lease.released) and time.monotonic() < deadline:
-        time.sleep(0.01)
-    assert sid not in server._sessions
-    assert orphan_lease.released is True
-    assert sibling_sid in server._sessions
-    assert [entry["session_id"] for entry in active_session_registry_snapshot(home)] == [sibling_sid]
-
-    repo_root = Path(__file__).resolve().parents[2]
-    env = os.environ.copy()
-    env["HERMES_HOME"] = str(home)
-    env["PYTHONPATH"] = os.pathsep.join(
-        part for part in (str(repo_root), env.get("PYTHONPATH", "")) if part
-    )
-    successor = subprocess.run(
-        [
-            sys.executable,
-            "-c",
-            (
-                "from hermes_cli.active_sessions import try_acquire_active_session; "
-                f"lease, refusal = try_acquire_active_session(session_id={sid!r}, surface='desktop', "
-                "config={}, track_liveness=True); "
-                "assert lease is not None and refusal is None, refusal; lease.release()"
-            ),
-        ],
-        cwd=repo_root,
-        env=env,
-        stdin=subprocess.DEVNULL,
-        capture_output=True,
-        text=True,
-        timeout=30,
-        check=False,
-    )
-    assert successor.returncode == 0, successor.stderr
-    assert [entry["session_id"] for entry in active_session_registry_snapshot(home)] == [sibling_sid]
 
 
 def test_sync_session_key_after_compress_reanchors_active_session_lease(
@@ -1767,8 +1507,6 @@ def test_command_dispatch_queue_sends_message(server):
     assert result["message"] == "tell me about quantum computing"
 
 
-
-
 # ── dispatch(): pool routing for long handlers (#12546) ──────────────
 
 
@@ -1898,93 +1636,26 @@ class _RecordingTransport:
         pass
 
 
-def test_unregister_live_transport_stops_delivery(capture, monkeypatch):
-    """A disconnected peer (unregistered in the ws finally block) receives nothing
-    — and a stale write is never attempted against its closed socket."""
-    server, buf = capture
-    monkeypatch.setattr(server, "_stdio_is_rpc_channel", True)  # stdio TUI process
-    a = _RecordingTransport()
-    server.register_live_transport(a)
-    server.unregister_live_transport(a)
-
-    server._broadcast_global_event("skin.changed", {"name": "x"})
-
-    assert a.frames == []
-    # No live transports left → fell back to stdio (the stdio TUI's JSON-RPC channel).
-    assert json.loads(buf.getvalue())["params"]["type"] == "skin.changed"
-
-
-def test_approval_for_a_ws_client_that_never_advertised_settles_the_queue_entry(server, monkeypatch):
-    """The approval wait is owned by ``tools.approval``'s queue, not by ``server_requests``. When the request
-    cannot be sent (the only client predates server→client requests) the queue entry must be withdrawn too,
-    otherwise ``_await_session_decision`` idles for the whole approvals.timeout with no prompt anywhere
-    (#112548). The decision is a withdrawal (``cancelled`` cause), never a user deny."""
-    from tools import approval as approval_mod
-    from tools import approval_session_wait as wait_mod
-
-    peer = _silent_ws()
-    _ws_session(server, "ws-old-approval", peer)
-    monkeypatch.setattr(wait_mod._ctx, "_get_approval_timeout", lambda: 3)
-    monkeypatch.setattr(wait_mod._ctx, "_fire_approval_hook", lambda name, **kw: None)
-    approval_mod.register_session_notify("ws-old-approval", lambda data: server._emit_approval_request("ws-old-approval", data))
-    try:
-        t0 = time.monotonic()
-        decision = wait_mod._await_session_decision(
-            "ws-old-approval", approval_mod._session_notify_cbs["ws-old-approval"],
-            {"command": "rm -rf build", "description": "", "pattern_key": "dangerous", "pattern_keys": ["dangerous"]})
-        waited = time.monotonic() - t0
-    finally:
-        approval_mod.unregister_session_notify("ws-old-approval")
-    assert waited < 1, decision
-    assert decision["choice"] is None and decision["cancelled"]
-    assert peer.frames == []
-    assert "ws-old-approval" not in approval_mod._session_queues
-
-
 def test_approval_that_ends_before_its_settle_hook_attaches_is_still_withdrawn(server):
     """The client can answer (``approval.respond`` RPC, or another surface) between the frame going out and
     the settle hook attaching; ``register_session_settle`` then reports the entry gone. The sent request must
     still be withdrawn, or every later ``session.resume`` replays a prompt nobody is waiting on."""
     from tui_runtime import server_requests
-    from tui_runtime.transport import bind_transport, reset_transport
-
-    peer = _silent_ws()
-    _ws_session(server, "ws-raced", peer)
-    token = bind_transport(peer)
-    try:
-        server.handle_request({"id": 1, "method": "client.capabilities", "params": {"server_requests": True}})
-    finally:
-        reset_transport(token)
+    peer = _RecordingTransport()
+    server._sessions["terminal-raced"] = {"session_key": "terminal-raced", "transport": peer,
+                                          "history": [], "history_lock": threading.Lock()}
     try:
         # No queue entry carries this request id: the wait already ended when the hook tries to attach.
-        server._emit_approval_request("ws-raced", {"command": "rm -rf build", "description": "",
+        server._emit_approval_request("terminal-raced", {"command": "rm -rf build", "description": "",
                                                    "request_id": "appr-already-resolved"})
         assert len(peer.frames) == 2, f"the sent approval was never withdrawn: {peer.frames}"
         sent, cancel = peer.frames
         assert sent["method"] == "approval"
         assert cancel["params"]["type"] == "request.cancel"
         assert cancel["params"]["payload"]["id"] == sent["id"]
-        assert server_requests.open_requests("ws-raced") == []
+        assert server_requests.open_requests("terminal-raced") == []
     finally:
-        server.unregister_live_transport(peer)
-
-
-def test_peerless_global_broadcast_never_reaches_stdout_in_ws_backend(capture, monkeypatch):
-    """`hermes serve` / dashboard speak JSON-RPC over WS only; Desktop captures their stdout
-    into desktop.log. After the last WS client leaves, the change watcher keeps ticking —
-    its sessions.changed / setup.ready / session.reclaimed frames must be dropped, not
-    printed (~1100 `[hermes] {"jsonrpc": ...}` lines in desktop.log)."""
-    server, buf = capture
-    monkeypatch.setattr(server, "_stdio_is_rpc_channel", False, raising=False)
-    a = _RecordingTransport()
-    server.register_live_transport(a)
-    server._broadcast_global_event("sessions.changed", {})
-    server.unregister_live_transport(a)
-
-    server._broadcast_global_event("sessions.changed", {})
-
-    assert len(a.frames) == 1
-    assert buf.getvalue() == ""
+        server._sessions.pop("terminal-raced", None)
 
 
 # ── session.create idempotency (#65410 / PR #65411) ───────────────────

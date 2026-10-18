@@ -1,15 +1,4 @@
-"""Regression tests: debug share captures update.log + desktop-update-handoff.log.
-
-A Desktop-driven update that fails at the Electron rebuild (updater exit 6)
-stores its root cause in exactly two files: ``logs/update.log`` (full
-stdout/stderr mirror of ``hermes update``) and
-``logs/desktop-update-handoff.log`` (hand-off stages incl. the rebuild
-retry). The updater's failure message and the Desktop error box both point
-users at ``hermes debug share``, yet the share captured neither file, so
-update-failure reports arrived with zero root-cause signal (#100874).
-
-These tests fail against the pre-fix capture set (five logs only).
-"""
+"""Native debug reports preserve terminal update and outgoing MCP diagnostics."""
 
 import pytest
 
@@ -18,12 +7,12 @@ import pytest
 UPDATE_LOG_BODY = (
     "=== hermes update started 2026-09-02T03:21:09 ===\n"
     "→ Fetching updates...\n"
-    "→ Building desktop packaged app...\n"
-    "✗ Desktop GUI build failed\n"
+    "→ Building TUI...\n"
+    "✗ TUI build failed\n"
 )
-HANDOFF_LOG_BODY = (
-    "2026-09-02T03:21:08 desktop rebuild exit code: 1\n"
-    "2026-09-02T03:21:08 rebuild!| npm ERR! code ELIFECYCLE\n"
+MCP_LOG_BODY = (
+    "2026-09-02T03:21:08 MCP stdio exit code: 1\n"
+    "2026-09-02T03:21:08 stdio initialization failed\n"
 )
 
 
@@ -37,7 +26,7 @@ def home_with_update_logs(tmp_path, monkeypatch):
         "2026-09-02 03:21:00 INFO agent.conversation_loop: API call #1\n"
     )
     (logs / "update.log").write_text(UPDATE_LOG_BODY)
-    (logs / "desktop-update-handoff.log").write_text(HANDOFF_LOG_BODY)
+    (logs / "mcp-stderr.log").write_text(MCP_LOG_BODY)
     monkeypatch.setenv("HERMES_HOME", str(home))
     return home
 
@@ -48,7 +37,7 @@ def home_without_update_logs(tmp_path, monkeypatch):
     home = tmp_path / "hermes_test_home"
     logs = home / "logs"
     logs.mkdir(parents=True)
-    for name in ("agent.log", "errors.log", "gateway.log", "gui.log", "desktop.log"):
+    for name in ("agent.log", "errors.log"):
         (logs / name).write_text("2026-09-02 03:21:00 INFO x: one line\n")
     monkeypatch.setenv("HERMES_HOME", str(home))
     return home
@@ -57,15 +46,15 @@ def home_without_update_logs(tmp_path, monkeypatch):
 class TestCaptureDefaultLogSnapshots:
     """The snapshot collector must include the update/hand-off pair."""
 
-    def test_snapshots_include_update_and_handoff_keys(self, home_with_update_logs):
+    def test_snapshots_include_update_and_mcp_keys(self, home_with_update_logs):
         from hermes_cli.debug import _capture_default_log_snapshots
 
         snaps = _capture_default_log_snapshots(100)
 
         assert "update" in snaps
-        assert "handoff" in snaps
-        assert "Desktop GUI build failed" in snaps["update"].tail_text
-        assert "ELIFECYCLE" in snaps["handoff"].tail_text
+        assert "mcp" in snaps
+        assert "TUI build failed" in snaps["update"].tail_text
+        assert "stdio" in snaps["mcp"].tail_text
 
     def test_snapshots_read_the_root_home_update_logs_under_a_profile(self, tmp_path, monkeypatch):
         """``hermes update`` and the hand-off scripts write the ROOT home's logs, whatever profile."""
@@ -76,13 +65,13 @@ class TestCaptureDefaultLogSnapshots:
         (root / "logs").mkdir(parents=True)
         (profile / "logs").mkdir(parents=True)
         (root / "logs" / "update.log").write_text(UPDATE_LOG_BODY)
-        (root / "logs" / "desktop-update-handoff.log").write_text(HANDOFF_LOG_BODY)
+        (profile / "logs" / "mcp-stderr.log").write_text(MCP_LOG_BODY)
         monkeypatch.setenv("HERMES_HOME", str(profile))
 
         snaps = _capture_default_log_snapshots(100)
 
-        assert "Desktop GUI build failed" in snaps["update"].tail_text
-        assert "ELIFECYCLE" in snaps["handoff"].tail_text
+        assert "TUI build failed" in snaps["update"].tail_text
+        assert "stdio" in snaps["mcp"].tail_text
 
     def test_missing_files_report_absence_without_raising(
         self, home_without_update_logs
@@ -94,23 +83,23 @@ class TestCaptureDefaultLogSnapshots:
 
         # Keys exist; the snapshots describe the missing files honestly.
         assert "update" in snaps
-        assert "handoff" in snaps
+        assert "mcp" in snaps
         assert "not found" in snaps["update"].tail_text
-        assert "not found" in snaps["handoff"].tail_text
+        assert "not found" in snaps["mcp"].tail_text
 
 
 class TestCollectDebugReport:
     """The summary report (what users paste) shows the update tails."""
 
-    def test_report_contains_update_and_handoff_sections(self, home_with_update_logs):
+    def test_report_contains_update_and_mcp_sections(self, home_with_update_logs):
         from hermes_cli.debug import collect_debug_report
 
         report = collect_debug_report(log_lines=50, dump_text="dump")
 
         assert "--- update.log" in report
-        assert "Desktop GUI build failed" in report
-        assert "--- desktop-update-handoff.log" in report
-        assert "ELIFECYCLE" in report
+        assert "TUI build failed" in report
+        assert "--- mcp-stderr.log" in report
+        assert "stdio" in report
 
     def test_report_omits_update_sections_when_logs_absent(
         self, home_without_update_logs
@@ -123,7 +112,7 @@ class TestCollectDebugReport:
         # (snapshot present), never a KeyError. The classic five remain.
         assert "--- agent.log" in report
         assert "--- update.log" in report
-        assert "--- desktop-update-handoff.log" in report
+        assert "--- mcp-stderr.log" in report
 
     def test_report_tolerates_a_hand_built_snapshots_dict(self, home_with_update_logs):
         """Gateway /debug and older callers pass dicts without the new keys.
@@ -133,7 +122,7 @@ class TestCollectDebugReport:
         """
         from hermes_cli.debug import LogSnapshot, collect_debug_report
 
-        legacy_keys = ("agent", "errors", "gateway", "gui", "desktop")
+        legacy_keys = ("agent", "errors")
         legacy = {k: LogSnapshot(path=None, tail_text="", full_text="") for k in legacy_keys}
 
         report = collect_debug_report(
@@ -153,10 +142,10 @@ class TestCollectShareBundle:
         bundle = collect_share_bundle(log_lines=50, redact=False)
 
         assert "update.log" in bundle
-        assert "Desktop GUI build failed" in bundle["update.log"]
+        assert "TUI build failed" in bundle["update.log"]
         assert "--- full update.log ---" in bundle["update.log"]
-        assert "desktop-update-handoff.log" in bundle
-        assert "ELIFECYCLE" in bundle["desktop-update-handoff.log"]
+        assert "mcp-stderr.log" in bundle
+        assert "stdio" in bundle["mcp-stderr.log"]
 
     def test_bundle_omits_update_keys_when_files_absent(
         self, home_without_update_logs
@@ -166,47 +155,44 @@ class TestCollectShareBundle:
         bundle = collect_share_bundle(log_lines=50, redact=False)
 
         assert "update.log" not in bundle
-        assert "desktop-update-handoff.log" not in bundle
+        assert "mcp-stderr.log" not in bundle
         # The classic five keep uploading.
         assert "agent.log" in bundle
 
 
 class TestFullLogUploadLabels:
-    """build_debug_share uploads every bundle log — including the new pair."""
-
-    def test_upload_label_list_includes_update_logs(self):
-        """The paste-upload loop must not silently skip the new labels.
-
-        Asserts the label tuple (source-derived behavior contract: the
-        bundle keys are only reachable for upload if listed here).
-        """
-        import inspect
-
+    def test_build_uploads_native_optional_logs(self, monkeypatch):
         from hermes_cli import debug
+        bundle = {"report": "summary", "agent.log": "agent", "mcp-stderr.log": "mcp", "update.log": "update"}
+        monkeypatch.setattr(debug, "collect_share_bundle", lambda **kwargs: bundle)
+        monkeypatch.setattr(debug, "_schedule_auto_delete", lambda *args: None)
+        uploads = []
+        monkeypatch.setattr(debug, "upload_to_pastebin",
+                            lambda content, **kwargs: uploads.append(content) or "https://example.invalid/test")
+        result = debug.build_debug_share()
+        assert set(result.urls) == {"Report", "agent.log", "mcp-stderr.log", "update.log"}
+        assert uploads == ["summary", "agent", "mcp", "update"]
 
-        source = inspect.getsource(debug.build_debug_share)
-        assert '"update.log"' in source
-        assert '"desktop-update-handoff.log"' in source
-
-    def test_local_print_label_list_includes_update_logs(self):
-        """run_debug_share --local prints bundle logs by the same contract."""
-        import inspect
-
+    def test_local_prints_same_optional_logs_without_upload(self, monkeypatch, capsys):
+        from types import SimpleNamespace
         from hermes_cli import debug
-
-        source = inspect.getsource(debug.run_debug_share)
-        assert '"FULL update.log"' in source
-        assert '"FULL desktop-update-handoff.log"' in source
+        monkeypatch.setattr(debug, "collect_share_bundle",
+                            lambda **kwargs: {"report": "summary", "mcp-stderr.log": "mcp-body", "update.log": "update-body"})
+        monkeypatch.setattr(debug, "upload_to_pastebin", lambda *args, **kwargs: pytest.fail("local report uploaded"))
+        debug.run_debug_share(SimpleNamespace(local=True, lines=20, expire=1, no_redact=False))
+        output = capsys.readouterr().out
+        assert "FULL mcp-stderr.log" in output and "mcp-body" in output
+        assert "FULL update.log" in output and "update-body" in output
 
 
 class TestLogsRegistry:
     """LOG_FILES gains readable keys for files `hermes logs list` already shows."""
 
-    def test_update_and_handoff_keys_resolve_real_filenames(self):
+    def test_update_and_mcp_keys_resolve_real_filenames(self):
         from hermes_cli.logs import LOG_FILES
 
         assert LOG_FILES.get("update") == "update.log"
-        assert LOG_FILES.get("handoff") == "desktop-update-handoff.log"
+        assert LOG_FILES.get("mcp") == "mcp-stderr.log"
 
     def test_tail_log_reads_update_log_from_hermes_home(self, home_with_update_logs):
         """End-to-end: `hermes logs update` resolves and prints the file."""
@@ -226,4 +212,4 @@ class TestLogsRegistry:
         # The available-log hint teaches the new keys.
         hint = capsys.readouterr().out
         assert "update" in hint
-        assert "handoff" in hint
+        assert "mcp" in hint

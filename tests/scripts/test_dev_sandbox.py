@@ -11,8 +11,8 @@ import pytest
 
 
 @pytest.mark.platforms("posix")
-@pytest.mark.parametrize("entry,prefix", [("dev-sandbox.sh", "HermesSandbox-"), ("dev-minimal-sandbox.sh", "HermesMinimalSandbox-")])
-def test_ephemeral_sandbox_preserves_command_and_removes_state(tmp_path, entry, prefix):
+@pytest.mark.parametrize("entry", ["dev-sandbox.sh", "dev-minimal-sandbox.sh"])
+def test_ephemeral_sandbox_preserves_command_and_removes_state(tmp_path, entry):
     root = Path(__file__).resolve().parents[2]
     checkout = tmp_path / "checkout with spaces"
     checkout.mkdir()
@@ -21,7 +21,7 @@ def test_ephemeral_sandbox_preserves_command_and_removes_state(tmp_path, entry, 
     probe = tmp_path / "probe.py"
     probe.write_text(
         "import json, os, sys\nfrom pathlib import Path\n"
-        "keys = ['HERMES_HOME', 'HERMES_DESKTOP_USER_DATA_DIR', 'HERMES_DESKTOP_APP_NAME']\n"
+        "keys = ['HERMES_HOME', 'HERMES_RUNTIME_DIR']\n"
         "Path(sys.argv[1]).write_text(json.dumps({'env': {k: os.environ[k] for k in keys}, 'args': sys.argv[2:]}), encoding='utf-8')\n"
         "sys.exit(7)\n", encoding="utf-8",
     )
@@ -33,8 +33,7 @@ def test_ephemeral_sandbox_preserves_command_and_removes_state(tmp_path, entry, 
     observed = json.loads(output.read_text(encoding="utf-8-sig"))
     home = Path(observed["env"]["HERMES_HOME"])
     assert observed["args"] == ["argument with spaces"]
-    assert observed["env"]["HERMES_DESKTOP_APP_NAME"].startswith(prefix)
-    assert Path(observed["env"]["HERMES_DESKTOP_USER_DATA_DIR"]).parent == home.parent
+    assert Path(observed["env"]["HERMES_RUNTIME_DIR"]).parent == home.parent
     assert not home.parent.exists()
 
 
@@ -56,9 +55,9 @@ def test_persistent_identities_seed_once_and_honor_overrides(tmp_path):
         marker.write_text("retained", encoding="utf-8")
         subprocess.run(command, cwd=checkout, env=env, check=True, stdin=subprocess.DEVNULL, capture_output=True, timeout=20)
         assert marker.read_text(encoding="utf-8-sig") == "retained"
-    env.update(HERMES_DEV_SANDBOX_DIR=".custom", HERMES_DEV_SANDBOX_NAME="CustomSandbox")
+    env.update(HERMES_DEV_SANDBOX_DIR=".custom")
     result = subprocess.run(["bash", str(root / "scripts/dev-minimal-sandbox.sh"), "--persistent", "--", "env"],
                             cwd=checkout, env=env, check=True, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=20)
     assert f"HERMES_HOME={checkout / '.custom/hermes-home'}" in result.stdout
-    assert "HERMES_DESKTOP_APP_NAME=CustomSandbox" in result.stdout
-    assert (checkout / ".custom/user-data").is_dir()
+    assert f"HERMES_RUNTIME_DIR={checkout / '.custom/runtime'}" in result.stdout
+    assert (checkout / ".custom/runtime").is_dir()

@@ -414,7 +414,6 @@ def _create_session(rid, params: dict, *, copy_parent_history: bool = False) -> 
     with _sessions_lock:
         _sessions[sid] = {
             "agent": None, "agent_error": None, "agent_ready": threading.Event(), "attached_images": [],
-            "close_on_disconnect": _flag(params, "close_on_disconnect"),
             "active_session_lease": None,  # claimed lazily on the first turn (_ensure_active_session_slot)
             "cols": int(params.get("cols", 80)), "created_at": now, "edit_snapshots": {},
             "explicit_cwd": explicit_cwd,
@@ -619,7 +618,6 @@ class _Resume:
             model_config, follows_profile = {}, False
         record = _deferred_session_record(
             self.target, cols=self.cols, cwd=cwd, history=history, lease=None, source=source,
-            close_on_disconnect=_flag(self.params, "close_on_disconnect"),
             profile_home=self.profile_home, explicit_cwd=bool(self.profile_resume_cwd), **extra)
         if follows_profile:
             record.update(follow_profile_config=True, composer_override_profile=(

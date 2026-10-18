@@ -678,6 +678,18 @@ def _migrate_to_50(results: dict[str, Any], quiet: bool) -> None:
             "  ✓ Removed security.tirith_* — the tirith scanner is no longer bundled with Hermes.")
 
 
+def _migrate_to_52(results: dict[str, Any], quiet: bool) -> None:
+    """Retire only the previously seeded remote-desktop image, without pinning its replacement."""
+    retired = "nousresearch/hermes-sandbox:desktop"
+    for key in ("docker_image", "modal_image", "daytona_image", "singularity_image"):
+        _rewrite_stale_default(
+            section="terminal", key=key,
+            old=f"docker://{retired}" if key == "singularity_image" else retired,
+            new=None, added=f"removed retired default terminal.{key}",
+            message=f"  ✓ terminal.{key}: follows the terminal-only default; existing sandboxes are kept until approved",
+        )(results, quiet)
+
+
 MIGRATIONS: tuple[tuple[int, Callable[[dict[str, Any], bool], None]], ...] = (
     (12, _migrate_to_12),
     (13, _migrate_to_13),
@@ -823,6 +835,7 @@ MIGRATIONS: tuple[tuple[int, Callable[[dict[str, Any], bool], None]], ...] = (
             "admitted to the target profile's running gateway and tracked by receipt, so cron no "
             "longer runs (or times out) a Bot Chat turn of its own."),
         extra_guard=lambda raw: "bot_chat_delivery_timeout_seconds" in raw)),
+    (52, _migrate_to_52),
 )
 
 #: Steps triggered by a legacy key or identifier (a renamed or retired key, a removed plugin or
@@ -832,7 +845,7 @@ MIGRATIONS: tuple[tuple[int, Callable[[dict[str, Any], bool], None]], ...] = (
 #: hermes_cli/data/config.yaml.example; targeted writers never stamp), so it gets only these: every other step
 #: decides by a value or an absence that, in such a file, is the user's own choice. v13 is left
 #: out: it clears OPENAI_MODEL from .env, a generic name Hermes never reads but the user's tools may.
-LEGACY_KEY_STEPS = frozenset({12, 14, 16, 17, 29, 33, 38, 39, 42, 43, 46, 50, 51})
+LEGACY_KEY_STEPS = frozenset({12, 14, 16, 17, 29, 33, 38, 39, 42, 43, 46, 50, 51, 52})
 
 #: Legacy-key steps that run on every migration pass whatever the stamp says, because a stamp at
 #: or past their version does not prove they ran: unreleased builds of the gateway-runtime branch

@@ -47,6 +47,19 @@ def browser_profile_dir(env: Any) -> str:
     return f"{home.rstrip('/')}/.cache/hermes-agent/browser/{scope}"
 
 
+def require_browser_cli(env: Any) -> None:
+    """The selected sandbox owns browser prerequisites; never borrow the host CLI."""
+    from tools.environments import streams
+
+    probe = streams.run_in(env, ["sh", "-c", "command -v agent-browser >/dev/null"], timeout=15)
+    if probe.returncode != 0:
+        raise RuntimeError(
+            "agent-browser is missing inside the selected sandbox. Install agent-browser and Chromium "
+            "in that image (docker/sandbox-terminal.Dockerfile provides the pinned stack), "
+            "or configure an explicit outgoing CDP endpoint with a sandbox-local agent-browser CLI."
+        )
+
+
 def require_native_computer_use() -> None:
     backend = terminal_backend()
     if backend != "local":

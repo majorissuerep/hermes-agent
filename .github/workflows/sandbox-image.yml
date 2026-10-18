@@ -1,28 +1,24 @@
-name: Sandbox desktop image
+name: Terminal sandbox image
 
-# nousresearch/hermes-sandbox:desktop is the terminal-backend sandbox base
-# (nikolaik/python-nodejs) plus a display stack; Bot Screen, computer_use and
-# the bot's browser run inside it when terminal.backend is docker/ssh/etc.
-# It contains NO Hermes code, so it does not need to track main: it changes
-# when its Dockerfile changes, not when the agent changes.
-#
-# Triggers: a PR that edits the Dockerfile/smoke (build + smoke, no push),
-# a release (publish :<tag>-desktop and roll :desktop), and manual dispatch.
-# Deliberately NOT on every main push: two 4 GB multi-arch builds per commit
-# for an image that changes a few times a year.
+# Terminal tools + headless Chromium, without a display server or remote desktop.
+# Both architectures must build and pass the real headless-browser smoke before publish.
 
 on:
   pull_request:
     paths:
-      - docker/sandbox-desktop.Dockerfile
-      - docker/sandbox-desktop-smoke.sh
+      - docker/sandbox-terminal.Dockerfile
+      - docker/sandbox-terminal-smoke.sh
       - .github/workflows/sandbox-image.yml
+      - pm/**
+      - hermes_constants.py
+      - hermes_cli/runtime_state.py
+      - scripts/bundles/payload.py
   release:
     types: [published]
   workflow_dispatch:
     inputs:
       publish:
-        description: Push to Docker Hub (rolls :desktop)
+        description: Push to Docker Hub (rolls :terminal)
         type: boolean
         default: false
 
@@ -62,16 +58,16 @@ jobs:
         uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
         with:
           context: .
-          file: docker/sandbox-desktop.Dockerfile
+          file: docker/sandbox-terminal.Dockerfile
           platforms: ${{ matrix.platform }}
           tags: ${{ env.IMAGE_NAME }}:test
           load: true
           cache-from: type=gha,scope=sandbox-${{ matrix.arch }}
           cache-to: ${{ github.event_name != 'pull_request' && format('type=gha,mode=max,scope=sandbox-{0}', matrix.arch) || '' }}
 
-      # The contract: the launcher, cua-driver and a headed Chromium work as `pn`.
+      # The contract: terminal tools and a real headless Chromium work as `pn`.
       - name: Smoke
-        run: docker/sandbox-desktop-smoke.sh ${{ env.IMAGE_NAME }}:test
+        run: docker/sandbox-terminal-smoke.sh ${{ env.IMAGE_NAME }}:test
 
   # Trusted source only; the sole Docker Hub credential boundary.
   publish:
@@ -107,7 +103,7 @@ jobs:
         uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
         with:
           context: .
-          file: docker/sandbox-desktop.Dockerfile
+          file: docker/sandbox-terminal.Dockerfile
           platforms: ${{ matrix.platform }}
           labels: |
             org.opencontainers.image.revision=${{ github.sha }}
@@ -165,10 +161,10 @@ jobs:
             echo "::error::want 2 digests, found ${#args[@]} (a publish leg failed)"
             exit 1
           fi
-          # :desktop is the stable tag docker_image points at; releases also get a pinned tag.
-          tags=(-t "${IMAGE_NAME}:desktop")
+          # :terminal is the stable tag docker_image points at; releases also get a pinned tag.
+          tags=(-t "${IMAGE_NAME}:terminal")
           if [ -n "${RELEASE_TAG}" ]; then
-            tags+=(-t "${IMAGE_NAME}:${RELEASE_TAG}-desktop")
+            tags+=(-t "${IMAGE_NAME}:${RELEASE_TAG}-terminal")
           fi
           for i in 1 2 3; do
             if docker buildx imagetools create "${tags[@]}" "${args[@]}"; then
@@ -180,4 +176,4 @@ jobs:
             fi
             sleep 10
           done
-          docker buildx imagetools inspect "${IMAGE_NAME}:desktop"
+          docker buildx imagetools inspect "${IMAGE_NAME}:terminal"

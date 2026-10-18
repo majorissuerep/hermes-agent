@@ -1152,7 +1152,7 @@ def _restart_slash_worker(sid: str, session: dict):
     except Exception:
         session["slash_worker"] = None
         return
-    # Store-iff-still-mapped: the post-turn restart races a close_on_disconnect reap (a bare store would orphan it).
+    # Store-iff-still-mapped: the post-turn restart races session close (a bare store would orphan it).
     _attach_worker(sid, session, new_worker)
 
 

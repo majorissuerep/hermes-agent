@@ -82,18 +82,6 @@ def _get_script_timeout() -> int:
     return _sched._DEFAULT_SCRIPT_TIMEOUT if resolved is None else resolved
 
 
-_DEFAULT_MEDIA_SEND_TIMEOUT = 300
-
-
-def _get_media_send_timeout() -> int:
-    """Per-attachment media-send timeout: HERMES_CRON_MEDIA_SEND_TIMEOUT env, then
-    ``cron.media_send_timeout_seconds``, then 300s (long TTS audio can exceed a 30s window)."""
-    resolved = _timeout_from_env_or_config(
-        "HERMES_CRON_MEDIA_SEND_TIMEOUT", "media_send_timeout_seconds", _positive_int,
-        "cron media-send timeout")
-    return _DEFAULT_MEDIA_SEND_TIMEOUT if resolved is None else resolved
-
-
 def _get_session_db_timeout() -> float:
     """Bound on run_job's SessionDB init: HERMES_CRON_SESSION_DB_TIMEOUT env, then
     ``cron.session_db_timeout_seconds`` (in DEFAULT_CONFIG), then 10s. Unlike sibling timeouts,

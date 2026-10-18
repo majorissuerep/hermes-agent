@@ -21586,11 +21586,6 @@
             "default": null,
             "title": "Service Tier"
           },
-          "close_on_disconnect": {
-            "default": false,
-            "title": "Close On Disconnect",
-            "type": "boolean"
-          },
           "hidden": {
             "default": false,
             "title": "Hidden",
@@ -22809,11 +22804,6 @@
           "eager_build": {
             "default": false,
             "title": "Eager Build",
-            "type": "boolean"
-          },
-          "close_on_disconnect": {
-            "default": false,
-            "title": "Close On Disconnect",
             "type": "boolean"
           },
           "inline_images": {

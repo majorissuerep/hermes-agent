@@ -1865,7 +1865,6 @@ export interface SessionCreateParams {
   reasoning_effort?: string | null
   fast?: boolean | null
   service_tier?: string | null
-  close_on_disconnect?: boolean
   hidden?: boolean
   follow_profile_config?: boolean
   idempotency_key?: string | null
@@ -1939,7 +1938,6 @@ export interface SessionResumeParams {
   defer_history?: boolean
   omit_messages?: boolean
   eager_build?: boolean
-  close_on_disconnect?: boolean
   inline_images?: boolean
 }
 export interface SessionResumeResult {

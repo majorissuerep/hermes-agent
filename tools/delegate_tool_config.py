@@ -552,9 +552,12 @@ def _resolve_child_runtime(
     if override_acp_command:
         from providers import get_provider_profile
         profile = get_provider_profile(effective_provider or "")
-        # A generic process command does not imply the legacy ACP protocol.
+        # A process command belongs only to an explicitly registered process provider.
         if profile is None or profile.auth_type != "external_process":
-            effective_provider, effective_api_mode = "copilot-acp", "chat_completions"
+            raise ValueError(
+                "A delegation command requires an external_process provider; "
+                f"provider {effective_provider!r} does not support process commands."
+            )
 
     # A named provider identity is endpoint-scoped. Preserve it only when the
     # child inherits the exact parent route; an override owns its final identity.

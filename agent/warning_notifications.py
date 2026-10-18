@@ -1,8 +1,5 @@
 """Delivery policy for engine diagnostics, never assistant or command responses."""
 
-from agent.display_config import resolve_display_setting
-
-
 class DiagnosticText(str):
     """Producer-owned classification on the legacy two-argument status callback.
 
@@ -16,7 +13,7 @@ def is_warning_status(event_type: str, message: str) -> bool:
 
 
 def is_diagnostic_notice(notice) -> bool:
-    """Out-of-band ``AgentNotice`` classification shared by the gateway, TUI and CLI sinks.
+    """Out-of-band ``AgentNotice`` classification shared by the TUI and CLI sinks.
 
     Credit-service notices are automatic diagnostics at every level (usage bands are ``info``,
     ``credits.restored`` is ``success``); everything else is diagnostic only when it warns.
@@ -91,11 +88,22 @@ def warning_notifications_enabled(platform, user_config=None) -> bool:
     """Use the turn snapshot when supplied, otherwise the active profile's effective config.
 
     No surface exemption: direct command/API outcomes are not notifications.
-    Unknown values never opt in; null inherits via the canonical display resolver.
+    Unknown values never opt in; a null surface override inherits the profile setting.
     """
     if user_config is None:
         user_config = effective_user_config()
     elif not isinstance(user_config, dict):
         user_config = {}
     platform_key = getattr(platform, "value", platform)
-    return not resolve_display_setting(user_config, platform_key, "suppress_warning_notifications", False)
+    display = user_config.get("display")
+    if not isinstance(display, dict):
+        return True
+    value = display.get("suppress_warning_notifications")
+    overrides = display.get("platforms")
+    surface = overrides.get(platform_key) if isinstance(overrides, dict) else None
+    if isinstance(surface, dict) and surface.get("suppress_warning_notifications") is not None:
+        value = surface["suppress_warning_notifications"]
+    suppressed = value is True or (
+        isinstance(value, str) and value.strip().lower() in {"true", "1", "yes", "on"}
+    )
+    return not suppressed

@@ -54,7 +54,7 @@ def test_default_closure_includes_the_boot_interpreter(install_spy):
     assert install_spy["activated"] == [{"allow_incomplete": True}]
 
 
-@pytest.mark.parametrize("names", [["npm", "ripgrep"], ["dmgbuild"]])
+@pytest.mark.parametrize("names", [["npm", "ripgrep"], ["uv"]])
 def test_explicit_names_pass_through_untouched(install_spy, names) -> None:
     assert pm.cli.cmd_install(argparse.Namespace(names=names, tools_only=False)) == 0
     assert install_spy["names"] == names

@@ -130,7 +130,6 @@ class SessionCreateParams(ProfileParams):
     reasoning_effort: str | None = None
     fast: bool | None = None  # presence is the contract: omitted inherits, true pins priority, false pins normal
     service_tier: str | None = None
-    close_on_disconnect: bool = False
     hidden: bool = False
     follow_profile_config: bool = False
     # #65410: stable caller-chosen key so a retried create (response lost in
@@ -187,7 +186,6 @@ class SessionResumeParams(SessionParams):
     defer_history: bool = False
     omit_messages: bool = False
     eager_build: bool = False
-    close_on_disconnect: bool = False
     # False: render image parts as "[image]" instead of their data URIs — a remote client reads a
     # transcript in kilobytes instead of re-transmitting every stored attachment (#116511).
     inline_images: bool = True

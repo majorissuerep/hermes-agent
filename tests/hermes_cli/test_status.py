@@ -1,5 +1,7 @@
 from types import SimpleNamespace
 
+import pytest
+
 from hermes_cli.status import show_status
 import subprocess
 
@@ -28,39 +30,11 @@ def test_show_status_all_does_not_print_tavily_key_value(monkeypatch, capsys, tm
     assert sentinel not in output
 
 
-def test_show_status_termux_gateway_section_skips_systemctl(monkeypatch, capsys, tmp_path):
-    from hermes_cli import status as status_mod
-    import hermes_cli.auth as auth_mod
-    import hermes_cli.gateway as gateway_mod
-
-    monkeypatch.setenv("TERMUX_VERSION", "0.118.3")
-    monkeypatch.setenv("PREFIX", "/data/data/com.termux/files/usr")
-    monkeypatch.setattr(status_mod, "get_env_path", lambda: tmp_path / ".env", raising=False)
-    monkeypatch.setattr(status_mod, "get_hermes_home", lambda: tmp_path, raising=False)
-    monkeypatch.setattr(status_mod, "load_config", lambda: {"model": "gpt-5.4"}, raising=False)
-    monkeypatch.setattr(status_mod, "resolve_requested_provider", lambda requested=None: "openai-codex", raising=False)
-    monkeypatch.setattr(status_mod, "resolve_provider", lambda requested=None, **kwargs: "openai-codex", raising=False)
-    monkeypatch.setattr(status_mod, "provider_label", lambda provider: "OpenAI Codex", raising=False)
-    monkeypatch.setattr(auth_mod, "get_nous_auth_status_local", dict, raising=False)
-    monkeypatch.setattr(auth_mod, "get_codex_auth_status", dict, raising=False)
-    monkeypatch.setattr(auth_mod, "get_xai_oauth_auth_status", dict, raising=False)
-    monkeypatch.setattr(gateway_mod, "find_gateway_pids", lambda exclude_pids=None: [], raising=False)
-
-    def _unexpected_systemctl(*args, **kwargs):
-        raise AssertionError("systemctl should not be called in the Termux status view")
-
-    monkeypatch.setattr(subprocess, "run", _unexpected_systemctl)
-
-    status_mod.show_status(SimpleNamespace(full=True, deep=False))
-
-    output = capsys.readouterr().out
-    assert "systemd (user)" not in output
 
 
 def test_show_status_reports_vercel_backend_contract(monkeypatch, capsys, tmp_path):
     from hermes_cli import status as status_mod
     import hermes_cli.auth as auth_mod
-    import hermes_cli.gateway as gateway_mod
 
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
     monkeypatch.setenv("TERMINAL_ENV", "vercel_sandbox")
@@ -73,7 +47,6 @@ def test_show_status_reports_vercel_backend_contract(monkeypatch, capsys, tmp_pa
     monkeypatch.setattr(auth_mod, "get_codex_auth_status", dict, raising=False)
     monkeypatch.setattr(auth_mod, "get_qwen_auth_status", dict, raising=False)
     monkeypatch.setattr(auth_mod, "get_xai_oauth_auth_status", dict, raising=False)
-    monkeypatch.setattr(gateway_mod, "find_gateway_pids", lambda exclude_pids=None: [], raising=False)
 
     status_mod.show_status(SimpleNamespace(full=True, deep=False))
 
@@ -92,7 +65,6 @@ def _base_xai_mocks(monkeypatch, tmp_path):
     """Set up the minimal environment for show_status, returning status_mod."""
     from hermes_cli import status as status_mod
     import hermes_cli.auth as auth_mod
-    import hermes_cli.gateway as gateway_mod
 
     monkeypatch.setattr(status_mod, "get_env_path", lambda: tmp_path / ".env", raising=False)
     monkeypatch.setattr(status_mod, "get_hermes_home", lambda: tmp_path, raising=False)
@@ -104,7 +76,6 @@ def _base_xai_mocks(monkeypatch, tmp_path):
     monkeypatch.setattr(auth_mod, "get_codex_auth_status", dict, raising=False)
     monkeypatch.setattr(auth_mod, "get_qwen_auth_status", dict, raising=False)
     monkeypatch.setattr(auth_mod, "get_minimax_oauth_auth_status", dict, raising=False)
-    monkeypatch.setattr(gateway_mod, "find_gateway_pids", lambda exclude_pids=None: [], raising=False)
     return status_mod
 
 
@@ -184,11 +155,10 @@ class TestShowStatusXaiOAuth:
         assert "xAI OAuth" in out
 
 
-def test_show_status_reports_gateway_session_last_activity(monkeypatch, capsys, tmp_path):
-    """hermes status should surface freshest gateway last_active (#72016)."""
+def test_show_status_reports_native_saved_sessions_without_writes(monkeypatch, capsys, tmp_path):
+    """Status counts native unarchived history and reports its freshest activity."""
     from hermes_cli import status as status_mod
     import hermes_cli.auth as auth_mod
-    import hermes_cli.gateway as gateway_mod
     import hermes_state
     import time
 
@@ -203,26 +173,24 @@ def test_show_status_reports_gateway_session_last_activity(monkeypatch, capsys, 
     monkeypatch.setattr(auth_mod, "get_codex_auth_status", dict, raising=False)
     monkeypatch.setattr(auth_mod, "get_qwen_auth_status", dict, raising=False)
     monkeypatch.setattr(auth_mod, "get_xai_oauth_auth_status", dict, raising=False)
-    monkeypatch.setattr(gateway_mod, "find_gateway_pids", lambda exclude_pids=None: [], raising=False)
 
-    import sqlite3
-    from contextlib import closing
+    from unittest.mock import patch
+    from hermes_state import session_constructor
 
     path = tmp_path / "state.db"
     db = hermes_state.SessionDB(db_path=path)
-    for sid in ("gw-old", "gw-new"):
-        db.create_session(sid, "telegram")
+    now = time.time()
+    for sid, age in (("native-old", 7200), ("native-new", 90), ("archived", 10)):
+        with patch.object(session_constructor, "time", SimpleNamespace(time=lambda: now - age)):
+            db.create_session(sid, "tui")
+        db.touch_session_activity(sid, now - age)
+    db.set_session_archived("archived", True)
     db.close()
-    with closing(sqlite3.connect(path)) as conn:
-        for sid, age in (("gw-old", 7200), ("gw-new", 90)):
-            conn.execute("UPDATE sessions SET session_key=?, started_at=?, last_activity_at=? WHERE id=?",
-                         (sid, time.time() - age, time.time() - age, sid))
-        conn.commit()
     before = path.read_bytes()
 
     status_mod.show_status(SimpleNamespace(full=True, deep=False))
     output = capsys.readouterr().out
-    assert "Active:       2 session(s)" in output
+    assert "Stored:       2 session(s)" in output
     assert "Last activity:" in output
     assert "1m ago" in output
     assert path.read_bytes() == before
@@ -251,22 +219,11 @@ def test_status_defaults_to_summary_and_full_or_all_prints_every_section(monkeyp
         show_status(_status_args(flag))
         assert "◆ Environment" in capsys.readouterr().out
 
+def test_native_deep_status_does_not_probe_a_retired_local_listener(monkeypatch, capsys):
+    import socket
+    from hermes_cli import status
 
-def test_platform_rows_follow_the_gateway_verdict_not_check_fn(monkeypatch, capsys, tmp_path):
-    """check_fn only says the SDK imports; each platform gets ONE row, judged like the summary line."""
-    import gateway.config as gateway_config
-    from gateway.platform_registry import platform_registry
-
-    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
-    entries = [SimpleNamespace(name=n, label=n.title(), check_fn=lambda: True) for n in ("telegram", "discord")]
-    monkeypatch.setattr(platform_registry, "plugin_entries", lambda: entries)
-    monkeypatch.setattr(gateway_config, "load_gateway_config", lambda: SimpleNamespace(
-        platforms={}, get_connected_platforms=lambda: [SimpleNamespace(value="telegram")]))
-
-    show_status(SimpleNamespace(full=True, deep=False))
-    out = capsys.readouterr().out
-    rows = {name: [line for line in out.splitlines() if line.strip().startswith(name)] for name in ("Telegram", "Discord")}
-    assert [("not configured" in line) for line in rows["Discord"]] == [True]
-    assert [("not configured" in line) for line in rows["Telegram"]] == [False]
-    show_status(SimpleNamespace())
-    assert "Platforms:    Telegram\n" in capsys.readouterr().out
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.setattr(socket, "socket", lambda *args, **kwargs: pytest.fail("local listener probed"))
+    status._render_deep(SimpleNamespace(deep=True))
+    assert "18789" not in capsys.readouterr().out

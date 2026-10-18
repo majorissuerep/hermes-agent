@@ -151,12 +151,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Two images per arch. `slim` is what :latest has always been; `desktop`
-        # adds the Bot Screen packages and distro Chromium fallback for the
-        # tier that offers a screen. PM's pinned full Chromium is in both.
-        # Both are built on a PR so gated-layer failures cannot reach publish.
+        # One terminal-only image per architecture.
         arch: [amd64, arm64]
-        variant: [slim, desktop]
+        variant: [slim]
         include:
           - arch: amd64
             runner: ${{ github.repository == 'NousResearch/hermes-agent' && 'ubuntu-latest-32-core' || 'ubuntu-latest' }}
@@ -231,10 +228,6 @@ jobs:
           load: true
           platforms: ${{ matrix.platform }}
           tags: ${{ env.IMAGE_NAME }}:test
-          build-args: |
-            HERMES_BOT_DESKTOP=${{ matrix.variant == 'desktop' && '1' || '0' }}
-          # Slim owns the scope; desktop adds the gated apt layer, so it reads
-          # and writes nothing — a mode=max scope could exceed the cache cap.
           cache-from: type=gha,scope=docker-${{ matrix.arch }}
           cache-to: ${{ (github.event_name != 'pull_request' && matrix.variant == 'slim') && format('type=gha,mode=max,scope=docker-{0}', matrix.arch) || '' }}
 
@@ -347,7 +340,7 @@ jobs:
       fail-fast: false
       matrix:
         arch: [amd64, arm64]
-        variant: [slim, desktop]
+        variant: [slim]
         include:
           - arch: amd64
             runner: ${{ github.repository == 'NousResearch/hermes-agent' && 'ubuntu-latest-32-core' || 'ubuntu-latest' }}
@@ -411,8 +404,6 @@ jobs:
           context: .
           file: Dockerfile
           platforms: ${{ matrix.platform }}
-          build-args: |
-            HERMES_BOT_DESKTOP=${{ matrix.variant == 'desktop' && '1' || '0' }}
           labels: |
             org.opencontainers.image.revision=${{ env.CANDIDATE_COMMIT }}
           outputs: type=image,name=${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
@@ -442,8 +433,7 @@ jobs:
   # publication controller.
   # ---------------------------------------------------------------------------
   merge:
-    # `needs` is the whole 4-leg matrix: only publish both :main variants
-    # after every arch and variant publisher succeeds.
+    # Publish :main only after both architecture publishers succeed.
     if: ${{ !cancelled() && needs.mode.outputs.release != 'true' && github.repository == 'NousResearch/hermes-agent' && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     needs: [mode, publish]
@@ -452,13 +442,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # One manifest list per variant. `slim` keeps the unsuffixed tags it has
-        # always had; `desktop` publishes its own digests under -desktop.
+        # The terminal image retains the established unsuffixed tags.
         include:
           - variant: slim
             suffix: ""
-          - variant: desktop
-            suffix: "-desktop"
     steps:
       - name: Download digests
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
@@ -538,14 +525,14 @@ jobs:
       fail-fast: false
       matrix:
         arch: [amd64, arm64]
-        variant: [slim, desktop]
+        variant: [slim]
     runs-on: ${{ github.repository == 'NousResearch/hermes-agent' && 'ubuntu-latest-32-core' || 'ubuntu-latest' }}
     timeout-minutes: 45
     env:
       ARCH: ${{ matrix.arch }}
       RELEASE_TAG: ${{ inputs.tag }}
       VARIANT: ${{ matrix.variant }}
-      SUFFIX: ${{ matrix.variant == 'desktop' && '-desktop' || '' }}
+      SUFFIX: ''
     steps:
       - name: Checkout release code (helper scripts only, no build)
         uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a # v7.0.1
@@ -577,7 +564,7 @@ jobs:
       - name: Load tested image
         run: |
           set -euo pipefail
-          docker load --input /tmp/image-artifacts/image-${ARCH}.tar
+          docker load --input "/tmp/image-artifacts/image-${ARCH}.tar"
           docker image inspect "${IMAGE_NAME}:test" > /tmp/image-artifacts/loaded.json
           python3 - <<'PY'
           import json, os
@@ -664,15 +651,14 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Create both immutable versioned manifest lists
+      - name: Create immutable versioned multiarch manifest
         env:
           IMAGE_NAME: ${{ env.IMAGE_NAME }}
         run: |
           set -euo pipefail
           cd /tmp/digests
-          for variant in slim desktop; do
+          for variant in slim; do
             suffix=""
-            [ "$variant" = desktop ] && suffix=-desktop
             digest_files=()
             args=()
             for arch in amd64 arm64; do
@@ -727,8 +713,8 @@ jobs:
           python3 -m scripts.releases.docker manifest \
             --tag "$RELEASE_TAG" \
             --commit "$CANDIDATE_COMMIT" \
-            --digest-amd64 "$(sed 's/^sha256://' /tmp/digests/docker-publish-digest-slim-amd64-${RELEASE_TAG}/amd64.digest)" \
-            --digest-arm64 "$(sed 's/^sha256://' /tmp/digests/docker-publish-digest-slim-arm64-${RELEASE_TAG}/arm64.digest)" \
+            --digest-amd64 "$(sed 's/^sha256://' "/tmp/digests/docker-publish-digest-slim-amd64-${RELEASE_TAG}/amd64.digest")" \
+            --digest-arm64 "$(sed 's/^sha256://' "/tmp/digests/docker-publish-digest-slim-arm64-${RELEASE_TAG}/arm64.digest")" \
             > /tmp/manifest/manifest.json
           python3 - "$RELEASE_TAG" "${{ steps.list.outputs.digest }}" <<'EOF'
           import json, sys

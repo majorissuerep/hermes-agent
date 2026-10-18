@@ -79,25 +79,6 @@ RUN apt-get -o Acquire::Retries=3 update && \
     libasound2t64 libatk-bridge2.0-0t64 libatk1.0-0t64 libatspi2.0-0t64 libcairo2 libcups2t64 libdbus-1-3 libgbm1 libglib2.0-0t64 libnspr4 libnss3 libpango-1.0-0 libx11-6 libxcb1 libxcomposite1 libxdamage1 libxext6 libxfixes3 libxkbcommon0 libxrandr2 && \
     rm -rf /var/lib/apt/lists/*
 
-# Bot Screen (opt-in): PACKAGES["apt"] from tools/bot_desktop/runtime.py plus apt
-# `chromium` for the restricted-userns sandbox fallback. PM already stages
-# pinned full Chromium for both variants; no separate Playwright install.
-# Nothing starts
-# at boot. docker.yml builds both variants and publishes these packages under
-# the `-desktop` tags: hosted sandboxes pull a prebuilt image and never run a
-# build, and cannot apt at run time either (unprivileged, no sudo). Only this
-# build step needs root —
-# Xvnc is a userspace X server, so the runtime user can drive it.
-#   docker build --build-arg HERMES_BOT_DESKTOP=1 .
-ARG HERMES_BOT_DESKTOP=0
-RUN if [ "$HERMES_BOT_DESKTOP" = "1" ]; then \
-        apt-get -o Acquire::Retries=3 update && \
-        DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=3 install -y --no-install-recommends \
-        tigervnc-standalone-server xfce4-panel xfwm4 xfdesktop4 xfce4-settings xfce4-terminal \
-        dbus-x11 x11-xserver-utils x11-utils x11-xkb-utils xauth fonts-dejavu-core chromium && \
-        rm -rf /var/lib/apt/lists/*; \
-    fi
-
 # Prefer the fixed SQLite over Debian's vulnerable libsqlite3.so.0. Keep the
 # public library name stable so both the system interpreter and the uv-created
 # venv resolve the replacement without changing Python import paths.
@@ -184,7 +165,7 @@ WORKDIR /opt/hermes
 # the two-authorities failure the pm design exists to end. The image is now
 # a pin consumer: the stdlib-only pm provisioner reads pm/lock.json and
 # stages the pinned uv + full Chromium (sha256-verified at
-# download — the same code path pm.sh/pm.ps1 and the desktop payload use)
+# download — the same verified provisioning path used by source installs)
 # into the image's own runtime dir, a self-contained store baked under
 # /opt/hermes, outside the /opt/data volume so it survives the overlay.
 # PM alone resolves the pinned uv for dependency preparation; build consumers
@@ -411,16 +392,9 @@ COPY --chmod=0755 docker/cont-init.d/015-supervise-perms /etc/cont-init.d/015-su
 # _tui_need_npm_install / runtime `npm install` branch entirely — exactly the
 # nix/packaged-release path the launcher was designed for.
 #
-# Why this is required (not just an optimization): the root package-lock.json
-# describes the WHOLE monorepo workspace set (root + web + ui-tui + apps/*),
-# but the image only installs root/web/ui-tui (apps/* — the desktop app — is
-# never `npm install`ed here). So the actualized node_modules permanently
-# disagrees with the canonical lock, _tui_need_npm_install() returns True on
-# every launch, and the runtime `npm install` it triggers (a) can never
-# converge against the partial monorepo and (b) races itself across concurrent
-# embedded-chat (/api/pty) connections → ENOTEMPTY → the chat tab dies with a
-# 502 / "[session ended]". Pointing at the prebuilt bundle sidesteps the whole
-# check. (A separate launcher hardening is tracked independently.)
+# The image's committed workspace graph is root + ui-tui + apps/shared.
+# Build once and select the immutable bundle; interactive launches never mutate
+# the image's node_modules or download frontend dependencies.
 ENV HERMES_TUI_DIR=/opt/hermes/ui-tui
 ENV HERMES_HOME=/opt/data
 ENV HERMES_WRITE_SAFE_ROOT=/opt/data

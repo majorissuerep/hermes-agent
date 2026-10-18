@@ -258,21 +258,24 @@ def main() -> None:
             children = db._conn.execute("SELECT COUNT(*) FROM sessions WHERE parent_session_id IS NOT NULL").fetchone()[0]
             child_ids = {row[0] for row in db._conn.execute(
                 "SELECT id FROM sessions WHERE parent_session_id IS NOT NULL")}
-            replies = {row[0]: row[1] for row in db._conn.execute(
-                "SELECT tool_call_id, content FROM messages WHERE role='tool'")}
+            replies = {(row[0], row[1]): row[2] for row in db._conn.execute(
+                "SELECT session_id, tool_call_id, content FROM messages WHERE role='tool'")}
             executed = {}
             for session_id, raw in db._conn.execute(
                     "SELECT session_id, tool_calls FROM messages WHERE role='assistant' AND tool_calls IS NOT NULL"):
                 for call in json.loads(raw):
                     function = call["function"]
-                    if function["name"] != "terminal" or call["id"] not in replies:
+                    reply_key = (session_id, call["id"])
+                    if function["name"] != "terminal" or reply_key not in replies:
                         continue
                     args = json.loads(function["arguments"])
                     command = args.get("command", "").strip()
                     if command not in {"hermes config get agent.max_turns", "hermes update --check",
                                        "hermes config set agent.max_turns 23"}:
                         continue
-                    result = json.loads(replies[call["id"]])
+                    # Native terminal results may append a runtime note after
+                    # their JSON payload; the leading result remains authoritative.
+                    result, _ = json.JSONDecoder().raw_decode(replies[reply_key].lstrip())
                     if result.get("exit_code") == 0:
                         executed[command] = session_id in child_ids
         finally:

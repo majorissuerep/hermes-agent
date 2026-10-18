@@ -128,31 +128,27 @@ def promote_stable(tag: str, digest: str, release_tag: str, *, run=output, sleep
         raise DockerReleaseError("Invalid published manifest-list digest")
     if _version_digest(tag, "", run) != digest:
         raise DockerReleaseError("Docker versioned tag differs from the final release receipt")
-    # Inspect both before moving either alias; desktop has its own registry digest.
-    variants = (("", digest), ("-desktop", _version_digest(tag, "-desktop", run)))
-    for suffix, version_digest in variants:
-        command = [
-            "docker", "buildx", "imagetools", "create", "-t", f"{IMAGE}:{release_tag}{suffix}",
-            "-t", f"{IMAGE}:stable{suffix}", "-t", f"{IMAGE}:latest{suffix}",
-            f"{IMAGE}@{version_digest}",
-        ]
+    command = [
+        "docker", "buildx", "imagetools", "create", "-t", f"{IMAGE}:{release_tag}",
+        "-t", f"{IMAGE}:stable", "-t", f"{IMAGE}:latest",
+        f"{IMAGE}@{digest}",
+    ]
+    for attempt in range(3):
+        try:
+            run(command)
+            break
+        except subprocess.CalledProcessError:
+            if attempt == 2:
+                raise
+            sleep(20)
+    for alias in (release_tag, "stable", "latest"):
         for attempt in range(3):
-            try:
-                run(command)
+            if _inspect(f"{IMAGE}:{alias}", run) == digest:
                 break
-            except subprocess.CalledProcessError:
-                if attempt == 2:
-                    raise
+            if attempt < 2:
                 sleep(20)
-        for alias in (release_tag, "stable", "latest"):
-            for attempt in range(3):
-                if _inspect(f"{IMAGE}:{alias}{suffix}", run) == version_digest:
-                    break
-                if attempt < 2:
-                    sleep(20)
-            else:
-                raise DockerReleaseError(f"Docker {alias}{suffix} alias read-back mismatch")
-
+        else:
+            raise DockerReleaseError(f"Docker {alias} alias read-back mismatch")
 
 def stable_alias_digest(run=output) -> str | None:
     """The slim ``stable`` alias digest, or None when the alias does not exist yet."""
@@ -166,14 +162,9 @@ def stable_alias_digest(run=output) -> str | None:
 
 
 def published_digest(tag: str, run=output) -> str:
-    """Read both attempt images; return the slim digest bound to the release receipt.
-
-    Desktop has a separate digest. Its immutable tag must be published before
-    the release can finalize; promotion reads it again when moving aliases.
-    """
+    """Read the immutable terminal image digest bound to the release receipt."""
     require_stable_tag(tag)
     digest = _version_digest(tag, "", run)
-    _version_digest(tag, "-desktop", run)
     return digest
 
 

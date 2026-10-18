@@ -65,8 +65,8 @@ UNREDIRECTABLE_AUTH = {
     "vertex": "Google ADC/OAuth2 token minting is required before any request",
     "external_process": "speaks ACP to a local vendor CLI subprocess, not HTTP",
     "copilot": "the GitHub token exchange URL is hardcoded (api.github.com/copilot_internal/v2/token)",
-    "oauth_device_code": "login + refresh covered by test_catalog_oauth.py",
-    "oauth_external": "login + refresh covered by test_catalog_oauth.py (where redirectable)",
+    "oauth_device_code": "provider-specific OAuth refresh is covered by the Anthropic/Codex suites",
+    "oauth_external": "provider-specific OAuth refresh is covered by the Anthropic/Codex suites",
 }
 KEYLESS_PROVIDERS = {
     "custom": "user-defined endpoint keyed by config api_key; covered by test_chat_custom_endpoint.py",

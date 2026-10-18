@@ -1,42 +1,22 @@
 #!/usr/bin/env bash
-# Run a Hermes instance in an isolated sandbox — separate HERMES_HOME,
-# separate Electron userData, and a distinct Desktop app name so it doesn't compete
-# with your main desktop instance's single-instance lock.
-#
-# By default the sandbox is throwaway: a temp dir is created and removed on
-# exit. Use --persistent to keep the sandbox across restarts (stored under
-# .hermes-sandbox/ in the worktree git root).
-#
-# Usage:
+# Run a local command with isolated Hermes home/runtime directories.
+# Ephemeral by default; --persistent keeps this worktree's state, and --from
+# explicitly seeds it without modifying the source home. Encrypted seeds remain
+# encrypted and require their normal unlock gate.
+# Examples:
 #   scripts/dev-sandbox.sh python -m hermes_cli.main
-#   scripts/dev-sandbox.sh hermes desktop
-#   scripts/dev-sandbox.sh electron .
-#   scripts/dev-sandbox.sh -- npm run dev   # from apps/desktop/
-#   scripts/dev-sandbox.sh --persistent hermes desktop
-#   scripts/dev-sandbox.sh --persistent -- npm run dev
-#
-# Seed the sandbox HERMES_HOME from an existing directory (e.g. your main
-# ~/.hermes) so config, sessions, skills, etc. are pre-populated:
-#   scripts/dev-sandbox.sh --from ~/.hermes hermes desktop
-#
-# Override the app name (default: HermesSandbox):
-#   HERMES_DEV_SANDBOX_NAME=Staging scripts/dev-sandbox.sh hermes desktop
-#
-# Override the persistent sandbox dir name (default: .hermes-sandbox):
-#   HERMES_DEV_SANDBOX_DIR=.staging-sandbox scripts/dev-sandbox.sh --persistent hermes desktop
+#   scripts/dev-sandbox.sh --persistent hermes
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENTRYPOINT="$(basename "$0")"
-# The minimal entrypoint is an alias, but its existing data and app identity stay separate.
+# Existing entrypoints retain distinct persistent directories.
 if [ "$ENTRYPOINT" = dev-minimal-sandbox.sh ]; then
   DEFAULT_DIR=.hermes-minimal-sandbox
-  APP_PREFIX=HermesMinimalSandbox
   TEMP_PREFIX=hermes-minimal-sandbox
 else
   DEFAULT_DIR=.hermes-sandbox
-  APP_PREFIX=HermesSandbox
   TEMP_PREFIX=hermes-sandbox
 fi
 
@@ -58,14 +38,13 @@ Options:
   -h, --help      Show this help message.
 
 Environment:
-  HERMES_DEV_SANDBOX_NAME  Override the app name (default prefix: $APP_PREFIX)
   HERMES_DEV_SANDBOX_DIR   Override the persistent dir name (default: $DEFAULT_DIR)
 
 Examples:
-  $ENTRYPOINT hermes desktop
-  $ENTRYPOINT --persistent hermes desktop
-  $ENTRYPOINT --from ~/.hermes hermes desktop
-  $ENTRYPOINT -- npm run dev
+  $ENTRYPOINT hermes
+  $ENTRYPOINT --persistent hermes
+  $ENTRYPOINT --from /explicit/seed/home hermes
+  $ENTRYPOINT -- python -m hermes_cli.main
 EOF
 }
 
@@ -152,17 +131,6 @@ if [ "$DELETE" = true ]; then
   exit 0
 fi
 
-# Derive a per-worktree app name so multiple checkouts don't collide.
-# Each worktree has its own toplevel path even though they share one repo,
-# so we hash that path into a short, stable suffix.
-WORKTREE_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || echo "$SCRIPT_DIR/..")"
-WORKTREE_ROOT="$(cd "$WORKTREE_ROOT" && pwd)"
-WORKTREE_HASH="$(printf '%s' "$WORKTREE_ROOT" | cksum | cut -d' ' -f1)"
-WORKTREE_NAME="$(basename "$WORKTREE_ROOT")"
-DEFAULT_SANDBOX_NAME="${APP_PREFIX}-${WORKTREE_NAME}-${WORKTREE_HASH}"
-
-SANDBOX_NAME="${HERMES_DEV_SANDBOX_NAME:-$DEFAULT_SANDBOX_NAME}"
-
 if [ "$PERSISTENT" = true ]; then
   SANDBOX_ROOT="$PERSISTENT_SANDBOX_ROOT"
 else
@@ -170,10 +138,9 @@ else
 fi
 
 export HERMES_HOME="$SANDBOX_ROOT/hermes-home"
-export HERMES_DESKTOP_USER_DATA_DIR="$SANDBOX_ROOT/user-data"
-export HERMES_DESKTOP_APP_NAME="$SANDBOX_NAME"
+export HERMES_RUNTIME_DIR="$SANDBOX_ROOT/runtime"
 
-mkdir -p "$HERMES_HOME" "$HERMES_DESKTOP_USER_DATA_DIR"
+mkdir -p "$HERMES_HOME" "$HERMES_RUNTIME_DIR"
 
 if [ -n "$SEED_DIR" ]; then
   # Only seed when the sandbox HERMES_HOME is empty — avoids clobbering an
@@ -187,8 +154,7 @@ if [ -n "$SEED_DIR" ]; then
 fi
 
 echo "[sandbox] HERMES_HOME=$HERMES_HOME" >&2
-echo "[sandbox] userData=$HERMES_DESKTOP_USER_DATA_DIR" >&2
-echo "[sandbox] appName=$HERMES_DESKTOP_APP_NAME" >&2
+echo "[sandbox] HERMES_RUNTIME_DIR=$HERMES_RUNTIME_DIR" >&2
 if [ "$PERSISTENT" = true ]; then
   echo "[sandbox] persistent: $SANDBOX_ROOT" >&2
 else

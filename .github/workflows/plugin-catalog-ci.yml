@@ -266,8 +266,8 @@ jobs:
             # each one under `attested_binaries:` and the binary must carry a
             # GitHub build-provenance attestation tying it to this repo's own
             # workflow at the pinned source digest; those paths are exempted here
-            # and verified below. No stdin: the parser must not drain the entry fd.
-            ATTESTED=$(python3 -I - "$entry" <<'PYEOF' </dev/null
+            # and verified below. The heredoc owns stdin; the entry list stays on fd 3.
+            ATTESTED=$(python3 -I - "$entry" <<'PYEOF'
           import re, shlex, sys
           from ruamel.yaml import YAML
           try:

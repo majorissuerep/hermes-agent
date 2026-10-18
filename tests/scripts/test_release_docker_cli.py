@@ -88,65 +88,18 @@ def test_promotion_reuses_the_receipt_digest_without_rebuilding():
         promote_stable('rc.1-v1.2.3', digest, 'v1.2.3', run=lambda _argv: 'sha256:' + 'e' * 64)
 
 
-def test_promotion_preserves_independent_desktop_digest():
-    from scripts.releases.docker import promote_stable
 
-    slim, desktop = ('sha256:' + c * 64 for c in 'de')
-    inspected = []
-    created = []
-
-    def run(argv):
-        if argv[3] == 'inspect':
-            ref = argv[4]
-            inspected.append(ref)
-            return desktop if ref.endswith('-desktop') else slim
-        if argv[3] == 'create':
-            created.append(argv)
-            return ''
-        raise AssertionError(argv)
-
-    promote_stable('rc.1-v1.2.3', slim, 'v1.2.3', run=run)
-    assert 'nousresearch/hermes-agent:rc.1-v1.2.3-desktop' in inspected
-    assert {tuple(cmd[4:]) for cmd in created} == {
-        ('-t', 'nousresearch/hermes-agent:v1.2.3', '-t', 'nousresearch/hermes-agent:stable',
-         '-t', 'nousresearch/hermes-agent:latest', f'nousresearch/hermes-agent@{slim}'),
-        ('-t', 'nousresearch/hermes-agent:v1.2.3-desktop', '-t',
-         'nousresearch/hermes-agent:stable-desktop', '-t',
-         'nousresearch/hermes-agent:latest-desktop', f'nousresearch/hermes-agent@{desktop}'),
-    }
-    assert 'nousresearch/hermes-agent:stable-desktop' in inspected
-    assert 'nousresearch/hermes-agent:latest-desktop' in inspected
-
-
-def test_promotion_requires_desktop_version_before_moving_any_alias():
-    from scripts.releases.docker import DockerReleaseError, promote_stable
-
-    created = []
-
-    def run(argv):
-        if argv[3] == 'inspect':
-            if argv[4].endswith('-desktop'):
-                raise subprocess.CalledProcessError(1, argv)
-            return 'sha256:' + 'd' * 64
-        created.append(argv)
-        return ''
-
-    with pytest.raises(DockerReleaseError, match='desktop'):
-        promote_stable('rc.1-v1.2.3', 'sha256:' + 'd' * 64, 'v1.2.3', run=run)
-    assert not created
-
-
-def test_published_digest_checks_desktop_tag():
+def test_published_digest_requires_the_terminal_version_tag():
     from scripts.releases.docker import DockerReleaseError, published_digest
 
     inspected = []
+    digest = 'sha256:' + 'd' * 64
 
     def run(argv):
         inspected.append(argv[4])
-        return 'sha256:' + ('e' if argv[4].endswith('-desktop') else 'd') * 64
+        return digest
 
-    assert published_digest('v1.2.3', run=run) == 'sha256:' + 'd' * 64
-    assert inspected == ['nousresearch/hermes-agent:v1.2.3',
-                         'nousresearch/hermes-agent:v1.2.3-desktop']
-    with pytest.raises(DockerReleaseError, match='desktop'):
-        published_digest('v1.2.3', run=lambda argv: 'garbage' if argv[4].endswith('-desktop') else 'sha256:' + 'd' * 64)
+    assert published_digest('v1.2.3', run=run) == digest
+    assert inspected == ['nousresearch/hermes-agent:v1.2.3']
+    with pytest.raises(DockerReleaseError):
+        published_digest('v1.2.3', run=lambda argv: 'garbage')

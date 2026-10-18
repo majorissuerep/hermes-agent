@@ -76,10 +76,12 @@ class TerminalPTY:
         self.prompts = 0
         self.output = bytearray()
         self.screen = Screen(42, 140)
+        project = Path(env["HOME"]) / "foreign-project"
+        project.mkdir(parents=True, exist_ok=True)
         self.master, slave = pty.openpty()
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 42, 140, 0, 0))
         self.process = subprocess.Popen([sys.executable, "-m", "hermes_cli.main", *args],
-            stdin=slave, stdout=slave, stderr=slave, cwd=ROOT,
+            stdin=slave, stdout=slave, stderr=slave, cwd=project,
             env={**env, "TERM": "xterm-256color"}, start_new_session=True,
             preexec_fn=lambda: fcntl.ioctl(0, termios.TIOCSCTTY, 0))  # noqa: PLW1509 -- child requires its controlling PTY
         os.close(slave)

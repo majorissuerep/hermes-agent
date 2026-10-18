@@ -1,19 +1,5 @@
-# GitHub supports cache-mode; actionlint v1.7.12's job schema does not yet.
-# Keep the literal trust boundaries, not a weaker step-only cache convention.
-# https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching#controlling-cache-access-with-cache-mode
 self-hosted-runner:
   labels:
     - ubuntu-latest-96-core
     - ubuntu-latest-32-core
     - ubuntu-latest-32-arm-core
-paths:
-  .github/workflows/desktop-bundled-release.yml:
-    ignore:
-      - '^unexpected key "cache-mode" for "job" section\.'
-  .github/workflows/desktop-bundle-smoke.yml:
-    ignore:
-      - '^unexpected key "cache-mode" for "job" section\.'
-  .github/workflows/ci.yaml:
-    ignore:
-      # This flaky legacy UI lane is explicitly disabled, not configurable.
-      - '^constant expression "false" in condition\.'

@@ -613,7 +613,7 @@ def _interpret_browser_command_output(command: str, stdout: str, stderr: str, re
     return parsed
 
 
-_SANDBOX_AGENT_BROWSER = "agent-browser"  # the CLI baked into nousresearch/hermes-sandbox:desktop
+_SANDBOX_AGENT_BROWSER = "agent-browser"  # Resolved inside the explicitly selected terminal.
 _SANDBOX_ENV_KEYS = ("AGENT_BROWSER_SOCKET_DIR", "AGENT_BROWSER_IDLE_TIMEOUT_MS", "AGENT_BROWSER_ARGS",
                      "AGENT_BROWSER_PROFILE", "AGENT_BROWSER_EXECUTABLE_PATH", "AGENT_BROWSER_HEADED",
                      "ANONYMIZED_TELEMETRY", "TMPDIR")
@@ -657,7 +657,8 @@ def _browser_command_preflight() -> dict[str, Any]:
         if is_interrupted():
             return {"success": False, "error": "Interrupted"}
         try:
-            terminal.terminal_environment(create=True)
+            env = terminal.terminal_environment(create=True)
+            terminal.require_browser_cli(env)
             if _cloud._is_local_mode() and _cloud._is_headed_mode() and _cloud._get_browser_engine() != "lightpanda":
                 raise RuntimeError("headed sandbox browsers are unsupported; use headless browsing or an explicit outgoing CDP endpoint")
         except RuntimeError as exc:

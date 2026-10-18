@@ -59,11 +59,12 @@ def runtime_command(repo_root: Path, args=(), *, module: str = "hermes_cli.main"
         settle = ("os.environ.get('HERMES_HOME') or os.environ.__setitem__('HERMES_HOME', "
                   "str(__import__('hermes_constants').get_default_hermes_root())); ")
     bootstrap = (
-        "import os, sys, runpy; "
+        "import os, sys, runpy; import re, contextlib, hashlib, io, pathlib, shutil, subprocess; "
         "os.environ.pop('PYTHONHOME', None); os.environ.pop('PYTHONPATH', None); "
         "os.environ.pop('VIRTUAL_ENV', None); "
         f"sys.path.insert(0, {_inline_string_literal(str(root))}); "
         + pin
+        + f"exec({_inline_string_literal(_closure_repair_script(root))}); _hermes_closure_repair(); "
         + "import hermes_bootstrap; "
         + settle
         + entry
@@ -319,16 +320,25 @@ def _hermes_closure_repair():
     from pathlib import Path
     root = Path(__ROOT__)
     git = root / '.git'
+
+    def refuse(reason):
+        sys.stderr.write('hermes: interrupted-update recovery could not be verified (%s); '
+                         'the checkout was not started. Preserve the checkout and run the '
+                         'installer repair before trying again.\\n' % reason)
+        raise SystemExit(1)
+
     try:
         if git.is_file():
             text = git.read_text(encoding='utf-8-sig').strip()
             git = root / text[7:].strip() if text.startswith('gitdir:') else git
         fields = dict(line.partition('=')[::2] for line in (git / __MARKER__).read_text(encoding='utf-8-sig').splitlines())
-    except OSError:
+    except FileNotFoundError:
         return
+    except OSError:
+        refuse('unreadable source-update marker')
     pre = fields.get('pre', '').strip()
     if not re.fullmatch('[0-9a-f]{40}|[0-9a-f]{64}', pre):
-        return
+        refuse('invalid source-update marker')
     closure = git / __CLOSURE_DIR__ / pre
     files = (*__CLOSURE__, __INIT__)
 
@@ -350,7 +360,7 @@ def _hermes_closure_repair():
             exe = next((os.path.join(d, n) for d in os.environ.get('PATH', '').split(os.pathsep) if os.path.isabs(d)
                         for n in names if os.path.isfile(os.path.join(d, n))), '')
         if not exe:
-            return
+            refuse('Git is unavailable')
 
         def git_out(*args):
             done = subprocess.run([exe, '--no-replace-objects', '-C', str(root), *args], capture_output=True, timeout=60,
@@ -378,11 +388,11 @@ def _hermes_closure_repair():
             shutil.rmtree(closure, ignore_errors=True)
             os.replace(staging, closure)
         except (OSError, KeyError, subprocess.SubprocessError):
-            pass
+            refuse('recovery Git objects could not be verified')
         finally:
             shutil.rmtree(staging, ignore_errors=True)
         if not verified():
-            return
+            refuse('recovery manifest does not match its files')
     for name in [n for n in sys.modules if n.split('.')[0] in ('hermes_cli', 'hermes_bootstrap', 'hermes_constants', 'pm')]:
         del sys.modules[name]
     tree = os.path.normcase(os.path.realpath(root))
@@ -408,6 +418,25 @@ def _hermes_closure_repair():
 """
 
 
+def _closure_repair_script(repo_root: Path) -> str:
+    """Self-contained verified repair shared by public and self-called native launchers."""
+    root = str(Path(repo_root).resolve())
+    from hermes_cli._early_recovery import (
+        INTERRUPTED_PULL_MARKER,
+        RECOVERY_CLOSURE,
+        RECOVERY_CLOSURE_DIR,
+        RECOVERY_CLOSURE_INIT,
+        RECOVERY_CLOSURE_MANIFEST,
+    )
+
+    return (_CLOSURE_REPAIR.replace("__MARKER__", repr(INTERRUPTED_PULL_MARKER))
+                      .replace("__CLOSURE_DIR__", repr(RECOVERY_CLOSURE_DIR))
+                      .replace("__MANIFEST__", repr(RECOVERY_CLOSURE_MANIFEST))
+                      .replace("__INIT__", repr(RECOVERY_CLOSURE_INIT))
+                      .replace("__CLOSURE__", repr(RECOVERY_CLOSURE))
+                      .replace("__ROOT__", repr(root)))  # last: a path is never re-substituted
+
+
 def _launcher_script(name: str, repo_root: Path, dependencies: Path | None) -> str:
     module, func = ENTRY_POINTS[name]
     # Profile boot repairs shared launchers: their default must stay at the
@@ -420,20 +449,7 @@ def _launcher_script(name: str, repo_root: Path, dependencies: Path | None) -> s
     # ``hermes_bootstrap`` right after the repair (``_PIN_DEFAULT_HOME``), and here again for a
     # bootstrap that predates that hook.
     root = str(repo_root.resolve())
-    from hermes_cli._early_recovery import (
-        INTERRUPTED_PULL_MARKER,
-        RECOVERY_CLOSURE,
-        RECOVERY_CLOSURE_DIR,
-        RECOVERY_CLOSURE_INIT,
-        RECOVERY_CLOSURE_MANIFEST,
-    )
-
-    closure_repair = (_CLOSURE_REPAIR.replace("__MARKER__", repr(INTERRUPTED_PULL_MARKER))
-                      .replace("__CLOSURE_DIR__", repr(RECOVERY_CLOSURE_DIR))
-                      .replace("__MANIFEST__", repr(RECOVERY_CLOSURE_MANIFEST))
-                      .replace("__INIT__", repr(RECOVERY_CLOSURE_INIT))
-                      .replace("__CLOSURE__", repr(RECOVERY_CLOSURE))
-                      .replace("__ROOT__", repr(root)))  # last: a path is never re-substituted
+    closure_repair = _closure_repair_script(repo_root)
     return (
         # The repair's own stdlib, bound before the checkout root goes on sys.path: a stdlib-named
         # file in the tree must not run in its place ahead of the closure's verification. The first
