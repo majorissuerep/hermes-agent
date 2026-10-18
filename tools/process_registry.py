@@ -34,7 +34,7 @@ from hermes_cli.config import get_hermes_home
 
 from tools.process_registry_notifications import format_process_notification, is_child_process_notification, should_surface_notification
 from tools.process_registry_checkpoint import ProcessCheckpointMixin
-from tools.process_registry_output_log import ProcessOutputLogMixin, open_output_log, record_exit_command, background_output_log
+from tools.process_registry_output_log import ProcessOutputLogMixin, spawn_output_worker, background_output_log
 from tools.process_registry_termination import ProcessTerminationMixin
 from tools.process_registry_results import load_completed_results, save_completed_result
 from tools.process_registry_env_log import log_delta_command
@@ -1143,7 +1143,7 @@ class ProcessRegistry(ProcessTerminationMixin, ProcessCheckpointMixin, ProcessOu
         # Pipe path (non-PTY or PTY fallback).
         _popen_kwargs = {"creationflags": windows_hide_flags()} if _IS_WINDOWS else {}
         unit_suffix = f"{session.id}-pipe-fallback" if pty_scope_attempted else session.id
-        spawn_argv = self._scope_argv(session, record_exit_command(log, safe_command) if log else safe_command,
+        spawn_argv = self._scope_argv(session, safe_command,
                                       unit_suffix, "Local")
         from hermes_security.sandbox.spawn import apply_env
         spawn_env = apply_env(self._spawn_env(env_vars), session._sandbox_env)
@@ -1154,18 +1154,19 @@ class ProcessRegistry(ProcessTerminationMixin, ProcessCheckpointMixin, ProcessOu
         # share the foreground process group and background spawns would stop the whole
         # session (observed as dead TUIs in state T). Cgroup isolation is unaffected —
         # the scope attaches to the invoked process, not the spawning session.
-        output = open_output_log(log) if log else subprocess.PIPE
-        try:
+        if log:
+            proc, host_start_time = spawn_output_worker(
+                log, spawn_argv, env=spawn_env, execution_id=session.id,
+                cwd=session.cwd, start_new_session=True, **_popen_kwargs)
+        else:
             proc = subprocess.Popen(
                 spawn_argv, text=True, cwd=session.cwd, env=spawn_env, encoding="utf-8",
-                errors="replace", stdout=output, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                errors="replace", stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
                 start_new_session=True, **_popen_kwargs)
-        finally:
-            if log:
-                os.close(output)
+            host_start_time = self._safe_host_start_time(proc.pid)
         session.process, session.output_log = proc, str(log or "")
         session.pid = proc.pid
-        session.host_start_time = self._safe_host_start_time(session.pid)
+        session.host_start_time = host_start_time
         try:
             self._track_started(session, self._log_reader_loop if log else self._reader_loop, f"proc-reader-{session.id}")
         except Exception:

@@ -1,13 +1,10 @@
-"""Profile-scoped credential resolution for multi-profile gateway multiplexing.
+"""Profile-scoped credentials for local sessions and terminal workers.
 
-The multiplexing gateway serves many profiles from one process; each profile's
-``.env`` keys **cannot** be unioned into ``os.environ`` (profile A's keys would
-leak into profile B's turns and subprocesses). This module is a fail-closed,
-context-local secret scope: ``set_secret_scope(mapping)`` installs the active
-profile's secrets for the current task (a contextvar, so it propagates into the
-agent's worker thread via ``copy_context()``); ``get_secret(name)`` reads from
-it and, when multiplexing is active with no scope set, RAISES rather than
-falling back to ``os.environ``. Design: ``website/docs/developer-guide/multiplexing-gateway.md``.
+A private runtime can serve several profiles in one process. Their secrets must
+not be unioned into ``os.environ``: profile A's keys would leak into B's turns
+and children. ``set_secret_scope`` binds task-local authority that propagates
+through ``copy_context()``; an unbound multiplexed read fails closed instead of
+borrowing ambient credentials.
 """
 from __future__ import annotations
 
@@ -130,8 +127,8 @@ class UnscopedSecretError(RuntimeError):
             secret_name, developer_detail = "", secret_name
         what = f"this profile's {secret_name}" if secret_name else "this profile's API key"
         super().__init__(
-            f"Hermes could not read {what} (an internal profile-scoping bug on the multiplexed "
-            "gateway, not your configuration). Run `hermes gateway restart`; if it keeps happening, "
+            f"Hermes could not read {what} (an internal profile-scoping error, not your "
+            "configuration). Restart the Hermes session; if it keeps happening, "
             "report it with `hermes debug share`."
         )
         self.secret_name = secret_name

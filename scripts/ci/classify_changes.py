@@ -42,10 +42,9 @@ _PY_RELEVANT_SITE = (
 # Editing only the JSON in an apps/-only PR would otherwise skip the one test
 # that can catch the drift, so these force the Python lane too.
 _PY_RELEVANT_CONTRACT_FILES = {
-    # tests/tui_gateway/contracts/test_generated.py (rendered from tui_gateway/contracts)
+    # tests/tui_runtime/contracts/test_generated.py (rendered from tui_runtime/contracts)
     "apps/shared/src/gateway-contract.generated.ts",
     "apps/shared/src/gateway-contract.openrpc.json",
-    # tests/tui_gateway/test_show_reasoning_display_gate.py (card-tool names vs the gateway lifecycle set)
     # tests/website/test_catalog_rules_mirror.py (docs page mirrors the canonical rules)
     "plugin-catalog/README.md",
 }
@@ -74,10 +73,6 @@ _SHARED_FIXTURE_CONSUMERS: dict[str, tuple[str, ...]] = {
 }
 # What a fixture inherits from its consumers: the lanes that run them as tests.
 _FIXTURE_CONSUMER_LANES = ("python", "frontend")  # fork: rust lane removed with the Tauri crate
-
-# These live under ``apps/``, so before this lane existed a ``.rs`` edit matched
-# ``frontend`` and nothing more: the TypeScript matrix built, cargo never ran,
-# and the crate's unit tests had never executed in CI at all.
 
 # The real SSH/Docker backend lane: the backends, the terminal tool that drives
 # them, the tests it runs, the sshd it starts, and the runner's env allowlist
@@ -134,10 +129,6 @@ _UPDATE_PIPELINE = (
     "hermes_cli/npm_engine.py",
     "hermes_cli/_scan_venv_blockers.py",
     "hermes_cli/dashboard_procs.py",
-    "hermes_cli/gateway.py",  # fleet restart / verify
-    "hermes_cli/gateway_launchd.py",
-    "hermes_cli/gateway_migrate",
-    "hermes_cli/gateway_supervised_restart.py",
     "hermes_cli/git_pack_tidy.py",  # partial-clone pack tidy: every update's pre-fetch runs it
     "hermes_bootstrap.py",  # every launch's prepare_launch
     "hermes_constants.py",  # root home = update marker location
@@ -171,6 +162,7 @@ _UPDATE_ENTRY_POINTS = (
 _UPDATE_DEPENDENCIES = (
     "hermes_cli/terminal_update.py",
     "hermes_platform/process_argv.py",
+    "hermes_platform/child_processes.py",  # native updater custody and completion receipt ownership
     "hermes_security/handoff.py",
     "hermes_security/session_authority.py",
     "hermes_cli/_subprocess_compat.py",  # update git env, process-tree kill, PM git exposure
@@ -186,7 +178,6 @@ _UPDATE_DEPENDENCIES = (
     "hermes_cli/memory_provider_migration.py",
     "hermes_cli/left_core_migration.py",  # source_build migrates plugins that left core
     "hermes_cli/bundled_app.py",
-    "hermes_cli/gui_uninstall.py",
     "hermes_cli/github_api.py",  # source_check's release lookup
     "hermes_cli/build_info.py",
     "hermes_cli/image_provenance.py",
@@ -202,7 +193,6 @@ _UPDATE_DEPENDENCIES = (
     "hermes_cli/tools_config_cua.py",
     "hermes_cli/_startup_fast.py",
     "hermes_cli/_parser.py",
-    "hermes_cli/gateway_multiplex_mode.py",
     "hermes_cli/plugin_catalog.py",
     "hermes_cli/steward.py",
     "hermes_cli/observability/shared_metrics_update.py",
@@ -235,7 +225,6 @@ _SHARED_HUBS = frozenset({
     "utils.py",
     "hermes_state/__init__.py",
     "agent/__init__.py",
-    "cron/jobs.py",
     "tools/environments/local.py",
     "hermes_constants.py",
     "pm/__init__.py",
@@ -249,8 +238,6 @@ _E2E_LANES: dict[str, tuple[str, ...]] = {
         # The state.db torture chamber and the compaction/exactly-once
         # suites are the only tests that run real concurrent writers.
         "hermes_state",
-        # Messaging-gated gateway cases: only the e2e job installs the real
-        # Discord/Telegram SDKs (tests.yml "Run messaging-gated gateway cases").
     ),
     "e2e_upgrade": (
         *_PY_TEST_HARNESS,

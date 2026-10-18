@@ -63,14 +63,37 @@ def clear_vault_redaction_values() -> None:
         _VAULT_REDACTION_VALUES.pop(_vault_scope(), None)
 
 
+def _profile_credential_values() -> set[str]:
+    """Current authority only: no process-env borrowing or persistent plaintext cache."""
+    from agent.secret_scope import current_secret_scope, current_secret_scope_home, load_env_file
+    from hermes_constants import get_hermes_home, hermes_home_key
+    from hermes_security import io as state_io, vault
+
+    home = get_hermes_home()
+    scope = current_secret_scope()
+    scope_home = current_secret_scope_home()
+    mappings = []
+    if scope is not None and (scope_home is None or hermes_home_key(scope_home) == hermes_home_key(home)):
+        mappings.append(scope)
+    env_path = home / ".env"
+    owner = state_io._home_for(env_path)
+    if owner is not None and vault.is_unlocked(owner):
+        # This parser authenticates every vaulted read and propagates integrity failures.
+        # The owning vault may be an ancestor; the parsed file is still THIS profile's.
+        mappings.append(load_env_file(env_path))
+    return {value for mapping in mappings for key, value in mapping.items()
+            if is_secret_field_name(key) and isinstance(value, str) and value}
+
+
 def redact_registered_vault_values(text: str) -> str:
-    """Exact-substring scrub of every vault secret value registered for the current profile."""
+    """Scrub active profile credentials plus explicitly registered browser/capability values."""
     if not isinstance(text, str) or not text:
         return text
     with _VAULT_REDACTION_LOCK:
         bucket = _VAULT_REDACTION_VALUES.get(_vault_scope())
-        values = sorted(bucket, key=len, reverse=True) if bucket else ()  # longest first: a substring never shadows its superstring
-    for value in values:
+        values = set(bucket) if bucket else set()
+    values.update(_profile_credential_values())
+    for value in sorted(values, key=len, reverse=True):
         if value in text:
             text = text.replace(value, "«redacted-vault-secret»")
     return text

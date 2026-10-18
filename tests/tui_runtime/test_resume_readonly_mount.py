@@ -110,5 +110,3 @@ def test_reopen_if_finalized_leaves_live_rows_untouched(tmp_path):
     row = db.get_session("live")
     assert row["ended_at"] is None and row["end_reason"] is None
     db.close()
-
-

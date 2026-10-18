@@ -6,7 +6,6 @@ signalled. A gone PID is pruned. A completion is queued only when a real exit
 status was collected.
 """
 
-import json
 import subprocess
 import sys
 import time
@@ -14,10 +13,15 @@ import time
 import pytest
 
 from tools.process_registry import ProcessRegistry, ProcessSession
+from hermes_security import io as state_io
+
+from tests.e2e.vault_home import seal_fixture_home
 
 
 @pytest.fixture()
-def registry():
+def registry(tmp_path, monkeypatch):
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    seal_fixture_home(tmp_path)
     return ProcessRegistry()
 
 
@@ -152,7 +156,7 @@ class TestCheckpointReadopt:
             start = ProcessRegistry._safe_host_start_time(proc.pid)
             assert start is not None
             checkpoint = tmp_path / "procs.json"
-            checkpoint.write_text(json.dumps([{
+            state_io.write_json(checkpoint, [{
                 "session_id": "proc_recover_live",
                 "command": "sleep-for-readopt",
                 "pid": proc.pid,
@@ -160,7 +164,7 @@ class TestCheckpointReadopt:
                 "host_start_time": start,
                 "task_id": "t1",
                 "notify_on_complete": True,
-            }]))
+            }], purpose="state")
             monkeypatch.setattr(
                 "tools.process_registry.CHECKPOINT_PATH", checkpoint
             )
@@ -186,7 +190,7 @@ class TestCheckpointReadopt:
             real = ProcessRegistry._safe_host_start_time(proc.pid)
             assert real is not None
             checkpoint = tmp_path / "procs.json"
-            checkpoint.write_text(json.dumps([{
+            state_io.write_json(checkpoint, [{
                 "session_id": "proc_recover_reused",
                 "command": "sleep-for-readopt",
                 "pid": proc.pid,
@@ -195,7 +199,7 @@ class TestCheckpointReadopt:
                 "task_id": "t1",
                 "notify_on_complete": True,
                 "systemd_unit": "hermes-worker-proc_recover_reused.scope",
-            }]))
+            }], purpose="state")
             stopped = []
             monkeypatch.setattr(
                 "tools.process_registry.CHECKPOINT_PATH", checkpoint

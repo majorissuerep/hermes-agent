@@ -1,13 +1,4 @@
-"""Tests for #65194: the gateway's startup-time orphaned-session sweep.
-
-A gateway restart destroys the in-process ws-orphan grace timers
-(``_schedule_ws_orphan_reap``), so rows for sessions that died with the
-previous process stay ``ended_at IS NULL`` forever.  Both gateway entry
-points — stdio ``entry.main()`` and the desktop/dashboard WS sidecar
-``handle_ws`` — must schedule a DB-level sweep, gated by
-``dashboard.startup_orphan_sweep`` (default on) and the gateway's session
-TTL, without ever blocking or crashing startup.
-"""
+"""Native startup reclaims provably orphaned rows without making them unresumable."""
 
 from __future__ import annotations
 
@@ -61,12 +52,8 @@ class TestSweepOrphanedSessionRows:
         """A stranded 'active' row (ended_at NULL, no live runtime) is swept
         AND still resumable afterward (#65194 salvage requirement).
 
-        ``startup_orphan_reap`` must be in the recoverable accidental-end set:
-        recovery (find_latest_gateway_session_for_peer), canonical-chat
-        resurrection (unarchive_recoverable_session), and reset promotion all
-        fence on ``_RECOVERABLE_END_REASONS`` — a sweep that used a
-        non-recoverable reason would make the restart LOSE the session
-        instead of merely closing its phantom row.
+        The durable row and transcript stay addressable by native resume; a
+        startup sweep closes phantom liveness, not the user's conversation.
         """
         db = SessionDB(tmp_path / "state.db")
         stale = time.time() - 8 * 3600
@@ -89,12 +76,7 @@ class TestSweepOrphanedSessionRows:
         # The distinct reason is a recoverable accident, not a boundary.
         assert "startup_orphan_reap" in SessionDB.RECOVERABLE_END_REASONS
 
-        # Peer-keyed recovery still surfaces the swept row...
-        recovered = db.find_latest_gateway_session_for_peer(
-            source="tui", session_key="tui:peer-1"
-        )
-        assert recovered is not None
-        assert recovered["id"] == "stranded-tui"
+        assert db.resolve_resume_session_id("stranded-tui") == "stranded-tui"
 
         # ...and the session.resume path (reopen_session) fully revives it.
         db.reopen_session("stranded-tui")
@@ -185,7 +167,7 @@ class TestSweepOrphanedSessionRows:
 
 
 class TestScheduleStartupOrphanSweep:
-    def test_once_per_process_and_config_and_ttl_gates(self, monkeypatch):
+    def test_once_per_process_and_ttl_gate(self, monkeypatch):
         started = {"count": 0}
 
         class _Timer:
@@ -196,43 +178,24 @@ class TestScheduleStartupOrphanSweep:
                 started["count"] += 1
 
         monkeypatch.setattr(server.threading, "Timer", _Timer)
-        monkeypatch.setattr(server, "_WS_ORPHAN_REAP_GRACE_S", 20.0)
-        monkeypatch.setattr(server, "_SESSION_TTL_S", float(IDLE_S))
+        monkeypatch.setattr(server, "_SESSION_TTL_S", 0.0)
 
         monkeypatch.setattr(server, "_startup_orphan_sweep_ran", False)
-        monkeypatch.setattr(server, "_session_orphan_reaper_enabled", lambda: False)
         server._schedule_startup_orphan_sweep()
         assert started["count"] == 0
         assert server._startup_orphan_sweep_ran is False
 
-        monkeypatch.setattr(server, "_session_orphan_reaper_enabled", lambda: True)
+        monkeypatch.setattr(server, "_SESSION_TTL_S", float(IDLE_S))
         server._schedule_startup_orphan_sweep()
         server._schedule_startup_orphan_sweep()
         assert started["count"] == 1
         assert server._startup_orphan_sweep_ran is True
 
-        monkeypatch.setattr(server, "_startup_orphan_sweep_ran", False)
-        monkeypatch.setattr(server, "_WS_ORPHAN_REAP_GRACE_S", 0.0)
-        server._schedule_startup_orphan_sweep()
-        assert started["count"] == 1
-
-        monkeypatch.setattr(server, "_WS_ORPHAN_REAP_GRACE_S", 20.0)
         monkeypatch.setattr(server, "_SESSION_TTL_S", 0.0)
         monkeypatch.setattr(server, "_startup_orphan_sweep_ran", False)
         server._schedule_startup_orphan_sweep()
         assert started["count"] == 1
 
-    def test_config_flag_reads_dashboard_startup_orphan_sweep(self, monkeypatch):
-        monkeypatch.setattr(
-            server, "_load_cfg", lambda: {"dashboard": {"startup_orphan_sweep": False}}
-        )
-        assert server._session_orphan_reaper_enabled() is False
-
-        monkeypatch.setattr(server, "_load_cfg", dict)
-        assert server._session_orphan_reaper_enabled() is True
-
-        monkeypatch.setattr(server, "_load_cfg", lambda: (_ for _ in ()).throw(RuntimeError("boom")))
-        assert server._session_orphan_reaper_enabled() is True
 
 
 class TestEntryAndWsWiring:

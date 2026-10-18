@@ -3,8 +3,8 @@
 A managed worker is a per-turn interpreter. A stdout pipe whose read end that worker's reader
 thread owns closes when the worker exits, so the child's next write raises SIGPIPE
 (``broken_pipe``) and everything it printed is gone. Under a worker the child writes to a
-profile-scoped log instead and its shell records the exit status beside it (the contract the
-env-backend wrapper already uses), so whichever interpreter adopts the checkpoint entry next
+profile-scoped encrypted stream through a lifetime-owned sink which records its exit status,
+so whichever interpreter adopts the checkpoint entry next
 (the session's next worker, the owner at startup) tails the same file and collects the exit.
 """
 import codecs
@@ -12,10 +12,16 @@ from contextlib import suppress
 import logging
 import os
 from pathlib import Path
+import select
+import signal
+import subprocess
+import struct
+import sys
 import time
 from typing import Optional
 
 from hermes_constants import get_hermes_home
+from hermes_security.errors import VaultError, VaultIntegrityError
 
 logger = logging.getLogger("tools.process_registry")
 
@@ -29,7 +35,7 @@ def output_dir() -> Path:
 
 
 def background_output_log(session_id: str) -> Optional[Path]:
-    """The log a worker-spawned process writes to; None outside a registered worker."""
+    """Encrypted stream for a durable native process, retained across launcher exit."""
     directory = output_dir()
     directory.mkdir(mode=0o700, parents=True, exist_ok=True)
     from tools.process_registry_results import RESULT_RETENTION_SECONDS
@@ -49,27 +55,58 @@ def adoptable_log(path) -> str:
     return str(log) if path and log.parent == output_dir() and log.suffix == ".log" else ""
 
 
-def open_output_log(log: Path) -> int:
-    """Owner-only append descriptor for the child's stdout+stderr (the parent closes its copy)."""
-    return os.open(log, os.O_WRONLY | os.O_CREAT | os.O_APPEND | getattr(os, "O_BINARY", 0), 0o600)
+def spawn_output_worker(log: Path, argv: list[str], *, env: dict, execution_id: str, **kwargs):
+    """Return only after the lifetime-owned sink adopted its key and started the child."""
+    from tools.process_registry import _IS_WINDOWS
+    from hermes_security.handoff import prepare_child_key
+    from hermes_platform.child_processes import spawn_env
+    from hermes_platform.processes import get_process_start_time
+
+    if _IS_WINDOWS:
+        raise RuntimeError("Durable encrypted background processes require Linux or macOS")
+    handoff = prepare_child_key()
+    if handoff is None:
+        raise RuntimeError("Durable process output requires an unlocked profile vault")
+    key_fd, key_env = handoff
+    ready_read, ready_write = os.pipe()
+    child_env = {**env, **key_env, **spawn_env("process-output"), "HERMES_HOME": str(get_hermes_home())}
+    worker = Path(__file__).with_name("process_output_worker.py")
+    proc = None
+    try:
+        proc = subprocess.Popen(
+            [sys.executable, str(worker), str(log), str(ready_write), execution_id, *argv],
+            env=child_env, pass_fds=(key_fd, ready_write), stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL, **kwargs)
+        started_at = get_process_start_time(proc.pid)
+        os.close(ready_write)
+        ready_write = -1
+        readable, _, _ = select.select([ready_read], [], [], 15)
+        if not readable or os.read(ready_read, 1) != b"R":
+            raise RuntimeError("Durable process output worker failed to adopt vault authority or start")
+        return proc, started_at
+    except BaseException:
+        if proc is not None and proc.poll() is None:
+            os.killpg(proc.pid, signal.SIGKILL)
+            proc.wait(timeout=5)
+        raise
+    finally:
+        os.close(key_fd)
+        os.close(ready_read)
+        if ready_write >= 0:
+            os.close(ready_write)
 
 
 def _exit_path(log) -> Path:
     return Path(log).with_suffix(".exit")
 
 
-def record_exit_command(log: Path, command: str) -> str:
-    """Prefix ``command`` so the shell writes its exit status beside the log: an interpreter
-    that adopts the process after the spawner exited has no Popen to wait on."""
-    import shlex
-    target = shlex.quote(_exit_path(log).as_posix())
-    return f"__hermes_exit_file={target}; trap 'printf \"%s\\n\" \"$?\" > \"$__hermes_exit_file\"' EXIT\n{command}"
-
-
 def recorded_exit_code(log) -> Optional[int]:
+    from hermes_security import io as state_io
+
     try:
-        return int(_exit_path(log).read_text(encoding="utf-8-sig").strip())
-    except (OSError, ValueError):
+        code = state_io.read_json(_exit_path(log), purpose="state")
+        return None if code is None else int(code)
+    except (OSError, ValueError, TypeError):
         return None
 
 
@@ -101,21 +138,38 @@ class ProcessOutputLogMixin:
                 return proc.poll() is None
             return self._detached_host_fate(session.pid, session.host_start_time) == "running"
         try:
+            from hermes_security import frames
+            from hermes_security.vault import get_vault
+            vault = get_vault()
             with open(session.output_log, "rb") as stream:
                 drained = 0
+                pending = b""
                 while True:
                     # Decided BEFORE the read: once the process is gone every byte it wrote is readable.
                     alive = running()
                     chunk = stream.read(65536)
                     if chunk:
-                        if text := decoder.decode(chunk):
-                            ingest(text)
+                        pending += chunk
+                        payloads, consumed = frames.split_stream(pending, vault=vault, purpose="log", strict=True)
+                        pending = pending[consumed:]
+                        if (len(pending) >= 4 and struct.unpack_from(">I", pending)[0] > 1 << 20):
+                            raise VaultIntegrityError("Process output frame exceeds the stream limit")
+                        for payload in payloads:
+                            if text := decoder.decode(payload):
+                                ingest(text)
                         drained += 0 if alive else len(chunk)
                         if drained < _FINAL_DRAIN_MAX_BYTES:
                             continue
                     if not alive:
+                        if pending:
+                            raise VaultIntegrityError("Incomplete durable process output frame")
                         break
                     time.sleep(_TAIL_SECONDS)
+        except VaultError:
+            self._terminate_host_pid(session.pid, session.host_start_time)
+            self._finish_exited(session, -1, reason="lost", source="backend_lost")
+            logger.error("Process output log failed vault authentication: %s", session.output_log)
+            return
         except OSError as exc:
             logger.warning("Process output log %s unreadable: %s", session.output_log, exc)
         if proc is not None:
@@ -123,7 +177,12 @@ class ProcessOutputLogMixin:
             return
         if tail := decoder.decode(b"", final=True):
             ingest(tail)
-        code = recorded_exit_code(session.output_log)
+        try:
+            code = recorded_exit_code(session.output_log)
+        except VaultError:
+            self._finish_exited(session, -1, reason="lost", source="backend_lost")
+            logger.error("Process exit record failed vault authentication: %s", session.output_log)
+            return
         if code is None:
             # SIGKILL / exec past the trap: the spawner is gone and no status was recorded.
             self._finish_exited(session, -1, reason="lost", source="backend_lost")
