@@ -58,6 +58,7 @@ htmlcov/
 
 # Documentation
 *.md
+!docker/SOUL.md
 !skills/**/*.md
 !optional-skills/**/*.md
 
@@ -72,9 +73,7 @@ runtime/
 
 # ---------- Not needed inside the Docker image ----------
 
-# Desktop app source (Tauri/Electron); never installed in the container.
-# apps/shared is the dashboard↔desktop websocket helper and is linked from
-# web/package.json as a file: workspace dep — keep it in the build context.
+# The TUI consumes the pure shared library, not other application sources.
 apps/
 !apps/shared/
 !apps/shared/**
@@ -85,13 +84,12 @@ tests/
 # Documentation site (Docusaurus)
 website/
 
-# Keep the source artwork needed by web's icon-generation prebuild.
+# Keep the bundled TUI artwork.
 assets/
 !assets/
 assets/*
 !assets/nous-girl-black.svg
 !assets/nous-girl-white.svg
-!assets/dmg-volume.png
 !assets/backgrounds/
 !assets/backgrounds/**
 infographic/

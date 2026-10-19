@@ -33,9 +33,11 @@ class ModelWire(http.server.BaseHTTPRequestHandler):
             {"id": model, "object": "model", "owned_by": "fixture"}
             for model in ("fixture-alpha", "fixture-beta", "fixture-gamma")]})
 
-    def _json(self, body):
-        self.send_response(200)
+    def _json(self, body, status=200):
+        self.send_response(status)
         self.send_header("Content-Type", "application/json")
+        if status == 429:
+            self.send_header("Retry-After", "0")
         self.end_headers()
         self.wfile.write(json.dumps(body).encode())
 
@@ -47,6 +49,11 @@ class ModelWire(http.server.BaseHTTPRequestHandler):
         assert self.path == "/v1/chat/completions"
         assert body["model"] in ("fixture-alpha", "fixture-beta", "fixture-gamma")
         self.server.requests.append(body)
+        if errors := getattr(self.server, "response_errors", []):
+            status = errors.pop(0)
+            self._json({"error": {"message": f"fixture-provider-refusal-{status}",
+                                  "type": "rate_limit_error" if status == 429 else "authentication_error"}}, status)
+            return
         text = "fixture-reply-" + str(len(self.server.requests))
         if not body.get("stream"):
             self._json({"id": "fixture", "object": "chat.completion", "created": 1,
@@ -158,6 +165,46 @@ class TerminalPTY:
         os.close(self.master)
 
 
+def _exercise_failed_model_controls(terminal, server):
+    """Rejected controls preserve the route/cache; transient and auth faults differ."""
+    count = len(server.requests)
+    prefix = server.requests[-1]["messages"]
+    terminal.submit("/model")
+    terminal.until(lambda _: "Select provider (step 1/3)" in "\n".join(terminal.screen.display()),
+                   "cancelable provider picker")
+    terminal.key(b"\x1b")
+    terminal.until(lambda _: "Select provider (step 1/3)" not in "\n".join(terminal.screen.display())
+                   and "─ ready │" in "\n".join(terminal.screen.display()), "picker canceled")
+    assert len(server.requests) == count
+    terminal.submit("/model fixture-beta --provider fixture-missing --session")
+    terminal.until(lambda text: "Unknown provider 'fixture-missing'" in text, "invalid route refused")
+    assert len(server.requests) == count
+    terminal.submit("after-rejected-model-controls")
+    terminal.until(lambda text: f"fixture-reply-{count + 1}" in text, "working route after refusal")
+    assert server.requests[-1]["model"] == "fixture-gamma"
+    assert server.requests[-1]["messages"][:len(prefix)] == prefix
+
+    count = len(server.requests)
+    server.response_errors = [429]
+    terminal.submit("recover-one-transient-rate-limit")
+    terminal.until(lambda text: f"fixture-reply-{count + 2}" in text, "bounded rate-limit recovery")
+    assert len(server.requests) == count + 2
+    assert [row["model"] for row in server.requests[-2:]] == ["fixture-gamma", "fixture-gamma"]
+    assert server.requests[-2]["messages"] == server.requests[-1]["messages"]
+
+    count = len(server.requests)
+    server.response_errors = [401] * 4
+    terminal.submit("refuse-invalid-credentials")
+    terminal.until(lambda text: "fixture-provider-refusal-401" in text
+                   and "─ ready │" in "\n".join(terminal.screen.display()), "authentication refusal settled")
+    assert len(server.requests) == count + 1, "authentication failure must not retry like a transient 429"
+    server.response_errors = []
+    terminal.submit("after-explicit-auth-repair")
+    terminal.until(lambda text: f"fixture-reply-{count + 2}" in text, "working route after credential repair")
+    assert server.requests[-1]["model"] == "fixture-gamma"
+    assert server.requests[-1]["messages"][:len(prefix)] == prefix
+
+
 @pytest.mark.parametrize("lazy", [False, True], ids=["active-history", "before-first-chat"])
 def test_public_ink_model_picker_and_scoped_switches(tmp_path, monkeypatch, lazy):
     node = shutil.which("node")
@@ -251,6 +298,8 @@ def test_public_ink_model_picker_and_scoped_switches(tmp_path, monkeypatch, lazy
         assert [request["model"] for request in server.requests][-2:] == ["fixture-beta", "fixture-gamma"]
         assert server.requests[-2].get("reasoning_effort") == "high"
         assert server.requests[-1].get("reasoning_effort") in (None, "none")
+        if not lazy:
+            _exercise_failed_model_controls(terminal, server)
         assert (home / "config.yaml").read_bytes() == before
         assert terminal.prompts == 1
     finally:

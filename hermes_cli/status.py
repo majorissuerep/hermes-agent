@@ -18,8 +18,7 @@ from hermes_cli.models import provider_label
 from hermes_cli.runtime_provider import resolve_requested_provider
 from hermes_cli.vercel_auth import describe_vercel_auth
 from hermes_cli.status_auth import (  # renderers wired into _SECTIONS below
-    _render_api_keys, _render_apikey_providers, _render_auth_providers, _render_nous_gateway)
-from hermes_constants import OPENROUTER_MODELS_URL
+    _render_api_keys, _render_auth_providers, _render_nous_gateway)
 
 
 def check_mark(ok: bool) -> str:
@@ -111,17 +110,6 @@ _TERMINAL_ENV_ROWS = {
     "docker": (("Docker Image:", "TERMINAL_DOCKER_IMAGE", DEFAULT_SANDBOX_IMAGE, False),),
     "daytona": (("Daytona Image:", "TERMINAL_DAYTONA_IMAGE", DEFAULT_SANDBOX_IMAGE, False),),
 }
-
-# Labels for built-in adapters without a platform-registry entry; registry entries bring their own.
-_PLATFORM_LABELS = {"telegram": "Telegram", "discord": "Discord", "whatsapp": "WhatsApp", "signal": "Signal",
-                    "slack": "Slack", "email": "Email", "sms": "SMS", "dingtalk": "DingTalk", "feishu": "Feishu",
-                    "wecom": "WeCom", "wecom_callback": "WeCom Callback", "weixin": "Weixin",
-                    "bluebubbles": "BlueBubbles", "qqbot": "QQBot", "yuanbao": "Yuanbao"}
-
-# Gateway manager label when the runtime snapshot is unavailable, keyed by platform.
-_GATEWAY_FALLBACK = {"termux": ("unknown", "Termux / manual process"), "linux": ("unknown", "systemd/manual"),
-                     "darwin": ("unknown", "launchd")}
-
 
 def _banner(lines, *styles) -> None:
     """Blank line, then each line in ``styles``."""
@@ -266,20 +254,6 @@ def _render_sessions(ctx):
             print(f"                {entry.get('surface') or 'unknown':<17} {entry.get('session_id') or '?':<24} {age}")
 
 
-def _render_deep(ctx):
-    if not ctx.deep:
-        return
-    _section("Deep Checks")
-    openrouter_key = os.getenv("OPENROUTER_API_KEY", "")
-    if openrouter_key:
-        try:
-            import httpx
-            response = httpx.get(OPENROUTER_MODELS_URL, headers={"Authorization": f"Bearer {openrouter_key}"}, timeout=10)
-            _kv_flag("OpenRouter:", response.status_code == 200, "reachable", f"error ({response.status_code})")
-        except Exception as e:
-            _kv("OpenRouter:", f"{check_mark(False)} error: {e}")
-
-
 def _render_footer(ctx):
     _banner(("─" * 60, "  Run 'hermes doctor' for detailed diagnostics", "  Run 'hermes setup' to configure"),
             Colors.DIM)
@@ -328,8 +302,7 @@ def _render_summary(ctx):
 # Print order of `hermes status`; each renderer takes the shared _StatusContext.
 _SECTIONS = (
     _render_header, _render_environment, _render_api_keys, _render_auth_providers, _render_nous_gateway,
-    _render_apikey_providers, _render_terminal, _render_cron,
-    _render_sessions, _render_deep, _render_footer)
+    _render_terminal, _render_cron, _render_sessions, _render_footer)
 
 
 def show_status(args):

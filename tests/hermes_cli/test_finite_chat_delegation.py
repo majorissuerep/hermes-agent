@@ -143,6 +143,7 @@ def test_finite_chat_joins_parallel_children_before_final_response(tmp_path, mod
     try:
         result = run_unlocked(command, cwd=tmp_path, env=env, stdin=subprocess.DEVNULL,
                               capture_output=True, text=True, encoding="utf-8", timeout=90, check=False)
+        assert result.returncode == 0, (result.stdout, result.stderr, joined_results, children, errors)
         with connect_state(home / "state.db") as database:
             rows = database.execute("SELECT content FROM messages WHERE role='tool'").fetchall()
             saved = [json.loads(row[0]) for row in rows]

@@ -114,7 +114,7 @@ class TestShowStatusXaiOAuth:
 
 
     def test_import_failure_does_not_break_other_oauth_providers(self, monkeypatch, capsys, tmp_path):
-        """Nous/Codex/MiniMax rows must still appear when xAI import fails."""
+        """Nous tools and ChatGPT remain visible when xAI import fails."""
         import hermes_cli.auth as auth_mod
         status_mod = _base_xai_mocks(monkeypatch, tmp_path)
         monkeypatch.setattr(auth_mod, "get_nous_auth_status_local",
@@ -125,7 +125,7 @@ class TestShowStatusXaiOAuth:
         out = capsys.readouterr().out
 
         assert "Nous Portal" in out
-        assert "MiniMax OAuth" in out
+        assert "OpenAI Codex" in out
 
     def test_status_function_exception_does_not_crash(self, monkeypatch, capsys, tmp_path):
         """show_status must not propagate an exception raised by get_xai_oauth_auth_status."""
@@ -218,12 +218,3 @@ def test_status_defaults_to_summary_and_full_or_all_prints_every_section(monkeyp
     for flag in ("--full", "--all"):
         show_status(_status_args(flag))
         assert "◆ Environment" in capsys.readouterr().out
-
-def test_native_deep_status_does_not_probe_a_retired_local_listener(monkeypatch, capsys):
-    import socket
-    from hermes_cli import status
-
-    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
-    monkeypatch.setattr(socket, "socket", lambda *args, **kwargs: pytest.fail("local listener probed"))
-    status._render_deep(SimpleNamespace(deep=True))
-    assert "18789" not in capsys.readouterr().out

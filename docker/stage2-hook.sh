@@ -247,7 +247,7 @@ if [ "$needs_chown" = true ]; then
     # Hermes-owned subdirs: recursive chown is safe here because these are
     # created and managed exclusively by hermes (see the s6-setuidgid mkdir
     # -p block below for the canonical list).
-    for sub in cron sessions logs hooks memories skills skins plans workspace home profiles pairing platforms/pairing; do
+    for sub in cron sessions logs hooks memories skills skins plans workspace home profiles; do
         if [ -e "$HERMES_HOME/$sub" ] && tree_has_non_hermes_owner "$HERMES_HOME/$sub"; then
             chown_hermes_tree "$HERMES_HOME/$sub"
         fi
@@ -260,7 +260,7 @@ fi
 # $HERMES_HOME (/opt/data) and run with PYTHONDONTWRITEBYTECODE. Keeping
 # /opt/hermes root-owned and non-writable prevents an agent session from
 # self-modifying the installed source, venv, TUI bundle, or node_modules and
-# bricking the gateway. On-demand dependency installs go to PM generations
+# breaking the terminal runtime. On-demand dependency installs go to PM generations
 # under $HERMES_HOME/installs, never into this tree.
 
 # Always reset ownership of $HERMES_HOME/profiles to hermes on every
@@ -285,32 +285,14 @@ if [ -d "$HERMES_HOME/cron" ] && tree_has_non_hermes_owner "$HERMES_HOME/cron"; 
     chown_hermes_tree "$HERMES_HOME/cron"
 fi
 
-# Always reset ownership of pairing data on every boot, same docker-exec/
-# root-write reason as profiles/ and cron/. `docker exec <container>
-# hermes pairing approve …` defaults to uid=0 and writes 0600 root-owned
-# approval files that the unprivileged hermes gateway cannot read,
-# silently leaving the approved user unauthorized (#10270). The targeted
-# data-volume chown above only runs when the top-level $HERMES_HOME is
-# mis-owned, so warm boots skip it — this block makes a container restart
-# self-heal. Tiny directory (a handful of small JSON files), so even the
-# ownership pre-scan is negligible; gated for consistency with profiles/
-# and cron/.
-if [ -d "$HERMES_HOME/platforms/pairing" ] && tree_has_non_hermes_owner "$HERMES_HOME/platforms/pairing"; then
-    chown_hermes_tree "$HERMES_HOME/platforms/pairing"
-fi
-# Legacy location (pre-consolidated layout).
-if [ -d "$HERMES_HOME/pairing" ] && tree_has_non_hermes_owner "$HERMES_HOME/pairing"; then
-    chown_hermes_tree "$HERMES_HOME/pairing"
-fi
-
 # Reset ownership of hermes-owned top-level state files on every boot.
 # The targeted data-volume chown above only covers hermes-owned
 # *subdirectories*; loose state files living directly under $HERMES_HOME
 # are missed. When those files are created or rewritten by
 # `docker exec <container> hermes …` (root unless `-u` is passed) they
 # land root-owned, and the unprivileged hermes runtime then hits
-# PermissionError on next startup (e.g. gateway.lock / state.db /
-# auth.json), producing a gateway restart loop.
+# PermissionError on next startup (e.g. state.db /
+# auth.json), producing a terminal startup failure.
 #
 # We use an explicit allowlist rather than a blanket `find -user root`
 # sweep so host-owned files in a bind-mounted $HERMES_HOME are never
@@ -358,24 +340,21 @@ as_hermes mkdir -p \
     "$HERMES_HOME/cron" \
     "$HERMES_HOME/sessions" \
     "$HERMES_HOME/logs" \
-    "$HERMES_HOME/logs/gateways" \
     "$HERMES_HOME/hooks" \
     "$HERMES_HOME/memories" \
     "$HERMES_HOME/skills" \
     "$HERMES_HOME/skins" \
     "$HERMES_HOME/plans" \
     "$HERMES_HOME/workspace" \
-    "$HERMES_HOME/home" \
-    "$HERMES_HOME/pairing" \
-    "$HERMES_HOME/platforms/pairing"
+    "$HERMES_HOME/home"
 
 # --- XDG_RUNTIME_DIR ---
-# 0700 as dbus requires. It lives in world-writable /tmp under a predictable name
-# and holds the display-allocation lock, so it is a security boundary: refuse a
+# 0700 for private per-container runtime files. It lives in world-writable /tmp under a predictable name
+# and holds private runtime files, so it is a security boundary: refuse a
 # symlink or a directory someone else owns (chowning that one would hand hermes a
 # directory whose creator keeps an fd into it), and chown rather than assume —
 # `usermod -u` above does not chown outside the home dir, so a HERMES_UID remap
-# would leave it owned by the old uid and every Xfce/dbus/lock open would EACCES.
+# would leave it owned by the old uid and every runtime-file open would EACCES.
 if [ -n "${XDG_RUNTIME_DIR:-}" ]; then
     xdg_owner=""
     if [ -e "$XDG_RUNTIME_DIR" ]; then xdg_owner=$(stat -c %u "$XDG_RUNTIME_DIR" 2>/dev/null || echo unknown); fi
@@ -401,7 +380,7 @@ fi
 #
 # Why we no longer stamp $HERMES_HOME: it is a shared DATA volume, commonly
 # bind-mounted from the host (~/.hermes:/opt/data) and sometimes shared with a
-# host-side Desktop/CLI install. Stamping 'docker' here clobbered that host
+# host-side CLI install. Stamping 'docker' here clobbered that host
 # install's marker, so its in-app updater read 'docker' and refused to run
 # 'hermes update'. To heal homes already poisoned by older images, remove a
 # stale 'docker' stamp from $HERMES_HOME if one is present (the host install's
@@ -434,7 +413,7 @@ seed_one "SOUL.md" "docker/SOUL.md"
 # Docker image upgrades replace the code under $INSTALL_DIR but preserve
 # $HERMES_HOME on the mounted volume. Run the same safe, non-interactive
 # config-schema migrations that `hermes update` runs for non-Docker installs,
-# after first-boot seeding and before supervised gateway services start.
+# after first-boot seeding and before the terminal command start.
 # Set HERMES_SKIP_CONFIG_MIGRATION=1 for controlled/manual migrations.
 if [ -f "$HERMES_HOME/config.yaml" ]; then
     s6-setuidgid hermes "$INSTALL_DIR/.venv/bin/python" "$INSTALL_DIR/scripts/docker_config_migrate.py" \
@@ -445,7 +424,7 @@ fi
 # Opt-in dependencies (lazy extras, plugin deps) live in PM generations on the
 # volume, selected by $HERMES_HOME/installs/*/facts.json. An image upgrade
 # replaces uv.lock under that durable selection, so re-resolve it here, before
-# any supervised service boots onto a generation built for the previous image.
+# any terminal process boots onto a generation built for the previous image.
 # On failure (e.g. offline) PM falls back to the image's own environment and
 # keeps the extras recorded for the next boot or install. Then collect the
 # generations nothing selects any more: no service holds a lease yet, and
@@ -499,7 +478,7 @@ if [ -z "${AGENT_BROWSER_EXECUTABLE_PATH:-}" ] && \
     if [ -n "$browser_bin" ] && [ -x "$browser_bin" ]; then
         echo "[stage2] Using pinned agent-browser Chromium binary: $browser_bin"
         # Write to s6's container_environment so with-contenv picks it
-        # up for all supervised services (the foreground terminal command).
+        # up for the foreground terminal command.
         # Idempotent: each boot overwrites with the current path.
         # Some container runtimes / s6-overlay versions do not create the
         # envdir before cont-init hooks run, so create it defensively.
@@ -510,4 +489,4 @@ if [ -z "${AGENT_BROWSER_EXECUTABLE_PATH:-}" ] && \
     fi
 fi
 
-echo "[stage2] Setup complete; starting user services"
+echo "[stage2] Setup complete; starting terminal command"

@@ -3,7 +3,6 @@
 import pytest
 
 from hermes_cli import doctor_tools
-from hermes_cli.doctor_report import Finding
 
 
 @pytest.mark.parametrize("backend", ["ssh", "daytona", "vercel_sandbox", "plugin-fixture"])
@@ -17,7 +16,7 @@ def test_explicit_terminal_backend_is_not_replaced_by_local(monkeypatch, backend
     })
     monkeypatch.setattr(doctor_tools, "_check_plugin_backend", lambda selected, issues: seen.append(selected))
 
-    doctor_tools._check_terminal_backend(False, Finding())
+    doctor_tools._check_terminal_backend(False)
 
     assert seen == [backend, backend]
 
@@ -28,6 +27,6 @@ def test_local_terminal_selection_does_not_probe_remote_backend(monkeypatch):
     monkeypatch.setattr(doctor_tools, "_check_docker_backend", lambda selected, container, issues: seen.append(selected))
     monkeypatch.setattr(doctor_tools, "_check_plugin_backend", lambda *args: pytest.fail("local requested remote diagnostics"))
 
-    doctor_tools._check_terminal_backend(False, Finding())
+    doctor_tools._check_terminal_backend(False)
 
     assert seen == ["local"]

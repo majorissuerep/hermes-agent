@@ -31,7 +31,7 @@ jobs:
         with:
           # Builders and terminal integration helpers use the PM test interpreter.
           toolchain: all
-          extras: '[]'
+          extras: '["icons"]'
           test-environment: 'true'
 
       - name: Install the native-shell test prerequisite

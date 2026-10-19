@@ -231,12 +231,12 @@ npm run build:fast --prefix website
 ```
 
 Use a Node/npm version accepted by the corresponding `package.json` engines.
-Native desktop dependencies can also require the platform build toolchain.
 
 Logos and icons are generated from `assets/nous-girl-*.svg` and
 `assets/backgrounds/`. `node scripts/generate-icons.mjs` renders them with the
-Hermes runtime Python (`HERMES_PYTHON`, else `python` on PATH): Pillow and
-resvg-py are core dependencies. Do not commit generated PNG/ICO/ICNS outputs.
+Hermes runtime Python (`HERMES_PYTHON`, else `python` on PATH) after selecting
+`hermes pm install --extra icons`. Render to an independent `--out` directory
+for checks; commit updated website branding only when the source artwork changes.
 
 ### Run tests
 

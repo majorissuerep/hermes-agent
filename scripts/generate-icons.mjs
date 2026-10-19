@@ -2,12 +2,10 @@
 /**
  * Generate the icon assets on demand for the pipeline that needs them.
  *
- * Default icons are committed. Release pipelines regenerate flavored desktop
- * assets; CI regenerates and verifies every supported product's default set.
+ * Default website icons are committed; CI regenerates and verifies that set.
  *
  * The renderer runs on the Hermes runtime interpreter (HERMES_PYTHON, else
- * `python` on PATH): Pillow and resvg-py are core dependencies, so every
- * runtime environment can draw its own icons.
+ * `python` on PATH) with the declared `icons` extra selected.
  */
 import { spawnSync } from 'node:child_process'
 import path from 'node:path'

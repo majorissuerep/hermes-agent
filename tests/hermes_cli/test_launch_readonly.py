@@ -7,15 +7,30 @@ import sys
 
 import pytest
 
+from tests.e2e.vault_home import seal_fixture_home, run_unlocked
+
 
 @pytest.mark.parametrize("populated", [False, True])
-def test_resume_and_exit_read_without_writing(tmp_path, populated):
+def test_resume_and_exit_read_without_writing(tmp_path, monkeypatch, populated):
     repo = Path(__file__).resolve().parents[2]
     home = tmp_path / "profile"
     home.mkdir()
+    seal_fixture_home(home)
+    monkeypatch.setenv("HERMES_HOME", str(home))
+    from hermes_constants import reset_hermes_home_override, set_hermes_home_override
+    from pm import sync_venv
+
+    token = set_hermes_home_override(home)
+    try:
+        sync_venv(extras=['all'], explicit=True, project_root=repo)
+    finally:
+        reset_hermes_home_override(token)
     env = {k: os.environ[k] for k in ("PATH", "SYSTEMROOT", "LANG", "TZ") if k in os.environ}
     env.update(HOME=str(tmp_path), USERPROFILE=str(tmp_path), HERMES_HOME=str(home), PYTHONPATH=str(repo))
     code = '''
+import hermes_bootstrap
+from hermes_security.handoff import adopt_inherited_key
+assert adopt_inherited_key()
 from pathlib import Path
 from hermes_state import SessionDB
 from hermes_cli.main import _resolve_last_session, _resolve_session_by_name_or_id
@@ -44,7 +59,7 @@ CLIInfoMixin._show_insights(object(), '/insights --days 30 --source tui')
 after = path.read_bytes() if path.exists() else None
 assert after == before, 'launch reader created or mutated state.db'
 '''.replace('POPULATED', repr(populated))
-    result = subprocess.run([sys.executable, "-c", code], cwd=repo, env=env,
+    result = run_unlocked([sys.executable, "-c", code], cwd=repo, env=env,
                             stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=30, check=False)
     assert result.returncode == 0, result.stdout + result.stderr
     assert 'Error generating insights:' not in result.stdout

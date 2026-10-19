@@ -4,18 +4,12 @@
 #
 # Background
 # ----------
-# The s6 image runs the supervised gateway/main process as the unprivileged
+# The s6 image runs the terminal process as the unprivileged
 # `hermes` user (UID 10000). When an operator runs `docker exec <c> hermes ...`
 # the default UID is root (0), and any file the command writes under
 # $HERMES_HOME — auth.json, .env, config.yaml — ends up root-owned and
-# unreadable to the supervised gateway. The most common manifestation: the
-# user runs `docker exec <c> hermes login`, this writes
-# /opt/data/auth.json as root:root mode 0600, and from then on the gateway
-# returns "Provider authentication failed: Hermes is not logged into Nous
-# Portal" on every incoming message — even though `docker exec <c> hermes
-# chat -q ping` (also running as root) succeeds because root happens to be
-# able to read its own root-owned file. See systematic-debugging skill
-# notes attached to this fix.
+# unreadable to later terminal sessions. A root-context config/auth write
+# must not strand private state that the owning terminal UID needs to read.
 #
 # Fix
 # ---

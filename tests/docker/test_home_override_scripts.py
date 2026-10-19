@@ -1,51 +1,12 @@
-"""Runtime smoke tests for Docker HOME overrides and script behavior.
-
-Build the real image and verify the actual runtime behavior:
-
-  1. dashboard service resets HOME to /opt/data before privilege drop
-  2. stage2 hook repairs profiles/ and cron/ ownership on every boot
-"""
+"""Container bootstrap repairs native profile and cron ownership."""
 from __future__ import annotations
 
 from tests.docker.conftest import (
     docker_exec,
     docker_exec_sh,
-    poll_container,
     restart_container,
     start_container,
 )
-
-
-
-
-def test_dashboard_service_resets_home(
-    built_image: str, container_name: str,
-) -> None:
-    """The dashboard run script must export HOME=/opt/data before dropping
-    privileges, so HOME-anchored state (discord lockfile, XDG dirs) doesn't
-    try to write to /root (the /init context's HOME).
-
-    Start the container with HERMES_DASHBOARD=1 and verify the running
-    dashboard process has HOME=/opt/data in its real environment.
-
-    Since the dashboard requires an auth provider on non-loopback binds,
-    we bind to 127.0.0.1 where the auth gate doesn't engage, and check
-    the process env.
-    """
-    start_container(built_image, container_name, "HERMES_DASHBOARD=1", "HERMES_DASHBOARD_HOST=127.0.0.1")
-
-    # Wait for the supervised dashboard process, then read its HOME from
-    # /proc/<pid>/environ (the real runtime environment, not the script text).
-    ok, out = poll_container(
-        container_name,
-        'pid=$(pgrep -f "hermes dashboard" | head -1); '
-        '[ -n "$pid" ] && tr "\\0" "\\n" < /proc/$pid/environ | grep "^HOME="',
-        deadline_s=60.0,
-    )
-    assert ok, f"dashboard process never started (last probe output: {out!r})"
-    assert "HOME=/opt/data" in out, (
-        f"dashboard process does not run with HOME=/opt/data: {out!r}"
-    )
 
 
 

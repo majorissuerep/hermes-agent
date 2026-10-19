@@ -82,6 +82,7 @@ def test_terminal_descendants_cannot_mutate_even_after_task_is_removed(tmp_path,
     from agent.shell_hooks import ShellHookSpec, _spawn
     from tools.code_execution_env import _build_child_env
     from tools.mcp_tool_config import _build_safe_env
+    from tests.e2e.vault_home import run_unlocked
 
     command = f"{shlex.quote(sys.executable)} {shlex.quote(str(script))}"
     outputs = [result.get("output", ""), run_inline_shell(command, tmp_path, 45),
@@ -91,8 +92,10 @@ def test_terminal_descendants_cannot_mutate_even_after_task_is_removed(tmp_path,
         _build_safe_env({"HERMES_HOME": os.environ["HERMES_HOME"]}),
     ]
     for env in child_envs:
-        proc = subprocess.run([sys.executable, str(script)], env=env, cwd=tmp_path,
-                              stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=45, check=False)
+        # Environment-only builders intentionally scrub inherited authority. This
+        # trusted inspection script receives its own one-use descriptor instead.
+        proc = run_unlocked([sys.executable, str(script)], env=env, cwd=tmp_path,
+                            stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=45, check=False)
         assert proc.returncode == 0, proc.stderr
         outputs.append(proc.stdout)
     for output in outputs:

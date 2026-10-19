@@ -21,6 +21,7 @@ PRE_ARGPARSE_INHERITED_FLAGS: list[tuple[str, bool]] = [("--profile", True), ("-
 # snapshot lacks AND derivation regresses.
 _VALUE_FLAGS_FALLBACK: frozenset[str] = frozenset({
     "-z", "--oneshot", "-m", "--model", "--provider", "--reasoning", "-t", "--toolsets",
+    "--max-turns", "--run-budget",
     "-r", "--resume", "-s", "--skills", "--usage-file", "--in",
 })
 _OPTIONAL_VALUE_FLAGS_FALLBACK: frozenset[str] = frozenset({"-c", "--continue"})
@@ -140,9 +141,24 @@ For more help on a command:
 """
 
 
+def _add_run_budget_flags(parser, *, default=None) -> None:
+    """The native finite entrypoints share explicit turn and wall-clock ceilings."""
+    add = parser.add_argument
+    add("--max-turns", type=int, default=default, metavar="N",
+        help="Maximum tool-calling iterations per conversation turn (default: 500, or agent.max_turns in config)")
+    add("--run-budget", type=float, default=default, metavar="SECONDS", dest="run_budget", help=(
+        "Optional wall-clock budget in seconds for each conversation run. "
+        "At 80%% elapsed the agent gets a one-time wrap-up notice, and "
+        "implicit provider stale timeouts are capped to the remaining "
+        "budget so one hung call can't consume the run. Unset = off. "
+        "Also configurable as agent.run_budget_seconds in config.yaml. "
+        "Intended for one-shot/eval invocations with a hard ceiling."))
+
+
 def _add_top_level_flags(parser: argparse.ArgumentParser) -> None:
     """Top-level (pre-subcommand) flags; ``-m/--provider`` pair with ``-z`` without ``chat``."""
     add, inherited = parser.add_argument, _inherited_flag
+    _add_run_budget_flags(parser)
     add("--version", "-V", action="store_true", help="Show version and exit")
     add("-z", "--oneshot", metavar="PROMPT", default=None, help=(
         "One-shot mode: send a single prompt and print ONLY the final "
@@ -292,15 +308,7 @@ def _build_chat_parser(subparsers) -> argparse.ArgumentParser:
         "hooks_auto_accept: in config.yaml)."))
     inherited(chat_parser, "--checkpoints", action="store_true", default=SUPPRESS,
               help="Enable filesystem checkpoints before destructive file operations (use /rollback to restore)")
-    add("--max-turns", type=int, default=None, metavar="N",
-        help="Maximum tool-calling iterations per conversation turn (default: 500, or agent.max_turns in config)")
-    add("--run-budget", type=float, default=None, metavar="SECONDS", dest="run_budget", help=(
-        "Optional wall-clock budget in seconds for each conversation run. "
-        "At 80%% elapsed the agent gets a one-time wrap-up notice, and "
-        "implicit provider stale timeouts are capped to the remaining "
-        "budget so one hung call can't consume the run. Unset = off. "
-        "Also configurable as agent.run_budget_seconds in config.yaml. "
-        "Intended for one-shot/eval invocations with a hard ceiling."))
+    _add_run_budget_flags(chat_parser, default=SUPPRESS)
     inherited(chat_parser, "--yolo", action="store_true", default=SUPPRESS,
               help="Bypass all dangerous command approval prompts (use at your own risk)")
     inherited(chat_parser, "--pass-session-id", action="store_true", default=SUPPRESS,

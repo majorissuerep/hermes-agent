@@ -1833,20 +1833,18 @@ class TestProviderEnabledRuntimeGate:
 
 
 # ---------------------------------------------------------------------------
-# DEFAULT_CONFIG must not carry a duplicate "kanban" key
+# Partial Kanban configuration retains unrelated local defaults.
 # ---------------------------------------------------------------------------
 
-def test_default_config_kanban_block_not_dropped_by_duplicate_key():
-    """DEFAULT_CONFIG previously declared ``"kanban"`` twice, so Python kept
-    only the second literal and silently dropped the first — losing the
-    ``auto_subscribe_on_create`` default. Both sets of defaults must survive.
-    """
-    kanban = DEFAULT_CONFIG["kanban"]
-    # From the first (dropped) block:
-    assert kanban.get("auto_subscribe_on_create") is True
-    # From the second block:
-    assert "dispatch_in_gateway" in kanban
-    assert "auto_decompose" in kanban
+def test_partial_kanban_config_preserves_local_defaults(tmp_path, monkeypatch):
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    (tmp_path / "config.yaml").write_text("kanban:\n  failure_limit: 7\n", encoding="utf-8")
+
+    kanban = load_config()["kanban"]
+
+    assert kanban["auto_subscribe_on_create"] is True
+    assert kanban["failure_limit"] == 7
+    assert kanban["worker_log_rotate_bytes"] > 0
 
 
 def test_default_config_has_no_duplicate_top_level_keys():

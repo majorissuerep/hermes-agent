@@ -1,18 +1,4 @@
-"""Harness: the image ships a prebuilt TUI bundle, not a runtime npm install.
-
-Regression guard for the hosted-chat failure where the embedded dashboard
-Chat tab died with a 502 / "[session ended]". Root cause: the image installs
-only a subset of the npm monorepo workspaces (root/web/ui-tui, never apps/*),
-so the actualized node_modules permanently disagrees with the canonical
-package-lock.json. Without HERMES_TUI_DIR set, ``_make_tui_argv`` falls
-through to source dependency preparation, racing itself across
-concurrent /api/pty connections → ENOTEMPTY.
-
-The fix is ``ENV HERMES_TUI_DIR=/opt/hermes/ui-tui`` in the Dockerfile, which
-makes the launcher take the prebuilt-bundle fast path (``node --expose-gc
-.../dist/entry.js``) and skip the install check entirely. These tests assert
-that invariant holds in the built image.
-"""
+"""The terminal image ships a usable Ink bundle and its own Python runtime."""
 from __future__ import annotations
 
 import json
@@ -28,7 +14,7 @@ def _exec_py(image: str, py: str) -> str:
         f"python3 -c {shlex.quote(py)}"
     )
     # Drop to the hermes user (UID 10000) so we exercise the same path the
-    # dashboard PTY child runs as — not root.
+    # local TUI child runs as — not root.
     cmd = [
         "docker", "run", "--rm", "--network=none", "--entrypoint", "su", image,
         "hermes", "-s", "/bin/bash", "-c", inner,
@@ -38,24 +24,6 @@ def _exec_py(image: str, py: str) -> str:
     return r.stdout.strip()
 
 
-
-
-def test_photon_baked_dependencies_load_without_writes_or_network(built_image: str) -> None:
-    """The non-root runtime uses the baked sidecar, including its npm patch."""
-    py = '''
-import subprocess
-from plugins.platforms.photon.sidecar_paths import SOURCE_SIDECAR_DIR, resolve_sidecar_dir, dir_writable
-sidecar = resolve_sidecar_dir()
-assert sidecar == SOURCE_SIDECAR_DIR, sidecar
-assert not dir_writable(sidecar / 'node_modules')
-child = subprocess.run(['node', '--input-type=module', '-e',
-    "import {patchSpectrumTs} from './patch-spectrum-mixed-attachments.mjs'; "
-    "patchSpectrumTs(); await import('spectrum-ts'); console.log('PHOTON_LOADED')"],
-    cwd=sidecar, capture_output=True, text=True, timeout=30)
-assert child.returncode == 0, child.stderr
-print(child.stdout.strip())
-'''
-    assert _exec_py(built_image, py).endswith('PHOTON_LOADED')
 
 
 def test_prebuilt_bundle_present_and_no_runtime_install(built_image: str) -> None:
@@ -84,7 +52,7 @@ def test_prebuilt_bundle_present_and_no_runtime_install(built_image: str) -> Non
     )
 
 
-def test_tui_gateway_child_uses_packaged_python(built_image: str) -> None:
+def test_local_runtime_child_uses_packaged_python(built_image: str) -> None:
     """The TUI child must inherit the image's dependency environment."""
     py = '''
 import json
@@ -97,7 +65,7 @@ env = dict(os.environ)
 _apply_tui_python_env(env)
 child = subprocess.run(
     [env["HERMES_PYTHON"], "-c",
-     "import os, sys; print(os.path.realpath(sys.executable), flush=True); import tui_gateway.entry"],
+     "import os, sys; print(os.path.realpath(sys.executable), flush=True); import tui_runtime.entry"],
     cwd="/opt/hermes", env=env, capture_output=True, text=True, timeout=30,
 )
 print(json.dumps({

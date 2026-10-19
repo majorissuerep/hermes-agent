@@ -15,6 +15,7 @@ on:
   # path publishes only immutable version tags; the ordered stable publication
   # controller moves stable/latest from the receipt-bound registry digest.
   pull_request:
+  workflow_dispatch:
   push:
     branches: [main]
   workflow_call:
@@ -98,10 +99,8 @@ jobs:
   # CI and the tag dispatch has no meaningful PR diff to classify.
   detect:
     name: Detect affected areas
-    # Fork: skip the classifier on fork PRs — the build/publish jobs below are
-    # upstream-only, so a classifier run would only produce a skipped workflow.
     needs: [mode]
-    if: github.repository == 'NousResearch/hermes-agent' && needs.mode.outputs.release != 'true'
+    if: needs.mode.outputs.release != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
@@ -113,6 +112,7 @@ jobs:
 
       - name: Detect affected areas
         id: classify
+        if: github.event_name != 'workflow_dispatch'
         uses: ./.github/actions/detect-changes
         with:
           github-token: ${{ github.token }}
@@ -125,9 +125,10 @@ jobs:
           # (or the run-e2e label). Every push to main builds the image.
           # classify_changes.py owns the formula.
           DOCKER: ${{ steps.classify.outputs.docker }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           set -euo pipefail
-          if [ "$DOCKER" = "true" ]; then
+          if [ "$DOCKER" = "true" ] || [ "$EVENT_NAME" = "workflow_dispatch" ]; then
             echo "build=true" >> "$GITHUB_OUTPUT"
           else
             echo "build=false" >> "$GITHUB_OUTPUT"
@@ -147,7 +148,7 @@ jobs:
     needs: [mode, detect]
     if: >-
       !cancelled() && needs.mode.result == 'success' &&
-      ((needs.mode.outputs.release != 'true' && github.repository == 'NousResearch/hermes-agent' && needs.detect.outputs.build == 'true') || needs.mode.outputs.phase == 'test')
+      ((needs.mode.outputs.release != 'true' && needs.detect.outputs.build == 'true') || needs.mode.outputs.phase == 'test')
     strategy:
       fail-fast: false
       matrix:
@@ -187,16 +188,9 @@ jobs:
         env:
           RELEASE_VERSION: ${{ needs.mode.outputs.release == 'true' && inputs.version || '' }}
         run: |
-          display="$RELEASE_VERSION"
-          if [ -z "$display" ]; then
-            display="$(python3 -m scripts.releases.distance)"
-          fi
           identity=(--commit "$CANDIDATE_COMMIT")
-          if [ -n "$display" ]; then
-            base="${display%%+*}"
-            development="${display#*+}"
-            if [ "$development" = "$display" ]; then distance=0; else distance="${development%%.*}"; fi
-            identity+=(--base-version "$base" --display-version "$display" --distance "$distance")
+          if [ -n "$RELEASE_VERSION" ]; then
+            identity+=(--base-version "$RELEASE_VERSION" --display-version "$RELEASE_VERSION")
           fi
           python3 scripts/write_install_stamp.py --output install-stamp.json \
             --distribution docker --update-mechanism external --source ci "${identity[@]}"
@@ -266,7 +260,7 @@ jobs:
           # Each of these tests drives a container, so the docker daemon sets
           # the limit and not the processor. This pins the runner's worker
           # count to the core count.
-          HERMES_TEST_WORKERS=$(nproc) scripts/run_tests.sh tests/docker/
+          HERMES_TEST_WORKERS=$(nproc) scripts/run_tests.sh tests/docker/ --file-retries 0
 
       - name: Verify release image identity
         if: needs.mode.outputs.phase == 'test'
@@ -365,14 +359,7 @@ jobs:
 
       - name: Write install stamp
         run: |
-          display="$(python3 -m scripts.releases.distance)"
           identity=(--commit "$CANDIDATE_COMMIT")
-          if [ -n "$display" ]; then
-            base="${display%%+*}"
-            development="${display#*+}"
-            if [ "$development" = "$display" ]; then distance=0; else distance="${development%%.*}"; fi
-            identity+=(--base-version "$base" --display-version "$display" --distance "$distance")
-          fi
           python3 scripts/write_install_stamp.py --output install-stamp.json \
             --distribution docker --update-mechanism external --source ci "${identity[@]}"
       - name: Reject profile exports in the build context

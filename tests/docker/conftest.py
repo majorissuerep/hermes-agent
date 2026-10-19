@@ -145,28 +145,14 @@ def wait_for_container_ready(
     deadline_s: float = 30.0,
     interval_s: float = 0.25,
 ) -> None:
-    """Poll until the container has finished s6 cont-init (stage2 + reconcile).
-
-    The readiness signal is ``profile=default`` appearing in
-    ``/opt/data/logs/container-boot.log``, which the 02-reconcile-profiles
-    cont-init script writes on every boot. That log entry fires AFTER
-    stage2-hook.sh completes, so by the time it appears the full
-    cont-init chain (UID remap, chown, config seeding, skills sync,
-    browser discovery, config migration) has run.
-
-    Raises ``TimeoutError`` if the container never becomes ready — much
-    better than a fixed ``time.sleep()`` that either wastes time on fast
-    machines or flakes on slow ones.
-    """
+    """Wait for this boot's actual terminal bootstrap, not a removed service log."""
+    started = subprocess.run(["docker", "inspect", "--format", "{{.State.StartedAt}}", container],
+                             capture_output=True, text=True, timeout=5, check=True).stdout.strip()
     end = time.monotonic() + deadline_s
     while time.monotonic() < end:
-        r = docker_exec(
-            container,
-            "sh", "-c",
-            "cat /opt/data/logs/container-boot.log 2>/dev/null",
-            timeout=5,
-        )
-        if r.returncode == 0 and "profile=default" in r.stdout:
+        r = subprocess.run(["docker", "logs", "--since", started, container],
+                           capture_output=True, text=True, timeout=5, check=False)
+        if r.returncode == 0 and "Setup complete; starting terminal command" in r.stdout:
             return
         time.sleep(interval_s)
     raise TimeoutError(
@@ -204,20 +190,7 @@ def start_container(
 
 
 def restart_container(container: str, timeout: int = 60) -> None:
-    """Restart a container and wait for cont-init to finish.
-
-    Equivalent to ``docker restart <container>`` followed by
-    :func:`wait_for_container_ready`.
-
-    The readiness signal (``profile=default`` in
-    ``/opt/data/logs/container-boot.log``) is append-only and persists
-    across restarts, so we truncate it BEFORE restarting — otherwise
-    ``wait_for_container_ready`` would match the stale line from the
-    previous boot and return before cont-init runs on the new boot.
-    """
-    docker_exec(container, "sh", "-c",
-                "truncate -s 0 /opt/data/logs/container-boot.log 2>/dev/null || true",
-                user="root", timeout=5)
+    """Restart and wait for the new StartedAt-bounded bootstrap output."""
     subprocess.run(
         ["docker", "restart", container],
         check=True, capture_output=True, timeout=timeout,

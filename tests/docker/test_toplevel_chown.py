@@ -2,8 +2,8 @@
 
 Build the real image and verify the actual runtime behavior:
 
-  1. Root-owned top-level state files (auth.json, state.db, gateway.lock,
-     gateway_state.json) are chowned to hermes on boot
+  1. Root-owned top-level state files (auth.json, state.db, processes.json,
+     response_store.db) are chowned to hermes on boot
   2. Non-allowlisted host-owned files are NOT touched (targeted, not
      blanket find -user root sweep)
   3. Symlinked allowlisted files are NOT chowned through the symlink
@@ -27,7 +27,7 @@ from tests.docker.conftest import (
 
 # The files the stage2 hook should repair (mirrors the allowlist in
 # stage2-hook.sh). We test a representative subset.
-ALLOWLISTED_FILES = ("auth.json", "state.db", "gateway.lock", "gateway_state.json")
+ALLOWLISTED_FILES = ("auth.json", "state.db", "processes.json", "response_store.db")
 
 
 def test_root_owned_state_files_repaired_on_boot(
