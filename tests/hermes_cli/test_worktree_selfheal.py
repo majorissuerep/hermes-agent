@@ -153,6 +153,16 @@ class TestMaintainPackHealth:
         _maintain_pack_health(str(tmp_path / "not-a-repo"))  # must not raise
 
 
+@pytest.fixture
+def owned_repack_descendants():
+    from tests.e2e.core.upgrade import _process_reaper
+    _process_reaper.adopt_orphans()
+    try:
+        yield _process_reaper
+    finally:
+        _process_reaper.release_orphans()
+
+
 class TestRepackStampede:
     """Regression for the Sep 2026 shared-clone incident: every ``hermes -w`` launch started its
     own full repack, and a timed-out repack left ``pack-objects`` running for days."""
@@ -174,9 +184,9 @@ class TestRepackStampede:
         assert len(runs) == 2
 
     @pytest.mark.platforms("linux")
-    def test_timeout_kills_the_whole_repack_tree(self, tmp_path, monkeypatch):
+    def test_timeout_kills_the_whole_repack_tree(self, tmp_path, monkeypatch, owned_repack_descendants):
         import os
-        import time
+        from tests.waiting import wait_until
 
         from hermes_cli import worktree_ops
 
@@ -195,10 +205,15 @@ class TestRepackStampede:
         worktree_ops._run_bounded_repack(str(tmp_path))
 
         grandchild = int(pidfile.read_text(encoding="utf-8").strip())
-        deadline = time.time() + 5
-        while time.time() < deadline:
-            if not Path(f"/proc/{grandchild}").exists():
-                return
-            time.sleep(0.05)
-        subprocess.run(["kill", "-9", str(grandchild)], check=False)
-        pytest.fail("pack-objects stand-in survived the repack timeout")
+        def reaped():
+            try:
+                waited, _status = os.waitpid(grandchild, os.WNOHANG)
+            except ChildProcessError:
+                return not Path(f"/proc/{grandchild}").exists()
+            return waited == grandchild
+
+        try:
+            wait_until(reaped, timeout=5, what="owned pack-objects descendant killed and reaped")
+        finally:
+            if started := owned_repack_descendants.start_time(grandchild):
+                owned_repack_descendants.kill_identified({(grandchild, started): "owned repack fixture child"})

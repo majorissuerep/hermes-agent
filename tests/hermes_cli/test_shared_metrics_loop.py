@@ -311,7 +311,7 @@ def test_browser_calls_name_the_backend_that_served_them(home):
 def test_browser_tool_backend_is_resolved_from_the_profile_at_call_time(home, monkeypatch):
     import tools.browser_tool as bt
 
-    handler = bt._routed_handler("browser_back", lambda args, kw: '{"success": true}')
+    handler = bt._browser_handler(lambda args, kw: '{"success": true}')
     handler({}, task_id="t")
     monkeypatch.setenv("BROWSER_CDP_URL", "ws://127.0.0.1:9/devtools/browser/x")  # `/browser connect` mid-session
     handler({}, task_id="t")

@@ -158,11 +158,14 @@ See the [reliability contract](../../website/docs/developer-guide/reliability.md
 ### Active-session source update (real public Ink)
 
 `active_session_update.py` is a separate required leg, not a replacement for the
-six installation scenarios. Prepare a disposable **native terminal** baseline
-(for example `f5df57070e5df6eab96df38fd5bd0717b4bf5ab7`), its PM environment,
-Node and Ink bundle, an encrypted configured home, and a controlled Git origin
+six installation scenarios. Prepare a disposable, qualified **native terminal** baseline,
+its PM environment, Node and Ink bundle, an encrypted configured home, and a controlled Git origin
 already publishing the exact candidate. Legacy `bde3` migration stays a standalone
 update leg; this fixture never launches a retired gateway to keep it alive.
+
+Qualify the baseline's installed launcher with its PM store Python first. A
+dependency-bearing test interpreter can hide broken bootstrap ordering. Neither
+`HERMES_PYTHON` nor a prebuilt `HERMES_TUI_DIR` may replace the product's selection.
 
 Run from the candidate coordinator's installed dev/test environment:
 

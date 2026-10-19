@@ -49,7 +49,11 @@ def releases(tmp_path, monkeypatch, request):
     git(checkout, "config", "user.email", "fixture@example.invalid")
     git(checkout, "config", "commit.gpgsign", "false")
     git(checkout, "checkout", "--detach", commits[0])
+    assert checkout.is_relative_to(tmp_path) and checkout.resolve() != main.PROJECT_ROOT.resolve()
     monkeypatch.setattr(main, "PROJECT_ROOT", checkout)
+    # This synthetic Git repository contains release payloads, not a Hermes install.
+    # Actual installed import-health refusal is covered by recovery/cold-upgrade tests.
+    monkeypatch.setattr(update_cmd, "_critical_module_import_failures", lambda *a, **k: {})
     monkeypatch.setenv("HERMES_INSTALL_ROOT", str(checkout))
     monkeypatch.delenv("HERMES_MANAGED", raising=False)
 

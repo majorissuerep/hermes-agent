@@ -2723,7 +2723,7 @@ def test_v3_failure_dimensions_never_export_third_party_identifiers(direct_runti
     """Plugin tool names, exception class names, plugin platforms and raw exit reasons collapse
     to closed classes, while Hermes's own vocabularies pass through."""
     base = {
-        "session_id": "s1", "task_id": "t1", "api_request_id": "r1", "platform": "telegram",
+        "session_id": "s1", "task_id": "t1", "api_request_id": "r1", "platform": "tui",
         "provider": "anthropic", "model": "claude-sonnet",
     }
     lifecycle.invoke_hook("pre_llm_call", **base)
@@ -2738,7 +2738,7 @@ def test_v3_failure_dimensions_never_export_third_party_identifiers(direct_runti
             error_type=error_type, duration_ms=10,
         )
     relay_shared_metrics.finish_task_run(
-        session_id="s1", task_id="t1", platform="telegram",
+        session_id="s1", task_id="t1", platform="tui",
         result={"failed": True, "failure_reason": "rate_limit",
                 "turn_exit_reason": "acme private exit reason"},
     )
@@ -2752,7 +2752,7 @@ def test_v3_failure_dimensions_never_export_third_party_identifiers(direct_runti
     [route] = counters["hermes.model_route.count"]
     assert (route["outcome"], route["error_class"]) == ("failed", "rate_limit")
     [finished] = counters["hermes.task_run.finished"]
-    assert (finished["platform"], finished["failure_class"]) == ("telegram", "rate_limit")
+    assert (finished["execution_surface"], finished["platform"], finished["failure_class"]) == ("tui", "none", "rate_limit")
 
 
 def test_install_snapshot_is_daily_and_carries_only_bucketed_counts(
@@ -2849,7 +2849,8 @@ def test_user_named_providers_and_models_never_reach_counters(direct_runtime, tm
 def test_milestone_install_age_is_the_subscriber_profile_not_the_relay_thread(tmp_path, monkeypatch):
     """Under multiplex the Relay thread carries no profile binding: a milestone reached in
     profile B must carry B's install age, not the launch profile's."""
-    import sqlite3 as _sqlite3
+    from hermes_security import sqlite as encrypted_sqlite
+    from tests.e2e.vault_home import seal_fixture_home
     import time
 
     from hermes_cli.observability.shared_metrics import SharedMetricsStore
@@ -2859,7 +2860,8 @@ def test_milestone_install_age_is_the_subscriber_profile_not_the_relay_thread(tm
     launch, other = tmp_path / "A", tmp_path / "B"
     for home in (launch, other):
         home.mkdir()
-    with _sqlite3.connect(other / "state.db") as con:
+        seal_fixture_home(home)
+    with encrypted_sqlite.connect(other / "state.db") as con:
         con.execute("CREATE TABLE sessions (id TEXT, started_at REAL)")
         con.execute("INSERT INTO sessions VALUES ('s1', ?)", (time.time() - 120 * 86400,))
     monkeypatch.setenv("HERMES_HOME", str(launch))

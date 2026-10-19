@@ -1,10 +1,8 @@
 """Startup / attach latency: one bucketed row per process start and surface.
 
-In-process surfaces (classic CLI, messaging gateway, ``hermes serve``) measure from the OS process
-creation time, the earliest timestamp available (it includes interpreter start and imports), to the
-moment they are ready. The Ink TUI and the Desktop app measure on their own side and report through
-the ``shared_metrics.startup_latency`` RPC. Recording goes through the shared ``_emit`` gate, so a
-profile without shared metrics enabled records nothing.
+Native finite commands measure OS process creation to dispatch readiness. The Ink renderer
+measures its own startup and reports through the private stdio RPC. Recording stays behind the
+explicit shared-metrics opt-in gate.
 """
 
 from __future__ import annotations
@@ -25,7 +23,7 @@ _THRESHOLDS_MS = (
     (500, "lt_500ms"), (1_000, "500ms_to_1s"), (2_000, "1s_to_2s"), (5_000, "2s_to_5s"), (10_000, "5s_to_10s"),
 )
 # (pid, surface, client launch id): a forked child re-arms, a surface in this process counts once,
-# and an RPC-reporting client counts once per launch (a Desktop reconnect re-sends the same launch).
+# and the renderer counts once per launch even if it repeats its ready notification.
 _recorded: set[tuple[int, str, str]] = set()
 _lock = threading.Lock()
 # A local client minting a fresh launch id per call must not grow this set without bound.
@@ -143,10 +141,6 @@ def _launch_key(launch_id: Any) -> str:
 
 
 def record_rpc_startup_latency(*, client_surface: Any, elapsed_ms: Any, launch_id: Any = None) -> None:
-    """The TUI / Desktop client's own launch -> ready measurement, once per (surface, client launch)
-    in this backend process. ``client_surface`` is the client's declared surface or the backend's
-    detection (``desktop``/``tui``); anything else records nothing."""
-    surface = {"desktop": "desktop_attach", "desktop_attach": "desktop_attach", "tui": "tui"}.get(client_surface)
-    # Only a usable measurement spends the launch's claim.
-    if surface is not None and latency_bucket(elapsed_ms) is not None and _claim(surface, _launch_key(launch_id)):
-        record_startup_latency(surface=surface, elapsed_ms=elapsed_ms)
+    """Record only the native renderer's launch measurement, once per launch id."""
+    if client_surface == "tui" and latency_bucket(elapsed_ms) is not None and _claim("tui", _launch_key(launch_id)):
+        record_startup_latency(surface="tui", elapsed_ms=elapsed_ms)

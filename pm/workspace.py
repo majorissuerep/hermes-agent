@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import os
 import shutil
+import tempfile
 from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
@@ -141,7 +142,21 @@ def _generate_pyproject(plugin_dirs: list[Path] | Mapping[Path, Path], root: Pat
     target = root / "pyproject.toml"
     text = _without_release_age(text)
     _copy_core_inputs(source, root)
-    target.write_text(text, encoding="utf-8")
+    _write_generated_manifest(target, text)
+
+
+def _write_generated_manifest(target: Path, text: str) -> None:
+    # These are private staging copies, not the immutable installed source.
+    # copy2/copytree preserve 0444 from Nix and fenced source checkouts.
+    target.parent.chmod(target.parent.stat().st_mode | 0o200)
+    fd, temporary = tempfile.mkstemp(prefix=".pyproject-", dir=target.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            stream.write(text)
+        os.replace(temporary, target)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
 
 
 def _without_release_age(text: str) -> str:
@@ -285,7 +300,7 @@ def _workspace_member(plugin_dir: Path, root: Path, *, identity: Path) -> Path:
         if virtual or changed:
             import tomli_w
 
-            (member / "pyproject.toml").write_text(tomli_w.dumps(document), encoding="utf-8")
+            _write_generated_manifest(member / "pyproject.toml", tomli_w.dumps(document))
         return member
     specs = declaration.install_requirements
     member = root / "plugin-deps" / key
@@ -378,7 +393,7 @@ def lock_and_sync(
         shutil.copytree(replay, root, symlinks=True, ignore=_member_ignored)
         # A generation recorded before the cutoff left the user's machine still carries it.
         manifest = root / "pyproject.toml"
-        manifest.write_text(_without_release_age(manifest.read_text(encoding="utf-8-sig")), encoding="utf-8")
+        _write_generated_manifest(manifest, _without_release_age(manifest.read_text(encoding="utf-8-sig")))
         frozen = True
 
     environment.sync(root, extras=extras, frozen=frozen)

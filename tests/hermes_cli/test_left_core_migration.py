@@ -54,16 +54,10 @@ _EXAMPLE_PLATFORM_TOOLSETS = (
 
 @pytest.mark.parametrize(("env", "config"), [
     ("HASS_TOKEN=abc\n", ""),
-    ("", "platforms:\n  homeassistant:\n    enabled: true\n"),
-    ("", "gateway:\n  platforms:\n    homeassistant:\n      enabled: true\n"),
-    ("", "platforms:\n  homeassistant:\n    token: inline-token\n"),
     ("", "platform_toolsets:\n  cli: [hermes-cli, homeassistant]\n"),
     ("", "toolsets: [hermes-cli, homeassistant]\n"),
-    # The Home Assistant row counts once the platform itself is on.
-    ("", "platforms:\n  homeassistant:\n    enabled: true\n"
-         "platform_toolsets:\n  homeassistant: [hermes-homeassistant]\n"),
 ])
-def test_homeassistant_in_use_matches_what_core_activated(tmp_path, env, config):
+def test_homeassistant_tools_require_credentials_or_explicit_toolset(tmp_path, env, config):
     assert lcm.homeassistant_in_use(_home(tmp_path, env=env, config=config)) is True
 
 
@@ -85,15 +79,14 @@ _JSON_ON = '{"platforms": {"homeassistant": {"enabled": true, "token": "t"}}}'
 
 
 @pytest.mark.parametrize(("gateway_json", "config", "in_use"), [
-    (_JSON_ON, "", True),
-    ("", "gateway:\n  homeassistant:\n    enabled: true\n    token: t\n", True),
+    (_JSON_ON, "", False),
+    ("", "gateway:\n  homeassistant:\n    enabled: true\n    token: t\n", False),
     ("", "gateway:\n  platforms:\n    homeassistant:\n      enabled: true\n      token: t\n"
-         "platforms:\n  homeassistant:\n    extra:\n      url: http://ha.local\n", True),
+         "platforms:\n  homeassistant:\n    extra:\n      url: http://ha.local\n", False),
     (_JSON_ON, "platforms:\n  homeassistant:\n    enabled: false\n", False),
 ])
-def test_in_use_reads_the_platform_config_the_gateway_loader_merged(tmp_path, gateway_json, config, in_use):
-    """legacy gateway.json, gateway.<platform> shorthand and nested+top-level blocks enabled core's
-    adapter; the last explicit ``enabled`` (here config.yaml over gateway.json) still wins."""
+def test_retired_platform_state_does_not_activate_native_tools(tmp_path, gateway_json, config, in_use):
+    """Historical service settings cannot opt a terminal session into a plugin."""
     home = _home(tmp_path, config=config)
     if gateway_json:
         (home / "gateway.json").write_text(gateway_json, encoding="utf-8")

@@ -40,12 +40,14 @@ logger = logging.getLogger(__name__)
 
 
 def _read_config(home: Path) -> dict:
-    import utils
+    from hermes_constants import reset_hermes_home_override, set_hermes_home_override
+    from hermes_cli.config import load_config_readonly
+
+    token = set_hermes_home_override(home)
     try:
-        data = utils.fast_safe_load((home / "config.yaml").read_text(encoding="utf-8-sig"))
-    except Exception:  # missing/unreadable/invalid YAML: nothing we can see is in use
-        return {}
-    return data if isinstance(data, dict) else {}
+        return load_config_readonly()
+    finally:
+        reset_hermes_home_override(token)
 
 
 
@@ -88,8 +90,10 @@ def spotify_in_use(home: Path, *, process_env: bool = False) -> bool:
     (``providers.spotify``, written by ``hermes auth spotify``) or the ``spotify`` toolset selected
     for a platform. The tools were opt-in and login-gated, so a client id alone is not use."""
     import json
+    from hermes_security.io import read_text
     try:
-        store = json.loads((home / "auth.json").read_text(encoding="utf-8-sig"))
+        text = read_text(home / "auth.json", purpose="auth", encoding="utf-8-sig")
+        store = json.loads(text) if text is not None else {}
     except (OSError, ValueError):  # missing/unreadable/invalid JSON: no login we can see
         store = {}
     providers = store.get("providers") if isinstance(store, dict) else None

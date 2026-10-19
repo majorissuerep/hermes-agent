@@ -71,10 +71,9 @@ def _(rid, params: dict) -> dict:
 @method("shared_metrics.startup_latency")
 @_profile_scoped
 def _(rid, params: dict) -> dict:
-    """The Ink TUI (gateway ready) and Desktop (backend attached) each report their own launch ->
-    ready time once per launch; ``launch_id`` latches it here too, so a reconnect to this backend
-    never re-counts. A Desktop on a URL/cloud backend has no ``HERMES_DESKTOP`` here, so the
-    client's declared surface wins over env detection. Always ``{ok: true}``."""
+    """Count the private renderer's ready notification once per terminal launch."""
+    if params.get("surface") not in (None, "tui"):
+        return _err(rid, 4000, "surface must be tui")
     from hermes_cli.observability.shared_metrics_startup import record_rpc_startup_latency
 
     record_rpc_startup_latency(

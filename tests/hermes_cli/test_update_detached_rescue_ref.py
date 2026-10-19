@@ -42,7 +42,10 @@ def detached_work(tmp_path, monkeypatch):
     _git(tmp_path, "clone", "-q", str(upstream), str(checkout))
     _git(checkout, "checkout", "-q", "--detach", "HEAD~1")
     work = _commit(checkout, "detached-work.txt", "work\n")
+    assert checkout.is_relative_to(tmp_path) and checkout.resolve() != update_cmd._m().PROJECT_ROOT.resolve()
     monkeypatch.setattr(update_cmd._m(), "PROJECT_ROOT", checkout)
+    # Exercise actual Git/stash reachability, not imports from this content-only repo.
+    monkeypatch.setattr(update_cmd, "_critical_module_import_failures", lambda *a, **k: {})
     return checkout, work, release
 
 

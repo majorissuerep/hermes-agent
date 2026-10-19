@@ -14,6 +14,8 @@ import filecmp
 import importlib.util
 import shutil
 import subprocess
+import json
+import sys
 import tempfile
 from pathlib import Path
 
@@ -24,6 +26,28 @@ _spec = importlib.util.spec_from_file_location("prompt_surface", REPO / "scripts
 assert _spec is not None and _spec.loader is not None
 prompt_surface = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(prompt_surface)
+
+
+def test_inspection_child_keeps_interpreter_without_triggering_install(tmp_path, monkeypatch):
+    child = tmp_path / "inspection.py"
+    child.write_text(
+        "import json, os, sys\nfrom pathlib import Path\n"
+        "out = Path(sys.argv[2]); out.mkdir()\n"
+        "(out / 'facts.json').write_text(json.dumps({'python': sys.executable, "
+        "'home': os.environ['HERMES_HOME'], "
+        "'lazy': os.environ.get('HERMES_DISABLE_LAZY_INSTALLS'), "
+        "'override': os.environ.get('HERMES_PYTHON')}))\n"
+    )
+    monkeypatch.setattr(prompt_surface, "__file__", str(child))
+    monkeypatch.setenv("HERMES_PYTHON", "/untrusted/caller/python")
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "operator-home"))
+    out = tmp_path / "render"
+    assert prompt_surface.render(out) == 0
+    facts = json.loads((out / "facts.json").read_text())
+    assert facts["python"] == sys.executable
+    assert facts["lazy"] == "1"
+    assert facts["override"] is None
+    assert facts["home"] != str(tmp_path / "operator-home")
 
 
 def _tree_differences(left: Path, right: Path) -> list[str]:

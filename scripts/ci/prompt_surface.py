@@ -213,6 +213,9 @@ def render(out: Path) -> int:
             "PATH": os.environ.get("PATH", ""), "HOME": str(home), "HERMES_HOME": str(home / ".hermes"),
             "TZ": "UTC", "LANG": "C.UTF-8", "PYTHONHASHSEED": "0", "PYTHONPATH": str(ROOT),
             "TMPDIR": tmp, "PYTHONDONTWRITEBYTECODE": "1",
+            # Inspect with the caller's PM interpreter; a synthetic home is not
+            # an installed product launch and must not trigger dependency repair.
+            "HERMES_DISABLE_LAZY_INSTALLS": "1",
         }
         for key in ("HERMES_RUNTIME_DIR", "SYSTEMROOT"):
             if os.environ.get(key):

@@ -3,7 +3,6 @@
 from argparse import Namespace
 from unittest.mock import patch
 
-import pytest
 from hermes_cli.config import DEFAULT_CONFIG, load_config, save_config
 
 
@@ -59,8 +58,8 @@ class TestNonInteractiveSetup:
         out = capsys.readouterr().out
         assert "Configuration reset to defaults." in out
 
-    def test_chat_first_run_headless_skips_setup_prompt(self, capsys):
-        """Bare `hermes` should not prompt for input when no provider exists and stdin is headless."""
+    def test_chat_without_query_leaves_first_run_to_native_tui(self):
+        """Non-TTY input must not revive the removed classic setup/REPL route."""
         from hermes_cli.main import cmd_chat
 
         args = _make_chat_args()
@@ -68,15 +67,14 @@ class TestNonInteractiveSetup:
         with (
             patch("hermes_cli.main._has_any_provider_configured", return_value=False),
             patch("hermes_cli.main.cmd_setup") as mock_setup,
+            patch("hermes_cli.main._launch_tui", return_value=17) as launch,
             patch("sys.stdin") as mock_stdin,
             patch("builtins.input", side_effect=AssertionError("input should not be called")),
         ):
             mock_stdin.isatty.return_value = False
-            with pytest.raises(SystemExit) as exc:
-                cmd_chat(args)
+            result = cmd_chat(args)
 
-        assert exc.value.code == 1
+        assert result == 17
+        launch.assert_called_once()
         mock_setup.assert_not_called()
-        out = capsys.readouterr().out
-        assert "hermes config set model.provider custom" in out
 

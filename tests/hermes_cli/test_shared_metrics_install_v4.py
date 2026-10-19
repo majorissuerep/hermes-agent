@@ -31,9 +31,9 @@ def marks(monkeypatch):
     (2_000, "2s_to_5s"), (9_999, "5s_to_10s"), (10_000, "gte_10s"), (3_600_000, "gte_10s"),
 ])
 def test_startup_latency_buckets_are_valid_counter_dimensions(elapsed_ms, bucket):
-    fields = startup.startup_latency_fields(surface="gateway_boot", elapsed_ms=elapsed_ms)
+    fields = startup.startup_latency_fields(surface="tui", elapsed_ms=elapsed_ms)
 
-    assert fields == {"latency_bucket": bucket, "surface": "gateway_boot"}
+    assert fields == {"latency_bucket": bucket, "surface": "tui"}
     assert contract.counter_dimensions_are_valid(contract.STARTUP_LATENCY_METRIC, fields)
 
 
@@ -48,11 +48,11 @@ def test_process_ready_records_process_start_to_now_once_per_surface(marks, monk
 
     startup.record_process_ready("cli")
     startup.record_process_ready("cli")
-    startup.record_process_ready("gateway_boot")
+    startup.record_process_ready("tui")
 
     assert marks == [
         (contract.STARTUP_LATENCY_MARK, {"latency_bucket": "1s_to_2s", "surface": "cli"}),
-        (contract.STARTUP_LATENCY_MARK, {"latency_bucket": "1s_to_2s", "surface": "gateway_boot"}),
+        (contract.STARTUP_LATENCY_MARK, {"latency_bucket": "1s_to_2s", "surface": "tui"}),
     ]
 
 
@@ -90,37 +90,31 @@ def _rpc(params: dict) -> dict:
         {"jsonrpc": "2.0", "id": "r1", "method": "shared_metrics.startup_latency", "params": params})
 
 
-def test_rpc_takes_the_declared_surface_else_env_detection(marks, monkeypatch):
-    monkeypatch.delenv("HERMES_DESKTOP", raising=False)
-    monkeypatch.delenv("HERMES_DESKTOP_TERMINAL", raising=False)
-
-    # A Desktop attached to a URL/cloud backend: no HERMES_DESKTOP here, the client says who it is.
-    assert _rpc({"elapsed_ms": 2500, "surface": "desktop_attach", "launch_id": "a"})["result"] == {"ok": True}
+def test_rpc_accepts_only_the_native_terminal_surface(marks):
+    assert _rpc({"elapsed_ms": 2500, "surface": "tui", "launch_id": "a"})["result"] == {"ok": True}
     assert _rpc({"elapsed_ms": 700, "launch_id": "b"})["result"] == {"ok": True}
-    monkeypatch.setenv("HERMES_DESKTOP", "1")
-    assert _rpc({"elapsed_ms": 12_000, "launch_id": "c"})["result"] == {"ok": True}
     assert _rpc({"elapsed_ms": -5, "surface": "tui", "launch_id": "d"})["result"] == {"ok": True}
-
+    refused = _rpc({"elapsed_ms": 12000, "surface": "desktop_attach", "launch_id": "retired"})
+    assert refused["error"]["code"] == 4000
+    startup.record_rpc_startup_latency(client_surface="desktop_attach", elapsed_ms=12000, launch_id="direct-retired")
     assert [data for _, data in marks] == [
-        {"latency_bucket": "2s_to_5s", "surface": "desktop_attach"},
+        {"latency_bucket": "2s_to_5s", "surface": "tui"},
         {"latency_bucket": "500ms_to_1s", "surface": "tui"},
-        {"latency_bucket": "gte_10s", "surface": "desktop_attach"},
     ]
 
 
 def test_rpc_counts_each_client_launch_once_per_backend_process(marks):
-    # A Desktop reconnecting to the same backend re-sends its launch; a later Desktop launch
-    # against the same long-lived backend is a new launch and still counts.
+    # Repeated renderer notifications count once; a distinct terminal launch counts again.
     for _ in range(3):
-        _rpc({"elapsed_ms": 1200, "surface": "desktop_attach", "launch_id": "launch-1"})
-    _rpc({"elapsed_ms": 300, "surface": "desktop_attach", "launch_id": "launch-2"})
+        _rpc({"elapsed_ms": 1200, "surface": "tui", "launch_id": "launch-1"})
+    _rpc({"elapsed_ms": 300, "surface": "tui", "launch_id": "launch-2"})
     # Older clients send no id and latch on their side; the backend still counts them once.
     for _ in range(2):
         _rpc({"elapsed_ms": 1200, "surface": "tui"})
 
     assert [data for _, data in marks] == [
-        {"latency_bucket": "1s_to_2s", "surface": "desktop_attach"},
-        {"latency_bucket": "lt_500ms", "surface": "desktop_attach"},
+        {"latency_bucket": "1s_to_2s", "surface": "tui"},
+        {"latency_bucket": "lt_500ms", "surface": "tui"},
         {"latency_bucket": "1s_to_2s", "surface": "tui"},
     ]
 
@@ -141,8 +135,8 @@ def test_in_place_relaunch_is_not_a_startup_but_its_children_are(marks, monkeypa
     # A child it spawns later inherits the env but not the PID: a real start of its own.
     child_pid = os.getpid() + 1
     monkeypatch.setattr(startup.os, "getpid", lambda: child_pid)
-    startup.record_process_ready("gateway_boot")
-    assert [data["surface"] for _, data in marks] == ["gateway_boot"]
+    startup.record_process_ready("tui")
+    assert [data["surface"] for _, data in marks] == ["tui"]
 
 
 def test_process_ready_when_off_starts_no_thread_and_reads_no_process_time(monkeypatch):

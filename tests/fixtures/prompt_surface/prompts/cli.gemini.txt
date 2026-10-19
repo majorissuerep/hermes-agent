@@ -56,7 +56,6 @@ For repeated questions or planned follow-up work on the same codebase or documen
     - computer-use: Drive the desktop background-first; escalate on signal.
     - hermes-agent: Operate encrypted, terminal-only Hermes Agent.
     - opencode: Delegate coding to OpenCode CLI (features, PR review).
-    - session-deck: Message, inspect or close the user's other sessions.
   creative: Creative content generation — ASCII art, hand-drawn style diagrams, and visual design tools.
     - architecture-diagram: Dark-themed SVG architecture/cloud/infra diagrams as HTML.
     - ascii-video: ASCII video: convert video/audio to colored ASCII MP4/GIF.
