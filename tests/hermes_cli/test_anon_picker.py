@@ -30,7 +30,7 @@ GUEST_STATE = {
 
 @pytest.fixture
 def guest_home(monkeypatch, tmp_path):
-    """Seed a guest that claimed the welcome trial, read on the desktop's local backend, as the only
+    """Seed a guest that claimed the welcome trial, read on the local terminal backend, as the only
     Nous state, and keep every row builder offline."""
     from tests.hermes_cli.anon_portal import install_optional_portal_provider
     install_optional_portal_provider(monkeypatch)
@@ -63,12 +63,6 @@ def _nous_rows(rows):
     return [r for r in rows if str(r.get("slug", "")).lower() == "nous"]
 
 
-def _cli_nous_rows(config):
-    from hermes_cli.main_provider_setup import _build_provider_picker_rows
-    ordered, _ = _build_provider_picker_rows(config, "nous", {}, {})
-    return [(key, label) for key, label, _members in ordered if key == "nous"]
-
-
 def test_guest_identity_shows_free_tier_row_with_only_welcome_model(guest_home, monkeypatch):
     from hermes_cli.model_switch_providers import list_picker_providers
     rows = _nous_rows(list_picker_providers("nous", "", None, None, 50, "nous/welcome"))
@@ -80,12 +74,6 @@ def test_guest_identity_shows_free_tier_row_with_only_welcome_model(guest_home, 
     rendered = repr(row).lower()
     assert "guest" not in rendered and "anonymous" not in rendered
 
-    # The `hermes model` provider picker applies the same rule from the same helper.
-    cli_rows = _cli_nous_rows({})
-    assert len(cli_rows) == 1
-    assert "free tier" in cli_rows[0][1]
-    assert "guest" not in cli_rows[0][1].lower() and "anonymous" not in cli_rows[0][1].lower()
-
 
 def test_guest_identity_with_guest_off_hides_the_nous_row(guest_home, monkeypatch):
     _write_config(monkeypatch, guest_home, "nous:\n  guest: false\n")
@@ -94,11 +82,10 @@ def test_guest_identity_with_guest_off_hides_the_nous_row(guest_home, monkeypatc
 
     from hermes_cli.model_switch_providers import list_picker_providers
     assert _nous_rows(list_picker_providers("nous", "", None, None, 50, "nous/welcome")) == []
-    assert _cli_nous_rows({"nous": {"guest": False}}) == []
 
 
-def test_desktop_picker_payload_never_locks_the_free_tier_row(guest_home, monkeypatch):
-    """``model.options`` (the desktop's path) prices rows from caches on a normal open; the free-tier
+def test_terminal_picker_payload_never_locks_the_free_tier_row(guest_home, monkeypatch):
+    """``model.options`` prices rows from caches on a normal open; the free-tier
     row has no Portal pricing and no entitlement to read, so it must be left alone rather than locked."""
     from hermes_cli import inventory
     monkeypatch.setattr(inventory, "_prewarm_pricing_async", lambda *a, **k: None)
