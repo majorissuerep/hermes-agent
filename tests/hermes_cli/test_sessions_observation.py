@@ -19,7 +19,9 @@ def test_session_observation_preserves_storage(tmp_path, monkeypatch, populated)
     code = '''
 import hermes_bootstrap
 from hermes_security.handoff import adopt_inherited_key
-assert adopt_inherited_key()
+adopt_inherited_key()
+from hermes_security.vault import is_unlocked
+assert is_unlocked()
 from pathlib import Path
 from types import SimpleNamespace
 from contextlib import redirect_stdout

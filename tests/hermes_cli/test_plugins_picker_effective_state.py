@@ -46,4 +46,4 @@ def test_only_flipped_rows_are_written(run_picker):
         toggle_keys=("tools/first", "tools/second"),
     )
     assert plugins["disabled"] == ["tools/second"]
-    assert sorted(plugins["enabled"]) == ["tools/first", "some/unshown-plugin"]
+    assert sorted(plugins["enabled"]) == ["some/unshown-plugin", "tools/first"]

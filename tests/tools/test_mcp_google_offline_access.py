@@ -10,6 +10,8 @@ exact-string check rejects against Google's slash-less document issuer.
 """
 from __future__ import annotations
 
+from tests.tools.mcp_oauth_fixtures import oauth_home as _oauth_home
+
 from types import SimpleNamespace
 from urllib.parse import parse_qsl, urlsplit
 

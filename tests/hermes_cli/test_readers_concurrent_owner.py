@@ -18,7 +18,9 @@ def test_cli_readers_observe_committed_state_during_writer_transaction(tmp_path,
     code = '''
 import hermes_bootstrap
 from hermes_security.handoff import adopt_inherited_key
-assert adopt_inherited_key()
+adopt_inherited_key()
+from hermes_security.vault import is_unlocked
+assert is_unlocked()
 import os, subprocess, sys
 from pathlib import Path
 from hermes_state import SessionDB

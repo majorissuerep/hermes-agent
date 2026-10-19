@@ -4,6 +4,9 @@ The manager consolidates the eight scattered MCP-OAuth call sites into a
 single object with disk-mtime watch, dedup'd 401 handling, and a provider
 cache. See `tools/mcp_oauth_manager.py` for design rationale.
 """
+
+from tests.tools.mcp_oauth_fixtures import oauth_home as _oauth_home
+from tests.tools.mcp_oauth_fixtures import read_oauth_state, write_oauth_state
 import json
 import time
 from unittest.mock import MagicMock
@@ -28,7 +31,7 @@ def test_manager_isolates_same_named_servers_by_profile_home(tmp_path, monkeypat
         try:
             storage = HermesTokenStorage("shared")
             storage._tokens_path().parent.mkdir(parents=True, exist_ok=True)
-            storage._tokens_path().write_text(
+            write_oauth_state(storage._tokens_path(),
                 f'{{"access_token":"{access_token}","token_type":"Bearer","expires_in":3600}}'
             , encoding="utf-8")
         finally:
@@ -82,7 +85,7 @@ async def test_first_observation_401_still_allows_in_place_refresh(tmp_path, mon
 
     token_dir = tmp_path / "mcp-tokens"
     token_dir.mkdir(parents=True)
-    (token_dir / "srv.json").write_text(json.dumps({"access_token": "OLD"}), encoding="utf-8")
+    write_oauth_state(token_dir / "srv.json", json.dumps({"access_token": "OLD"}), encoding="utf-8")
 
     class _Ctx:
         current_tokens = object()  # tokens already in memory (in-process sign-in)
@@ -127,7 +130,7 @@ async def test_external_login_after_absent_tokens_file_forces_reload(tmp_path, m
     assert await mgr.invalidate_if_disk_changed("srv") is False  # file absent
     token_dir = tmp_path / "mcp-tokens"
     token_dir.mkdir(parents=True)
-    (token_dir / "srv.json").write_text(json.dumps({"access_token": "NEW"}), encoding="utf-8")
+    write_oauth_state(token_dir / "srv.json", json.dumps({"access_token": "NEW"}), encoding="utf-8")
     assert await mgr.invalidate_if_disk_changed("srv") is True
     assert provider._initialized is False
 
@@ -218,7 +221,7 @@ def test_invalid_client_metadata_does_not_trip(tmp_path, monkeypatch):
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
     d = tmp_path / "mcp-tokens"
     d.mkdir(parents=True)
-    (d / "srv.client.json").write_text('{"client_id": "live"}', encoding="utf-8")
+    write_oauth_state(d / "srv.client.json", '{"client_id": "live"}', encoding="utf-8")
     provider = _provider_with_token_endpoint(
         tmp_path, {}, "https://idp.example.com/oauth/token", monkeypatch
     )
@@ -254,7 +257,7 @@ def test_bridge_forwards_requests_and_poisons_on_token_endpoint_400(
     token_ep = "https://idp.example.com/oauth/token"
     d = tmp_path / "mcp-tokens"
     d.mkdir(parents=True)
-    (d / "srv.client.json").write_text('{"client_id": "dead"}', encoding="utf-8")
+    write_oauth_state(d / "srv.client.json", '{"client_id": "dead"}', encoding="utf-8")
 
     forwarded = []
 
@@ -437,7 +440,7 @@ async def test_refresh_response_without_refresh_token_keeps_stored_one(tmp_path,
         _fake_response(200, "https://idp.example.com/oauth/token", body)
     )
 
-    on_disk = json.loads((tmp_path / "mcp-tokens" / "srv.json").read_text(encoding="utf-8"))
+    on_disk = json.loads(read_oauth_state(tmp_path / "mcp-tokens" / "srv.json", encoding="utf-8"))
     assert provider.context.current_tokens.access_token == "at-2"
     assert provider.context.current_tokens.refresh_token == "rt-keep" == on_disk["refresh_token"]
     assert provider.context.current_tokens.scope == "read" == on_disk["scope"]
@@ -463,7 +466,7 @@ async def test_refresh_response_with_new_refresh_token_rotates(tmp_path, monkeyp
         _fake_response(200, "https://idp.example.com/oauth/token", body)
     )
 
-    on_disk = json.loads((tmp_path / "mcp-tokens" / "srv.json").read_text(encoding="utf-8"))
+    on_disk = json.loads(read_oauth_state(tmp_path / "mcp-tokens" / "srv.json", encoding="utf-8"))
     assert provider.context.current_tokens.refresh_token == "rt-new" == on_disk["refresh_token"]
 
 

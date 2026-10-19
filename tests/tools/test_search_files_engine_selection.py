@@ -6,6 +6,7 @@ import re
 import pytest
 
 from tools.environments.local import LocalEnvironment
+from tests.tools.file_ops_fixtures import bash_program
 from tools.file_operations import SearchResult, ShellFileOperations
 from tools.file_tools import search_tool
 from tools.registry import registry
@@ -21,6 +22,7 @@ class RecordingEnvironment:
         self.rg_code = rg_code
 
     def execute(self, command, **kwargs):
+        command = bash_program(command)
         self.commands.append(command)
         if command.startswith("test -e "):
             return {"output": "exists\n", "returncode": 0}
@@ -57,6 +59,7 @@ def test_bounded_filename_total_is_serialized_as_a_lower_bound(engine, monkeypat
     env = RecordingEnvironment()
 
     def execute(command, **kwargs):
+        command = bash_program(command)
         env.commands.append(command)
         if command.startswith("test -e "):
             return {"output": "exists\n", "returncode": 0}
@@ -121,6 +124,7 @@ def test_modified_requires_parseable_ripgrep_14_before_search(version):
     env = RecordingEnvironment()
 
     def execute(command, **kwargs):
+        command = bash_program(command)
         env.commands.append(command)
         if command.startswith("test -e "):
             return {"output": "exists\n", "returncode": 0}
@@ -146,6 +150,7 @@ def test_modified_accepts_complete_ripgrep_semver_with_revision_text():
 
     def execute(command, **kwargs):
         if "--version" in command:
+            command = bash_program(command)
             env.commands.append(command)
             return {"output": "ripgrep 14.1.1 (rev abc123)\n", "returncode": 0}
         return original_execute(command, **kwargs)
@@ -165,6 +170,7 @@ def test_modified_accepts_ripgrep_semver_with_prerelease_and_build_metadata():
 
     def execute(command, **kwargs):
         if "--version" in command:
+            command = bash_program(command)
             env.commands.append(command)
             return {
                 "output": "ripgrep 14.1.1-alpha.1+build.2\n",
@@ -297,6 +303,7 @@ def test_repeated_search_key_distinguishes_order(monkeypatch):
 
 class RipgrepInvocationEnvironment(RecordingEnvironment):
     def execute(self, command, **kwargs):
+        command = bash_program(command)
         self.commands.append(command)
         if command.startswith("test -e "):
             return {"output": "exists\n", "returncode": 0}
@@ -367,6 +374,7 @@ def test_remote_resolution_never_probes_controller_host_paths(tmp_path, monkeypa
     env = RecordingEnvironment()
 
     def miss(command, **kwargs):
+        command = bash_program(command)
         env.commands.append(command)
         return {"output": "", "returncode": 1}
 
@@ -383,6 +391,7 @@ def test_remote_msys_shaped_executable_is_not_rewritten_as_controller_path():
     env = RecordingEnvironment()
 
     def execute(command, **kwargs):
+        command = bash_program(command)
         env.commands.append(command)
         if command.startswith("test -e "):
             return {"output": "exists\n", "returncode": 0}
@@ -418,6 +427,7 @@ def test_modified_multi_path_search_preserves_exact_order_request():
     env = RecordingEnvironment()
 
     def execute(command, **kwargs):
+        command = bash_program(command)
         env.commands.append(command)
         if command.startswith("test -e "):
             if "'/one /two'" in command:
@@ -451,6 +461,7 @@ def test_comma_delimited_file_roots_preserve_internal_spaces_in_one_search():
 
     def execute(command, **kwargs):
         nonlocal path_checks
+        command = bash_program(command)
         env.commands.append(command)
         if command.startswith("test -e "):
             path_checks += 1
@@ -477,6 +488,7 @@ def test_multi_path_modified_capability_error_propagates():
     env = RecordingEnvironment()
 
     def execute(command, **kwargs):
+        command = bash_program(command)
         env.commands.append(command)
         if command.startswith("test -e "):
             output = "not_found\n" if "'/one /two'" in command else "exists\n"

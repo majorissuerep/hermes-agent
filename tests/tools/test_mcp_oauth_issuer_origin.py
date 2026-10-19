@@ -9,6 +9,9 @@ rejected.
 """
 from __future__ import annotations
 
+from tests.tools.mcp_oauth_fixtures import oauth_home as _oauth_home
+from tests.tools.mcp_oauth_fixtures import read_oauth_state
+
 import json
 from types import SimpleNamespace
 from urllib.parse import parse_qs, urlsplit
@@ -120,8 +123,8 @@ async def test_origin_issued_document_of_path_scoped_server_completes_the_flow(t
     assert ("POST", f"{AS_ORIGIN}/register") in standin.hits and ("POST", f"{AS_ORIGIN}/token") in standin.hits
     assert str(provider.context.oauth_metadata.issuer).rstrip("/") == AS_ORIGIN
     # SEP-2352 binding stays on the advertised identifier, so the next 401 reuses this client instead of re-registering.
-    assert json.loads((tmp_path / "mcp-tokens" / "srv.client.json").read_text())["issuer"] == ADVERTISED
-    assert json.loads((tmp_path / "mcp-tokens" / "srv.json").read_text())["access_token"] == "AT-1"
+    assert json.loads(read_oauth_state(tmp_path / "mcp-tokens" / "srv.client.json"))["issuer"] == ADVERTISED
+    assert json.loads(read_oauth_state(tmp_path / "mcp-tokens" / "srv.json"))["access_token"] == "AT-1"
 
 
 @pytest.mark.asyncio

@@ -28,6 +28,8 @@ the bridge forwards responses correctly into the inner SDK generator.
 """
 from __future__ import annotations
 
+from tests.tools.mcp_oauth_fixtures import oauth_home as _oauth_home
+
 import asyncio
 
 import pytest

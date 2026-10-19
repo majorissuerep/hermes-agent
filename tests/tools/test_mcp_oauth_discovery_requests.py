@@ -15,6 +15,8 @@ real discovery request, then assert on its headers.
 """
 from __future__ import annotations
 
+from tests.tools.mcp_oauth_fixtures import oauth_home as _oauth_home
+
 import pytest
 
 

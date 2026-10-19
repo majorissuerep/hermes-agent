@@ -16,6 +16,8 @@ real socket, because that path (``tools.mcp_oauth_device``) sends its own token
 request instead of yielding it into the SDK's auth flow.
 """
 
+from tests.tools.mcp_oauth_fixtures import oauth_home as _oauth_home
+
 import asyncio
 import json
 import threading

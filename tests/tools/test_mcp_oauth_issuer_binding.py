@@ -4,6 +4,9 @@ The discovered authorization server for an MCP server can change (server migrati
 metadata edit, DNS takeover). A stored refresh token must never be sent to a different issuer.
 """
 
+from tests.tools.mcp_oauth_fixtures import oauth_home as _oauth_home
+from tests.tools.mcp_oauth_fixtures import read_oauth_state, write_oauth_state
+
 import asyncio
 import json
 from types import SimpleNamespace
@@ -27,7 +30,7 @@ def _stored(tmp_path, issuer):
     if issuer is not None:
         payload["hermes_issuer"] = issuer
     _token_file(tmp_path).parent.mkdir(parents=True, exist_ok=True)
-    _token_file(tmp_path).write_text(json.dumps(payload))
+    write_oauth_state(_token_file(tmp_path), json.dumps(payload))
     storage = HermesTokenStorage("srv", hermes_home=tmp_path)
     tokens = asyncio.run(storage.get_tokens())
     assert tokens is not None
@@ -45,7 +48,7 @@ def test_issuer_mismatch_strips_refresh_token_in_memory_and_on_disk(tmp_path):
     enforce_refresh_token_issuer(ctx)
     assert ctx.current_tokens.refresh_token is None
     assert ctx.current_tokens.access_token == "a"  # unexpired access token stays usable
-    on_disk = json.loads(_token_file(tmp_path).read_text())
+    on_disk = json.loads(read_oauth_state(_token_file(tmp_path)))
     assert "refresh_token" not in on_disk and on_disk["access_token"] == "a"
 
 
@@ -54,14 +57,14 @@ def test_matching_issuer_keeps_refresh_token_even_with_trailing_slash(tmp_path):
     ctx = _context(storage, "https://as.example.com", tokens)
     enforce_refresh_token_issuer(ctx)
     assert ctx.current_tokens.refresh_token == "r"
-    assert json.loads(_token_file(tmp_path).read_text())["refresh_token"] == "r"
+    assert json.loads(read_oauth_state(_token_file(tmp_path)))["refresh_token"] == "r"
 
 
 def test_legacy_file_without_issuer_adopts_current_issuer_once(tmp_path):
     storage, tokens = _stored(tmp_path, None)
     enforce_refresh_token_issuer(_context(storage, "https://as.example.com", tokens))
     assert tokens.refresh_token == "r"
-    assert json.loads(_token_file(tmp_path).read_text())["hermes_issuer"] == "https://as.example.com"
+    assert json.loads(read_oauth_state(_token_file(tmp_path)))["hermes_issuer"] == "https://as.example.com"
     # Now bound: a later issuer change is rejected.
     storage2 = HermesTokenStorage("srv", hermes_home=tmp_path)
     tokens2 = asyncio.run(storage2.get_tokens())
@@ -74,7 +77,7 @@ def test_set_tokens_stamps_bound_issuer_and_get_tokens_keeps_it_out_of_the_sdk_m
     storage = HermesTokenStorage("srv", hermes_home=tmp_path)
     bind_issuer_from_context(_context(storage, "https://as.example.com"))
     asyncio.run(storage.set_tokens(OAuthToken(access_token="a", token_type="Bearer", expires_in=3600, refresh_token="r")))
-    assert json.loads(_token_file(tmp_path).read_text())["hermes_issuer"] == "https://as.example.com"
+    assert json.loads(read_oauth_state(_token_file(tmp_path)))["hermes_issuer"] == "https://as.example.com"
     fresh = HermesTokenStorage("srv", hermes_home=tmp_path)
     tokens = asyncio.run(fresh.get_tokens())
     assert fresh.loaded_issuer == "https://as.example.com"

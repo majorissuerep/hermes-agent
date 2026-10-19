@@ -1,5 +1,8 @@
 """Tests for tools/mcp_oauth.py — OAuth 2.1 PKCE support for MCP servers."""
 
+from tests.tools.mcp_oauth_fixtures import oauth_home as _oauth_home
+from tests.tools.mcp_oauth_fixtures import read_oauth_state, write_oauth_state
+
 import json
 import stat
 import sys
@@ -94,7 +97,7 @@ class TestHermesTokenStorage:
         # File exists with correct permissions
         token_path = tmp_path / "mcp-tokens" / "test-server.json"
         assert token_path.exists()
-        data = json.loads(token_path.read_text())
+        data = json.loads(read_oauth_state(token_path))
         assert data["access_token"] == "abc123"
 
     @pytest.mark.platforms("posix")  # POSIX mode bits not enforced on Windows
@@ -145,14 +148,14 @@ class TestHermesTokenStorage:
         assert loaded is not None
         assert loaded.token_endpoint_auth_method == "client_secret_post"
         client_path = tmp_path / "mcp-tokens" / "supabase.client.json"
-        assert json.loads(client_path.read_text())["token_endpoint_auth_method"] == "client_secret_post"
+        assert json.loads(read_oauth_state(client_path))["token_endpoint_auth_method"] == "client_secret_post"
 
     def test_client_info_with_secret_and_none_method_is_coerced(self, tmp_path, monkeypatch):
         monkeypatch.setenv("HERMES_HOME", str(tmp_path))
         token_dir = tmp_path / "mcp-tokens"
         token_dir.mkdir(parents=True)
         client_path = token_dir / "supabase.client.json"
-        client_path.write_text(json.dumps({
+        write_oauth_state(client_path, json.dumps({
             "client_id": "client-id",
             "client_secret": "secret",
             "redirect_uris": ["http://127.0.0.1:12345/callback"],
@@ -163,7 +166,7 @@ class TestHermesTokenStorage:
 
         assert loaded is not None
         assert loaded.token_endpoint_auth_method == "client_secret_post"
-        assert json.loads(client_path.read_text())["token_endpoint_auth_method"] == "client_secret_post"
+        assert json.loads(read_oauth_state(client_path))["token_endpoint_auth_method"] == "client_secret_post"
 
 
     def test_corrupt_tokens_returns_none(self, tmp_path, monkeypatch):
@@ -175,13 +178,13 @@ class TestHermesTokenStorage:
         storage = HermesTokenStorage("bad-server")
         d = tmp_path / "mcp-tokens"
         d.mkdir(parents=True)
-        (d / "bad-server.json").write_text("NOT VALID JSON{{{")
+        write_oauth_state(d / "bad-server.json", "NOT VALID JSON{{{")
         assert asyncio.run(storage.get_tokens()) is None
         for raw in ('NOT VALID JSON{{{', '[]', 'null', '"cached-secret"', '42', 'true', '{}'):
             path = d / "bad-server.meta.json"
-            path.write_text(raw)
+            write_oauth_state(path, raw)
             assert storage.load_oauth_metadata() is None
-            assert path.read_text() == raw
+            assert read_oauth_state(path) == raw
 
         metadata = {"issuer": "https://example.com", "token_endpoint": "https://example.com/token",
                     "response_types_supported": ["code"], "authorization_endpoint": "https://example.com/auth"}
@@ -190,11 +193,11 @@ class TestHermesTokenStorage:
                 metadata.pop("authorization_endpoint")
                 metadata["device_authorization_endpoint"] = "https://example.com/device"
             path = d / "bad-server.meta.json"
-            path.write_text(json.dumps(metadata))
+            write_oauth_state(path, json.dumps(metadata))
             loaded = storage.load_oauth_metadata()
             assert type(loaded) is (DeviceOAuthMetadata if device else OAuthMetadata)
             assert str(loaded.token_endpoint) == metadata["token_endpoint"]
-            assert json.loads(path.read_text()) == metadata
+            assert json.loads(read_oauth_state(path)) == metadata
 
     def test_corrupt_tokens_warning_never_echoes_the_token_material(self, tmp_path, monkeypatch, caplog):
         """A pydantic ValidationError's str() includes the raw input; the corrupt-store warning must
@@ -209,7 +212,7 @@ class TestHermesTokenStorage:
         secret = "sk-live-QQQQQQQQ"  # short enough that pydantic's input echo does not elide it
         # access_token must be a str: a one-element list fails validation on THAT field, and pydantic's
         # message echoes the failing field's input — i.e. the token.
-        (d / "bad-server.json").write_text(json.dumps({"access_token": [secret], "token_type": "Bearer"}))
+        write_oauth_state(d / "bad-server.json", json.dumps({"access_token": [secret], "token_type": "Bearer"}))
 
         with caplog.at_level(logging.WARNING, logger="tools.mcp_oauth"):
             assert asyncio.run(storage.get_tokens()) is None
@@ -262,7 +265,7 @@ class TestBuildOAuthAuth:
         assert tokens.access_token == "access-token"
         token_path = tmp_path / "mcp-tokens" / "supabase.json"
         assert token_path.exists()
-        assert json.loads(token_path.read_text())["access_token"] == "access-token"
+        assert json.loads(read_oauth_state(token_path))["access_token"] == "access-token"
 
 
     @pytest.mark.asyncio
@@ -522,7 +525,7 @@ class TestCallbackPortReservation:
         storage = HermesTokenStorage("srv", hermes_home=tmp_path)
         path = storage._client_info_path()
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(payload), encoding="utf-8")
+        write_oauth_state(path, json.dumps(payload), encoding="utf-8")
         return storage
 
     @pytest.mark.parametrize("bad_uri", [
@@ -588,8 +591,8 @@ class TestRemoveOAuthTokens:
         monkeypatch.setenv("HERMES_HOME", str(tmp_path))
         d = tmp_path / "mcp-tokens"
         d.mkdir()
-        (d / "myserver.json").write_text("{}")
-        (d / "myserver.client.json").write_text("{}")
+        write_oauth_state(d / "myserver.json", "{}")
+        write_oauth_state(d / "myserver.client.json", "{}")
 
         remove_oauth_tokens("myserver")
 
@@ -615,11 +618,11 @@ class TestInvalidateTokensOnClientChange:
         info = {"client_id": client_id, "redirect_uris": ["http://localhost:1455/callback"]}
         if client_secret:
             info["client_secret"] = client_secret
-        (d / "chg-server.client.json").write_text(json.dumps(info))
-        (d / "chg-server.json").write_text(json.dumps({
+        write_oauth_state(d / "chg-server.client.json", json.dumps(info))
+        write_oauth_state(d / "chg-server.json", json.dumps({
             "access_token": "old-token", "token_type": "Bearer",
         }))
-        (d / "chg-server.meta.json").write_text(json.dumps({
+        write_oauth_state(d / "chg-server.meta.json", json.dumps({
             "issuer": "https://idp.example",
             "authorization_endpoint": "https://idp.example/auth",
             "token_endpoint": "https://idp.example/token",
@@ -656,7 +659,7 @@ class TestInvalidateTokensOnClientChange:
         storage = HermesTokenStorage("fresh-server")
         d = tmp_path / "mcp-tokens"
         d.mkdir(parents=True, exist_ok=True)
-        (d / "fresh-server.json").write_text(json.dumps({
+        write_oauth_state(d / "fresh-server.json", json.dumps({
             "access_token": "tok", "token_type": "Bearer",
         }))
         _invalidate_tokens_on_client_change(storage, "client-x", None)
@@ -677,7 +680,7 @@ class TestInvalidateTokensOnClientChange:
         assert not (d / "chg-server.json").exists(), (
             "tokens minted under client-a must not survive switch to client-b"
         )
-        info = json.loads((d / "chg-server.client.json").read_text())
+        info = json.loads(read_oauth_state(d / "chg-server.client.json"))
         assert info["client_id"] == "client-b"
 
 
@@ -1028,9 +1031,9 @@ class TestPoisonClientRegistration:
         storage = HermesTokenStorage("srv")
         d = tmp_path / "mcp-tokens"
         d.mkdir(parents=True)
-        (d / "srv.json").write_text('{"access_token": "keep-me"}')
-        (d / "srv.client.json").write_text('{"client_id": "dead"}')
-        (d / "srv.meta.json").write_text('{"token_endpoint": "https://idp/token"}')
+        write_oauth_state(d / "srv.json", '{"access_token": "keep-me"}')
+        write_oauth_state(d / "srv.client.json", '{"client_id": "dead"}')
+        write_oauth_state(d / "srv.meta.json", '{"token_endpoint": "https://idp/token"}')
 
         removed = storage.poison_client_registration()
 
@@ -1039,9 +1042,9 @@ class TestPoisonClientRegistration:
         assert not (d / "srv.client.json").exists()
         assert not (d / "srv.meta.json").exists()
         # Backup of the client file kept for recovery.
-        assert (d / "srv.client.json.bak").read_text() == '{"client_id": "dead"}'
+        assert read_oauth_state(d / "srv.client.json.bak") == '{"client_id": "dead"}'
         # Tokens are intentionally preserved.
-        assert (d / "srv.json").read_text() == '{"access_token": "keep-me"}'
+        assert read_oauth_state(d / "srv.json") == '{"access_token": "keep-me"}'
 
 
 

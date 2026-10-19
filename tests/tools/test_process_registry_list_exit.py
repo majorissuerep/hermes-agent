@@ -93,7 +93,9 @@ def test_poll_during_the_readers_final_drain_keeps_the_whole_output(tmp_path):
 def test_list_reconciles_real_exit_without_consuming_owned_result(tmp_path):
     # A disposable subreaper owns even the orphaned writer; no global pytest
     # process state is changed, and every fixture child is reaped on failure.
-    result = subprocess.run(
+    from tests.e2e.vault_home import run_unlocked
+
+    result = run_unlocked(
         [sys.executable, str(Path(__file__).resolve()), "probe", str(tmp_path)],
         cwd=Path(__file__).resolve().parents[2],
         env={**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[2])},
@@ -104,6 +106,9 @@ def test_list_reconciles_real_exit_without_consuming_owned_result(tmp_path):
 
 
 def _probe(root):
+    from hermes_security.handoff import adopt_inherited_key
+
+    adopt_inherited_key()
     import tools.process_registry as module
 
     assert ctypes.CDLL(None).prctl(36, 1, 0, 0, 0) == 0  # PR_SET_CHILD_SUBREAPER

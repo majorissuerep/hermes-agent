@@ -33,6 +33,9 @@ timestamp persisted alongside the access_token (``auth.ts:~180``).
 """
 from __future__ import annotations
 
+from tests.tools.mcp_oauth_fixtures import oauth_home as _oauth_home
+from tests.tools.mcp_oauth_fixtures import read_oauth_state, write_oauth_state
+
 import asyncio
 import json
 import time
@@ -68,7 +71,7 @@ class TestSetTokensAbsoluteExpiry:
         after = time.time()
 
         on_disk = json.loads(
-            (tmp_path / "mcp-tokens" / "srv.json").read_text()
+            read_oauth_state(tmp_path / "mcp-tokens" / "srv.json")
         )
         assert "expires_at" in on_disk, (
             "Fix A: set_tokens must record an absolute expires_at wall-clock "
@@ -98,7 +101,7 @@ class TestSetTokensAbsoluteExpiry:
         )
 
         on_disk = json.loads(
-            (tmp_path / "mcp-tokens" / "srv.json").read_text()
+            read_oauth_state(tmp_path / "mcp-tokens" / "srv.json")
         )
         assert "expires_at" not in on_disk
 
@@ -143,7 +146,7 @@ class TestGetTokensReconstructsExpiresIn:
         token_dir = _get_token_dir()
         token_dir.mkdir(parents=True, exist_ok=True)
         # Write an already-expired token file directly.
-        (token_dir / "srv.json").write_text(
+        write_oauth_state(token_dir / "srv.json",
             json.dumps(
                 {
                     "access_token": "a",
@@ -182,7 +185,7 @@ class TestGetTokensReconstructsExpiresIn:
         # Legacy-shape file (no expires_at). Make it stale by backdating mtime
         # well past its nominal expires_in.
         legacy_path = token_dir / "srv.json"
-        legacy_path.write_text(
+        write_oauth_state(legacy_path,
             json.dumps(
                 {
                     "access_token": "a",
@@ -304,10 +307,10 @@ async def test_initialize_marks_zero_ttl_cold_loaded_token_invalid(
         )
     )
     token_path = _get_token_dir() / "srv.json"
-    persisted = json.loads(token_path.read_text())
+    persisted = json.loads(read_oauth_state(token_path))
     fixed_now = time.time()
     persisted["expires_at"] = fixed_now - 60
-    token_path.write_text(json.dumps(persisted))
+    write_oauth_state(token_path, json.dumps(persisted))
     await storage.set_client_info(
         OAuthClientInformationFull(
             client_id="test-client",

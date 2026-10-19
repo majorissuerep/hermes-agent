@@ -14,6 +14,9 @@ as concurrent subprocesses, so sharing it across files would make whichever
 test lost the race fail on a port another file legitimately held.
 """
 
+from tests.tools.mcp_oauth_fixtures import oauth_home as _oauth_home
+from tests.tools.mcp_oauth_fixtures import write_oauth_state
+
 import asyncio
 import json
 import socket
@@ -328,7 +331,7 @@ def test_existing_registration_falls_back_to_dcr(tmp_path, monkeypatch, private_
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
     storage = HermesTokenStorage("srv")
     storage._client_info_path().parent.mkdir(parents=True, exist_ok=True)
-    storage._client_info_path().write_text('{"client_id": "dcr-issued"}')
+    write_oauth_state(storage._client_info_path(), '{"client_id": "dcr-issued"}')
 
     assert _maybe_use_cimd({}, storage) is None
 
@@ -429,7 +432,7 @@ def test_cached_pinned_port_is_not_handed_to_a_sibling_server(
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
     settled = HermesTokenStorage("settled")
     settled._client_info_path().parent.mkdir(parents=True, exist_ok=True)
-    settled._client_info_path().write_text(json.dumps({
+    write_oauth_state(settled._client_info_path(), json.dumps({
         "client_id": _CIMD_CLIENT_METADATA_URL,
         "redirect_uris": [f"http://127.0.0.1:{private_ports[0]}/callback"],
     }))

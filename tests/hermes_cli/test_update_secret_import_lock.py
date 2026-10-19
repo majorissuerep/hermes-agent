@@ -135,7 +135,9 @@ def test_update_probe_children_skip_external_secret_sources(tmp_path, monkeypatc
         [sys.executable, "-c",
          "import hermes_bootstrap\n"
          "from hermes_security.handoff import adopt_inherited_key\n"
-         "assert adopt_inherited_key()\n"
+         "adopt_inherited_key()\n"
+         "from hermes_security.vault import is_unlocked\n"
+         "assert is_unlocked()\n"
          "import sys; sys.argv = ['hermes', 'update']\n"
          "from hermes_cli.update_cmd_validation import _validate_critical_modules_import\n"
          "print('PROBE=' + repr(_validate_critical_modules_import(__import__('os').getcwd())))"],

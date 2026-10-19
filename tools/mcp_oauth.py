@@ -43,7 +43,7 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import parse_qs, urlparse
 
 from hermes_constants import secure_parent_dir
-from utils import atomic_json_write
+from hermes_security import io as state_io
 from tools.mcp_dashboard_oauth import contextvar_set as _contextvar_set, get_dashboard_oauth_flow
 
 if TYPE_CHECKING:  # annotations only; the SDK is imported lazily at runtime
@@ -349,7 +349,7 @@ def _raise_if_non_interactive(lead: str) -> None:
     """
     if not _is_interactive():
         raise OAuthNonInteractiveError(
-            f"{lead} Run `hermes mcp login <server>` interactively to (re)authorize, then restart or reload the gateway."
+            f"{lead} Run `hermes mcp login <server>` interactively to (re)authorize, then reconnect the MCP session."
         )
 
 
@@ -388,7 +388,8 @@ def _read_json(path: Path) -> dict | None:
     if not path.exists():
         return None
     try:
-        return json.loads(path.read_text(encoding="utf-8-sig"))
+        content = state_io.read_text(path, purpose="state", encoding="utf-8-sig")
+        return None if content is None else json.loads(content)
     except (json.JSONDecodeError, OSError) as exc:
         logger.warning("Failed to read %s: %s", path, exc)
         return None
@@ -401,7 +402,7 @@ def _write_json(path: Path, data: dict) -> None:
 
     mkdir_under_hermes_home(path.parent)
     secure_parent_dir(path)
-    atomic_json_write(path, data, mode=0o600, default=str)
+    state_io.write_text(path, json.dumps(data, indent=2, ensure_ascii=False, default=str), purpose="state")
 
 
 def _model_json(model: Any) -> dict:
@@ -633,7 +634,7 @@ class HermesTokenStorage:
             return False
         backup = client_path.with_name(client_path.name + ".bak")
         try:
-            backup.write_bytes(client_path.read_bytes())
+            state_io.write_bytes(backup, state_io.read_bytes(client_path, purpose="state"), purpose="state")
         except OSError as exc:  # non-fatal — proceed with the removal anyway
             logger.warning("Could not back up client info at %s: %s", client_path, exc)
         client_path.unlink(missing_ok=True)

@@ -5,7 +5,7 @@ Run: python evals/mcp_device_flow.py --repo /path/to/checkout
 from __future__ import annotations
 
 import argparse
-from contextlib import contextmanager
+from contextlib import contextmanager, ExitStack
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
@@ -115,8 +115,13 @@ def oauth_fixture(mode="success"):
 
 
 def run_cli(repo, mode):
-    with tempfile.TemporaryDirectory(prefix="hermes-device-wire-") as directory, oauth_fixture(mode) as (base, wire):
+    from hermes_constants import reset_hermes_home_override, set_hermes_home_override
+    from hermes_security import io as state_io
+    from tests.e2e.vault_home import prepare_fixture_runtime, run_unlocked
+
+    with tempfile.TemporaryDirectory(prefix="hermes-device-wire-") as directory, oauth_fixture(mode) as (base, wire), ExitStack() as scope:
         home = Path(directory)
+        scope.callback(reset_hermes_home_override, set_hermes_home_override(home))
         oauth = {"flow": "device", "cimd": False, "scope": "fixture.read", "timeout": 15}
         if mode == "preregistered":
             oauth.update(client_id="fixture-client", client_secret="fixture-client-secret")
@@ -131,15 +136,20 @@ def run_cli(repo, mode):
                         "fixture.meta.json": '{"issuer":"https://old.example"}'}
             for filename, value in previous.items():
                 (token_dir / filename).write_text(value, encoding="utf-8")
+        prepare_fixture_runtime(home, repo)
         env = {key: value for key, value in os.environ.items()
                if not key.startswith("HERMES_") and not any(part in key for part in ("API_KEY", "TOKEN", "SECRET"))}
-        env.update(HOME=str(home), HERMES_HOME=str(home), HERMES_ALLOW_NO_VAULT="1",
+        env.update(HOME=str(home), HERMES_HOME=str(home),
                    PYTHONPATH=str(repo), PYTHONDONTWRITEBYTECODE="1")
+        if "HERMES_DISABLE_LAZY_INSTALLS" in os.environ:
+            env["HERMES_DISABLE_LAZY_INSTALLS"] = os.environ["HERMES_DISABLE_LAZY_INSTALLS"]
         command = ["reauth", "fixture"] if mode == "preregistered" else ["login", "fixture", "--flow", "device"]
         argv = [sys.executable, "-m", "hermes_cli.main", "mcp", *command]
         if mode == "persistence":
             # Inject a filesystem write error after real registration/metadata writes.
             argv = [sys.executable, "-c", '''
+from hermes_security.handoff import adopt_inherited_key
+adopt_inherited_key()
 from tools import mcp_oauth
 write = mcp_oauth._write_json
 def fail_token(path, data):
@@ -150,20 +160,21 @@ mcp_oauth._write_json = fail_token
 from hermes_cli.main import main
 main()
 ''', "mcp", *command]
-        result = subprocess.run(argv,
+        result = run_unlocked(argv,
                                 cwd=repo, env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=40, check=False)
         token_path = home / "mcp-tokens" / "fixture.json"
         refresh_output = None
         if token_path.exists() and not previous:
-            tokens = json.loads(token_path.read_text(encoding="utf-8"))
+            tokens = state_io.read_json(token_path, purpose="state")
             tokens["expires_at"] = time.time() - 60
-            token_path.write_text(json.dumps(tokens), encoding="utf-8")
-            refreshed = subprocess.run([sys.executable, "-m", "hermes_cli.main", "mcp", "test", "fixture"],
+            state_io.write_json(token_path, tokens, purpose="state")
+            refreshed = run_unlocked([sys.executable, "-m", "hermes_cli.main", "mcp", "test", "fixture"],
                                        cwd=repo, env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=30, check=False)
             refresh_output = refreshed.stdout + refreshed.stderr
         return {"mode": mode, "returncode": result.returncode, "output": result.stdout + result.stderr,
                 "token_persisted": token_path.exists(), "refresh_output": refresh_output, "wire": wire,
-                "state_preserved": all((home / "mcp-tokens" / k).read_text(encoding="utf-8") == v for k, v in previous.items())}
+                "state_preserved": all(state_io.read_text(home / "mcp-tokens" / k, purpose="state") == v
+                                       for k, v in previous.items())}
 
 
 if __name__ == "__main__":

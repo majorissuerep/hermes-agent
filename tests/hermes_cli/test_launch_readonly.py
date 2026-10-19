@@ -22,7 +22,9 @@ def test_resume_and_exit_read_without_writing(tmp_path, monkeypatch, populated):
     code = '''
 import hermes_bootstrap
 from hermes_security.handoff import adopt_inherited_key
-assert adopt_inherited_key()
+adopt_inherited_key()
+from hermes_security.vault import is_unlocked
+assert is_unlocked()
 from pathlib import Path
 from hermes_state import SessionDB
 from hermes_cli.main import _resolve_last_session, _resolve_session_by_name_or_id

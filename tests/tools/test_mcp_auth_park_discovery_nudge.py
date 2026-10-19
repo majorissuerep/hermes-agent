@@ -2,6 +2,9 @@
 re-authorization rewrites its credentials: every nudge replayed the same rejected refresh token,
 once per agent build, until the authorization server rate-limited the user's IP."""
 
+from tests.tools.mcp_oauth_fixtures import oauth_home as _oauth_home
+from tests.tools.mcp_oauth_fixtures import write_oauth_state
+
 import asyncio
 import json
 
@@ -19,7 +22,7 @@ def test_auth_parked_oauth_server_ignores_discovery_until_credentials_change(mon
     cfg = {"url": "https://mcp.example.test/mcp", "auth": "oauth"}
     token_file = HermesTokenStorage("cloud")._tokens_path()
     token_file.parent.mkdir(parents=True)
-    token_file.write_text(json.dumps({"access_token": "a", "token_type": "Bearer", "refresh_token": "dead"}))
+    write_oauth_state(token_file, json.dumps({"access_token": "a", "token_type": "Bearer", "refresh_token": "dead"}))
     attempts = []
 
     class _Task(MCPServerTask):
@@ -46,7 +49,7 @@ def test_auth_parked_oauth_server_ignores_discovery_until_credentials_change(mon
             await _settle()
         assert len(attempts) == 1
 
-        token_file.write_text(json.dumps({"access_token": "b", "token_type": "Bearer", "refresh_token": "new"}))
+        write_oauth_state(token_file, json.dumps({"access_token": "b", "token_type": "Bearer", "refresh_token": "new"}))
         _select_new_servers({"cloud": cfg})  # `hermes mcp login` landed: the next pass revives it
         await _settle()
         assert len(attempts) == 2

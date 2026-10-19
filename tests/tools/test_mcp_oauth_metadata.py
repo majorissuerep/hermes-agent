@@ -18,6 +18,8 @@ layer so refresh across restarts stays quiet.
 
 from __future__ import annotations
 
+from tests.tools.mcp_oauth_fixtures import oauth_home as _oauth_home
+
 import asyncio
 import json
 from unittest.mock import AsyncMock, MagicMock, patch

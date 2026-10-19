@@ -123,8 +123,6 @@ def test_list_sessions_flags_persist_on_release(registry):
 def test_spawn_local_stamps_persist_on_release(registry, monkeypatch, tmp_path):
     """spawn_local(persist_on_release=True) stamps the flag onto the minted
     ProcessSession so every kill filter can see it (#41225)."""
-    import os
-
     from tools import terminal_tool_sudo
 
     # Stay off the real hermes home: the spawn-path env sanitizer resolves the
@@ -136,9 +134,23 @@ def test_spawn_local_stamps_persist_on_release(registry, monkeypatch, tmp_path):
     monkeypatch.setattr(registry, "_track_started", lambda *a, **k: None)
     monkeypatch.setattr(terminal_tool_sudo, "_rewrite_compound_background", lambda c: c)
     monkeypatch.setattr(ProcessRegistry, "_scope_argv", lambda *a, **k: None)
-    fake_popen = MagicMock()
-    fake_popen.pid = 4242
-    monkeypatch.setattr("subprocess.Popen", MagicMock(return_value=fake_popen))
+    fake_process = MagicMock(pid=4242)
+    from types import SimpleNamespace
+    import subprocess
+
+    monkeypatch.setattr(
+        "tools.process_registry.subprocess",
+        SimpleNamespace(Popen=lambda *args, **kwargs: fake_process, PIPE=subprocess.PIPE,
+                        STDOUT=subprocess.STDOUT, DEVNULL=subprocess.DEVNULL),
+    )
+    monkeypatch.setattr(registry, "_safe_host_start_time", lambda pid: 123.0)
+    monkeypatch.setattr(
+        "tools.process_registry.background_output_log", lambda session_id: tmp_path / f"{session_id}.log",
+    )
+    monkeypatch.setattr(
+        "tools.process_registry.spawn_output_worker",
+        lambda *args, **kwargs: (fake_process, 123.0),
+    )
 
     session = registry.spawn_local(
         "python -c 'import time; time.sleep(60)'", task_id="t1", persist_on_release=True)

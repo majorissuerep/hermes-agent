@@ -38,9 +38,9 @@ def register(ctx):
     ctx.register_image_gen_provider(Painter())
 '''
 
-PLATFORM_PLUGIN = '''
+APPROVAL_PLUGIN = '''
 def register(ctx):
-    ctx.register_platform("x", "X", adapter_factory=lambda cfg: None, check_fn=lambda: True)
+    ctx.register_approval_transport("x", lambda request: None)
 '''
 
 
@@ -68,7 +68,7 @@ def test_plugin_runs_out_of_process_with_ctx_round_trips_and_survives_host_crash
     from agent.image_gen_provider import ImageGenProvider
     from tools.registry import registry
 
-    _home_with_plugins(tmp_path, monkeypatch, {"hostprobe": PROBE_PLUGIN, "platformprobe": PLATFORM_PLUGIN})
+    _home_with_plugins(tmp_path, monkeypatch, {"hostprobe": PROBE_PLUGIN, "approvalprobe": APPROVAL_PLUGIN})
     manager = PluginManager()
     manager.discover_and_load()
     try:
@@ -88,7 +88,7 @@ def test_plugin_runs_out_of_process_with_ctx_round_trips_and_survives_host_crash
         assert isinstance(painter, ImageGenProvider)
         assert painter.generate("cat") == {"success": True, "image": f"cat@{host_pid}"}
         # Live-object ctx surfaces fail the plugin with the boundary's reason, not a crash.
-        assert "register_platform" in str(manager._plugins["platformprobe"].error)
+        assert "register_approval_transport" in str(manager._plugins["approvalprobe"].error)
 
         # A plugin killing its host costs one tool error; Hermes keeps running and the host restarts.
         crashed = registry.dispatch("hostprobe_crash", {}, scope=manager.scope_key)
@@ -110,7 +110,7 @@ def test_isolation_host_keeps_every_user_import_path_out_of_process(tmp_path, mo
     from hermes_cli.plugin_isolation_audit import audit_plugin_dir
     from plugins import plugin_loader
 
-    home = _home_with_plugins(tmp_path, monkeypatch, {"platformprobe": PLATFORM_PLUGIN, "fine": PROBE_PLUGIN})
+    home = _home_with_plugins(tmp_path, monkeypatch, {"approvalprobe": APPROVAL_PLUGIN, "fine": PROBE_PLUGIN})
     # Category loaders' in-process import refuses user code under host isolation (the backstop
     # behind the memory / context-engine / cron host routes).
     import logging
@@ -120,8 +120,8 @@ def test_isolation_host_keeps_every_user_import_path_out_of_process(tmp_path, mo
     assert "_hermes_user_x.fine" not in sys.modules
     # The static audit reads the same boundary table the host enforces.
     assert audit_plugin_dir(home / "plugins" / "fine").verdict == "host"
-    blocked = audit_plugin_dir(home / "plugins" / "platformprobe")
-    assert blocked.verdict == "in_process" and "register_platform" in blocked.reasons[0]
+    blocked = audit_plugin_dir(home / "plugins" / "approvalprobe")
+    assert blocked.verdict == "in_process" and "register_approval_transport" in blocked.reasons[0]
 
 
 

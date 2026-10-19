@@ -7,6 +7,9 @@ BetterStack bug: an external process rewrites the tokens file on disk,
 and the running Hermes session picks up the new tokens on the next auth
 flow without requiring a restart.
 """
+
+from tests.tools.mcp_oauth_fixtures import oauth_home as _oauth_home
+from tests.tools.mcp_oauth_fixtures import write_oauth_state
 import asyncio
 import json
 import os
@@ -48,13 +51,13 @@ async def test_external_refresh_picked_up_without_restart(tmp_path, monkeypatch)
     client_info_file = token_dir / "srv.client.json"
 
     # Pre-seed the baseline state: valid tokens the session loaded at startup.
-    tokens_file.write_text(json.dumps({
+    write_oauth_state(tokens_file, json.dumps({
         "access_token": "OLD_ACCESS",
         "token_type": "Bearer",
         "expires_in": 3600,
         "refresh_token": "OLD_REFRESH",
     }))
-    client_info_file.write_text(json.dumps({
+    write_oauth_state(client_info_file, json.dumps({
         "client_id": "test-client",
         "redirect_uris": ["http://127.0.0.1:12345/callback"],
         "grant_types": ["authorization_code", "refresh_token"],
@@ -85,7 +88,7 @@ async def test_external_refresh_picked_up_without_restart(tmp_path, monkeypatch)
     # EXTERNAL PROCESS: cron rewrites the tokens file with fresh creds.
     # The old refresh_token has been consumed by this external exchange.
     future_mtime = time.time() + 1
-    tokens_file.write_text(json.dumps({
+    write_oauth_state(tokens_file, json.dumps({
         "access_token": "NEW_ACCESS",
         "token_type": "Bearer",
         "expires_in": 3600,
@@ -120,7 +123,7 @@ async def test_handle_401_deduplicates_concurrent_callers(tmp_path, monkeypatch)
 
     token_dir = tmp_path / "mcp-tokens"
     token_dir.mkdir(parents=True)
-    (token_dir / "srv.json").write_text(json.dumps({
+    write_oauth_state(token_dir / "srv.json", json.dumps({
         "access_token": "TOK",
         "token_type": "Bearer",
         "expires_in": 3600,
