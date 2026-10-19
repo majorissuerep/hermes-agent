@@ -3,6 +3,16 @@ from pathlib import Path
 
 import pytest
 
+@pytest.fixture(autouse=True)
+def close_case_owned_vaults():
+    from hermes_security import vault
+
+    previous = set(vault.unlocked_homes())
+    yield
+    for home in set(vault.unlocked_homes()) - previous:
+        vault.lock_now(home)
+
+
 
 def test_backfill_rebinds_root_credentials_and_preserves_existing_profile(tmp_path, monkeypatch):
     from hermes_cli import profiles

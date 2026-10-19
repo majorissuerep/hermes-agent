@@ -156,15 +156,6 @@ def test_subprocess_run_setsid_systemctl_blocked():
         subprocess.run(["setsid", "systemctl", "kill", "hermes-gateway"], check=False)
 
 
-def test_host_gateway_start_blocked_but_container_exec_allowed():
-    """A host-side ``hermes gateway start`` spawns a real runtime; the same words addressed to
-    a container via ``docker exec`` stay inside it and are the Docker harness's business."""
-    with pytest.raises(RuntimeError, match="REAL hermes gateway runtime"):
-        subprocess.run(["hermes", "-p", "p", "gateway", "start"], check=False)
-    argv = ["docker", "exec", "-u", "hermes", "hermes-test-x", "sh", "-c", "hermes -p p gateway start"]
-    # Past the guard the call reaches the real subprocess.run; a missing binary is fine here.
-    with pytest.raises(FileNotFoundError):
-        subprocess.run(argv, env={"PATH": "/nonexistent"}, check=False)
 
 
 def test_subprocess_run_string_shell_true_blocked():
@@ -297,41 +288,10 @@ def test_subprocess_killall_hermes_blocked():
 # ──────────────────── real gateway runtime spawn ─────────────────
 
 
-def test_subprocess_popen_real_gateway_restart_blocked():
-    """``python -m hermes_cli.main gateway restart`` is a detached child that
-    inherits the pytest-tmp HERMES_HOME, resolves the developer's real
-    ``hermes-gateway`` unit, and outlives the test (39 six-day orphans squatted
-    the webhook port, 2026-09-03). Blocked at the spawn primitive."""
-    with pytest.raises(RuntimeError, match="live-system guard"):
-        subprocess.Popen(
-            [sys.executable, "-m", "hermes_cli.main", "gateway", "restart"],
-            start_new_session=True,
-        )
 
 
-def test_subprocess_popen_inline_source_restart_watcher_blocked():
-    """``gateway._spawn_gateway_restart_watcher`` hides the real gateway argv behind
-    ``python -c <src> <old_pid> …``. The identity matcher must ignore that trailing argv (#107002),
-    but the guard reads it as SPAWN INTENT — otherwise the watcher sails through, waits out its
-    120s deadline and leaves a real detached gateway squatting the webhook port."""
-    with pytest.raises(RuntimeError, match="live-system guard"):
-        subprocess.Popen(
-            [sys.executable, "-c", "import time; time.sleep(1)", "4242",
-             sys.executable, "-m", "hermes_cli.main", "gateway", "run"],
-            start_new_session=True,
-        )
 
 
-def test_subprocess_run_gateway_status_passes_through():
-    """Only lifecycle verbs are blocked: ``gateway status`` (and every other
-    read-only subcommand) must still spawn — via the canonical matcher, not an
-    argv substring."""
-    result = subprocess.run(
-        [sys.executable, "-c", "import sys; print(sys.argv[1:])", "-m", "hermes_cli.main", "gateway", "status"],
-        capture_output=True, text=True,
-        check=False,
-    )
-    assert result.returncode == 0
 
 
 # ──────────────────── bypass marker ─────────────────────────────

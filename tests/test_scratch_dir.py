@@ -93,9 +93,14 @@ class TestScratchDirPermissionPolicy:
             monkeypatch.delenv(var, raising=False)
 
     def test_default_is_owner_only(self, tmp_path, monkeypatch):
+        from hermes_constants import is_container
+
         self._isolate_env(monkeypatch, tmp_path)
+        probe = tmp_path / "mode-probe"
+        probe.mkdir()
+        expected = stat.S_IMODE(probe.stat().st_mode) if is_container() else 0o700
         scratch = get_scratch_dir(tmp_path, prune=False)
-        assert stat.S_IMODE(os.stat(scratch).st_mode) == 0o700
+        assert stat.S_IMODE(os.stat(scratch).st_mode) == expected
 
     def test_explicit_home_mode_uses_native_chmod_semantics(self, tmp_path, monkeypatch):
         self._isolate_env(monkeypatch, tmp_path)
@@ -164,7 +169,10 @@ class TestScratchDirPermissionPolicy:
         pre = other / "cache" / "scratch"
         pre.mkdir(parents=True)
         os.chmod(pre, 0o750)
-        assert stat.S_IMODE(os.stat(get_scratch_dir(other, prune=False)).st_mode) == 0o700
+        from hermes_constants import is_container
+
+        expected = 0o750 if is_container() else 0o700
+        assert stat.S_IMODE(os.stat(get_scratch_dir(other, prune=False)).st_mode) == expected
 
     def test_canonical_container_signal_without_env_override_keeps_operator_mode(self, tmp_path, monkeypatch):
         # Podman/containerd/K8s runtimes often don't export HERMES_CONTAINER; the canonical

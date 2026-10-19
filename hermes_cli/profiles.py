@@ -1935,10 +1935,8 @@ def _rename_profile_owned(old_name: str, new_name: str) -> Path:
     from tools.mcp_tool_lifecycle import shutdown_mcp_servers
     shutdown_mcp_servers(scope=hermes_home_key(old_dir))
 
-    try:
-        old_dir.rename(new_dir)
-    except Exception:
-        raise
+    from hermes_cli.profile_state_copy import rename_profile_state
+    rename_profile_state(old_dir, new_dir)
     print(f"✓ Renamed {old_dir.name} → {new_dir.name}")
 
     # 2b. Record the rename so Bot Mode group chats can re-link persisted

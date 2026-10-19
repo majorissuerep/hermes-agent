@@ -44,7 +44,7 @@ def test_starlette_server_pins_and_lock_exclude_cve_2026_48710():
             assert len(pins) == 1 and pins[0].operator == "==", (extra, requirement)
             assert Version(pins[0].version) >= floor, (extra, requirement)
             found.add(extra)
-    assert {"web", "mcp", "computer-use"} <= found
+    assert {"mcp", "computer-use"} <= found
     dev = [req for req in map(Requirement, metadata["dependency-groups"]["dev"])
            if req.name == "starlette"]
     assert len(dev) == 1

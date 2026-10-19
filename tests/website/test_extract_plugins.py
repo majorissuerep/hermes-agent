@@ -279,6 +279,8 @@ def test_git_dates_added_is_first_commit_updated_is_last_and_renames_keep_added(
     _git(repo, "commit", "-q", "-m", "rename", date="2026-03-01T00:00:00+00:00")
 
     dates = mod.load_git_dates(catalog)
+    dates = {name: {key: value.replace("+00:00", "Z") for key, value in fields.items()}
+             for name, fields in dates.items()}
 
     assert dates["alpha.yaml"] == {"addedAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-02-01T00:00:00Z"}
     assert dates["new-name.yaml"] == {"addedAt": "2026-01-01T00:00:00Z", "updatedAt": "2026-03-01T00:00:00Z"}

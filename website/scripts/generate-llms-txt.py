@@ -96,26 +96,10 @@ SECTIONS: list[tuple[str, list[tuple[str, str, str | None]]]] = [
         ("user-guide/features/image-generation", "Image Generation", None),
         ("user-guide/features/tts", "Text-to-Speech", None),
     ]),
-    ("Messaging Platforms", [
-        ("user-guide/messaging", "Overview", None),
-        ("user-guide/messaging/telegram", "Telegram", None),
-        ("user-guide/messaging/discord", "Discord", None),
-        ("user-guide/messaging/slack", "Slack", None),
-        ("user-guide/messaging/whatsapp", "WhatsApp", None),
-        ("user-guide/messaging/signal", "Signal", None),
-        ("user-guide/messaging/email", "Email", None),
-        ("user-guide/messaging/sms", "SMS", None),
-        ("user-guide/messaging/matrix", "Matrix", None),
-        ("user-guide/messaging/mattermost", "Mattermost", None),
-        ("user-guide/messaging/homeassistant", "Home Assistant", None),
-        ("user-guide/messaging/webhooks", "Webhooks", None),
-    ]),
     ("Integrations", [
         ("integrations", "Integrations Overview", None),
         ("integrations/providers", "Providers", None),
         ("user-guide/features/mcp", "MCP (Model Context Protocol)", None),
-        ("user-guide/features/acp", "ACP (Agent Context Protocol)", None),
-        ("user-guide/features/api-server", "API Server", None),
         ("user-guide/features/honcho", "Honcho Memory", None),
         ("user-guide/features/provider-routing", "Provider Routing", None),
         ("user-guide/features/fallback-providers", "Fallback Providers", None),
@@ -125,7 +109,6 @@ SECTIONS: list[tuple[str, list[tuple[str, str, str | None]]]] = [
         ("guides/tips", "Tips & Best Practices", None),
         ("guides/local-llm-on-mac", "Local LLMs on Mac", None),
         ("guides/daily-briefing-bot", "Daily Briefing Bot", None),
-        ("guides/team-telegram-assistant", "Team Telegram Assistant", None),
         ("guides/python-library", "Use Hermes as a Python Library", None),
         ("guides/use-mcp-with-hermes", "Use MCP with Hermes", None),
         ("guides/use-voice-mode-with-hermes", "Use Voice Mode with Hermes", None),
@@ -141,12 +124,10 @@ SECTIONS: list[tuple[str, list[tuple[str, str, str | None]]]] = [
         ("developer-guide/agent-loop", "Agent Loop", None),
         ("developer-guide/prompt-assembly", "Prompt Assembly", None),
         ("developer-guide/context-compression-and-caching", "Context Compression & Caching", None),
-        ("developer-guide/gateway-internals", "Gateway Internals", None),
         ("developer-guide/session-storage", "Session Storage", None),
         ("developer-guide/provider-runtime", "Provider Runtime", None),
         ("developer-guide/adding-tools", "Adding Tools", None),
         ("developer-guide/adding-providers", "Adding Providers", None),
-        ("developer-guide/adding-platform-adapters", "Adding Platform Adapters", None),
         ("developer-guide/creating-skills", "Creating Skills", None),
         ("developer-guide/extending-the-cli", "Extending the CLI", None),
     ]),
@@ -178,7 +159,6 @@ SKILL_CATALOG = ("user-guide/skills/bundled", "user-guide/skills/optional")
 # MISC_SECTION — no path can drop a page out of the index.
 ABSORB: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Getting Started", ("getting-started",)),
-    ("Messaging Platforms", ("user-guide/messaging",)),
     ("Core Features", ("user-guide/features",)),
     ("Using Hermes", ("user-guide",)),
     ("Integrations", ("integrations",)),
@@ -295,22 +275,19 @@ def emit_llms_index() -> str:
     lines.append("# Hermes Agent")
     lines.append("")
     lines.append(
-        "> The self-improving AI agent built by Nous Research. A terminal-native "
-        "autonomous coding and task agent with persistent memory, agent-created skills, "
-        "and a messaging gateway that lives on 21+ messaging platforms — 19 native to "
-        "the gateway plus IRC and Microsoft Teams via plugins (Telegram, Discord, Slack, "
-        "SMS, Matrix, ...). Runs on local, Docker, SSH, Daytona, Modal, or Singularity "
-        "backends. Works with Nous Portal, OpenRouter, OpenAI, Anthropic, Google, or any "
-        "OpenAI-compatible endpoint."
+        "> Hermes is an encrypted, terminal-native personal AI agent for Linux and macOS. "
+        "The Ink TUI and finite CLI share persistent memory, skills, local terminal subagents, "
+        "and resilient install/update/repair. Supported model routes are documented explicitly; "
+        "there is no Desktop app, inbound messaging gateway, or remote management listener."
     )
     lines.append("")
     lines.append(
-        "Install: `curl -fsSL https://raw.githubusercontent.com/NousResearch/"
+        "Install: `curl -fsSL https://raw.githubusercontent.com/majorissuerep/"
         "hermes-agent/main/scripts/install.sh | bash`  "
         "(Linux, macOS, WSL2)"
     )
     lines.append("")
-    lines.append("Repo: https://github.com/NousResearch/hermes-agent")
+    lines.append("Repo: https://github.com/majorissuerep/hermes-agent")
     lines.append("")
 
     for section, items in SECTIONS:

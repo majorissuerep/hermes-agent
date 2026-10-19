@@ -71,12 +71,6 @@ class TestAtomicWritersRefuseDeletedProfileHome:
             reset_hermes_home_override(token)
         assert not profile.exists()
 
-    def test_lifecycle_sentinel_write_after_delete(self, tmp_path):
-        from gateway.lifecycle_ledger import _write_sentinel
-
-        profile = _tombstoned_profile(tmp_path)
-        _write_sentinel({"reason": "clean-exit"}, profile)
-        assert not profile.exists()
 
     def test_oauth_token_write_after_delete(self, tmp_path):
         from tools.mcp_oauth import _write_json

@@ -5,9 +5,20 @@ from pathlib import Path
 
 import pytest
 
+@pytest.fixture(autouse=True)
+def close_case_owned_vaults():
+    from hermes_security import vault
+
+    previous = set(vault.unlocked_homes())
+    yield
+    for home in set(vault.unlocked_homes()) - previous:
+        vault.lock_now(home)
+
+
 
 @pytest.mark.parametrize("kind", ["fresh", "clone", "clone-all"])
-def test_staged_profile_keeps_all_native_state_readable_after_publish(tmp_path, monkeypatch, kind):
+@pytest.mark.parametrize("alias", [False, pytest.param(True, marks=pytest.mark.platforms("posix"))])
+def test_staged_profile_keeps_all_native_state_readable_after_publish(tmp_path, monkeypatch, kind, alias):
     from hermes_cli import profiles
     from hermes_cli.config_defaults import DEFAULT_CONFIG
     from hermes_constants import set_hermes_home_override, reset_hermes_home_override
@@ -15,7 +26,12 @@ def test_staged_profile_keeps_all_native_state_readable_after_publish(tmp_path, 
     from tests.e2e.vault_home import seal_fixture_home
 
     home = tmp_path / ".hermes"
-    home.mkdir()
+    if alias:
+        physical = tmp_path / "private-profile-data"
+        physical.mkdir()
+        home.symlink_to(physical, target_is_directory=True)
+    else:
+        home.mkdir()
     (home / "config.yaml").write_text(
         f"_config_version: {DEFAULT_CONFIG['_config_version']}\n"
         "model:\n  provider: litellm\n  default: deepseek/deepseek-v4-flash-0731\n"
@@ -37,6 +53,8 @@ def test_staged_profile_keeps_all_native_state_readable_after_publish(tmp_path, 
         db.execute("INSERT INTO retained_work VALUES ('unexecuted private work')")
         db.commit()
     frames.append(home / "logs/native.log", b"private log record", purpose="log")
+    (home / "logs/update_receipts").mkdir(parents=True)
+    (home / "logs/update_receipts/.pm-write.lock").touch()
     originals = {name: (home / name).read_bytes() for name in
                  ("config.yaml", ".env", "SOUL.md", "memories/MEMORY.md", "mem0.json", "kanban.db")}
     token = set_hermes_home_override(home)
@@ -61,6 +79,7 @@ def test_staged_profile_keeps_all_native_state_readable_after_publish(tmp_path, 
         assert "private-memory-provider" in io.read_text(result / "mem0.json", purpose="state")
         assert (result / "skills/probe/SKILL.md").read_text() == "public skill code"
     if kind == "clone-all":
+        assert not (result / "logs/update_receipts/.pm-write.lock").exists()
         with closing(sqlite.connect(result / "kanban.db")) as db:
             assert db.execute("SELECT body FROM retained_work").fetchall() == [("unexecuted private work",)]
         assert list(frames.read_frames(result / "logs/native.log", purpose="log")) == [b"private log record"]

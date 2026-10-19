@@ -21,21 +21,16 @@ interpreter, or the restart phase of a pre-hand-off updater imports new code int
   script run as real sandboxed processes (isolated HOME, only a loopback fake provider)
   with shared invariants: bounded termination, documented rc, no traceback, no
   service-manager calls, no model call unless the command is a turn. ``-z`` must persist
-  exactly what was sent and rendered; ``serve`` must announce READY on stdout, bind the
-  announced port, and stop on SIGTERM leaving no descendant and no host record behind.
+  exactly what was sent and rendered through the encrypted home and SQLCipher store.
 """
 
 from __future__ import annotations
 
-import ast
 import importlib.util
 import json
 import os
 import re
 import shutil
-import signal
-import socket
-import sqlite3
 import subprocess
 import sys
 import tomllib
@@ -46,6 +41,7 @@ from pathlib import Path
 import pytest
 
 from tests.e2e.core.upgrade._helpers import (
+    BWRAP_OK,
     WORKTREE,
     describe,
     isolated_env,
@@ -53,13 +49,13 @@ from tests.e2e.core.upgrade._helpers import (
     run,
     sandbox_argv,
     sandbox_required_reason,
-    wait_for,
 )
 from tests.fakes.fake_llm_provider import FakeLLMServer, Text, write_hermes_home
+from tests.e2e.vault_home import connect_state, prepare_fixture_runtime
+from hermes_security import vault
+from hermes_security.handoff import prepare_child_key
 
-pytestmark = [
-    pytest.mark.skipif(sys.platform != "linux", reason="fork()-based import isolation and bwrap sandbox are Linux-only"),
-]
+pytestmark = [pytest.mark.platforms("linux")]
 
 PY = sys.executable
 PYPROJECT = tomllib.loads((WORKTREE / "pyproject.toml").read_text(encoding="utf-8"))
@@ -71,26 +67,35 @@ TRACEBACK = "Traceback (most recent call last)"
 # requirement whose environment marker excludes this platform) — the table is re-validated
 # against pyproject.toml, so it cannot be used to hide a missing core dependency.
 _OPTIONAL_IMPORTS = {
-    "acp": "agent-client-protocol", "aiohttp": "aiohttp", "aiohttp_socks": "aiohttp-socks",
-    "aiosqlite": "aiosqlite", "alibabacloud_dingtalk": "alibabacloud-dingtalk", "anthropic": "anthropic",
-    "asyncpg": "asyncpg", "azure": "azure-identity", "boto3": "boto3", "botocore": "boto3",
-    "brotlicffi": "brotlicffi", "daytona": "daytona", "defusedxml": "defusedxml",
-    "dingtalk_stream": "dingtalk-stream", "discord": "discord.py", "edge_tts": "edge-tts",
-    "elevenlabs": "elevenlabs", "exa_py": "exa-py", "fal_client": "fal-client",
-    "faster_whisper": "faster-whisper", "firecrawl": "firecrawl-py", "google": "google-auth",
-    "google_auth_oauthlib": "google-auth-oauthlib", "googleapiclient": "google-api-python-client",
-    "httplib2": "httplib2", "lark_oapi": "lark-oapi", "mautrix": "mautrix",
-    "mcp": "mcp", "microsoft_teams": "microsoft-teams-apps", "mistralai": "mistralai",
-    "modal": "modal", "numpy": "numpy", "pyopen_wakeword": "pyopen-wakeword",
-    "opentelemetry": "opentelemetry-sdk", "parallel": "parallel-web", "pvporcupine": "pvporcupine",
-    "pyasn1": "pyasn1", "qrcode": "qrcode", "sentencepiece": "sentencepiece", "sherpa_onnx": "sherpa-onnx",
-    "slack_bolt": "slack-bolt", "slack_sdk": "slack-sdk", "sounddevice": "sounddevice",
-    "telegram": "python-telegram-bot", "uvloop": "uvloop",
-    "vercel": "vercel", "youtube_transcript_api": "youtube-transcript-api",
-    # Windows-only core requirements (their markers exclude Linux).
-    "pywintypes": "pywin32", "win32api": "pywin32", "win32con": "pywin32", "win32event": "pywin32",
-    "win32file": "pywin32", "win32job": "pywin32", "win32process": "pywin32", "win32security": "pywin32",
-    "winerror": "pywin32", "winpty": "pywinpty",
+    "anthropic": "anthropic",
+    "azure": "azure-identity",
+    "boto3": "boto3",
+    "botocore": "boto3",
+    "daytona": "daytona",
+    "edge_tts": "edge-tts",
+    "elevenlabs": "elevenlabs",
+    "exa_py": "exa-py",
+    "fal_client": "fal-client",
+    "faster_whisper": "faster-whisper",
+    "firecrawl": "firecrawl-py",
+    "google": "google-auth",
+    "google_auth_oauthlib": "google-auth-oauthlib",
+    "googleapiclient": "google-api-python-client",
+    "httplib2": "httplib2",
+    "mcp": "mcp",
+    "mistralai": "mistralai",
+    "modal": "modal",
+    "numpy": "numpy",
+    "pyopen_wakeword": "pyopen-wakeword",
+    "opentelemetry": "opentelemetry-sdk",
+    "parallel": "parallel-web",
+    "pvporcupine": "pvporcupine",
+    "pyasn1": "pyasn1",
+    "sentencepiece": "sentencepiece",
+    "sherpa_onnx": "sherpa-onnx",
+    "sounddevice": "sounddevice",
+    "vercel": "vercel",
+    "youtube_transcript_api": "youtube-transcript-api",
 }
 
 # Shipped modules that cannot import on this platform for a reason other than a missing
@@ -100,26 +105,47 @@ _PLATFORM_ALLOWLIST: dict[str, str] = {}
 # Third-party modules imported in the parent BEFORE forking, purely to amortise their import
 # cost across ~1.8k children. Never first-party (the runner refuses to fork if any is loaded).
 _PRELOAD = (
-    "openai", "httpx", "pydantic", "rich", "prompt_toolkit", "yaml", "ruamel.yaml", "requests", "jinja2",
-    "fastapi", "starlette", "uvicorn", "anthropic", "cryptography", "psutil", "websockets", "dotenv",
-    "tenacity", "fire", "croniter", "markdown", "jwt", "packaging", "PIL",
+    "openai",
+    "httpx",
+    "pydantic",
+    "rich",
+    "prompt_toolkit",
+    "yaml",
+    "ruamel.yaml",
+    "requests",
+    "jinja2",
+    "anthropic",
+    "cryptography",
+    "psutil",
+    "websockets",
+    "dotenv",
+    "tenacity",
+    "fire",
+    "croniter",
+    "jwt",
+    "packaging",
+    "PIL",
 )
 
 # Import sites the pre-hand-off updater (v2026.9.14 update_cmd_fleet/_maint) reaches AFTER
 # its purge in the pre-pull interpreter: the restart phase (``hermes_cli.gateway`` and what
-# it pulls), the maintenance/summary steps, and the atexit browser cleanup that re-imports
+# it pulled historically), the maintenance/summary steps, and browser cleanup that re-imports
 # ``tools.browser_tool`` -> ``hermes_cli.config`` (#112522). Entry points that only ever start
-# in a NEW process (gateway.run, tui_runtime.entry, cron.scheduler) are covered by the
+# in a NEW process (tui_runtime.entry, cron.scheduler) are covered by the
 # fresh-interpreter smoke instead.
 _POST_PURGE_IMPORTS = (
-    "hermes_cli.config", "hermes_cli.managed_scope", "hermes_cli.gateway", "gateway.status",
-    "hermes_cli.gateway_migrate", "hermes_cli.profiles", "hermes_cli.backup", "hermes_cli.model_catalog",
-    "hermes_cli.plugin_compat", "agent.curator", "tools.skills_sync", "tools.browser_tool",
+    "hermes_cli.config",
+    "hermes_cli.managed_scope",
+    "hermes_cli.profiles",
+    "hermes_cli.backup",
+    "hermes_cli.model_catalog",
+    "hermes_cli.plugin_compat",
+    "agent.curator",
+    "tools.skills_sync",
+    "tools.browser_tool",
 )
 # What the pre-hand-off ``hermes update`` process had imported before the pull.
 _OLD_UPDATER_GRAPH = ("hermes_cli.main", "hermes_cli.update_cmd", "hermes_cli.config", "hermes_cli.gateway")
-
-_READY_RE = re.compile(r"^HERMES_(?:BACKEND|DASHBOARD)_READY port=(\d+)", re.MULTILINE)  # electron/backend-ready.ts
 
 
 # --------------------------------------------------------------------------- packaging model
@@ -413,36 +439,6 @@ for target in spec["targets"]:
 json.dump({"results": results, "stale_roots": stale_roots}, open(spec["out"], "w"))
 '''
 
-# Reaps and reports every descendant that outlives the process it runs (a child subreaper),
-# so "serve leaves nothing behind" is observable even inside a PID namespace.
-_SUBREAPER = r'''
-import ctypes, json, os, signal, subprocess, sys, time
-import psutil
-
-out = sys.argv[1]
-ctypes.CDLL(None, use_errno=True).prctl(36, 1, 0, 0, 0)  # PR_SET_CHILD_SUBREAPER
-# Survive whatever the watched process sends its process group on the way out. A handler (not
-# SIG_IGN) so the child starts with default dispositions: handlers reset across exec.
-for _sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
-    signal.signal(_sig, lambda *_: None)
-proc = subprocess.Popen(sys.argv[2:], stdin=subprocess.DEVNULL)
-status = proc.wait()
-deadline = time.monotonic() + 20
-orphans = []
-while True:
-    orphans = [p for p in psutil.Process().children(recursive=True) if p.status() != psutil.STATUS_ZOMBIE]
-    if not orphans or time.monotonic() > deadline:
-        break
-    time.sleep(0.1)
-report = {"returncode": status, "orphans": [" ".join(p.cmdline()) for p in orphans]}
-for p in orphans:
-    try:
-        p.kill()
-    except psutil.Error:
-        pass
-json.dump(report, open(out, "w"))
-'''
-
 
 def _write_script(dirpath: Path, name: str, body: str) -> Path:
     dirpath.mkdir(parents=True, exist_ok=True)
@@ -459,15 +455,6 @@ def _sandbox_or_skip() -> None:
 
 # --------------------------------------------------------------------------- (a) import smoke
 
-
-def test_relaunch_shim_is_excluded_only_while_it_exits_on_import():
-    shim = WORKTREE / "hermes_cli" / "psutil_android.py"
-    top_level = ast.parse(shim.read_text(encoding="utf-8")).body
-    assert any(isinstance(node, ast.Expr) and isinstance(node.value, ast.Call)
-               and isinstance(node.value.func, ast.Name) and node.value.func.id == "stop_for_relaunch"
-               for node in top_level)
-    entries, _ = _shipped_modules()
-    assert "hermes_cli.psutil_android" not in {entry["id"] for entry in entries}
 
 def test_optional_import_table_only_names_optional_or_platform_deps():
     """The tolerance table cannot launder a missing CORE dependency into a skip."""
@@ -492,36 +479,67 @@ def test_every_shipped_module_imports_from_a_clean_first_party_graph(tmp_path):
     ids = [e["id"] for e in entries]
     # Non-vacuous: the list really is the packaging config (every root module, every package).
     assert len(ids) == len(set(ids)), "duplicate module ids in the enumeration"
-    assert {"hermes_cli.main", "run_agent", "gateway.run", "tui_runtime.entry", "acp_adapter.entry"} <= set(ids)
-    find_tops = {p.split(".")[0] for p in PYPROJECT["tool"]["setuptools"]["packages"]["find"]["include"]}
-    covered_tops = {i.split(".")[0] if not i.endswith(".py") else i.split("/")[0] for i in ids}
-    assert find_tops <= covered_tops, f"packages.find tops with no module enumerated: {find_tops - covered_tops}"
+    assert {
+        "hermes_cli.main",
+        "run_agent",
+        "tui_runtime.entry",
+        "cron.scheduler",
+    } <= set(ids)
+    find_tops = {
+        p.split(".")[0]
+        for p in PYPROJECT["tool"]["setuptools"]["packages"]["find"]["include"]
+    }
+    covered_tops = {
+        i.split(".")[0] if not i.endswith(".py") else i.split("/")[0] for i in ids
+    }
+    assert find_tops <= covered_tops, (
+        f"packages.find tops with no module enumerated: {find_tops - covered_tops}"
+    )
 
     runner = _write_script(tmp_path / "runner", "import_runner.py", _IMPORT_RUNNER)
     out = tmp_path / "results.json"
     spec = {
-        "tree": str(WORKTREE), "first_party": sorted(first_party), "modules": entries,
-        "workers": max(2, min(8, (os.cpu_count() or 4) // 2)), "timeout": 180,
-        "out": str(out), "preload": list(_PRELOAD),
+        "tree": str(WORKTREE),
+        "first_party": sorted(first_party),
+        "modules": entries,
+        "workers": max(2, min(8, (os.cpu_count() or 4) // 2)),
+        "timeout": 180,
+        "out": str(out),
+        "preload": list(_PRELOAD),
     }
     spec_path = tmp_path / "spec.json"
     spec_path.write_text(json.dumps(spec), encoding="utf-8")
     env = isolated_env(tmp_path / "sbx")
-    cp = run([PY, str(runner), str(spec_path)], env=env, cwd=tmp_path, writable=[tmp_path], timeout=900)
+    cp = run(
+        [PY, str(runner), str(spec_path)],
+        env=env,
+        cwd=tmp_path,
+        writable=[tmp_path],
+        timeout=900,
+    )
     assert cp.returncode == 0 and out.exists(), describe(cp)
     results = {r["id"]: r for r in json.loads(out.read_text(encoding="utf-8"))}
-    assert set(results) == set(ids), f"runner lost modules: {sorted(set(ids) - set(results))[:10]}"
+    assert set(results) == set(ids), (
+        f"runner lost modules: {sorted(set(ids) - set(results))[:10]}"
+    )
 
     failures, tolerated = {}, {}
     for mid, res in sorted(results.items()):
         if res["ok"]:
             if mid in _PLATFORM_ALLOWLIST:
-                failures[mid] = "stale _PLATFORM_ALLOWLIST entry: module imports fine here"
+                failures[mid] = (
+                    "stale _PLATFORM_ALLOWLIST entry: module imports fine here"
+                )
             continue
         missing_top = (res.get("missing") or "").split(".")[0]
-        if (res["type"] == "ModuleNotFoundError" and missing_top
-                and missing_top not in first_party and missing_top not in sys.stdlib_module_names
-                and missing_top in _OPTIONAL_IMPORTS and _dist_is_optional_here(_OPTIONAL_IMPORTS[missing_top])):
+        if (
+            res["type"] == "ModuleNotFoundError"
+            and missing_top
+            and missing_top not in first_party
+            and missing_top not in sys.stdlib_module_names
+            and missing_top in _OPTIONAL_IMPORTS
+            and _dist_is_optional_here(_OPTIONAL_IMPORTS[missing_top])
+        ):
             tolerated[mid] = missing_top
             continue
         if mid in _PLATFORM_ALLOWLIST:
@@ -644,19 +662,68 @@ class Entry:
 
 
 _ENTRIES = {
-    "module-version": Entry("module", ("--version",), frozenset({0}), prints_version=True),
-    "module-doctor": Entry("module", ("doctor",), frozenset({0, 1})),  # docs: 1 when problems remain
+    "module-version": Entry(
+        "module", ("--version",), frozenset({0}), prints_version=True
+    ),
+    "module-doctor": Entry(
+        "module", ("doctor",), frozenset({0, 1})
+    ),  # docs: 1 when problems remain
+    "module-finite-chat": Entry("module", ("chat", "-q"), frozenset({0}), turn=True),
     "module-oneshot": Entry("module", ("-z",), frozenset({0}), turn=True),
     # The #111942 symptom: the interactive CLI died at startup whenever config.yaml existed.
     "module-interactive-cli": Entry("module", (), frozenset({0}), tty=True),
-    "hermes-version": Entry("hermes", ("--version",), frozenset({0}), prints_version=True),
+    "hermes-version": Entry(
+        "hermes", ("--version",), frozenset({0}), prints_version=True
+    ),
     "hermes-help": Entry("hermes", ("--help",), frozenset({0})),
-    "hermes-acp-version": Entry("hermes-acp", ("--version",), frozenset({0}), prints_version=True),
-    "hermes-acp-help": Entry("hermes-acp", ("--help",), frozenset({0})),
     "hermes-agent-help": Entry("hermes-agent", ("--help",), frozenset({0})),
 }
-def _run_on_tty(argv: list[str], *, env: dict[str, str], cwd: Path, writable: list[Path],
-                timeout: float) -> subprocess.CompletedProcess:
+
+
+def _spawn_native_entrypoint(argv, *, env, cwd, writable, **kwargs):
+    """Keep the one-use vault FD through the optional real bubblewrap boundary."""
+    inherited = prepare_child_key()
+    assert inherited is not None
+    fd, additions = inherited
+    try:
+        command = sandbox_argv(argv, writable=writable)
+        if BWRAP_OK:
+            command[1:1] = ["--preserve-fds", str(fd - 2)]
+        return subprocess.Popen(
+            command, env={**env, **additions}, cwd=str(cwd), pass_fds=(fd,), **kwargs
+        )
+    finally:
+        os.close(fd)
+
+
+def _run_native_entrypoint(argv, *, env, cwd, writable, timeout):
+    with _spawn_native_entrypoint(
+        argv,
+        env=env,
+        cwd=cwd,
+        writable=writable,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    ) as proc:
+        try:
+            stdout, stderr = proc.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            kill_tree(proc)
+            raise
+        return subprocess.CompletedProcess(argv, proc.returncode, stdout, stderr)
+
+
+def _run_on_tty(
+    argv: list[str],
+    *,
+    env: dict[str, str],
+    cwd: Path,
+    writable: list[Path],
+    timeout: float,
+) -> subprocess.CompletedProcess:
     """Run ``argv`` on a pty; once it has drawn anything, send EOF every second until it exits.
 
     EOF typed before the line editor switched the tty to raw mode can be swallowed, so it is
@@ -667,15 +734,25 @@ def _run_on_tty(argv: list[str], *, env: dict[str, str], cwd: Path, writable: li
     import time
 
     master, slave = pty.openpty()
-    proc = subprocess.Popen(sandbox_argv(argv, writable=writable), env=env, cwd=str(cwd),
-                            stdin=slave, stdout=slave, stderr=slave, start_new_session=True)
+    proc = _spawn_native_entrypoint(
+        argv,
+        env=env,
+        cwd=cwd,
+        writable=writable,
+        stdin=slave,
+        stdout=slave,
+        stderr=slave,
+        start_new_session=True,
+    )
     os.close(slave)
     buf, last_eof, deadline = b"", 0.0, time.monotonic() + timeout
     try:
         while proc.poll() is None:
             if time.monotonic() > deadline:
-                raise AssertionError(f"{argv} still running after {timeout}s on a tty:\n"
-                                     f"{buf.decode(errors='replace')[-4000:]}")
+                raise AssertionError(
+                    f"{argv} still running after {timeout}s on a tty:\n"
+                    f"{buf.decode(errors='replace')[-4000:]}"
+                )
             if select.select([master], [], [], 0.2)[0]:
                 try:
                     buf += os.read(master, 65536)
@@ -695,7 +772,9 @@ def _run_on_tty(argv: list[str], *, env: dict[str, str], cwd: Path, writable: li
     finally:
         kill_tree(proc)
         os.close(master)
-    return subprocess.CompletedProcess(argv, proc.returncode, buf.decode(errors="replace"), "")
+    return subprocess.CompletedProcess(
+        argv, proc.returncode, buf.decode(errors="replace"), ""
+    )
 
 
 def test_every_console_script_is_in_the_entrypoint_matrix():
@@ -703,31 +782,41 @@ def test_every_console_script_is_in_the_entrypoint_matrix():
 
 
 def _db_rows(db: Path, sql: str) -> list[tuple]:
-    conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    conn = connect_state(db)
     try:
-        return conn.execute(sql).fetchall()
+        return [tuple(row) for row in conn.execute(sql)]
     finally:
         conn.close()
 
 
 @pytest.mark.parametrize("case", list(_ENTRIES))
-def test_entrypoint_in_a_fresh_process(case, tmp_path):
+def test_entrypoint_in_a_fresh_process(case, tmp_path, request):
     _sandbox_or_skip()
     entry = _ENTRIES[case]
     canary = f"C6-{uuid.uuid4().hex[:12]}"
     reply = f"FAKE-REPLY-{uuid.uuid4().hex[:12]}"
-    env = isolated_env(tmp_path, pythonpath=WORKTREE,
-                       extra={"TERM": "xterm-256color", "COLUMNS": "120", "LINES": "40"} if entry.tty else None)
+    env = isolated_env(
+        tmp_path,
+        pythonpath=WORKTREE,
+        extra={"TERM": "xterm-256color", "COLUMNS": "120", "LINES": "40"}
+        if entry.tty
+        else None,
+    )
     hermes_home = Path(env["HERMES_HOME"])
     with FakeLLMServer([Text(reply)]) as srv:
         write_hermes_home(hermes_home, srv.base_url)
+        request.addfinalizer(lambda: vault.lock_now(hermes_home))
+        prepare_fixture_runtime(hermes_home, WORKTREE)
+        env.pop("HERMES_ALLOW_NO_VAULT", None)
         config_before = (hermes_home / "config.yaml").read_bytes()
         args = [*entry.args, canary] if entry.turn else list(entry.args)
+        if case == "module-finite-chat":
+            args.append("-Q")
         if entry.via == "module":
             argv = [PY, "-m", "hermes_cli.main", *args]
         else:
             argv = [PY, str(_console_script(tmp_path / "bin", entry.via)), *args]
-        launcher = _run_on_tty if entry.tty else run
+        launcher = _run_on_tty if entry.tty else _run_native_entrypoint
         cp = launcher(argv, env=env, cwd=WORKTREE, writable=[tmp_path], timeout=300)
         main_requests = srv.main_requests()
 
@@ -736,17 +825,23 @@ def test_entrypoint_in_a_fresh_process(case, tmp_path):
     assert TRACEBACK not in out, describe(cp)
     shim_log = tmp_path / "shims" / "shim-calls.log"
     assert not shim_log.exists() or not shim_log.read_text(encoding="utf-8").strip(), (
-        f"{case} called a service manager: {shim_log.read_text(encoding='utf-8')}")
+        f"{case} called a service manager: {shim_log.read_text(encoding='utf-8')}"
+    )
     if entry.prints_version:
         from hermes_cli.version_info import get_version_info
+
         commit = get_version_info().commit
         assert commit and commit[:7] in cp.stdout, describe(cp)
     db = hermes_home / "state.db"
     if db.exists():
-        assert _db_rows(db, "PRAGMA integrity_check") == [("ok",)], f"{case} left a corrupt state.db"
+        assert _db_rows(db, "PRAGMA integrity_check") == [("ok",)], (
+            f"{case} left a corrupt state.db"
+        )
     if case == "module-doctor":
         assert cp.stdout.strip(), describe(cp)
-        assert (hermes_home / "config.yaml").read_bytes() == config_before, "doctor without --fix rewrote config.yaml"
+        assert (hermes_home / "config.yaml").read_bytes() == config_before, (
+            "doctor without --fix rewrote config.yaml"
+        )
     if not entry.turn:
         assert main_requests == [], f"{case} made {len(main_requests)} model call(s)"
         return
@@ -759,61 +854,8 @@ def test_entrypoint_in_a_fresh_process(case, tmp_path):
     assert db.exists(), "the one-shot turn persisted nothing"
     sessions = _db_rows(db, "SELECT id FROM sessions")
     assert len(sessions) == 1, sessions
-    rows = _db_rows(db, f"SELECT role, content FROM messages WHERE session_id = '{sessions[0][0]}' ORDER BY id")
+    rows = _db_rows(
+        db,
+        f"SELECT role, content FROM messages WHERE session_id = '{sessions[0][0]}' ORDER BY id",
+    )
     assert ("user", canary) in rows and ("assistant", reply) in rows, rows
-
-
-def test_serve_announces_ready_and_stops_cleanly_on_sigterm(tmp_path):
-    _sandbox_or_skip()
-    psutil = pytest.importorskip("psutil")
-    lock_dir = tmp_path / "host-locks"
-    env = isolated_env(tmp_path, pythonpath=WORKTREE, extra={"HERMES_GATEWAY_LOCK_DIR": str(lock_dir)})
-    reaper = _write_script(tmp_path / "runner", "subreaper.py", _SUBREAPER)
-    report_path = tmp_path / "reaper.json"
-    stdout_path, stderr_path = tmp_path / "serve.out", tmp_path / "serve.err"
-    with FakeLLMServer() as srv, open(stdout_path, "w", encoding="utf-8") as out, open(stderr_path, "w", encoding="utf-8") as err:
-        write_hermes_home(Path(env["HERMES_HOME"]), srv.base_url)
-        argv = [PY, str(reaper), str(report_path),
-                PY, "-m", "hermes_cli.main", "serve", "--host", "127.0.0.1", "--port", "0"]
-        proc = subprocess.Popen(sandbox_argv(argv, writable=[tmp_path]), env=env, cwd=str(WORKTREE),
-                                stdin=subprocess.DEVNULL, stdout=out, stderr=err, start_new_session=True)
-
-        def _logs() -> str:
-            return f"--- stdout ---\n{stdout_path.read_text(encoding='utf-8')[-4000:]}\n--- stderr ---\n{stderr_path.read_text(encoding='utf-8')[-4000:]}"
-
-        try:
-            def _ready():
-                m = _READY_RE.search(stdout_path.read_text(encoding="utf-8"))
-                if m:
-                    return int(m.group(1))
-                assert proc.poll() is None, f"serve exited rc={proc.returncode} before READY\n{_logs()}"
-                return None
-
-            port = wait_for(_ready, timeout=180, what="HERMES_BACKEND_READY on stdout")
-            socket.create_connection(("127.0.0.1", port), timeout=10).close()
-            record_file = lock_dir / "host-serve.json"
-            record = json.loads(record_file.read_text(encoding="utf-8"))
-            assert record.get("port") == port, record
-
-            # With bwrap the reaper is a child; without it (CI) it is proc itself.
-            root = psutil.Process(proc.pid)
-            reaper_proc = next(p for p in [root, *root.children(recursive=True)]
-                               if p.cmdline()[1:2] == [str(reaper)])
-            serve = next(p for p in reaper_proc.children() if p.cmdline()[1:3] == ["-m", "hermes_cli.main"])
-            descendants = [p.pid for p in serve.children(recursive=True)]
-            serve.send_signal(signal.SIGTERM)
-            wait_for(lambda: report_path.exists() and report_path.stat().st_size > 0, timeout=120,
-                     what=f"serve to exit after SIGTERM (descendants at signal time: {descendants})")
-            proc.wait(timeout=60)
-        finally:
-            kill_tree(proc)
-
-    report = json.loads(report_path.read_text(encoding="utf-8"))
-    assert report["returncode"] in (0, -signal.SIGTERM), f"{report}\n{_logs()}"
-    assert report["orphans"] == [], f"serve left descendants running after SIGTERM: {report['orphans']}"
-    assert not record_file.exists() and not (lock_dir / "host-serve.token").exists(), (
-        "serve's host record/token outlived the process (a Desktop would attach to a dead port)")
-    assert TRACEBACK not in stdout_path.read_text(encoding="utf-8") + stderr_path.read_text(encoding="utf-8"), _logs()
-    shim_log = tmp_path / "shims" / "shim-calls.log"
-    assert not shim_log.exists() or not shim_log.read_text(encoding="utf-8").strip(), shim_log.read_text(encoding="utf-8")
-    assert srv.main_requests() == [], "serve made a model call while idle"

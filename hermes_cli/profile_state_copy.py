@@ -113,7 +113,7 @@ def publish_profile_state(staging: Path, destination: Path) -> None:
             purpose = _purpose(relative)
             content = io.read_bytes(path, purpose=purpose)
             sealed = final_vault.encrypt(content, purpose=purpose,
-                                         relpath=target.relative_to(final_owner).as_posix())
+                                         relpath=target.resolve(strict=False).relative_to(final_owner).as_posix())
             vault._atomic_write(path, sealed)
         elif _database(path):
             fd, name = tempfile.mkstemp(prefix=".profile-publish-", dir=path.parent)
@@ -133,7 +133,58 @@ def profile_clone_exclusions(directory: Path, names: list[str], *, source_root: 
         relative = (directory / name).relative_to(source_root)
         if _public_asset(relative):
             continue
-        if (name in {".env.lock", "config.yaml.lock", "runtime.lock", "gateway.lock"}
+        if (name in {".env.lock", "config.yaml.lock", "runtime.lock", "gateway.lock", ".pm-write.lock"}
                 or name.endswith((".log.lock", ".jsonl.lock"))):
             excluded.add(name)
+        elif any(name.endswith(suffix) and _database(Path(name.removesuffix(suffix)))
+                 for suffix in ("-wal", "-shm", ".quarantine.lock", ".repair.lock",
+                                ".auto-maintenance.lock", ".fts_rebuild.lock")):
+            excluded.add(name)  # SQLCipher snapshots WAL data; lock identities do not transfer.
     return excluded
+
+
+def rename_profile_state(source: Path, destination: Path) -> None:
+    """Publish a rekeyed sibling atomically; retain the donor until publication succeeds."""
+    import logging
+    import os
+    import secrets
+    from functools import partial
+    from hermes_cli.profiles import (
+        _clone_staging_dir, _copytree_keep_junctions, _materialize_symlinked_files,
+    )
+    from hermes_security import io, vault
+
+    source_owner = io._home_for(source)
+    if source_owner is None:
+        source.rename(destination)
+        return
+    staging = _clone_staging_dir(destination)
+    rollback = source.parent / f".{source.name}.renaming-{secrets.token_hex(8)}"
+    moved = False
+    try:
+        _copytree_keep_junctions(
+            source, staging,
+            lambda directory, names: profile_clone_exclusions(Path(directory), names, source_root=source),
+            copy_function=partial(copy_profile_tree_file, source_root=source),
+        )
+        _materialize_symlinked_files(staging)
+        publish_profile_state(staging, destination)
+        source.rename(rollback)
+        moved = True
+        try:
+            os.rename(staging, destination)
+        except BaseException:
+            rollback.rename(source)
+            moved = False
+            raise
+    finally:
+        if staging.exists():
+            shutil.rmtree(staging)
+    if moved:
+        try:
+            shutil.rmtree(rollback)
+        except OSError as exc:
+            logging.getLogger(__name__).warning(
+                "Profile renamed; original encrypted snapshot retained at %s: %s", rollback, exc)
+        if source_owner == source.resolve():
+            vault.lock_now(source_owner)

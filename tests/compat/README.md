@@ -4,10 +4,10 @@ An updater can retain old Python modules after replacing its checkout. Its next
 lazy import reads the new files. Current-tree tests alone cannot protect that
 boundary.
 
-The compatibility contract covers only updaters shipped before the PM migration,
-not imports introduced on the unshipped migration branch or in the working tree.
-`old_updater_surface.json` retains an existing history-plus-tree superset; keep
-every frozen name, without continually adding new PM updater imports.
+The JSON is a historical pre-PM import inventory, not a requirement to retain removed
+Desktop or messaging services. This terminal-only fork validates supported update behavior
+through fresh-process, repair, cold-install and active encrypted-session rehearsals.
+The retained finite updater compatibility contracts still exercise actual handoff and receipts.
 
 Regeneration audits history only and requires a full clone and an explicit
 pre-PM cutoff. Use the existing JSON's `stats.history.history_ref` (or
@@ -21,9 +21,7 @@ The walker resolves `--ref` once. The JSON records that exact commit, the
 history roots, discovered entrypoints, selected paths, and parse recoveries.
 It inventories all reachable commits, including merge parents. It follows
 historical filenames, deleted helpers, extraction imports, and rename edges.
-A shallow clone cannot regenerate the file. Shallow CI resolves every frozen
-bare name against the current tree and checks historical completeness; it does
-not require fresh-tree imports to be a subset of the freeze. An update-flow
+A shallow clone cannot regenerate the file. The audit tool can inspect the inventory independently of the runtime qualification suite. An update-flow
 change alone is not grounds for regeneration or for advancing the cutoff.
 
 The surface deliberately over-approximates reachability. Matching update

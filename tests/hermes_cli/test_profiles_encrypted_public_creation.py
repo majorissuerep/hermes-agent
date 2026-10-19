@@ -24,7 +24,11 @@ def encrypted_profile_install(tmp_path):
     )
     (home / ".env").write_text("ACME_TOKEN=profile-owner-private-fixture\n")
     prepare_fixture_runtime(home, REPO)
-    return user, home
+    try:
+        yield user, home
+    finally:
+        from hermes_security import vault
+        vault.lock_now(home)
 
 
 @pytest.mark.platforms("posix")
