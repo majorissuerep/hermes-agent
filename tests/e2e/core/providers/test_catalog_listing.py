@@ -27,7 +27,7 @@ from pathlib import Path
 import pytest
 
 from tests.e2e.core.providers._catalog_helpers import (
-    Known, Row, decoy_keys, discover_catalog, gate, hermetic_env, known_gate, write_home,
+    Row, decoy_keys, discover_catalog, gate, hermetic_env, write_home,
 )
 from tests.fakes.providers.catalog_fake import CatalogFake, bare_path
 
@@ -39,27 +39,8 @@ PROBE_TIMEOUT = 90.0
 HANG_S = 60.0
 HANG_BOUND_S = 40.0
 
-_LISTING_BROKEN = (
-    "ai-gateway", "alibaba", "alibaba-cn", "alibaba-coding-plan", "alibaba-coding-plan-cn",
-    "alibaba-token-plan", "alibaba-token-plan-cn", "arcee", "commandcode", "commandcode-anthropic",
-    "deepinfra", "deepseek", "fireworks", "gemini", "gmi", "huggingface", "kilocode", "kimi-coding",
-    "kimi-coding-cn", "meta-ai", "minimax", "minimax-cn", "nebius-token-factory", "novita", "nvidia",
-    "ollama-cloud", "opencode-go", "opencode-zen", "openrouter", "router", "stepfun", "upstage", "xai",
-    "xiaomi", "zai",
-)
-# Signature: the picker went to the vendor host and returned without any probe error (it renders
-# the vendor/static list instead of the relay's).
-LISTING_KNOWN: dict[str, Known] = {n: Known(
-    r"^canonical_host_hit=True probe_error=None",
-    "#121387 picker listing ignores model.base_url; queries the vendor host") for n in _LISTING_BROKEN}
-SWITCH_KNOWN: dict[str, Known] = {
-    "nebius-token-factory": Known(
-        r"^ok=False .*not found in this provider's catalog.*'api\.tokenfactory\.nebius\.com:443'",
-        "#121388 nebius /model switch validates against the vendor host, ignoring model.base_url"),
-    "xai": Known(r"^ok=True got='xai' base_url='https://api\.x\.ai/v1'", "#121347 xai ignores model.base_url"),
-}
-# Rows that list from the configured endpoint today: they also carry the 404 / hang cells.
-CONTROL_ROWS = [r for r in ROWS if r.supports_model_listing and r.name not in LISTING_KNOWN]
+# Every supported live catalog also qualifies relay IDs and bounded 404/hang degradation.
+CONTROL_ROWS = [r for r in ROWS if r.supports_model_listing]
 
 _LIST = r"""
 import json, sys
@@ -89,7 +70,7 @@ def _probe(row: Row, root: Path, kind: str) -> dict:
     keys = decoy_keys(CATALOG)
     with CatalogFake(models=[unique, f"catalog-{row.name}-beta"], routes=row.routes(), **fake_kwargs) as fake:
         base = fake.origin + row.base_path
-        home = write_home(root, {"provider": row.name, "base_url": base})
+        home = write_home(root, {"provider": row.name, "base_url": base}, prepare_runtime=False)
         started = time.monotonic()
         try:
             from tests.e2e.vault_home import run_unlocked
@@ -130,8 +111,7 @@ def test_listing_uses_configured_endpoint(row: Row, probes: dict) -> None:
     ok = (not row.supports_model_listing) or (
         "error" not in ls and bool(ls["listing_paths"]) and all(bare_path(p) in routes for p in ls["listing_paths"])
         and not ls["canonical_host_hit"])
-    with known_gate(LISTING_KNOWN.get(row.name)):
-        gate(ok, f"{_listing_facts(ls)}\n{row.name}: picker did not list the configured endpoint (want {sorted(routes)})")
+    gate(ok, f"{_listing_facts(ls)}\n{row.name}: picker did not list the configured endpoint (want {sorted(routes)})")
 
 
 @pytest.mark.parametrize("row", [pytest.param(r, id=r.name) for r in CONTROL_ROWS])
@@ -149,8 +129,7 @@ def test_switch_resolves_requested_provider(row: Row, probes: dict) -> None:
         str(sw.get("base_url") or "").rstrip("/") == sw["base"].rstrip("/")
     facts = (f"ok={sw.get('ok')} got={sw.get('got')!r} base_url={sw.get('base_url')!r} error={sw.get('error')!r} "
              f"egress={sw['egress']}")
-    with known_gate(SWITCH_KNOWN.get(row.name)):
-        gate(ok, f"{facts}\n{row.name}: switch did not resolve to {sw.get('want')!r} at {sw['base']}")
+    gate(ok, f"{facts}\n{row.name}: switch did not resolve to {sw.get('want')!r} at {sw['base']}")
 
 
 @pytest.mark.parametrize("kind", ["list404", "listhang"])

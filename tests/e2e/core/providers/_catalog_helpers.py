@@ -32,7 +32,7 @@ import hermes_yaml as yaml
 from tests.e2e.core._pending_fixes import known_failure
 from tests.fakes.providers.catalog_fake import USAGE_IN, USAGE_OUT, CatalogFake, Recorded
 
-from tests.e2e.vault_home import connect_state, prepare_fixture_runtime, spawn_unlocked
+from tests.e2e.vault_home import connect_state, prepare_fixture_runtime, seal_fixture_home, spawn_unlocked
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 # Hard bound per child. A row that talks to its vendor host instead of the fake ends on its own:
@@ -207,7 +207,8 @@ def hermetic_env(home: Path, extra: dict[str, str]) -> dict[str, str]:
     return env
 
 
-def write_home(root: Path, model: dict[str, Any], extra_cfg: dict[str, Any] | None = None) -> Path:
+def write_home(root: Path, model: dict[str, Any], extra_cfg: dict[str, Any] | None = None, *,
+               prepare_runtime: bool = True) -> Path:
     home = root / "home"
     (home / ".hermes").mkdir(parents=True, exist_ok=True)
     cfg = {"model": {"default": "catalog-model-a", "context_length": 128000, **model},
@@ -223,7 +224,12 @@ def write_home(root: Path, model: dict[str, Any], extra_cfg: dict[str, Any] | No
         for route in routes
     )
     extras = ("all", "anthropic") if needs_anthropic else ("all",)
-    prepare_fixture_runtime(home / ".hermes", REPO_ROOT, extras=extras)
+    if prepare_runtime:
+        prepare_fixture_runtime(home / ".hermes", REPO_ROOT, extras=extras)
+    else:
+        # Direct source-import catalog probes use the owning test interpreter;
+        # public inference/matrix children still prepare their actual PM runtime.
+        seal_fixture_home(home / ".hermes")
     return home
 
 

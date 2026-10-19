@@ -1906,6 +1906,17 @@ def get_xai_oauth_auth_status() -> dict[str, Any]:
 
 
 def _provider_env_base_url(pconfig: ProviderConfig) -> str:
+    if pconfig.id == "zai":
+        from hermes_cli.providers import normalize_provider
+
+        explicit = os.getenv(pconfig.base_url_env_var, "").strip() if pconfig.base_url_env_var else ""
+        if explicit:
+            return explicit
+        # Endpoint detection sends authenticated probes. A relay selection must
+        # terminate that discovery before any vendor sees the relay credential.
+        model = read_raw_config().get("model")
+        if isinstance(model, dict) and normalize_provider(str(model.get("provider") or "")) == "zai":
+            return str(model.get("base_url") or "").strip()
     if pconfig.id == "actual":
         from hermes_cli.providers import normalize_provider
 
