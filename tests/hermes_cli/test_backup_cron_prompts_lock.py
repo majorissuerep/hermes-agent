@@ -35,8 +35,8 @@ def test_concurrent_cron_edits_survive_recovery(tmp_path, monkeypatch):
     real_load = bcp._load_cron_jobs_doc
     fired = []
 
-    def load_then_race(path):
-        doc = real_load(path)
+    def load_then_race(path, *, canonical_path=None):
+        doc = real_load(path, canonical_path=canonical_path)
         if Path(path) == jobs_path and not fired:
             fired.append(True)
             with cron_jobs.use_cron_store(hermes_home):

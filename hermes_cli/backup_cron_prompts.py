@@ -12,22 +12,28 @@ from pathlib import Path
 from typing import Any, Optional
 
 from hermes_constants import get_hermes_home
+from hermes_security import io as state_io
 
 # Log-record parity with the origin module.
 logger = logging.getLogger("hermes_cli.backup")
 
 
-def _load_cron_jobs_doc(path: Path) -> Optional[Any]:
+def _load_cron_jobs_doc(path: Path, *, canonical_path: Path | None = None) -> Optional[Any]:
     """Parse ``path`` as the canonical ``{"jobs": [...]}`` doc (legacy bare list honoured).
 
     ``None`` = missing/unreadable/non-dict-with-list — same dialect rules as
-    :func:`_count_cron_jobs` (utf-8-sig for Windows BOMs). Never raises.
+    the count-based safety net (utf-8-sig for Windows BOMs). Locked state refuses access.
     """
     if not path.is_file():
         return None
     try:
-        with open(path, "r", encoding="utf-8-sig") as f:
-            data = json.load(f)
+        if canonical_path is None:
+            text = state_io.read_text(path, purpose="state", encoding="utf-8-sig")
+        else:
+            from hermes_cli.backup_snapshot_io import read_snapshot_text
+
+            text = read_snapshot_text(path, canonical_path, purpose="state")
+        data = json.loads(text) if text is not None else None
     except (OSError, json.JSONDecodeError):
         return None
     if isinstance(data, dict):
@@ -155,7 +161,7 @@ def restore_cron_prompt_fields_if_degraded(
     live_path = home / _CRON_JOBS_REL
     snap_path = _quick_snapshot_root(home) / snapshot_id / _CRON_JOBS_REL
 
-    snap_doc = _load_cron_jobs_doc(snap_path)
+    snap_doc = _load_cron_jobs_doc(snap_path, canonical_path=live_path)
     if snap_doc is None:
         return None
     snap_prompts = _snapshot_prompts_by_id(snap_doc)

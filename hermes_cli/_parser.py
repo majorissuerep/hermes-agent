@@ -21,7 +21,7 @@ PRE_ARGPARSE_INHERITED_FLAGS: list[tuple[str, bool]] = [("--profile", True), ("-
 # snapshot lacks AND derivation regresses.
 _VALUE_FLAGS_FALLBACK: frozenset[str] = frozenset({
     "-z", "--oneshot", "-m", "--model", "--provider", "--reasoning", "-t", "--toolsets",
-    "--max-turns", "--run-budget",
+    "--max-turns", "--run-budget", "--base-url", "--api-key",
     "-r", "--resume", "-s", "--skills", "--usage-file", "--in",
 })
 _OPTIONAL_VALUE_FLAGS_FALLBACK: frozenset[str] = frozenset({"-c", "--continue"})
@@ -113,13 +113,8 @@ Examples:
     hermes config                 View configuration
     hermes config edit            Edit config in $EDITOR
     hermes config set model gpt-4 Set a config value
-    hermes gateway                Run messaging gateway
-    hermes gateway install        Install gateway background service
-    hermes gateway start          Start the installed gateway service
-    hermes gateway stop           Stop the gateway service
-    hermes gateway status         Show gateway status
     hermes -p <profile> <cmd>     Run any command against a named profile's
-                                  home (also --profile) — e.g. hermes -p coder gateway stop
+                                  home (also --profile) — e.g. hermes -p coder sessions list
     hermes -s hermes-agent-dev,github-auth
     hermes -w                     Start in isolated git worktree
     hermes sessions list          List past sessions
@@ -129,12 +124,8 @@ Examples:
     hermes logs -f                Follow agent.log in real time
     hermes logs errors            View errors.log
     hermes logs --since 1h        Lines from the last hour
-    hermes debug share             Upload debug report for support
     hermes console                Open the safe Hermes command console
     hermes update                 Update to latest version
-    hermes dashboard              Start web UI dashboard (port 9119)
-    hermes dashboard --stop       Stop running dashboard processes
-    hermes dashboard --status     List running dashboard processes
 
 For more help on a command:
     hermes <command> --help
@@ -155,10 +146,19 @@ def _add_run_budget_flags(parser, *, default=None) -> None:
         "Intended for one-shot/eval invocations with a hard ceiling."))
 
 
+def _add_endpoint_flags(parser, *, default=None) -> None:
+    """Finite entry forms share explicit, invocation-only endpoint authority."""
+    parser.add_argument("--base-url", dest="base_url", default=default, metavar="URL",
+        help="OpenAI-compatible endpoint for --provider custom (e.g. http://127.0.0.1:8000/v1).")
+    parser.add_argument("--api-key", dest="api_key", default=default, metavar="KEY",
+        help="API key for this launch only; not persisted.")
+
+
 def _add_top_level_flags(parser: argparse.ArgumentParser) -> None:
     """Top-level (pre-subcommand) flags; ``-m/--provider`` pair with ``-z`` without ``chat``."""
     add, inherited = parser.add_argument, _inherited_flag
     _add_run_budget_flags(parser)
+    _add_endpoint_flags(parser)
     add("--version", "-V", action="store_true", help="Show version and exit")
     add("-z", "--oneshot", metavar="PROMPT", default=None, help=(
         "One-shot mode: send a single prompt and print ONLY the final "
@@ -177,7 +177,7 @@ def _add_top_level_flags(parser: argparse.ArgumentParser) -> None:
         "Model override for this invocation (e.g. anthropic/claude-sonnet-4.6). "
         "Applies to -z/--oneshot and --tui. Also settable via HERMES_INFERENCE_MODEL env var."))
     inherited(parser, "--provider", default=None, help=(
-        "Provider override for this invocation (e.g. openrouter, anthropic). "
+        "Provider override for this invocation (e.g. litellm, anthropic). "
         "Applies to -z/--oneshot and --tui. The persistent provider lives in config.yaml "
         "under model.provider — use `hermes setup` or edit the file to change it."))
     inherited(parser, "--reasoning", default=None, metavar="LEVEL", help=(
@@ -273,12 +273,7 @@ def _build_chat_parser(subparsers) -> argparse.ArgumentParser:
     # too; runtime resolution (resolve_runtime_provider) validates, same as the top-level flag.
     inherited(chat_parser, "--provider", default=SUPPRESS,
               help="Inference provider (default: auto). Built-in or a user-defined name from `providers:` in config.yaml.")
-    # Explicit endpoint launches (custom provider, --safe-mode isolation) are frozen into the
-    # session policy by the gateway; the key lives only in the authority's memory, never on disk.
-    add("--base-url", dest="base_url", default=SUPPRESS, metavar="URL",
-        help="OpenAI-compatible endpoint for --provider custom (e.g. http://127.0.0.1:8000/v1).")
-    add("--api-key", dest="api_key", default=SUPPRESS, metavar="KEY",
-        help="API key for this launch only; not persisted.")
+    _add_endpoint_flags(chat_parser, default=SUPPRESS)
     add("-v", "--verbose", action="store_true", default=SUPPRESS, help="Verbose output")
     add("-Q", "--quiet", action="store_true",
         help="Quiet mode for programmatic use: suppress banner, spinner, and tool previews. Only output the final response and session info.")

@@ -27,7 +27,8 @@ from hermes_state.holders import read_only_db_uri
 from agent.provider_media import GENERATED_SUBDIR
 from hermes_cli.archive_safe import normalize_archive_parts
 from hermes_cli.backup_sqlite import _close_quietly, _safe_copy_db
-from hermes_cli.backup_snapshot_io import read_snapshot_manifest, snapshot_source
+from hermes_cli.backup_snapshot_io import read_snapshot_manifest, read_snapshot_text, snapshot_source
+from hermes_cli.backup_cron_jobs import restore_cron_jobs_if_emptied
 from hermes_cli.backup_vault_import import open_backup_zip
 from hermes_security.errors import VaultError
 from hermes_cli.home_data_layout import PM_RUNTIME_ROOT_DIRS, profile_root_entry
@@ -1644,113 +1645,6 @@ def _restore_quick_snapshot_exclusive(snapshot_id: str, home: Path) -> bool:
     return restored > 0 and not auth_restore_failed
 
 
-def _count_cron_jobs(path: Path) -> Optional[int]:
-    """Return the number of cron jobs stored in ``path``.
-
-    The canonical on-disk shape is ``{"jobs": [...]}`` (see ``cron/jobs.py``).
-    A legacy bare-list shape (``[...]``) is also honoured.
-
-    Returns:
-        The job count for any *valid, readable* JSON document, or ``None`` if
-        the file is missing or cannot be parsed. ``None`` means "unknown" —
-        callers must not treat it as "zero jobs", because acting on an
-        unreadable file could mask a real corruption the user needs to see.
-    """
-    if not path.is_file():
-        return None
-    try:
-        # utf-8-sig: same dialect as cron/jobs.load_jobs — Windows editors
-        # may leave a UTF-8 BOM that plain utf-8 json.load rejects. Without
-        # it a BOM'd jobs.json counts as "unreadable" (None) and the
-        # post-update cron-loss auto-restore safety net silently disables.
-        with open(path, "r", encoding="utf-8-sig") as f:
-            data = json.load(f)
-    except (OSError, json.JSONDecodeError):
-        return None
-    if isinstance(data, dict):
-        jobs = data.get("jobs", [])
-        return len(jobs) if isinstance(jobs, list) else None
-    if isinstance(data, list):
-        return len(data)
-    return None
-
-
-def restore_cron_jobs_if_emptied(
-    snapshot_id: str,
-    hermes_home: Optional[Path] = None,
-) -> Optional[dict[str, Any]]:
-    """Safety net for silent cron-job loss across ``hermes update``.
-
-    Config-version migrations have been observed to leave ``cron/jobs.json``
-    valid-but-empty after an update, silently dropping every scheduled job
-    (issue #34600). The desktop scheduler can also overwrite the file with its
-    own small set of internally-tracked crons, causing partial loss (issue
-    #52144).
-
-    This compares the *current* job count against the pre-update snapshot. If
-    the live file now has **fewer** jobs than the snapshot, the snapshot copy
-    of ``cron/jobs.json`` is restored in place.
-
-    The check is deliberately conservative — it only ever restores when there
-    is unambiguous evidence of loss (snapshot had more jobs than live file),
-    so a user who genuinely deleted jobs during/after the update is never
-    second-guessed, and an unreadable live file (count ``None``) is left
-    untouched so real corruption still surfaces.
-
-    Args:
-        snapshot_id: The pre-update quick-snapshot id (from
-            :func:`create_quick_snapshot`).
-        hermes_home: Override for the Hermes home directory (tests).
-
-    Returns:
-        ``None`` when no action was taken (the common, healthy path). On a
-        successful restore, a dict ``{"restored": True, "job_count": N,
-        "snapshot_id": ...}`` so the caller can warn the user.
-    """
-    if not snapshot_id:
-        return None
-
-    home = hermes_home or get_hermes_home()
-    live_path = home / _CRON_JOBS_REL
-
-    live_count = _count_cron_jobs(live_path)
-    # ``None`` (missing or unparseable) is intentionally left alone — that's a
-    # different failure mode the user should see rather than have papered over.
-    if live_count is None:
-        return None
-
-    snap_path = _quick_snapshot_root(home) / snapshot_id / _CRON_JOBS_REL
-    snap_count = _count_cron_jobs(snap_path)
-    if not snap_count:  # None or 0 — nothing worth restoring
-        return None
-
-    # Restore when live has FEWER jobs than the pre-update snapshot.
-    # Catches both total loss (0 vs N) and partial loss (1 vs 19) — the
-    # desktop scheduler can overwrite jobs.json with its own small set of
-    # internally-tracked crons after an update/restart.
-    if live_count >= snap_count:
-        return None
-
-    try:
-        live_path.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(snap_path, live_path)
-    except (OSError, PermissionError) as exc:
-        logger.error(
-            "Cron jobs were emptied during update but auto-restore failed: %s", exc
-        )
-        return None
-
-    logger.warning(
-        "Restored %d cron job(s) from pre-update snapshot %s "
-        "(live file had %d job(s), snapshot had %d — jobs were lost during migration)",
-        snap_count,
-        snapshot_id,
-        live_count,
-        snap_count,
-    )
-    return {"restored": True, "job_count": snap_count, "snapshot_id": snapshot_id}
-
-
 def _sibling_profile_homes(invoking_home: Path) -> list[tuple[str, Path]]:
     """(name, home) for every OTHER profile on this install. Never raises.
 
@@ -1830,15 +1724,18 @@ _PROTECTED_CONFIG_PATHS: tuple[tuple[str, ...], ...] = (
 )
 
 
-def _read_raw_yaml_dict(path: Path) -> Optional[dict[str, Any]]:
+def _read_raw_yaml_dict(path: Path, *, canonical_path: Path | None = None) -> Optional[dict[str, Any]]:
     """Parse ``path`` as a YAML mapping. ``None`` = missing/unreadable/non-dict."""
     if not path.is_file():
         return None
     try:
         import hermes_yaml as yaml
 
-        with open(path, "r", encoding="utf-8-sig") as f:
-            data = yaml.safe_load(f)
+        from hermes_security import io as state_io
+
+        text = (read_snapshot_text(path, canonical_path, purpose="config") if canonical_path is not None
+                else state_io.read_text(path, purpose="config", encoding="utf-8-sig"))
+        data = yaml.safe_load(text)
     except Exception:
         return None
     return data if isinstance(data, dict) else None
@@ -1901,7 +1798,7 @@ def restore_config_model_settings_if_rewritten(
     live_path = home / "config.yaml"
     snap_path = _quick_snapshot_root(home) / snapshot_id / "config.yaml"
 
-    snap = _read_raw_yaml_dict(snap_path)
+    snap = _read_raw_yaml_dict(snap_path, canonical_path=live_path)
     if not snap:
         return None  # no snapshot copy — nothing to compare against
     live = _read_raw_yaml_dict(live_path)

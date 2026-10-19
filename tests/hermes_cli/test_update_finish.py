@@ -251,7 +251,7 @@ def test_frozen_remote_fields_are_acknowledged_without_restarting_retired_surfac
     assert child.returncode == 0, child.stdout + child.stderr
     receipt = _receipt(home)
     assert receipt["outcome"] == "success"
-    assert not {row["step"] for row in receipt["followups"]} & {"gateway_restart", "windows_resume"}
+    assert not {row["step"] for row in receipt.get("followups", [])} & {"gateway_restart", "windows_resume"}
     assert context.read_bytes() == before
     assert json.loads(result.read_text()) == {"resume_handled": True, "receipt_handled": True}
     assert not (source / "apps/desktop").exists()
@@ -376,7 +376,7 @@ def test_real_compiler_failure_is_owed_build_and_completion_continues(completion
     assert context.read_bytes() == context_before
     receipt = _receipt(home)
     assert receipt["outcome"] == "success"
-    assert [row["step"] for row in receipt["followups"]] == ["build"]
+    assert [row["step"] for row in receipt.get("followups", [])] == ["build"]
     # Only a build follow-up marks the build stage failed (an owed config/dependency step does not).
     assert {mark["name"]: mark["outcome"] for mark in receipt["stages"]}.get("build") == "failed"
     assert receipt["update_id"] == request["update_id"]

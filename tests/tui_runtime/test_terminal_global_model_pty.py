@@ -9,7 +9,7 @@ import threading
 
 import pytest
 
-from tests.tui_runtime.test_terminal_model_pty import ModelWire, ROOT, TerminalPTY
+from tests.tui_runtime.test_terminal_model_pty import ModelWire, ROOT, TerminalPTY, save_fixture_runtime_logs
 
 pytestmark = [pytest.mark.platforms("linux", "macos"), pytest.mark.live_system_guard_bypass]
 
@@ -101,6 +101,8 @@ def test_global_model_survives_independent_public_terminal_owner(tmp_path, monke
         for terminal in terminals:
             terminal.transcript.write_text(terminal.text())
             terminal.close()
+        if terminals:
+            save_fixture_runtime_logs(home, password, tmp_path / "runtime-diagnostics.log")
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)

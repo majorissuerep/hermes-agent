@@ -88,6 +88,7 @@ def update_tree(tmp_path, monkeypatch):
     # This synthetic repository contains content.txt, not Hermes imports. Its
     # contract is real Git/ref/stash identity; cold source updates prove imports.
     monkeypatch.setattr(update_cmd, '_validate_critical_modules_import', lambda *a, **kw: (True, None, None))
+    monkeypatch.setattr(update_cmd, '_critical_module_import_failures', lambda *a, **kw: {})
     args = SimpleNamespace(branch=None, channel='stable', yes=True, force=True, force_venv=True,
                            check=False, plan=False, gateway=False, install_id=False, set_channel=None)
     return SimpleNamespace(origin=origin, clone=clone, base=base, wanted=wanted, newer=newer,

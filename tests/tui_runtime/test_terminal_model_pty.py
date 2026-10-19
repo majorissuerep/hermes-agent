@@ -14,6 +14,7 @@ import subprocess
 import sys
 import threading
 import time
+from collections import deque
 
 import pytest
 
@@ -72,6 +73,25 @@ class ModelWire(http.server.BaseHTTPRequestHandler):
         self.wfile.flush()
 
 
+def save_fixture_runtime_logs(home, password, output):
+    """After owner exit, retain bounded authenticated synthetic diagnostics, never its password/key."""
+    from hermes_security import frames, vault
+    from hermes_security.errors import VaultError
+
+    vault.unlock(home, password)
+    notes = []
+    for path in sorted((home / "logs").rglob("*.log"))[:8]:
+        try:
+            payload = b"".join(deque(frames.read_frames(path, purpose="log"), maxlen=100))
+            text = payload.decode("utf-8", errors="replace")[-12000:]
+        except (OSError, VaultError) as error:
+            text = f"diagnostic read failed: {type(error).__name__}"
+        for value in (password, "synthetic-fixture-key", "synthetic-global-key"):
+            text = text.replace(value, "[REDACTED]")
+        notes.append(f"--- {path.relative_to(home)} ---\n{text}")
+    output.write_text("\n".join(notes))
+
+
 class TerminalPTY:
     def __init__(self, env, password, transcript, *, args=(), argv=None, project=None, timeout=45, sensitive_values=()):
         import fcntl
@@ -84,6 +104,9 @@ class TerminalPTY:
         self.transcript = transcript
         self.prompts = 0
         self.output = bytearray()
+        self.started_at = time.monotonic()
+        self.read_metrics = {"chunks": 0, "parse_s": 0.0, "write_s": 0.0,
+                             "max_parse_s": 0.0, "max_write_s": 0.0}
         self.screen = Screen(42, 140)
         project = Path(project) if project is not None else Path(env["HOME"]) / "foreign-project"
         project.mkdir(parents=True, exist_ok=True)
@@ -102,13 +125,22 @@ class TerminalPTY:
             except OSError:
                 chunk = b""
             self.output.extend(chunk)
+            started = time.monotonic()
             self.screen.feed(chunk)
+            parsed = time.monotonic() - started
+            self.read_metrics["chunks"] += 1
+            self.read_metrics["parse_s"] += parsed
+            self.read_metrics["max_parse_s"] = max(self.read_metrics["max_parse_s"], parsed)
             if b"\x1b[6n" in chunk:
                 os.write(self.master, b"\x1b[1;1R")
             if self.prompts == 0 and b"Unlock master password:" in self.output:
                 self.prompts += 1
                 os.write(self.master, self.password.encode() + b"\n")
+            started = time.monotonic()
             self.transcript.write_text(self.text())
+            written = time.monotonic() - started
+            self.read_metrics["write_s"] += written
+            self.read_metrics["max_write_s"] = max(self.read_metrics["max_write_s"], written)
         return self.text()
 
     def text(self):
@@ -163,6 +195,15 @@ class TerminalPTY:
             os.killpg(self.process.pid, signal.SIGKILL)
         self.process.wait(timeout=10)
         os.close(self.master)
+        raw = self.output.decode("utf-8", errors="replace")
+        for value in self.sensitive_values:
+            if value:
+                raw = raw.replace(value, "[REDACTED]")
+        self.transcript.with_suffix(".ansi.log").write_text(raw)
+        self.transcript.with_suffix(".metrics.json").write_text(json.dumps({
+            **self.read_metrics, "elapsed_s": time.monotonic() - self.started_at,
+            "bytes": len(self.output), "unlock_prompts": self.prompts,
+            "returncode": self.process.returncode}, indent=2))
 
 
 def _exercise_failed_model_controls(terminal, server):
@@ -305,6 +346,7 @@ def test_public_ink_model_picker_and_scoped_switches(tmp_path, monkeypatch, lazy
     finally:
         terminal.transcript.write_text(terminal.text().replace(password, "[REDACTED]"))
         terminal.close()
+        save_fixture_runtime_logs(home, password, tmp_path / "runtime-diagnostics.log")
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)

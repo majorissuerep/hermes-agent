@@ -1068,7 +1068,10 @@ def _clone_file(source_dir: Path, profile_dir: Path, relpath: str) -> None:
         return
     dst = profile_dir / relpath
     dst.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(src, dst)
+    from hermes_cli.profile_state_copy import copy_profile_file
+    purpose = "env" if relpath == ".env" else "config" if relpath == "config.yaml" else (
+        "memory" if relpath.startswith("memories/") else "state")
+    copy_profile_file(src, dst, purpose=purpose)
     if relpath == ".env":
         with contextlib.suppress(OSError):
             os.chmod(str(dst), 0o600)
@@ -1303,10 +1306,7 @@ def create_profile(
         raise _profile_exists_error(canon)
     source_dir = _resolve_clone_source(clone_from) if cloning else None
     clear_named_profile_deleted(profile_dir)
-    # Build in a hidden sibling and publish with one rename: a running multiplexer rescans profiles/
-    # on every create and every 30 s, and ``_iter_named_profile_dirs`` only lists valid ids (no leading
-    # dot), so it can never adopt the half-copied tree and start adapters on credentials the strip
-    # below has not removed yet.
+    # Hidden staging keeps partially created profiles out of native profile listings.
     staging = _clone_staging_dir(profile_dir)
     try:
         if clone_all and source_dir:
@@ -1325,11 +1325,6 @@ def create_profile(
         shutil.rmtree(staging, ignore_errors=True)
         raise
 
-    # Inside a container under s6, register the gateway as a runtime s6 service so
-    # `hermes -p <profile> gateway start` supervises via `s6-svc -u` instead of a bare
-    # process. No-op on host (systemd/launchd/windows unit generation handles lifecycle).
-    # A running multiplexer enumerates profiles/ at boot: ask it to serve this one now (it also
-    # rescans periodically, so a missed signal only delays serving).
     return profile_dir
 
 
@@ -1409,9 +1404,14 @@ def backfill_profile_envs(quiet: bool = False) -> list[str]:
             continue
         try:
             if default_env.is_file():
-                shutil.copy2(default_env, env_path)
+                from hermes_cli.profile_state_copy import copy_profile_file
+                copy_profile_file(default_env, env_path, purpose="env")
             else:
-                env_path.write_text(_PLACEHOLDER_ENV, encoding="utf-8")
+                from hermes_security import io
+                if io._home_for(env_path) is None:
+                    env_path.write_text(_PLACEHOLDER_ENV, encoding="utf-8")
+                else:
+                    io.write_text(env_path, _PLACEHOLDER_ENV, purpose="env")
             os.chmod(str(env_path), 0o600)
             backfilled.append(entry.name)
         except OSError as e:

@@ -121,11 +121,11 @@ def test_finite_chat_joins_parallel_children_before_final_response(tmp_path, mod
                HERMES_MANAGED_DIR=str(tmp_path / "managed"), TERMINAL_CWD=str(tmp_path),
                OPENAI_BASE_URL=url, OPENAI_API_KEY="local-test-only", PYTHONPATH=str(REPO_ROOT),
                PYTHONDONTWRITEBYTECODE="1", LANG="C.UTF-8")
-    from tests.e2e.vault_home import connect_state, run_unlocked, seal_fixture_home
+    from tests.e2e.vault_home import connect_state, prepare_fixture_runtime, run_unlocked
     from hermes_state import SessionDB
 
     (home / ".env").write_text(f"OPENAI_API_KEY=local-test-only\nOPENAI_BASE_URL={url}\n")
-    seal_fixture_home(home)
+    prepare_fixture_runtime(home, REPO_ROOT)
     common = ["--provider", "custom", "--model", "test-model", "--base-url", url,
               "--toolsets", "delegation", "--ignore-rules", "--reasoning", "high", "--max-turns", "10"]
     command = [sys.executable, "-m", "hermes_cli.main"]

@@ -12,6 +12,7 @@ from pathlib import Path
 import tempfile
 
 from hermes_security import io as state_io, vault as vault_mod
+from hermes_security.errors import PlaintextStateError
 from hermes_security.migrate import _DB_SUFFIXES, _FRAME_SUFFIXES, _purpose_for
 
 
@@ -23,6 +24,19 @@ def read_snapshot_manifest(path: Path) -> dict:
     if not isinstance(value, dict):
         raise ValueError("snapshot manifest is not an object")
     return value
+
+
+def read_snapshot_text(source: Path, destination: Path, *, purpose: str) -> str:
+    """Read recovery bytes with the canonical destination's authenticated identity."""
+    with snapshot_source(source, destination) as prepared:
+        raw = prepared.read_bytes()
+        home = state_io._home_for(destination)
+        if home is not None:
+            if not raw.startswith(b"HRMVAULT\x00"):
+                raise PlaintextStateError(f"{source} is not an encrypted recovery payload")
+            relative = destination.resolve().relative_to(home).as_posix()
+            raw = vault_mod.get_vault(home).decrypt(raw, purpose=purpose, relpath=relative)
+        return raw.decode("utf-8-sig")
 
 
 def _legacy_snapshot_home(source: Path) -> Path | None:

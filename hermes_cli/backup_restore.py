@@ -582,8 +582,7 @@ def _count_session_rows(path: Path) -> Optional[tuple[int, int]]:
     Read-only and best effort.  ``None`` means "unknown" — a missing file, a
     database that is not a Hermes session store, or one that cannot be read.
     Callers must never read ``None`` as "zero rows": acting on an unreadable
-    database would mask the very loss this count exists to surface.  Same
-    contract as :func:`_count_cron_jobs`.
+    database would mask the very loss this count exists to surface.
     """
     if not path.is_file():
         return None

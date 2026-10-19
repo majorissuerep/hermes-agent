@@ -125,23 +125,24 @@ def test_background_spawn_requires_explicit_mode_and_same_owned_completed_wait()
     assert proof["update_message_id"] == 4
 
 
-@pytest.mark.parametrize("defect", ["wrong-wait-id", "fake-wait", "wrong-receipt-id", "foreign-owner", "failed", "missing"])
-def test_any_zero_exit_or_unjoined_process_cannot_qualify_background_update(defect):
+def _unrelated_wait(rows, processes):
+    calls = json.loads(rows[2]["tool_calls"])
+    calls[0]["function"]["arguments"] = json.dumps({"action": "wait", "session_id": "proc_unrelated"})
+    rows[2]["tool_calls"] = json.dumps(calls)
+
+
+@pytest.mark.parametrize("mutate", [
+    pytest.param(_unrelated_wait, id="wrong-wait-id"),
+    pytest.param(lambda rows, processes: rows[3].update(content=json.dumps(
+        {"status": "running", "command": UPDATE_COMMAND, "exit_code": 0})), id="fake-wait"),
+    pytest.param(lambda rows, processes: processes[0].update(id="proc_unrelated"), id="wrong-receipt-id"),
+    pytest.param(lambda rows, processes: processes[0].update(parent_session_id="other"), id="foreign-owner"),
+    pytest.param(lambda rows, processes: processes[0].update(exit_code=2), id="failed"),
+    pytest.param(lambda rows, processes: processes.clear(), id="missing"),
+])
+def test_any_zero_exit_or_unjoined_process_cannot_qualify_background_update(mutate):
     rows, processes = _background_update_case()
-    if defect == "wrong-wait-id":
-        calls = json.loads(rows[2]["tool_calls"])
-        calls[0]["function"]["arguments"] = json.dumps({"action": "wait", "session_id": "proc_unrelated"})
-        rows[2]["tool_calls"] = json.dumps(calls)
-    elif defect == "fake-wait":
-        rows[3]["content"] = json.dumps({"status": "running", "command": UPDATE_COMMAND, "exit_code": 0})
-    elif defect == "wrong-receipt-id":
-        processes[0]["id"] = "proc_unrelated"
-    elif defect == "foreign-owner":
-        processes[0]["parent_session_id"] = "other"
-    elif defect == "failed":
-        processes[0]["exit_code"] = 2
-    else:
-        processes.clear()
+    mutate(rows, processes)
     with pytest.raises(RuntimeError, match="same owned process"):
         verify_calls(rows, "parent", {"child"}, processes=processes, allow_background_update=True,
                      delegations=_receipts(), child_links=_links())
