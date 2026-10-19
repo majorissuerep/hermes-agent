@@ -1,12 +1,12 @@
-"""Gateway/desktop `session.resume` must refuse a Kanban worker transcript (#68779).
+"""Terminal `session.resume` must refuse a Kanban worker transcript (#68779).
 
 The refusal happens in `_resume_guard`, before ANY history read, live-reuse, lazy watch or
-slash-worker build: a resumed Desktop/TUI session would be a write-capable writer with none
+slash-worker build: a resumed TUI session would be a write-capable writer with none
 of the dispatcher's ownership env, invisible to the Kanban board.
 """
 
 import sys
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -21,14 +21,15 @@ def _restore_stdout():
 
 @pytest.fixture()
 def server():
-    # Same import-window pattern as tests/tui_runtime/test_protocol.py: the mocks only need
-    # to cover the initial import of tui_runtime.server.
+    # Patch import-time effects, not sys.modules: late-importing resume workers
+    # must share the server registry imported and cleaned up by this fixture.
+    import hermes_cli.banner
+    import hermes_cli.env_loader
     import tui_runtime.server_requests
     import tui_runtime.transport
-    with patch.dict("sys.modules", {
-        "hermes_cli.env_loader": MagicMock(),
-        "hermes_cli.banner": MagicMock(),
-    }):
+    with patch.object(hermes_cli.env_loader, "load_hermes_dotenv"), patch.object(
+        hermes_cli.banner, "prefetch_update_check"
+    ):
         import importlib
         mod = importlib.import_module("tui_runtime.server")
 
@@ -98,6 +99,11 @@ def test_gateway_resume_refuses_kanban_worker_session(server, monkeypatch):
     # No history read ran: the refusal fired before anything touched the transcript.
     assert ("lineage", "worker-1") not in db.reads
     assert ("tip", "worker-1") not in db.reads
+
+
+def test_resume_fixture_retains_the_canonical_server_module(server):
+    """Late-importing resume workers must see the same session registry as teardown."""
+    assert sys.modules.get("tui_runtime.server") is server
 
 
 def test_gateway_resume_ordinary_session_unchanged(server, monkeypatch):
