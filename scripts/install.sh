@@ -622,6 +622,17 @@ stage_repository() {
         # just the first clone.
         if [ -n "${HERMES_REPO_URL:-}" ]; then
             git -C "$INSTALL_DIR" remote set-url origin "$REPO_URL" || fail "cannot point origin at $REPO_URL" git_fetch_failed
+        else
+            # Taking over the known upstream install must also take over its
+            # future update source. Operator-selected forks/mirrors stay intact.
+            local existing_origin
+            existing_origin="$(git -C "$INSTALL_DIR" config --get remote.origin.url 2>/dev/null || :)"
+            existing_origin="$(printf '%s' "$existing_origin" | tr '[:upper:]' '[:lower:]')"
+            existing_origin="${existing_origin%/}"; existing_origin="${existing_origin%.git}"
+            case "$existing_origin" in
+                https://github.com/nousresearch/hermes-agent|http://github.com/nousresearch/hermes-agent|git@github.com:nousresearch/hermes-agent|ssh://git@github.com/nousresearch/hermes-agent)
+                    git -C "$INSTALL_DIR" remote set-url origin "$REPO_URL" || fail "cannot point origin at $REPO_URL" git_fetch_failed ;;
+            esac
         fi
         # Explicit refspec: a tag-pinned --single-branch checkout from an older
         # installer maps only the tag, so a by-name fetch writes FETCH_HEAD and
