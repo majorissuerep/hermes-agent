@@ -6,12 +6,9 @@ description: "Step-by-step guide to running Hermes Agent entirely on your own ma
 
 # Run Hermes Locally with Ollama — Zero API Cost
 
-:::tip Desktop users: there's a one-click path
-On the Hermes desktop app, **Settings → Providers → Local Models** installs
-and manages a local llama.cpp server for you — model downloads, memory
-fitting, and context sizing included. See [Local Models](../user-guide/local-models.md).
-This guide is for manual setup: Ollama specifically, CLI-first workflows,
-or servers you want to run yourself.
+:::tip Connect through a custom endpoint
+Start the server yourself, then select **Custom endpoint** in `hermes model`.
+See [Local Model Endpoints](../user-guide/local-models.md) for the Hermes setup.
 :::
 
 ## The Problem
@@ -113,7 +110,7 @@ When prompted for a provider, select **Custom Endpoint** and enter:
 - **API Key:** Leave empty or type `no-key` (Ollama doesn't need one)
 - **Model:** `gemma4:31b` (or whichever model you pulled)
 
-Alternatively, edit `~/.hermes/config.yaml` directly:
+The logical configuration below is saved by the wizard into Hermes-managed encrypted settings:
 
 ```yaml
 model:
@@ -206,50 +203,7 @@ ollama ps   # Shows which model is loaded and how many GPU layers
 
 For a 31B model on a 12 GB GPU, you'll get partial offload (~40 layers on GPU, rest on CPU), which still gives a significant speedup.
 
-## Step 7: Run as a Gateway Bot (Optional)
-
-Once Hermes works locally in the CLI, you can expose it as a Telegram or Discord bot — still running entirely on your hardware.
-
-### Telegram
-
-1. Create a bot via [@BotFather](https://t.me/BotFather) and get the token
-2. Add to your `~/.hermes/config.yaml`:
-
-```yaml
-model:
-  default: "gemma4:31b"
-  provider: "custom"
-  base_url: "http://localhost:11434/v1"
-
-platforms:
-  telegram:
-    enabled: true
-    token: "YOUR_TELEGRAM_BOT_TOKEN"
-```
-
-3. Start the gateway:
-
-```bash
-hermes gateway
-```
-
-Now message your bot on Telegram — it responds using your local model.
-
-### Discord
-
-1. Create a Discord application at [discord.com/developers](https://discord.com/developers/applications)
-2. Add to config:
-
-```yaml
-platforms:
-  discord:
-    enabled: true
-    token: "YOUR_DISCORD_BOT_TOKEN"
-```
-
-3. Start: `hermes gateway`
-
-## Step 8: Set Up Fallbacks (Optional)
+## Step 7: Set Up Fallbacks (Optional)
 
 Local models can struggle with complex tasks. Set up a cloud fallback that only activates when the local model fails:
 
@@ -260,23 +214,13 @@ model:
   base_url: "http://localhost:11434/v1"
 
 fallback_providers:
-  - provider: openrouter
-    model: anthropic/claude-sonnet-4
+  - provider: anthropic
+    model: claude-sonnet-4-6
 ```
 
-This way, 90% of your usage is free (local), and only the hard tasks hit the paid API.
+Configure Anthropic credentials first. The fallback runs when the local route fails; normal requests remain on the local endpoint.
 
 ## Troubleshooting
-
-### "provider 'ollama' has no endpoint configured"
-
-`hermes chat --provider ollama` (or `vllm`) stops with this error when no endpoint is configured for that alias anywhere — no `providers.ollama.base_url`, no `model.base_url`. Hermes refuses to send the request rather than fall back to OpenRouter with a cloud key (`OPENROUTER_API_KEY` / `OPENAI_API_KEY`) that happens to be set. Add the endpoint:
-
-```yaml
-providers:
-  ollama:
-    base_url: "http://localhost:11434/v1"
-```
 
 ### "Connection refused" on startup
 

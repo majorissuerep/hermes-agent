@@ -43,7 +43,7 @@ class TestCustomProviderModelSwitch:
         import hermes_yaml as yaml
         from agent.credential_pool import load_pool
         from hermes_cli.auth import read_credential_pool, write_credential_pool
-        from hermes_cli.model_setup_flows import _model_flow_custom
+        from hermes_cli.model_setup_flows_custom import _model_flow_custom
 
         config_path = config_home / "config.yaml"
         config_path.write_text(
@@ -124,7 +124,7 @@ class TestCustomProviderModelSwitch:
     def test_env_template_api_key_is_preserved_in_model_config(self, config_home, monkeypatch):
         """Selecting an env-backed custom provider must not inline the secret."""
         import hermes_yaml as yaml
-        from hermes_cli.model_setup_flows import _model_flow_named_custom
+        from hermes_cli.model_setup_flows_custom import _model_flow_named_custom
 
         config_path = config_home / "config.yaml"
         config_path.write_text(
@@ -162,7 +162,7 @@ class TestCustomProviderModelSwitch:
     def test_key_env_custom_provider_persists_reference_not_secret(self, config_home, monkeypatch):
         """key_env custom providers should also avoid writing plaintext keys."""
         import hermes_yaml as yaml
-        from hermes_cli.model_setup_flows import _model_flow_named_custom
+        from hermes_cli.model_setup_flows_custom import _model_flow_named_custom
 
         config_path = config_home / "config.yaml"
         config_path.write_text(
@@ -279,7 +279,7 @@ class TestCustomProviderModelSwitch:
         ``api_key`` belongs on disk.
         """
         import hermes_yaml as yaml
-        from hermes_cli.model_setup_flows import _model_flow_named_custom
+        from hermes_cli.model_setup_flows_custom import _model_flow_named_custom
 
         config_path = config_home / "config.yaml"
         config_path.write_text(
@@ -393,7 +393,7 @@ class TestCustomProviderModelSwitch:
         template must keep it untouched. Only entries that never declared
         an ``api_key`` should skip the write."""
         import hermes_yaml as yaml
-        from hermes_cli.model_setup_flows import _model_flow_named_custom
+        from hermes_cli.model_setup_flows_custom import _model_flow_named_custom
 
         config_path = config_home / "config.yaml"
         config_path.write_text(
@@ -447,7 +447,7 @@ class TestCustomProviderDiscoverModels:
 
     def test_discover_false_with_only_singular_model_skips_probe(self, config_home):
         """An active singular model is not an implicit discovery catalog."""
-        from hermes_cli.model_setup_flows import _model_flow_named_custom
+        from hermes_cli.model_setup_flows_custom import _model_flow_named_custom
 
         provider_info = {
             "name": "Headered Ollama",
@@ -470,7 +470,7 @@ class TestCustomProviderDiscoverModels:
     def test_discover_false_saves_choice_from_configured_list(self, config_home):
         """User picks the 2nd configured model; it persists, list-driven."""
         import hermes_yaml as yaml
-        from hermes_cli.model_setup_flows import _model_flow_named_custom
+        from hermes_cli.model_setup_flows_custom import _model_flow_named_custom
 
         provider_info = {
             "name": "Baidu Coding",
@@ -498,7 +498,7 @@ class TestCustomProviderDiscoverModels:
         """When discovery is on but the probe returns nothing, fall back to the
         configured models: list instead of forcing manual entry."""
         import hermes_yaml as yaml
-        from hermes_cli.model_setup_flows import _model_flow_named_custom
+        from hermes_cli.model_setup_flows_custom import _model_flow_named_custom
 
         provider_info = {
             "name": "My Gateway",
@@ -521,7 +521,7 @@ class TestCustomProviderDiscoverModels:
 
     def test_discover_false_string_is_normalised(self, config_home):
         """String 'false' (hand-edited configs) disables discovery too."""
-        from hermes_cli.model_setup_flows import _model_flow_named_custom
+        from hermes_cli.model_setup_flows_custom import _model_flow_named_custom
 
         provider_info = {
             "name": "Baidu Coding",

@@ -70,13 +70,9 @@ def qwen_env(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-
 # ---------------------------------------------------------------------------
 # _read_qwen_cli_tokens
 # ---------------------------------------------------------------------------
-
-
-
 
 
 # ---------------------------------------------------------------------------
@@ -84,23 +80,14 @@ def qwen_env(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-
-
-
 # ---------------------------------------------------------------------------
 # _qwen_access_token_is_expiring
 # ---------------------------------------------------------------------------
 
 
-
-
-
 # ---------------------------------------------------------------------------
 # _refresh_qwen_cli_tokens
 # ---------------------------------------------------------------------------
-
-
-
 
 
 # ---------------------------------------------------------------------------
@@ -155,41 +142,3 @@ def test_get_qwen_auth_status_refreshes_expired_token(qwen_env):
     mock_refresh.assert_called_once()
     assert status["logged_in"] is True
     assert status["api_key"] == "refreshed-at"
-
-
-def test_model_flow_qwen_oauth_stale_token_shows_reauth_guidance(qwen_env, monkeypatch, capsys):
-    from hermes_cli.model_setup_flows import _model_flow_qwen_oauth
-
-    expired_ms = int((time.time() - 3600) * 1000)
-    tokens = _make_qwen_tokens(access_token="dead-at", expiry_date=expired_ms)
-    _write_qwen_creds(qwen_env, tokens)
-
-    monkeypatch.setattr(
-        "hermes_cli.auth._refresh_qwen_cli_tokens",
-        lambda *args, **kwargs: (_ for _ in ()).throw(
-            AuthError(
-                "Qwen refresh rejected. Re-run 'qwen auth qwen-oauth'.",
-                provider="qwen-oauth",
-                code="qwen_refresh_failed",
-            )
-        ),
-    )
-
-    prompt_called = {"value": False}
-    update_called = {"value": False}
-
-    monkeypatch.setattr(
-        "hermes_cli.auth._prompt_model_selection",
-        lambda *args, **kwargs: prompt_called.__setitem__("value", True),
-    )
-    monkeypatch.setattr(
-        "hermes_cli.auth._update_config_for_provider",
-        lambda *args, **kwargs: update_called.__setitem__("value", True),
-    )
-
-    _model_flow_qwen_oauth({}, current_model="qwen3-coder-plus")
-
-    out = capsys.readouterr().out
-    assert "Qwen refresh rejected" in out
-    assert prompt_called["value"] is False
-    assert update_called["value"] is False

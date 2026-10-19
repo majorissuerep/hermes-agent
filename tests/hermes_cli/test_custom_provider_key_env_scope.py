@@ -36,7 +36,7 @@ def test_provider_config_key_env_resolves_through_secret_scope(scoped_profile):
 
 
 def test_named_custom_flow_probes_with_scoped_key_env(scoped_profile):
-    from hermes_cli.model_setup_flows import _model_flow_named_custom
+    from hermes_cli.model_setup_flows_custom import _model_flow_named_custom
 
     provider_info = {
         "name": "Example Provider",

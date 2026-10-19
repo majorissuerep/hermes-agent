@@ -84,37 +84,33 @@ class TestProviderPersistsAfterModelSave:
         config.model started as a plain string."""
         from hermes_cli.auth import PROVIDER_REGISTRY
 
-        pconfig = PROVIDER_REGISTRY.get("kimi-coding")
-        if not pconfig:
-            pytest.skip("kimi-coding not in PROVIDER_REGISTRY")
-
-        # Simulate: user has a Kimi API key, model was a string
-        monkeypatch.setenv("KIMI_API_KEY", "sk-kimi-test-key")
+        assert "xai" in PROVIDER_REGISTRY
+        monkeypatch.setenv("XAI_API_KEY", "sk-xai-test-key")
 
         from hermes_cli.model_setup_flows import _model_flow_api_key_provider
         from hermes_cli.config import load_config
 
-        # Mock the model selection prompt to return "kimi-k2.5"
-        # Also mock input() for the base URL prompt and builtins.input
-        with patch("hermes_cli.auth._prompt_model_selection", return_value="kimi-k2.5"), \
+        with patch("hermes_cli.auth._prompt_model_selection", return_value="grok-4.3"), \
+             patch("hermes_cli.model_setup_flows._api_key_provider_model_list", return_value=["grok-4.3"]), \
+             patch("hermes_cli.models_pricing.get_pricing_for_provider", return_value={}), \
              patch("hermes_cli.auth.deactivate_provider"), \
              patch("builtins.input", return_value=""):
-            _model_flow_api_key_provider(load_config(), "kimi-coding", "old-model")
+            _model_flow_api_key_provider(load_config(), "xai", "old-model")
 
         import hermes_yaml as yaml
         config = yaml.safe_load((config_home / "config.yaml").read_text()) or {}
         model = config.get("model")
         assert isinstance(model, dict), f"model should be dict, got {type(model)}"
-        assert model.get("provider") == "kimi-coding", (
-            f"provider should be 'kimi-coding', got {model.get('provider')}"
+        assert model.get("provider") == "xai", (
+            f"provider should be 'xai', got {model.get('provider')}"
         )
-        assert model.get("default") == "kimi-k2.5"
+        assert model.get("default") == "grok-4.3"
 
 
 class TestBaseUrlValidation:
     """Reject non-URL values in the base URL prompt (e.g. shell commands).
 
-    Uses MiniMax instead of Z.AI because Z.AI now uses a curses-based
+    Uses xAI instead of Z.AI because Z.AI uses a curses-based
     endpoint picker (_select_zai_endpoint) rather than the plain text
     input() prompt. Z.AI picker behavior is covered in
     TestZaiEndpointPicker below.
@@ -124,22 +120,21 @@ class TestBaseUrlValidation:
         """Pressing Enter (empty) should not change the base URL."""
         from hermes_cli.auth import PROVIDER_REGISTRY
 
-        pconfig = PROVIDER_REGISTRY.get("minimax")
-        if not pconfig:
-            pytest.skip("minimax not in PROVIDER_REGISTRY")
-
-        monkeypatch.setenv("MINIMAX_API_KEY", "test-key")
-        monkeypatch.delenv("MINIMAX_BASE_URL", raising=False)
+        assert "xai" in PROVIDER_REGISTRY
+        monkeypatch.setenv("XAI_API_KEY", "test-key")
+        monkeypatch.delenv("XAI_BASE_URL", raising=False)
 
         from hermes_cli.model_setup_flows import _model_flow_api_key_provider
         from hermes_cli.config import load_config, get_env_value
 
-        with patch("hermes_cli.auth._prompt_model_selection", return_value="MiniMax-M2"), \
+        with patch("hermes_cli.auth._prompt_model_selection", return_value="grok-4.3"), \
+             patch("hermes_cli.model_setup_flows._api_key_provider_model_list", return_value=["grok-4.3"]), \
+             patch("hermes_cli.models_pricing.get_pricing_for_provider", return_value={}), \
              patch("hermes_cli.auth.deactivate_provider"), \
              patch("builtins.input", return_value=""):
-            _model_flow_api_key_provider(load_config(), "minimax", "old-model")
+            _model_flow_api_key_provider(load_config(), "xai", "old-model")
 
-        saved = get_env_value("MINIMAX_BASE_URL") or ""
+        saved = get_env_value("XAI_BASE_URL") or ""
         assert saved == "", "Empty input should not save a base URL"
 
 

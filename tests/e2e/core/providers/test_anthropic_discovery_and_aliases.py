@@ -2,7 +2,7 @@
 
 * Discovery: with a custom Anthropic-protocol endpoint configured (``ANTHROPIC_BASE_URL``
   or ``model.base_url``), the picker catalog (``provider_model_ids``, behind ``hermes model``,
-  ``/model``, the dashboard and Desktop pickers) must come from THAT endpoint's
+  ``/model`` and the terminal picker) must come from THAT endpoint's
   ``/v1/models`` — asserted by the fake seeing the GET and its relay-only id in the result.
 * OAuth wire aliases: on the Claude subscription route Hermes renames tools on the wire
   (``mcp__`` prefix, ``memory`` -> ``context_notes``, ``session_search`` ->
@@ -19,31 +19,11 @@ from pathlib import Path
 
 import pytest
 
-from tests.e2e.core._pending_fixes import known_gate
 from tests.e2e.core.providers._anthropic_helpers import Rig, blocks, start_rig
 from tests.fakes.providers.anthropic_messages import AnthropicMessagesServer, Reply, Text, ToolUse
 
-pytestmark = [pytest.mark.skipif(not sys.platform.startswith("linux"), reason="process-tree cleanup uses /proc"),
+pytestmark = [pytest.mark.platforms("linux"),
               pytest.mark.live_system_guard_bypass]
-
-class DiscoveryIgnoredEndpoint(AssertionError):
-    """#120844's signature: raised ONLY when the configured endpoint's catalog is not what the picker
-    serves; the type ``known_gate`` accepts for the discovery cells."""
-
-
-class AliasNotReverseMapped(AssertionError):
-    """#120858's signature: raised ONLY when tool_describe fails to resolve the advertised wire alias;
-    the type ``known_gate`` accepts for the alias cell."""
-
-
-# Red on main for a tracked, open bug: key -> (the bug's own failure-message pattern, reason). Each
-# gate accepts only its dedicated exception, so harness failures in a KNOWN cell stay failures.
-KNOWN: dict[str, tuple[str, str]] = {
-    "discovery_env": (r"configured endpoint probed=False \(native host saw \d+ GETs\); relay catalog served=False",
-                      "#120844 Anthropic model discovery ignores ANTHROPIC_BASE_URL"),
-    "alias_describe": (r"tool_describe did not resolve the advertised alias: .*not_found.*chat_history_lookup",
-                       "#120858 wire alias chat_history_lookup not reverse-mapped in tool_describe args"),
-}
 RELAY_ONLY_MODEL = "claude-e2e-relay-only-7"
 OAUTH_TOKEN = "sk-ant-oat01-e2e-fake-oauth-token"
 
@@ -104,11 +84,9 @@ def test_model_discovery_probes_the_configured_anthropic_endpoint(rig, via: str)
         r = rig([])
         ids = _discover(r, relay, via=via)
         probed = [g["path"] for g in relay.gets if "/v1/models" in g["path"]]
-        with known_gate(KNOWN, f"discovery_{via}", raises=DiscoveryIgnoredEndpoint):
-            if not probed or RELAY_ONLY_MODEL not in ids:
-                raise DiscoveryIgnoredEndpoint(
-                    f"configured endpoint probed={bool(probed)} (native host saw {len(r.srv.gets)} GETs); "
-                    f"relay catalog served={RELAY_ONLY_MODEL in ids}: {ids[:15]}")
+        assert probed and RELAY_ONLY_MODEL in ids, (
+            f"configured endpoint probed={bool(probed)} (native host saw {len(r.srv.gets)} GETs); "
+            f"relay catalog served={RELAY_ONLY_MODEL in ids}: {ids[:15]}")
     finally:
         relay.stop()
 
@@ -121,7 +99,8 @@ def _oauth_rig(rig, script) -> Rig:
 
 
 def _tool_results(body: dict) -> list[str]:
-    return [json.dumps(b.get("content")) for m in body["messages"] if m["role"] == "user"
+    return [b["content"] if isinstance(b.get("content"), str) else json.dumps(b.get("content"))
+            for m in body["messages"] if m["role"] == "user"
             for b in blocks(m) if b.get("type") == "tool_result"]
 
 
@@ -160,6 +139,8 @@ def test_oauth_deferred_alias_resolves_through_tool_describe(rig) -> None:
     """The deferred catalog advertises ``chat_history_lookup`` (the OAuth alias of
     ``session_search``); asking ``tool_describe`` for that exact name must return its schema."""
     r = _oauth_rig(rig, [Reply([ToolUse("mcp__tool_describe", {"names": ["chat_history_lookup"]})]),
+                         Reply([ToolUse("mcp__tool_call", {"calls": [
+                             {"name": "chat_history_lookup", "arguments": {"query": "", "limit": 1}}]})]),
                          Reply([Text("DESCRIBED")])])
     proc = r.run("-z", "Look up how to recall past chats.")
     assert proc.returncode == 0 and "DESCRIBED" in proc.stdout, proc.stderr[-2000:]
@@ -167,8 +148,10 @@ def test_oauth_deferred_alias_resolves_through_tool_describe(rig) -> None:
     catalog = next(t for t in mains[0]["body"]["tools"] if t["name"] == "mcp__tool_search")
     assert "chat_history_lookup" in catalog["description"], "precondition: alias advertised in the catalog"
     (result,) = _tool_results(mains[1]["body"])
-    not_found = "not_found" in result and "chat_history_lookup" in result.split("not_found", 1)[1][:80]
-    described = "chat_history_lookup" in result and ("parameters" in result or "input_schema" in result)
-    with known_gate(KNOWN, "alias_describe", raises=AliasNotReverseMapped):
-        if not_found or not described:
-            raise AliasNotReverseMapped(f"tool_describe did not resolve the advertised alias: {result[:600]}")
+    from tools.session_search_tool import SESSION_SEARCH_SCHEMA
+    described = json.loads(result)
+    assert not described.get("not_found"), described
+    assert described["tools"]["session_search"]["parameters"] == SESSION_SEARCH_SCHEMA["parameters"]
+    results = [json.loads(value) for value in _tool_results(mains[2]["body"])]
+    assert results[-1]["success"] is True and results[-1]["mode"] == "browse", results
+    assert isinstance(results[-1]["results"], list), results

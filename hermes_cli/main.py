@@ -649,21 +649,8 @@ import threading
 from datetime import datetime
 
 from hermes_cli.model_setup_flows import (
-    _model_flow_openrouter,
-    _model_flow_nous,
     _model_flow_openai_codex,
     _model_flow_xai_oauth,
-    _model_flow_qwen_oauth,
-    _model_flow_minimax_oauth,
-    _model_flow_custom,
-    _model_flow_azure_foundry,
-    _model_flow_named_custom,
-    _model_flow_copilot,
-    _model_flow_copilot_acp,
-    _model_flow_kimi,
-    _model_flow_stepfun,
-    _model_flow_bedrock,
-    _model_flow_vertex,
     _model_flow_api_key_provider,
     _model_flow_anthropic,
     _model_flow_moa,
@@ -671,7 +658,7 @@ from hermes_cli.model_setup_flows import (
     _model_flow_plugin_provider,
     _is_profile_plugin_flow_provider,
 )
-from hermes_cli.model_setup_flows_local import _model_flow_local
+from hermes_cli.model_setup_flows_custom import _model_flow_custom, _model_flow_named_custom
 logger = logging.getLogger(__name__)
 from hermes_cli.main_agent_cmds import (
     cmd_insights,
@@ -1597,13 +1584,7 @@ _PROVIDER_MODEL_FLOWS = {
     "openai-codex": lambda c, m, a: _model_flow_openai_codex(c, m),
     "xai-oauth": lambda c, m, a: _model_flow_xai_oauth(c, m, args=a),
     "custom": lambda c, m, a: _model_flow_custom(c),
-    "llamacpp": lambda c, m, a: _model_flow_local(c, m),
     "anthropic": lambda c, m, a: _model_flow_anthropic(c, m),
-    "kimi-coding": lambda c, m, a: _model_flow_kimi(c, m),
-    "stepfun": lambda c, m, a: _model_flow_stepfun(c, m),
-    "bedrock": lambda c, m, a: _model_flow_bedrock(c, m),
-    "vertex": lambda c, m, a: _model_flow_vertex(c, m),
-    "azure-foundry": lambda c, m, a: _model_flow_azure_foundry(c, m),
 }
 
 

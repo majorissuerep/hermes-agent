@@ -15,8 +15,6 @@ request log (how many model calls each attempt was billed).
 
 from __future__ import annotations
 
-import os
-import signal
 import sys
 import threading
 import time

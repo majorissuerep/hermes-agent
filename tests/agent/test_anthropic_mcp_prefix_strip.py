@@ -15,8 +15,52 @@ tools, or the bare name for native tools) so the dispatcher is unaffected.
 
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 from unittest.mock import patch
+
+import pytest
+
+
+@pytest.mark.parametrize("oauth", [False, True])
+@pytest.mark.parametrize("form", ["list", "object", "json", "legacy"])
+def test_bridge_name_slots_decode_without_changing_opaque_arguments(oauth, form):
+    from copy import deepcopy
+    from agent.transports.anthropic import AnthropicTransport
+
+    describe = {"names": ["chat_history_lookup", "mcp__context_notes", "unknown_tool"]}
+    entry = {"name": "chat_history_lookup", "arguments": {"query": "chat_history_lookup"}}
+    calls = {"calls": {"list": [entry], "object": entry, "json": json.dumps([entry])}.get(form)}
+    if form == "legacy":
+        calls = entry
+    scalar = {"names": "chat_history_lookup"}
+    original = deepcopy([describe, calls, scalar])
+    response = _make_response(_make_tool_use_block("mcp__tool_describe", input_data=describe),
+                              _make_tool_use_block("mcp__tool_call", input_data=calls),
+                              _make_tool_use_block("mcp__tool_describe", input_data=scalar))
+    registry = _FakeRegistry({"tool_describe", "tool_call", "session_search", "memory"})
+    with patch("tools.registry.registry", registry):
+        result = AnthropicTransport().normalize_response(response, strip_tool_prefix=oauth)
+    arguments = [json.loads(call.arguments) for call in result.tool_calls]
+    mapped = {"name": "session_search", "arguments": {"query": "chat_history_lookup"}}
+    expected_call = {"calls": {"list": [mapped], "object": mapped, "json": json.dumps([mapped])}.get(form)}
+    if form == "legacy":
+        expected_call = mapped
+    expected = [{"names": ["session_search", "memory", "unknown_tool"]}, expected_call,
+                {"names": "session_search"}]
+    assert arguments == (expected if oauth else original)
+    assert [describe, calls, scalar] == original
+
+
+def test_bridge_registered_alias_name_keeps_registry_precedence():
+    from agent.transports.anthropic import AnthropicTransport
+
+    response = _make_response(_make_tool_use_block("mcp__tool_describe",
+                                                  input_data={"names": ["chat_history_lookup"]}))
+    registry = _FakeRegistry({"tool_describe", "session_search", "chat_history_lookup"})
+    with patch("tools.registry.registry", registry):
+        result = AnthropicTransport().normalize_response(response, strip_tool_prefix=True)
+    assert json.loads(result.tool_calls[0].arguments) == {"names": ["chat_history_lookup"]}
 
 
 # ---------------------------------------------------------------------------

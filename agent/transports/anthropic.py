@@ -23,6 +23,56 @@ def _unprefix_oauth_tool_name(name: str) -> str:
     return _OAUTH_TOOL_NAME_REVERSE_ALIASES.get(bare, name)
 
 
+def _oauth_bridge_name(name: Any) -> Any:
+    from tools.registry import registry
+
+    if not isinstance(name, str):
+        return name
+    trimmed = name.strip()
+    prefixed = trimmed if trimmed.startswith(_MCP_PREFIX) else _MCP_PREFIX + trimmed
+    resolved = _unprefix_oauth_tool_name(prefixed)
+    return name if resolved == prefixed and registry.get_entry(prefixed) is None else resolved
+
+
+def _oauth_bridge_calls(calls: Any) -> Any:
+    import json
+
+    encoded = isinstance(calls, str)
+    try:
+        decoded = json.loads(calls) if encoded else calls
+    except ValueError:
+        return calls  # The bridge owns validation of malformed envelopes.
+    entries = [decoded] if isinstance(decoded, dict) else decoded
+    if not isinstance(entries, list):
+        return calls
+    mapped = [{**call, "name": _oauth_bridge_name(call["name"])}
+              if isinstance(call, dict) and "name" in call else call for call in entries]
+    if mapped == entries:
+        return calls
+    result = mapped[0] if isinstance(decoded, dict) else mapped
+    return json.dumps(result) if encoded else result
+
+
+def _oauth_bridge_arguments(name: str, arguments: Any) -> Any:
+    """Decode only bridge name slots; opaque tool payloads and replay blocks stay intact."""
+    if not isinstance(arguments, dict):
+        return arguments
+    result = dict(arguments)
+    if name == "tool_describe":
+        names = arguments.get("names")
+        if isinstance(names, str):
+            result["names"] = _oauth_bridge_name(names)
+        elif isinstance(names, list):
+            result["names"] = [_oauth_bridge_name(value) for value in names]
+    elif name == "tool_call":
+        calls = arguments.get("calls")
+        if calls is not None:
+            result["calls"] = _oauth_bridge_calls(calls)
+        elif "name" in arguments:
+            result["name"] = _oauth_bridge_name(arguments["name"])
+    return result
+
+
 # build_kwargs params forwarded to build_anthropic_kwargs, with the defaults applied when absent.
 _BUILD_KWARG_DEFAULTS = {
     "max_tokens": 16384, "reasoning_config": None, "tool_choice": None, "is_oauth": False, "preserve_dots": False,
@@ -87,9 +137,12 @@ class AnthropicTransport(ProviderTransport):
                     reasoning_details.append(detail)
             elif block.type == "tool_use":
                 name = block.name
+                arguments = block.input
                 if strip_tool_prefix and name.startswith(_MCP_PREFIX):
                     name = _unprefix_oauth_tool_name(name)
-                tool_calls.append(ToolCall(id=block.id, name=name, arguments=json.dumps(block.input)))
+                if strip_tool_prefix:
+                    arguments = _oauth_bridge_arguments(name, arguments)
+                tool_calls.append(ToolCall(id=block.id, name=name, arguments=json.dumps(arguments)))
         provider_data = {"reasoning_details": reasoning_details} if reasoning_details else {}
         stop_details = _to_plain_data(getattr(response, "stop_details", None))
         if stop_details is not None:

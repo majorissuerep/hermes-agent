@@ -962,14 +962,6 @@ def _build_provider_picker_rows(config: dict, active: str, provider_labels: dict
         else:
             slug = row["slug"]
             label = canonical_descs.get(slug, provider_labels.get(slug, slug))
-            if slug == "nous":
-                # Same free-tier rule as the gateway/TUI pickers: relabel for a guest, hide
-                # when nous.guest is off, untouched for a real account.
-                from hermes_cli.model_switch_providers import _free_tier_nous_row
-                tier_row = _free_tier_nous_row({"name": label, "models": []})
-                if tier_row is None:
-                    continue
-                label = tier_row["name"]
             _add(slug, label, [], bool(active) and slug == active)
 
     for key, provider_info in custom_provider_map.items():
@@ -978,11 +970,6 @@ def _build_provider_picker_rows(config: dict, active: str, provider_labels: dict
         _add(key, f"{provider_info['name']} ({_short_url(provider_info['base_url'])}){model_hint}", [],
              bool(active) and key == active)
 
-    from hermes_cli.model_setup_flows_local import local_models_available
-    from hermes_cli.providers import LLAMACPP_ALIASES
-    if not _cli_excluded & set(LLAMACPP_ALIASES) and local_models_available():
-        _add("llamacpp", "Local models (run open models on this machine — no account or API key)", [],
-             active == "llamacpp")
     ordered.append(("custom", "Custom endpoint (enter URL manually)", []))
     if custom_provider_map:
         ordered.append(("remove-custom", "Remove a saved custom provider", []))

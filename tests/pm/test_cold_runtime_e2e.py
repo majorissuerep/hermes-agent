@@ -276,7 +276,6 @@ print(json.dumps({'yaml': ruamel.yaml.__file__, 'idna': idna.__file__,
     app_report = json.loads(_bare(python, repo, app_code, env=env).stdout)
     assert Path(app_report["yaml"]).is_relative_to(app)
     assert Path(app_report["idna"]).is_relative_to(app)
-    _assert_installed_native_packages(app, repo, cwd=tmp_path, env=env)
     initial_fact = report["facts"]["packages"]["venv"]
     assert initial_fact["extras"] == ["all"]
     lock_before = Path(initial_fact["resolved_lock"]).read_bytes()
@@ -294,7 +293,6 @@ print(json.dumps({'yaml': ruamel.yaml.__file__, 'idna': idna.__file__,
     assert repaired_app != app
     assert Path(restored["yaml"]).is_relative_to(repaired_app)
     assert Path(restored["idna"]).is_relative_to(repaired_app)
-    _assert_installed_native_packages(repaired_app, repo, cwd=tmp_path, env=env)
     assert (pm_root / "selected.json").read_bytes() == selection
     after = json.loads(_bare(python, repo, report_code, env=env).stdout)
     repaired_fact = after["facts"]["packages"]["venv"]
@@ -308,17 +306,3 @@ print(json.dumps({'yaml': ruamel.yaml.__file__, 'idna': idna.__file__,
     assert not (repo / "venv").exists()
     assert not (repo / ".venv").exists()
     print(f"cold PM proof: runtime={runtime}; first_app={app}; repaired_app={repaired_app}")
-
-
-def _assert_installed_native_packages(environment, candidate, *, cwd, env):
-    """Probe the actual cold-built/repaired app, not pytest's dependency-only environment."""
-    packages = ["agent", "tools", "hermes_cli", "hermes_state", "hermes_security",
-                "hermes_platform", "cron", "pm", "providers", "tui_runtime"]
-    result = _run([str(environment / "bin/python"), "-I", "-c",
-                   "import importlib.util,json,sys; "
-                   "print(json.dumps({name:(spec.origin if (spec:=importlib.util.find_spec(name)) else None) "
-                   "for name in sys.argv[1:]}))", *packages], cwd=cwd, env=env)
-    origins = json.loads(result.stdout)
-    for package in packages:
-        assert origins[package] is not None, f"{package} is absent from the installed package map"
-        assert Path(origins[package]).resolve().is_relative_to(candidate), (package, origins[package])

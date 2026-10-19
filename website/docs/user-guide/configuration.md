@@ -1110,16 +1110,16 @@ compression:
   enabled: true
   threshold: 0.50
 ```
-Uses your main provider and main model. Override per-task (e.g. `auxiliary.compression.provider: openrouter` + `model: google/gemini-2.5-flash`) if you want compression on a cheaper model than your main chat model.
+Uses your main provider and main model. Override per-task (e.g. `auxiliary.compression.provider: zai` + `model: glm-5.2`) to use a different configured model for compression.
 
 **Force a specific provider** (OAuth or API-key based):
 ```yaml
 auxiliary:
   compression:
-    provider: nous
-    model: gemini-3-flash
+    provider: zai
+    model: glm-5.2
 ```
-Works with any provider: `nous`, `openrouter`, `codex`, `anthropic`, `main`, etc.
+Works with supported providers and named custom routes, including `codex`, `anthropic`, `zai`, and `main`.
 
 **Custom endpoint** (self-hosted, Ollama, zai, DeepSeek, etc.):
 ```yaml
@@ -1499,17 +1499,18 @@ auxiliary:
 
 When `base_url` is set, Hermes ignores the provider and calls that endpoint directly (using `api_key` or `OPENAI_API_KEY` for auth). When only `provider` is set, Hermes uses that provider's built-in auth and base URL.
 
-Available providers for auxiliary tasks: `auto`, `main`, plus any provider in the [provider registry](../reference/environment-variables.md) — `openrouter`, `nous`, `openai-codex`, `copilot`, `copilot-acp`, `anthropic`, `gemini`, `qwen-oauth`, `zai`, `kimi-coding`, `kimi-coding-cn`, `minimax`, `minimax-cn`, `minimax-oauth`, `deepseek`, `nvidia`, `xai`, `xai-oauth`, `ollama-cloud`, `alibaba`, `bedrock`, `huggingface`, `arcee`, `xiaomi`, `kilocode`, `opencode-zen`, `opencode-go`, `commandcode`, `commandcode-anthropic`, `ai-gateway`, `azure-foundry` — or any named custom provider from your `providers:` dict (e.g. `provider: "beans"`).
+Available providers for auxiliary tasks are `auto`, `main`, the supported built-ins
+`openai-api`, `openai-codex`, `anthropic`, `zai`, `xai`, `xai-oauth`, `ai-gateway`,
+and `litellm`, plus named custom providers from your `providers:` dict. Explicitly
+installed provider plugins can supply their own routes.
 
-Local OpenAI-compatible servers work under their own names too: `provider: ollama` (also `vllm`, `llamacpp`, `llama.cpp`) with a `base_url` such as `http://127.0.0.1:11434` and an empty `api_key` routes through the custom endpoint with a placeholder key, and a bare `host:port` base_url gets the `/v1` suffix automatically.
+For a local OpenAI-compatible server, use a named custom provider or an explicit
+`base_url` such as `http://127.0.0.1:8080/v1`; do not select a retired built-in
+`llamacpp`, `ollama`, or `vllm` provider. See [Local Model Endpoints](./local-models.md).
 
 `provider: openai` is a direct-API alias: it routes through the custom endpoint at the block's `base_url`, else `OPENAI_BASE_URL`, else `https://api.openai.com/v1`, authenticated with `api_key` or `OPENAI_API_KEY`. Every auxiliary task resolves it the same way — `compression`/`vision`/`title_generation` as well as `background_review`, `curator` and MoA slots — so removing `base_url` while keeping `provider: openai` moves that task to the public OpenAI endpoint. A `providers.openai` entry in your `providers:` dict takes precedence and keeps its own endpoint and key.
 
 When a routed `auxiliary.<task>` block cannot be resolved (unknown provider, missing endpoint or credentials), the task runs on the main model and Hermes says so: `background_review` emits a one-time user-visible warning naming the provider and reason (plus a `WARNING` line in `agent.log` per review), and `hermes doctor` resolves every routed `auxiliary.<task>` block through the same resolver and reports the ones that fail.
-
-:::tip MiniMax OAuth
-`minimax-oauth` logs in via browser OAuth (no API key needed). Run `hermes model` and select **MiniMax (OAuth)** to authenticate. Auxiliary tasks use `MiniMax-M2.7-highspeed` automatically. See the [MiniMax OAuth guide](../guides/minimax-oauth.md).
-:::
 
 :::tip xAI Grok OAuth
 `xai-oauth` logs in via browser OAuth for SuperGrok and X Premium+ subscribers (no API key needed). Run `hermes model` and select **xAI Grok OAuth (SuperGrok / Premium+)** to authenticate. The same OAuth token is reused for every direct-to-xAI surface (chat, auxiliary tasks, TTS, image gen, video gen, transcription). See the [xAI Grok OAuth guide](../guides/xai-grok-oauth.md), and if Hermes is on a remote host see [OAuth over SSH / Remote Hosts](../guides/oauth-over-ssh.md).
@@ -1525,7 +1526,7 @@ The `"main"` provider option means "use whatever provider my main agent uses" �
 auxiliary:
   # Image analysis (vision_analyze tool + browser screenshots)
   vision:
-    provider: "auto"           # "auto", "openrouter", "nous", "codex", "main", etc.
+    provider: "auto"           # "auto", "anthropic", "codex", "main", etc.
     model: ""                  # e.g. "openai/gpt-4o", "google/gemini-2.5-flash"
     base_url: ""               # Custom OpenAI-compatible endpoint (overrides provider)
     api_key: ""                # API key for base_url (falls back to OPENAI_API_KEY)
@@ -1559,10 +1560,10 @@ auxiliary:
     # no_progress_timeout: 60   # seconds a streamed summary may go without a substantive chunk
     #                           # before the attempt fails fast into retry/fallback
     # fallback_chain:           # Optional — providers to try on rate-limit / connectivity failure
-    #   - provider: nous
-    #     model: deepseek/deepseek-chat
-    #   - provider: openrouter
-    #     model: google/gemini-2.5-flash
+    #   - provider: zai
+    #     model: glm-5.2
+    #   - provider: anthropic
+    #     model: claude-sonnet-4-6
     #     base_url: ""
     #     api_key: ""
     # max_concurrency: 2       # Optional: cap simultaneous compression LLM calls so
@@ -1633,16 +1634,16 @@ Each auxiliary task can optionally define a `fallback_chain` — a list of provi
 ```yaml
 auxiliary:
   compression:
-    provider: openrouter
-    model: openai/gpt-4o-mini
+    provider: anthropic
+    model: claude-sonnet-4-6
     fallback_chain:
-      - provider: nous
-        model: deepseek/deepseek-chat
-      - provider: openrouter
-        model: google/gemini-2.5-flash
+      - provider: zai
+        model: glm-5.2
+      - provider: xai
+        model: grok-4.3
 ```
 
-When the primary auxiliary provider (`openrouter` / `openai/gpt-4o-mini`) returns a rate-limit, connection timeout, or payment-required error, Hermes walks the `fallback_chain` in order. It skips entries whose provider matches the already-failed provider, and tries each remaining entry until one succeeds or the chain is exhausted. If all fallbacks fail, Hermes falls back to the main agent model as a final safety net.
+When the primary auxiliary provider (`anthropic` / `claude-sonnet-4-6`) returns a rate-limit, connection timeout, or payment-required error, Hermes walks the `fallback_chain` in order. It skips entries whose provider matches the already-failed provider, and tries each remaining entry until one succeeds or the chain is exhausted. If all fallbacks fail, Hermes falls back to the main agent model as a final safety net.
 
 Each entry supports the same three knobs as any auxiliary task config:
 
@@ -1718,24 +1719,23 @@ These options apply to **auxiliary task configs** (`auxiliary:`, `compression:`)
 
 | Provider | Description | Requirements |
 |----------|-------------|-------------|
-| `"auto"` | Best available (default). Vision tries OpenRouter → Nous → Codex. | — |
-| `"openrouter"` | Force OpenRouter — routes to any model (Gemini, GPT-4o, Claude, etc.) | `OPENROUTER_API_KEY` |
-| `"nous"` | Force Nous Portal | `hermes auth` |
+| `"auto"` | Use the main conversation model (default). | Main provider configured |
 | `"codex"` | Force Codex OAuth (ChatGPT account). Set `model` explicitly (e.g. `gpt-5.4`). | `hermes model` → ChatGPT or Codex Subscription |
-| `"minimax-oauth"` | Force MiniMax OAuth (browser login, no API key). Uses MiniMax-M2.7-highspeed for auxiliary tasks. | `hermes model` → MiniMax (OAuth) |
 | `"xai-oauth"` | Force xAI Grok OAuth (browser login for SuperGrok or X Premium+ subscribers, no API key). Same OAuth token covers chat, TTS, image, video, and transcription. | `hermes model` → xAI Grok OAuth (SuperGrok / Premium+) |
 | `"main"` | Use your active custom/main endpoint. This can come from `OPENAI_BASE_URL` + `OPENAI_API_KEY` or from a custom endpoint saved via `hermes model` / `config.yaml`. Works with OpenAI, local models, or any OpenAI-compatible API. **Auxiliary tasks only — not valid for `model.provider`.** | Custom endpoint credentials + base URL |
 
-Direct API-key providers from the main provider catalog also work here when you want side tasks to bypass your default router. For example, `gmi` is valid once `GMI_API_KEY` is configured, and `fireworks` is valid once `FIREWORKS_API_KEY` is configured:
+Supported direct API-key providers also work here when you want side tasks to
+use a different configured route. For example:
 
 ```yaml
 auxiliary:
   compression:
-    provider: "gmi"
-    model: "anthropic/claude-opus-4.6"
+    provider: "zai"
+    model: "glm-5.2"
 ```
 
-For GMI auxiliary routing, use the exact model ID returned by GMI's `/v1/models` endpoint. Fireworks model IDs use the provider's native slash form, for example `accounts/fireworks/models/glm-5p2`.
+Use a model available to that provider account and configure its credentials
+through `hermes model` or the encrypted secret configuration commands.
 
 ### Common Setups
 
@@ -1762,14 +1762,6 @@ auxiliary:
     model: "gpt-4o"       # or "gpt-4o-mini" for cheaper
 ```
 
-**Using OpenRouter for vision** (route to any model):
-```yaml
-auxiliary:
-  vision:
-    provider: "openrouter"
-    model: "openai/gpt-4o"      # or "google/gemini-2.5-flash", etc.
-```
-
 **Using Codex OAuth** (ChatGPT Pro/Plus account — no API key needed):
 ```yaml
 auxiliary:
@@ -1777,15 +1769,6 @@ auxiliary:
     provider: "codex"     # uses your ChatGPT OAuth token
     model: "gpt-5.4"      # no implicit default on the Codex route
 ```
-
-**Using MiniMax OAuth** (browser login, no API key needed):
-```yaml
-model:
-  default: MiniMax-M2.7
-  provider: minimax-oauth
-  base_url: https://api.minimax.io/anthropic
-```
-Run `hermes model` and select **MiniMax (OAuth)** to log in and set this automatically. For the China region, the base URL will be `https://api.minimaxi.com/anthropic`. See the [MiniMax OAuth guide](../guides/minimax-oauth.md) for the full walkthrough.
 
 **Using a local/self-hosted model:**
 ```yaml
@@ -1795,7 +1778,7 @@ auxiliary:
     model: "my-local-model"
 ```
 
-`provider: "main"` uses whatever provider Hermes uses for normal chat — whether that's a named custom provider (e.g. `beans`), a built-in provider like `openrouter`, or a legacy `OPENAI_BASE_URL` endpoint.
+`provider: "main"` uses whatever provider Hermes uses for normal chat — whether that's a named custom provider (e.g. `beans`), a supported built-in provider, or a legacy `OPENAI_BASE_URL` endpoint.
 
 :::tip
 If you use Codex OAuth as your main model provider, vision works automatically — no extra configuration needed. Codex is included in the auto-detection chain for vision.

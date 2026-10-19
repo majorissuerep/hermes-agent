@@ -1490,11 +1490,14 @@ def _stepfun_catalog(normalized: str, force_refresh: bool) -> Optional[list[str]
 
 
 def _anthropic_catalog(normalized: str, force_refresh: bool) -> list[str]:
+    from agent.secret_scope import get_secret_str
+
     model_cfg = _get_model_config_dict()
     cfg_base_url = cfg_api_key = ""
     if normalize_provider(str(model_cfg.get("provider", "") or "")) == "anthropic":
         cfg_base_url = str(model_cfg.get("base_url", "") or "").strip()
         cfg_api_key = str(model_cfg.get("api_key", "") or "").strip()
+    cfg_base_url = cfg_base_url or get_secret_str("ANTHROPIC_BASE_URL").strip()
     live = _fetch_anthropic_models(base_url=cfg_base_url or None, api_key=cfg_api_key or None)
     curated = list(_PROVIDER_MODELS.get("anthropic", []))
     if not live:
@@ -1556,41 +1559,6 @@ def _custom_catalog(normalized: str, force_refresh: bool) -> Optional[list[str]]
     return fetch_api_models(api_key, base_url, api_mode=api_mode) or None
 
 
-def _bedrock_catalog(normalized: str, force_refresh: bool) -> Optional[list[str]]:
-    # Live discovery keyed by the resolved AWS region so EU/AP users see eu.*/ap.* ids.
-    try:
-        from agent.bedrock_adapter import bedrock_model_ids_or_none
-
-        return bedrock_model_ids_or_none()
-    except Exception:
-        return None
-
-
-def _azure_foundry_catalog(normalized: str, force_refresh: bool) -> Optional[list[str]]:
-    """Live ``GET <base>/models`` of the configured Azure Foundry resource (#27989).
-
-    Deployments are per-resource, so the static catalog is intentionally empty and the plugin
-    profile ships ``base_url=""`` — which is why the generic profile fetch never fires. Resolve
-    through the runtime resolver so the picker targets the same resource inference hits
-    (``model.base_url`` / ``AZURE_FOUNDRY_BASE_URL``) with the same credential: an API key string,
-    or the Entra ID token-provider callable that ``azure_detect`` already accepts. Anthropic-style
-    ``/anthropic`` routes serve no ``/models``; the probe never raises, so any miss keeps ``[]``.
-    """
-    try:
-        from hermes_cli.azure_detect import _probe_openai_models
-        from hermes_cli.runtime_provider import _resolve_azure_foundry_runtime
-
-        runtime = _resolve_azure_foundry_runtime(requested_provider=normalized, model_cfg=_get_model_config_dict())
-        base_url = str(runtime.get("base_url") or "").strip().rstrip("/")
-        credential = runtime.get("api_key")
-        if not (base_url and credential):
-            return None
-        ok, ids = _probe_openai_models(base_url, credential)
-        return ids if ok and ids else None
-    except Exception:
-        return None
-
-
 # Per-provider catalog sources tried before the generic profile fetch. A fetcher returning None
 # falls through to the profile/curated path; a list is returned as-is (even empty).
 _PROVIDER_CATALOG_FETCHERS: dict[str, Any] = {
@@ -1609,9 +1577,7 @@ _PROVIDER_CATALOG_FETCHERS: dict[str, Any] = {
     "ollama-cloud": lambda normalized, force_refresh: fetch_ollama_cloud_models(force_refresh=force_refresh) or None,
     "openai": _openai_catalog,
     "openai-api": _openai_catalog,
-    "custom": _custom_catalog,
-    "bedrock": _bedrock_catalog,
-    "azure-foundry": _azure_foundry_catalog}
+    "custom": _custom_catalog}
 
 
 # ``-free`` slugs the relay still LISTS but no longer serves: the Go-only twin (``ox-alpha-free``)
@@ -2196,7 +2162,9 @@ def _fetch_anthropic_models(
     except ImportError:
         return None
 
-    resolved_base_url = base_url
+    from agent.secret_scope import get_secret_str
+
+    resolved_base_url = base_url or get_secret_str("ANTHROPIC_BASE_URL").strip() or None
     token = (api_key or "").strip() or resolve_anthropic_token()
     if not token:
         # A pool credential and its endpoint are one security boundary — never pair the pool key

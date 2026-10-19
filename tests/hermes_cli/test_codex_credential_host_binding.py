@@ -40,8 +40,11 @@ _REPO = Path(__file__).resolve().parents[2]
 
 def _home(monkeypatch) -> Path:
     import os
-    home = Path(os.environ["HERMES_HOME"])
-    home.mkdir(parents=True, exist_ok=True)
+    import tempfile
+    root = Path(os.environ["HERMES_HOME"])
+    root.mkdir(parents=True, exist_ok=True)
+    home = Path(tempfile.mkdtemp(prefix="codex-host-binding-", dir=root))
+    monkeypatch.setenv("HERMES_HOME", str(home))
     monkeypatch.delenv("HERMES_CODEX_BASE_URL", raising=False)
     return home
 

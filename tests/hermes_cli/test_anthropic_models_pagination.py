@@ -114,3 +114,40 @@ class TestPluginFetchModelsPagination:
     def test_no_api_key_returns_none(self):
         profile = _load_plugin_profile()
         assert profile.fetch_models(api_key=None) is None
+
+
+@pytest.mark.parametrize("explicit", [False, True])
+def test_catalog_uses_scoped_endpoint_unless_config_explicitly_selects_one(monkeypatch, explicit):
+    from agent.secret_scope import reset_secret_scope, set_secret_scope
+    from hermes_cli import models
+
+    seen = []
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://ambient.invalid")
+    monkeypatch.setattr(models, "_get_model_config_dict", lambda: {
+        "provider": "anthropic", "api_key": "sk-ant-api-test",
+        "base_url": "http://configured.invalid" if explicit else ""})
+    monkeypatch.setattr(models, "_get_json", lambda url, **kwargs: (
+        seen.append((url, kwargs["headers"])) or {"data": [{"id": "relay-only-model"}]}))
+    token = set_secret_scope({"ANTHROPIC_BASE_URL": "http://scoped.invalid"})
+    try:
+        assert models.provider_model_ids("anthropic", force_refresh=True) == ["relay-only-model"]
+    finally:
+        reset_secret_scope(token)
+    endpoint = "http://configured.invalid" if explicit else "http://scoped.invalid"
+    assert seen[0][0].startswith(endpoint + "/v1/models?")
+    assert seen[0][1]["x-api-key"] == "sk-ant-api-test"
+
+
+def test_pool_catalog_keeps_its_credential_and_endpoint_paired(monkeypatch):
+    from hermes_cli import models
+
+    seen = []
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://unrelated.invalid")
+    monkeypatch.setattr("agent.anthropic_credentials.resolve_anthropic_token", lambda: None)
+    monkeypatch.setattr(models, "_resolve_anthropic_pool_catalog_credentials",
+                        lambda: ("pool-key", "http://pool.invalid"))
+    monkeypatch.setattr(models, "_get_json", lambda url, **kwargs: (
+        seen.append((url, kwargs["headers"])) or {"data": [{"id": "pool-model"}]}))
+    assert models._fetch_anthropic_models() == ["pool-model"]
+    assert seen[0][0].startswith("http://pool.invalid/v1/models?")
+    assert seen[0][1]["x-api-key"] == "pool-key"

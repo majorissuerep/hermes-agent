@@ -1,8 +1,8 @@
 """Real-process Kanban board harness: a scratch HOME/HERMES_HOME, the recording fake provider, and
 the real ``hermes kanban`` CLI (dispatcher ticks spawn real ``hermes chat -q`` workers).
 
-Nothing below imports the dispatcher: every board mutation goes through a child process and every
-verdict is read back from ``kanban.db`` (tasks / task_runs / task_events rows) or the files on disk.
+Every board mutation goes through a child process and every verdict is read back from ``kanban.db``.
+Only native process identity helpers are imported to guard signals to witnessed worker PIDs.
 """
 
 from __future__ import annotations
@@ -16,11 +16,23 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from hermes_platform.processes import terminate_pid
+from hermes_platform.processes import get_process_start_time, terminate_pid
 from tests.e2e.vault_home import connect_state, prepare_fixture_runtime, run_unlocked, spawn_unlocked
 
 REPO = Path(__file__).resolve().parents[4]
 PY = sys.executable
+
+
+def _kill_witnessed_worker(pid: int, fingerprint) -> None:
+    from hermes_cli.kanban_db_dispatch import _pid_recycled
+
+    # Snapshot numeric birth BEFORE validating the complete persisted boot/namespace witness.
+    # terminate_pid rechecks that numeric birth immediately before signalling; PID reuse on
+    # either side of the opaque-witness check therefore refuses the signal.
+    start = get_process_start_time(pid)
+    if start is None or _pid_recycled(pid, fingerprint):
+        raise OSError(f"refusing to terminate worker {pid}; its witnessed identity changed")
+    terminate_pid(pid, force=True, expected_start_time=start)
 
 # Clocks shrunk through the documented env knobs, never by patching code.
 FAST_ENV = {
@@ -145,7 +157,7 @@ class Board:
             "AND worker_started_at IS NOT NULL ORDER BY id DESC", (pid,),
         )
         assert owners, f"No witnessed process identity for worker {pid}"
-        terminate_pid(pid, force=True, expected_start_time=owners[0]["worker_started_at"])
+        _kill_witnessed_worker(pid, owners[0]["worker_started_at"])
 
     def kill_workers(self) -> None:
         for pid in self.spawned_pids:
@@ -155,7 +167,7 @@ class Board:
             )
             for owner in owners:
                 try:
-                    terminate_pid(pid, force=True, expected_start_time=owner["worker_started_at"])
+                    _kill_witnessed_worker(pid, owner["worker_started_at"])
                     break
                 except OSError:
                     # Exited or PID reused: neither permits an unguarded fallback signal.
