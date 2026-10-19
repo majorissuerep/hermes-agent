@@ -89,7 +89,7 @@ def test_ui_conflict_is_reported_without_changing_selection(plugin_world, surfac
     watched = [world.home / "config.yaml", paths.runtime_facts_path()]
     before = {path: path.read_bytes() for path in watched}
     if surface == "dashboard":
-        result = plugins_cmd.dashboard_set_agent_plugin_enabled("conflicting-ui-plugin", enabled=True)
+        result = plugins_cmd.set_agent_plugin_enabled("conflicting-ui-plugin", enabled=True)
         assert not result["ok"] and "plugin-proof-dep" in result["error"]
     else:
         with pytest.raises(AdmissionRefused, match="plugin-proof-dep"):

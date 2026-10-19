@@ -1,10 +1,7 @@
-"""Stranded bot-session adoption (#93296 follow-up).
+"""Explicit lineage repair preserves data; normal resume keeps profiles isolated.
 
-Pre-#93296 misrouting accumulated profile-bot sessions in the DEFAULT
-profile's state.db. Post-fix, profile-scoped resumes correctly target the
-profile's own store — which never saw the session — so the same chat 4001'd
-for the opposite reason. These tests pin the heal: the unit-level adoption
-primitive (SessionDB.adopt_session_lineage_from) and its invariants.
+The removed Desktop misrouting workaround must not make a native resume copy
+another profile's history. Explicit SessionDB repair remains independently tested.
 """
 
 from __future__ import annotations
@@ -188,10 +185,8 @@ def gateway(tmp_path, monkeypatch):
     default_db.close()
 
 
-def test_profile_resume_adopts_stranded_default_store_session(gateway):
-    """The live repro: resume a session by id on a profile whose store has
-    never seen it, while the id exists in the default store. Pre-heal this
-    was a hard 4007; now the lineage is adopted and the resume succeeds."""
+def test_profile_resume_refuses_foreign_store_without_copying_or_retiring(gateway):
+    """Knowing a foreign session id does not authorize importing its history."""
     mod, default_db, profile_home = gateway
     _seed_stranded(default_db)
 
@@ -207,22 +202,18 @@ def test_profile_resume_adopts_stranded_default_store_session(gateway):
         }
     )
 
-    assert not resp.get("error"), f"resume failed: {resp.get('error')}"
-    result = resp["result"]
-    assert result.get("resumed") == STRANDED_ID
-    assert result.get("message_count") == 6
+    assert resp["error"]["code"] == 4007
 
-    # Durably adopted into the profile's own store...
     pdb = SessionDB(db_path=profile_home / "state.db")
     try:
-        assert pdb.get_session(STRANDED_ID) is not None
-        assert len(pdb.get_messages(STRANDED_ID)) == 6
+        assert pdb.get_session(STRANDED_ID) is None
+        assert pdb.get_messages(STRANDED_ID) == []
     finally:
         pdb.close()
-    # ...and retired (archived, never deleted) in the default store.
     donor = default_db.get_session(STRANDED_ID)
-    assert donor["archived"]
-    assert donor["end_reason"] == "adopted_by_profile"
+    assert not donor["archived"]
+    assert donor["end_reason"] is None
+    assert len(default_db.get_messages(STRANDED_ID)) == 6
 
 
 def test_profile_resume_of_truly_unknown_session_still_4007s(gateway):

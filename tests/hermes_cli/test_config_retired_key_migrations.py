@@ -5,7 +5,7 @@ import hermes_yaml as yaml
 
 class TestRetiredMultiplexAllowlist:
     def test_v43_drops_multiplex_profile_allowlist_from_user_config(self, tmp_path, monkeypatch):
-        """The multiplexer serves every profile; a stale allowlist must not linger in config.yaml."""
+        """Historical allowlist retirement preserves unrelated user data without restoring defaults."""
         from hermes_cli.config import DEFAULT_CONFIG
         from hermes_cli.config_migrations import run_migrations
 
@@ -19,7 +19,7 @@ class TestRetiredMultiplexAllowlist:
         raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
         assert "multiplex_profile_allowlist" not in raw["gateway"]
         assert raw["gateway"]["multiplex_profiles"] is True
-        assert "multiplex_profile_allowlist" not in DEFAULT_CONFIG["gateway"]
+        assert "multiplex_profile_allowlist" not in DEFAULT_CONFIG.get("gateway", {})
 
 
 class TestCuratorFasterPrune:

@@ -1,4 +1,4 @@
-"""Plugin loading: directory/entry-point module import, deferred bundled platforms, portable packages,
+"""Plugin loading: directory/entry-point module import, portable packages,
 dependency/config-schema warnings. Mixed into :class:`hermes_cli.plugins.PluginManager`.
 
 Origin-internal names (``PluginContext``, ``LoadedPlugin``, ``_PLUGINS_DEBUG`` …) are imported lazily
@@ -204,14 +204,13 @@ class PluginLoaderMixin:
         """Subscribe to "a discovery sweep loaded plugins this process did not have": fires from INSIDE
         :meth:`discover_and_load` (never emitted by an install RPC) with one
         ``{name, key, activated_now, deferred}`` summary per NEWLY loaded plugin — every plugin at boot,
-        just the newcomer after a mid-run ``hermes plugins install/enable``, Desktop / dashboard /
-        ``plugins.manage`` install-enable-update, a tool-triggered force re-discovery or the gateway's
-        ``reload-plugins`` verb (all of which run ``discover_plugins(force=True)``; a non-forced call
+        just the newcomer after a native install-enable-update or a tool-triggered forced discovery
+        (which runs ``discover_plugins(force=True)``; a non-forced call
         short-circuits on ``_discovered`` and never fires). See
         :func:`hermes_cli.plugins_activation.plugin_activation_summary` for the payload: ``activated_now``
-        (gateway commands/transforms/hooks/callbacks, live at once) vs ``deferred`` (``tools``/``prompt``
+        (native commands/hooks, live at once) vs ``deferred`` (``tools``/``prompt``
         until the next session, ``mcp_servers`` — the plugin's mcp.json server names — until ``mcp.reload``).
-        Listeners belong to the process (gateway runner, TUI server), not to a plugin, so ``unload()``
+        Listeners belong to the native runtime, not to a plugin, so ``unload()``
         never clears them. Returns an unsubscribe callable. Fires on the discovering thread with the
         discovery lock released; marshal onto your own loop."""
         if not callable(callback):
@@ -327,9 +326,7 @@ class PluginLoaderMixin:
                 self._plugin_host().load(manifest, ctx, module_name=module_name,
                                          entrypoint=manifest.source not in {"user", "project"})
                 return True
-            # Reuse a deferred platform's already-imported package so its body doesn't run twice.
-            # See #78050.
-            module = self._predeclared_modules.pop(plugin_key, None)
+            module = None
             if module is None and manifest.source in {"user", "project", "bundled"}:
                 if self._is_manifest_only_language_pack(manifest):
                     return True  # pure pack: locales/ is the whole plugin, no register() to run
@@ -372,13 +369,6 @@ class PluginLoaderMixin:
             # from later event dispatch.
             self._remove_plugin_subscriptions(plugin_key)
             logger.warning("Failed to load plugin '%s': %s", manifest.name, _load_error_text(exc), exc_info=_PLUGINS_DEBUG)
-        # The failure path swept this plugin's whole ledger (not just the registration_start slice), so
-        # discovery-time pre-registrations are gone too.
-        # There is no live tool left to credit — attribution and the registry agree at zero. Only the
-        # success path pops _predeclared_tools, so drop the entry here rather than let the bookkeeping
-        # outlive the load attempt (#78050).
-        if not loaded.enabled:
-            self._predeclared_tools.pop(plugin_key, None)
         self._plugins[plugin_key] = loaded
 
     @staticmethod
@@ -445,10 +435,7 @@ class PluginLoaderMixin:
         def _keys(kind: str) -> list[str]:
             return [r.key for r in registrations if r.kind == kind]
 
-        # Discovery-time tools predate registration_start; credit them back or `hermes plugins list`
-        # under-reports once the deferred adapter materializes.
-        predeclared = [t for t in self._predeclared_tools.pop(plugin_key, []) if t in self._plugin_tool_names]
-        loaded.tools_registered = predeclared + [k for k in _keys("tool") if k not in predeclared]
+        loaded.tools_registered = _keys("tool")
         loaded.hooks_registered = _keys("hook")
         loaded.middleware_registered = _keys("middleware")
         loaded.commands_registered = _keys("command")

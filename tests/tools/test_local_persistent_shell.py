@@ -3,6 +3,9 @@ env vars between commands, off starts every command from the login-time env. cwd
 both modes (file tools rely on it); plain shell vars never carry."""
 
 import json
+import shlex
+import shutil
+import subprocess
 
 import pytest
 
@@ -50,26 +53,37 @@ def test_local_persistent_defaults_on_and_reaches_the_environment(monkeypatch, t
 
 @pytest.mark.platforms("linux", "macos")
 @pytest.mark.parametrize("setting, later", [("true", "fn:no"), ("false", "fn:yes")])
-def test_profile_functions_survive_only_with_persistence_off(monkeypatch, tmp_path, setting, later):
+def test_profile_functions_survive_only_with_persistence_off(tmp_path, setting, later):
     """The login snapshot holds profile functions; with persistence on the first command's
     ``export -p`` re-dump replaces it, so they are gone from the second command on. The docs'
     "Profile functions / aliases" row states exactly this."""
-    home = tmp_path / "home"
-    home.mkdir()
-    for rc in (".bashrc", ".bash_profile"):
-        (home / rc).write_text("hermes_lp_fn(){ echo FN; }\n", encoding="utf-8")
-    monkeypatch.setenv("HOME", str(home))
-    monkeypatch.setenv("TERMINAL_ENV", "local")
-    monkeypatch.setenv("TERMINAL_CWD", str(tmp_path))
-    monkeypatch.setenv("TERMINAL_LOCAL_PERSISTENT", setting)
-    task_id = f"local-persist-fn-{setting}"
+    from tools.environments.base_session_env import _snapshot_bootstrap_script, _wrap_command_script
+
+    # This contract is Bash-specific: native sh/zsh cannot import Bash functions
+    # from the wrapper. Select the actual command dialect explicitly rather than
+    # falsifying the account's login shell or running Bash syntax under sh.
+    bash = shutil.which("bash")
+    assert bash, "Bash snapshot qualification requires Bash"
+    profile = tmp_path / ".bashrc"
+    profile.write_text("hermes_lp_fn(){ echo FN; }\n", encoding="utf-8")
+    snapshot = tmp_path / "snapshot"
+    kwargs = dict(
+        quoted_cwd=shlex.quote(str(tmp_path)), quoted_snap=shlex.quote(str(snapshot)),
+        snap_tmp_template=shlex.quote(str(snapshot) + ".tmp.XXXXXXXXXX"), cwd_marker="__CWD__",
+    )
+    bootstrap = f"source {shlex.quote(str(profile))}\n" + _snapshot_bootstrap_script(
+        **kwargs, excluded_names=(),
+    )
+    subprocess.run([bash, "-c", bootstrap], check=True, capture_output=True, text=True, timeout=10)
     probe = "type hermes_lp_fn >/dev/null 2>&1 && echo fn:yes || echo fn:no"
 
     def run(cmd):
-        return json.loads(terminal_tool(cmd, task_id=task_id))["output"].strip()
+        script = _wrap_command_script(
+            cmd, **kwargs, passthrough_names=(), snapshot_ready=True,
+            user_shell=bash, persist_env=setting == "true",
+        )
+        result = subprocess.run([bash, "-c", script], check=True, capture_output=True, text=True, timeout=10)
+        return result.stdout.split("\n__CWD__", 1)[0].strip()
 
-    try:
-        assert run(probe) == "fn:yes"
-        assert run(probe) == later
-    finally:
-        cleanup_vm(_resolve_container_task_id(task_id))
+    assert run(probe) == "fn:yes"
+    assert run(probe) == later

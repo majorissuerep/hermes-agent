@@ -30,14 +30,8 @@ ISOLATION_HOST = "host"
 _ISOLATION_MODES = frozenset({ISOLATION_IN_PROCESS, ISOLATION_HOST})
 
 # ctx methods that hand a plugin (or receive from it) live objects no process boundary can carry:
-# raw platform SDK clients, argparse parsers, adapter classes bound to the gateway's event loop, the
-# launch-scope dashboard auth registry. A plugin calling one of these runs only in-process.
+# live approval request/response channels. These registrars run only in-process.
 HOST_UNSUPPORTED_CTX_METHODS: dict[str, str] = {
-    "register_platform": "platform adapters run on the gateway's event loop with native SDK clients",
-    "register_platform_handler": "the handler factory receives the platform's native SDK client",
-    "register_telegram_handler": "the handler factory receives the native Telegram Application",
-    "register_slack_action_handler": "the callback receives native slack_bolt ack/body objects",
-    "register_dashboard_auth_provider": "dashboard auth is owned by the launch process, not a profile",
     "register_approval_transport": "approval transports hold the live approval request/response channel",
 }
 
@@ -48,7 +42,7 @@ HOST_SKIPPED_CTX_METHODS: dict[str, str] = {
 }
 
 # Live ctx facades the host reaches by method call; each call returns plain data.
-HOST_REMOTE_FACADES: frozenset[str] = frozenset({"state", "llm", "platform_actions", "subagent_lifecycle"})
+HOST_REMOTE_FACADES: frozenset[str] = frozenset({"state", "llm", "subagent_lifecycle"})
 
 # Object-taking ctx methods and the ABC the parent checks. The host sends the object's method table
 # and the parent builds a subclass of that ABC whose methods run in the host.
@@ -65,13 +59,6 @@ HOST_OBJECT_BASES: dict[str, str] = {
     "register_context_reference": "agent.context_references:ContextReferenceProvider",
     "register_memory_provider": "agent.memory_provider:MemoryProvider",
 }
-
-# Hooks whose payload carries live handles (the gateway runner, the session store). In the host the
-# callback receives placeholders for those fields, so a plugin that uses them needs in-process.
-HOST_DEGRADED_HOOKS: dict[str, str] = {
-    "pre_gateway_dispatch": "receives the live gateway runner and session store",
-}
-
 
 def _plugins_config(config: Optional[Mapping[str, Any]] = None) -> Mapping[str, Any]:
     if config is None:

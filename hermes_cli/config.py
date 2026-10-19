@@ -529,7 +529,7 @@ def seed_config_file(config_path: Path, template: Optional[Path] = None) -> bool
         if _hermes_io()._home_for(config_path) is not None:
             atomic_config_write(config_path, yaml.safe_load(template.read_text(encoding="utf-8")))
         else:
-            shutil.copy2(template, config_path)
+            shutil.copyfile(template, config_path)
         _secure_file(config_path)
         return True
     save_config(DEFAULT_CONFIG)

@@ -264,3 +264,18 @@ class TestResolveHermesBinWindowsPyGuard:
         monkeypatch.setattr(relaunch_mod.shutil, "which", lambda name: None)
 
         assert relaunch_mod.resolve_hermes_bin() is None
+
+
+@pytest.mark.platforms("posix")
+@pytest.mark.parametrize("same_directory", [True, False])
+def test_relaunch_env_absolute_target_respects_interpreter_directory(tmp_path, monkeypatch, same_directory):
+    interpreter = tmp_path / "venv" / "bin" / "python"
+    monkeypatch.setattr(sys, "executable", str(interpreter))
+    target = interpreter if same_directory else tmp_path / "venv" / "bin-extra" / "python"
+    launcher = tmp_path / "hermes"
+    launcher.write_text(f"#!/usr/bin/env -S {target} -I\n")
+    launcher.chmod(0o755)
+    monkeypatch.setattr(sys, "argv", [str(launcher)])
+    monkeypatch.setattr(relaunch_mod.shutil, "which", lambda _name: None)
+
+    assert relaunch_mod.resolve_hermes_bin() == (str(launcher) if same_directory else None)

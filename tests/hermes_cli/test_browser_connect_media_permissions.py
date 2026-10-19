@@ -4,8 +4,7 @@
 Local Storage). A bare ``os.makedirs`` inherited the umask and landed 0755, so on the
 documented ``HERMES_HOME_MODE=0701`` web-server hatch every other local account could
 read those stores (#77579 / #77486). The same held for the lazily-created media caches
-that hold user content — vision/computer-use captures, downloaded media, gateway inbound
-media. These tests pin the creation contract: 0700 dirs at creation time, a 0600 launch
+that hold user content — vision/computer-use captures and downloaded media. These tests pin the creation contract: 0700 dirs at creation time, a 0600 launch
 stderr log, and 0600 media files, with managed (NixOS) installs deliberately left to
 the configured umask/setgid.
 """
@@ -41,7 +40,7 @@ def test_chrome_debug_data_dir_created_owner_only(tmp_path, monkeypatch):
     assert _mode(home / "chrome-debug") == 0o700
 
 
-def test_chrome_debug_data_dir_reconciles_legacy_world_readable(tmp_path, monkeypatch):
+def test_chrome_debug_data_dir_reconciles_explicit_owner_only_policy(tmp_path, monkeypatch):
     """A profile an older Hermes left at 0755 is tightened on the next launch — the
     exposure is already on disk, so creation-time hardening alone is not enough."""
     home = tmp_path / "hh"
@@ -49,6 +48,7 @@ def test_chrome_debug_data_dir_reconciles_legacy_world_readable(tmp_path, monkey
     monkeypatch.setattr(bc, "get_hermes_home", lambda: home)
     profile = home / "chrome-debug"
     profile.mkdir(parents=True, mode=0o755)
+    monkeypatch.setenv("HERMES_HOME_MODE", "0700")
     bc._ensure_chrome_debug_data_dir(str(profile))
     assert _mode(profile) == 0o700
 
@@ -86,12 +86,24 @@ def test_launch_stderr_log_owner_only(tmp_path, monkeypatch):
     with bc._open_launch_stderr_log(str(log)) as handle:
         handle.write(b"stderr tail")
     assert _mode(log) == 0o600
-    # Legacy exposure on disk: the reconcile must tighten it after the open.
+
+
+def test_legacy_launch_stderr_log_reconciles_on_bare_hosts(tmp_path, monkeypatch):
+    import hermes_constants
+
+    home = tmp_path / "hh"
+    _no_managed(monkeypatch, home)
+    if hermes_constants._container_or_chmod_skipped():
+        pytest.skip("container/shared-mount policy intentionally leaves existing file modes unchanged")
+    monkeypatch.setattr(bc, "get_hermes_home", lambda: home)
+    log = home / "chrome-debug" / bc._LAUNCH_STDERR_LOG
+    log.parent.mkdir(parents=True, mode=0o700)
+    log.write_bytes(b"previous run")
     os.chmod(log, 0o644)
     with bc._open_launch_stderr_log(str(log)) as handle:
         handle.write(b"again")
     assert _mode(log) == 0o600
-    assert log.read_bytes() == b"again"  # O_TRUNC overwrite semantics preserved
+    assert log.read_bytes() == b"again"
 
 
 def test_vision_media_cache_dirs_created_owner_only(tmp_path, monkeypatch):
@@ -104,6 +116,7 @@ def test_vision_media_cache_dirs_created_owner_only(tmp_path, monkeypatch):
         assert _mode(vt._secure_cache_dir(sub, "legacy")) == 0o700
     legacy = home / "cache" / "vision"
     os.chmod(legacy, 0o755)
+    monkeypatch.setenv("HERMES_HOME_MODE", "0700")
     assert _mode(vt._secure_cache_dir("cache/vision", "legacy")) == 0o700
 
 

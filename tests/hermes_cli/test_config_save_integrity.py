@@ -73,7 +73,7 @@ def _save_loaded():
     save_config(cfg)
 
 
-def _save_raw():  # the shape every migration step and ``write_platform_config_field(raw=True)`` use
+def _save_raw():  # the raw-mapping shape used by migrations
     cfg = read_raw_config()
     cfg.setdefault("display", {})["skin"] = "ares"
     save_config(cfg)
@@ -86,19 +86,11 @@ def _tui_config_set():
         raise RuntimeError(reply["error"]["message"])
 
 
-def _dashboard_put():
-    from starlette.testclient import TestClient
-    from hermes_cli.web_server import _SESSION_HEADER_NAME, _SESSION_TOKEN, app
-    client = TestClient(app, raise_server_exceptions=False)
-    r = client.put("/api/config", json={"config": {"display": {"skin": "ares"}}},
-                   headers={_SESSION_HEADER_NAME: _SESSION_TOKEN})
-    if r.status_code != 200:
-        raise RuntimeError(r.text)
 
 
 @pytest.mark.parametrize("last_known_good", ["none", "stale"])
-@pytest.mark.parametrize("write", [_save_loaded, _save_raw, _tui_config_set, _dashboard_put],
-                         ids=["load_config", "read_raw_config", "tui-config.set", "dashboard-put"])
+@pytest.mark.parametrize("write", [_save_loaded, _save_raw, _tui_config_set],
+                         ids=["load_config", "read_raw_config", "tui-config.set"])
 def test_no_single_transient_read_error_reaches_the_file(write, last_known_good, home, monkeypatch):
     """Fail each config read the write performs, one at a time: the write either lands exactly as
     it would have, or is refused with the file byte-identical, and the retry is not poisoned."""

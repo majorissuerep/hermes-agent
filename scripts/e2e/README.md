@@ -154,3 +154,42 @@ compaction, encrypted persistence and resume result. This permits real gateway
 qualification inside private-network pods without exposing the gateway publicly.
 
 See the [reliability contract](../../website/docs/developer-guide/reliability.md).
+
+### Active-session source update (real public Ink)
+
+`active_session_update.py` is a separate required leg, not a replacement for the
+six installation scenarios. Prepare a disposable **native terminal** baseline
+(for example `f5df57070e5df6eab96df38fd5bd0717b4bf5ab7`), its PM environment,
+Node and Ink bundle, an encrypted configured home, and a controlled Git origin
+already publishing the exact candidate. Legacy `bde3` migration stays a standalone
+update leg; this fixture never launches a retired gateway to keep it alive.
+
+Run from the candidate coordinator's installed dev/test environment:
+
+```sh
+python -m scripts.e2e.active_session_update \
+  --root /rehearsal/active \
+  --install-root /rehearsal/active/code \
+  --home /rehearsal/active/user/.hermes \
+  --launcher /rehearsal/active/code/.hermes/bin/hermes \
+  --baseline FULL_NATIVE_BASELINE_SHA --candidate FULL_CANDIDATE_SHA \
+  --evidence /rehearsal/active/evidence --kind live
+```
+
+The coordinator forwards JSON containing `password` and optional `api_key` on
+stdin **from memory** (`api_key` is required for live transcript sanitization), never shell arguments, environment variables or a plaintext
+file. The home must disable first-run onboarding; its selected model must support
+terminal and delegation. Existing isolated Git URL rewrites and PM Node settings
+are inherited. All supplied paths must remain below the disposable root.
+
+This driver types into the actual public Ink PTY, performs one human vault gate,
+then uses four separate conversation turns: retain a marker, run a real terminal
+child `hermes update --yes --keep-stash --backup --branch main`, perform later
+parent configuration and delegated child work, and recover the original marker
+from conversation history. It requires the same native runtime PID/incarnation
+and durable session, unchanged original message bytes, exact Git advancement,
+actual successful updater receipt without owed followups, encrypted state and no
+second unlock. It exits Ink normally and checks independent locked-owner refusal.
+The sanitized PTY transcript and receipt distinguish this from private-RPC-only
+proof; `--kind strict-fixture` is not live-provider qualification. The caller still
+owns dedicated-key revocation and disposable namespace cleanup.

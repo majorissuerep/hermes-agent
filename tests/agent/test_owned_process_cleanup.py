@@ -7,6 +7,7 @@ from agent.turn_context import _bind_turn_identity
 from run_agent import AIAgent
 from tools.process_registry import ProcessRegistry
 from tools.terminal_tool import terminal_tool
+from tests.tools.process_receipt_fixtures import encrypted_process_home as _encrypted_process_home
 
 
 def _agent():

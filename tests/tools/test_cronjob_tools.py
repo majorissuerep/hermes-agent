@@ -380,14 +380,7 @@ class TestUnifiedCronjobTool:
 
 
     def test_create_normalizes_list_form_deliver(self):
-        """deliver=['telegram'] (list) is stored as the string 'telegram'.
-
-        Regression for #17139: MCP clients / scripts sometimes pass ``deliver``
-        as an array.  Prior to the fix, ``['telegram']`` was written verbatim
-        to ``jobs.json`` and the scheduler then tried to resolve the literal
-        string ``"['telegram']"`` as a platform, failing with
-        "no delivery target resolved".
-        """
+        """List-form local output is normalized before durable storage."""
         from cron.jobs import get_job
 
         created = json.loads(
@@ -395,16 +388,16 @@ class TestUnifiedCronjobTool:
                 action="create",
                 prompt="Daily briefing",
                 schedule="every 1h",
-                deliver=["telegram"],
+                deliver=["local"],
             )
         )
         assert created["success"] is True
         stored = get_job(created["job_id"])
-        assert stored["deliver"] == "telegram"
+        assert stored["deliver"] == "local"
 
 
     def test_update_normalizes_list_form_deliver(self):
-        """update with deliver=['telegram'] stores the canonical string."""
+        """Updating list-form local output stores the canonical string."""
         from cron.jobs import get_job
 
         created = json.loads(
@@ -414,12 +407,12 @@ class TestUnifiedCronjobTool:
             cronjob(
                 action="update",
                 job_id=created["job_id"],
-                deliver=["telegram"],
+                deliver=["local"],
             )
         )
         assert updated["success"] is True
         stored = get_job(created["job_id"])
-        assert stored["deliver"] == "telegram"
+        assert stored["deliver"] == "local"
 
 
 # =========================================================================
@@ -478,10 +471,8 @@ class TestAgentCannotSetModelPin:
         assert stored["name"] == "renamed"
 
 
-class TestRegisteredHandlerForwardsAttachToSession:
-    """#84802 — schema + cronjob() already accept attach_to_session, but the
-    registry adapter must forward it or create silently drops the field and
-    update returns "No updates provided." """
+class TestRegisteredHandlerRejectsRemovedSessionDelivery:
+    """Removed attachment must not be silently accepted by the registry adapter."""
 
     @pytest.fixture(autouse=True)
     def _setup_cron_dir(self, tmp_path, monkeypatch):
@@ -489,8 +480,8 @@ class TestRegisteredHandlerForwardsAttachToSession:
         monkeypatch.setattr("cron.jobs.JOBS_FILE", tmp_path / "cron" / "jobs.json")
         monkeypatch.setattr("cron.jobs.OUTPUT_DIR", tmp_path / "cron" / "output")
 
-    def test_create_persists_attach_to_session(self):
-        from cron.jobs import get_job
+    def test_create_rejects_attach_to_session(self):
+        from cron.jobs import list_jobs
         from tools.registry import registry
 
         created = json.loads(
@@ -501,22 +492,17 @@ class TestRegisteredHandlerForwardsAttachToSession:
                     "name": "Continuable cron canary",
                     "schedule": "1h",
                     "repeat": 1,
-                    "deliver": "origin",
+                    "deliver": "local",
                     "attach_to_session": True,
                     "prompt": "Reply exactly: canary",
                 },
             )
         )
-        assert created["success"] is True
-        assert created.get("job", {}).get("attach_to_session") is True
-        stored = get_job(created["job_id"])
-        assert stored is not None
-        assert stored.get("attach_to_session") is True
-        listing = json.loads(registry.dispatch("cronjob_manage", {"action": "list"}))
-        listed = next(j for j in listing["jobs"] if j["job_id"] == created["job_id"])
-        assert listed.get("attach_to_session") is True
+        assert created["success"] is False
+        assert "attach_to_session is unsupported" in created["error"]
+        assert list_jobs() == []
 
-    def test_update_persists_attach_to_session(self):
+    def test_update_rejects_attachment_without_changing_local_job(self):
         from cron.jobs import get_job
         from tools.registry import registry
 
@@ -544,11 +530,11 @@ class TestRegisteredHandlerForwardsAttachToSession:
                 },
             )
         )
-        assert updated["success"] is True, updated
-        assert updated.get("job", {}).get("attach_to_session") is True
+        assert updated["success"] is False, updated
+        assert "attach_to_session is unsupported" in updated["error"]
         stored = get_job(created["job_id"])
         assert stored is not None
-        assert stored.get("attach_to_session") is True
+        assert "attach_to_session" not in stored
 
         disabled = json.loads(
             registry.dispatch(

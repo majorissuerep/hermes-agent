@@ -843,10 +843,3 @@ class TestConversationStartedTwoLine:
         json.dumps(vol, ensure_ascii=False).encode("utf-8")
         assert "Conversation started: Tuesday, July 14, 2026" in vol
         assert "Paris, Madrid (heure d'" in vol and "UTC+02:00" in vol
-
-    def test_timeless_bot_chat_unaffected(self):
-        agent = self._agent("20200110_090000_old")
-        agent._bot_chat_timeless_prompt = True
-        vol = self._volatile(agent)
-        assert "Conversation started:" not in vol
-        assert "as of the last context rebuild" not in vol

@@ -1699,7 +1699,7 @@ def _plugins_toggle(rid, params):
     if not ident:
         return _err(rid, 4019, "plugins.toggle requires a 'key' or 'name'")
     _ensure_plugin_activation_listener()
-    toggle = _tools_mod("hermes_cli.plugins_cmd").dashboard_set_agent_plugin_enabled
+    toggle = _tools_mod("hermes_cli.plugins_cmd").set_agent_plugin_enabled
     result = toggle(ident, enabled=bool(params.get("enable")))
     if not result.get("ok"):
         return _err(rid, 5026, result.get("error") or "toggle failed")
@@ -1709,7 +1709,7 @@ def _plugins_toggle(rid, params):
     return _ok(rid, _with_activation({
         "ok": True, "unchanged": bool(result.get("unchanged")),
         "restart_required": bool(result.get("restart_required")),
-        "gateway_reloaded": bool(result.get("gateway_reloaded")), "activation": result.get("activation"),
+        "activation": result.get("activation"),
         "name": key, "plugin": row}, key))
 
 

@@ -113,7 +113,7 @@ def test_declared_capabilities_for_entrypoint_uses_distribution_metadata(
         dist=SimpleNamespace(version="1.0", metadata={"Summary": ""}),
     )
     capability_ep = SimpleNamespace(
-        name="thread-namer.gateway.platform_actions",
+        name="thread-namer.llm.model_override",
         value="thread_namer.plugin:register",
         group="hermes_agent.plugin_capabilities",
     )
@@ -128,7 +128,7 @@ def test_declared_capabilities_for_entrypoint_uses_distribution_metadata(
     )
 
     assert plugins_cmd._declared_capabilities_for_key("thread-namer") == [
-        "gateway.platform_actions"
+        "llm.model_override"
     ]
 
 

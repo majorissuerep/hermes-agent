@@ -131,24 +131,12 @@ VALID_HOOKS: set[str] = {
     "on_session_finalize", "on_session_reset",
     # on_skill_lifecycle: successful skill lifecycle facts (local skill name visible to plugins).
     "on_skill_lifecycle", "subagent_start", "subagent_stop",
-    # pre_gateway_dispatch: once per incoming MessageEvent, after the internal-event guard, BEFORE
-    # auth/pairing and dispatch. Kwargs: event, gateway, session_store. Return {"action": "skip",
-    # "reason"} -> drop; {"action": "rewrite", "text"} -> replace event.text; "allow"/None -> normal.
-    "pre_gateway_dispatch", "post_gateway_admission",  # post_*: fail-open consume, gateway/run_inbound_consumer.py
-    # agent_loop_stopped: an agent turn was interrupted mid-run (/stop, or the running-agent
-    # fast-path of /new; see gateway/run.py::_interrupt_and_clear_session). Kwargs: session_key,
-    # platform, reason, invalidation_reason. Return values are ignored.
+    # Native TUI stop/reset lifecycle observer; returns are ignored.
     "agent_loop_stopped",
     # Approval observers (returns ignored; veto via pre_tool_call). Kwargs: command, description, pattern_key,
     # pattern_keys, session_key, surface ("cli"|"gateway"|"smart"|"mcp-elicitation/<server>"|"mcp-trust/<server>"|
     # "vault-payment"); post_approval_response adds choice/decided_by. on_human_input_*: tools/human_input_hooks.py.
     "pre_approval_request", "post_approval_response", "on_human_input_request", "on_human_input_resolved",
-    # on_room_member_activity: a hosted Group Chat member's live runtime events (tool.started/completed,
-    # request.opened, message.delta, reasoning.delta, turn.error, ...) stamped with room_id, thread_id,
-    # member_id, turn_id, task_id, execution_generation. Observer, queued per consumer off the token
-    # path (agent.plugin_stream_hooks); never written to the durable room log. Kwargs: those
-    # coordinates + kind, seq, payload (the client-safe session event payload, approvals redacted).
-    "on_room_member_activity",
     # pre_transcription: after provider resolution, BEFORE any backend runs. Kwargs: file_path,
     # provider, model, language, prompt, source. Return None or a dict mutating prompt/language/
     # model (registration order, last-writer-wins; file_path is read-only).
@@ -173,31 +161,7 @@ VALID_HOOKS: set[str] = {
     #   (privacy: task ids, assignees, workspace paths).
     "on_kanban_worker_spawned", "on_kanban_worker_exited", "on_kanban_worker_stale_claim",
     "on_kanban_task_updated", "on_kanban_dispatch_tick",
-    # gateway_platform_event: normalized envelopes only, never raw SDK objects or adapter handles.
-    # Kwargs: platform, event_type, payload (event_type-local; see hooks.md). New event types land
-    # only together with real fire-sites.
-    # on_kanban_dispatch_tick fires once per dispatcher tick in dispatch_once, strictly AFTER the board's
-    # single-writer dispatch lock has been released (the #56066 original fired inside the lock — the #64231
-    # disposition mandates the post-lock re-port), so a slow subscriber can never extend the writer critical
-    # section. Kwargs: board: str | None, profile_name: str, dry_run: bool, outcome: "ok" | "skipped_locked"
-    # | "idle", result: hermes_cli.kanban_db.DispatchResult (spawned, reclaimed, promoted,
-    # reconciled_orphans, crashed, stale, timed_out, auto_blocked, rate_limited, auto_assigned_default,
-    # respawn_guarded, skipped_per_profile_capped, skipped_unassigned, skipped_nonspawnable,
-    # skipped_locked). Privacy: result carries task ids, assignees, and workspace paths.
-    # Gateway platform-boundary observer hooks (#64176). Observer-only; each callback isolated by
-    # invoke_hook. This surface grants no adapter handles or platform actions. Fired today: Telegram
-    # "reaction" + "message_edited"; Discord "message_edited", "message_deleted", "thread_created",
-    # "thread_renamed". Each event type carries its own event-local additive payload contract (see
-    # hooks.md). Other event types and hook names land here only together with real fire-sites and payload
-    # contracts; no inert VALID_HOOKS surface is registered ahead of implementation.
-    "gateway_platform_event",
-    # pre_command: BEFORE a recognized slash command's handler on CLI and gateway canonical dispatch;
-    # returns IGNORED in v1. Deliberately NOT fired for the gateway's running-agent intercept path
-    # (/stop, /approve, busy_policy) — a slow/hostile plugin must not touch the operator's escape
-    # hatches. Kwargs: surface, command (canonical), alias_used, args_raw, session_key, platform.
-    # Slash-command dispatch observer (#64204, observer-first per #64182 ground rule 3). Return values are
-    # IGNORED in v1 — a plugin returning a directive-shaped dict gets a debug log so future block/rewrite
-    # adopters are discoverable once the middleware variant ships against the #64231 taxonomy.
+    # Native recognized slash-command observer; directive returns are ignored.
     "pre_command",
 }
 
@@ -221,8 +185,6 @@ class LoadedPlugin:
     commands_registered: list[str] = field(default_factory=list)
     enabled: bool = False
     error: Optional[str] = None
-    # Bundled platform recorded as a not-yet-imported loader (see _register_deferred_platform).
-    deferred: bool = False
 
 
 class PluginContext:
@@ -282,14 +244,6 @@ class PluginContext:
         """This plugin's profile-scoped durable JSON state facade."""
         return PluginState(self.plugin_id, self.manifest.skill_namespace)
 
-    @cached_property
-    def platform_actions(self):
-        """Capability-gated platform action facade (``add_reaction``, ``set_thread_title``). Every call
-        re-checks ``gateway.platform_actions`` (legacy ``plugins.entries.<id>.allow_platform_actions``,
-        default OFF) and returns ``{"ok": bool, ...}`` — verbs never raise into hook dispatch; no adapter
-        handles or raw SDK objects."""
-        from hermes_cli.platform_actions import PlatformActions
-        return PlatformActions(self.plugin_id)
 
     def _wrong_type(self, obj: Any, base_class: type, label: str, article: str = "a") -> bool:
         """Warn-and-ignore gate shared by every registrar that requires a base class."""
@@ -647,8 +601,7 @@ class PluginContext:
         argument_mode: str | None = None,
     ) -> Optional[PluginRegistration]:
         """Register an in-session slash command (``/name``); handler ``fn(raw_args: str) -> str | None``
-        (sync or async). ``args_hint`` (e.g. ``"<file>"``) lets adapters like Discord surface an argument
-        field; without it the command registers parameterless there but still accepts trailing text."""
+        (sync or async). ``args_hint`` (e.g. ``"<file>"``) describes native completion arguments."""
         clean = name.lower().strip().lstrip("/").replace(" ", "-")
         if not clean:
             logger.warning("Plugin '%s' tried to register a command with an empty name.", self.manifest.name)
@@ -731,47 +684,8 @@ class PluginContext:
 
 
 
-    def register_slack_action_handler(
-        self, action_id: Any, callback: Callable,
-    ) -> PluginRegistration:
-        """Register a Slack Block Kit action handler, wired into ``slack_bolt.AsyncApp`` at connect.
-        ``action_id`` is anything ``slack_bolt.App.action()`` accepts; ``callback`` is
-        ``async def handler(ack, body, action)`` (``await ack()`` within 3s). Raises ``ValueError`` for
-        a non-callable callback or empty ``action_id``."""
-        if not callable(callback):
-            raise self._refuse("a Slack action handler with a non-callable callback")
-        if action_id is None or (isinstance(action_id, str) and not action_id.strip()):
-            raise self._refuse("a Slack action handler with an empty action_id")
-        entry = (action_id, callback, self.manifest.name)
-        handlers = self._manager._slack_action_handlers
-        handlers.append(entry)
-        handle = self._track("slack_action_handler", repr(action_id),
-                             lambda: self._manager._remove_identity(handlers, entry))
-        logger.debug("Plugin %s registered Slack action handler: %s", self.manifest.name, action_id)
-        return handle
 
-    def register_platform_handler(self, platform: str, factory: Callable) -> None:
-        """Register ``factory(native, adapter)``, invoked at ``connect()`` before/as the core handlers
-        register (``adapter`` read-only). ``native``: telegram PTB ``Application``, discord
-        ``commands.Bot``, slack ``AsyncApp``, matrix client, teams ``App``, dingtalk
-        ``DingTalkStreamClient``, line aiohttp ``web.Application``, others ``None``. Keep SDK imports
-        inside the factory; exceptions are logged and the platform still connects. Scope handlers in
-        first-match dispatch tables so core flows keep working. Raises ``ValueError`` when not callable
-        or platform is empty."""
-        if not callable(factory):
-            raise self._refuse("a platform handler factory with a non-callable factory")
-        key = (platform or "").strip().lower()
-        if not key:
-            raise self._refuse("a platform handler factory with an empty platform name")
-        self._manager._platform_handler_factories.setdefault(key, []).append((factory, self.manifest.name))
-        logger.debug("Plugin %s registered %s handler factory: %s", self.manifest.name, key,
-                     getattr(factory, "__name__", repr(factory)))
 
-    def register_telegram_handler(self, factory: Callable) -> None:
-        """``register_platform_handler("telegram", factory)``. PTB dispatches only the FIRST matching
-        handler per group and core registers a catch-all ``CallbackQueryHandler`` — always scope with
-        ``pattern=`` or you swallow the core button flows."""
-        self.register_platform_handler("telegram", factory)
 
     @_serialized_replacement
     def register_auxiliary_task(
@@ -1106,7 +1020,6 @@ class PluginManager(PluginLoaderMixin, PluginDispatchMixin, PluginLedgerMixin):
         self._memory_hook_registrations: dict[tuple[str, str], list[PluginRegistration]] = {}
         self._middleware: dict[str, list[Callable]] = {}
         self._plugin_tool_names: set[str] = set()
-        self._plugin_platform_names: set[str] = set()
         self._cli_commands: dict[str, dict] = {}
         self._plugin_commands: dict[str, dict] = {}
         self._system_prompt_sections: dict[str, PluginSystemPromptSection] = {}
@@ -1116,8 +1029,6 @@ class PluginManager(PluginLoaderMixin, PluginDispatchMixin, PluginLedgerMixin):
         self._portable_mcp_server_plugins: dict[str, str] = {}
         self._aux_tasks: dict[str, dict[str, Any]] = {}
         self._approval_transports: dict[str, Any] = {}
-        self._slack_action_handlers: list[tuple] = []
-        self._platform_handler_factories: dict[str, list[tuple]] = {}
         # Process-owned discovery listeners (``on_plugin_loaded``); never cleared by unload().
         self._plugin_loaded_listeners: list[Callable] = []
         # Event bus: owner-tagged subscriptions (unload removes zombies); one daemon worker keeps
@@ -1159,8 +1070,6 @@ class PluginManager(PluginLoaderMixin, PluginDispatchMixin, PluginLedgerMixin):
         # Deferred platforms whose client tools registered at discovery (see
         # _register_deferred_platform_tools): imported package (don't re-execute on materialize)
         # and contributed tool names (so `hermes plugins list` still attributes them).
-        self._predeclared_modules: dict[str, types.ModuleType] = {}
-        self._predeclared_tools: dict[str, list[str]] = {}
 
     @property
     def has_gateway_message_injector(self) -> bool:
@@ -1219,7 +1128,7 @@ class PluginManager(PluginLoaderMixin, PluginDispatchMixin, PluginLedgerMixin):
                 return
             # ``on_plugin_loaded`` reports the plugins this sweep loads that the process did not have before
             # (boot: everything; a mid-run install/enable: just the newcomer), keyed on the pre-sweep set.
-            loaded_before = frozenset(k for k, p in self._plugins.items() if not p.error and not p.deferred)
+            loaded_before = frozenset(k for k, p in self._plugins.items() if not p.error)
             if force:
                 self.unload()  # the ledger owns teardown of process-global registries
             if env_var_enabled("HERMES_SAFE_MODE"):
@@ -1445,18 +1354,8 @@ class PluginManager(PluginLoaderMixin, PluginDispatchMixin, PluginLedgerMixin):
         """Read installed plugin entry points (see :func:`discover_entrypoint_manifests`)."""
         return discover_entrypoint_manifests()
 
-    def get_slack_action_handlers(self) -> list[tuple]:
-        """``(action_id, callback, plugin_name)`` tuples for the Slack adapter to wire at connect."""
-        return list(self._slack_action_handlers)
 
-    def get_platform_handler_factories(self, platform: str) -> list[tuple]:
-        """``(factory, plugin_name)`` tuples for one platform; adapters call ``factory(native,
-        adapter)`` at connect (see :meth:`PluginContext.register_platform_handler`)."""
-        return list(self._platform_handler_factories.get((platform or "").strip().lower(), []))
 
-    def get_telegram_handler_factories(self) -> list[tuple]:
-        """Back-compat alias for ``get_platform_handler_factories("telegram")``."""
-        return self.get_platform_handler_factories("telegram")
 
     def list_plugins(self) -> list[dict[str, Any]]:
         """Return a list of info dicts for all discovered plugins."""

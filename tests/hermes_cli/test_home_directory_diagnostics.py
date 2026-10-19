@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from hermes_cli import config
+from hermes_constants import _container_or_chmod_skipped
 
 
 @pytest.mark.platforms("linux")
@@ -63,7 +64,7 @@ def test_initialization_preserves_external_directory_modes(tmp_path, monkeypatch
         assert (home if linked == "home" else home / "logs").is_symlink()
         assert target.stat().st_mode & 0o777 == 0o750
         assert curator.stat().st_mode & 0o777 == 0o750
-    else:
+    elif not _container_or_chmod_skipped():
         assert (home / "logs").stat().st_mode & 0o777 == 0o700
 
 
@@ -80,6 +81,8 @@ def test_symlinked_parent_above_home_is_not_an_operator_home_link(
     secure: they must end up 0o700, both when created fresh and when a previous run left them
     at the 0o755 default.
     """
+    # Explicit policy exercises link ownership on both bare hosts and containers.
+    monkeypatch.setenv("HERMES_HOME_MODE", "0700")
     real_root = tmp_path / "real"
     real_root.mkdir()
     alias = tmp_path / "alias"

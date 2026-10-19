@@ -1911,18 +1911,6 @@ class TestConfigCommandFailClosedSurface:
         assert config_path.read_text(encoding="utf-8") == original
 
 
-def test_gateway_multiplex_keys_are_recognized_config_keys():
-    """``hermes config set gateway.multiplex_profiles true`` used to warn 'not a recognized config
-    key' although gateway/config.py reads it; the key (and profile_routes) live in DEFAULT_CONFIG."""
-    from hermes_cli.config import _validate_config_key
-    from hermes_cli.config_defaults import DEFAULT_CONFIG
-    assert "auto_migrate" not in DEFAULT_CONFIG["gateway"]
-    assert _validate_config_key("gateway.multiplex_profiles") == (True, None)
-    assert _validate_config_key("gateway.profile_routes") == (True, None)
-    assert _validate_config_key("gateway.auto_multiplex_migration") == (True, None)
-    known, suggestion = _validate_config_key("gateway.auto_migrate")
-    assert known is False
-    assert suggestion == "gateway.auto_multiplex_migration"
 
 
 def test_empty_dict_default_sections_are_open_containers():

@@ -1,8 +1,8 @@
 """Mid-run plugin activation: what a just-loaded plugin does NOW vs next session (#87770).
 
 One seam for every surface: ``PluginManager.on_plugin_loaded`` fires with one
-:func:`plugin_activation_summary` per loaded plugin. Gateway handlers (slash commands, transform hooks,
-platform callbacks) are live as soon as the plugin loads; portable MCP servers and skills go live in
+:func:`plugin_activation_summary` per loaded plugin. Native commands and hooks are live as soon as
+the plugin loads; portable MCP servers and skills go live in
 the open chats of the plugin's profile (:func:`load_and_go_live`; MCP tools are deferred behind
 tool_search, so the cached prompt prefix is unchanged); Python tools and system-prompt sections stay
 deferred to the next session (prompt-cache invariant, same as ``/skills install``).
@@ -21,20 +21,12 @@ logger = logging.getLogger(__name__)
 
 _GO_LIVE_LOCK = threading.Lock()
 
-# Hooks the gateway consults per inbound/outbound message: live as soon as the registry holds them.
-_GATEWAY_TRANSFORM_HOOKS = frozenset({
-    "transform_llm_output", "transform_tool_result", "transform_terminal_output", "pre_gateway_dispatch",
-    "gateway_platform_event", "pre_command",
-})
-
-
 def plugin_activation_summary(manager: Any, plugin_key: str) -> dict[str, Any]:
     """``{name, key, activated_now: {kind: [names]}, deferred: {kind: [names]}}`` for one loaded plugin,
     read from what it actually registered (ownership ledger + handler registries), not from what its
     manifest promises. Keys appear only when non-empty.
 
-    ``activated_now``: ``gateway_commands`` (slash names), ``gateway_transforms`` / ``hooks`` (hook names),
-    ``callbacks`` (platforms with a ``register_platform_handler`` factory / Slack action ids), ``locales``
+    ``activated_now``: ``commands`` (native slash names), ``hooks`` (hook names), ``locales``
     (``<lang>.<surface>`` language-pack layers).
     ``deferred``: ``tools`` (tool names; next session), ``prompt`` (section ids; next session),
     ``mcp_servers`` (the plugin's mcp.json server names exactly as registered; until ``mcp.reload``)."""
@@ -47,17 +39,10 @@ def plugin_activation_summary(manager: Any, plugin_key: str) -> dict[str, Any]:
         kinds.setdefault(reg.kind, []).append(str(reg.key))
     now: dict[str, list[str]] = {}
     if kinds.get("command"):
-        now["gateway_commands"] = sorted(kinds["command"])
+        now["commands"] = sorted(kinds["command"])
     hooks = set(kinds.get("hook", ()))
-    if hooks & _GATEWAY_TRANSFORM_HOOKS:
-        now["gateway_transforms"] = sorted(hooks & _GATEWAY_TRANSFORM_HOOKS)
-    if hooks - _GATEWAY_TRANSFORM_HOOKS:
-        now["hooks"] = sorted(hooks - _GATEWAY_TRANSFORM_HOOKS)
-    callbacks = sorted(platform for platform, factories in manager._platform_handler_factories.items()
-                       if any(plugin == name for _f, plugin in factories))
-    callbacks += [f"slack:{a}" for a in kinds.get("slack_action_handler", ())]
-    if callbacks:
-        now["callbacks"] = callbacks
+    if hooks:
+        now["hooks"] = sorted(hooks)
     if kinds.get("locale"):  # language-pack layers: the i18n caches reset on registration, so live at once
         now["locales"] = sorted(kinds["locale"])
     deferred: dict[str, list[str]] = {}
@@ -75,10 +60,10 @@ def plugin_activation_summary(manager: Any, plugin_key: str) -> dict[str, Any]:
 
 
 def activation_summaries(manager: Any) -> list[dict[str, Any]]:
-    """One summary per loaded (non-deferred-platform, non-errored) plugin — the ``on_plugin_loaded`` payload."""
+    """One summary per loaded, non-errored plugin — the ``on_plugin_loaded`` payload."""
     out = []
     for key, loaded in list(manager._plugins.items()):
-        if getattr(loaded, "deferred", False) or getattr(loaded, "error", None):
+        if getattr(loaded, "error", None):
             continue
         out.append(plugin_activation_summary(manager, key))
     return out
@@ -118,7 +103,7 @@ def _go_live(name: str) -> Optional[dict[str, Any]]:
         from hermes_cli.plugins import _join_background_discovery, get_plugin_manager
         _join_background_discovery()
         manager = get_plugin_manager()
-        # Other forced passes (a reload-plugins verb, the dashboard) do not take the go-live lock, so the
+        # Other forced discovery passes do not take the go-live lock, so the
         # reads share the discovery lock with the pass that produced them.
         with manager._discovery_lock:
             manager.discover_and_load(force=True)

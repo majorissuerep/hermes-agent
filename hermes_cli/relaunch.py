@@ -59,6 +59,31 @@ def _extract_inherited_flags(argv: Sequence[str]) -> list[str]:
     return flags
 
 
+def _python_launcher_escapes_interpreter(path: pathlib.Path) -> bool:
+    """Reject PATH-resolved Python shebangs without resolving venv symlinks."""
+    try:
+        with path.open("rb") as stream:
+            head = stream.read(256)
+    except OSError:
+        return False
+    if not head.startswith(b"#!"):
+        return False
+    shebang = head.decode("utf-8", errors="replace").splitlines()[0]
+    if "python" not in shebang.lower():
+        return False
+    tokens = shebang[2:].strip().split()
+    if not tokens:
+        return True
+    interpreter = pathlib.Path(tokens[0])
+    if interpreter.name in ("env", "env.exe"):
+        targets = [token for token in tokens[1:] if not token.startswith("-")]
+        if not targets or not pathlib.Path(targets[0]).is_absolute():
+            return True
+        interpreter = pathlib.Path(targets[0])
+    running_dir = os.path.dirname(os.path.abspath(sys.executable)).lower()
+    return str(interpreter.parent).lower() != running_dir
+
+
 def resolve_hermes_bin() -> Optional[str]:
     """Hermes entry point: ``sys.argv[0]`` if a real executable, else ``which hermes``, else ``None``
     (caller falls back to ``python -m hermes_cli.main``).
@@ -79,9 +104,7 @@ def resolve_hermes_bin() -> Optional[str]:
             return _is_python_script(p)
         # A console script pinned to the running venv (``#!<venv>/bin/python``) keeps the venv and
         # stays exec-able; a shebang that resolves elsewhere (``env python3``) loses it.
-        from hermes_cli.linux_desktop_entry import _needs_interpreter
-
-        return _needs_interpreter(pathlib.Path(p))
+        return _python_launcher_escapes_interpreter(pathlib.Path(p))
 
     # Absolute executable (nix store, venv wrappers, …), then relative-to-CWD, then PATH.
     if (

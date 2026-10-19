@@ -66,21 +66,23 @@ class ModelWire(http.server.BaseHTTPRequestHandler):
 
 
 class TerminalPTY:
-    def __init__(self, env, password, transcript, *, args=()):
+    def __init__(self, env, password, transcript, *, args=(), argv=None, project=None, timeout=45, sensitive_values=()):
         import fcntl
         import pty
         import termios
 
         self.password = password
+        self.timeout = timeout
+        self.sensitive_values = (password, *sensitive_values)
         self.transcript = transcript
         self.prompts = 0
         self.output = bytearray()
         self.screen = Screen(42, 140)
-        project = Path(env["HOME"]) / "foreign-project"
+        project = Path(project) if project is not None else Path(env["HOME"]) / "foreign-project"
         project.mkdir(parents=True, exist_ok=True)
         self.master, slave = pty.openpty()
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 42, 140, 0, 0))
-        self.process = subprocess.Popen([sys.executable, "-m", "hermes_cli.main", *args],
+        self.process = subprocess.Popen(argv or [sys.executable, "-m", "hermes_cli.main", *args],
             stdin=slave, stdout=slave, stderr=slave, cwd=project,
             env={**env, "TERM": "xterm-256color"}, start_new_session=True,
             preexec_fn=lambda: fcntl.ioctl(0, termios.TIOCSCTTY, 0))  # noqa: PLW1509 -- child requires its controlling PTY
@@ -99,11 +101,15 @@ class TerminalPTY:
             if self.prompts == 0 and b"Unlock master password:" in self.output:
                 self.prompts += 1
                 os.write(self.master, self.password.encode() + b"\n")
-            self.transcript.write_text(self.text().replace(self.password, "[REDACTED]"))
+            self.transcript.write_text(self.text())
         return self.text()
 
     def text(self):
-        return "\n".join(self.screen.history + self.screen.display())
+        text = "\n".join(self.screen.history + self.screen.display())
+        for value in self.sensitive_values:
+            if value:
+                text = text.replace(value, "[REDACTED]")
+        return text
 
     def until(self, predicate, description):
         print("PTY waiting:", description, flush=True)
@@ -119,14 +125,19 @@ class TerminalPTY:
                 raise AssertionError(f"terminal exited {self.process.returncode}: {description}\n{text[-6000:]}")
             return False
         try:
-            return wait_until(ready, timeout=45, what=description)
+            return wait_until(ready, timeout=self.timeout, what=description)
         except AssertionError as error:
             raise AssertionError(str(error) + "\n" + self.text()[-6000:]) from error
 
-    def submit(self, text):
+    def submit(self, text, *, rendered_suffix=None):
         os.write(self.master, text.encode())
         # Model actual separate keypresses: <50ms text+Enter is intentionally treated as paste.
-        self.until(lambda output: " ".join(text.split()) in " ".join(output.split()), "typed text rendered")
+        if rendered_suffix is None:
+            self.until(lambda output: " ".join(text.split()) in " ".join(output.split()), "typed text rendered")
+        else:
+            expected = "".join(rendered_suffix.split())
+            self.until(lambda _output: expected in "".join("".join(self.screen.display()).split()),
+                       "current input suffix rendered")
         rendered = time.monotonic()
         self.until(lambda _output: time.monotonic() - rendered >= 0.15,
                    "rendered text clear of the rapid-input paste window")

@@ -525,24 +525,6 @@ def _admit_and_save_plugin_sets(
 
 
 
-_BASIC_AUTH_PLUGIN_KEYS = frozenset({"basic", "dashboard_auth/basic"})
-
-
-def ensure_basic_auth_plugin_enabled_in_config(cfg: dict) -> bool:
-    """Drop the bundled basic dashboard-auth plugin from ``plugins.disabled`` in *cfg*.
-
-    ``hermes setup`` / ``hermes plugins disable basic`` can park it there while
-    ``dashboard.basic_auth`` is configured, and password auth then silently fails.
-    Returns True when modified.
-    """
-    plugins_cfg = cfg.get("plugins")
-    disabled = plugins_cfg.get("disabled") if isinstance(plugins_cfg, dict) else None
-    if not isinstance(disabled, list) or not (set(disabled) & _BASIC_AUTH_PLUGIN_KEYS):
-        return False
-    plugins_cfg["disabled"] = sorted(set(disabled) - _BASIC_AUTH_PLUGIN_KEYS)
-    return True
-
-
 def _discard_key_and_leaf(names: set, key: str) -> None:
     """Drop *key* and its bare leaf (``web/exa`` -> ``exa``) from *names*, so a
     stale legacy bare-name entry can't keep vetoing the canonical key."""
@@ -799,9 +781,9 @@ def _is_portable_plugin_dir(dir_path) -> bool:
         return False
 
 
-# Manifest kinds active-by-default when bundled (backends auto-load, platforms register lazily,
+# Manifest kinds active-by-default when bundled (backends auto-load,
 # model providers go through providers/ discovery). Standalone/exclusive kinds stay opt-in.
-_BUNDLED_DEFAULT_ON_KINDS = frozenset({"backend", "platform", "model-provider"})
+_BUNDLED_DEFAULT_ON_KINDS = frozenset({"backend", "model-provider"})
 
 
 def _default_on(dir_path, source: str) -> bool:
@@ -894,7 +876,7 @@ def _plugin_status(name: str, enabled: set, disabled: set, key: str = "", *, sou
                    dir_path=None, active: frozenset | set = frozenset()) -> str:
     """User-facing activation state for a plugin name or key. Mirrors ``gate_manifest``: an explicit
     disable wins, then the allow-list, then the activations that need no list entry — bundled
-    backends/platforms and model providers from any source (*source* + *dir_path*) and category-selected providers
+    backends and model providers from any source (*source* + *dir_path*) and category-selected providers
     (*active*, see :func:`_category_active_names`)."""
     names = {name, key}
     if names & disabled:
@@ -989,7 +971,7 @@ def _toggle_plugin_toolset(name: str, *, enable: bool, toolset_key: Optional[str
         save_config(config)
 
 
-def dashboard_set_agent_plugin_enabled(name: str, *, enabled: bool) -> dict[str, Any]:
+def set_agent_plugin_enabled(name: str, *, enabled: bool) -> dict[str, Any]:
     """Enable or disable a plugin in ``config.yaml`` (runtime allow/deny lists). *name* may be the
     canonical key, the manifest name or a unique bare leaf; the canonical key is what gets written
     (the loader never matches a bare leaf, and a stale key in ``disabled`` outranks a manifest-name
@@ -1011,8 +993,8 @@ def dashboard_set_agent_plugin_enabled(name: str, *, enabled: bool) -> dict[str,
             "restart_required": False,
         }
     if changed and enabled:
-        # Load it now, here and in the running gateway; ``activation`` tells the UI what is live vs
-        # deferred, and ``restart_required`` only survives when no gateway answered (#87770).
+        # Load native capabilities here; the result distinguishes live changes from
+        # Python tools and prompt sections deferred to the next session.
         from hermes_cli.plugins_activation import activate_plugin_now
         result = {"ok": True, "name": key, "unchanged": False, **activate_plugin_now(key)}
         # Only now is the plugin loaded here, so its toolset key resolves: a backend that scanned
@@ -1021,8 +1003,7 @@ def dashboard_set_agent_plugin_enabled(name: str, *, enabled: bool) -> dict[str,
         return result
     if changed:
         _toggle_plugin_toolset(key, enable=False, toolset_key=toolset_key)
-    # Disable is config-only: there is no un-wire primitive, so a running gateway keeps the plugin's
-    # handlers until restart and every UI says so — #71595/#54941.
+    # Disable is config-only: the current session retains its pinned plugin surface.
     return {"ok": True, "name": key, "unchanged": not changed, "restart_required": changed}
 
 

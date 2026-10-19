@@ -183,11 +183,8 @@ def test_model_switch_marker_lands_in_the_live_session(monkeypatch, tmp_path):
         db.close()
 
 
-def test_model_switch_markers_do_not_accumulate_across_switches(monkeypatch, tmp_path):
-    """The in-memory path is self-replacing: each switch strips the prior marker so N switches leave ONE
-    marker, not N re-sent on every API call (#65891). The DURABLE write had no counterpart, so N switches
-    left N active rows that all replay on resume — the invariant held in memory only. Filed in the live
-    session (see the test above), those rows are exactly the reporter's 130 stray markers."""
+def test_model_switch_markers_preserve_every_cached_prefix(monkeypatch, tmp_path):
+    """Switch notices append: replacing or deactivating past rows would invalidate cached context."""
     db = SessionDB(db_path=tmp_path / "state.db")
     sid, key = _desktop_session(monkeypatch, db)
     session = server._sessions[sid]
@@ -198,19 +195,22 @@ def test_model_switch_markers_do_not_accumulate_across_switches(monkeypatch, tmp
         assert server._ensure_session_db_row(session) is not False
         agent = _flush_agent(db, key)
         session["agent"] = agent
+        previous = db.get_messages(key)
         for i in range(3):
             server._append_model_switch_marker(session, model=f"model-{i}", provider="test-provider")
+            current = db.get_messages(key)
+            assert current[:len(previous)] == previous
+            previous = current
         prefix = server._MODEL_SWITCH_MARKER_PREFIX
         # LIVE rows only (get_messages defaults to active=1), and full content: the marker prefix is
         # longer than the _rows() helper's 48-char preview.
         live = [r for r in db.get_messages(key) if prefix in str(r.get("content") or "")]
-        assert len(live) == 1, (
-            f"3 switches must leave 1 live durable marker, not {len(live)}: "
+        assert len(live) == 3, (
+            f"3 switches must preserve 3 live durable markers, not {len(live)}: "
             f"{[str(r.get('content'))[:60] for r in live]}")
-        # The superseded rows are preserved inactive, never deleted (same contract as deactivate_message).
         kept = [r for r in db.get_messages(key, include_inactive=True)
                 if prefix in str(r.get("content") or "")]
-        assert len(kept) == 3, f"superseded markers must be kept inactive, not deleted: {len(kept)}"
+        assert kept == live, "model switches must not retire cached-prefix rows"
     finally:
         server._sessions.pop(sid, None)
         db.close()

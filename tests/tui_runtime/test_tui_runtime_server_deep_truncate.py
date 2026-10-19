@@ -105,6 +105,7 @@ def test_deep_truncate_counts_every_durable_row_a_merged_carrier_holds(monkeypat
 
 def test_prompt_submit_empty_truncation_allowed_with_confirm(monkeypatch):
     """Intentional restore/regenerate of the first user turn may wipe history."""
+    monkeypatch.setattr(server, "_stage_first_contact_onboarding_note", lambda *_args: None)
 
     seen = {}
     replaced = []

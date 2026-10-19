@@ -63,23 +63,21 @@ def _newest_mtime_ns(paths) -> int | None:
     return max((m for m in map(_watcher_mtime_ns, paths) if m is not None), default=None)
 
 
-def _skin_sig() -> tuple[str, float | None]:
+def _skin_sig(config: dict | None = None) -> tuple[str, float | None]:
     """(active skin name, its user-file mtime). Built-ins have no file, so only
     their name moves; a user skin's mtime lets an in-place color edit repaint too."""
-    name = str((_load_cfg().get("display") or {}).get("skin") or "default")
+    config = _load_cfg() if config is None else config
+    name = str((config.get("display") or {}).get("skin") or "default")
     try:
         return name, (_watcher_home() / "skins" / f"{name}.yaml").stat().st_mtime
     except OSError:
         return name, None
 
 
-# A multiplexed gateway serves other profiles' TUIs from this one watcher thread (no profile
-# override): their baselines live here, keyed by home, and their repaints go to their own peers only
-# (main ran one gateway per profile, so a work TUI never saw the launch home's skin).
-def _note_skin_broadcast() -> None:
+def _note_skin_broadcast(config: dict | None = None) -> None:
     """Keep the watcher baseline in step with an explicit local /skin change."""
     global _last_skin_sig
-    _last_skin_sig = _skin_sig()
+    _last_skin_sig = _skin_sig(config)
 
 
 def _broadcast_skin_if_changed() -> None:

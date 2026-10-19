@@ -843,6 +843,7 @@ def test_usage_ticker_stop_join_prevents_late_ticks(monkeypatch):
 def test_run_prompt_submit_never_ticks_after_message_complete(monkeypatch):
     """End-to-end ordering through _run_prompt_submit: live session.usage ticks
     happen strictly before message.complete, never after it."""
+    monkeypatch.setattr(server, "_stage_first_contact_onboarding_note", lambda *_args: None)
     events: list[str] = []
     tick_seen = threading.Event()
 
@@ -5338,6 +5339,7 @@ def test_prompt_submit_resolves_row_id_absorbed_into_marker_merge(monkeypatch):
     live = copy.deepcopy(repaired)
     assert live[2]["_row_id"] == 12135
     server._sessions["merged-marker-sid"] = _session(history=list(live))
+    monkeypatch.setattr(server, "_run_after_agent_ready", lambda *a, **k: None)
     monkeypatch.setattr(server, "_session_db", _fake_session_db)
     monkeypatch.setattr(server, "_get_db", lambda: _FakeDB())
     monkeypatch.setattr(server, "_start_agent_build", lambda *a, **k: None)
@@ -5369,6 +5371,10 @@ def test_prompt_submit_resolves_row_id_absorbed_into_marker_merge(monkeypatch):
         ]
         assert len(server._sessions["merged-marker-sid"]["history"]) == 2
     finally:
+        worker = server._sessions["merged-marker-sid"].get("_run_thread")
+        if worker is not None:
+            worker.join(timeout=5)
+            assert not worker.is_alive()
         server._sessions.pop("merged-marker-sid", None)
 
 
@@ -5451,6 +5457,7 @@ def test_prompt_submit_resolves_row_id_swallowed_by_marker_merge(monkeypatch):
         {k: v for k, v in message.items() if k != "_row_id"} for message in verbatim
     ]
     server._sessions["marker-merge-sid"] = _session(history=list(live))
+    monkeypatch.setattr(server, "_run_after_agent_ready", lambda *a, **k: None)
     monkeypatch.setattr(server, "_session_db", _fake_session_db)
     monkeypatch.setattr(server, "_get_db", lambda: fake_db)
     monkeypatch.setattr(server, "_start_agent_build", lambda *a, **k: None)
@@ -5484,6 +5491,10 @@ def test_prompt_submit_resolves_row_id_swallowed_by_marker_merge(monkeypatch):
         ]
         assert len(server._sessions["marker-merge-sid"]["history"]) == 4
     finally:
+        worker = server._sessions["marker-merge-sid"].get("_run_thread")
+        if worker is not None:
+            worker.join(timeout=5)
+            assert not worker.is_alive()
         server._sessions.pop("marker-merge-sid", None)
 
 
@@ -5528,6 +5539,7 @@ def test_prompt_submit_resolves_row_id_swallowed_by_plain_user_merge(monkeypatch
     live = copy.deepcopy(repaired)
     assert live[2]["_row_id"] == 303
     server._sessions["plain-merge-sid"] = _session(history=list(live))
+    monkeypatch.setattr(server, "_run_after_agent_ready", lambda *a, **k: None)
     monkeypatch.setattr(server, "_session_db", _fake_session_db)
     monkeypatch.setattr(server, "_get_db", lambda: fake_db)
     monkeypatch.setattr(server, "_start_agent_build", lambda *a, **k: None)
@@ -5559,6 +5571,10 @@ def test_prompt_submit_resolves_row_id_swallowed_by_plain_user_merge(monkeypatch
         ]
         assert len(server._sessions["plain-merge-sid"]["history"]) == 3
     finally:
+        worker = server._sessions["plain-merge-sid"].get("_run_thread")
+        if worker is not None:
+            worker.join(timeout=5)
+            assert not worker.is_alive()
         server._sessions.pop("plain-merge-sid", None)
 
 
@@ -5966,6 +5982,8 @@ def _configure_immediate_prompt_run(
 
     if immediate_threads:
         monkeypatch.setattr(server.threading, "Thread", _ImmediateThread)
+    # These event-ordering contracts use partial DB doubles; first contact has real encrypted-state coverage.
+    monkeypatch.setattr(server, "_stage_first_contact_onboarding_note", lambda *_args: None)
     monkeypatch.setattr(server, "_emit", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(server, "make_stream_renderer", lambda _cols: None)
     monkeypatch.setattr(server, "render_message", lambda _raw, _cols: None)
@@ -6834,6 +6852,7 @@ def test_session_create_drops_pending_title_on_valueerror(monkeypatch):
     pending_title should be dropped (non-retryable). Updated for post-#18370
     lazy session creation where title is applied post-first-message.
     """
+    monkeypatch.setattr(server, "_stage_first_contact_onboarding_note", lambda *_args: None)
 
     class _Agent:
         session_id = "test-session"
@@ -11536,6 +11555,7 @@ def test_prompt_submit_snapshots_history_after_pending_model_switch(monkeypatch)
 
 def test_prompt_submit_can_truncate_before_user_ordinal(monkeypatch):
     """Desktop user-message edits should restart the turn from the edited user."""
+    monkeypatch.setattr(server, "_stage_first_contact_onboarding_note", lambda *_args: None)
 
     seen = {}
 
@@ -11757,6 +11777,7 @@ def test_prompt_submit_truncate_ordinal_skips_display_kind_rows(monkeypatch):
     filter, a trailing marker shifts the ordinal so the wrong message is
     targeted for truncation.
     """
+    monkeypatch.setattr(server, "_stage_first_contact_onboarding_note", lambda *_args: None)
 
     seen = {}
 
@@ -11857,6 +11878,7 @@ def test_prompt_submit_truncate_translates_display_prefix_ordinal(monkeypatch):
     still holds ancestor user turns the UI shows. A client ordinal that includes
     those ancestors must map into the tip, not 4018.
     """
+    monkeypatch.setattr(server, "_stage_first_contact_onboarding_note", lambda *_args: None)
 
     seen = {}
 
@@ -12232,11 +12254,11 @@ def test_interrupt_error_after_tts_stop_still_resumes_wake(monkeypatch):
         assert state["resumed"] == [owner]
 
         _dispatch_sync({"id": "pause-2", "method": "wake.pause", "params": {}}, transport=owner)
-        failed = _dispatch_sync(
-            {"id": "host", "method": "session.interrupt", "params": {"session_id": "sid"}},
-            transport=owner,
-        )
-        assert failed["error"]["code"] == 5000
+        with pytest.raises(RuntimeError, match="host failed"):
+            _dispatch_sync(
+                {"id": "host", "method": "session.interrupt", "params": {"session_id": "sid"}},
+                transport=owner,
+            )
         assert state["paused"] is False
         assert state["resumed"] == [owner, owner]
     finally:
@@ -15158,6 +15180,7 @@ def test_prompt_submit_wires_live_title_rename_callback(monkeypatch):
     so the gateway's only remaining job is delivering the rename event. Asserted
     by calling the hook the gateway installed and checking what it emits.
     """
+    monkeypatch.setattr(server, "_stage_first_contact_onboarding_note", lambda *_args: None)
 
     class _Agent:
         model = "gpt-5.6-sol"
@@ -15216,6 +15239,7 @@ def test_prompt_submit_surfaces_backend_error_as_visible_text(monkeypatch):
     → provider 4xx), the TUI must surface result['error'] as visible text
     instead of emitting a blank message.complete turn."""
 
+    monkeypatch.setattr(server, "_stage_first_contact_onboarding_note", lambda *_args: None)
     class _Agent:
         def run_conversation(self, prompt, conversation_history=None, stream_callback=None, **_kwargs):
             return {
@@ -15262,6 +15286,7 @@ def test_prompt_submit_preserves_empty_response_without_error(monkeypatch):
     synthesize an error string. Preserves the existing None/empty-sentinel
     semantics owned by downstream handlers."""
 
+    monkeypatch.setattr(server, "_stage_first_contact_onboarding_note", lambda *_args: None)
     class _Agent:
         def run_conversation(self, prompt, conversation_history=None, stream_callback=None, **_kwargs):
             return {
@@ -15418,6 +15443,7 @@ def test_session_activate_returns_inflight_stream_before_completion(monkeypatch)
     so session.activate needs an explicit in-flight payload sourced from the
     backend stream callback.
     """
+    monkeypatch.setattr(server, "_stage_first_contact_onboarding_note", lambda *_args: None)
     started = threading.Event()
     release = threading.Event()
     done = threading.Event()
@@ -17676,12 +17702,12 @@ def test_turn_completion_trim_skips_while_another_session_is_running(monkeypatch
     server._sessions.clear()
     server._sessions["own"] = own
     try:
-        server._post_turn_housekeeping("own", own, server._TurnRun(agent=None, one_turn_restore=None, terminal_callback=None, receipt_committed=True))
+        server._post_turn_housekeeping("own", own, server._TurnRun(agent=None, one_turn_restore=None))
         assert len(calls) == 1
 
         calls.clear()
         server._sessions["other"] = _idle_evictable_session(now) | {"running": True}
-        server._post_turn_housekeeping("own", own, server._TurnRun(agent=None, one_turn_restore=None, terminal_callback=None, receipt_committed=True))
+        server._post_turn_housekeeping("own", own, server._TurnRun(agent=None, one_turn_restore=None))
         assert calls == []
     finally:
         server._sessions.clear()
@@ -17812,13 +17838,13 @@ def test_lru_reaper_revalidates_and_tries_next_candidate(monkeypatch):
         lambda session, *, end_reason: closed.append((session, end_reason)),
     )
 
-    def _reattach_oldest_after_scan(sid, session):
+    def _make_oldest_live_after_scan(sid, session):
         evictable = original_is_evictable(sid, session)
-        if sid == "lru-race" and session.get("transport") is server._detached_ws_transport:
+        if sid == "lru-race" and session.get("transport")._closed:
             session["transport"] = live_transport
         return evictable
 
-    monkeypatch.setattr(server, "_session_is_lru_evictable", _reattach_oldest_after_scan)
+    monkeypatch.setattr(server, "_session_is_lru_evictable", _make_oldest_live_after_scan)
     now = time.time()
     server._sessions.clear()
     server._sessions["lru-race"] = _idle_evictable_session(now) | {

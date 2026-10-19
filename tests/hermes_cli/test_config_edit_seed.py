@@ -1,6 +1,4 @@
-"""Every writer that seeds or first-configures config.yaml must leave each messaging platform's display defaults
-alone (#121230). The gateway loader merges no DEFAULT_CONFIG, so any written global ``display.<key>`` beats every
-platform tier (e.g. Telegram/Slack tool_progress ``off`` -> ``all``, QQBot show_reasoning ``False`` -> ``True``)."""
+"""Every fresh configuration writer produces terminal-only, editable settings."""
 import os
 import shutil
 
@@ -53,7 +51,7 @@ def _doctor_fix(tmp_path, monkeypatch, cfg):
     monkeypatch.setattr(doctor, "HERMES_HOME", home)
     monkeypatch.setattr(doctor, "PROJECT_ROOT", root)
     assert _check_config_file(True).fixed == 1
-    if os.name == "posix":
+    if os.name == "posix" and not cfg._container_or_chmod_skipped():
         assert (home / "config.yaml").stat().st_mode & 0o777 == 0o600
 
 
@@ -82,3 +80,23 @@ def test_every_seeder_produces_terminal_configuration(tmp_path, monkeypatch, see
     raw = cfg.read_user_config_raw(config_path)
     assert isinstance(raw, dict)
     assert not ({"gateway", "platforms", "desktop", "dashboard"} & raw.keys())
+
+
+def test_readonly_packaged_template_does_not_make_new_managed_config_readonly(tmp_path, monkeypatch):
+    from hermes_cli import config
+
+    home = tmp_path / "managed-home"
+    home.mkdir()
+    (home / ".managed").write_text("nixos")
+    monkeypatch.setenv("HERMES_HOME", str(home))
+    monkeypatch.delenv("HERMES_MANAGED", raising=False)
+    template = tmp_path / "packaged-template.yaml"
+    template.write_text("model:\n  default: safe-model\n")
+    template.chmod(0o444)
+    target = home / "config.yaml"
+    assert config.seed_config_file(target, template)
+    assert target.read_text() == template.read_text()
+    assert os.access(target, os.W_OK)
+    with target.open("a") as handle:
+        handle.write("# user edit\n")
+    assert target.read_text().endswith("# user edit\n")

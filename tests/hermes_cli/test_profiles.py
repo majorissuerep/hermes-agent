@@ -313,26 +313,6 @@ class TestCreateProfile:
             assert not (cloned_browser / process_marker).exists(), process_marker
         assert (cloned_browser / 'Default' / 'Cookies').read_text(encoding='utf-8-sig') == 'jar'
 
-    @pytest.mark.platforms('linux')
-    def test_clone_all_does_not_attach_to_the_source_profiles_live_browser(self, profile_env):
-        """Copied Chromium markers must not route the clone through the source profile's CDP port."""
-        from tools.bot_desktop.browser import running_instance_cdp_port
-        default_home = profile_env / '.hermes'
-        (default_home / 'config.yaml').write_text('model: test', encoding='utf-8')
-        browser_profile = default_home / 'bot-desktop' / 'browser-profile'
-        browser_profile.mkdir(parents=True)
-        with socket.socket() as listener:
-            listener.bind(('127.0.0.1', 0))
-            listener.listen()
-            port = listener.getsockname()[1]
-            (browser_profile / 'DevToolsActivePort').write_text(f'{port}\n/devtools/browser/source\n', encoding='utf-8')
-            (browser_profile / 'SingletonLock').symlink_to(f'host-{os.getpid()}')
-            assert running_instance_cdp_port(str(browser_profile)) == port
-            profile_dir = create_profile('coder', clone_all=True, no_alias=True)
-            cloned_browser = profile_dir / 'bot-desktop' / 'browser-profile'
-            assert running_instance_cdp_port(str(cloned_browser)) is None
-            assert running_instance_cdp_port(str(browser_profile)) == port
-
     @pytest.mark.skipif(not hasattr(os, 'mkfifo'), reason='special files need a POSIX filesystem')
     def test_clone_all_skips_special_files(self, profile_env):
         default_home = profile_env / '.hermes'
@@ -449,12 +429,11 @@ class TestListProfiles:
         assert 'beta' in names
 
     def test_lazy_skill_count_never_walks_in_the_polled_request(self, profile_env, monkeypatch):
-        """Polled surfaces (private ``profiles.list`` RPC) must render
+        """Lazy profile enumeration must render
         ``skill_count`` without any skill-tree walk on the request thread; the count arrives
         from one background refresh per profile per recheck window (#114041). Control: the
         synchronous ``list_profiles()`` still walks and reports the fresh number."""
         import threading
-        import tui_runtime.server as srv
         skills = profile_env / '.hermes' / 'skills' / 'cat'
         for i in range(3):
             (skills / f's{i}').mkdir(parents=True)
@@ -470,15 +449,15 @@ class TestListProfiles:
         monkeypatch.setattr(profiles, '_walk_skill_count', spy)
 
         def _rpc():
-            return srv._methods['profiles.list'](1, {'include_sessions': False})['result']['profiles']
+            return list_profiles(lazy_skill_count=True)
         first = _rpc()
         assert walks == [] or set(walks) == {'hermes-skill-count'}
-        assert first[0]['skill_count'] in (0, 3)
+        assert first[0].skill_count in (0, 3)
         for t in threading.enumerate():
             if t.name == 'hermes-skill-count':
                 t.join(timeout=10)
         assert walks == ['hermes-skill-count']
-        assert _rpc()[0]['skill_count'] == 3
+        assert _rpc()[0].skill_count == 3
         assert list_profiles(lazy_skill_count=True)[0].skill_count == 3
         assert walks == ['hermes-skill-count']
         from tui_runtime import methods_complete

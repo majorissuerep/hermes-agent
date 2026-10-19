@@ -160,9 +160,6 @@ class PluginLedgerMixin:
     def _remove_tool_name_if_unowned(self, name: str) -> None:
         self._remove_name_if_unowned("tool", self._plugin_tool_names, name)
 
-    def _remove_platform_name_if_unowned(self, name: str) -> None:
-        self._remove_name_if_unowned("platform", self._plugin_platform_names, name)
-
     def _forget_registrations(self, registrations: list[PluginRegistration]) -> None:
         if not registrations:
             return
@@ -220,7 +217,7 @@ class PluginLedgerMixin:
         return manifest_key(plugin) if isinstance(plugin, PluginManifest) else str(plugin)
 
     def unload(self, plugin: str | PluginManifest | LoadedPlugin | None = None) -> bool:
-        """Unload registrations while excluding discovery/deferred loading."""
+        """Unload registrations while excluding concurrent discovery."""
         with self._discovery_lock, _plugin_home_scope(self.home_path):
             return self._unload_scoped(plugin)
 
@@ -284,11 +281,9 @@ class PluginLedgerMixin:
         self._persistent_carryover.extend(r for r in self._active_persistent() if id(r) not in carryover_ids)
         for container in (
             self._ownership_ledger, self._plugins, self._hooks, self._middleware,
-            self._plugin_tool_names, self._plugin_platform_names, self._cli_commands,
+            self._plugin_tool_names, self._cli_commands,
             self._plugin_commands, self._plugin_skills, self._automation_blueprints, self._portable_mcp_servers,
             self._portable_mcp_server_plugins, self._aux_tasks, self._system_prompt_sections, self._approval_transports,
-            self._slack_action_handlers, self._predeclared_modules, self._predeclared_tools,
-            self._platform_handler_factories,
         ):
             container.clear()
         self._context_engine = None

@@ -1,8 +1,6 @@
 """Every goal surface applies the same commands to real persisted state."""
-import asyncio
 import os
 import queue
-from types import SimpleNamespace
 
 import pytest
 
@@ -22,29 +20,6 @@ def _surface(surface, mgr, monkeypatch, prompts=None):
             while not cli._pending_input.empty():
                 prompts.append(cli._pending_input.get_nowait())
         return execute
-    if surface == "gateway":
-        from gateway.run_busy import GatewayBusySessionMixin
-        from gateway.slash_commands_goals import GatewayGoalCommandsMixin
-
-        class Runner(GatewayBusySessionMixin, GatewayGoalCommandsMixin):
-            pass
-
-        runner = object.__new__(Runner)
-        async def manager(event):
-            return mgr, None
-        async def execute(fn, *args):
-            return fn(*args)
-        runner._get_goal_manager_for_event = manager
-        runner._run_in_executor_with_context = execute
-        runner._adapter_and_key_for = lambda event: (None, None)
-        runner._enqueue_goal_turn = lambda event, text, **kwargs: prompts.append(text)
-        runner._resume_caller_is_admin = lambda source: True
-        def execute(arg):
-            event = SimpleNamespace(get_command_args=lambda: arg, source=None)
-            if arg == 'show':
-                return asyncio.run(runner._busy_goal_command(event, mgr.session_id, None))
-            return asyncio.run(runner._handle_goal_command(event))
-        return execute
     from tui_runtime import server
     server._sessions[mgr.session_id] = {'session_key': mgr.session_id}
     def execute(arg):
@@ -56,7 +31,7 @@ def _surface(surface, mgr, monkeypatch, prompts=None):
     return execute
 
 
-@pytest.mark.parametrize('surface', ['cli', 'gateway', 'tui'])
+@pytest.mark.parametrize('surface', ['cli', 'tui'])
 @pytest.mark.parametrize('command', [
     'show', 'draft', 'draft build it', 'drafting docs', 'wait', 'wait nope',
     'wait {pid} build', 'unwait', 'gate add true', 'gate remove 1',
@@ -73,9 +48,7 @@ def test_surface_goal_state_matches_cli(surface, command, monkeypatch):
         mgr.set('original objective')
         mgr.add_gate('original gate')
         mgr.wait_on(os.getpid(), reason='existing barrier')
-        result = _surface(name, mgr, monkeypatch)(command)
-        if name == 'gateway' and command == 'show':
-            assert mgr.state.goal in result
+        _surface(name, mgr, monkeypatch)(command)
         state = goals.load_goal(mgr.session_id)
         if state:
             from dataclasses import asdict
@@ -86,7 +59,7 @@ def test_surface_goal_state_matches_cli(surface, command, monkeypatch):
     assert snapshots[0] == snapshots[1]
 
 
-@pytest.mark.parametrize('surface', ['cli', 'gateway', 'tui'])
+@pytest.mark.parametrize('surface', ['cli', 'tui'])
 @pytest.mark.parametrize('draft_result', ['contract', 'unavailable', 'error'])
 def test_drafts_start_work_but_inspection_and_literal_prefixes_do_not_draft(
     surface, draft_result, monkeypatch,
@@ -135,7 +108,7 @@ def test_control_verb_with_trailing_words_never_replaces_the_goal(command, pause
     if paused:
         mgr.pause(reason='user-paused')
     from hermes_cli.goal_command import is_goal_control
-    assert is_goal_control(command)  # gateway busy path dispatches instead of rejecting
+    assert is_goal_control(command)  # busy dispatch accepts the local control
     result = _dispatch(mgr, command)
     state = goals.load_goal(mgr.session_id)
     assert (state.goal, state.status) == ('original objective', status)
@@ -151,7 +124,7 @@ def test_double_dash_sets_control_word_goal_and_announces_the_replace():
     assert goals.load_goal(mgr.session_id).goal == 'pause the nightly cron'
     assert 'was: original objective' in result.output
     mgr.clear()
-    fresh = goals.GoalManager(session_id=mgr.session_id)  # gateway/TUI reload per command
+    fresh = goals.GoalManager(session_id=mgr.session_id)  # private TUI reloads per command
     assert 'replaced' not in _dispatch(fresh, 'fresh objective').output
     _dispatch(fresh, '--dry-run the migration')
     assert goals.load_goal(mgr.session_id).goal == '--dry-run the migration'

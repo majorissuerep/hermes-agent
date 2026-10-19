@@ -2447,6 +2447,7 @@ def _run_oneshot_from_args(args) -> None:
         raise SystemExit("A headless turn requires --query or --oneshot.")
     if getattr(args, "image", None):
         raise SystemExit("Headless tasks accept text queries; use the terminal UI for images.")
+    _confirm_startup_expensive_model_override(args)
     options = {name: getattr(args, name) for name in
                ("api_key", "base_url", "max_turns", "run_budget", "ignore_rules", "output_format")
                if getattr(args, name, None) is not None}

@@ -26,7 +26,7 @@ logger = logging.getLogger("hermes_cli.plugins")
 # Allowlist of agent-turn hot-path hooks bounded by plugins.hook_callback_timeout (fail-open:
 # abandon without join — joining reintroduced a shutdown hang). Unlisted hooks run synchronously.
 # Intentionally unbounded: on_session_finalize/reset (last-chance flush — abandon can lose state);
-# subagent_start (observer); pre_gateway_dispatch (policy gate — neither fail mode is acceptable);
+# subagent_start (observer);
 # pre/post_approval_* (approval UX has its own timeout); kanban_* (own heartbeat/stale reclaim).
 # The goal is to stop a hung Python plugin callback from wedging the conversation loop (#76821) without
 # joining the worker (avoids the #6622 ThreadPoolExecutor shutdown hang). Hooks not listed below run
@@ -43,8 +43,6 @@ _HOOK_TIMEOUT_BOUNDED_HOOKS: set[str] = {
     "post_tool_call", "transform_terminal_output", "transform_tool_result", "transform_llm_output",
     "pre_llm_call", "post_llm_call", "pre_api_request", "post_api_request", "api_request_error",
     "pre_auxiliary_call", "post_auxiliary_call", "pre_verify", "on_session_start", "on_session_end",
-    # Fail-open consumer on every inbound gateway message: a hung plugin must not stall the profile.
-    "post_gateway_admission",
 }
 
 # Policy hooks: timeout / still-running must fail closed (block the tool).
@@ -258,10 +256,7 @@ class PluginDispatchMixin:
         if safe_worker_enabled():
             return []
         from hermes_cli.plugins import _resolve_hook_callback_timeout
-        # Gateway platform events define event-local envelopes; a bus-wide version here would turn
-        # unrelated adapter payloads into one monolithic compatibility contract.
-        if hook_name != "gateway_platform_event":
-            kwargs.setdefault("telemetry_schema_version", OBSERVER_SCHEMA_VERSION)
+        kwargs.setdefault("telemetry_schema_version", OBSERVER_SCHEMA_VERSION)
         results: list[Any] = []
         timeout = _resolve_hook_callback_timeout()
         use_timeout = _hook_uses_callback_timeout(hook_name, timeout)
@@ -532,13 +527,12 @@ class PluginDispatchMixin:
         where an ``async def`` callback runs: here it is awaited on the caller's own loop, so a
         callback that awaits anything scheduled on that loop can make progress. Through the
         sync path it runs on a helper thread while the caller blocks in ``done.wait()`` — on the
-        gateway that stalls the whole event loop for the callback's duration. Sync callbacks
+        native runtime that stalls the whole event loop for the callback's duration. Sync callbacks
         run inline. Bounded hooks keep ``plugins.hook_callback_timeout`` via ``asyncio.wait_for``
         (the coroutine is cancelled, not abandoned); a timed-out ``pre_tool_call`` fails closed.
         """
         from hermes_cli.plugins import _resolve_hook_callback_timeout
-        if hook_name != "gateway_platform_event":
-            kwargs.setdefault("telemetry_schema_version", OBSERVER_SCHEMA_VERSION)
+        kwargs.setdefault("telemetry_schema_version", OBSERVER_SCHEMA_VERSION)
         results: list[Any] = []
         timeout = _resolve_hook_callback_timeout()
         use_timeout = _hook_uses_callback_timeout(hook_name, timeout)

@@ -137,9 +137,9 @@ def _user_command_invocation(escaped_command: str, user_shell: str | None, env_d
       upstream behavior.
     - other POSIX-family shell (zsh/dash/ksh/...): the command runs under the
       USER's shell via ``<shell> -c`` so their syntax applies.  Because a
-      child cannot mutate this shell's environment, the child also runs
-      ``export -p`` into *env_dump_path*; the caller sources it back so
-      ``export FOO=1`` persists across commands exactly like upstream.
+      child cannot mutate this shell's environment, its EXIT trap writes
+      ``export -p`` and its final directory into *env_dump_path*. The caller
+      restores them without replacing the command's original exit status.
       (POSIX-family ``export -p`` output — ``export K=V`` / ksh-dash forms
       and zsh's ``typeset -x K=V`` — parses in bash, which treats ``typeset``
       as ``declare``.)
@@ -154,10 +154,18 @@ def _user_command_invocation(escaped_command: str, user_shell: str | None, env_d
     if name == "bash":
         return f"eval '{escaped_command}'"
     if name in {"sh", "dash", "ash", "ksh", "mksh", "posh", "yash", "zsh"}:
-        dump_clause = ""
+        prefix = ""
         if env_dump_path:
-            dump_clause = f"\nexport -p > {env_dump_path} 2>/dev/null || true"
-        return f"{user_shell} -c '{escaped_command}{dump_clause}'"
+            # EXIT also covers explicit exit and errexit. Capture status before
+            # publishing state; neither export nor the parent's restore may
+            # turn a failed command into success (approval re-gating depends on it).
+            on_exit = (
+                '__hermes_native_ec=$?; trap - EXIT; umask 077; '
+                'export __HERMES_NATIVE_CWD="$(pwd -P)"; '
+                f'export -p > {env_dump_path}; exit "$__hermes_native_ec"'
+            )
+            prefix = f"trap {shlex.quote(on_exit)} EXIT\n".replace("'", "'\\''")
+        return f"{shlex.quote(user_shell)} -c '{prefix}{escaped_command}'"
     # fish / nushell / powershell: native -c handoff, no env round-trip.
     return f"{user_shell} -c '{escaped_command}'"
 
@@ -202,12 +210,23 @@ def _wrap_command_script(
     # post-command env to a side file this shell sources back, preserving
     # export persistence across commands.
     user_shell_name = PureWindowsPath(user_shell or "").name.lower().removesuffix(".exe")
-    env_dump = f"{quoted_snap}.userenv" if user_shell_name not in ("", "bash") else None
-    parts.append(_user_command_invocation(escaped, user_shell, env_dump))
+    env_dump = (
+        f"{quoted_snap}.userenv"
+        if user_shell_name in {"sh", "dash", "ash", "ksh", "mksh", "posh", "yash", "zsh"}
+        else None
+    )
     if env_dump:
-        parts.append(f"source {env_dump} >/dev/null 2>&1 || true; rm -f {env_dump}")
+        parts.append(f"rm -f {env_dump}")
+    parts.append(_user_command_invocation(escaped, user_shell, env_dump))
+    parts.append("__hermes_ec=$?")
+    if env_dump:
+        parts += [
+            f"source {env_dump} >/dev/null 2>&1 || true",
+            'if [ -n "${__HERMES_NATIVE_CWD-}" ]; then builtin cd -- "$__HERMES_NATIVE_CWD" || true; fi',
+            "unset __HERMES_NATIVE_CWD",
+            f"rm -f {env_dump}",
+        ]
     parts += [
-        "__hermes_ec=$?",
         "umask 077"]
     if snapshot_ready and persist_env:
         parts.append(

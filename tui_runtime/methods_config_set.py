@@ -468,10 +468,18 @@ def _set_personality(rid, params, key, value, session):
 
 @_cfgset_guarded
 def _set_skin(rid, params, key, value, session):
-    _write_config_key("display.skin", value)
-    # Every surface repaints; sync the watcher baseline so the poll loop doesn't re-broadcast.
-    _broadcast_global_event("skin.changed", resolve_skin())
-    _note_skin_broadcast()
+    from hermes_cli.config_effective import _effective
+
+    cfg = _load_cfg_raw()
+    if not isinstance(cfg.get("display"), dict):
+        cfg["display"] = {}
+    cfg["display"]["skin"] = value
+    # Resolve managed overlays before committing: a later read failure must not
+    # report refusal after the user's config has already changed.
+    effective = _effective(cfg)
+    _save_cfg(cfg)
+    _broadcast_global_event("skin.changed", skin_payload(effective))
+    _note_skin_broadcast(effective)
     return _kv(rid, key, value)
 
 

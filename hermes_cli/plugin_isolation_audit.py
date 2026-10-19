@@ -87,10 +87,10 @@ class _SourceVisitor(ast.NodeVisitor):
 
     def __init__(self, rel: str, *, model_provider: bool = False):
         from hermes_cli.plugin_isolation import (
-            HOST_DEGRADED_HOOKS, HOST_OBJECT_BASES, HOST_SKIPPED_CTX_METHODS, HOST_UNSUPPORTED_CTX_METHODS,
+            HOST_OBJECT_BASES, HOST_SKIPPED_CTX_METHODS, HOST_UNSUPPORTED_CTX_METHODS,
         )
         self._unsupported, self._skipped = HOST_UNSUPPORTED_CTX_METHODS, HOST_SKIPPED_CTX_METHODS
-        self._degraded, self._object_methods = HOST_DEGRADED_HOOKS, HOST_OBJECT_BASES
+        self._object_methods = HOST_OBJECT_BASES
         self.rel = rel
         # A model-provider plugin's register_provider() call is its contract; the host captures it.
         self.model_provider = model_provider
@@ -151,10 +151,6 @@ class _SourceVisitor(ast.NodeVisitor):
                 self.notes.append(f"ctx.{name}() is skipped in the host ({self._skipped[name]})")
             if name.startswith("register_") or name in {"subscribe", "dispatch_tool", "inject_message", "emit"}:
                 self.ctx_methods.add(name)
-            if name == "register_hook" and node.args and isinstance(node.args[0], ast.Constant) \
-                    and node.args[0].value in self._degraded:
-                hook = node.args[0].value
-                self.notes.append(f"hook {hook} {self._degraded[hook]}; those fields are placeholders in the host")
             self._flag_registry_call(self._resolve(func), node.lineno)
         elif isinstance(func, ast.Name):
             self._flag_registry_call(self.aliases.get(func.id), node.lineno)

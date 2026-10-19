@@ -484,13 +484,8 @@ class TestPluginDiscovery:
     def test_force_rediscover_clears_all_plugin_registries(self, monkeypatch):
         """force=True must clear every plugin-populated registry.
 
-        Regression: ``_plugin_platform_names`` was populated by
-        ``register_platform`` but omitted from the ``discover_and_load(force=True)``
-        clear block, so a platform plugin disabled between force-rediscovers
-        left a stale entry behind forever (the set diverged from the real
-        platform_registry / _plugins truth). This asserts the clear block
-        empties the full set of per-plugin registries so no future addition
-        silently leaks across a force pass either.
+        Native commands, hooks, tools, skills, and auxiliary tasks must not
+        retain stale registrations across a forced discovery pass.
         """
         mgr = PluginManager()
 
@@ -501,12 +496,10 @@ class TestPluginDiscovery:
         mgr._hooks["pre_tool_call"] = [lambda **_: None]
         mgr._middleware["llm_request"] = [lambda **_: None]
         mgr._plugin_tool_names.add("some_tool")
-        mgr._plugin_platform_names.add("irc")
         mgr._cli_commands["c"] = {"plugin": "p"}
         mgr._plugin_commands["cmd"] = {"plugin": "p"}
         mgr._plugin_skills["p:skill"] = {}
         mgr._aux_tasks["task"] = {"plugin": "p"}
-        mgr._slack_action_handlers.append(("aid", lambda **_: None, "p"))
         mgr._discovered = True
 
         monkeypatch.setattr(PluginManager, "_discover_and_load_inner", lambda self_inner: None)
@@ -516,14 +509,10 @@ class TestPluginDiscovery:
         assert mgr._hooks == {}
         assert mgr._middleware == {}
         assert mgr._plugin_tool_names == set()
-        assert mgr._plugin_platform_names == set(), (
-            "_plugin_platform_names was not cleared on force-rediscover"
-        )
         assert mgr._cli_commands == {}
         assert mgr._plugin_commands == {}
         assert mgr._plugin_skills == {}
         assert mgr._aux_tasks == {}
-        assert mgr._slack_action_handlers == []
 
 
 # ── TestPluginLoading ──────────────────────────────────────────────────────
@@ -894,30 +883,6 @@ class TestPluginLoading:
 class TestPluginHooks:
     """Tests for lifecycle hook registration and invocation."""
 
-
-    def test_pre_gateway_dispatch_collects_action_dicts(self, tmp_path, monkeypatch):
-        """pre_gateway_dispatch callbacks return action dicts (skip/rewrite/allow)."""
-        plugins_dir = tmp_path / "hermes_test" / "plugins"
-        _make_plugin_dir(
-            plugins_dir, "predispatch_plugin",
-            register_body=(
-                'ctx.register_hook("pre_gateway_dispatch", '
-                'lambda **kw: {"action": "skip", "reason": "test"})'
-            ),
-        )
-        monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes_test"))
-
-        mgr = PluginManager()
-        mgr.discover_and_load()
-
-        results = mgr.invoke_hook(
-            "pre_gateway_dispatch",
-            event=object(),
-            gateway=object(),
-            session_store=object(),
-        )
-        assert len(results) == 1
-        assert results[0] == {"action": "skip", "reason": "test"}
 
 
     def test_request_hooks_are_invokeable(self, tmp_path, monkeypatch):
@@ -2686,7 +2651,7 @@ class TestAsyncHookOnCallerLoop:
 
     #109196 made async callbacks run under ``invoke_hook`` by bridging them through a helper
     thread; the caller blocks in ``done.wait()`` until the callback finishes. For a hook fired
-    from a coroutine (``pre_gateway_dispatch`` on the gateway loop) that stalls the loop, and a
+    from a native coroutine that stalls the loop, and a
     callback that awaits anything scheduled on that loop can never complete. The async twin keeps
     the callback on the caller's loop.
     """
@@ -2709,8 +2674,8 @@ class TestAsyncHookOnCallerLoop:
         async def narrow_async(event):
             return {"seen_async": event}
 
-        mgr._hooks.setdefault("pre_gateway_dispatch", []).extend([narrow, boom, narrow_async])
+        mgr._hooks.setdefault("pre_command", []).extend([narrow, boom, narrow_async])
         with caplog.at_level(logging.WARNING, logger="hermes_cli.plugins"):
-            results = asyncio.run(mgr.ainvoke_hook("pre_gateway_dispatch", event="e", gateway="g"))
+            results = asyncio.run(mgr.ainvoke_hook("pre_command", event="e", session_key="s"))
         assert results == [{"seen": "e"}, {"seen_async": "e"}]
         assert "async plugin blew up" in caplog.text

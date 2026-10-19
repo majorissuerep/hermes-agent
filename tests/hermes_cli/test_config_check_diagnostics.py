@@ -2,7 +2,6 @@
 
 from pathlib import Path
 
-import hermes_cli.config as config_mod
 import hermes_cli.plugins as plugins_mod
 from hermes_cli.config import DEFAULT_CONFIG, _cmd_config_check, _warn_invalid_platform_toolsets
 
@@ -29,7 +28,6 @@ def test_config_check_and_migrate_agree_on_stale_platform_toolsets(tmp_path, mon
         tmp_path / "stale",
         "platform_toolsets:\n"
         "  cli: [hermes-cli, messaging, linear, mcp-linear, mcp-portable, mcp-ghost, ghost]\n"
-        "  teams: [hermes-teams]\n"
         "mcp_servers:\n"
         "  linear:\n"
         "    command: linear-mcp\n"
@@ -43,7 +41,7 @@ def test_config_check_and_migrate_agree_on_stale_platform_toolsets(tmp_path, mon
 
     for home, expected in ((stale, {"messaging", "ghost", "mcp-ghost"}), (clean, set()), (stale, {"messaging", "ghost", "mcp-ghost"})):
         output = _check(home, monkeypatch, capsys)
-        for name in ("messaging", "ghost", "mcp-ghost", "linear", "mcp-linear", "mcp-portable", "hermes-teams"):
+        for name in ("messaging", "ghost", "mcp-ghost", "linear", "mcp-linear", "mcp-portable"):
             assert (f"unknown toolset '{name}'" in output) is (name in expected), (home.name, name)
 
         results = {"warnings": []}
@@ -51,28 +49,3 @@ def test_config_check_and_migrate_agree_on_stale_platform_toolsets(tmp_path, mon
         assert {w for w in results["warnings"] if "unknown toolset" in w} == {
             line.strip().removeprefix("⚠ ") for line in output.splitlines() if "unknown toolset" in line
         }
-
-
-def test_config_check_reports_disabled_platform_only_when_runtime_disables_it(tmp_path, monkeypatch, capsys):
-    manifest = {
-        "name": "fakechat-platform",
-        "requires_env": [{"name": "FAKECHAT_TOKEN"}],
-        "optional_env": [{"name": "FAKECHAT_HOME_CHANNEL"}],
-    }
-    monkeypatch.setattr(config_mod, "_platform_plugin_manifests", lambda *a, **k: iter([("fakechat", manifest)]))
-    monkeypatch.delenv("FAKECHAT_TOKEN", raising=False)
-    token = "FAKECHAT_TOKEN=synthetic-test-token\n"
-    cases = (
-        (_write_home(tmp_path / "key", "plugins:\n  disabled: [platforms/fakechat]\n", token), True),
-        (_write_home(tmp_path / "name", "plugins:\n  disabled: [fakechat-platform]\n", token), True),
-        (_write_home(tmp_path / "no_token", "plugins:\n  disabled: [platforms/fakechat]\n"), False),
-        # The runtime ignores a non-list plugins.disabled, so the platform is not disabled.
-        (_write_home(tmp_path / "string", "plugins:\n  disabled: platforms/fakechat\n", token), False),
-    )
-
-    for home, reported in (*cases, cases[0]):
-        output = _check(home, monkeypatch, capsys)
-        assert ("platform plugin 'platforms/fakechat' is disabled" in output) is reported, home.name
-        if reported:
-            assert "hermes plugins enable platforms/fakechat" in output
-        assert "synthetic-test-token" not in output

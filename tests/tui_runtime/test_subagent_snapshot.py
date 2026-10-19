@@ -161,52 +161,37 @@ def test_interrupt_requires_exact_live_owner_but_direct_helper_stays_legacy(runt
 
 
 
-def test_reattach_preserves_child_controls_including_late_registration(runtime, tmp_path):
+def test_replaced_transport_revokes_early_and_late_captured_children(runtime, tmp_path):
     from tools.delegate_tool_child_run import _register_child
 
     server, owner, old, call = runtime
-    new = type("Transport", (), {"write": lambda self, frame: True})()
+    new = SimpleNamespace(write=lambda frame: True)
     transcript = tmp_path / "child.txt"
     transcript.write_text("live child output")
     steered, stopped = [], []
 
-    def register(sid):
+    def register(sid, captured):
         child = SimpleNamespace(_subagent_id=sid, _delegate_depth=1, model="test",
                                 _live_transcript_path=str(transcript),
                                 steer=lambda text: steered.append(text) or True,
                                 hard_interrupt=lambda text: stopped.append(text))
         _register_child(child, None, "owned", owner_session_id="ui-owner",
-                        owner_transport=old, owner_session_record=owner)
+                        owner_transport=captured, owner_session_record=owner)
 
-    register("before")
-    owner["transport"] = server._detached_ws_transport
-    owner["history_lock"] = threading.Lock()
-    with server._session_resume_lock, owner["history_lock"]:
-        assert server._reattach_refusal(1, "ui-owner", owner) is None
-        server._rebind_live_transport("ui-owner", owner, new)
-    # A dispatch captured before reload may not construct its child until afterwards.
-    register("after")
-    assert {row["subagent_id"] for row in call("subagent.list", via=new)["result"]["subagents"]} == {"before", "after"}
-    # Closing a second authenticated viewer hands control back to the survivor.
-    popup = type(new)()
-    with server._session_resume_lock, owner["history_lock"]:
-        server._rebind_live_transport("ui-owner", owner, popup)
-    for peer in (new, popup):
-        assert {r["subagent_id"] for r in call("subagent.list", via=peer)["result"]["subagents"]} == {"before", "after"}
-        assert call("subagent.tail", via=peer, subagent_id="before")["result"]["text"] == "live child output"
-    assert server._close_sessions_for_transport(popup) == (0, 0)
-    assert server._session_transport_contains(owner, new)
-    assert not server._session_transport_contains(owner, popup)
-    assert {row["subagent_id"] for row in call("subagent.list", via=new)["result"]["subagents"]} == {"before", "after"}
-    for sid in ("before", "after"):
-        assert call("subagent.tail", via=new, subagent_id=sid)["result"]["text"] == "live child output"
-        assert call("subagent.steer", via=new, subagent_id=sid, text=sid)["result"]["status"] == "queued"
-        assert call("subagent.interrupt", via=new, subagent_id=sid)["result"]["found"]
-    assert steered == ["before", "after"] and len(stopped) == 2
-    for method in ("list", "tail", "steer", "interrupt"):
-        denied = call("subagent." + method, subagent_id="before", text="old")
-        assert "error" in denied or denied["result"].get("status") == "rejected"
-    assert steered == ["before", "after"] and len(stopped) == 2
+    register("before", old)
+    assert server._attach_session_transport(owner, new)
+    register("late", old)  # captured before replacement, constructed afterwards
+    for sid in ("before", "late"):
+        assert not call("subagent.tail", via=new, subagent_id=sid)["result"]["available"]
+        assert call("subagent.steer", via=new, subagent_id=sid, text=sid)["result"]["status"] == "rejected"
+        assert not call("subagent.interrupt", via=new, subagent_id=sid)["result"]["found"]
+    assert steered == [] and stopped == []
+    register("current", new)
+    assert [row["subagent_id"] for row in call("subagent.list", via=new)["result"]["subagents"]] == ["current"]
+    assert call("subagent.tail", via=new, subagent_id="current")["result"]["text"] == "live child output"
+    assert call("subagent.steer", via=new, subagent_id="current", text="current")["result"]["status"] == "queued"
+    assert call("subagent.interrupt", via=new, subagent_id="current")["result"]["found"]
+    assert steered == ["current"] and len(stopped) == 1
 
 
 def test_reattach_does_not_adopt_foreign_or_retired_generations(runtime):
@@ -236,31 +221,27 @@ def test_reattach_does_not_adopt_foreign_or_retired_generations(runtime):
     assert effects == []
 
 
-def test_any_attach_path_carries_subagent_authority_without_registry_sync(runtime):
-    """Authority follows the live session slot, not a per-record transport copy. Every reattach site
-    (prompt.submit, queued-prompt drain, resume, activate, future ones) goes through
-    _attach_session_transport; none of them may need to remember a registry sync step."""
+def test_replacing_session_record_revokes_captured_child_authority(runtime):
     from tools.delegate_tool_child_run import _register_child
 
-    server, owner, old, call = runtime
-    new = type("Transport", (), {"write": lambda self, frame: True})()
-    steered, stopped = [], []
+    server, owner, transport, call = runtime
+    effects = []
     child = SimpleNamespace(_subagent_id="child", _delegate_depth=1, model="test",
-                            steer=lambda text: steered.append(text) or True,
-                            hard_interrupt=lambda text: stopped.append(text))
+                            steer=lambda text: effects.append(text) or True,
+                            hard_interrupt=lambda text: effects.append(text))
     _register_child(child, None, "owned", owner_session_id="ui-owner",
-                    owner_transport=old, owner_session_record=owner)
-    owner["transport"] = server._detached_ws_transport
-    assert server._attach_session_transport(owner, new)
-    assert [r["subagent_id"] for r in call("subagent.list", via=new)["result"]["subagents"]] == ["child"]
-    assert call("subagent.steer", via=new, subagent_id="child", text="go")["result"]["status"] == "queued"
-    assert call("subagent.interrupt", via=new, subagent_id="child")["result"]["found"]
-    assert steered == ["go"] and len(stopped) == 1
-    # The detached pre-reconnect transport lost membership and with it every control.
-    for method in ("list", "steer", "interrupt"):
-        denied = call("subagent." + method, via=old, subagent_id="child", text="stale")
-        assert "error" in denied or denied["result"].get("status") == "rejected"
-    assert steered == ["go"] and len(stopped) == 1
+                    owner_transport=transport, owner_session_record=owner)
+    replacement = dict(owner)
+    server._sessions["ui-owner"] = replacement
+    assert call("subagent.list")["result"]["subagents"] == []
+    assert not call("subagent.tail", subagent_id="child")["result"]["available"]
+    assert call("subagent.steer", subagent_id="child", text="deny")["result"]["status"] == "rejected"
+    assert not call("subagent.interrupt", subagent_id="child")["result"]["found"]
+    assert effects == []
+    _register_child(child, None, "owned", owner_session_id="ui-owner",
+                    owner_transport=transport, owner_session_record=replacement)
+    assert call("subagent.steer", subagent_id="child", text="current")["result"]["status"] == "queued"
+    assert effects == ["current"]
 
 
 def test_list_follows_the_conversation_across_ui_sid_and_compression_rotation(runtime, tmp_path):

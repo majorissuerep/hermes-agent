@@ -4,10 +4,7 @@ Updated for the single-owner unification (hermes_cli.personality): built-ins
 always exist, resolution reads config (agent.personalities overlays), and
 persistence flows exclusively through persist_personality().
 """
-import os
-import pytest
 from unittest.mock import MagicMock, patch
-import hermes_yaml as yaml
 
 # ── CLI tests ──────────────────────────────────────────────────────────────
 
@@ -74,81 +71,6 @@ class TestCLIPersonalityNone:
 
 # ── Gateway tests ──────────────────────────────────────────────────────────
 
-class TestGatewayPersonalityNone:
-
-    def _make_event(self, args=""):
-        event = MagicMock()
-        event.get_command.return_value = "personality"
-        event.get_command_args.return_value = args
-        return event
-
-    def _make_runner(self, personalities=None):
-        from gateway.run import GatewayRunner
-        runner = GatewayRunner.__new__(GatewayRunner)
-        runner.config = {
-            "agent": {
-                "personalities": personalities or {"helpful": "You are helpful."}
-            }
-        }
-        return runner
-
-    def _gateway_env(self, tmp_path):
-        # The gateway reads via _load_gateway_config (rooted at
-        # gateway.run._hermes_home) and persists via persist_personality
-        # (rooted at HERMES_HOME) — point both at the same tmp dir.
-        return (
-            patch("gateway.run._hermes_home", tmp_path),
-            patch.dict(os.environ, {"HERMES_HOME": str(tmp_path)}),
-        )
-
-    @pytest.mark.asyncio
-    async def test_default_clears_ephemeral_prompt(self, tmp_path):
-        runner = self._make_runner()
-        config_data = {
-            "agent": {
-                "system_prompt": "manual forever",
-                "personalities": {"helpful": "You are helpful."},
-            },
-            "display": {"personality": "helpful"},
-        }
-        config_file = tmp_path / "config.yaml"
-        config_file.write_text(yaml.safe_dump(config_data))
-
-        p1, p2 = self._gateway_env(tmp_path)
-        with p1, p2:
-            event = self._make_event("default")
-            await runner._handle_personality_command(event)
-
-        saved = yaml.safe_load(config_file.read_text())
-        assert saved["agent"]["system_prompt"] == "manual forever"
-        assert saved.get("display", {}).get("personality", None) == ""
-        # The next turn re-resolves from config (no in-memory snapshot).
-        with p1, p2:
-            assert runner._get_system_prompt_for_channel(None, "c") == "manual forever"
-
-    @pytest.mark.asyncio
-    async def test_set_persists_display_personality_not_system_prompt(self, tmp_path):
-        runner = self._make_runner()
-        config_data = {
-            "agent": {
-                "system_prompt": "manual forever",
-                "personalities": {"helpful": "You are helpful."},
-            }
-        }
-        config_file = tmp_path / "config.yaml"
-        config_file.write_text(yaml.safe_dump(config_data))
-
-        p1, p2 = self._gateway_env(tmp_path)
-        with p1, p2:
-            event = self._make_event("helpful")
-            result = await runner._handle_personality_command(event)
-
-        saved = yaml.safe_load(config_file.read_text())
-        assert saved["agent"]["system_prompt"] == "manual forever"
-        assert saved["display"]["personality"] == "helpful"
-        with p1, p2:
-            assert runner._get_system_prompt_for_channel(None, "c") == "You are helpful."
-        assert "helpful" in result.lower()
 
 class TestPersonalityDictFormat:
     """Test dict-format custom personalities with description, tone, style."""

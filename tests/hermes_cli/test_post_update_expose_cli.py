@@ -89,8 +89,8 @@ class TestExposeCli:
         assert not extra.exists()
         assert {p.name for p in (root / ".hermes/bin").iterdir()} == set(_launchers.ENTRY_POINTS)
 
-        # An owned ACP entry must be repaired even without an owned hermes
-        # sibling admitting this directory. Its old target is already gone.
+        # A retired owned ACP convenience must be removed, not republished.
+        # An unrelated install's ACP symlink must remain untouched.
         extra.mkdir()
         dangling = root / "venv/bin/hermes-acp"
         acp = extra / "hermes-acp"
@@ -106,8 +106,8 @@ class TestExposeCli:
         foreign_link.symlink_to(foreign_target)
         before = {path: path.lstat().st_mtime_ns for path in (wrapper_dir, wrapper_dir / "hermes", foreign_link)}
 
-        assert _launchers.expose_cli(create=False) == {"ok": True, "written": ["hermes-acp"]}
-        assert acp.is_file() and not acp.is_symlink() and os.access(acp, os.X_OK)
+        assert _launchers.expose_cli(create=False) == {"ok": True, "written": []}
+        assert not acp.exists() and not acp.is_symlink()
         assert not dangling.exists()
         assert not (extra / "hermes-agent").exists()
         assert not (wrapper_dir / "hermes-agent").exists()
@@ -121,12 +121,12 @@ class TestExposeCli:
         assert _launchers.expose_cli(create=False) == {"ok": True, "written": []}
 
     @posix_only
-    def test_writes_all_three_wrappers_fresh(self, fake_install):
+    def test_writes_native_wrappers_fresh(self, fake_install):
         home, root = fake_install
         result = _launchers.expose_cli()
         assert result["ok"] is True
-        assert sorted(result["written"]) == ["hermes", "hermes-acp", "hermes-agent"]
-        for name in ("hermes", "hermes-agent", "hermes-acp"):
+        assert sorted(result["written"]) == ["hermes", "hermes-agent"]
+        for name in ("hermes", "hermes-agent"):
             wrapper = home / ".local" / "bin" / name
             body = wrapper.read_text(encoding="utf-8-sig")
             assert str(root) in body
@@ -146,8 +146,8 @@ class TestExposeCli:
         result = _launchers.expose_cli()
         assert (wrapper_dir / "hermes").read_text(encoding="utf-8-sig") == foreign
         assert "hermes" not in result["written"]
-        # The other two had no file at all — those ARE written.
-        assert sorted(result["written"]) == ["hermes-acp", "hermes-agent"]
+        # The native agent entry was absent and may be created.
+        assert sorted(result["written"]) == ["hermes-agent"]
 
     @posix_only
     def test_config_gate_disables(self, fake_install, monkeypatch):
@@ -180,7 +180,7 @@ class TestExposeCli:
         (payload / "bin").mkdir(parents=True)
         (payload / "repo").mkdir()
         _write_bundled_stamp(payload / "repo")
-        for name in ("hermes", "hermes-agent", "hermes-acp"):
+        for name in ("hermes", "hermes-agent"):
             (payload / "bin" / name).write_text("\x7fELF fake shim\n", encoding="utf-8")
         monkeypatch.setenv("HERMES_INSTALL_ROOT", str(payload / "repo"))
         if not create:
@@ -242,7 +242,7 @@ def test_direct_packaged_cli_exposes_shims_before_electron(tmp_path):
     bin_dir = payload / "bin"
     bin_dir.mkdir()
     code = f"import sys; sys.path.insert(0, {str(Path(__file__).resolve().parents[2])!r}); from hermes_cli.main import main; main()"
-    for name in ("hermes", "hermes-agent", "hermes-acp"):
+    for name in ("hermes", "hermes-agent"):
         shim = bin_dir / name
         shim.write_text(f'#!/bin/sh\nexec {shlex.join([sys.executable, "-I", "-c", code])} "$@"\n', encoding="utf-8")
         shim.chmod(0o755)
@@ -254,7 +254,7 @@ def test_direct_packaged_cli_exposes_shims_before_electron(tmp_path):
     result = subprocess.run([str(bin_dir / "hermes"), "--help"], env=env,
                             capture_output=True, text=True, timeout=30, encoding="utf-8", check=False)
     assert result.returncode == 0, result.stderr
-    for name in ("hermes", "hermes-agent", "hermes-acp"):
+    for name in ("hermes", "hermes-agent"):
         assert (home / ".local/bin" / name).is_symlink()
         assert (home / ".local/bin" / name).resolve() == bin_dir / name
 
@@ -272,16 +272,16 @@ class TestSymlinkSealedLaunchers:
         monkeypatch.setattr(Path, "home", staticmethod(lambda: home))
         payload_bin = tmp_path / "Hermes.app" / "Contents" / "Resources" / "agent-payload" / "bin"
         payload_bin.mkdir(parents=True)
-        for name in ("hermes", "hermes-agent", "hermes-acp"):
+        for name in ("hermes", "hermes-agent"):
             (payload_bin / name).write_text("fake mach-o shim\n", encoding="utf-8")
         return home, payload_bin
 
-    def test_links_all_three_fresh(self, payload):
+    def test_links_native_entries_fresh(self, payload):
         home, payload_bin = payload
         result = _launchers._symlink_sealed_launchers(payload_bin)
         assert result["ok"] is True
-        assert sorted(result["written"]) == ["hermes", "hermes-acp", "hermes-agent"]
-        for name in ("hermes", "hermes-agent", "hermes-acp"):
+        assert sorted(result["written"]) == ["hermes", "hermes-agent"]
+        for name in ("hermes", "hermes-agent"):
             link = home / ".local" / "bin" / name
             assert link.is_symlink()
             assert os.readlink(link) == str(payload_bin / name)
@@ -317,4 +317,4 @@ class TestSymlinkSealedLaunchers:
         result = _launchers._symlink_sealed_launchers(payload_bin)
         assert (link_dir / "hermes").read_text(encoding="utf-8-sig") == "#!/bin/sh\n# pipx launcher\n"
         assert os.readlink(link_dir / "hermes-agent") == str(other)
-        assert sorted(result["written"]) == ["hermes-acp"]
+        assert result["written"] == []

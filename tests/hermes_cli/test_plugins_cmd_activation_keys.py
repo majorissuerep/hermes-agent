@@ -58,20 +58,18 @@ def _lists():
     return set(plugins.get("enabled") or []), set(plugins.get("disabled") or [])
 
 
-def test_disable_bundled_platform_by_manifest_name_gates_the_loader(home):
-    """`hermes plugins disable photon-platform` must produce a key the loader's gate matches; the
-    CLI wrote ``platforms/photon`` while discovery keyed the adapter ``photon-platform``."""
-    plugins_cmd.cmd_disable("photon-platform")
-
+def test_disable_by_manifest_name_gates_the_loader(home):
+    """The canonical nested key must match the actual loader gate, not its display name."""
+    _write_plugin(home / "plugins", "tools/native-probe", "native-probe-manifest")
+    plugins_cmd.cmd_disable("native-probe-manifest")
     enabled, disabled = _lists()
-    photon = next(m for m in collect_directory_manifests() if m.name == "photon-platform")
-    gate = gate_manifest(photon, disabled, enabled)
+    manifest = next(m for m in collect_directory_manifests() if m.name == "native-probe-manifest")
+    gate = gate_manifest(manifest, disabled, enabled)
     assert gate.action == "placeholder" and gate.error == "disabled via config"
-    # And the key the CLI persists IS the loader's key — not merely an alias of it.
-    assert photon.key in disabled
+    assert manifest.key in disabled
 
 
-def test_dashboard_toggle_writes_canonical_key_and_clears_stale_aliases(home):
+def test_native_toggle_writes_canonical_key_and_clears_stale_aliases(home):
     """A toggle by bare leaf or manifest name must land on the canonical key; a stale key in
     ``disabled`` outranks a manifest-name entry in ``enabled``, so writing the raw identifier
     reported success while the plugin stayed off."""
@@ -80,24 +78,23 @@ def test_dashboard_toggle_writes_canonical_key_and_clears_stale_aliases(home):
     cfg["plugins"]["disabled"] = ["obs/zzprobe"]
     save_config(cfg)
 
-    result = plugins_cmd.dashboard_set_agent_plugin_enabled("zzprobe", enabled=True)
+    result = plugins_cmd.set_agent_plugin_enabled("zzprobe", enabled=True)
 
-    # The enable also loads the plugin now (#87770): with no gateway answering, a restart is still the
-    # honest hint and the activation summary rides along.
+    # Local activation reports what actually loaded, with prompt-affecting tools deferred.
     assert {k: result[k] for k in ("ok", "name", "unchanged", "restart_required")} == {
-        "ok": True, "name": "obs/zzprobe", "unchanged": False, "restart_required": True}
-    assert result["gateway_reloaded"] is False
+        "ok": True, "name": "obs/zzprobe", "unchanged": False, "restart_required": False}
+    assert result["activation"]["key"] == "obs/zzprobe"
     enabled, disabled = _lists()
     assert enabled == {"obs/zzprobe"} and disabled == set()
     manifest = next(m for m in collect_directory_manifests() if m.name == "zz-probe-manifest")
     assert gate_manifest(manifest, disabled, enabled).action == "load"
     # Same state requested again by manifest name: nothing to write, no restart to announce.
-    again = plugins_cmd.dashboard_set_agent_plugin_enabled("zz-probe-manifest", enabled=True)
+    again = plugins_cmd.set_agent_plugin_enabled("zz-probe-manifest", enabled=True)
     assert again["unchanged"] is True and again["restart_required"] is False
 
 
-def test_dashboard_enable_on_a_fresh_config_keeps_the_core_tools(home):
-    """Desktop/TUI/dashboard enable with no saved ``platform_toolsets`` must not write one: the old
+def test_native_enable_on_a_fresh_config_keeps_the_core_tools(home):
+    """Native TUI enable with no saved ``platform_toolsets`` must not write one: the old
     seed ``platform_toolsets.cli: [<plugin_ts>]`` replaced the ``hermes-cli`` composite, so the model
     lost every built-in tool (27 -> 2, no ``terminal``). The plugin toolset is on by default anyway."""
     from hermes_cli.tools_config import _get_platform_tools
@@ -105,7 +102,7 @@ def test_dashboard_enable_on_a_fresh_config_keeps_the_core_tools(home):
 
     _write_tool_plugin(home / "plugins", "zzseed")
     try:
-        assert plugins_cmd.dashboard_set_agent_plugin_enabled("zzseed", enabled=True)["ok"] is True
+        assert plugins_cmd.set_agent_plugin_enabled("zzseed", enabled=True)["ok"] is True
         cfg = load_config()
         assert not cfg.get("platform_toolsets")
         assert {"terminal", "file", "zzseed_ts"} <= _get_platform_tools(cfg, "cli")
@@ -138,25 +135,25 @@ def saved_list_plugin(home):
     _restart_backend()
 
 
-def test_dashboard_reenable_restores_the_toolset_in_a_saved_list(saved_list_plugin):
-    """Desktop/TUI/dashboard disable drops the plugin toolset from a saved list; re-enabling from a
+def test_native_reenable_restores_the_toolset_in_a_saved_list(saved_list_plugin):
+    """Native TUI disable drops the plugin toolset from a saved list; re-enabling from a
     backend that scanned while the plugin was off must add it back. The toggle ran before the plugin
     loaded, found no registered tool, and left the plugin enabled with its tools off."""
     from hermes_cli.plugins import discover_plugins
 
     discover_plugins()  # long-lived backend: scanned while the plugin was on
-    assert plugins_cmd.dashboard_set_agent_plugin_enabled("zzre", enabled=False)["ok"] is True
+    assert plugins_cmd.set_agent_plugin_enabled("zzre", enabled=False)["ok"] is True
     assert _saved_cli_list() == ["hermes-cli"]
 
     _restart_backend()
     discover_plugins()  # the backend now holds only a placeholder for the disabled plugin
-    assert plugins_cmd.dashboard_set_agent_plugin_enabled("zzre", enabled=True)["ok"] is True
+    assert plugins_cmd.set_agent_plugin_enabled("zzre", enabled=True)["ok"] is True
     assert _saved_cli_list() == ["hermes-cli", "zzre_ts"]
 
 
 def test_cli_disable_and_enable_round_trip_the_toolset_in_a_saved_list(saved_list_plugin):
-    """``hermes plugins disable`` / ``enable`` edit a saved list the same way the dashboard does, each
-    in its own process; they never touched it, so a toolset the dashboard dropped stayed off."""
+    """``hermes plugins disable`` / ``enable`` edit a saved list the same way the TUI does, each
+    in its own process; they never touched it, so a toolset the TUI dropped stayed off."""
     plugins_cmd.cmd_disable("zzre")
     assert _saved_cli_list() == ["hermes-cli"]
 
@@ -197,7 +194,7 @@ def test_status_reports_bundled_defaults_and_the_live_memory_provider(home):
 
 def test_status_matches_the_loader_for_a_user_installed_model_provider(home):
     """``gate_manifest`` loads a model provider from any source without a ``plugins.enabled`` entry, so
-    status (and the Desktop Plugins switch) must not report a user-installed one as "not enabled"; a
+    status and the native plugin picker must not report a user-installed one as "not enabled"; a
     user standalone plugin stays opt-in."""
     _write_plugin(home / "plugins", "fakeprov", "fakeprov", "kind: model-provider\n")
     _write_plugin(home / "plugins", "fakestand", "fakestand", "")

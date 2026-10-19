@@ -60,6 +60,9 @@ SID = "op-rpc-session"
 @pytest.fixture
 def owned(monkeypatch):
     live.reset_for_tests()
+    # These fake-client operation contracts start with an existing identity;
+    # first-use portal provisioning has separate authentication contracts.
+    monkeypatch.setattr("tools.connectors.managed.ensure_guest_identity", lambda: None)
     with ExitStack() as stack:
         owner, stranger = PipeClient(stack), PipeClient(stack)
         session = dict(transport=owner.transport, agent=None, session_key=SID, history=[],

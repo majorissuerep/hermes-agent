@@ -155,7 +155,7 @@ def test_the_catalog_name_you_installed_with_works_for_every_later_verb(world, t
     pc.cmd_capabilities("cat-plugin")
     pc.cmd_disable("cat-plugin")
     assert pc._get_disabled_set() == {"renamed-plugin"}
-    assert pc.dashboard_set_agent_plugin_enabled("cat-plugin", enabled=True)["name"] == "renamed-plugin"
+    assert pc.set_agent_plugin_enabled("cat-plugin", enabled=True)["name"] == "renamed-plugin"
     assert pc.dashboard_update_user_plugin("cat-plugin")["ok"] is True
     assert pc.dashboard_remove_user_plugin("cat-plugin")["ok"] is True
     assert not target.exists()

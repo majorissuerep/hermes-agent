@@ -24,7 +24,7 @@ except ImportError:  # pragma: no cover – yaml is optional at import time
 
 logger = logging.getLogger("hermes_cli.plugins")
 
-_VALID_PLUGIN_KINDS: set[str] = {"standalone", "backend", "exclusive", "platform", "model-provider"}
+_VALID_PLUGIN_KINDS: set[str] = {"standalone", "backend", "exclusive", "model-provider"}
 
 # Unknown plugin.yaml fields are forward-compat surface: warn (debug for v1 files, warning for v2+)
 # and continue loading. ``capabilities``/``emits``/``listens``/``hermes``/``depends`` are reserved.
@@ -353,8 +353,7 @@ class PluginManifest:
     path: Optional[str] = None
     # ``standalone`` (default; opt-in via plugins.enabled) | ``backend`` (pluggable backend for a core tool;
     # bundled auto-load, user-installed gated) | ``exclusive`` (one active provider, selected via
-    # <category>.provider; own discovery, general scanner skips) | ``platform`` (gateway adapter; bundled
-    # auto-load, user-installed gated as untrusted code).
+    # <category>.provider; own discovery, general scanner skips).
     kind: str = "standalone"
     # Path-derived registry key used by plugins.enabled/disabled and `hermes plugins list`: ``disk-cleanup``
     # for a flat plugin, ``image_gen/openai`` for a category plugin. Empty -> name.
@@ -505,6 +504,8 @@ def _manifest_kind(data: Mapping, key: str, plugin_dir: Path) -> str:
     route to their own discovery instead of the general manager."""
     raw_kind = data.get("kind", "standalone")
     kind = raw_kind.strip().lower() if isinstance(raw_kind, str) else "standalone"
+    if kind == "platform":
+        raise ValueError("Messaging platform plugins are not supported by this terminal-only build")
     if kind not in _VALID_PLUGIN_KINDS:
         logger.warning(
             "Plugin %s: unknown kind '%s' (valid: %s); treating as 'standalone'",

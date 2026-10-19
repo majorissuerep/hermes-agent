@@ -847,13 +847,12 @@ def dashboard_install_plugin(
     if enable and (refused := _enable_placed(installed_name, deps, step)):
         return refused
     ap = target / "after-install.md"
-    # Deps first, then load: the plugin activates in this process (TUI/Desktop server subscribers see it)
-    # and in the running gateway; ``activation`` says what is live now vs next session (#87770).
+    # Deps first, then load native capabilities; prompt/tool pins remain session-stable.
     from hermes_cli.plugins_activation import activate_plugin_now
     if enable:
         step(InstallPhase.loading_tools)
     activated = activate_plugin_now(installed_name) if enable else {
-        "gateway_reloaded": False, "activation": None, "restart_required": False}
+        "activation": None, "restart_required": False}
     return {
         "ok": True, "plugin_name": installed_name, "warnings": warnings,
         "python_dependencies": deps,

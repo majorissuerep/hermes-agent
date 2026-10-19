@@ -63,14 +63,16 @@ def test_none_shell_gets_upstream_eval():
 
 def test_zsh_user_gets_zsh_handoff_with_dump():
     script = bse._user_command_invocation("echo hi", "/usr/bin/zsh", "/tmp/envdump")
-    assert script.startswith("/usr/bin/zsh -c 'echo hi")
+    assert script.startswith("/usr/bin/zsh -c '")
+    assert "echo hi" in script
     assert "export -p > /tmp/envdump" in script
     assert "eval" not in script
 
 
 def test_dash_user_handoff():
     script = bse._user_command_invocation("echo hi", "/bin/dash", "/tmp/envdump")
-    assert script.startswith("/bin/dash -c 'echo hi")
+    assert script.startswith("/bin/dash -c '")
+    assert "echo hi" in script
 
 
 def test_wrap_command_bash_unchanged():
@@ -100,7 +102,7 @@ def test_wrap_command_zsh_handoff_present():
         cwd_marker="__M__",
         user_shell="/usr/bin/zsh",
     )
-    assert "/usr/bin/zsh -c 'echo hi" in script
+    assert "/usr/bin/zsh -c '" in script
     assert ".userenv" in script  # dump + source-back wired
 
 

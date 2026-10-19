@@ -119,12 +119,12 @@ class TestDeclarationParsing:
             group="hermes_agent.plugins",
             dist=SimpleNamespace(
                 version="1.2.3",
-                metadata={"Summary": "Names gateway threads"},
+                metadata={"Summary": "Chooses a local model"},
             ),
             load=load,
         )
         capability_ep = SimpleNamespace(
-            name="thread-namer.gateway.platform_actions",
+            name="thread-namer.llm.model_override",
             value="thread_namer.plugin:register",
             group="hermes_agent.plugin_capabilities",
             load=load,
@@ -140,8 +140,8 @@ class TestDeclarationParsing:
         assert len(manifests) == 1
         assert manifests[0].name == "thread-namer"
         assert manifests[0].version == "1.2.3"
-        assert manifests[0].description == "Names gateway threads"
-        assert manifests[0].capabilities == ["gateway.platform_actions"]
+        assert manifests[0].description == "Chooses a local model"
+        assert manifests[0].capabilities == ["llm.model_override"]
         load.assert_not_called()
 
 
