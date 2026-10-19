@@ -2923,7 +2923,8 @@ def _default_spawn(task: Task, workspace: str, *, board: Optional[str] = None) -
     env = systemd_user_bus_env(env)
     log_f = _open_worker_log(task, board)
     try:
-        proc = subprocess.Popen(
+        from hermes_cli.kanban_worker_authority import spawn_worker
+        proc = spawn_worker(
             cmd,
             cwd=workspace if os.path.isdir(workspace) else None,
             stdin=subprocess.DEVNULL,
@@ -2944,12 +2945,6 @@ def _default_spawn(task: Task, workspace: str, *, board: Optional[str] = None) -
     if _kb._IS_WINDOWS:
         _live_worker_procs[proc.pid] = proc
     return proc.pid
-
-
-# ---------------------------------------------------------------------------
-# Long-lived dispatcher daemon
-# ---------------------------------------------------------------------------
-
 
 
 # Late-bound origin namespace (see module docstring); imported LAST so this

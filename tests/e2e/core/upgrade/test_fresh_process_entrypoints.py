@@ -41,7 +41,6 @@ from pathlib import Path
 import pytest
 
 from tests.e2e.core.upgrade._helpers import (
-    BWRAP_OK,
     WORKTREE,
     describe,
     isolated_env,
@@ -687,8 +686,6 @@ def _spawn_native_entrypoint(argv, *, env, cwd, writable, **kwargs):
     fd, additions = inherited
     try:
         command = sandbox_argv(argv, writable=writable)
-        if BWRAP_OK:
-            command[1:1] = ["--preserve-fds", str(fd - 2)]
         return subprocess.Popen(
             command, env={**env, **additions}, cwd=str(cwd), pass_fds=(fd,), **kwargs
         )

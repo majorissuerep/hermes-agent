@@ -104,6 +104,8 @@ def assert_managed_env_read_succeeded(requests: list[dict], ctx: Ctx) -> None:
     ids = set()
     result = None
     for request in requests:
+        if request["kind"] != "main":
+            continue
         for message in request.get("body", {}).get("messages", []):
             for call in message.get("tool_calls") or []:
                 args = json.loads(call["function"]["arguments"])

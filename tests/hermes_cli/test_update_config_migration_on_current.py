@@ -97,13 +97,15 @@ def test_update_copies_bundled_skill_bytes_to_default_active_and_sibling(tmp_pat
         assert (profile / 'skills' / witness.relative_to(bundled)).read_bytes() == witness.read_bytes()
 
 
-def test_active_config_write_failure_still_migrates_siblings_and_restores_snapshots(tmp_path, monkeypatch):
+def test_active_config_write_failure_still_migrates_siblings_and_restores_snapshots(tmp_path, monkeypatch, request):
     """A failed ACTIVE config write is owed debt, but the independent sibling migration and the
     pre-update snapshot safety nets (the only holders of this run's snapshot ids) still run."""
     import json
     from pathlib import Path
 
     from hermes_cli import backup, update_cmd_config
+    from hermes_security import io, vault
+    from tests.e2e.vault_home import seal_fixture_home
 
     root = tmp_path / '.hermes'
     sibling = root / 'profiles' / 'sibling'
@@ -114,11 +116,13 @@ def test_active_config_write_failure_still_migrates_siblings_and_restores_snapsh
         (home / 'cron' / 'jobs.json').write_text(json.dumps(jobs), encoding='utf-8')
     monkeypatch.setattr(Path, 'home', lambda: tmp_path)
     monkeypatch.setenv('HERMES_HOME', str(root))
+    seal_fixture_home(root)
+    request.addfinalizer(lambda: vault.lock_now(root))
     active_snapshot = backup.create_quick_snapshot(label='pre-update', hermes_home=root)
     monkeypatch.setattr(update_cmd_config, '_LAST_SIBLING_SNAPSHOTS',
                         backup.create_pre_update_snapshots_all_profiles(root))
     for home in (root, sibling):  # the documented mutation-window loss the safety nets repair
-        (home / 'cron' / 'jobs.json').write_text('{"jobs": []}', encoding='utf-8')
+        io.write_json(home / 'cron' / 'jobs.json', {'jobs': []}, purpose='state')
     real_replace = config.atomic_config_replace
 
     def replace(path, *args, **kwargs):
@@ -130,7 +134,7 @@ def test_active_config_write_failure_still_migrates_siblings_and_restores_snapsh
     with pytest.raises(RuntimeError, match='was not written: disk full'):
         update_cmd_config._check_and_apply_config_migration(pre_update_snapshot_id=active_snapshot)
     for home in (root, sibling):
-        assert json.loads((home / 'cron' / 'jobs.json').read_text(encoding='utf-8')) == jobs
+        assert io.read_json(home / 'cron' / 'jobs.json', purpose='state') == jobs
     assert config.check_config_version()[0] == 48  # the active write stays owed
     monkeypatch.setenv('HERMES_HOME', str(sibling))
     sibling_version, latest = config.check_config_version()

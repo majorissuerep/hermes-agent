@@ -57,11 +57,13 @@ def run_claim() -> int:
     from hermes_state.runtime_ownership import ProfileOwnership
     from hermes_constants import get_hermes_home
     gate_startup(Namespace(command='chat'))
+    from hermes_cli.kanban_worker_authority import adopt_worker_execution
+    authority = adopt_worker_execution()
     owner = ProfileOwnership()
-    owner.reserve([get_hermes_home()])
     context = None
     code, output = 1, ''
     try:
+        owner.reserve([get_hermes_home()])
         task, context = _claim_context()
         os.chdir(task.workspace_path)
         def turns(agent, prompt, history):
@@ -82,6 +84,8 @@ def run_claim() -> int:
                 _record_worker_result(context, code, output[-500:])
         finally:
             owner.close()
+            if authority is not None:
+                authority.close()
 
 
 def main():
