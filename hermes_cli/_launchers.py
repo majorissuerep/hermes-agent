@@ -394,16 +394,19 @@ def _hermes_closure_repair():
             refuse('recovery manifest does not match its files')
     for name in [n for n in sys.modules if n.split('.')[0] in ('hermes_cli', 'hermes_bootstrap', 'hermes_constants', 'pm')]:
         del sys.modules[name]
+    original_path = sys.path[:]
     tree = os.path.normcase(os.path.realpath(root))
     sys.path[:] = [str(closure)] + [p for p in sys.path if p and os.path.normcase(os.path.realpath(p)) != tree
                                     and not os.path.normcase(os.path.realpath(p)).startswith(tree + os.sep)]
     sys.dont_write_bytecode = True
     said = io.StringIO()
     restored = False
+    checked = False
     try:
         with contextlib.redirect_stderr(said):
             from hermes_cli import _early_recovery
             restored = _early_recovery.restore_interrupted_pull(root)
+            checked = True
     except Exception as exc:
         said.write('hermes: the checkout cannot start after an interrupted `hermes update`, and it was not '
                    'repaired: %s\\n' % (exc,))
@@ -411,6 +414,13 @@ def _hermes_closure_repair():
         sys.stderr.write('hermes: the checkout could not start after an interrupted `hermes update`; '
                          'repaired it with the recovery code saved before the update.\\n' + said.getvalue())
         _early_recovery.relaunch_after_restore()
+    if checked and not (git / __MARKER__).exists():
+        # Git completed the move before its updater died: recovery retired the
+        # marker without rewriting the tree. Bootstrap must still finish its tail.
+        for name in [n for n in sys.modules if n.split('.')[0] in ('hermes_cli', 'hermes_bootstrap', 'hermes_constants', 'pm')]:
+            del sys.modules[name]
+        sys.path[:] = original_path
+        return
     sys.stderr.write(said.getvalue() or 'hermes: the checkout cannot start after an interrupted `hermes update`; '
                      'launch again once the update that owns it finishes.\\n')
     raise SystemExit(1)
