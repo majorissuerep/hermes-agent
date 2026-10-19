@@ -132,7 +132,7 @@ def test_commit_pin_must_come_from_the_installed_branch(tmp_path):
 
 
 def test_pinned_fresh_clone_never_materializes_the_branch_tip(tmp_path):
-    """A pinned install (the desktop bootstrap passes --commit) checks out only the pin.
+    """A pinned install checks out only the pin.
 
     Every file the tip changed is fetched and written once for the tip, then again for the pin.
     """
@@ -148,7 +148,7 @@ def test_pinned_fresh_clone_never_materializes_the_branch_tip(tmp_path):
     assert _git(install, "rev-parse", "HEAD") == pin
     assert (install / "README").read_text() == "one"
     assert _git(install, "status", "--porcelain") == ""
-    [clone] = [line for line in trace.read_text().splitlines() if line.startswith("clone ")]
+    [clone] = [line for line in trace.read_text().splitlines() if "clone" in line.split()]
     assert "--no-checkout" in clone.split()
     unpinned_root = tmp_path / "unpinned"
     unpinned_root.mkdir()
@@ -156,7 +156,7 @@ def test_pinned_fresh_clone_never_materializes_the_branch_tip(tmp_path):
     result = _stage(unpinned_root, origin, prelude=tracer)
     assert result.returncode == 0, result.stdout + result.stderr
     assert (unpinned_root / "install" / "README").read_text() == "tip"
-    [clone] = [line for line in trace.read_text().splitlines() if line.startswith("clone ")]
+    [clone] = [line for line in trace.read_text().splitlines() if "clone" in line.split()]
     assert "--no-checkout" not in clone.split()
 
 
@@ -172,7 +172,7 @@ def test_pinned_fresh_clone_publishes_nothing_when_the_pin_fails(tmp_path):
     assert refused.returncode != 0
     assert "is not on branch main" in refused.stdout + refused.stderr
     assert not (tmp_path / "install").exists()
-    failing_checkout = 'git() { [ "${3:-}" = checkout ] && return 1; command git "$@"; }'
+    failing_checkout = 'git() { case " $* " in *" checkout "*) return 1 ;; esac; command git "$@"; }'
     failed = _stage(tmp_path, origin, commit=pin, prelude=failing_checkout)
     assert failed.returncode != 0
     assert "no checkout published" in failed.stdout + failed.stderr

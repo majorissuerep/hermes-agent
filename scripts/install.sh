@@ -743,6 +743,9 @@ stage_repository() {
         fi
         mkdir -p "$(dirname "$INSTALL_DIR")"
         local staged attempt label cloned=false progress=() materialize=(reset --hard HEAD)
+        # A promisor checkout can detach maintenance that still names the temporary
+        # path when we publish it. Keep its writers owned without changing future GC.
+        local git_no_detach=(-c gc.autoDetach=false -c maintenance.auto=false)
         # Phase lines ("Receiving objects: 42%") feed the status line; git
         # prints none to a pipe unless asked.
         if quiet_output; then progress=(--progress); fi
@@ -757,7 +760,7 @@ stage_repository() {
             [ "$attempt" = 1 ] || label="$label (attempt $attempt of 3)"
             # A pinned install materializes only the pin (below): checking out the
             # branch tip first fetches and rewrites every file the two differ in.
-            if run_logged "$label" git clone ${progress[@]+"${progress[@]}"} \
+            if run_logged "$label" git "${git_no_detach[@]}" clone ${progress[@]+"${progress[@]}"} \
                 --filter=blob:none ${INSTALL_COMMIT:+--no-checkout} --branch "$BRANCH" "$REPO_URL" "$staged/tree"; then
                 cloned=true
                 break
@@ -769,7 +772,7 @@ stage_repository() {
             # The checkout step is where throttled downloads die: clone the
             # graph alone, then retry materializing the tree separately.
             log_warn "direct clone failed; trying deferred checkout"
-            if run_logged "Cloning history" git clone ${progress[@]+"${progress[@]}"} \
+            if run_logged "Cloning history" git "${git_no_detach[@]}" clone ${progress[@]+"${progress[@]}"} \
                 --filter=blob:none --no-checkout --branch "$BRANCH" "$REPO_URL" "$staged/tree"; then
                 cloned=deferred
             fi
@@ -781,7 +784,7 @@ stage_repository() {
         if [ -n "$INSTALL_COMMIT" ]; then
             # Pin before publishing: a pinned or deferred clone has no files yet,
             # and an unpublished tree never leaves an empty checkout behind.
-            git -C "$staged/tree" merge-base --is-ancestor "$INSTALL_COMMIT" "origin/$BRANCH" 2>/dev/null \
+            git -C "$staged/tree" "${git_no_detach[@]}" merge-base --is-ancestor "$INSTALL_COMMIT" "origin/$BRANCH" 2>/dev/null \
                 || { rm -rf "$staged"; fail "commit $INSTALL_COMMIT is not on branch $BRANCH" commit_not_on_branch; }
         fi
         if [ -n "$INSTALL_COMMIT" ] || [ "$cloned" = deferred ]; then
@@ -791,7 +794,7 @@ stage_repository() {
             cloned=false
             for attempt in 1 2; do
                 if run_logged "Checking out ${INSTALL_COMMIT:-files} (attempt $attempt of 2)" \
-                    git -C "$staged/tree" "${materialize[@]}"; then
+                    git -C "$staged/tree" "${git_no_detach[@]}" "${materialize[@]}"; then
                     cloned=true
                     [ -z "$INSTALL_COMMIT" ] || pinned=true
                     break
