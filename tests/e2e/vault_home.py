@@ -71,20 +71,21 @@ def _fixture_pm_home(home: Path):
 
 def _prepare_fixture_pm(home: Path, source: Path, extras: tuple[str, ...], *, tui: bool = False) -> None:
     """PM owns a separate process: pytest may reset its own home between test cases."""
-    seal_fixture_home(home)
-    env = {**os.environ, "HERMES_HOME": str(home.resolve())}
-    argv = [sys.executable, "-m", "tests.e2e.vault_home", str(home.resolve()),
-            str(source.resolve()), json.dumps(extras), "tui" if tui else "runtime"]
-    with spawn_unlocked(argv, env=env, cwd=source, stdout=subprocess.PIPE,
-                        stderr=subprocess.STDOUT, text=True) as process:
-        try:
-            output, _ = process.communicate(timeout=600)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.communicate()
-            raise
-        if process.returncode:
-            raise RuntimeError(f"fixture PM preparation failed ({process.returncode}): {output[-12000:]}")
+    with _PM_HOME_LOCK:
+        seal_fixture_home(home)
+        env = {**os.environ, "HERMES_HOME": str(home.resolve())}
+        argv = [sys.executable, "-m", "tests.e2e.vault_home", str(home.resolve()),
+                str(source.resolve()), json.dumps(extras), "tui" if tui else "runtime"]
+        with spawn_unlocked(argv, env=env, cwd=source, stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT, text=True) as process:
+            try:
+                output, _ = process.communicate(timeout=600)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.communicate()
+                raise
+            if process.returncode:
+                raise RuntimeError(f"fixture PM preparation failed ({process.returncode}): {output[-12000:]}")
 
 
 def prepare_fixture_runtime(home: Path, source: Path, *, extras: tuple[str, ...] = ("all",)) -> None:
