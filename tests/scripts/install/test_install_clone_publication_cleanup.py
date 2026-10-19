@@ -42,7 +42,7 @@ def test_filtered_clone_publication_keeps_maintenance_in_custody(tmp_path, pinne
                HERMES_HOME=str(tmp_path / "home"), HERMES_INSTALL_DIR=str(install),
                HERMES_REPO_URL=origin.as_uri())
     body = f"source {shlex.quote(str(INSTALLER))} --manifest\n"
-    body += f"INSTALL_COMMIT={shlex.quote(expected if pinned else '')}\nstage_repository\n"
+    body += f"INSTALL_COMMIT={shlex.quote(expected if pinned else '')}\nset -e\nstage_repository\n"
     result = subprocess.run(["bash", "-c", body], env=env, capture_output=True,
                             text=True, timeout=60, check=False)
     events = [json.loads(line) for line in trace.read_text().splitlines()]
