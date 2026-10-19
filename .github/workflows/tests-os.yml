@@ -2,26 +2,20 @@ name: OS-specific tests
 
 # Runs the tests that can only be trusted on their own host OS.
 #
-# The main Python suite (.github/workflows/tests.yml) runs on
-# ubuntu-latest and covers everything that is either platform-agnostic or
-# genuinely Linux-specific. Tests whose subject is macOS- or
-# OS-specific behaviour carries a marker (see the ``_OS_MARKS`` block
-# comment in tests/conftest.py) and are SKIPPED on Linux, because faking
-# ``sys.platform`` on a Linux runner selects the branch under test without
-# reproducing any of the OS behaviour that branch exists for. This workflow
-# is where those markers actually execute:
+# The main Python suite has no compiled Ink prerequisite. This workflow builds
+# the real terminal UI for explicit Linux usability tests and the macOS-marked
+# suite, so neither native host relies on optional TUI skips or a faked OS.
 #
 #   macos    → ``-m platforms``    on macos-latest
+#   linux    → three public terminal-usability files on ubuntu-latest
 #
 # (tests/conftest.py's ``pytest_collection_modifyitems`` hook skips
 # foreign-OS ``platforms(...)`` markers on each host, so one shared ``-m
 # platforms`` expression selects "this host's own marked tests" on either
 # lane — the helper narrows WHICH FILES get imported first.)
 #
-# Deliberately NOT sliced. The marked set is small (tens of tests, not
-# thousands), so one plain ``pytest`` process per OS is both faster and far
-# less machinery than the per-file parallel runner the Linux lane uses.
-# Each lane FAILS when it selects zero tests (pytest exit code 5) — a
+# macOS keeps its two existing file slices; Linux runs its three files serially.
+# Each lane FAILS when it selects zero tests — a
 # renamed marker or bad selector can never report a green job that ran
 # nothing.
 
@@ -55,6 +49,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - name: Linux terminal usability
+            runner: ubuntu-latest
+            marker: linux
+            workers: 1
+            files: >-
+              tests/tui_runtime/test_terminal_model_pty.py
+              tests/tui_runtime/test_terminal_global_model_pty.py
+              tests/tui_runtime/test_terminal_session_naming_pty.py
           # Two slices on the free standard runner (3 cores, 3 workers): one lane ran
           # ~7.5 min and became the slowest required job once the Linux suite split.
           - name: macOS-only tests (1/2)
@@ -94,6 +96,7 @@ jobs:
         # bare-pytest variant implemented by hand with an exit-5 branch.
         #
         # Selection still narrows WHICH FILES run:
+        # Linux supplies its explicit usability files; on macOS,
         # scripts/ci/list_os_marked_tests.py emits the file list (it exits
         # non-zero when the marker matches no file at all); the list rides
         # to the runner via ``--files`` so an unrelated ImportError fails
@@ -114,7 +117,9 @@ jobs:
 
           # Process substitution would hide the helper's exit status, so write
           # to a file and check it explicitly.
-          if ! python scripts/ci/list_os_marked_tests.py \
+          if [ -n "${{ matrix.files }}" ]; then
+            printf '%s\n' ${{ matrix.files }} > "$LIST"
+          elif ! python scripts/ci/list_os_marked_tests.py \
                  "${{ matrix.marker }}" > "$LIST"; then
             echo "::error::could not enumerate ${{ matrix.marker }} test files"
             exit 1
@@ -143,9 +148,8 @@ jobs:
             -m "platforms and not integration" \
             -v --tb=short
         env:
-          # Match the standard macOS runner's three cores; native terminal tests
-          # also spawn their own Python/Node children.
-          HERMES_TEST_WORKERS: ${{ github.repository == 'NousResearch/hermes-agent' && '16' || '3' }}
+          # Linux serializes real PTYs; preserve the existing macOS worker count.
+          HERMES_TEST_WORKERS: ${{ matrix.workers || (github.repository == 'NousResearch/hermes-agent' && '16' || '3') }}
           HERMES_E2E_REQUIRE_TUI: '1'
           HERMES_TEST_SLICE: ${{ matrix.slice || '' }}
           # Belt-and-suspenders with tests/conftest.py's env blanking: no

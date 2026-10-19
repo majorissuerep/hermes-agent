@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.e2e.vault_home import connect_state
+from tests.e2e.vault_home import connect_state, prepare_fixture_tui
 from tests.tui_runtime.test_terminal_model_pty import (
     ROOT, ModelWire, TerminalPTY, save_fixture_runtime_logs,
 )
@@ -147,7 +147,6 @@ class NamingWorld:
 def naming_world(tmp_path, monkeypatch):
     from hermes_cli.config import ensure_hermes_home, save_config, save_env_value
     from hermes_security import migrate, vault
-    from pm import sync_venv
 
     node = shutil.which("node")
     if not node or not (ROOT / "ui-tui/dist/entry.js").is_file():
@@ -187,7 +186,7 @@ def naming_world(tmp_path, monkeypatch):
             "curator": {"enabled": False}, "updates": {"check": False},
             "display": {"tui_auto_resume_recent": False},
             "agent": {"reasoning_effort": "none"}}, merge_existing=False)
-        sync_venv(extras=["all"], explicit=True, project_root=ROOT)
+        prepare_fixture_tui(home, ROOT)
         vault.clear_vault_cache()
         yield world
     finally:
