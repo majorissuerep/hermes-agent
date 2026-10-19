@@ -43,7 +43,7 @@ def test_public_finite_command_drains_deferred_title_before_exit(tmp_path, entry
         with _fixture_pm_home(home):
             process = spawn_unlocked([sys.executable, "-m", "hermes_cli.main", *args],
                 env={**os.environ, "HERMES_HOME": str(home)}, cwd=ROOT,
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True)
             try:
                 assert entered.wait(30), "actual deferred title HTTP request never arrived"
                 try:
