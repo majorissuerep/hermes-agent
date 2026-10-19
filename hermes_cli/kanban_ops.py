@@ -1,5 +1,5 @@
 """Dispatcher and maintenance verbs for ``hermes kanban``: ``dispatch``,
-``daemon`` (deprecated standalone loop), ``tail``/``watch`` event streaming,
+``tail``/``watch`` event streaming,
 ``gc`` and ``repair``.
 """
 
@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 import time
 from pathlib import Path
@@ -60,34 +59,38 @@ def _cmd_tail(args: argparse.Namespace) -> int:
 def _cmd_dispatch(args: argparse.Namespace) -> int:
     # Honour kanban.default_assignee, kanban.max_in_progress,
     # kanban.max_in_progress_per_profile and kanban.max_spawn with the same
-    # semantics as the gateway dispatch path.
-    try:
-        from hermes_cli.config import load_config
-        _cfg = load_config()
-        _kanban_cfg = _cfg.get("kanban", {}) if isinstance(_cfg, dict) else {}
-        default_assignee = (_kanban_cfg.get("default_assignee") or "").strip() or None
-        max_in_progress_per_profile = kbd._positive_int(
-            _kanban_cfg.get("max_in_progress_per_profile"), None
-        )
-        # Memory-derived default when unset — same fallback the gateway applies.
-        max_in_progress = kbd.resolve_max_in_progress(
-            kbd._positive_int(_kanban_cfg.get("max_in_progress"), None)
-        )
-        # CLI --max is the more explicit signal, so it wins over kanban.max_spawn.
-        cli_max = getattr(args, "max", None)
-        max_spawn = (
-            cli_max if cli_max is not None else kbd._positive_int(_kanban_cfg.get("max_spawn"), None)
-        )
-    except Exception:
-        default_assignee = max_in_progress_per_profile = max_in_progress = None
-        max_spawn = getattr(args, "max", None)
+    # semantics on every explicit local pass.
+    from hermes_cli.config import load_config
+    _cfg = load_config()
+    _kanban_cfg = _cfg.get("kanban", {}) if isinstance(_cfg, dict) else {}
+    default_assignee = (_kanban_cfg.get("default_assignee") or "").strip() or None
+    max_in_progress_per_profile = kbd._positive_int(
+        _kanban_cfg.get("max_in_progress_per_profile"), None
+    )
+    # Memory-derived default when unset.
+    max_in_progress = kbd.resolve_max_in_progress(
+        kbd._positive_int(_kanban_cfg.get("max_in_progress"), None)
+    )
+    # CLI --max is the more explicit signal, so it wins over kanban.max_spawn.
+    cli_max = getattr(args, "max", None)
+    max_spawn = (
+        cli_max if cli_max is not None else kbd._positive_int(_kanban_cfg.get("max_spawn"), None)
+    )
+    stale_timeout = kbd._positive_int(_kanban_cfg.get("dispatch_stale_timeout_seconds"), 0)
+    reconcile = bool(_kanban_cfg.get("reconcile_orphans", True))
+    failure_limit = kbd._positive_int(
+        getattr(args, "failure_limit", None),
+        kbd._positive_int(_kanban_cfg.get("failure_limit"), kbd.DEFAULT_FAILURE_LIMIT),
+    )
     with kbc.connect_closing() as conn:
         res = kbd.dispatch_once(
             conn,
             dry_run=args.dry_run,
             max_spawn=max_spawn,
             max_in_progress=max_in_progress,
-            failure_limit=getattr(args, "failure_limit", kbd.DEFAULT_FAILURE_LIMIT),
+            failure_limit=failure_limit,
+            stale_timeout_seconds=stale_timeout,
+            reconcile_orphans=reconcile,
             default_assignee=default_assignee,
             max_in_progress_per_profile=max_in_progress_per_profile,
         )
@@ -154,115 +157,6 @@ def _cmd_dispatch(args: argparse.Namespace) -> int:
         print("Skipped: another dispatcher holds this board's lock (no writes this tick)")
     if res.memory_pressure:
         print(f"Memory pressure {res.memory_pressure}: new workers restricted this tick")
-    return 0
-
-
-_DAEMON_DEPRECATED = (
-    "hermes kanban daemon: DEPRECATED — the dispatcher now runs\ninside the gateway. To use "
-    "kanban:\n\n    hermes gateway start       # starts the gateway + embedded dispatcher\n\nReady "
-    "tasks will be picked up on the next dispatcher tick\n(default: every 60 seconds). Configure "
-    "via config.yaml:\n\n    kanban:\n      dispatch_in_gateway: true      # default\n      "
-    "dispatch_interval_seconds: 60\n      failure_limit: 2              # consecutive non-success "
-    "attempts before auto-block\n\nRunning both the gateway AND this standalone daemon will\nrace "
-    "for claims. If you truly need the old standalone\ndaemon (no gateway available), rerun with "
-    "--force."
-)
-
-
-def _cmd_daemon(args: argparse.Namespace) -> int:
-    """Deprecated — the dispatcher now runs inside the gateway. Kept so old
-    scripts/systemd units get a clear migration message; ``--force`` (hidden
-    from --help) keeps the standalone loop for hosts that truly cannot run the
-    gateway. The default path exits 2 so nobody accidentally runs two
-    dispatchers against the same kanban.db."""
-    if not getattr(args, "force", False):
-        return _err(_DAEMON_DEPRECATED, 2)
-
-    # Init before printing "started" so the DB path is right and init errors
-    # surface immediately.
-    kb.init_db()
-
-    pidfile = getattr(args, "pidfile", None)
-    if pidfile:
-        try:
-            Path(pidfile).parent.mkdir(parents=True, exist_ok=True)
-            Path(pidfile).write_text(str(os.getpid()), encoding="utf-8")
-        except OSError as exc:
-            print(f"warning: could not write pidfile {pidfile}: {exc}", file=sys.stderr)
-
-    verbose = bool(getattr(args, "verbose", False))
-    print(
-        f"Kanban dispatcher running STANDALONE via --force (interval={args.interval}s, "
-        f"pid={os.getpid()}). Ctrl-C to stop. NOTE: if a gateway is also running with "
-        f"dispatch_in_gateway=true (default), you have two dispatchers racing for claims.",
-        file=sys.stderr,
-    )
-
-    # Health telemetry: warn when every tick finds ready work but spawns
-    # nothing (broken profile, PATH drift, missing venv, credential loss) —
-    # the per-task breaker auto-blocks quietly, so the operator needs a signal.
-    HEALTH_WINDOW = 6  # ticks (default 30s at interval=5)
-    health_state = {"bad_ticks": 0, "last_warn_at": 0}
-
-    def _ready_queue_nonempty() -> bool:
-        """Is there a ready+assigned+unclaimed task the dispatcher would spawn for?
-        Control-plane lanes pulled via ``claim_task`` are correctly idle, not stuck."""
-        try:
-            with kbc.connect_closing() as conn:
-                return kbd.has_spawnable_ready(conn)
-        except Exception:
-            return False
-
-    def _on_tick(res):
-        ready_pending = bool(res.skipped_unassigned) or _ready_queue_nonempty()
-        if ready_pending and not res.spawned:
-            health_state["bad_ticks"] += 1
-        else:
-            health_state["bad_ticks"] = 0
-        # Warn once per HEALTH_WINDOW bad ticks, at most every 5 minutes.
-        if health_state["bad_ticks"] >= HEALTH_WINDOW:
-            now = int(time.time())
-            if now - health_state["last_warn_at"] >= 300:
-                held = kbd.describe_suppression([res])
-                held = f" Last tick held back: {held}." if held else ""
-                print(
-                    f"[{_fmt_ts(now)}] WARN dispatcher stuck: ready queue non-empty for "
-                    f"{health_state['bad_ticks']} consecutive ticks but 0 workers spawned "
-                    f"successfully.{held} Check profile health (venv, PATH, credentials) and `hermes "
-                    f"kanban list --status ready` / `hermes kanban list --status blocked` for "
-                    f"recent spawn_failed tasks.",
-                    file=sys.stderr, flush=True,
-                )
-                health_state["last_warn_at"] = now
-        if not verbose:
-            return
-        did_work = (
-            res.reclaimed or res.crashed or res.timed_out or res.promoted
-            or res.spawned or res.auto_blocked or res.stale
-        )
-        if did_work:
-            print(
-                f"[{_fmt_ts(int(time.time()))}] reclaimed={res.reclaimed} "
-                f"crashed={len(res.crashed)} timed_out={len(res.timed_out)} stale={len(res.stale)} "
-                f"promoted={res.promoted} spawned={len(res.spawned)} "
-                f"auto_blocked={len(res.auto_blocked)}",
-                flush=True,
-            )
-
-    try:
-        kbd.run_daemon(
-            interval=args.interval,
-            max_spawn=args.max,
-            failure_limit=getattr(args, "failure_limit", kbd.DEFAULT_FAILURE_LIMIT),
-            on_tick=_on_tick,
-        )
-    finally:
-        if pidfile:
-            try:
-                Path(pidfile).unlink()
-            except OSError:
-                pass
-    print("(dispatcher stopped)")
     return 0
 
 

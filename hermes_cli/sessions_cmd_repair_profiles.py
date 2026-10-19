@@ -46,12 +46,16 @@ def _print_report(findings: list[Finding]) -> None:
 
 
 def cmd_repair_profiles(args) -> int:
-    from hermes_state.runtime_ownership import exclusive_maintenance
+    from hermes_state.runtime_ownership import OwnershipConflict, exclusive_maintenance
     if not getattr(args, "apply", False):
         return _repair_profiles_owned(args)
     stores = enumerate_stores()
-    with exclusive_maintenance([store.home for store in stores]):
-        return _repair_profiles_owned(args)
+    try:
+        with exclusive_maintenance([store.home for store in stores]):
+            return _repair_profiles_owned(args)
+    except OwnershipConflict as error:
+        print(str(error), file=sys.stderr)
+        return 1
 
 
 def _repair_profiles_owned(args) -> int:

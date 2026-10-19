@@ -21,7 +21,7 @@ def _run(tmp_path: Path, body: str) -> dict:
         from pathlib import Path
         sys.path.insert(0, sys.argv[1])
         from hermes_cli import update_receipt as receipts
-        from hermes_cli.process_identity import _process_create_time
+        from hermes_platform.child_processes import process_create_time
     """) + textwrap.dedent(body), encoding="utf-8")
     env = {key: value for key, value in os.environ.items()
            if not key.startswith(("HERMES_", "PYTEST_"))}
@@ -57,7 +57,7 @@ def test_writer_identity_cannot_resurrect_a_mismatched_owner(tmp_path):
     result = _run(tmp_path, """
         child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])
         try:
-            ct = _process_create_time(child.pid)
+            ct = process_create_time(child.pid)
             assert ct is not None
             same = {'pid': child.pid, 'writer_pid': child.pid, 'pid_create_time': ct - 60}
             writer = {'pid': 0, 'writer_pid': child.pid, 'writer_create_time': ct - 60}

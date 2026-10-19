@@ -7,8 +7,8 @@ from tests.tools.process_receipt_fixtures import encrypted_process_home as _encr
 from tools.process_registry import ProcessRegistry
 
 @pytest.fixture
-def registry(tmp_path, monkeypatch):
-    monkeypatch.setenv("HERMES_HOME", str(tmp_path / ".hermes"))
+def registry():
+    # The canonical isolated home already owns this test's vault authority.
     return ProcessRegistry()
 
 def _spawn_sleeper(registry, notify=False):

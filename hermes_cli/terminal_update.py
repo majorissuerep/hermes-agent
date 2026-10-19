@@ -20,6 +20,8 @@ def update_source(args) -> None:
     root = main.PROJECT_ROOT
     operation = git_operation_in_progress(root)
     if operation:
+        from hermes_cli.update_cmd_common import _record_stop
+        _record_stop("git_in_progress", without_receipt="failed")
         raise RuntimeError(f"Finish the Git {operation} in {root} before updating.")
     release_dead_index_lock(root)
     check.clear_git_debris(root)

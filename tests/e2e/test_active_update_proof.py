@@ -16,9 +16,18 @@ def _call(number, session, command, exit_code=0):
              "\n[Terminal runtime note: the command has finished.]"}]
 
 
+def _delegation():
+    return [{"id": 7, "session_id": "parent", "role": "assistant", "tool_call_id": None,
+             "content": None, "tool_calls": json.dumps([{"id": "delegated", "function": {
+                 "name": "delegate_task", "arguments": "{}"}}])},
+            {"id": 8, "session_id": "parent", "role": "tool", "tool_call_id": "delegated",
+             "tool_calls": None, "content": json.dumps({"results": [{"status": "completed", "summary": "23"}]})}]
+
+
 def test_successful_update_requires_later_parent_and_child_native_calls():
     rows = (_call(1, "parent", UPDATE_COMMAND) + _call(3, "parent", SET_COMMAND) +
             _call(5, "child", GET_COMMAND))
+    rows += _delegation()
     proof = verify_calls(rows, "parent", {"child"})
     assert proof["successful_update_calls"] == 1
     assert proof["post_update_parent_config_writes"] == proof["post_update_child_config_reads"] == 1
@@ -45,4 +54,17 @@ def test_child_reading_the_wrong_profile_value_does_not_qualify():
             _call(5, "child", GET_COMMAND))
     rows[-1]["content"] = json.dumps({"exit_code": 0, "output": "37"})
     with pytest.raises(RuntimeError, match="post-update"):
+        verify_calls(rows, "parent", {"child"})
+
+
+@pytest.mark.parametrize("result", [None, {"results": []}, {"results": [{"status": "failed"}]},
+                                    {"results": [{"status": "completed"}, {"status": "failed"}]},
+                                    {"status": "completed", "results": [{"summary": "23"}]}])
+def test_child_rows_without_completed_parent_delegate_tool_do_not_qualify(result):
+    rows = (_call(1, "parent", UPDATE_COMMAND) + _call(3, "parent", SET_COMMAND) +
+            _call(5, "child", GET_COMMAND))
+    if result is not None:
+        rows += _delegation()
+        rows[-1]["content"] = json.dumps(result)
+    with pytest.raises(RuntimeError, match="actual delegate_task"):
         verify_calls(rows, "parent", {"child"})

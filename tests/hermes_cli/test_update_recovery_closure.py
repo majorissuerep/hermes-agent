@@ -28,7 +28,7 @@ SOURCE = Path(__file__).resolve().parents[2]
 # What a minted launcher imports before the application entry.
 BOOT = ("hermes_bootstrap.py", "hermes_constants.py", "hermes_cli/__init__.py", "hermes_cli/_launchers.py",
         "hermes_cli/_early_recovery.py", "hermes_cli/_parser.py", "hermes_cli/runtime_state.py",
-        "hermes_cli/venv_sync.py", "hermes_cli/steward.py", "hermes_cli/stderr_timestamp.py",
+        "hermes_cli/venv_sync.py", "hermes_cli/steward.py",
         "hermes_cli/update_lock.py", "hermes_cli/update_custody.py", "pm/environments.py",
         "pm/filesystem.py", "pm/paths.py")
 _HOLDER = ("import sys, time\nfrom pathlib import Path\nsys.path.insert(0, sys.argv[1])\n"
@@ -44,12 +44,12 @@ def _killed_mid_write(tmp_path: Path, rel: str, committed: dict[str, str] | None
     for f in BOOT:
         if (SOURCE / f).is_file():
             (root / f).parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(SOURCE / f, root / f)
+            shutil.copyfile(SOURCE / f, root / f)
     for f, text in (committed or {}).items():
         (root / f).write_text(text, encoding="utf-8")
     (root / "hermes_cli/main.py").write_text("def main():\n    print('APP_REACHED')\n    return 0\n", encoding="utf-8")
     env = {"HOME": str(home), "HERMES_HOME": str(home / ".hermes"), "PATH": os.environ.get("PATH", ""),
-           "LANG": "C.UTF-8", "HERMES_ALLOW_NO_VAULT": "1", "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull}
+           "LANG": "C.UTF-8", "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull}
     git_exe = shutil.which("git") or "git"
 
     def git(*args):

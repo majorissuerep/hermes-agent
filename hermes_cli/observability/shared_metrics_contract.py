@@ -156,10 +156,24 @@ TASK_FAILURE_CLASSES = MODEL_ERROR_CLASSES | frozenset({
 _CORE_GATEWAY_PLATFORMS = (frozenset(PLATFORMS) - {"api_server", "cli", "cron"}) | {"none", "plugin", "relay"}
 # The Tool Search bridge tools are not in a toolset; every hosted connector tool reads ``connector``.
 BRIDGE_TOOL_NAMES = frozenset({"tool_call", "tool_describe", "tool_search"})
-# Deleted with the old setup flow. v4 only adds values, and rows that v0.21.6/7 saved with these names
-# must still package; recording maps through the live sets (tool_metric_name, toolset_metric_name).
-RETIRED_TOOL_NAMES = frozenset({"setup_choose", "start_chat"})
-RETIRED_TOOLSET_NAMES = frozenset({"setup", "start_chat"})
+# v4 is additive: historical opt-in rows still package after feature removal.
+# New recording uses only live names; these do not register tools or integrations.
+RETIRED_TOOL_NAMES = frozenset({
+    "setup_choose", "start_chat", "annotate_preview", "browser_vault_enter_code", "browser_vault_fill",
+    "browser_vault_list", "browser_vault_save_login", "browser_vault_unlock", "close_terminal",
+    "desktop_preview", "desktop_project", "discord", "discord_admin", "drive_preview", "feishu_doc_read",
+    "feishu_drive_add_comment", "feishu_drive_list_comment_replies", "feishu_drive_list_comments",
+    "feishu_drive_reply_comment", "focus_pane", "gui_tour", "react_to_message", "read_terminal",
+    "read_window_below", "show_tip", "yb_query_group_info", "yb_query_group_members", "yb_search_sticker",
+    "yb_send_dm", "yb_send_sticker",
+})
+RETIRED_TOOLSET_NAMES = frozenset({
+    "setup", "start_chat", "bot_room", "desktop_ui", "discord", "discord_admin", "feishu_doc", "feishu_drive",
+    "hermes-acp", "hermes-api-server", "hermes-bluebubbles", "hermes-dingtalk", "hermes-discord", "hermes-email",
+    "hermes-feishu", "hermes-gateway", "hermes-matrix", "hermes-mattermost", "hermes-qqbot", "hermes-signal",
+    "hermes-slack", "hermes-sms", "hermes-telegram", "hermes-webhook", "hermes-wecom", "hermes-wecom-callback",
+    "hermes-weixin", "hermes-whatsapp", "hermes-yuanbao", "onboarding", "project", "yuanbao",
+})
 _LIVE_TOOL_NAMES = BUILTIN_TOOL_NAMES | BRIDGE_TOOL_NAMES | {"connector", "mcp", "plugin", "unknown"}
 TOOL_NAMES = _LIVE_TOOL_NAMES | RETIRED_TOOL_NAMES
 TOOL_ERROR_CLASSES = frozenset({

@@ -121,6 +121,10 @@ class TestSnapshotRealProfile:
         import stat
 
         import hermes_cli.browser_connect as bc
+        from hermes_cli.config import _container_or_chmod_skipped, is_managed
+
+        if is_managed() or _container_or_chmod_skipped():
+            pytest.skip("existing-file reconciliation deliberately preserves managed/container permissions")
         src = self._make_profile(tmp_path / "real")
         home = tmp_path / "hermes-home"
         monkeypatch.setattr(bc, "get_hermes_home", lambda: home)
@@ -147,6 +151,10 @@ class TestSnapshotRealProfile:
         import stat
 
         import hermes_cli.browser_connect as bc
+        from hermes_cli.config import _container_or_chmod_skipped, is_managed
+
+        if is_managed() or _container_or_chmod_skipped():
+            pytest.skip("existing-file reconciliation deliberately preserves managed/container permissions")
         src = self._make_profile(tmp_path / "real")
         home = tmp_path / "hermes-home"
         monkeypatch.setattr(bc, "get_hermes_home", lambda: home)
@@ -157,6 +165,26 @@ class TestSnapshotRealProfile:
         dst2, err2 = bc.snapshot_real_profile("chrome", src=str(src))
         assert err2 is None and dst2 == dst
         assert stat.S_IMODE(os.stat(cookies).st_mode) == 0o600
+
+    @pytest.mark.platforms("linux", "macos")
+    def test_new_snapshot_root_is_private_under_permissive_umask(self, tmp_path, monkeypatch):
+        import stat
+
+        import hermes_cli.browser_connect as bc
+
+        src = self._make_profile(tmp_path / "real")
+        home = tmp_path / "hermes-home"
+        monkeypatch.setattr(bc, "get_hermes_home", lambda: home)
+        previous = os.umask(0o022)
+        try:
+            dst, error = bc.snapshot_real_profile("chrome", src=str(src))
+        finally:
+            os.umask(previous)
+        assert error is None and dst
+        # Even where reconciliation is intentionally disabled, newly created
+        # credential stores must not expose their copied cookies by traversal.
+        assert stat.S_IMODE(os.stat(dst).st_mode) == 0o700
+        assert _auth_db(os.path.join(dst, "Default", "Cookies")) == "sqlite-cookies"
 
 
 class TestRealProfileCdpLaunch:

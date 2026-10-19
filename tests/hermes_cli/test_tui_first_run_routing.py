@@ -1,14 +1,6 @@
-"""First-run routing between the classic CLI guard, the TUI and the shared-metrics offer.
-
-A blank install (no provider) must reach the TUI's own "Setup Required" screen under
-``hermes --tui``; the classic "Run setup now? [Y/n]" guard only fronts the classic CLI, and the
-one-time shared-metrics offer waits until a provider exists (#128663).
-"""
+"""Blank installs reach native Ink setup without a classic prompt or consent offer."""
 
 from __future__ import annotations
-
-import sys
-import types
 
 import pytest
 
@@ -31,9 +23,6 @@ def _run_chat(monkeypatch, argv, *, provider_configured):
         calls.append("tui")
         raise _Launched
 
-    def classic_main(**_k):
-        calls.append("classic")
-
     monkeypatch.setattr(main_mod, "_has_any_provider_configured", lambda: provider_configured)
     monkeypatch.setattr(main_mod, "_first_run_setup_guard", lambda _args: calls.append("guard"))
     monkeypatch.setattr(consent, "offer_consent_before_chat", lambda _args: calls.append("offer"))
@@ -42,21 +31,11 @@ def _run_chat(monkeypatch, argv, *, provider_configured):
     monkeypatch.setattr(main_mod, "_start_chat_background_prefetch", lambda: None)
     monkeypatch.setattr(main_mod, "_confirm_startup_expensive_model_override", lambda _args: None)
     monkeypatch.setattr(main_mod, "_sync_bundled_skills_for_startup", lambda: None, raising=False)
-    fake_cli = types.ModuleType("cli")
-    fake_cli.main = classic_main
-    monkeypatch.setitem(sys.modules, "cli", fake_cli)
-    from hermes_cli import gateway_chat
-
-    # The classic CLI rides the gateway client: it must still front the guard and never reach
-    # a session (no gateway, no admission) when no provider is configured.
-    monkeypatch.setattr(gateway_chat, "run_gateway_chat", lambda *_a, **_k: calls.append("gateway"))
-    monkeypatch.setattr(gateway_chat, "_register_terminal_process", lambda: None, raising=False)
     try:
         main_mod.cmd_chat(args)
     except _Launched:
         pass
     except SystemExit as exc:
-        # launch_gateway_chat returns 0 after the guard; anything else is a refusal we did not expect.
         assert exc.code == 0, f"cmd_chat exited {exc.code} after {calls}"
     return calls
 
@@ -70,5 +49,5 @@ def test_blank_install_tui_skips_classic_guard_and_offer(monkeypatch):
     assert _run_chat(monkeypatch, ["chat", "--tui"], provider_configured=False) == ["tui"]
 
 
-def test_blank_install_classic_cli_still_gets_the_guard(monkeypatch):
-    assert _run_chat(monkeypatch, ["chat", "--cli"], provider_configured=False) == ["guard"]
+def test_blank_install_default_is_native_tui(monkeypatch):
+    assert _run_chat(monkeypatch, ["chat"], provider_configured=False) == ["tui"]

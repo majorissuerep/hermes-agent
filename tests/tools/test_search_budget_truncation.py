@@ -7,6 +7,7 @@ from tools import file_operations
 from tools.environments.local import LocalEnvironment
 from tools.file_operations import ExecuteResult, ShellFileOperations
 from tools.file_operations_search import _search_stdout_and_limit
+from tests.tools.file_ops_fixtures import bash_program
 
 
 TIMEOUT = "[Command timed out after 60s]"
@@ -87,6 +88,7 @@ class FindRecordingEnvironment:
         self.commands = []
 
     def execute(self, command, **kwargs):
+        command = bash_program(command)
         self.commands.append((command, kwargs))
         if command.startswith("command -v find"):
             return {"output": "yes\n", "returncode": 0}
@@ -106,6 +108,7 @@ class FindRecordingEnvironment:
 
 class MultiRootFindEnvironment(FindRecordingEnvironment):
     def execute(self, command, **kwargs):
+        command = bash_program(command)
         self.commands.append((command, kwargs))
         if command.startswith("test -e "):
             output = "not_found\n" if "'/one/.hidden /two/.cache'" in command else "exists\n"

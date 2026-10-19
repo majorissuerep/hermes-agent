@@ -51,13 +51,13 @@ class TestSessionActiveDirectory:
         launch_dir.mkdir()
         monkeypatch.chdir(launch_dir)  # desktop app launches from HOME
 
-        record_session_cwd("desktop:123", str(workspace))
+        record_session_cwd("tui:123", str(workspace))
         try:
-            prompt = build_init_prompt_for_cwd(session_key="desktop:123")
+            prompt = build_init_prompt_for_cwd(session_key="tui:123")
             assert f"for the project at: {workspace}" in prompt
             assert str(launch_dir) not in prompt
         finally:
-            clear_session_cwd("desktop:123")
+            clear_session_cwd("tui:123")
 
     def test_stale_record_falls_back_to_process_cwd(self, tmp_path, monkeypatch):
         from tools.terminal_tool import clear_session_cwd, record_session_cwd
@@ -67,30 +67,30 @@ class TestSessionActiveDirectory:
         monkeypatch.chdir(launch_dir)
         monkeypatch.delenv("TERMINAL_CWD", raising=False)
 
-        record_session_cwd("desktop:123", str(tmp_path / "deleted-project"))
+        record_session_cwd("tui:123", str(tmp_path / "deleted-project"))
         try:
-            prompt = build_init_prompt_for_cwd(session_key="desktop:123")
+            prompt = build_init_prompt_for_cwd(session_key="tui:123")
             assert f"for the project at: {launch_dir}" in prompt
         finally:
-            clear_session_cwd("desktop:123")
+            clear_session_cwd("tui:123")
 
     def test_explicit_cwd_wins_over_session_record(self, tmp_path):
         from tools.terminal_tool import clear_session_cwd, record_session_cwd
 
-        record_session_cwd("desktop:123", str(tmp_path / "other"))
+        record_session_cwd("tui:123", str(tmp_path / "other"))
         try:
             prompt = build_init_prompt_for_cwd(
-                cwd=str(tmp_path), session_key="desktop:123"
+                cwd=str(tmp_path), session_key="tui:123"
             )
             assert f"for the project at: {tmp_path}" in prompt
         finally:
-            clear_session_cwd("desktop:123")
+            clear_session_cwd("tui:123")
 
     def test_ambient_session_key_used_when_none(self, tmp_path, monkeypatch):
         # Dispatch surfaces that don't pass an explicit key (e.g. a CLI
         # inheriting a bound session env) resolve the key from
         # HERMES_SESSION_KEY.
-        from gateway.session_context import set_session_vars
+        from agent.session_context import set_session_vars, reset_session_vars
         from tools.terminal_tool import clear_session_cwd, record_session_cwd
 
         workspace = tmp_path / "proj"
@@ -99,13 +99,14 @@ class TestSessionActiveDirectory:
         launch_dir.mkdir()
         monkeypatch.chdir(launch_dir)
 
-        record_session_cwd("gateway:999", str(workspace))
-        set_session_vars(session_key="gateway:999")
+        record_session_cwd("tui:999", str(workspace))
+        set_session_vars(session_key="tui:999")
         try:
             prompt = build_init_prompt_for_cwd()
             assert f"for the project at: {workspace}" in prompt
         finally:
-            clear_session_cwd("gateway:999")
+            clear_session_cwd("tui:999")
+            reset_session_vars()
 
     def test_stale_explicit_cwd_falls_through_to_the_session_record(self, tmp_path):
         # The guard lives in the builder so every surface shares it: a ``cwd`` naming a
@@ -119,13 +120,13 @@ class TestSessionActiveDirectory:
         gone.mkdir()
         gone.rmdir()
 
-        record_session_cwd("desktop:123", str(workspace))
+        record_session_cwd("tui:123", str(workspace))
         try:
-            prompt = build_init_prompt_for_cwd(cwd=str(gone), session_key="desktop:123")
+            prompt = build_init_prompt_for_cwd(cwd=str(gone), session_key="tui:123")
             assert f"for the project at: {workspace}" in prompt
             assert str(gone) not in prompt
         finally:
-            clear_session_cwd("desktop:123")
+            clear_session_cwd("tui:123")
 
 
 class TestInitRegistryWiring:
@@ -137,9 +138,7 @@ class TestInitRegistryWiring:
         assert cmd.name == "init"
 
 
-    def test_init_works_on_the_gateway(self):
-        # /init is a both-surfaces command like /learn, not CLI-only.
-        from hermes_cli.commands import GATEWAY_KNOWN_COMMANDS
+    def test_init_is_available_to_native_command_dispatch(self):
+        from hermes_cli.commands import COMMAND_NAMES
 
-        assert "init" in GATEWAY_KNOWN_COMMANDS
-
+        assert "init" in COMMAND_NAMES

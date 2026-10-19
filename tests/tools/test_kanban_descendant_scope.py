@@ -59,6 +59,8 @@ def test_terminal_descendants_cannot_mutate_even_after_task_is_removed(tmp_path,
     script.write_text(
         "import os, sys, json, subprocess\n"
         f"sys.path.insert(0, {str(ROOT)!r})\n"
+        "from hermes_security.handoff import adopt_inherited_key\n"
+        "assert adopt_inherited_key(), 'trusted fixture child requires native session authority'\n"
         "from tools import kanban_tools as kt\n"
         "from agent.delegation_context import is_dispatcher_owned_worker_context\n"
         f"own, foreign = {own!r}, {foreign!r}\n"
@@ -95,6 +97,7 @@ def test_terminal_descendants_cannot_mutate_even_after_task_is_removed(tmp_path,
         outputs.append(proc.stdout)
     for output in outputs:
         row = json.loads(next(line.split("SCOPE_RESULT=", 1)[1] for line in output.splitlines() if "SCOPE_RESULT=" in line))
+        assert "task" in row["show"], row
         assert row["show"]["task"]["id"] == own, row
         assert not row["owner"] and row["default"] is None, row
         assert row["db"] == str(tmp_path / "assigned.db") and row["board"] == "default"

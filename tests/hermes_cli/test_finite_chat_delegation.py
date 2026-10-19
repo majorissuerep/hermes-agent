@@ -146,8 +146,9 @@ def test_finite_chat_joins_parallel_children_before_final_response(tmp_path, mod
         with connect_state(home / "state.db") as database:
             rows = database.execute("SELECT content FROM messages WHERE role='tool'").fetchall()
             saved = [json.loads(row[0]) for row in rows]
-            assert any(row.get("status") == "completed" and len(row.get("results", [])) == 2
-                       for row in saved), saved
+            assert any(len(row.get("results", [])) == 2 and all(
+                entry.get("status") == "completed" for entry in row["results"])
+                for row in saved), saved
             if mode == "resumed":
                 history = database.execute("SELECT content FROM messages WHERE session_id=? ORDER BY id",
                                            ("finite-resume",)).fetchall()

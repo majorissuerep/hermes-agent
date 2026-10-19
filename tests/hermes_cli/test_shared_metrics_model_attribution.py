@@ -218,69 +218,6 @@ def test_tui_switch_before_first_prompt_blames_the_configured_route(
         ({"execution_surface": "tui", "from_provider": expected[0], "to_provider": "openai"}, 1)]
 
 
-def _gateway_runner(multiplex_home=None):
-    from gateway.slash_commands_model import GatewayModelCommandsMixin
-
-    class Runner(GatewayModelCommandsMixin):
-        def __init__(self):
-            self.config = SimpleNamespace(multiplex_profiles=multiplex_home is not None)
-
-        def _resolve_profile_home_for_source(self, source):
-            return multiplex_home
-
-        def _switch_cached_agent_model(self, result, ctx, picker):
-            return None
-
-        async def _record_model_switch(self, *a, **k):
-            return None
-
-        async def _model_switch_confirmation(self, *a, **k):
-            return "ok"
-
-    return Runner()
-
-
-def _gateway_switch(runner, config_path):
-    from gateway.slash_commands_model import _ModelSwitchContext
-
-    ctx = _ModelSwitchContext(session_key="k", source=None, config_path=config_path, persist_global=False)
-    ctx.read_config()
-    result = SimpleNamespace(target_provider="anthropic", new_model="claude-opus-4")
-    asyncio.run(runner._commit_model_switch_locked(result, ctx, source=None, picker=True))
-    _flush()
-
-
-@pytest.mark.parametrize(("model_block", "expected"), [
-    ("  provider: vllm\n  default: acme-private-llama\n", ("custom", "custom")),
-    ("  default: acme-private-llama\n  base_url: http://10.0.0.5:8000/v1\n", ("unknown", "custom")),
-    (f"  provider: openrouter\n  default: {PUBLIC}\n", ("openrouter", PUBLIC)),
-])
-def test_gateway_switch_reports_the_configured_route_not_the_switch_default(
-    direct_runtime, tmp_path, model_block, expected,
-):
-    """Gateway /model reads config.yaml: an unset provider must not borrow switch_model's
-    ``openrouter`` default, and a local alias must not ship the configured model id."""
-    cfg = tmp_path / "gw-config.yaml"
-    cfg.write_text("model:\n" + model_block)
-    _gateway_switch(_gateway_runner(), cfg)
-
-    assert _stored_values(tmp_path, "hermes.model_friction.count") == [
-        ({"model": expected[1], "provider": expected[0], "signal": "switch_away"}, 1)]
-    assert _stored_values(tmp_path, "hermes.model_switch.count") == [
-        ({"execution_surface": "gateway", "from_provider": expected[0], "to_provider": "anthropic"}, 1)]
-
-
-def test_multiplexed_gateway_switch_records_in_the_owning_profile(direct_runtime, tmp_path):
-    home_b = tmp_path / "profiles" / "b"
-    home_b.mkdir(parents=True)
-    cfg = home_b / "config.yaml"
-    cfg.write_text(f"model:\n  provider: openrouter\n  default: {PUBLIC}\n")
-    _gateway_switch(_gateway_runner(multiplex_home=home_b), cfg)
-
-    assert not _all_rows(tmp_path / "hermes-home")
-    assert sorted(name for name, _ in _all_rows(home_b)) == ["hermes.model_friction.count", "hermes.model_switch.count"]
-
-
 def _cli(db):
     from hermes_cli.cli_loops_mixin import CLILoopsMixin
     from hermes_cli.cli_session_mixin import CLISessionMixin

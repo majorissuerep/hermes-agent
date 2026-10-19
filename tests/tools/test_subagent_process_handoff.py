@@ -12,6 +12,8 @@ import weakref
 
 import pytest
 
+from tests.tools.process_receipt_fixtures import encrypted_process_home as _encrypted_process_home
+
 from tools.delegate_tool import _register_subagent, _unregister_subagent
 from tools.process_registry import ProcessRegistry, process_registry, _handle_process
 from tools.process_registry_notifications import _process_accounting_lines, format_process_notification

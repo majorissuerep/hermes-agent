@@ -162,17 +162,15 @@ def test_default_spawn_resolves_env_passthrough_under_multiplex(monkeypatch, tmp
 
 
 def test_worker_toolsets_come_from_the_assignee_profile_not_the_parent_config(tmp_path, monkeypatch):
-    """The worker's toolsets are frozen by the assignee profile's own gateway (its config), never
-    by the dispatcher's root/active profile: a root config that only lists ``kanban`` must not
-    reach a worker whose profile grants ``terminal`` and ``web``."""
-    import json
+    """A valid native worker reads its assignee's CLI policy, not the parent's config."""
     from contextlib import closing
-    from types import SimpleNamespace
+
+    import json
 
     from hermes_cli import kanban_db as kb
+    from hermes_cli import oneshot
     from hermes_cli.kanban_db_connect import connect
-    from gateway.session_contract import Principal
-    from gateway.session_kanban import build_kanban_policy
+    from hermes_cli.kanban_worker_client import _claim_context
 
     profile = tmp_path / "profiles" / "elias"
     profile.mkdir(parents=True)
@@ -181,27 +179,53 @@ def test_worker_toolsets_come_from_the_assignee_profile_not_the_parent_config(tm
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     monkeypatch.delenv("HERMES_KANBAN_DB", raising=False)
     monkeypatch.setattr("hermes_cli.profiles.resolve_profile_env", lambda name: str(profile))
+    root_config = {"platform_toolsets": {"cli": ["kanban"]}}
+    (tmp_path / "config.yaml").write_text(json.dumps(root_config), encoding="utf-8")
+    assignee_config = {"model": {"default": "worker-model", "provider": "custom"},
+                       "platform_toolsets": {"cli": ["terminal", "web"]}}
+    (profile / "config.yaml").write_text(json.dumps(assignee_config), encoding="utf-8")
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    kb.create_board("owned")  # explicit creation; connect() never creates a board (#43243)
+    kb.create_board("owned")
     with closing(connect(board="owned")) as conn:
         task_id = kb.create_task(conn, title="t", body="b", assignee="elias",
                                  workspace_kind="dir", workspace_path=str(workspace))
         kb.recompute_ready(conn)
         task = kb.claim_task(conn, task_id)
-    actor = Principal("owner", str(profile), frozenset({"session:create"}), "transport")
-    connection = SimpleNamespace(authority=SimpleNamespace(profile_id=str(profile)), actor=actor, native_owner=True)
-    params = dict(board="owned", task_id=task.id, run_id=task.current_run_id, claim_lock=task.claim_lock)
+        db_path = conn.execute("PRAGMA database_list").fetchone()[2]
+    monkeypatch.setenv("HERMES_KANBAN_DB", db_path)
+    monkeypatch.setenv("HERMES_KANBAN_TASK", task.id)
+    monkeypatch.setenv("HERMES_KANBAN_RUN_ID", str(task.current_run_id))
+    monkeypatch.setenv("HERMES_KANBAN_CLAIM_LOCK", task.claim_lock)
+    claimed, context = _claim_context()
+    assert claimed.assignee == "elias"
+    assert context["task_id"] == task.id and context["run_id"] == task.current_run_id
 
-    assignee_config = {"model": {"default": "m", "provider": "custom"},
-                       "platform_toolsets": {"cli": ["terminal", "web"]}, "toolsets": ["hermes-cli"]}
-    policy, _ = build_kanban_policy(connection, params, assignee_config)
-    assert {"terminal", "web", "kanban"} <= set(policy.toolsets)
+    constructed = {}
 
-    root_only_kanban = {"model": {"default": "m", "provider": "custom"}, "platform_toolsets": {"cli": ["kanban"]}}
-    other_profile = tmp_path
-    with pytest.raises(Exception):
-        # A dispatcher acting for another profile cannot mint this worker's policy at all.
-        build_kanban_policy(SimpleNamespace(authority=SimpleNamespace(profile_id=str(other_profile)),
-                                            actor=actor, native_owner=True), params, root_only_kanban)
-    assert json.loads(policy.kanban_json)["profile"] == "elias"
+    class FakeAgent:
+        session_id = None
+
+        def __init__(self, **kwargs):
+            constructed.update(kwargs)
+
+        def shutdown_memory_provider(self):
+            pass
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(oneshot, "_create_session_db_for_oneshot", lambda: None)
+    monkeypatch.setattr("hermes_cli.runtime_provider.resolve_runtime_with_fallback",
+                        lambda *args, **kwargs: ({"provider": "custom", "api_key": "fixture"}, None))
+    monkeypatch.setattr("hermes_cli.mcp_startup.ensure_mcp_discovery_before_agent_build", lambda **kwargs: None)
+    monkeypatch.setattr("run_agent.AIAgent", FakeAgent)
+    output, _ = oneshot._run_agent("work", conversation_runner=lambda *_: {"final_response": "done"})
+    assert output == "done"
+    assert {"terminal", "web"} <= set(constructed["enabled_toolsets"])
+    assert constructed["model"] == "worker-model"
+
+    # Another owning profile cannot consume the same valid card/claim.
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    with pytest.raises(RuntimeError, match="kanban_profile_mismatch"):
+        _claim_context()

@@ -39,9 +39,6 @@ def complete_source_checkout(
 ) -> bool:
     """Publish commands, build the products, then run post-build maintenance.
 
-    ``before_build`` (an update's paused-gateway restart) runs once the launchers are published:
-    dependencies are already synced, the long product builds have not started.
-
     Every step runs even when an earlier one failed; each failure is printed as ``⚠``,
     recorded on the open update receipt and appended to ``followups`` as ``(step, reason)``.
     Returns True only when every step finished and the SQLite runtime is not unsafe.
@@ -49,17 +46,9 @@ def complete_source_checkout(
     from hermes_cli.update_lock import UpdateLock, describe_holder
 
     root = Path(root)
-    # This tail is the last mutating step of an install or update, and its product
-    # builds run for minutes. A gateway restarted while it runs (launchd KeepAlive,
-    # a service manager, a second `hermes` launch) reaches the same tail through
-    # venv_sync, and `hermes update` runs its own: two completions then build the
-    # same output directories concurrently and race on install-stamp.json (#123376).
-    # Claim the shared update lock so stacked completions serialize. A tail whose
-    # orchestrator already holds the lock (venv_sync's interrupted-update finish,
-    # the updater's completion child) runs under its parent's claim, exactly as
-    # `hermes update` does under the desktop handoff pid. The CHECKOUT lock is acquired, not
-    # sampled (R2): a completion from another home must not build a checkout an update owns;
-    # one inside the update's tree joins the lock it inherited.
+    # Install/update completion can build for minutes. A concurrent local launch
+    # may discover the same unfinished tail, so acquire checkout custody rather
+    # than sampling a marker. A child joins only through its inherited lock FD.
     lock = UpdateLock(install_root=root)
     if not lock.acquire():
         raise RuntimeError(

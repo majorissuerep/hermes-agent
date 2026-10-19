@@ -15,6 +15,8 @@ import time
 import pytest
 from unittest.mock import patch
 
+from tests.tools.process_receipt_fixtures import encrypted_process_home as _encrypted_process_home
+
 from tools.process_registry import (
     ProcessRegistry,
     ProcessSession,
@@ -223,12 +225,15 @@ class TestCheckpointPersistence:
         with registry._lock:
             registry._running[session.id] = session
 
-        with patch("utils.atomic_json_write") as mock_write:
-            registry._write_checkpoint()
-            args = mock_write.call_args
-            entries = args[0][1]  # second positional arg
-            assert len(entries) == 1
-            assert entries[0]["watch_patterns"] == ["ERROR", "FAIL"]
+        from hermes_security import io as state_io
+        from tools.process_registry import _checkpoint_path
+
+        registry._write_checkpoint()
+        path = _checkpoint_path()
+        assert b"tail -f app.log" not in path.read_bytes()
+        entries = state_io.read_json(path, purpose="state")
+        assert len(entries) == 1
+        assert entries[0]["watch_patterns"] == ["ERROR", "FAIL"]
 
     def test_watch_patterns_recovery(self, registry, tmp_path, monkeypatch):
         """watch_patterns survives checkpoint recovery."""

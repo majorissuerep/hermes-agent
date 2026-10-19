@@ -71,31 +71,28 @@ def test_notify_sub_delivery_mode_persists_and_last_write_wins(kanban_home):
     finally:
         conn.close()
 
-def test_notify_subscribe_cli_records_discord_multiplex_anchors(kanban_home):
-    """The CLI must persist thread route anchors without dropping existing metadata."""
+def test_cli_can_remove_historical_remote_subscription(kanban_home):
+    """Retiring the transport preserves old records until explicit local cleanup."""
     import argparse
 
-    with kbc.connect() as conn:
-        tid = kb.create_task(conn, title="thread route", assignee="worker")
-        kbn.add_notify_sub(
-            conn, task_id=tid, platform="discord", chat_id="thread",
-            thread_id="thread", delivery_metadata={"chat_type": "thread", "existing": "keep"},
-        )
+    with kbc.connect_closing() as conn:
+        task = kb.create_task(conn, title="old route", assignee="worker")
+        kbn.add_notify_sub(conn, task_id=task, platform="discord", chat_id="thread",
+                           thread_id="thread", delivery_metadata={"guild_id": "old-guild"})
+        kbn.add_notify_sub(conn, task_id=task, platform="tui", chat_id="local-owner")
 
     parser = argparse.ArgumentParser()
     kc.build_parser(parser.add_subparsers(dest="command"))
     args = parser.parse_args([
-        "kanban", "notify-subscribe", tid, "--platform", "discord", "--chat-id", "thread",
-        "--thread-id", "thread", "--chat-type", "thread", "--parent-chat-id", "parent",
-        "--guild-id", "guild",
+        "kanban", "notify-unsubscribe", task, "--platform", "discord", "--chat-id", "thread",
+        "--thread-id", "thread",
     ])
     assert kc.kanban_command(args) == 0
+    with kbc.connect_closing() as conn:
+        subscription, = kbn.list_notify_subs(conn, task)
+        assert kb.get_task(conn, task) is not None
+    assert (subscription["platform"], subscription["chat_id"]) == ("tui", "local-owner")
 
-    with kbc.connect() as conn:
-        sub = kbn.list_notify_subs(conn, tid)[0]
-    assert sub["delivery_metadata"] == {
-        "chat_type": "thread", "existing": "keep", "parent_chat_id": "parent", "guild_id": "guild",
-    }
 
 def test_notify_sub_chat_type_persists_and_last_write_wins(kanban_home):
     """chat_type persists, defaults to 'dm', an explicit re-subscribe is
@@ -379,24 +376,18 @@ def test_gc_purges_stale_done_sub_keeps_fresh_one(kanban_home):
     finally:
         conn.close()
 
-def test_gc_honors_configured_retention_days(kanban_home):
+def test_gc_honors_explicit_retention_days(kanban_home):
     import hermes_cli.kanban_db as kb
     from hermes_cli import kanban_db_connect as kbc
     from hermes_cli import kanban_db_notify as kbn
-    from hermes_cli.config_defaults import DEFAULT_CONFIG
-
-    # The watcher reads kanban.done_sub_retention_days from config; the
-    # shipped default must exist and drive the sweep when passed through.
-    default_days = DEFAULT_CONFIG["kanban"]["done_sub_retention_days"]
-    assert isinstance(default_days, int) and default_days > 0
 
     conn = kbc.connect()
     try:
         tid = _make_done_task_with_sub(kb, conn, title="ten days old", chat_id="c-10d")
         _backdate_task(kb, conn, tid, days=10)
 
-        # Under the shipped default (>= 30d) a 10-day-old done task is fresh.
-        assert kbn.purge_stale_done_notify_subs(conn, max_age_days=default_days) == 0
+        # A 10-day-old done task is fresh under an explicit 30-day policy.
+        assert kbn.purge_stale_done_notify_subs(conn, max_age_days=30) == 0
         assert len(kbn.list_notify_subs(conn, tid)) == 1
 
         # A tighter user-configured retention purges the same row.

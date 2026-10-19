@@ -47,6 +47,7 @@ def main() -> int:
     from hermes_constants import get_hermes_home
     from hermes_state.runtime_ownership import ProfileOwnership
     from hermes_platform.child_processes import register_self
+    from tools.environments.local import build_subprocess_env
 
     log, ready_fd, execution_id, *argv = sys.argv[1:]
     ready_fd = int(ready_fd)
@@ -65,7 +66,9 @@ def main() -> int:
         if not register_self("process-output"):
             raise RuntimeError("durable process could not register its native identity")
         authority = start_session_authority(home, execution_id)
-        child_env = os.environ.copy()
+        # The launcher already applied the terminal's skill-aware secret filter.
+        # Preserve deliberate passthrough while binding this worker's owning home.
+        child_env = build_subprocess_env(scrub_secrets=False, strip_launch_profile=True)
         if authority is not None:
             child_env.update(authority.environment())
         with subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -81,7 +84,7 @@ def main() -> int:
                     os.killpg(os.getpgrp(), signal.SIGKILL)
                 child.kill()
                 raise
-            code = child.wait()
+            code = child.wait()  # health: allow HX006 -- durable command lifetime is user-controlled; verified process-tree cancellation owns termination
             state_io.write_json(target.with_suffix(".exit"), code, purpose="state")
             return code if code >= 0 else 128 - code
     finally:

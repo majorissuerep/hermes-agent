@@ -494,7 +494,7 @@ class TestSyncSkills:
             def failing_copytree(src, dst, *a, **kw):
                 raise OSError("Simulated disk full")
 
-            with patch("shutil.copytree", side_effect=failing_copytree):
+            with patch("tools.skills_sync._copy_skill_tree", side_effect=failing_copytree):
                 result = sync_skills(quiet=True)
 
             assert "new-skill" not in result["copied"]
@@ -907,7 +907,7 @@ class TestUpdateBackupRecovery:
             raise OSError("simulated copy failure")
 
         with self._patches(bundled, skills_dir, manifest_file), \
-                patch("tools.skills_sync.shutil.copytree", side_effect=_boom):
+                patch("tools.skills_sync._copy_skill_tree", side_effect=_boom):
             sync_skills(quiet=True)
 
         # The live copy must survive the failed update untouched...
@@ -956,7 +956,7 @@ class TestUpdateBackupRecovery:
             raise OSError("simulated failure mid-copy")
 
         with self._patches(bundled, skills_dir, manifest_file), \
-                patch("tools.skills_sync.shutil.copytree", side_effect=_partial_then_fail):
+                patch("tools.skills_sync._copy_skill_tree", side_effect=_partial_then_fail):
             sync_skills(quiet=True)
 
         # Original content restored, partial debris and backup gone.

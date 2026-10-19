@@ -85,9 +85,14 @@ _TENANT = _arg("--tenant", help="Tenant namespace")
 _PRIORITY = _arg("--priority", type=int, default=0, help="Priority tiebreaker")
 _RECLAIM_REASON = _reason("Human-readable reason (recorded on the reclaimed event)")
 _NOTIFY_TARGET = (
-    _arg("--platform", required=True),
-    _arg("--chat-id", required=True),
-    _arg("--thread-id"),
+    _arg("--platform", default="tui", choices=("tui",)),
+    _arg("--session-id", "--chat-id", dest="chat_id", required=True,
+         help="Owning local TUI session ID"),
+)
+_NOTIFY_CLEANUP_TARGET = (
+    _arg("--platform", default="tui", help="tui, or a historical subscription's platform for removal"),
+    _arg("--session-id", "--chat-id", dest="chat_id", required=True),
+    _arg("--thread-id", help="Historical subscription thread ID (cleanup only)"),
 )
 _STEP_HANDOFF = (
     _arg("--summary", help="Structured handoff summary. Falls back to --result if omitted."),
@@ -363,21 +368,11 @@ _SPECS = [
     _cmd("dispatch", [
         _arg("--dry-run", action="store_true", help="Don't actually spawn processes; just print what would happen"),
         _arg("--max", type=int, help="Cap number of spawns this pass"),
-        _arg("--failure-limit", type=int, default=kbd.DEFAULT_FAILURE_LIMIT,
+        _arg("--failure-limit", type=int, default=None,
              help=f"Auto-block a task after this many consecutive non-success attempts "
                   f"(spawn_failed, timed_out, or crashed; default: {kbd.DEFAULT_FAILURE_LIMIT})"),
         _json_flag(),
     ], help="One dispatcher pass: reclaim stale, promote ready, spawn workers"),
-    _cmd("daemon", [
-        _arg("--interval", type=float, default=60.0, help="Seconds between dispatch ticks (default: 60)"),
-        _arg("--max", type=int, help="Cap number of spawns per tick"),
-        _arg("--failure-limit", type=int, default=kbd.DEFAULT_FAILURE_LIMIT),
-        _arg("--pidfile", help="Write the daemon's PID to this file on start"),
-        _arg("--verbose", "-v", action="store_true", help="Log each tick's outcome to stdout"),
-        # Escape hatch for hosts that truly cannot run the gateway; hidden from
-        # --help so nobody casually keeps the double-dispatcher pattern alive.
-        _arg("--force", action="store_true", help=argparse.SUPPRESS),
-    ], help="DEPRECATED — dispatcher now runs in the gateway. Use `hermes gateway start`."),
     _cmd("watch", [
         _arg("--assignee", help="Only show events for tasks assigned to this profile"),
         _arg("--tenant", help="Only show events from tasks in this tenant"),
@@ -389,30 +384,13 @@ _SPECS = [
     _cmd("notify-subscribe", [
         _TASK_ID,
         *_NOTIFY_TARGET,
-        _arg("--user-id"),
-        _arg("--user-id-alt"),
-        _arg("--chat-type", choices=("dm", "group", "channel", "thread"),
-             help="Originating source chat_type, recorded so the active-wake delivery "
-                  "modes resolve the operator's real session. Omit to leave an "
-                  "existing sub unchanged (new subs default to 'dm')."),
-        _arg("--parent-chat-id",
-             help="Parent channel ID for a thread or forum post, used for multiplex profile routing."),
-        _arg("--guild-id",
-             help="Discord guild ID, used for multiplex profile routing."),
-        _arg("--notifier-profile",
-             help="Profile gateway that owns/delivers this subscription (default: active profile)"),
-        # choices: single source of truth shared with the DB/watcher enum.
         _arg("--delivery-mode", choices=kbn._NOTIFY_DELIVERY_MODES,
-             help="How the kanban-notifier reacts to terminal events for this "
-                  "subscription: 'notify' (passive message only; default), "
-                  "'notify+wake' (message AND wake the destination gateway agent so "
-                  "it reads the full board context and replies in its own voice), or "
-                  "'wake' (wake the agent only, no passive message). Omit to leave an "
-                  "existing subscription's mode unchanged (new subs default to 'notify')."),
-    ], help="Subscribe a gateway source to a task's terminal events (used by /kanban subscribe in the gateway adapter)"),
+             help="notify: local notice; notify+wake: notice and resume the owning TUI; "
+                  "wake: resume only. Default: notify; omitted edits keep the existing mode."),
+    ], help="Subscribe a local TUI session to a task's terminal events"),
     _cmd("notify-list", [_arg("task_id", nargs="?"), _json_flag()],
          help="List notification subscriptions (optionally for a single task)"),
-    _cmd("notify-unsubscribe", [_TASK_ID, *_NOTIFY_TARGET], help="Remove a gateway subscription from a task"),
+    _cmd("notify-unsubscribe", [_TASK_ID, *_NOTIFY_CLEANUP_TARGET], help="Remove a current or historical task subscription"),
     _cmd("log", [_TASK_ID, _arg("--tail", type=int, help="Only print the last N bytes")],
          help="Print the worker log for a task (from <kanban-root>/kanban/logs/)"),
     _cmd("runs", [_TASK_ID, _json_flag(), *_run_state_args("filter runs by task_runs column")],

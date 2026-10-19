@@ -359,8 +359,18 @@ def test_explicit_stop_preserves_verified_root_incarnation(tmp_path, monkeypatch
         owned_child.kill.assert_called_once_with()
 
 
+@pytest.fixture
+def _own_reparented_router():
+    from tests.e2e.core.upgrade import _process_reaper
+    _process_reaper.adopt_orphans()
+    try:
+        yield
+    finally:
+        _process_reaper.release_orphans()
+
+
 @pytest.mark.platforms("linux")
-def test_reparented_router_keeps_its_endpoint(tmp_path, monkeypatch):
+def test_reparented_router_keeps_its_endpoint(tmp_path, monkeypatch, _own_reparented_router):
     from hermes_cli.local_runtime import endpoint, supervisor
 
     monkeypatch.setattr(supervisor, "runtimes_root", lambda: tmp_path)

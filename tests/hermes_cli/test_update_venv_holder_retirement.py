@@ -31,12 +31,10 @@ def test_historical_holder_hooks_hand_off_without_inspecting_or_killing(
 ):
     """A historical main's holder gates hand the update to the fresh child and exit with its
     status; the old parent never classifies, inspects or kills processes itself."""
-    from hermes_cli import gateway
     from hermes_cli import process_identity
     import psutil
 
     forbidden = Mock(side_effect=AssertionError("retired holder gate performed work"))
-    monkeypatch.setattr(gateway, "_is_pid_ancestor_of_current_process", forbidden)
     monkeypatch.setattr(update_cmd_holders, "_psutil", forbidden)
     monkeypatch.setattr(process_identity, "ledger_entries", forbidden)
     monkeypatch.setattr(psutil, "process_iter", forbidden)
@@ -60,17 +58,15 @@ def test_relaunch_stopped_serves_is_separate_work_not_an_update(monkeypatch, fre
 
 
 @pytest.mark.parametrize("gateway_mode", [False, True])
-def test_gateway_ancestor_refusal_never_kills_unknown_ancestry(monkeypatch, gateway_mode):
-    """The live guard only refuses a tree-kill when a nominated gateway is positively an ancestor."""
-    from hermes_cli import gateway
+def test_retired_ancestor_hook_hands_off_without_any_process_access(monkeypatch, gateway_mode, fresh_child):
+    """Old ancestor probes transfer to the new updater without inspecting or killing PIDs."""
     import psutil
 
     forbidden = Mock(side_effect=AssertionError("refusal probe performed work"))
-    monkeypatch.setattr(gateway, "_is_pid_ancestor_of_current_process", lambda pid: False)
     monkeypatch.setattr(psutil, "Process", forbidden)
-    monkeypatch.setattr(update_cmd_holders.subprocess, "run", forbidden)
     monkeypatch.setattr(os, "kill", forbidden)
-    assert update_cmd._refuse_gateway_ancestor_tree_kill([123, 456], gateway_mode=gateway_mode) is False
+    with fresh_child.exits():
+        update_cmd._refuse_gateway_ancestor_tree_kill([123, 456], gateway_mode=gateway_mode)
     forbidden.assert_not_called()
 
 
@@ -87,10 +83,7 @@ def test_command_reaches_checkout_preparation_without_holder_gates(monkeypatch, 
     monkeypatch.setattr(main, "_install_hangup_protection", lambda **kwargs: None)
     monkeypatch.setattr(main, "_finalize_update_output", lambda token: None)
     monkeypatch.setattr(update_inventory, "collect_runtime_inventory", lambda: update_inventory.UpdatePlan())
-    monkeypatch.setattr(main, "_run_pre_update_backup", lambda args: reached.append("backup"))
-    monkeypatch.setattr(main, "_pause_windows_gateways_for_update", lambda: reached.append("pause"))
-    monkeypatch.setattr(main, "_desktop_packaged_executable", lambda root: None)
-    monkeypatch.setattr(main, "_desktop_dist_exists", lambda root: False)
+    monkeypatch.setattr(update_cmd, "_run_pre_update_backup", lambda args: reached.append("backup"))
 
     # Recreate the former call-site names as tripwires, not host-OS fakes.
     # The scan remains live for lifecycle ownership, but must not gate updates.
@@ -107,6 +100,6 @@ def test_command_reaches_checkout_preparation_without_holder_gates(monkeypatch, 
     monkeypatch.setattr(update_cmd, "_prepare_git_command", prepare_checkout)
     with pytest.raises(ReachedCheckout):
         main.cmd_update(SimpleNamespace(gateway=False, check=False, yes=True, force=False, force_venv=False))
-    assert reached == ["backup", "pause", "checkout"]
+    assert reached == ["backup", "checkout"]
     forbidden.assert_not_called()
 

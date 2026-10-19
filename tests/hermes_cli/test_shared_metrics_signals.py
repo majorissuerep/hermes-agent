@@ -184,7 +184,7 @@ def test_disabled_collection_writes_nothing(marks):
 
 
 def test_dead_or_stale_marker_is_abandoned_at_the_next_start_and_live_waits(marks):
-    from gateway.status import get_process_start_time
+    from hermes_platform.processes import get_process_start_time
 
     directory = setup_metrics.markers_dir(marks.home)
     directory.mkdir(parents=True)
@@ -293,55 +293,35 @@ def test_oauth_session_endings(marks, monkeypatch, sess, ending):
     assert [r[2:] for r in _setup_rows(marks.rows)] == [("started", "none"), ending]
 
 
-def test_cancel_or_lapsed_code_is_never_a_failure_and_poller_errors_keep_their_class(marks, monkeypatch):
-    """A user cancel / a sign-in code left to run out is ``abandoned`` on every surface; a dashboard
-    poller's exception keeps its closed class instead of the bare session ``error`` -> ``other``."""
+def test_cancel_or_lapsed_code_is_never_failure_in_native_signin(marks):
     import httpx
-
     from hermes_cli.auth_constants import _codex_err, _xai_err
     from hermes_cli.auth_device_flow import _poll_for_token
     from hermes_cli.auth_error_copy import device_flow_error
-    from hermes_cli.web_server_oauth import _oauth_poller, _oauth_sessions
 
-    monkeypatch.setattr(setup_metrics, "web_setup_surface", lambda: "desktop")
-    with setup_metrics.provider_setup_surface("cli_model"):  # CLI: Ctrl-C mid sign-in
+    with setup_metrics.provider_setup_surface("cli_model"):
         with pytest.raises(KeyboardInterrupt), setup_metrics.cli_provider_setup("openai-codex"):
             raise KeyboardInterrupt
-    flow = setup_metrics.begin_oauth_setup("openai-codex", None)  # web start route: cancelled pre-response
-    setup_metrics.finish_provider_setup(flow, "failed", setup_metrics.setup_failure_class(KeyboardInterrupt()))
-
-    class Pending:  # the real Nous poll loop running out of time on authorization_pending
-        status_code = 400
-
-        def json(self):
-            return {"error": "authorization_pending"}
-
-    with pytest.raises(TimeoutError) as lapsed:
-        _poll_for_token(SimpleNamespace(post=lambda *a, **k: Pending()), "https://p", "c", "d", 0, 1)
-    dropped = _xai_err("xAI OIDC discovery failed", "xai_discovery_failed")
-    dropped.__cause__ = httpx.ConnectError("down")
-    for provider, exc in [
-        ("openai-codex", lapsed.value), ("xai-oauth", _xai_err("Timed out", "device_code_timeout")),
-        ("openai-codex", _codex_err("Login timed out after 15 minutes.", "device_code_timeout")),
-        ("openai-codex", device_flow_error("access_denied", "declined")), ("xai-oauth", dropped),
-        ("openai-codex", device_flow_error("invalid_client", "nope")),
-    ]:
-        sess = {"status": "pending", "profile": None}
-        _oauth_sessions["probe"] = sess
-        setup_metrics.attach_oauth_setup(sess, setup_metrics.begin_oauth_setup(provider, None))
-
-        @_oauth_poller(provider)
-        def poller(_sid, _sess, exc=exc):
-            raise exc
-
-        poller("probe")
-        setup_metrics.settle_oauth_setup(sess)
-    _oauth_sessions.pop("probe", None)
-    assert [r for r in _setup_rows(marks.rows) if r[2] != "started"] == [
-        ("cli_model", "openai-codex", "abandoned", "none"), ("desktop", "openai-codex", "abandoned", "none"),
-        ("desktop", "openai-codex", "abandoned", "none"), ("desktop", "xai-oauth", "abandoned", "none"),
-        ("desktop", "openai-codex", "abandoned", "none"), ("desktop", "openai-codex", "abandoned", "none"),
-        ("desktop", "xai-oauth", "failed", "network"), ("desktop", "openai-codex", "failed", "auth"),
+        class Pending:
+            status_code = 400
+            def json(self):
+                return {"error": "authorization_pending"}
+        with pytest.raises(TimeoutError) as lapsed:
+            _poll_for_token(SimpleNamespace(post=lambda *a, **k: Pending()), "https://p", "c", "d", 0, 1)
+        dropped = _xai_err("xAI OIDC discovery failed", "xai_discovery_failed")
+        dropped.__cause__ = httpx.ConnectError("down")
+        for provider, exc in [
+            ("openai-codex", lapsed.value), ("xai-oauth", _xai_err("Timed out", "device_code_timeout")),
+            ("openai-codex", _codex_err("Login timed out", "device_code_timeout")),
+            ("openai-codex", device_flow_error("access_denied", "declined")), ("xai-oauth", dropped),
+            ("openai-codex", device_flow_error("invalid_client", "nope")),
+        ]:
+            with pytest.raises(Exception), setup_metrics.cli_provider_setup(provider):
+                raise exc
+    assert [r[2:] for r in _setup_rows(marks.rows)] == [
+        ("started", "none"), ("abandoned", "none"),
+        *[("started", "none"), ("abandoned", "none")] * 4,
+        ("started", "none"), ("failed", "network"), ("started", "none"), ("failed", "auth"),
     ]
 
 
@@ -373,84 +353,20 @@ def _poll(provider, status, body):
     return run
 
 
-def _guest_sign_in(token_status, token_body):
-    """The Desktop free-tier sign-in (guest promotion): the real ``run_sign_in`` generator recorded
-    onto a dashboard session; the promotion completes, the token poll gets ``token_*`` until expiry."""
-    def run(monkeypatch):
-        import httpx
-
-        from hermes_cli import anon_auth, auth_device_flow
-        from tests.hermes_cli.anon_portal import install_optional_portal_provider
-        install_optional_portal_provider(monkeypatch)
-        from hermes_cli.web_server_oauth import _record_sign_in_state
-
-        clock = [0.0]
-        fake_time = SimpleNamespace(monotonic=lambda: clock[0], sleep=lambda s: clock.__setitem__(0, clock[0] + max(s, 1)))
-        monkeypatch.setattr(auth_device_flow, "time", fake_time)
-        monkeypatch.setattr(anon_auth, "current_nous_state", lambda: {
-            "auth_method": anon_auth.ANON_AUTH_METHOD, "anon_token": "t", "portal_base_url": "https://p"})
-        monkeypatch.setattr(anon_auth, "_anon_headers", dict)
-        replies = {
-            "/api/oauth/device/code": (200, {"device_code": "d", "user_code": "U", "verification_uri": "https://p/v",
-                                             "verification_uri_complete": "https://p/v?c=U", "expires_in": 30, "interval": 1}),
-            "/api/anonymous/promotion-intent": (200, {"claim_code": "C", "claim_url": "/claim", "interval": 1}),
-            "/api/anonymous/promotion-status": (200, {"status": "completed"}),
-            "/api/oauth/token": (token_status, token_body)}
-
-        def reply(request):
-            status, body = replies[request.url.path]
-            return httpx.Response(status, **({"json": body} if isinstance(body, dict) else {"text": body}))
-        sess = {"status": "pending"}
-        for state in anon_auth.run_sign_in(client_factory=lambda *_: httpx.Client(transport=httpx.MockTransport(reply))):
-            _record_sign_in_state(sess, state)
-        return sess
-    return run
-
-
-def _codex_start(status, body):
-    """The dashboard start route: the worker thread's failure crosses into an HTTPException."""
-    def run(monkeypatch):
-        import asyncio
-
-        import hermes_cli.web_routers.oauth as routes
-
-        client = _wire(status, body)
-        monkeypatch.setattr(routes, "_codex_post", lambda _httpx, url, **kw: client.post(url, **kw))
-        asyncio.run(routes._start_codex_device_code(None))
-    return run
-
-
 @pytest.mark.parametrize("producer, ending", [
     (_poll("nous", 400, {"error": "authorization_pending"}), ("abandoned", "none")),  # code left unapproved
     (_poll("nous", 503, "<html>503 unavailable</html>"), ("failed", "network")),  # outage until it ran out
     (_poll("xai", 400, {"error": "access_denied"}), ("abandoned", "none")),  # consent declined
     (_poll("xai", 400, {"error": "expired_token"}), ("abandoned", "none")),  # the server let the code lapse
     (_poll("xai", 400, {"error": "invalid_client"}), ("failed", "auth")),
-    (_codex_start(401, {"error": "invalid_client"}), ("failed", "auth")),
-    (_codex_start(0, ConnectionRefusedError("down")), ("failed", "network")),
-    (_codex_start(503, "<html>503</html>"), ("failed", "network")),
-    (_guest_sign_in(400, {"error": "authorization_pending"}), ("abandoned", "none")),
-    (_guest_sign_in(503, "<html>503 unavailable</html>"), ("failed", "network")),
-], ids=["nous-pending", "nous-503", "xai-denied", "xai-expired", "xai-refused", "codex-401", "codex-down",
-        "codex-503", "guest-pending", "guest-503"])
+], ids=["nous-pending", "nous-503", "xai-denied", "xai-expired", "xai-refused"])
 def test_wire_failures_keep_the_producers_class_to_the_recorded_end(marks, monkeypatch, producer, ending):
-    """Real poll loops / start route / free-tier sign-in against wire responses: a lapse or a decline
-    is a walk-away, an outage or a refusal stays a failure, across the worker -> HTTPException and
-    sign-in state -> session boundaries too."""
-    import asyncio
-
-    import hermes_cli.web_routers.oauth as routes
-
-    monkeypatch.setattr(setup_metrics, "web_setup_surface", lambda: "desktop")
-    flow = setup_metrics.begin_oauth_setup("nous", None)
-    try:
-        sess = producer(monkeypatch)
-    except Exception as exc:
-        asyncio.run(routes._end_oauth_setup_metric(flow, exc))
-    else:  # a sign-in generator ends on a state, recorded onto its session
-        setup_metrics.attach_oauth_setup(sess, flow)
-        setup_metrics.settle_oauth_setup(sess)
+    """Native sign-in failures retain classification through CLI setup metrics."""
+    with setup_metrics.provider_setup_surface("cli_model"):
+        with pytest.raises(Exception), setup_metrics.cli_provider_setup("nous"):
+            producer(monkeypatch)
     assert [r[2:] for r in _setup_rows(marks.rows)] == [("started", "none"), ending]
+
 
 def test_pending_oauth_session_does_not_settle(marks, monkeypatch):
     monkeypatch.setattr(setup_metrics, "web_setup_surface", lambda: "dashboard")
@@ -466,26 +382,6 @@ def test_api_key_env_maps_to_provider_only():
     # Ecosystem tokens and keys a tool panel also asks for (Gemini TTS) are not a provider connection.
     for shared in ("GITHUB_TOKEN", "GH_TOKEN", "HF_TOKEN", "GEMINI_API_KEY"):
         assert setup_metrics.provider_for_api_key_env(shared) is None
-
-
-def test_web_forms_count_only_a_new_provider_key_or_endpoint(marks, monkeypatch):
-    from hermes_cli.web_models import CustomEndpointUpdate
-    from hermes_cli.web_routers import config_env
-
-    done: list[str] = []
-    monkeypatch.setattr(setup_metrics, "record_provider_setup_done", lambda _s, provider, **_k: done.append(provider))
-    monkeypatch.setattr(setup_metrics, "web_setup_surface", lambda: "dashboard")
-    marks.home.mkdir(parents=True, exist_ok=True)
-    for key, value in (("OPENROUTER_API_KEY", "sk-or-a"), ("OPENROUTER_API_KEY", "sk-or-a"),  # re-save
-                       ("OPENROUTER_API_KEY", ""), ("OPENROUTER_API_KEY", "sk-or-b"),  # clear, then a new key
-                       ("GITHUB_TOKEN", "ghp_" + "b" * 36)):
-        config_env._save_env_credential(key, value)
-    config_env._save_env_credential("GEMINI_API_KEY", "gm-a")  # Keys page: could be the TTS tool's key
-    config_env._save_env_credential("GLM_API_KEY", "glm-b", provider_setup=True)  # a provider-connection form
-    body = {"name": "Acme LLM", "base_url": "http://10.0.0.5:8080/v1", "model": "acme-70b"}
-    endpoint = config_env.upsert_custom_endpoint(CustomEndpointUpdate(**body))["id"]
-    config_env.upsert_custom_endpoint(CustomEndpointUpdate(id=endpoint, **{**body, "model": "acme-70b-v2"}))
-    assert done == ["openrouter", "openrouter", "zai", "custom"]
 
 
 # ---- feature disabled ----

@@ -116,18 +116,6 @@ def test_null_platform_warns_even_when_others_are_valid():
     assert not any("zero valid toolsets" in w for w in warnings)
 
 
-def test_null_platform_uses_canonical_default_for_alias():
-    cfg = {"whatsapp_cloud": None, "telegram": ["hermes-telegram"]}
-    warnings = validate_platform_toolsets(cfg, _is_valid)
-
-    assert any(
-        "platform 'whatsapp_cloud'" in w
-        and "falling back to 'hermes-whatsapp'" in w
-        for w in warnings
-    )
-    assert not any("zero valid toolsets" in w for w in warnings)
-
-
 def test_scalar_platform_value_warns_but_uses_platform_default():
     cfg = {"cli": "bogus", "telegram": ["hermes-telegram"]}
     warnings = validate_platform_toolsets(cfg, _is_valid)
@@ -163,34 +151,6 @@ def test_platform_restricted_toolset_warns_when_other_platform_is_valid():
         for w in warnings
     )
     assert not any("zero valid toolsets" in w for w in warnings)
-
-
-def test_null_plugin_platform_uses_synthetic_default():
-    from gateway.platform_registry import PlatformEntry, platform_registry
-    from toolsets import resolve_toolset
-
-    platform = "toolset_validation_plugin"
-    platform_registry.register(
-        PlatformEntry(
-            name=platform,
-            label="Toolset Validation Plugin",
-            adapter_factory=lambda _config: object(),
-            check_fn=lambda: True,
-        )
-    )
-    try:
-        cfg = {platform: None, "telegram": ["hermes-telegram"]}
-        warnings = validate_platform_toolsets(cfg, _is_valid)
-
-        assert resolve_toolset(f"hermes-{platform}")
-        assert any(
-            f"platform '{platform}'" in w
-            and f"falling back to 'hermes-{platform}'" in w
-            for w in warnings
-        )
-        assert not any("zero valid toolsets" in w for w in warnings)
-    finally:
-        platform_registry.unregister(platform)
 
 
 def test_all_invalid_platform_warns_even_when_others_are_valid():

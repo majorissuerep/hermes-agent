@@ -551,10 +551,11 @@ def test_respawn_guard_ignores_auth_words_in_crashed_worker_output(kanban_home):
         assert kbd.check_respawn_guard(conn, spawn_failed_id) == "blocker_auth"
 
 
+@pytest.mark.platforms("linux")
 def test_infrastructure_spawn_refusal_never_charges_the_card(
     kanban_home, monkeypatch, all_assignees_spawnable,
 ):
-    """The host refusing to place a worker (managed gateway, user bus gone —
+    """The host refusing to place a worker (managed dispatch, user bus gone —
     #114720) is not a card failure: through the REAL spawn boundary and the
     real dispatcher accounting, ``consecutive_failures`` stays put, the breaker
     never parks the card as a bare ``blocked``, the run is tagged
@@ -562,8 +563,7 @@ def test_infrastructure_spawn_refusal_never_charges_the_card(
     failure on the same card still counts."""
     from tools import process_registry
 
-    monkeypatch.setattr(process_registry, "_is_supervised_gateway_process", lambda: True)
-    monkeypatch.setenv("INVOCATION_ID", "managed-gateway")
+    monkeypatch.setenv("INVOCATION_ID", "managed-dispatch")
     monkeypatch.setattr(process_registry, "_systemd_run_user_scope_available", lambda: False)
     monkeypatch.setenv("HERMES_KANBAN_RATE_LIMIT_COOLDOWN_SECONDS", "0")
 
@@ -580,7 +580,7 @@ def test_infrastructure_spawn_refusal_never_charges_the_card(
             "SELECT status, block_kind, consecutive_failures, last_failure_error FROM tasks WHERE id = ?", (tid,),
         ).fetchone()
         assert (row["status"], row["block_kind"], row["consecutive_failures"]) == ("ready", None, 0)
-        assert "enable-linger" in row["last_failure_error"]
+        assert "requires a reachable systemd user bus" in row["last_failure_error"]
         runs = conn.execute(
             "SELECT outcome, metadata FROM task_runs WHERE task_id = ? ORDER BY id", (tid,),
         ).fetchall()
@@ -1113,17 +1113,17 @@ class TestSharedBoardPaths:
         self, tmp_path, monkeypatch
     ):
         # The dispatcher must pin board paths while stripping any unrelated
-        # HERMES_SESSION_* identity inherited from the long-lived gateway.
+        # HERMES_SESSION_* identity inherited from the dispatcher's parent.
         # The one exception is HERMES_SESSION_SOURCE, which the dispatcher
         # re-sets to its own `kanban` tag AFTER the strip — a value it owns,
-        # never one inherited from whatever the gateway last routed.
+        # never one inherited from the parent's unrelated conversation.
         default_home = tmp_path / ".hermes"
         default_home.mkdir()
         self._set_home(monkeypatch, tmp_path, default_home)
 
-        from gateway import session_context as sc
+        from agent import session_context as sc
 
-        # A dispatcher can launch before the gateway binds its first session.
+        # A finite dispatcher can launch before any session has been bound.
         monkeypatch.setattr(sc, "_session_context_engaged", False)
         sc.reset_session_vars()
         for key in sc._VAR_MAP:

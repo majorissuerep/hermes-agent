@@ -17,6 +17,7 @@ import hashlib
 import json
 import logging
 import secrets
+import shlex
 import unicodedata
 from abc import ABC, abstractmethod
 from typing import Optional, Dict
@@ -235,7 +236,10 @@ class ShellFileOperations(LintMixin, SearchMixin, FileOperations):
         if stdin_data is not None:
             kwargs['stdin_data'] = stdin_data
         effective_cwd = cwd or getattr(self.env, 'cwd', None) or self.cwd
-        result = self.env.execute(command, cwd=effective_cwd, **kwargs)
+        # These are Hermes-generated Bash programs (pipefail, fenced probes),
+        # not user commands in the account's native shell. Keep execution on
+        # the selected backend, including stdin, rather than borrowing the host.
+        result = self.env.execute(f"bash -c {shlex.quote(command)}", cwd=effective_cwd, **kwargs)
         exit_code = result.get("returncode", 0)
         output = result.get("output", "")
         # The command wrapper's own ``builtin cd -- <cwd> || exit 126`` failed: the

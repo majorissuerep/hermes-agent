@@ -6,6 +6,10 @@ from unittest.mock import patch
 
 import pytest
 
+# All subprocess probes boot only test-owned temporary trees. Real-checkout
+# mutation remains guarded in dedicated positive guard contracts.
+pytestmark = pytest.mark.live_system_guard_bypass
+
 from hermes_cli import main as hermes_main, update_cmd
 from tests.hermes_cli.test_update_target_identity import git, update_tree
 from datetime import UTC
@@ -33,7 +37,7 @@ def test_update_preserves_local_work_and_rescues_orphan_before_reset(
     (t.clone / 'untracked.txt').write_text('local edit\n', encoding='utf-8')
     t.args.channel, t.args.keep_stash = 'main', keep
     monkeypatch.setattr(hermes_main, '_sync_with_upstream_if_needed', update_cmd._sync_with_upstream_if_needed)
-    monkeypatch.setattr(update_cmd, '_UPDATE_CRITICAL_MODULES', ())
+    monkeypatch.setattr(update_cmd, '_critical_module_import_failures', lambda *args, **kwargs: {})
     original = subprocess.run
     resets = []
 
@@ -146,7 +150,7 @@ def test_restore_validates_real_stash_and_each_import(probe_root, monkeypatch, c
         assert not git(tmp_path, 'status', '--porcelain')
         assert git(tmp_path, 'stash', 'list')
         output = capsys.readouterr().out
-        assert message in output and 'gateway was not restarted' in output
+        assert message in output and 'clean updated tree has been restored' in output
         assert f'git stash apply {ref}' in output
 
 

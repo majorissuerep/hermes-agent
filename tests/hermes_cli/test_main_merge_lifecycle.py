@@ -1,7 +1,4 @@
 """Behavior parity at lifecycle helpers extracted before the main merge."""
-import asyncio
-from types import SimpleNamespace
-from unittest.mock import Mock
 
 import pytest
 
@@ -16,7 +13,7 @@ def test_readiness_reports_selected_free_route(monkeypatch, provider, host, expe
     monkeypatch.setattr('hermes_cli.main._has_any_provider_configured', lambda **kw: True)
     monkeypatch.setattr('hermes_cli.runtime_provider.resolve_runtime_provider', lambda **kw: {
         'provider': provider, 'base_url': host, 'api_key': 'no-key-required', 'model': 'nous/welcome'})
-    # Same field the legacy setup.runtime_check answers and Desktop reads.
+    # Native setup readiness reports the selected route, not ambient profile state.
     assert check_runtime_readiness()['free_tier_route'] is expected
 
 
@@ -32,15 +29,3 @@ def test_canonical_readiness_blames_the_pin_not_the_chain_tail(monkeypatch):
     result = check_runtime_readiness()
     assert result == {'ok': False, 'provider': 'zai', 'model': 'glm-5.3', 'source': 'pool',
                       'error': 'No usable credentials found for zai.'}
-
-
-def test_local_launch_bootstraps_before_provider_guard(monkeypatch):
-    from hermes_cli.gateway_chat_startup import ensure_launch_provider
-    events = []
-    monkeypatch.delenv('HERMES_TUI_GATEWAY_URL', raising=False)
-    monkeypatch.setattr('hermes_cli.free_tier_bootstrap.run_bootstrap',
-                        lambda **kw: events.append(('boot', kw)))
-    monkeypatch.setattr('hermes_cli.main._has_any_provider_configured',
-                        lambda: events.append('inventory') or True)
-    assert ensure_launch_provider(SimpleNamespace())
-    assert events == [('boot', {'announce': False}), 'inventory']

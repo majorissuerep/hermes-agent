@@ -462,15 +462,18 @@ class TestBomHandling:
     def _env_without(*missing: str):
         """A real shell where only the named BINARIES are absent (busybox, distroless)."""
         import re as _re
+        import shlex
+        from tests.tools.file_ops_fixtures import bash_program
         from tools.environments.local import LocalEnvironment
         stub = "( echo 'sh: not found' >&2; exit 127 )"  # a SUBSHELL: `exit` must not kill the shell
 
         class Env(LocalEnvironment):
             def execute(self, command, *args, **kwargs):
+                command = bash_program(command)
                 for name in missing:
                     command = _re.sub(rf"\b{name} <", f"{stub} <", command)
                     command = _re.sub(rf"\b{name}\b(?! <)", stub, command)
-                return super().execute(command, *args, **kwargs)
+                return super().execute(f"bash -c {shlex.quote(command)}", *args, **kwargs)
         return Env
 
     def test_byte_exact_read_falls_back_to_hex_without_base64(self, tmp_path: Path, monkeypatch):

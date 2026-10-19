@@ -10,7 +10,7 @@ from rich.console import Console
 
 from hermes_constants import get_hermes_home
 
-NOTE = "slash command /handoff unavailable — name taken by built-in; use /skill handoff"
+NOTE = "slash command /model unavailable — name taken by built-in; use /skill model"
 
 
 def _write_skill(name: str) -> None:
@@ -26,7 +26,7 @@ def test_built_in_name_collision_is_visible_on_every_listing_surface(monkeypatch
     from hermes_cli.skills_hub import do_list
     from tui_runtime import server
 
-    _write_skill("handoff")  # core CommandDef → dropped by scan_skill_commands
+    _write_skill("model")  # core CommandDef → dropped by scan_skill_commands
     _write_skill("tidy-notes")  # control
     monkeypatch.setattr(skills_tool, "_SKILLS_CACHE", {})
     monkeypatch.setattr(cli, "_skill_commands", None)
@@ -47,16 +47,16 @@ def test_built_in_name_collision_is_visible_on_every_listing_surface(monkeypatch
     with contextlib.redirect_stdout(help_out):
         _Cli().show_help("skills")
     assert NOTE in help_out.getvalue()
-    assert "/tidy-notes" in help_out.getvalue() and "/handoff" not in help_out.getvalue().replace(NOTE, "")
+    assert "/tidy-notes" in help_out.getvalue() and "/model" not in help_out.getvalue().replace(NOTE, "")
 
     catalog = server._methods["commands.catalog"](1, {})["result"]
     assert catalog["warning"] == NOTE
-    assert "/tidy-notes" in catalog["skills"] and "/handoff" not in catalog["skills"]
+    assert "/tidy-notes" in catalog["skills"] and "/model" not in catalog["skills"]
 
     from hermes_cli.slash_exec import CommandContext, _exec_commands
 
-    gateway_commands = _exec_commands(CommandContext(args="", options={"page_size": 500})).text
-    assert f"⚠ {NOTE}" in gateway_commands and "`/tidy-notes`" in gateway_commands
+    command_listing = _exec_commands(CommandContext(args="", options={"page_size": 500})).text
+    assert f"⚠ {NOTE}" in command_listing and "`/tidy-notes`" in command_listing
 
 
 def test_catalog_discovery_failure_warning_outranks_the_collision_note(monkeypatch):
@@ -64,7 +64,7 @@ def test_catalog_discovery_failure_warning_outranks_the_collision_note(monkeypat
     from tools import skills_tool
     from tui_runtime import server
 
-    _write_skill("handoff")
+    _write_skill("model")
     _write_skill("tidy-notes")  # control: skills still list when a loader failed
     monkeypatch.setattr(skills_tool, "_SKILLS_CACHE", {})
 

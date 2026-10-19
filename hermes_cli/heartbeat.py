@@ -1,6 +1,6 @@
 """Session heartbeats — recurring re-entry prompts for the current session.
 
-Session-scoped and in-process (CLI or gateway must be running); durable cross-process scheduling stays
+Session-scoped and in-process (the owning terminal must be running); durable cross-process scheduling stays
 ``hermes cron``. Invariants (mirrors goals.py): injection is a plain user message — no system-prompt
 mutation or toolset swap, so prompt caching stays intact — and a real user message always wins:
 heartbeats only fire into an idle session with an empty input queue."""
@@ -11,7 +11,7 @@ import json
 import logging
 import re
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
@@ -71,6 +71,7 @@ class HeartbeatState:
     created_at: float = 0.0
     last_fired_at: float = 0.0
     fire_count: int = 0
+    route: dict[str, str] = field(default_factory=dict)
 
     def to_json(self) -> str:
         return json.dumps(asdict(self), ensure_ascii=False)
@@ -78,7 +79,10 @@ class HeartbeatState:
     @classmethod
     def from_json(cls, raw: str) -> HeartbeatState:
         data = json.loads(raw)
-        return cls(**{name: coerce(data.get(name) or default) for name, (coerce, default) in _STATE_FIELDS.items()})
+        fields = {name: coerce(data.get(name) or default) for name, (coerce, default) in _STATE_FIELDS.items()}
+        route = data.get("route", {})
+        fields["route"] = route if isinstance(route, dict) else {"kind": "unsupported"}
+        return cls(**fields)
 
     def is_due(self, now: Optional[float] = None) -> bool:
         if self.status != "active" or not self.prompt or self.interval_seconds <= 0:
@@ -147,9 +151,9 @@ def save_heartbeat(session_id: str, state: HeartbeatState) -> None:
 
 
 class HeartbeatManager:
-    """Per-session heartbeat state + due-tick decisions; the surface CLI + gateway talk to.
+    """Per-session heartbeat state + local due-tick decisions.
 
-    Drivers (CLI thread / gateway task) call :meth:`due_prompt` on a poll cadence while the session is
+    Terminal drivers call :meth:`due_prompt` on a poll cadence while the session is
     idle; a non-None return is the user-role message to inject.
     """
 
@@ -168,10 +172,18 @@ class HeartbeatManager:
     def is_active(self) -> bool:
         return self._state is not None and self._state.status == "active"
 
+    def can_run_locally(self) -> bool:
+        from hermes_cli.schedule_ownership import can_run_locally
+
+        return self._state is not None and can_run_locally(
+            self.session_id, self._state.route, _get_session_db())
+
     def status_line(self) -> str:
         s = self._state
         if s is None:
             return "No heartbeat. Set one with /heartbeat every <interval> <prompt>."
+        if not self.can_run_locally():
+            return f"Heartbeat stored for an unsupported destination; /heartbeat resume to run locally: {s.prompt}"
         every = format_interval(s.interval_seconds)
         fired = f", fired {s.fire_count}×" if s.fire_count else ""
         if s.status == "active":
@@ -188,7 +200,7 @@ class HeartbeatManager:
         if interval_seconds < MIN_INTERVAL_SECONDS:
             raise ValueError(f"interval must be at least {MIN_INTERVAL_SECONDS}s")
         self._state = HeartbeatState(prompt=prompt, interval_seconds=interval_seconds, status="active",
-                                     created_at=time.time())
+                                     created_at=time.time(), route={"kind": "local"})
         save_heartbeat(self.session_id, self._state)
         return self._state
 
@@ -198,6 +210,7 @@ class HeartbeatManager:
         self._state.status = status
         if reanchor:
             self._state.last_fired_at = time.time()
+            self._state.route = {"kind": "local"}
         save_heartbeat(self.session_id, self._state)
         return self._state
 
@@ -221,7 +234,7 @@ class HeartbeatManager:
         schedule.
         """
         s = self._state
-        if s is None or not s.is_due(now):
+        if s is None or not s.is_due(now) or not self.can_run_locally():
             return None
         self._last_claim = (s.last_fired_at, s.fire_count)
         s.last_fired_at = now if now is not None else time.time()

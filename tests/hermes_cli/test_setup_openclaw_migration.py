@@ -226,13 +226,6 @@ class TestSetupWizardSkipsConfiguredSections:
 
         reloaded_config = {"model": "openai/gpt-4"}
 
-        # _platform_status (called by the gateway summary path) reads env
-        # vars via hermes_cli.gateway.get_env_value, NOT setup_mod's. Patch
-        # both so sibling tests can't leak a TELEGRAM_BOT_TOKEN /
-        # WHATSAPP_* / etc. through and trick the wizard into thinking the
-        # gateway section is already configured (which would skip it).
-        import hermes_cli.gateway as gateway_mod
-
         with (
             patch.object(setup_mod, "ensure_hermes_home"),
             patch.object(
@@ -241,7 +234,6 @@ class TestSetupWizardSkipsConfiguredSections:
             ),
             patch.object(setup_mod, "get_hermes_home", return_value=tmp_path),
             patch.object(setup_mod, "get_env_value", side_effect=env_side),
-            patch.object(gateway_mod, "get_env_value", side_effect=env_side),
             patch.object(setup_mod, "is_interactive_stdin", return_value=True),
             patch("hermes_cli.auth.get_active_provider", return_value=None),
             patch("builtins.input", return_value=""),
@@ -256,7 +248,6 @@ class TestSetupWizardSkipsConfiguredSections:
             patch.object(setup_mod, "setup_model_provider") as mock_model,
             patch.object(setup_mod, "setup_terminal_backend") as mock_terminal,
             patch.object(setup_mod, "setup_agent_settings") as mock_agent,
-            patch.object(setup_mod, "setup_gateway") as mock_gateway,
             patch.object(setup_mod, "setup_tools") as mock_tools,
             patch.object(setup_mod, "save_config"),
             patch.object(setup_mod, "_print_setup_summary"),
@@ -268,7 +259,5 @@ class TestSetupWizardSkipsConfiguredSections:
         # Terminal/agent always have a summary → skip offered, user said No
         mock_terminal.assert_not_called()
         mock_agent.assert_not_called()
-        # Gateway has no tokens (env_side returns "" for gateway keys) → section runs
-        mock_gateway.assert_called_once()
         # Tools have no keys → section runs
         mock_tools.assert_called_once()

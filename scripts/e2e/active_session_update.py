@@ -43,14 +43,18 @@ class Acceptance:
                         "HERMES_TUI_DIR", "HERMES_INSTALL_ROOT", "HERMES_CWD"}}
         self.tag = "active-update-" + secrets.token_hex(16)
         self.env.update(HOME=str(self.home.parent), HERMES_HOME=str(self.home), PYTHONUNBUFFERED="1",
-                        PARITY_TREE_TAG=self.tag, LANG="C.UTF-8")
+                        PARITY_TREE_TAG=self.tag, LANG="C.UTF-8",
+                        PATH=os.pathsep.join((str(args.launcher.resolve().parent), self.env.get("PATH", ""))))
         os.environ["HERMES_HOME"] = str(self.home)
         from hermes_security import vault
         vault.unlock(self.home, self.password)
         self.vault = vault
         self.secret_values = [secret.get("api_key", "")]
         self.receipt = {"kind": args.kind, "surface": "actual-public-ink-pty", "baseline": args.baseline,
-                        "candidate": args.candidate, "status": "running", "cleanup_verified": False}
+                        "candidate": args.candidate, "status": "running", "cleanup_verified": False,
+                        "launcher": str(args.launcher.resolve()),
+                        "pm_runtime_dir": self.env.get("HERMES_RUNTIME_DIR"),
+                        "pm_node": self.env.get("HERMES_NODE")}
         self.terminal = None
         self.parent_id = None
         from tests.e2e.core.upgrade import _process_reaper
@@ -58,7 +62,9 @@ class Acceptance:
         self.reaper.adopt_orphans()
 
     def head(self):
-        return subprocess.check_output(["git", "-C", str(self.code), "rev-parse", "HEAD"], text=True).strip()
+        return subprocess.check_output(
+            ["git", "-C", str(self.code), "rev-parse", "HEAD"], text=True, timeout=30,
+        ).strip()
 
     def messages(self):
         from hermes_security import sqlite

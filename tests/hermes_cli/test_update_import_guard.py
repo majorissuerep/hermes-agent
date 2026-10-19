@@ -21,6 +21,10 @@ from pathlib import Path
 
 import pytest
 
+# All subprocess probes boot only test-owned temporary trees. Real-checkout
+# mutation remains guarded in dedicated positive guard contracts.
+pytestmark = pytest.mark.live_system_guard_bypass
+
 from hermes_cli import update_cmd
 from hermes_cli import update_cmd_validation
 from hermes_constants import partial_update_hint

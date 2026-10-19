@@ -486,8 +486,7 @@ def test_unwritable_marker_location_refuses_instead_of_running_unlocked(tmp_path
 
 
 def test_an_unwritable_marker_location_says_why_the_update_needs_it_and_how_to_fix_it(tmp_path):
-    """Review P2 (5411135165): the refusal stays (the marker is what the Desktop gate, gateways and
-    the other updaters read), so it must say what the path is for and how to make it writable."""
+    """Review P2 (5411135165): the refusal stays (the marker is what other local update commands read), so it must say what the path is for and how to make it writable."""
     blocker = tmp_path / "home"
     blocker.write_bytes(b"a file where the marker directory should be")
     lock = UpdateLock(path=blocker / "marker")
@@ -495,7 +494,7 @@ def test_an_unwritable_marker_location_says_why_the_update_needs_it_and_how_to_f
     assert lock.acquire() is False
     message = describe_holder(lock.holder)
     assert str(blocker) in message
-    assert "Desktop app" in message and "other updaters" in message, message
+    assert "concurrent commands" in message and "corrupt the install" in message, message
     assert "read-only filesystem" in message, message
 
 _HOLD_CHECKOUT = """

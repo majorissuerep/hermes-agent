@@ -1,13 +1,11 @@
 """Key-validation surfaces never reroute a key by its prefix, matching chat (#115306).
 
 Google issues ``AQ.`` keys for both Google AI Studio and Vertex express mode, so a key prefix can
-no longer pick the surface: ``hermes doctor`` and the dashboard key test probe the default Studio
+no longer pick the surface: ``hermes doctor`` probes the default Studio
 host, and an express key reaches aiplatform only through an explicitly configured base URL.
 """
 
 from __future__ import annotations
-
-import asyncio
 
 from agent.gemini_native_adapter import VERTEX_EXPRESS_BASE_URL
 
@@ -38,39 +36,3 @@ def test_doctor_gemini_probe_keeps_aq_keys_on_the_studio_host(monkeypatch):
     )
     assert url == VERTEX_EXPRESS_BASE_URL + "/models"
     assert headers["x-goog-api-key"] == "AQ.express-key"
-
-
-def test_dashboard_gemini_key_probe_keeps_aq_keys_on_the_studio_host(monkeypatch):
-    import hermes_cli.web_routers.config_env as mod
-    from hermes_cli.web_models import EnvVarUpdate
-
-    seen = {}
-
-    class _Resp:
-        status_code = 200
-        is_success = True
-
-    class _Client:
-        def __init__(self, *a, **k):
-            pass
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *a):
-            return False
-
-        async def get(self, url, **k):
-            seen["url"] = url
-            return _Resp()
-
-    import httpx
-
-    monkeypatch.setattr(httpx, "AsyncClient", _Client)
-    monkeypatch.setattr(mod, "_require_token", lambda request: None)
-
-    body = EnvVarUpdate(key="GEMINI_API_KEY", value="AQ.studio-key")
-    out = asyncio.run(mod.validate_provider_credential(body, request=None))  # type: ignore[arg-type]
-
-    assert out["ok"] is True
-    assert seen["url"] == _STUDIO_MODELS

@@ -151,8 +151,7 @@ def test_discord_toolsets_do_not_leak_to_other_platforms():
 
 
 def test_get_platform_tools_legacy_hermes_alias_expands():
-    """Legacy ``"hermes"`` toolset name must expand to ``"hermes-cli"`` and
-    ``"hermes-api-server"`` so that tools are not silently dropped.
+    """Legacy ``"hermes"`` toolset names retain the native CLI selection.
 
     Regression test for issue #41579.
     """
@@ -179,7 +178,7 @@ def test_get_platform_tools_legacy_hermes_alias_alone():
 
     enabled = _get_platform_tools(config, "cli", include_default_mcp_servers=False)
     reference = _get_platform_tools(
-        {"platform_toolsets": {"cli": ["hermes-cli", "hermes-api-server"]}},
+        {"platform_toolsets": {"cli": ["hermes-cli"]}},
         "cli",
         include_default_mcp_servers=False,
     )
@@ -325,23 +324,6 @@ class TestPlatformToolsetConsistency:
             assert ts_name in TOOLSETS, (
                 f"Platform {platform!r} references toolset {ts_name!r} "
                 f"which is not defined in toolsets.py"
-            )
-
-    def test_gateway_toolset_includes_all_messaging_platforms(self):
-        """hermes-gateway includes list should cover all messaging platforms."""
-        from hermes_cli.tools_config import PLATFORMS
-        from toolsets import TOOLSETS
-
-        gateway_includes = set(TOOLSETS["hermes-gateway"]["includes"])
-        # Exclude non-messaging platforms from the check
-        non_messaging = {"cli", "api_server", "cron"}
-        for platform, meta in PLATFORMS.items():
-            if platform in non_messaging:
-                continue
-            ts_name = meta["default_toolset"]
-            assert ts_name in gateway_includes, (
-                f"Platform {platform!r} toolset {ts_name!r} missing from "
-                f"hermes-gateway includes"
             )
 
     def test_skills_config_covers_tools_config_platforms(self):
@@ -715,23 +697,6 @@ def test_exactly_one_image_row_is_active_for_a_managed_selection(monkeypatch):
         assert active == [_managed_image_row()["name"]], (model, active)
 
 
-def test_gui_model_catalog_for_the_managed_row_spans_every_managed_gateway(monkeypatch):
-    from hermes_cli import tools_config
-    from hermes_cli.web_routers.tools import _resolve_toolset_model_plugin, _toolset_model_catalog
-    from plugins.image_gen.krea import KREA_MODEL_IDS
-    from tools.image_generation_catalog import FAL_MODELS
-
-    paid = NousPortalAccountInfo(logged_in=True, source="jwt", fresh=False, paid_service_access=True)
-    monkeypatch.setattr(
-        tools_config, "get_nous_subscription_features",
-        lambda *args, **kwargs: SimpleNamespace(features={}, account_info=paid))
-    plugin = _resolve_toolset_model_plugin("image_gen", _managed_image_row())
-    catalog, default_model = _toolset_model_catalog("image_gen", plugin, {})
-
-    assert default_model in catalog and default_model in FAL_MODELS
-    assert KREA_MODEL_IDS <= set(catalog)
-    assert not any(mid.startswith("fal-ai/krea/") for mid in catalog), "Krea 2 must appear once, natively"
-
 
 def test_pool_only_account_is_offered_fal_models_only(monkeypatch):
     from hermes_cli import tools_config
@@ -887,33 +852,6 @@ def test_disabled_composite_display_matches_runtime_tool_selection():
 
     for name in ("terminal", "file", "web", "vision", "skills"):
         assert (name in enabled) == bool(set(resolve_toolset(name)) & runtime), name
-
-
-@_requires_recently_shipped
-def test_platforms_whose_composite_excludes_it_are_left_narrow():
-    """Parity is the justification, so don't widen a deliberately small
-    composite (hermes-acp, hermes-webhook) that never carried the toolset."""
-    from toolsets import TOOLSETS, resolve_toolset
-
-    narrow = [
-        platform
-        for platform in ("acp", "webhook")
-        if f"hermes-{platform}" in TOOLSETS
-        and not any(
-            set(resolve_toolset(ts, include_registry=False))
-            <= set(resolve_toolset(f"hermes-{platform}"))
-            for ts in _RECENTLY_SHIPPED_TOOLSETS
-        )
-    ]
-    assert narrow, "expected a composite that excludes the new toolset"
-
-    for platform in narrow:
-        enabled = _get_platform_tools(
-            _saved_list_from_before(platform),
-            platform,
-            include_default_mcp_servers=False,
-        )
-        assert not (_RECENTLY_SHIPPED_TOOLSETS & enabled), platform
 
 
 # Regression for issue #81163 (Layer 2): an explicitly-listed plugin toolset

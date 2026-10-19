@@ -1,7 +1,7 @@
 """Tests for CLI resume model restoration and /model session persistence.
 
 Covers _restore_session_model, _persist_model_switch_to_session (cli.py) and
-SessionDB.session_gateway_runtime (hermes_state/__init__.py) — the round trip that
+SessionDB.session_runtime (hermes_state/__init__.py) — the round trip that
 makes `hermes --resume` reopen a session on the model/provider it actually
 used instead of the ambient config default (#57588-class, #79536).
 """
@@ -36,31 +36,31 @@ def _row(model="glm-4.7", model_config=None):
     }
 
 
-# ── SessionDB.session_gateway_runtime ───────────────────────────────
+# ── SessionDB.session_runtime ───────────────────────────────
 
 
-def test_session_gateway_runtime_prefers_nested_key():
+def test_session_runtime_prefers_nested_key():
     meta = _row(model_config={
         "gateway_runtime": {"provider": "custom:feather", "base_url": "https://f/v1"},
         "provider": "openrouter",
     })
-    runtime = SessionDB.session_gateway_runtime(meta)
+    runtime = SessionDB.session_runtime(meta)
     assert runtime["provider"] == "custom:feather"
     assert runtime["base_url"] == "https://f/v1"
 
 
-def test_session_gateway_runtime_falls_back_to_top_level_keys():
-    # The TUI gateway's _runtime_model_config writes top-level keys only.
+def test_session_runtime_falls_back_to_top_level_keys():
+    # The native TUI's _runtime_model_config writes top-level keys only.
     meta = _row(model_config={"provider": "nous", "api_mode": "chat_completions"})
-    runtime = SessionDB.session_gateway_runtime(meta)
+    runtime = SessionDB.session_runtime(meta)
     assert runtime == {"provider": "nous", "api_mode": "chat_completions"}
 
 
-def test_session_gateway_runtime_tolerates_garbage():
-    assert SessionDB.session_gateway_runtime(None) == {}
-    assert SessionDB.session_gateway_runtime({}) == {}
-    assert SessionDB.session_gateway_runtime({"model_config": "{not json"}) == {}
-    assert SessionDB.session_gateway_runtime({"model_config": json.dumps([1, 2])}) == {}
+def test_session_runtime_tolerates_garbage():
+    assert SessionDB.session_runtime(None) == {}
+    assert SessionDB.session_runtime({}) == {}
+    assert SessionDB.session_runtime({"model_config": "{not json"}) == {}
+    assert SessionDB.session_runtime({"model_config": json.dumps([1, 2])}) == {}
 
 
 # ── _restore_session_model ──────────────────────────────────────────
@@ -188,14 +188,14 @@ def test_persist_model_switch_writes_model_and_both_route_shapes():
     assert written["model"] == ("s1", "deepseek-v4-flash-free")
     _sid, patch = written["patch"]
     # Nested shape for the CLI reader...
-    assert patch["gateway_runtime"]["provider"] == "custom:opencode-zen"
-    # ...and top-level for the TUI gateway's _stored_session_runtime_overrides.
+    assert patch["runtime"]["provider"] == "custom:opencode-zen"
+    # ...and top-level for the native TUI's _stored_session_runtime_overrides.
     assert patch["provider"] == "custom:opencode-zen"
     assert patch["base_url"] == "https://oz/v1"
     # Both shapes use or-None so stale keys are deleted (not merely omitted)
-    # in BOTH gateway_runtime and top-level — the asymmetry that caused the
+    # in BOTH runtime and top-level — the asymmetry that caused the
     # original stale-key bug.
-    assert patch["gateway_runtime"]["api_mode"] is None
+    assert patch["runtime"]["api_mode"] is None
     assert patch["api_mode"] is None
 
 
@@ -232,14 +232,14 @@ def test_persist_model_switch_clears_stale_route_keys(tmp_path, monkeypatch):
     # Top-level keys: stale values deleted.
     assert config["provider"] == "openrouter"
     assert "api_mode" not in config, config  # stale anthropic_messages deleted
-    # Nested gateway_runtime: stale values replaced with None (the merge
-    # replaces the entire gateway_runtime dict, not deep-merging its keys).
+    # Nested native runtime: stale values replaced with None (the merge
+    # replaces the entire runtime dict, not deep-merging its keys).
     # The reader's `or None` / `if v` filtering treats None the same as
     # absent, so stale values are effectively erased.
-    gw = config.get("gateway_runtime", {})
+    gw = config.get("runtime", {})
     assert gw.get("provider") == "openrouter"
     assert gw.get("api_mode") is None  # stale anthropic_messages erased
-    runtime = SessionDB.session_gateway_runtime(meta)
+    runtime = SessionDB.session_runtime(meta)
     assert runtime["provider"] == "openrouter"
     assert "api_mode" not in runtime
 
@@ -286,7 +286,7 @@ def test_persist_model_switch_heals_bare_custom(monkeypatch):
     written.clear()
     stub._persist_model_switch_to_session(_BareResult())
     assert written["patch"]["provider"] is None
-    assert written["patch"]["gateway_runtime"]["provider"] is None
+    assert written["patch"]["runtime"]["provider"] is None
 
 
 def test_restore_session_model_heals_bare_custom_stored_rows(monkeypatch):
@@ -384,21 +384,21 @@ def test_update_session_model_null_model_config_with_provider(tmp_path, monkeypa
     assert config["provider"] == "minimax"
 
 
-# ── session_gateway_runtime billing_provider fallback (#85721) ─────
+# ── session_runtime billing_provider fallback (#85721) ─────
 
 
-def test_session_gateway_runtime_falls_back_to_billing_provider():
+def test_session_runtime_falls_back_to_billing_provider():
     """Sessions that never ran /model have only billing_provider."""
     meta = {
         "model": "glm-4.7",
         "model_config": None,
         "billing_provider": "minimax",
     }
-    runtime = SessionDB.session_gateway_runtime(meta)
+    runtime = SessionDB.session_runtime(meta)
     assert runtime == {"provider": "minimax"}
 
 
-def test_session_gateway_runtime_billing_provider_bare_bucket_ignored():
+def test_session_runtime_billing_provider_bare_bucket_ignored():
     """Bare billing buckets (auto/custom) are not routable — skip them."""
     for bare in ("auto", "custom"):
         meta = {
@@ -406,27 +406,27 @@ def test_session_gateway_runtime_billing_provider_bare_bucket_ignored():
             "model_config": None,
             "billing_provider": bare,
         }
-        assert SessionDB.session_gateway_runtime(meta) == {}
+        assert SessionDB.session_runtime(meta) == {}
 
 
-def test_session_gateway_runtime_explicit_provider_wins_over_billing():
+def test_session_runtime_explicit_provider_wins_over_billing():
     """Explicit model_config provider takes precedence over billing_provider."""
     meta = _row(model_config={"provider": "nous"})
     meta["billing_provider"] = "minimax"
-    runtime = SessionDB.session_gateway_runtime(meta)
+    runtime = SessionDB.session_runtime(meta)
     assert runtime == {"provider": "nous"}
 
 
-def test_session_gateway_runtime_billing_provider_fills_top_level_route_without_provider():
+def test_session_runtime_billing_provider_fills_top_level_route_without_provider():
     """A TUI row with top-level base_url/api_mode but no provider keeps that endpoint AND takes the
-    provider the session was billed to — the same merge the TUI gateway always did (#125942); a bare
+    provider the session was billed to — the same merge the native TUI always did (#125942); a bare
     bucket still contributes nothing."""
     meta = _row(model_config={"base_url": "https://f/v1", "api_mode": "chat_completions"})
     meta["billing_provider"] = "minimax"
-    assert SessionDB.session_gateway_runtime(meta) == {
+    assert SessionDB.session_runtime(meta) == {
         "provider": "minimax", "base_url": "https://f/v1", "api_mode": "chat_completions"}
     meta["billing_provider"] = "custom"
-    assert SessionDB.session_gateway_runtime(meta) == {"base_url": "https://f/v1", "api_mode": "chat_completions"}
+    assert SessionDB.session_runtime(meta) == {"base_url": "https://f/v1", "api_mode": "chat_completions"}
 
 
 def test_restore_session_model_restores_billing_provider_fallback():

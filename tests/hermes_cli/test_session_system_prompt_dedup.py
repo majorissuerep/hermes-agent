@@ -36,7 +36,6 @@ def test_prompt_snapshots_are_deduplicated_and_hydrated_for_readers(db):
         system_prompt=prompt,
     )
     db.create_session("s2", "cli", system_prompt=prompt)
-    db.request_handoff("s1", "telegram")
 
     stored = db._conn.execute(
         "SELECT hash, prompt FROM system_prompts"
@@ -55,8 +54,6 @@ def test_prompt_snapshots_are_deduplicated_and_hydrated_for_readers(db):
     assert db.list_sessions_rich()[0]["system_prompt"] == prompt
     assert db.search_sessions()[0]["system_prompt"] == prompt
     assert db.export_session("s1")["system_prompt"] == prompt
-    assert db.list_gateway_sessions()[0]["system_prompt"] == prompt
-    assert db.list_pending_handoffs()[0]["system_prompt"] == prompt
 
 
 def test_route_changes_keep_the_prompt_and_replacement_collects_orphans(db):

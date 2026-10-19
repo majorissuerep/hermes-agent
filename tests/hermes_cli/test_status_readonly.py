@@ -18,5 +18,7 @@ def test_session_status_does_not_create_database(tmp_path, monkeypatch, capsys, 
         (directory / "sessions.json").write_text(json.dumps({"fixture": {}}))
     status._render_sessions(SimpleNamespace(config={}))
     output = capsys.readouterr().out
-    assert "1 session(s)" in output if legacy else "Active:" in output
+    assert "Stored:" in output and "0 session(s)" in output
+    if legacy:
+        assert json.loads((directory / "sessions.json").read_text()) == {"fixture": {}}
     assert not (tmp_path / "state.db").exists()

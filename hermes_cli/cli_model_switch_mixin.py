@@ -49,9 +49,9 @@ def _resolve_cli_reasoning(cli) -> None:
 def stored_session_route(session_meta, *, current_model, current_provider):
     """The route a resumed session should run on, or ``None`` when the stored one is absent or
     already current. Returns ``(model, provider, base_url, api_mode, provider_changed)``; the
-    canonical row reader is ``SessionDB.session_runtime`` (``model_config.gateway_runtime``,
+    canonical row reader is ``SessionDB.session_runtime`` (``model_config.runtime`` (legacy ``gateway_runtime`` fallback),
     else the TUI's top-level keys). Bare ``custom`` is healed because the CLI resolve path
-    hard-fails on it (the TUI gateway keeps it when a base_url exists)."""
+    hard-fails on it (the native TUI keeps it when a base_url exists)."""
     stored_model = str((session_meta or {}).get("model") or "").strip()
     if not stored_model:
         return None
@@ -414,14 +414,14 @@ class CLIModelSwitchMixin:
         """Persist a session-scoped /model switch to the session DB row.
 
         Writes the model column plus the route in both shapes readers use — nested
-        ``gateway_runtime`` (CLI --resume) and top-level keys (TUI session.resume) — from one
+        ``runtime`` (native resume) and top-level keys (TUI session.resume) — from one
         or-None dict so stale keys are DELETED (``_merge_model_config_json`` only deletes on
         explicit None) and the shapes never diverge.
 
-        Writes the model column plus the runtime route so ``--resume`` (CLI, reads ``gateway_runtime``) and
-        ``session.resume`` (TUI/desktop, reads top-level ``model_config`` keys via
+        Writes the model column plus the runtime route so ``--resume`` (CLI, reads ``runtime``) and
+        ``session.resume`` (TUI, reads top-level ``model_config`` keys via
         ``_stored_session_runtime_overrides``) both restore the switched provider instead of recombining the
-        model with the ambient default (#79536). Mirrors the gateway's ``update_session_model()`` call.
+        model with the ambient default (#79536).
         getattr: tests drive the switch paths with ``object.__new__`` stubs.
         """
         from cli import logger
@@ -434,8 +434,8 @@ class CLIModelSwitchMixin:
                 result.target_provider, base_url=result.base_url, model=result.new_model,
             ) or None,
             # Both shapes use the same or-None discipline so stale keys from a previous switch are deleted
-            # (not merely omitted) in BOTH the nested gateway_runtime dict (CLI reader) and the top-level
-            # keys (TUI gateway reader). _merge_model_config_json only deletes on explicit None, so falsy
+            # (not merely omitted) in BOTH the nested runtime dict (CLI reader) and the top-level
+            # keys (native TUI reader). _merge_model_config_json only deletes on explicit None, so falsy
             # values must be converted, not filtered. Deriving the top-level from **route guarantees the two
             # shapes can never diverge — the asymmetry that caused the original stale-key bug (#85261
             # simplify-code review).
@@ -443,7 +443,7 @@ class CLIModelSwitchMixin:
             "api_mode": result.api_mode or None}
         try:
             db.update_session_model(sid, result.new_model)
-            db.patch_session_model_config(sid, {"gateway_runtime": route, **route})
+            db.patch_session_model_config(sid, {"runtime": route, **route})
         except Exception:
             logger.debug("Failed to persist model switch to session DB", exc_info=True)
 

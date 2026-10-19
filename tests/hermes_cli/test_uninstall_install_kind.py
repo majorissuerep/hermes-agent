@@ -109,16 +109,6 @@ def test_run_uninstall_exits_on_sealed_tree(monkeypatch, tmp_path, capsys):
     assert exc.value.code == 1
     assert "Nix" in capsys.readouterr().out
 
-
-def test_run_gui_uninstall_exits_on_sealed_tree(monkeypatch, tmp_path, capsys):
-    _fake_project_root(monkeypatch, tmp_path, git=False, distribution="desktop-app")
-    args = SimpleNamespace(yes=True)
-    with pytest.raises(SystemExit) as exc:
-        un.run_gui_uninstall(args)
-    assert exc.value.code == 1
-    assert "managed by the desktop app" in capsys.readouterr().out
-
-
 # ---------------------------------------------------------------------------
 # run_data_uninstall — user data only, on any install kind
 # ---------------------------------------------------------------------------
@@ -137,21 +127,6 @@ def _make_home(tmp_path: Path) -> Path:
     return home
 
 
-def test_run_data_uninstall_removes_electron_userdata(monkeypatch, tmp_path):
-    home = _make_home(tmp_path)
-    userdata = tmp_path / "electron-userdata"
-    userdata.mkdir()
-    (userdata / "connection.json").write_text("{}", encoding="utf-8")
-    monkeypatch.setattr(un, "get_hermes_home", lambda: home)
-    import hermes_cli.gui_uninstall as gu
-
-    monkeypatch.setattr(gu, "desktop_userdata_dir", lambda: userdata)
-
-    un.run_data_uninstall(SimpleNamespace(yes=True))
-
-    assert not userdata.exists()
-
-
 def test_run_data_uninstall_works_on_sealed_trees(monkeypatch, tmp_path):
     # The whole point of the data mode: no code-removal gate applies.
     home = _make_home(tmp_path)
@@ -159,9 +134,8 @@ def test_run_data_uninstall_works_on_sealed_trees(monkeypatch, tmp_path):
         json.dumps({"distribution": "nix", "updateMechanism": "external"})
     , encoding="utf-8")
     monkeypatch.setattr(un, "get_hermes_home", lambda: home)
-    import hermes_cli.gui_uninstall as gu
-
-    monkeypatch.setattr(gu, "desktop_userdata_dir", lambda: tmp_path / "none")
+    monkeypatch.setattr(un, "get_project_root", lambda: home / "hermes-agent")
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
 
     un.run_data_uninstall(SimpleNamespace(yes=True))
 
@@ -174,60 +148,16 @@ def test_run_data_uninstall_works_on_sealed_trees(monkeypatch, tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_gui_summary_reports_steward_and_gate(monkeypatch, tmp_path):
-    import hermes_cli.gui_uninstall as gu
-    from hermes_cli import steward as st
-
-    home = tmp_path / ".hermes"
-    home.mkdir()
-    monkeypatch.setattr(gu, "packaged_gui_app_paths", list)
-    monkeypatch.setattr(gu, "desktop_userdata_dir", lambda: tmp_path / "none")
-
-    # Sealed nix tree → steward named, code removal denied.
-    monkeypatch.setattr(st, "classify_install", lambda root: ("nix", False))
-    summary = gu.gui_install_summary(home)
-    assert summary["steward"] == "nix"
-    assert summary["code_removal_allowed"] is False
-
-    # Git checkout → ours to remove.
-    monkeypatch.setattr(st, "classify_install", lambda root: ("git", True))
-    summary = gu.gui_install_summary(home)
-    assert summary["steward"] == "git"
-    assert summary["code_removal_allowed"] is True
-
-
-def test_gui_summary_classifies_the_agent_root(tmp_path, monkeypatch):
-    """The steward facts classify the home's ``hermes-agent`` checkout — the
-    tree the code-removal modes would delete — not some unrelated root."""
-    import hermes_cli.gui_uninstall as gu
-    from hermes_cli import steward as st
-
-    seen = []
-    monkeypatch.setattr(st, "classify_install", lambda root: seen.append(root) or ("git", True))
-    monkeypatch.setattr(gu, "packaged_gui_app_paths", list)
-    monkeypatch.setattr(gu, "desktop_userdata_dir", lambda: tmp_path / "none")
-
-    home = tmp_path / ".hermes"
-    gu.gui_install_summary(home)
-
-    assert seen == [home / "hermes-agent"]
-
-
-# ---------------------------------------------------------------------------
-# module entrypoint routing
-# ---------------------------------------------------------------------------
-
-
 def test_module_entrypoint_routes_data_mode(monkeypatch):
     calls = []
     monkeypatch.setattr(un, "run_data_uninstall", lambda args: calls.append(("data", args)))
-    monkeypatch.setattr(un, "run_gui_uninstall", lambda args: calls.append(("gui", args)))
     monkeypatch.setattr(un, "run_uninstall", lambda args: calls.append(("agent", args)))
 
     assert un.main(["--mode", "data"]) == 0
     assert calls[-1][0] == "data"
-    assert un.main(["--mode", "gui"]) == 0
-    assert calls[-1][0] == "gui"
+    with pytest.raises(SystemExit) as refused:
+        un.main(["--mode", "gui"])
+    assert refused.value.code == 2
     assert un.main(["--mode", "full"]) == 0
     assert calls[-1][0] == "agent"
     assert calls[-1][1].full is True

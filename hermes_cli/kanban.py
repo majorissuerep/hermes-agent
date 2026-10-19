@@ -1,6 +1,6 @@
 """``hermes kanban …`` — dispatch (``kanban_command``), task-verb handlers, ``run_slash`` for ``/kanban``.
 DB work lives in ``kanban_db``; siblings: ``kanban_parser`` (argparse, re-exported ``build_parser``),
-``kanban_output`` (text/--json), ``kanban_boards`` (``boards …``), ``kanban_ops`` (dispatch/daemon/
+``kanban_output`` (text/--json), ``kanban_boards`` (``boards …``), ``kanban_ops`` (dispatch/
 tail/watch/gc/repair).
 """
 
@@ -30,7 +30,7 @@ from hermes_cli.kanban_output import (
 )
 from hermes_cli.kanban_boards import _dispatch_boards
 from hermes_cli.kanban_ops import (
-    _cmd_daemon, _kanban_config, _cmd_dispatch, _cmd_gc, _cmd_repair, _cmd_tail, _cmd_watch,
+    _kanban_config, _cmd_dispatch, _cmd_gc, _cmd_repair, _cmd_tail, _cmd_watch,
 )
 from hermes_cli.kanban_parser import build_parser
 
@@ -97,41 +97,6 @@ def _parse_branch_flag(value: Optional[str]) -> Optional[str]:
     return branch
 
 
-def _check_dispatcher_presence(hermes_home: Optional[Path] = None) -> tuple[bool, str]:
-    """``(running, message)`` for the "will anything dispatch this?" warning: True when a gateway is
-    alive for this HERMES_HOME with ``kanban.dispatch_in_gateway`` on, else False + human guidance.
-    Fails OPEN (probe/config errors -> ``(True, "")``) — a missed warning beats crying wolf.
-    ``hermes_home`` scopes the probe to a profile dir (dashboard backend); CLI callers pass None.
-
-    The dashboard plugin API passes it because the dashboard backend process can be running under a
-    different HERMES_HOME than the profile the request targets, which otherwise produced a "no gateway is
-    running" warning against a perfectly healthy profile gateway (#71211). CLI callers leave it ``None`` and
-    keep the existing process-level behavior.
-    """
-    try:
-        from hermes_platform.processes import resolve_gateway_liveness  # type: ignore
-
-        # Same ladder as the dashboard status endpoints so PID-file-less / cross-container gateways
-        # aren't misreported; use_cache=False because this one-shot probe must see the state now.
-        liveness = resolve_gateway_liveness(profile_dir=hermes_home, use_cache=False)
-    except Exception:
-        return (True, "")  # can't probe — silent
-    if liveness.probe_error:  # resolver swallows per-rung failures; "can't tell" != "no gateway"
-        return (True, "")
-    pid = liveness.pid
-    # Even if the gateway is up, dispatch_in_gateway may be off (can't tell -> assume default).
-    if pid and bool(_kanban_config().get("dispatch_in_gateway", True)):
-        return (True, f"gateway pid={pid}, dispatch enabled")
-    if pid:
-        return (False, "Gateway is running but kanban.dispatch_in_gateway=false in "
-                "config.yaml — the task will sit in 'ready' until you flip it "
-                "back on and restart the gateway, OR run the legacy "
-                "standalone daemon (`hermes kanban daemon --force`).")
-    return (False, "No gateway is running — the task will sit in 'ready' until you "
-            "start it. Run:\n    hermes gateway start\n"
-            "The gateway hosts an embedded dispatcher (tick interval 60s by "
-            "default); your task will be picked up on the next tick after "
-            "the gateway comes up.")
 
 
 # --- Command dispatch ---
@@ -208,7 +173,7 @@ def _profile_author() -> str:
 _DELEGATED_CHILD_DENIED_ACTIONS: frozenset[str] = frozenset({
     "init", "create", "swarm", "assign", "reclaim", "reassign", "link", "unlink",
     "claim", "comment", "attach", "attach-rm", "complete", "edit", "block",
-    "schedule", "unblock", "promote", "archive", "dispatch", "daemon", "repair",
+    "schedule", "unblock", "promote", "archive", "dispatch", "repair",
     "heartbeat", "notify-subscribe", "notify-unsubscribe", "specify", "decompose",
     "request-review", "request-changes", "reopen-review",
     "gc",
@@ -297,15 +262,10 @@ def _cmd_init(args: argparse.Namespace) -> int:
         for name in profiles:
             print(f"  {name}")
     else:
-        print("No profiles found under ~/.hermes/profiles/.\n"
+        print("No profiles configured.\n"
               "Create one with `hermes -p <name> setup` before assigning tasks.")
-    print(
-        "\nNext step: start the gateway so ready tasks actually get picked up.\n"
-        "  hermes gateway start\n\n"
-        "The gateway hosts an embedded dispatcher that ticks every 60 seconds\n"
-        "by default (config: kanban.dispatch_interval_seconds). Without a\n"
-        "running gateway, tasks stay in 'ready' forever."
-    )
+    print("\nDispatch ready tasks locally with `hermes kanban dispatch`.\n"
+          "Creating a task does not start workers or a background service.")
     return 0
 
 
@@ -386,9 +346,7 @@ def _cmd_create(args: argparse.Namespace) -> int:
         # Warn only for ready+assigned tasks that would sit without a dispatcher (triage/todo idle
         # by design, unassigned can't dispatch); skipped under --json so stdout stays parseable.
         if task.status == "ready" and task.assignee:
-            running, message = _check_dispatcher_presence()
-            if not running and message:
-                print(f"\n⚠  {message}", file=sys.stderr)
+            print("Run `hermes kanban dispatch` to start ready work locally.", file=sys.stderr)
     return 0
 
 
@@ -632,8 +590,7 @@ def _cmd_diagnostics(args: argparse.Namespace) -> int:
     # Honour kanban.default_assignee as the fallback for unassigned ready tasks (#27145),
     # kanban.max_in_progress as the global concurrency cap (#33488), kanban.max_in_progress_per_profile as
     # the per-profile cap (#21582), and kanban.max_spawn as the per-tick spawn limit (#28805). Same
-    # semantics as the gateway dispatch path so behavior matches whether the user runs the CLI directly or
-    # relies on the gateway-embedded dispatcher.
+    # semantics on every explicit local dispatch pass.
     from hermes_cli.config import load_config
 
     diag_config = kd.config_from_runtime_config(load_config())
@@ -1153,27 +1110,17 @@ def _cmd_stats(args: argparse.Namespace) -> int:
 
 
 def _cmd_notify_subscribe(args: argparse.Namespace) -> int:
-    delivery_metadata = {
-        key: value
-        for key, value in (
-            ("parent_chat_id", getattr(args, "parent_chat_id", None)),
-            ("guild_id", getattr(args, "guild_id", None)),
-        )
-        if value
-    }
+    if args.platform != "tui":
+        return _err("Only local TUI notification subscriptions are supported.")
     with kbc.connect_closing() as conn:
         if kb.get_task(conn, args.task_id) is None:
             return _err(f"no such task: {args.task_id}")
         kbn.add_notify_sub(
-            conn, task_id=args.task_id, platform=args.platform, chat_id=args.chat_id,
-            chat_type=args.chat_type, thread_id=args.thread_id, user_id=args.user_id,
-            user_id_alt=getattr(args, "user_id_alt", None),
-            notifier_profile=args.notifier_profile or _profile_author(),
+            conn, task_id=args.task_id, platform="tui", chat_id=args.chat_id,
+            notifier_profile=_profile_author(),
             delivery_mode=getattr(args, "delivery_mode", None),
-            delivery_metadata=delivery_metadata or None,
         )
-    print(f"Subscribed {args.platform}:{args.chat_id}" + (f":{args.thread_id}" if args.thread_id else "")
-          + f" to {args.task_id}")
+    print(f"Subscribed local session {args.chat_id} to {args.task_id}")
     return 0
 
 
@@ -1331,7 +1278,7 @@ _HANDLERS = {
     "request-review": _cmd_request_review, "request-changes": _cmd_request_changes,
     "reopen-review": _cmd_reopen_review, "promote": _cmd_promote,
     "archive": _cmd_archive, "tail": _cmd_tail, "dispatch": _cmd_dispatch,
-    "daemon": _cmd_daemon, "watch": _cmd_watch, "stats": _cmd_stats,
+    "watch": _cmd_watch, "stats": _cmd_stats,
     "log": _cmd_log, "runs": _cmd_runs, "heartbeat": _cmd_heartbeat,
     "assignees": _cmd_assignees, "notify-subscribe": _cmd_notify_subscribe,
     "notify-list": _cmd_notify_list, "notify-unsubscribe": _cmd_notify_unsubscribe,
@@ -1340,7 +1287,7 @@ _HANDLERS = {
 }
 
 
-# --- Slash-command entry point (used by /kanban from CLI and gateway) ---
+# --- Slash-command entry point (used by /kanban from local CLI and TUI) ---
 
 _SLASH_KANBAN_HELP = """\
 **/kanban** — manage the shared task board.
@@ -1369,7 +1316,7 @@ Read-only commands are safe while an agent is running.\
 
 def run_slash(rest: str) -> str:
     """Execute a ``/kanban …`` string (``rest`` = everything after ``/kanban``) and return captured
-    stdout/stderr. Shared by the interactive CLI and the gateway so formatting is identical."""
+    stdout/stderr. Shared by the native CLI and TUI so formatting is identical."""
     import io
 
     # Non-posix split (Windows) keeps backslashes as path separators but

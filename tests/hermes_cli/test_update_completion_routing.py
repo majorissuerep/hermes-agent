@@ -27,7 +27,7 @@ from tests.compat.old_updater_support import fresh_child, no_external_work
 ])
 def test_historical_completion_hook_never_reports_success(hook, args, kwargs, fresh_child, capsys):
     if hook in {update_cmd._prepare_updated_checkout, update_cmd._reload_config_modules,
-                update_cmd._reload_process_scan_modules, update_cmd._run_pending_fleet_restart}:
+                update_cmd._reload_process_scan_modules}:
         with pytest.raises(SystemExit) as error:
             hook(*args, **kwargs)
         assert error.value.code == 1

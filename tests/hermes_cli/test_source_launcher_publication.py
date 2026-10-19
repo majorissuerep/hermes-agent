@@ -26,7 +26,7 @@ def fixture_tree(tmp_path, monkeypatch):
     for relative in BOOT_FILES:
         destination = repo / relative
         destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(ROOT / relative, destination)
+        shutil.copyfile(ROOT / relative, destination)
     entry = (
         "import json, os, sys\n"
         "def main():\n"
@@ -449,7 +449,7 @@ def _torn_by_a_killed_merge(tmp_path, monkeypatch):
     """
     repo, home, interpreter = fixture_tree(tmp_path, monkeypatch)
     for relative in ("hermes_cli/update_lock.py", "hermes_cli/update_custody.py"):
-        shutil.copy2(ROOT / relative, repo / relative)
+        shutil.copyfile(ROOT / relative, repo / relative)
 
     def git(*args):
         return subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True,

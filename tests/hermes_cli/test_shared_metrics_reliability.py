@@ -116,7 +116,7 @@ def _dead_pid() -> int:
 
 
 def test_dead_markers_report_killed_or_crash_and_live_ones_wait(marks):
-    from gateway.status import get_process_start_time
+    from hermes_platform.processes import get_process_start_time
 
     directory = process_metrics.markers_dir(marks.home)
     directory.mkdir(parents=True)
@@ -247,28 +247,6 @@ def test_a_marker_the_store_did_not_save_is_kept_for_the_next_start(marks):
     marks.store["saves"] = True
     process_metrics._report_dead_markers(marks.home, directory / "self.json")
     assert not marker.exists() and [data["exit_kind"] for _, data in marks.rows] == ["clean"]
-
-
-def test_graceful_gateway_exit_stamps_the_marker_clean(marks, monkeypatch):
-    import gateway.run as gateway_run
-
-    monkeypatch.setattr(process_metrics, "_STATE", {})
-    monkeypatch.setattr(sys, "excepthook", lambda *a: None)
-    monkeypatch.setattr(process_metrics.atexit, "register", lambda *a, **k: None)
-    monkeypatch.setattr(process_metrics.threading, "Thread", lambda **k: SimpleNamespace(start=lambda: None))
-    process_metrics.begin_process("gateway")
-
-    class _Exited(Exception):
-        pass
-
-    def fake_exit(code):
-        raise _Exited(code)
-
-    monkeypatch.setattr(gateway_run.os, "_exit", fake_exit)  # os._exit skips atexit: no stamp from there
-    with pytest.raises(_Exited):
-        gateway_run._exit_after_graceful_shutdown(1)
-    marker = process_metrics.markers_dir(marks.home) / f"gateway-{os.getpid()}.json"
-    assert json.loads(marker.read_text())["state"] == "clean"
 
 
 def test_unrepresentable_timestamps_read_as_unknown():

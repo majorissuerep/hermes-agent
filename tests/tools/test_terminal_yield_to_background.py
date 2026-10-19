@@ -13,6 +13,8 @@ import time
 
 import pytest
 
+from tests.tools.process_receipt_fixtures import encrypted_process_home as _encrypted_process_home
+
 from agent.interrupt_control import InterruptControlMixin
 from tools import interrupt as interrupt_mod
 from tools.process_registry import process_registry
@@ -37,13 +39,12 @@ class _Agent(InterruptControlMixin):
 
 
 @pytest.mark.live_system_guard_bypass
-def test_redirect_mid_command_yields_it_to_background_without_killing_it(tmp_path, monkeypatch):
+def test_redirect_mid_command_yields_it_to_background_without_killing_it():
     """Real signal delivery is required: the registry SIGTERMs the shell first, so its
     ``sleep`` child is reparented to init before the registry reaps it from the descendant
     snapshot — the conftest guard's parent-chain walk can no longer see it under the test PID."""
     import psutil
 
-    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
     agent = _Agent()
     res = {}
 

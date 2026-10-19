@@ -25,6 +25,16 @@ from hermes_cli._subprocess_compat import bounded_git_probe, kill_process_tree
 pytestmark = pytest.mark.platforms("posix")  # POSIX process-group semantics
 
 
+@pytest.fixture(autouse=True)
+def _own_orphaned_probe_descendants():
+    from tests.e2e.core.upgrade import _process_reaper
+    _process_reaper.adopt_orphans()
+    try:
+        yield
+    finally:
+        _process_reaper.release_orphans()
+
+
 def _write_forking_script(tmp_path, marker_name="child.pid"):
     """A fake ``git`` that forks a long-lived descendant, then stalls."""
     marker = tmp_path / marker_name
@@ -44,6 +54,12 @@ def _write_forking_script(tmp_path, marker_name="child.pid"):
 
 
 def _pid_alive(pid: int) -> bool:
+    try:
+        reaped, _ = os.waitpid(pid, os.WNOHANG)
+        if reaped == pid:
+            return False
+    except ChildProcessError:
+        pass
     try:
         os.kill(pid, 0)
     except ProcessLookupError:

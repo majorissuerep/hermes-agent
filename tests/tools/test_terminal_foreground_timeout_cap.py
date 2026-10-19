@@ -7,6 +7,8 @@ re-sent lower/split/background, 251 of them test suites).
 import json
 from unittest.mock import patch, MagicMock
 
+from tests.tools.process_receipt_fixtures import encrypted_process_home as _encrypted_process_home
+
 # ---------------------------------------------------------------------------
 # Shared test config dict — mirrors _get_env_config() return shape.
 # ---------------------------------------------------------------------------
@@ -29,13 +31,12 @@ def _make_env_config(**overrides):
 class TestForegroundTimeoutCap:
     """FOREGROUND_MAX_TIMEOUT rejects foreground commands that exceed it."""
 
-    def test_foreground_timeout_above_max_is_promoted_to_tracked_background(self, tmp_path, monkeypatch):
+    def test_foreground_timeout_above_max_is_promoted_to_tracked_background(self, tmp_path):
         """Real local backend, real registry: the command runs (once), the result is a background
         session with notify_on_complete and a note naming the requested and cap seconds."""
         import time
         from tools.terminal_tool import terminal_tool, FOREGROUND_MAX_TIMEOUT
 
-        monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hh"))
         marker = tmp_path / "ran"
         with patch("tools.terminal_tool._get_env_config", return_value=_make_env_config(cwd=str(tmp_path))), \
              patch("tools.terminal_tool._start_cleanup_thread"), \

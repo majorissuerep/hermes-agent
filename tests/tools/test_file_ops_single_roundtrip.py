@@ -16,6 +16,7 @@ import pytest
 
 from tools.environments.local import LocalEnvironment
 from tools.file_operations import ExecuteResult, ShellFileOperations
+from tests.tools.file_ops_fixtures import bash_program
 
 pytestmark = pytest.mark.platforms("posix")  # POSIX shell probes
 
@@ -35,7 +36,7 @@ def _ops(_local_env, tmp_path):
     real_execute = type(env).execute.__get__(env, type(env))
 
     def spy(command, *args, **kwargs):
-        calls.append(command)
+        calls.append(bash_program(command))
         return real_execute(command, *args, **kwargs)
 
     env.execute = spy

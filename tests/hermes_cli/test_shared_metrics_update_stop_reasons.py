@@ -85,7 +85,7 @@ def test_a_failed_git_call_names_its_class_from_the_argv_and_fixed_phrases(stder
     assert _zip_stop_class(ValueError("x"), downloaded=False) == "download_failed"
 
 
-def test_exits_before_the_receipt_opens_count_once_and_leave_the_holders_receipt_alone(rows, monkeypatch):
+def test_exits_before_the_receipt_opens_count_once_and_leave_the_holders_receipt_alone(rows, monkeypatch, tmp_path):
     """Invariant: the update-lock refusal and the Git-operation refusal fire before this run's
     receipt opens; each still yields exactly one row with its class, and neither writes a receipt
     (``latest.json`` belongs to the update holding the lock)."""
@@ -112,15 +112,36 @@ def test_exits_before_the_receipt_opens_count_once_and_leave_the_holders_receipt
     monkeypatch.setattr(update_lock, "describe_holder", lambda holder: "another update is running")
     with pytest.raises(SystemExit) as refused:
         main.cmd_update(SimpleNamespace(gateway=False))
-    monkeypatch.setattr(update_cmd, "git_operation_in_progress", lambda root: "rebase")
-    with pytest.raises(SystemExit) as in_progress:
-        update_cmd._cmd_update_impl(SimpleNamespace(), gateway_mode=False)
+    from hermes_cli import terminal_update
+    monkeypatch.setattr(main, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr("hermes_cli._early_recovery.git_operation_in_progress", lambda root: "rebase")
+    with pytest.raises(RuntimeError, match="Finish the Git rebase"):
+        terminal_update.update_source(SimpleNamespace())
 
-    assert (refused.value.code, in_progress.value.code) == (2, 1)
+    assert refused.value.code == 2
     assert [(r["failure_class"], r["outcome"], r["failed_stage"]) for r in rows.runs()] == [
         ("lock_held", "refused", "none"), ("git_in_progress", "failed", "other")]
     assert all(contract.counter_dimensions_are_valid(contract.UPDATE_RUN_METRIC, r) for r in rows.runs())
     assert (rows.home / "logs/update_receipts/latest.json").read_bytes() == holders
+
+
+def test_native_update_without_git_operation_reaches_preparation_without_false_refusal(rows, monkeypatch, tmp_path):
+    from hermes_cli import main, terminal_update
+
+    class PreparationReached(Exception):
+        pass
+
+    def prepared(root):
+        assert root == tmp_path
+        raise PreparationReached
+
+    monkeypatch.setattr(main, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr("hermes_cli._early_recovery.git_operation_in_progress", lambda root: None)
+    monkeypatch.setattr("hermes_cli.gitlock.release_dead_index_lock", prepared)
+    with pytest.raises(PreparationReached):
+        terminal_update.update_source(SimpleNamespace())
+    assert rows.runs() == []
+    assert not (rows.home / "logs/update_receipts/latest.json").exists()
 
 
 def _marker(home, *lines: str) -> None:

@@ -1,22 +1,8 @@
-"""Host-level concurrency accounting + review-lane fairness (OOF-30 review).
-
-Three gaps found in review of the original memory-guard PR:
-
-1. The standalone daemon path (``hermes kanban daemon --force`` /
-   :func:`hermes_cli.kanban_db_dispatch.run_daemon`) never resolved
-   ``kanban.max_in_progress`` at all — the one shipped entry point that
-   could still fan out an entire backlog in a single tick.
-2. ``max_in_progress`` was enforced per-board while the gateway dispatcher
-   ticks every active board — N boards multiplied the host budget by N.
-3. The ready loop consumed the entire shared spawn budget before the
-   review loop ran, so a sustained ready backlog starved autonomous
-   reviews indefinitely.
-"""
+"""Finite local dispatch respects host concurrency caps and review-lane fairness."""
 
 from __future__ import annotations
 
 import sqlite3
-import threading
 import time
 from pathlib import Path
 
@@ -50,41 +36,23 @@ def _fake_spawn_factory(spawns: list):
 
 
 # ---------------------------------------------------------------------------
-# 1. Standalone daemon resolves max_in_progress (P1a)
+# Finite local dispatch resolves max_in_progress
 # ---------------------------------------------------------------------------
 
 
-def test_run_daemon_resolves_and_passes_max_in_progress(
-    kanban_home, monkeypatch,
-):
-    """The daemon tick must pass a resolved cap into dispatch_once.
+def test_local_dispatch_resolves_and_passes_max_in_progress(kanban_home, monkeypatch):
+    from hermes_cli import kanban as cli
 
-    Regression guard for the OOF-30 review finding: ``run_daemon`` only
-    forwarded ``max_spawn`` — with no explicit ``--max`` (the shipped
-    systemd shape) nothing capped the tick even though the gateway and
-    ``hermes kanban dispatch`` paths both resolved the memory-derived
-    default.
-    """
-    captured: dict = {}
-    stop = threading.Event()
+    captured = {}
 
-    def fake_dispatch_once(conn, **kwargs):
-        captured.update(kwargs)
-        return kb.DispatchResult()
+    def dispatch_once(connection, **options):
+        captured.update(options)
+        return kbd.DispatchResult()
 
-    monkeypatch.setattr(kbd, "dispatch_once", fake_dispatch_once)
-    # No explicit config → the derived default must flow through.
-    monkeypatch.setattr(kbd, "configured_max_in_progress", lambda: None)
+    monkeypatch.setattr(kbd, "dispatch_once", dispatch_once)
     monkeypatch.setattr(kbd, "derive_default_max_in_progress", lambda sample=None: 3)
-
-    def on_tick(res):
-        stop.set()
-
-    kbd.run_daemon(interval=0.01, stop_event=stop, on_tick=on_tick)
-
-    assert captured.get("max_in_progress") == 3
-
-
+    assert "Reclaimed" in cli.run_slash("dispatch --dry-run")
+    assert captured["max_in_progress"] == 3
 
 
 def test_configured_max_in_progress_parsing(monkeypatch):

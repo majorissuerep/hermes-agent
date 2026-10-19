@@ -318,11 +318,7 @@ def test_doctor_reports_vercel_backend_diagnostics(monkeypatch, tmp_path):
     monkeypatch.setenv("VERCEL_TEAM_ID", "team")
     monkeypatch.setattr(importlib.util, "find_spec", lambda name: object() if name == "vercel" else None)
 
-    fake_model_tools = types.SimpleNamespace(
-        check_tool_availability=lambda *a, **kw: ([], []),
-        TOOLSET_REQUIREMENTS={},
-    )
-    monkeypatch.setitem(sys.modules, "model_tools", fake_model_tools)
+    monkeypatch.setattr(doctor_mod, "DOCTOR_CHECKS", ((None, doctor_tools._check_terminal_backend),))
 
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
@@ -1053,6 +1049,7 @@ class TestGitHubTokenCheck:
                 return types.SimpleNamespace(returncode=1, stdout=b"", stderr=b"unknown JSON field")
             return types.SimpleNamespace(returncode=0, stdout=b"", stderr=b"Logged in to github.com")
 
+        monkeypatch.setattr(doctor_tools, "_safe_which", lambda name: "gh" if name == "gh" else None)
         monkeypatch.setattr(subprocess, "run", gh_2_98)
         assert doctor_state._gh_authenticated() is True
 

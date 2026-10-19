@@ -1,27 +1,24 @@
 """One-shot CLI exit linger for notify_on_complete background processes (#90879).
 
-A Bot Mode agent invoked as a short-lived ``hermes -p <bot> chat -Q
---query-file ...`` process (exactly how DM handoffs deliver) dispatches its
-reply via ``terminal(background=true, notify_on_complete=true)`` and then
-exits.  The reply child writes to a stdout pipe owned by the dying parent and
-is destroyed a few seconds later — the handoff reply is silently lost.
+A finite native CLI turn may start a terminal background process with
+``notify_on_complete``. Its bounded exit wait must observe completion before
+teardown instead of returning while the requested work is still running.
 
 Fix under test: ``ProcessRegistry.wait_for_pending_completions`` gives the
 one-shot exit paths (``cli._finalize_single_query`` and
 ``hermes_cli.oneshot``) a bounded linger over every tracked
-``notify_on_complete`` process, so the delivery lands before the parent dies.
+``notify_on_complete`` process. Durable output capture also retains work that
+outlives the parent; these checks exercise the explicit wait, not remote delivery.
 
 Covers:
   - registry wait semantics (no-op, completion, timeout, filters, disable)
   - config default + reader fallback
   - the CLI exit paths actually invoke the wait before teardown
   - real-process E2E: a short-lived parent that lingers keeps its background
-    delivery alive to completion; a parent that exits immediately loses it
-    (control that proves the bug class is real).
+    work alive to completion and observes its result before returning.
 """
 
 import os
-import subprocess
 import sys
 import textwrap
 import threading
@@ -31,6 +28,7 @@ from pathlib import Path
 import pytest
 
 from tests.tools.process_receipt_fixtures import encrypted_process_home as _encrypted_process_home
+from tests.e2e.vault_home import run_unlocked
 
 from tools.process_registry import ProcessRegistry, ProcessSession
 
@@ -302,16 +300,16 @@ _E2E_PARENT = textwrap.dedent(
     """
     import sys, time
     sys.path.insert(0, {repo!r})
+    from hermes_security.handoff import adopt_inherited_key
+    assert adopt_inherited_key(), "fixture parent requires its sealed vault grant"
     from tools.process_registry import ProcessRegistry
 
     marker = {marker!r}
     linger = {linger!r}
 
     reg = ProcessRegistry()
-    # The child mimics a Bot Mode reply delivery: it works for a bit, then
-    # WRITES to stdout (the pipe owned by this parent) before recording
-    # success. If the parent is gone, that write raises SIGPIPE/BrokenPipe
-    # and the marker file never appears — the destroyed-reply symptom.
+    # A real background child writes output before recording completion.
+    # The owning parent explicitly waits for it rather than merely launching.
     session = reg.spawn_local(
         "sleep 2; echo delivering; echo done > " + marker,
         task_id="e2e",
@@ -334,7 +332,7 @@ def _run_e2e_parent(tmp_path, *, linger: bool) -> Path:
     )
     env = dict(os.environ)
     env.setdefault("HERMES_HOME", str(tmp_path / "hermes_home"))
-    proc = subprocess.run(
+    proc = run_unlocked(
         [sys.executable, str(script)],
         capture_output=True,
         text=True,

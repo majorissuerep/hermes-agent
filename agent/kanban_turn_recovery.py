@@ -240,9 +240,11 @@ def worker_claim_is_live(
         return False
     now = _now()
     try:
-        conn = sqlite3.connect(f"{Path(db_path).absolute().as_uri()}?mode=ro", uri=True)
+        from hermes_security import sqlite as state_sqlite
+
+        conn = state_sqlite.maybe_connect(f"{Path(db_path).absolute().as_uri()}?mode=ro", uri=True)
         try:
-            conn.row_factory = sqlite3.Row
+            conn.row_factory = state_sqlite.row_class() if state_sqlite.is_vaulted(db_path) else sqlite3.Row
             row = conn.execute(
                 "SELECT status, worker_pid, current_run_id, claim_lock, claim_expires "
                 "FROM tasks WHERE id = ?",

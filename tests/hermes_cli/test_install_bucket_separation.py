@@ -37,7 +37,6 @@ class TestProfileCopyExclusions:
         home = tmp_path / ".hermes"
         home.mkdir()
         monkeypatch.setenv("HERMES_HOME", str(home))
-        monkeypatch.setattr(profiles, "_maybe_register_gateway_service", lambda name: None)
         kept = {"config.yaml": "model: {}\n", "SOUL.md": "profile identity\n",
                 "skills/demo/SKILL.md": "demo instructions\n"}
         if operation != "distribution":

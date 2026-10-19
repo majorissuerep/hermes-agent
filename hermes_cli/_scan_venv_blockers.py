@@ -12,16 +12,8 @@ import sys
 
 
 def _is_pausable_gateway(cmdline: str) -> bool:
-    """Historical post-swap import; preserve the canonical gateway predicate.
-
-    Required by tests/compat/old_updater_surface.json even though the Desktop
-    preflight is retired. An unavailable matcher must still fail closed.
-    """
-    try:
-        from hermes_platform.processes import looks_like_gateway_command_line
-    except Exception:
-        return False
-    return looks_like_gateway_command_line(cmdline)
+    """Retired hosts are never candidates for legacy pause/termination."""
+    return False
 
 
 def main() -> None:

@@ -33,8 +33,8 @@ from hermes_cli._scan_venv_blockers import _is_pausable_gateway
         "PYTHON.EXE -m hermes_cli.main GATEWAY RUN",
     ],
 )
-def test_is_pausable_gateway_accepts_gateway_run_chains(cmdline: str) -> None:
-    assert _is_pausable_gateway(cmdline) is True
+def test_retired_gateway_commands_are_never_pausable(cmdline: str) -> None:
+    assert _is_pausable_gateway(cmdline) is False
 
 
 @pytest.mark.parametrize(

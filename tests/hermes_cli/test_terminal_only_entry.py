@@ -33,9 +33,11 @@ def test_headless_invokes_native_runner(monkeypatch):
     from hermes_cli import main
     calls = []
     monkeypatch.setattr(main, '_run_and_exit_oneshot', lambda *a, **k: calls.append((a, k)))
+    monkeypatch.setattr(main, '_confirm_startup_expensive_model_override', lambda args: None)
     main._run_oneshot_from_args(Namespace(query='Retain context', model='test/model', resume='saved-session'))
     assert calls == [(('Retain context',), {'model': 'test/model', 'provider': None, 'toolsets': None,
-        'skills': None, 'usage_file': None, 'resume': 'saved-session', 'reasoning': None})]
+        'skills': None, 'usage_file': None, 'resume': 'saved-session', 'reasoning': None,
+        'launch_options': {'yolo': False, 'accept_hooks': False}})]
 
 
 def test_headless_holds_profile_until_cleanup(monkeypatch, tmp_path):

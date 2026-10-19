@@ -12,6 +12,7 @@ import pytest
 
 from tools.environments.local import LocalEnvironment
 from tools.file_operations import ShellFileOperations
+from tests.tools.file_ops_fixtures import bash_program
 
 pytestmark = pytest.mark.platforms("posix")  # native rg lane is POSIX-only
 
@@ -40,7 +41,7 @@ def ops_factory(_local_env):
         _local_env.cwd = str(tree)
 
         def recording(command, *a, **kw):
-            spy.append(command)
+            spy.append(bash_program(command))
             return real(command, *a, **kw)
 
         _local_env.execute = recording

@@ -624,13 +624,12 @@ class TestDispatchLoopCommand:
         assert "stopped" in dispatch_loop_command(mgr, "stop")["output"].lower()
         assert "No active loop" in dispatch_loop_command(mgr, "stop")["output"]
 
-    def test_route_stored(self, hermes_home):
+    def test_explicit_command_claims_local_destination(self, hermes_home):
         from hermes_cli.loops import LoopManager, dispatch_loop_command, load_loop
 
         mgr = LoopManager(session_id="d5")
-        route = {"platform": "telegram", "chat_id": "42", "chat_type": "private"}
-        dispatch_loop_command(mgr, "5m ping", route=route)
-        assert load_loop("d5").route == route
+        dispatch_loop_command(mgr, "5m ping")
+        assert load_loop("d5").route == {"kind": "local"}
 
 
     def test_bad_times_error(self, hermes_home):

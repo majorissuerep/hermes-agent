@@ -1447,21 +1447,13 @@ DEFAULT_CONFIG = {
     # promotes dependency-satisfied todos to ready, and fires `hermes -p <assignee> chat -q ...` per
     # claimable task. Run ONE dispatcher per profile; two on the same kanban.db race for claims.
     "kanban": {
-        # Auto-subscribe the originating gateway/TUI session to completion + block events when
+        # Auto-subscribe the originating local TUI session to completion + block events when
         # kanban_create is called from a session with a persistent delivery channel. Disable for
-        # profiles that prefer explicit kanban_notify-subscribe calls per task.
+        # profiles that prefer explicit local subscriptions per task.
         "auto_subscribe_on_create": True,
-        # Poll and deliver Kanban subscriptions from this gateway. Disable on profiles that do
-        # not own notification subscriptions to avoid an idle five-second board probe.
-        "notify_in_gateway": True,
-        # Run the dispatcher inside the gateway process (~300µs per idle tick). False only if you
-        # run it as a separate unit or don't want the gateway spawning workers.
-        "dispatch_in_gateway": True,
         # Auto-claim tasks in the review column and spawn the assigned profile with the bundled
-        # sdlc-review skill. Disable where every review is done manually from the dashboard.
+        # sdlc-review skill. Disable where every review is done manually.
         "review_dispatch": True,
-        # Seconds between dispatcher ticks. Lower = snappier pickup; higher = less SQL pressure.
-        "dispatch_interval_seconds": 60,
         # Auto-block after this many consecutive non-success attempts (spawn_failed, timed_out,
         # crashed) for the same task/profile. Reassignment resets the streak.
         "failure_limit": 2,
@@ -1499,12 +1491,6 @@ DEFAULT_CONFIG = {
         # root profile named "default", so on a shared kanban.db every home can otherwise claim
         # default-assigned cards.
         "dispatch_profiles": None,
-        # Auto-run the decomposer on Triage tasks every tick. False = manual via `hermes kanban
-        # decompose <id>` or the dashboard's Decompose button.
-        "auto_decompose": True,
-        # Max triage tasks decomposed per tick, bounding the aux-LLM burst from a bulk load. Excess
-        # defers to the next tick.
-        "auto_decompose_per_tick": 3,
         # Running tasks with no heartbeat (last_heartbeat_at) for this many seconds are reclaimed to
         # ready on the next tick; a still-running local worker is terminated first. 0 = off.
         "dispatch_stale_timeout_seconds": 14400,
@@ -1512,13 +1498,7 @@ DEFAULT_CONFIG = {
         # claim_expires NULL with a dead worker) that TTL/crash/stale recovery can't see. False
         # keeps orphans frozen for manual forensics.
         "reconcile_orphans": True,
-        # Notify subscriptions survive `done` (completion is reversible) and are removed on archive.
-        # On boards that never archive, the notifier GC purges subscriptions for tasks done with no
-        # activity for this many days so stale rows aren't scanned forever. 0 = off.
-        "done_sub_retention_days": 30,
     },
-    # Bot Mode cross-connection relay (tools/bot_relay.py): envelopes queued by message_agent for
-    # agents on other connections wait in an on-disk outbox until the Desktop drains them.
     "code_execution": {  # execute_code settings (programmatic tool calls).
         # project = run in the session cwd with the active venv/conda python so project deps and
         # relative paths resolve. strict = isolated temp dir with hermes-agent's own python

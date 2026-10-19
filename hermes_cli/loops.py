@@ -3,7 +3,7 @@
 A loop stops when the agent ends a wakeup reply with ``LOOP_COMPLETE`` on its own line, when
 ``--times N`` ticks have fired, when the ``--until`` judge rules the condition met, or when the
 ``loops.max_ticks`` backstop pauses it. State lives in SessionDB ``state_meta`` (same contract as
-``hermes_cli/goals.py``); CLI, gateway, and TUI all drive it through :class:`LoopManager`.
+``hermes_cli/goals.py``); local terminal drivers use :class:`LoopManager`.
 """
 
 from __future__ import annotations
@@ -194,8 +194,7 @@ class LoopState:
     last_response_digest: str = ""    # self-paced change detection
     paused_reason: Optional[str] = None
     last_stop_reason: Optional[str] = None
-    # Gateway routing (platform / chat_id / chat_type / thread_id) captured at creation so the
-    # idle watcher can inject ticks into the right chat. Empty for CLI/TUI (own schedulers).
+    # Passive legacy destination metadata, or an explicit local ownership claim.
     route: dict[str, str] = field(default_factory=dict)
 
     def to_json(self) -> str:
@@ -204,14 +203,14 @@ class LoopState:
     @classmethod
     def from_json(cls, raw: str) -> LoopState:
         data = json.loads(raw)
-        route = data.get("route")
+        route = data.get("route", {})
         kwargs: dict[str, Any] = {
             "prompt": data.get("prompt", ""),
             "status": data.get("status", "active"),
             "mode": data.get("mode", "interval"),
             "paused_reason": data.get("paused_reason"),
             "last_stop_reason": data.get("last_stop_reason"),
-            "route": route if isinstance(route, dict) else {},
+            "route": route if isinstance(route, dict) else {"kind": "unsupported"},
         }
         # Remaining scalar fields: missing key -> dataclass default; present-but-falsy -> type zero.
         casts = {"str": str, "int": int, "float": float, "bool": bool}
@@ -409,6 +408,12 @@ class LoopManager:
     def has_loop(self) -> bool:
         return self._state is not None and self._state.status in {"active", "paused"}
 
+    def can_run_locally(self) -> bool:
+        from hermes_cli.schedule_ownership import can_run_locally
+
+        return self._state is not None and can_run_locally(
+            self.session_id, self._state.route, _get_session_db())
+
     def _save(self) -> LoopState:
         save_loop(self.session_id, self._state)
         return self._state
@@ -417,6 +422,8 @@ class LoopManager:
         s = self._state
         if s is None or s.status == "cleared":
             return "No loop set. Start one with /loop [interval] <prompt>."
+        if not self.can_run_locally():
+            return f"Loop stored for an unsupported destination; /loop resume to run locally: {s.prompt}"
         fired = _ticks_label(s.ticks_fired)
         if s.times:
             caps = [f"{s.ticks_fired}/{s.times} runs"]
@@ -444,7 +451,6 @@ class LoopManager:
         interval_seconds: Optional[int] = None,
         times: int = 0,
         until: str = "",
-        route: Optional[dict[str, str]] = None,
     ) -> LoopState:
         """Start a new loop (replaces any existing one for the session)."""
         prompt = (prompt or "").strip()
@@ -464,7 +470,7 @@ class LoopManager:
             max_ticks=max_ticks_default(),
             created_at=now,
             next_due_at=now,
-            route=dict(route or {}),
+            route={"kind": "local"},
         )
         self._state = state
         return self._save()
@@ -481,6 +487,7 @@ class LoopManager:
         if not s or s.status == "cleared":
             return None
         s.status, s.paused_reason, s.awaiting_response = "active", None, False
+        s.route = {"kind": "local"}
         # Re-arm relative to now so a long pause doesn't fire instantly N times.
         delay = s.current_delay or s.interval_seconds or self_paced_floor_seconds()
         s.next_due_at = time.time() + min(delay, 5.0)
@@ -499,7 +506,7 @@ class LoopManager:
         s = self._state
         return (
             s is not None and s.status == "active" and not s.awaiting_response
-            and (now if now is not None else time.time()) >= s.next_due_at
+            and (now if now is not None else time.time()) >= s.next_due_at and self.can_run_locally()
         )
 
     def fire_tick(self) -> Optional[str]:
@@ -661,13 +668,10 @@ _CONTROL_COMMANDS = {
 def dispatch_loop_command(
     mgr: LoopManager,
     args: str,
-    *,
-    route: Optional[dict[str, str]] = None,
 ) -> dict[str, Any]:
     """Surface-agnostic handler for ``/loop <args>`` → ``{"output": str, "created": bool}``.
 
-    ``output`` is printed/sent verbatim by each surface. ``route`` is stored on new loops so the
-    gateway's idle watcher can inject wakeups into the right chat; CLI/TUI pass None.
+    ``output`` is printed verbatim in the owning local terminal.
     """
     arg = (args or "").strip()
     control = _CONTROL_COMMANDS.get(arg.lower())
@@ -687,7 +691,6 @@ def dispatch_loop_command(
             interval_seconds=parsed["interval_seconds"],
             times=parsed["times"],
             until=parsed["until"],
-            route=route,
         )
     except ValueError as exc:
         return {"output": f"/loop: {exc}", "created": False}

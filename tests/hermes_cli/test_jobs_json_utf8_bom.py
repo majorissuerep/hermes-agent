@@ -25,9 +25,6 @@ def test_dump_cron_summary_accepts_utf8_bom(tmp_path):
 def test_status_scheduled_jobs_accepts_utf8_bom(monkeypatch, capsys, tmp_path):
     """hermes status must not print '(error reading jobs file)' under BOM."""
     from hermes_cli import status as status_mod
-    import hermes_cli.auth as auth_mod
-    import hermes_cli.gateway as gateway_mod
-
     cron = tmp_path / "cron"
     cron.mkdir()
     (cron / "jobs.json").write_bytes(
@@ -36,22 +33,8 @@ def test_status_scheduled_jobs_accepts_utf8_bom(monkeypatch, capsys, tmp_path):
     )
 
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
-    monkeypatch.setattr(status_mod, "get_env_path", lambda: tmp_path / ".env", raising=False)
-    monkeypatch.setattr(status_mod, "get_hermes_home", lambda: tmp_path, raising=False)
-    monkeypatch.setattr(status_mod, "load_config", lambda: {"model": "gpt-5.4"}, raising=False)
-    monkeypatch.setattr(
-        status_mod, "resolve_requested_provider", lambda requested=None: "openai-codex", raising=False
-    )
-    monkeypatch.setattr(
-        status_mod, "resolve_provider", lambda requested=None, **kwargs: "openai-codex", raising=False
-    )
-    monkeypatch.setattr(status_mod, "provider_label", lambda provider: "OpenAI Codex", raising=False)
-    monkeypatch.setattr(auth_mod, "get_nous_auth_status", dict, raising=False)
-    monkeypatch.setattr(auth_mod, "get_codex_auth_status", dict, raising=False)
-    monkeypatch.setattr(auth_mod, "get_xai_oauth_auth_status", dict, raising=False)
-    monkeypatch.setattr(gateway_mod, "find_gateway_pids", lambda exclude_pids=None: [], raising=False)
-
-    status_mod.show_status(SimpleNamespace(full=True, deep=False))
+    monkeypatch.setattr(status_mod, "get_hermes_home", lambda: tmp_path)
+    status_mod._render_cron(SimpleNamespace(config={}))
     out = capsys.readouterr().out
     assert "(error reading jobs file)" not in out
     assert "2 active, 2 total" in out

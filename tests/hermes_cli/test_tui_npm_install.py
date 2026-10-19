@@ -56,8 +56,8 @@ def test_source_launch_prepares_base_union_but_compiles_only_tui(tui_source):
     assert [event["step"] for event in _events(root)] == ["deps", "tui"]
     assert acquired == ["npm"]
     assert (root / "node_modules/ui-tui").exists()
-    assert (root / "node_modules/web").exists()
-    assert not (root / "node_modules/apps-desktop").exists()
+    assert not (root / "node_modules/auxiliary").exists()
+    assert not (root / "node_modules/addon-fixture").exists()
 
 
 @pytest.mark.platforms("posix")
@@ -149,11 +149,11 @@ def test_runtime_node_comes_from_pm_without_legacy_repair(tmp_path, monkeypatch)
 
 
 @pytest.mark.platforms("linux")
-def test_tui_rebuild_preserves_the_prepared_desktop_and_web_union(tui_source):
+def test_tui_rebuild_reuses_prepared_native_dependencies(tui_source):
     from hermes_cli.source_build import build_update_products
 
     root, acquired = tui_source
-    build_update_products(root, desktop=True)
+    build_update_products(root)
     before = _events(root)
     main_tui_launch._make_tui_argv(root / "ui-tui", tui_dev=False)
     assert _events(root) == before, "fresh launch must not prepare or rebuild"
@@ -164,5 +164,5 @@ def test_tui_rebuild_preserves_the_prepared_desktop_and_web_union(tui_source):
     main_tui_launch._make_tui_argv(root / "ui-tui", tui_dev=False)
     assert _events(root) == [*before, {"step": "tui"}]
     assert acquired == ["npm", "npm"]
-    assert (root / "node_modules/web").exists()
-    assert (root / "node_modules/apps-desktop").exists()
+    assert not (root / "node_modules/auxiliary").exists()
+    assert not (root / "node_modules/addon-fixture").exists()

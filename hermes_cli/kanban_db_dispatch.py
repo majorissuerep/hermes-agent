@@ -1,4 +1,4 @@
-"""Dispatcher: crash/stale/orphan detection, failure accounting and the respawn circuit breaker, memory-aware concurrency caps, the one-shot ``dispatch_once`` pass, worker spawning (``_default_spawn``), worker-log rotation and the long-lived ``run_daemon`` loop.
+"""Dispatcher: crash/stale/orphan detection, failure accounting and the respawn circuit breaker, memory-aware concurrency caps, the one-shot ``dispatch_once`` pass, worker spawning (``_default_spawn``), worker-log rotation.
 
 Split out of ``hermes_cli.kanban_db``; origin-resident helpers are reached
 late-bound via ``_kb`` (import-cycle breaking) so monkeypatching
@@ -369,7 +369,7 @@ def _process_fingerprint(pid: int) -> Optional[str]:
     """Restart-stable identity of a live process: ``"<instantiation epoch>|<start time>"``. The start
     time alone (``/proc/<pid>/stat`` field 22 on Linux) is clock ticks since THIS boot, so a row that
     survives a reboot could match an unrelated process with the same PID and the same tick value;
-    ``gateway.drain_control.current_instantiation_epoch`` (``boot_id`` + PID-1 start) changes on every
+    ``hermes_platform.runtime_health.current_instantiation_epoch`` (``boot_id`` + PID-1 start) changes on every
     reboot / container recreate, so the composed value never survives one. ``None`` when unreadable."""
     from hermes_platform.runtime_health import current_instantiation_epoch
     from hermes_platform.processes import get_process_start_time
@@ -2950,59 +2950,6 @@ def _default_spawn(task: Task, workspace: str, *, board: Optional[str] = None) -
 # Long-lived dispatcher daemon
 # ---------------------------------------------------------------------------
 
-def run_daemon(
-    *,
-    interval: float = 60.0,
-    max_spawn: Optional[int] = None,
-    failure_limit: int = DEFAULT_FAILURE_LIMIT,
-    stop_event=None,
-    on_tick=None,
-) -> None:
-    """Run the dispatcher in a loop until interrupted.
-
-    Calls :func:`dispatch_once` every ``interval`` seconds; exits cleanly on
-    SIGINT / SIGTERM so it is systemd-friendly. ``stop_event`` and ``on_tick``
-    are test hooks. Each tick resolves ``kanban.max_in_progress`` exactly like
-    the gateway dispatcher and ``hermes kanban dispatch`` — the standalone
-    daemon must not be the one uncapped entry point.
-    """
-    import threading
-
-    if stop_event is None:
-        stop_event = threading.Event()
-
-    def _handle(_signum, _frame):
-        stop_event.set()
-
-    # Install handlers only on the main thread — tests call this inline from
-    # worker threads and signal() would raise there.
-    if threading.current_thread() is threading.main_thread():
-        for sig_name in ("SIGINT", "SIGTERM"):
-            sig = getattr(signal, sig_name, None)
-            if sig is not None:
-                with contextlib.suppress(ValueError, OSError):
-                    signal.signal(sig, _handle)
-
-    while not stop_event.is_set():
-        try:
-            # Re-resolved every tick (config load is mtime-cached) so operator
-            # edits apply without a restart.
-            max_in_progress = resolve_max_in_progress(configured_max_in_progress())
-            with contextlib.closing(_kbc.connect()) as conn:
-                res = dispatch_once(
-                    conn,
-                    max_spawn=max_spawn,
-                    max_in_progress=max_in_progress,
-                    failure_limit=failure_limit,
-                )
-            if on_tick is not None:
-                with contextlib.suppress(Exception):
-                    on_tick(res)
-        except Exception:
-            # Don't let any single tick kill the daemon.
-            import traceback
-            traceback.print_exc()
-        stop_event.wait(timeout=interval)
 
 
 # Late-bound origin namespace (see module docstring); imported LAST so this

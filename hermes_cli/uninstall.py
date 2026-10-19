@@ -806,22 +806,10 @@ class _UninstallArgs:
 
 
 def main(argv=None) -> int:
-    """Module entrypoint: ``python -m hermes_cli.uninstall --mode <gui|lite|full|data>``.
+    """Run terminal uninstall from outside an environment being removed.
 
-    Exists so the desktop app can run the uninstall under a Python interpreter
-    OUTSIDE the venv being deleted. On Windows, ``lite``/``full`` rmtree the
-    venv that contains the running ``python.exe`` — and a running .exe is
-    mandatory-locked, so doing that from the venv's own interpreter half-fails.
-    The desktop launches this with the system Python + ``PYTHONPATH=<agentRoot>``
-    so ``import hermes_cli`` resolves from source while the venv is torn down.
-
-    ``data`` removes user data only (no code) and is the one mode allowed on
-    steward-owned installs (Nix, the bundled desktop app, Docker); the
-    code-removing modes hard-fail there with the steward's instructions.
-
-    Data-only mode keeps the runtime installed and uses its dependencies to
-    coordinate live writers. Code-removing modes can still run outside the
-    environment being removed.
+    Data-only removal preserves installed code and sibling profiles, including
+    steward-owned Nix/Docker installations. Code removal honors its steward gate.
     """
     import argparse
     parser = argparse.ArgumentParser(prog="python -m hermes_cli.uninstall")
@@ -829,7 +817,7 @@ def main(argv=None) -> int:
         "--mode",
         choices=["lite", "full", "data"],
         required=True,
-        help="gui = Chat GUI only; lite = GUI + agent, keep data; "
+        help="lite = remove installed agent, keep data; "
         "full = everything; data = user data only, keep code",
     )
     ns = parser.parse_args(argv)

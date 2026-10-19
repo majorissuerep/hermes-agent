@@ -30,6 +30,23 @@ def terminal_calls(messages: list[dict]) -> list[dict]:
     return executed
 
 
+def completed_delegations(messages: list[dict], parent_id: str, after: int) -> int:
+    replies = {row["tool_call_id"]: row for row in messages
+               if row["role"] == "tool" and row["session_id"] == parent_id and row["id"] > after}
+    completed = 0
+    for row in messages:
+        if row["session_id"] != parent_id or row["id"] <= after:
+            continue
+        for call in json.loads(row.get("tool_calls") or "[]"):
+            reply = replies.get(call["id"])
+            if call["function"]["name"] == "delegate_task" and reply is not None:
+                result, _ = json.JSONDecoder().raw_decode(reply["content"].lstrip())
+                entries = result.get("results")
+                completed += bool(isinstance(entries, list) and entries and all(
+                    isinstance(entry, dict) and entry.get("status") == "completed" for entry in entries))
+    return completed
+
+
 def verify_calls(messages: list[dict], parent_id: str, children: set[str]) -> dict:
     calls = terminal_calls([row for row in messages if row["session_id"] in {parent_id, *children}])
     updates = [row for row in calls if row["command"] == UPDATE_COMMAND and row["session_id"] == parent_id]
@@ -41,5 +58,8 @@ def verify_calls(messages: list[dict], parent_id: str, children: set[str]) -> di
                  and row["output"].strip().splitlines()[-1:] == ["23"]]
     if not config or not delegated:
         raise RuntimeError("post-update parent config write and delegated config read are both required")
-    return {"update_message_id": updates[0]["message_id"], "successful_update_calls": 1,
+    completed = completed_delegations(messages, parent_id, updates[0]["message_id"])
+    if not completed:
+        raise RuntimeError("post-update parent must complete an actual delegate_task call")
+    return {"completed_parent_delegations": completed, "update_message_id": updates[0]["message_id"], "successful_update_calls": 1,
             "post_update_parent_config_writes": len(config), "post_update_child_config_reads": len(delegated)}

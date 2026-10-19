@@ -15,8 +15,10 @@ def owner_reclaim_paused(conn, task_id):
     if marker is None:
         return False
     try:
+        from hermes_security.sqlite import maybe_connect
+
         binding = json.loads(marker['payload'])
-        with closing(sqlite3.connect(Path(binding['db']).as_uri() + '?mode=ro', uri=True)) as owner:
+        with closing(maybe_connect(Path(binding['db']).as_uri() + '?mode=ro', uri=True)) as owner:
             row = owner.execute('SELECT status,outcome FROM session_admissions WHERE target_session_id=? AND request_id=?',
                                 (binding['session_id'], binding['request_id'])).fetchone()
         if row is not None and row[0] == 'terminal':

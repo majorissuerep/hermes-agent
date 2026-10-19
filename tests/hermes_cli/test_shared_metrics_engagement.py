@@ -161,13 +161,13 @@ def test_only_compression_joins_segments_and_the_retired_segment_closes_at_hand_
     with nothing left open. A compression mid-turn closes the old segment when that turn ends."""
     token = set_conversation_context("g1")
     try:
-        _turn("g1", "t1", platform="telegram")
+        _turn("g1", "t1", platform="tui")
         relay_shared_metrics.rotate_segment("g1", "g1c")
-        _turn("g1c", "t2", platform="telegram")
+        _turn("g1c", "t2", platform="tui")
         relay_shared_metrics.close_session_run("g1c")
-        _turn("g2", "t3", platform="telegram")
+        _turn("g2", "t3", platform="tui")
         relay_shared_metrics.close_session_run("g2")
-        _turn("g3", "t4", platform="telegram")
+        _turn("g3", "t4", platform="tui")
         relay_shared_metrics.close_session_run("g3")
         lifecycle.invoke_hook("pre_llm_call", session_id="m1", task_id="t5", platform="cli")
         relay_shared_metrics.rotate_segment("m1", "m1c")
@@ -177,7 +177,7 @@ def test_only_compression_joins_segments_and_the_retired_segment_closes_at_hand_
         reset_conversation_context(token)
     _flush()
     rows = sorted((d["platform"], d["turn_count_bucket"], v) for d, v in _stored_values(tmp_path, "hermes.session.count"))
-    assert rows == [("none", "1", 1), ("telegram", "1", 2), ("telegram", "2", 1)]
+    assert rows == [("none", "1", 1), ("none", "1", 2), ("none", "2", 1)]
     runtime = next(iter(relay_shared_metrics._RUNTIMES.values()))
     assert not runtime._lineages and not runtime._lineage_of and not runtime._sessions
 

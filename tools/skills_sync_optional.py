@@ -3,6 +3,9 @@ patchable helpers resolve through ``_ss()`` at call time so ``tools.skills_sync`
 
 import json
 import logging
+import os
+import shutil
+import stat
 from contextlib import suppress
 from datetime import datetime, timezone, UTC
 from pathlib import Path, PurePosixPath
@@ -62,6 +65,32 @@ def _ignore_runtime_cache(directory: str, names: list[str]) -> list[str]:
     """copytree callback: don't seed generated caches into managed packages."""
     root = Path(directory)
     return [name for name in names if _is_runtime_cache(root / name, root)]
+
+
+def _copy_skill_file(source: Path, destination: Path) -> None:
+    """Installed package modes must not lock an editable user-owned copy."""
+    shutil.copy2(source, destination)
+    destination.chmod(destination.stat().st_mode | stat.S_IWUSR)
+
+
+def _copy_skill_tree(source: Path, destination: Path, *, missing_only: bool = False) -> None:
+    """Create writable directories; never change existing user entries in fill mode.
+
+    Copytree's final copystat would overwrite an existing user's directory modes
+    and propagate immutable package modes. New directories instead use mkdir's
+    normal user/umask policy; copied files retain executable bits and timestamps.
+    """
+    destination.mkdir(parents=True, exist_ok=missing_only)
+    children = list(source.iterdir())
+    ignored = set(_ignore_runtime_cache(str(source), [child.name for child in children]))
+    for child in children:
+        if child.name in ignored:
+            continue
+        target = destination / child.name
+        if child.is_dir():
+            _copy_skill_tree(child, target, missing_only=missing_only)
+        elif not missing_only or not os.path.lexists(target):
+            _copy_skill_file(child, target)
 
 
 def _skill_file_list(skill_dir: Path) -> list[str]:

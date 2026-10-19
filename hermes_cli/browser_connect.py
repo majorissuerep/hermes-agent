@@ -721,7 +721,9 @@ def snapshot_real_profile(browser: str, src: str | None = None) -> tuple[str | N
     # rebuilt — otherwise a torn first copy poisons freshness forever.
     populated = os.path.isfile(marker)
     try:
-        os.makedirs(dst, exist_ok=True)
+        # Creation is private even when container/managed reconciliation leaves
+        # existing operator-owned modes untouched. Copies contain live cookies.
+        os.makedirs(dst, mode=0o700, exist_ok=True)
         # Secure the snapshot dir AND its browser-profile parent on EVERY launch so a failed
         # first attempt or an older-build dir still converges to owner-only perms.
         for path in filter(None, (os.path.dirname(dst), dst)):

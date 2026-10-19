@@ -32,7 +32,8 @@ def _bound_claim_is_live(context):
                                 claim_lock=context['claim_lock'], verify_pid=False):
         return False
     try:
-        with closing(sqlite3.connect(Path(context['db']).resolve().as_uri() + '?mode=ro', uri=True)) as conn:
+        from hermes_security.sqlite import maybe_connect
+        with closing(maybe_connect(Path(context['db']).resolve().as_uri() + '?mode=ro', uri=True)) as conn:
             return _bound_worker_matches(conn, context)
     except sqlite3.Error:
         return False

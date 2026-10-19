@@ -408,7 +408,7 @@ def _reject_unsafe_stash_restore(
     if cleanup_ok:
         cleanup_ok = _ok(_git_quiet(git_cmd, ["diff", "--quiet", "HEAD", "--"], cwd))
     if cleanup_ok:
-        print("  The clean updated tree has been restored; the gateway was not restarted.")
+        print("  The clean updated tree has been restored; no local session was restarted.")
     else:
         print("  ⚠ The clean updated tree could not be fully restored automatically.")
         print("    Inspect `git status` and run `git reset --hard HEAD` before retrying.")

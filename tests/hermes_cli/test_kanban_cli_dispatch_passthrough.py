@@ -44,6 +44,9 @@ def test_cli_dispatch_passes_max_in_progress_from_config(isolated_kanban_home, m
             "max_spawn": 5,
             "default_assignee": "default",
             "max_in_progress_per_profile": 2,
+            "dispatch_stale_timeout_seconds": 7200,
+            "reconcile_orphans": False,
+            "failure_limit": 4,
         }
     }
     monkeypatch.setattr(
@@ -58,7 +61,9 @@ def test_cli_dispatch_passes_max_in_progress_from_config(isolated_kanban_home, m
 
     monkeypatch.setattr(kbd, "dispatch_once", fake_dispatch_once)
 
-    args = argparse.Namespace(dry_run=True, max=None, failure_limit=2, json=False)
+    parser = argparse.ArgumentParser()
+    kb_cli.build_parser(parser.add_subparsers(dest="command"))
+    args = parser.parse_args(["kanban", "dispatch", "--dry-run"])
     kb_cli._cmd_dispatch(args)
 
     # Every config value must have reached dispatch_once.
@@ -70,6 +75,9 @@ def test_cli_dispatch_passes_max_in_progress_from_config(isolated_kanban_home, m
     )
     assert captured.get("default_assignee") == "default"
     assert captured.get("max_in_progress_per_profile") == 2
+    assert captured.get("stale_timeout_seconds") == 7200
+    assert captured.get("reconcile_orphans") is False
+    assert captured.get("failure_limit") == 4
 
 
 def test_cli_max_flag_overrides_config_max_spawn(isolated_kanban_home, monkeypatch):
@@ -94,5 +102,20 @@ def test_cli_max_flag_overrides_config_max_spawn(isolated_kanban_home, monkeypat
     assert captured.get("max_spawn") == 2, (
         f"CLI --max=2 must override config kanban.max_spawn=10; got {captured.get('max_spawn')!r}"
     )
+
+
+def test_dispatch_never_spawns_after_configuration_read_fails(isolated_kanban_home, monkeypatch):
+    from hermes_cli import kanban as cli
+    from hermes_cli import kanban_db_dispatch as dispatch
+
+    def unreadable():
+        raise PermissionError("owned configuration is unreadable")
+
+    calls = []
+    monkeypatch.setattr("hermes_cli.config.load_config", unreadable)
+    monkeypatch.setattr(dispatch, "dispatch_once", lambda *a, **kw: calls.append(kw) or dispatch.DispatchResult())
+    with pytest.raises(PermissionError):
+        cli._cmd_dispatch(argparse.Namespace(dry_run=False, max=None, failure_limit=None, json=False))
+    assert calls == []
 
 

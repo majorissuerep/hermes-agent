@@ -4,7 +4,7 @@
 `hermes --tui` just spawns a Node process; the spawned tui_runtime backend
 performs its own plugin discovery. Running discover_plugins() in the
 launcher added ~0.5s to every `hermes --tui` startup for work the backend
-then redoes. Plain chat must still discover plugins.
+then redoes. Native headless queries still discover plugins.
 """
 
 from __future__ import annotations
@@ -68,7 +68,7 @@ def test_plugin_discovery_skipped_for_tui_launch(monkeypatch):
     )
 
 
-def test_plugin_discovery_runs_for_plain_chat(monkeypatch):
+def test_plugin_discovery_runs_for_native_headless_query(monkeypatch):
     calls = _install_discover_spy(monkeypatch)
-    main_mod._prepare_agent_startup(_args(tui=False, command="chat"))
+    main_mod._prepare_agent_startup(_args(command="chat", query="bounded task"))
     assert calls == ["discover"]

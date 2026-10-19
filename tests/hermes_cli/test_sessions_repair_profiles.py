@@ -43,6 +43,22 @@ def _session(db: SessionDB, sid: str, key: str, *, profile: str, parent=None, me
         db.append_message(sid, "user" if i % 2 == 0 else "assistant", f"{sid} m{i}")
 
 
+def _legacy_route(db, key, sid, scope):
+    db._execute_write(lambda conn: conn.execute(
+        "INSERT INTO gateway_routing (scope, session_key, entry_json, updated_at) VALUES (?,?,?,1)",
+        (scope, key, json.dumps({"session_key": key, "session_id": sid}))))
+
+
+def _legacy_topic(db):
+    from hermes_state.legacy_topic_schema import initialize_schema
+    def seed(conn):
+        initialize_schema(conn)
+        conn.execute("INSERT INTO telegram_dm_topic_bindings "
+                     "(profile_name,chat_id,thread_id,user_id,session_key,session_id,linked_at,updated_at) "
+                     "VALUES ('default','200','7','200',?,'ok-acme',1,1)", (ACME_KEY,))
+    db._execute_write(seed)
+
+
 def _seed_crossings(homes):
     """Every defect the command knows, spread over the three stores."""
     root = SessionDB(homes["default"] / "state.db")
@@ -53,7 +69,7 @@ def _seed_crossings(homes):
     # healthy controls — must survive untouched
     _session(root, "ok-root", ROOT_KEY, profile="default")
     _session(acme, "ok-acme", ACME_KEY, profile="acme")
-    root.save_gateway_routing_entry(ACME_KEY, json.dumps({"session_key": ACME_KEY, "session_id": "ok-acme"}), scope=scope)
+    _legacy_route(root, ACME_KEY, "ok-acme", scope)
 
     # 1. label ≠ key namespace (row in the right store)
     _session(acme, "mislabelled", "agent:acme:telegram:dm:201", profile="default")
@@ -71,11 +87,10 @@ def _seed_crossings(homes):
     _session(beta, "acme-in-beta", "agent:acme:telegram:dm:204", profile="acme")
     _session(beta, "beta-child", "agent:beta:telegram:dm:301", profile="beta", parent="acme-in-beta")
     # 4. routing rows: beta's index row copied into beta's store (#66887) + a ghost row in the root
-    beta.save_gateway_routing_entry(BETA_KEY, json.dumps({"session_key": BETA_KEY, "session_id": "beta-parent"}), scope=scope)
-    root.save_gateway_routing_entry(GHOST_KEY, json.dumps({"session_key": GHOST_KEY, "session_id": "ghost"}), scope=scope)
+    _legacy_route(beta, BETA_KEY, "beta-parent", scope)
+    _legacy_route(root, GHOST_KEY, "ghost", scope)
     # 5. profile-less topic binding + voice-mode entry for a chat only acme's bot holds
-    acme.bind_telegram_topic(chat_id="200", thread_id="7", user_id="200", session_key=ACME_KEY,
-                             session_id="ok-acme", profile_name="default")
+    _legacy_topic(acme)
     (homes["default"] / "gateway_voice_mode.json").write_text(json.dumps({
         "telegram:200": "all",        # acme's chat, unprefixed
         "telegram:100": "voice_only",  # the default bot's chat — legitimately unprefixed
@@ -184,11 +199,11 @@ def test_apply_settles_every_repairable_crossing_and_is_idempotent(homes, monkey
         assert beta.get_session("acme-in-beta") is None and acme.get_session("acme-in-beta") is not None
         # 4. ghost routing row dropped, acme's healthy row kept, beta's own row kept (standalone)
         scope = str((homes["default"] / "sessions").resolve())
-        assert set(root.load_gateway_routing_entries(scope=scope)) == {ACME_KEY}
-        assert set(beta.load_gateway_routing_entries(scope=scope)) == {BETA_KEY}
+        assert {row["session_key"] for row in root.list_gateway_routing_rows() if row["scope"] == scope} == {ACME_KEY}
+        assert {row["session_key"] for row in beta.list_gateway_routing_rows() if row["scope"] == scope} == {BETA_KEY}
         # 5. topic binding carries acme; voice key prefixed only for acme's chat
-        assert acme.get_telegram_topic_binding(chat_id="200", thread_id="7", profile_name="acme") is not None
-        assert acme.get_telegram_topic_binding(chat_id="200", thread_id="7", profile_name="default") is None
+        assert [row[0] for row in acme._conn.execute(
+            "SELECT profile_name FROM telegram_dm_topic_bindings WHERE chat_id='200' AND thread_id='7'")] == ["acme"]
         voice = json.loads((homes["default"] / "gateway_voice_mode.json").read_text())
         assert voice == {"acme:telegram:200": "all", "telegram:100": "voice_only"}
         # 6. ghost mirror entry dropped, the default's kept
@@ -207,15 +222,18 @@ def test_apply_settles_every_repairable_crossing_and_is_idempotent(homes, monkey
     assert report["repairable"] == 0
 
 
-def test_apply_refuses_while_a_gateway_owns_a_store(homes, monkeypatch, capsys):
+def test_apply_refuses_while_a_native_runtime_owns_a_store(homes, capsys):
+    from hermes_state.runtime_ownership import ProfileOwnership
+
     _seed_crossings(homes)
-    monkeypatch.setattr("hermes_cli.sessions_cmd_repair_profiles.live_gateway_homes",
-                        lambda stores: [("default", 4242)])
     before = _dump(homes["default"] / "state.db")
-
-    assert _run(apply=True) == 1
-
-    assert "pid 4242" in capsys.readouterr().err
+    owner = ProfileOwnership()
+    owner.reserve([homes["default"]])
+    try:
+        assert _run(apply=True) == 1
+    finally:
+        owner.close()
+    assert "close its Hermes sessions" in capsys.readouterr().err
     assert _dump(homes["default"] / "state.db") == before
 
 

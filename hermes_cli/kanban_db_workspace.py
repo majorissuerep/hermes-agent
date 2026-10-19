@@ -154,10 +154,12 @@ def _sibling_board_db_files(conn: sqlite3.Connection) -> list[Path]:
 
 
 def _other_board_uses_path(db_file: Path, task_id: str, key: str) -> bool:
+    from hermes_security import sqlite as state_sqlite
+
     uri = db_file.as_uri() + "?mode=ro"
-    other = sqlite3.connect(uri, uri=True, timeout=1.0)
+    other = state_sqlite.maybe_connect(uri, uri=True, timeout=1.0)
     try:
-        other.row_factory = sqlite3.Row
+        other.row_factory = state_sqlite.row_class() if state_sqlite.is_vaulted(db_file) else sqlite3.Row
         return _conn_uses_path(other, task_id, key, exclude_task_id=False)
     finally:
         other.close()

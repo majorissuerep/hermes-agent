@@ -646,11 +646,12 @@ class BaseEnvironment(ABC):
 
         # Merge sudo stdin with caller stdin.
         effective_stdin = sudo_stdin + (stdin_data or "") if sudo_stdin is not None else stdin_data
-        if effective_stdin and self._stdin_mode == "heredoc":
-            exec_command = self._embed_stdin_heredoc(exec_command, effective_stdin)
-            effective_stdin = None
-
         wrapped = self._wrap_command(exec_command, effective_cwd)
+        if effective_stdin and self._stdin_mode == "heredoc":
+            # The transport uses Bash process substitution. Apply it outside
+            # the native-user-shell command, in the Bash snapshot wrapper.
+            wrapped = self._embed_stdin_heredoc(wrapped, effective_stdin)
+            effective_stdin = None
 
         # Login shell if the snapshot failed (so the user's profile still
         # loads), unless login itself is broken — then non-login is the only path.

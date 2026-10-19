@@ -28,7 +28,7 @@ When the work should run **unattended** — overnight, on a real schedule, survi
 What you'll see:
 
 1. **Loop accepted** — `↻ Loop set (every 5m): check the deploy status…`
-2. **First wakeup fires right away** — on the next idle poll (gateway: the next 15s watcher scan), Hermes injects the wakeup and runs a normal turn against current state.
+2. **First wakeup fires right away** — on the next idle terminal poll, Hermes injects the wakeup and runs a normal turn against current state.
 3. **Repeat** — every 5 minutes after that, until a stop condition fires or you stop it.
 
 Loop a slash command just as easily:
@@ -36,6 +36,10 @@ Loop a slash command just as easily:
 ```
 /loop 10m /recap
 ```
+
+Historical remote destinations stay stored but passive, including incomplete routes. Review the
+instruction and explicitly `/loop resume` (or replace it) to run locally in the same conversation;
+resuming the transcript alone never claims an old remote schedule.
 
 ## The two cadence modes
 
