@@ -1,5 +1,8 @@
 """Owned title generation and publication, separate from conversation mutation."""
 import contextlib
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def _require_owner(session, sid):
@@ -77,6 +80,7 @@ def session_title(rid, params, session, db):
     except ValueError as exc:
         return server._err(rid, 4022, str(exc))
     except Exception as exc:
+        logger.exception("Session title RPC failed for session %s", key)
         return server._err(rid, 5007, str(exc))
     server._emit_session_info_for_session(sid, session)
     return server._ok(rid, result)

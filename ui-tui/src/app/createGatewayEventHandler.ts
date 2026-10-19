@@ -8,7 +8,6 @@ import type { MessageDeltaPayload, SubagentStatus, Usage } from '@hermes/shared/
 import { STARTUP_IMAGE, STARTUP_QUERY } from '../config/env.js'
 import { STREAM_BATCH_MS } from '../config/timing.js'
 import { buildSetupRequiredSections, setupRequiredTitle } from '../content/setup.js'
-import { usageFromTick } from '../domain/usage.js'
 import type {
   AnyGatewayEvent,
   CommandsCatalogResponse,
@@ -38,6 +37,7 @@ import type { GatewayEventHandlerContext, NoticeLevel } from './interfaces.js'
 import { getOverlayState, patchOverlayState, SENSITIVE_PROMPTS } from './overlayStore.js'
 import { flashGoodVibes, flashPet } from './petFlashStore.js'
 import { forgetServerRequest } from './serverRequestStore.js'
+import { applySessionMetadataEvent } from './sessionMetadataEvents.js'
 import { reportStartupLatency } from './startupLatency.js'
 import { markNextSubmitVoice } from './submissionCore.js'
 import { captureDestination, isCurrentDestination } from './submissionDestination.js'
@@ -1022,26 +1022,11 @@ export function createGatewayEventHandler(ctx: GatewayEventHandlerContext): (ev:
         return
 
       case 'session.title':
-        if (sid && ev.session_id === sid && typeof ev.payload?.title === 'string') {
-          patchUiState({ sessionTitle: ev.payload.title.trim() })
-        }
+
+      case 'session.usage':
+        applySessionMetadataEvent(ev, sid)
 
         return
-      case 'session.usage': {
-        // Live usage tick while a turn runs (see tui_runtime
-        // _start_usage_ticker) — keeps the status-bar context window current
-        // mid-turn instead of only at message.complete. The session filter at
-        // the top of this handler already dropped ticks for non-focused
-        // sessions.
-        const usage = usageFromTick(ev.payload) // canonical: the owner's counters at the top level
-
-        if (usage) {
-          patchUiState(state => ({ ...state, usage: { ...state.usage, ...usage } }))
-        }
-
-        return
-      }
-
       case 'thinking.delta': {
         if (!getUiState().busy) {
           return
