@@ -23,13 +23,13 @@ import hermes_yaml as yaml
 
 from tests.e2e.core._pending_fixes import known_gate
 
-from tests.e2e.vault_home import connect_state, run_unlocked, seal_fixture_home
+from tests.e2e.vault_home import connect_state, run_unlocked, prepare_fixture_runtime
 from hermes_security import io as state_io
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 TURN_TIMEOUT = 150.0
 _SECRET_ENV_SUFFIXES = ("_API_KEY", "_TOKEN", "_SECRET", "_ACCESS_KEY")
-_PASSTHROUGH_ENV = frozenset({"PATH", "LANG", "LANGUAGE", "USER", "LOGNAME", "SHELL", "TMPDIR", "TZ"})
+_PASSTHROUGH_ENV = frozenset({"PATH", "LANG", "LANGUAGE", "USER", "LOGNAME", "SHELL", "TMPDIR", "TZ", "HERMES_DISABLE_LAZY_INSTALLS"})
 
 
 # KNOWN-bug plumbing ------------------------------------------------------------------
@@ -150,7 +150,7 @@ class Home:
             "".join(f"{k}={v}\n" for k, v in (dotenv or {}).items()), encoding="utf-8")
         if auth is not None:
             (self.hermes_home / "auth.json").write_text(json.dumps(auth), encoding="utf-8")
-        seal_fixture_home(self.hermes_home)
+        prepare_fixture_runtime(self.hermes_home, REPO_ROOT)
         return self
 
     def update_config(self, mutate: Callable[[dict], None]) -> None:

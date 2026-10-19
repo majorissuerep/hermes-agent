@@ -30,10 +30,9 @@ import pytest
 import hermes_yaml as yaml
 
 from tests.e2e.core._pending_fixes import known_failure
-from tests.e2e.core._pm_dependencies import select_test_dependencies
 from tests.fakes.providers.catalog_fake import USAGE_IN, USAGE_OUT, CatalogFake, Recorded
 
-from tests.e2e.vault_home import connect_state, seal_fixture_home, spawn_unlocked
+from tests.e2e.vault_home import connect_state, prepare_fixture_runtime, spawn_unlocked
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 # Hard bound per child. A row that talks to its vendor host instead of the fake ends on its own:
@@ -75,7 +74,7 @@ KEYLESS_PROVIDERS = {
 CREDENTIAL_FREE_HOSTS = frozenset({"models.dev:443"})
 
 _SECRET_SUFFIXES = ("_API_KEY", "_TOKEN", "_SECRET", "_ACCESS_KEY", "_KEY")
-_PASSTHROUGH = frozenset({"PATH", "LANG", "LANGUAGE", "USER", "LOGNAME", "SHELL", "TMPDIR", "TZ"})
+_PASSTHROUGH = frozenset({"PATH", "LANG", "LANGUAGE", "USER", "LOGNAME", "SHELL", "TMPDIR", "TZ", "HERMES_DISABLE_LAZY_INSTALLS"})
 
 
 class CatalogGap(AssertionError):
@@ -217,8 +216,7 @@ def write_home(root: Path, model: dict[str, Any], extra_cfg: dict[str, Any] | No
            "agent": {"api_max_retries": 1, "auto_recovery_cycles": 0}, "updates": {"check": False},
            **(extra_cfg or {})}
     (home / ".hermes" / "config.yaml").write_text(yaml.safe_dump(cfg, sort_keys=False), encoding="utf-8")
-    seal_fixture_home(home / ".hermes")
-    select_test_dependencies(home / ".hermes", REPO_ROOT)
+    prepare_fixture_runtime(home / ".hermes", REPO_ROOT)
     return home
 
 

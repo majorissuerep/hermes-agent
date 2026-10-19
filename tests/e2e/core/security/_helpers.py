@@ -21,7 +21,7 @@ import sys
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
-from tests.e2e.vault_home import connect_state, seal_fixture_home, spawn_unlocked
+from tests.e2e.vault_home import connect_state, prepare_fixture_runtime, spawn_unlocked
 from tests.waiting import wait_until
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -73,6 +73,8 @@ def hermetic_env(home: Path, extra: dict[str, str] | None = None) -> dict[str, s
         HERMES_STATE_DB_GUARD_BYPASS="1",
         HERMES_ACCEPT_HOOKS="1",
     )
+    if "HERMES_DISABLE_LAZY_INSTALLS" in os.environ:
+        env["HERMES_DISABLE_LAZY_INSTALLS"] = os.environ["HERMES_DISABLE_LAZY_INSTALLS"]
     env.update(extra or {})
     return env
 
@@ -101,7 +103,7 @@ def write_home(hermes_home: Path, base_url: str, *, api_key: str, config: str = 
     )
     lines = {"OPENAI_API_KEY": api_key, **(env or {})}
     (hermes_home / ".env").write_text("".join(f"{k}={v}\n" for k, v in lines.items()), encoding="utf-8")
-    seal_fixture_home(hermes_home)
+    prepare_fixture_runtime(hermes_home, REPO_ROOT)
     return hermes_home
 
 

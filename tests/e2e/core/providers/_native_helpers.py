@@ -23,14 +23,14 @@ from typing import Any, Callable
 import hermes_yaml as yaml
 from hermes_cli.config_defaults import DEFAULT_CONFIG
 
-from tests.e2e.vault_home import connect_state, run_unlocked, seal_fixture_home
+from tests.e2e.vault_home import connect_state, run_unlocked, prepare_fixture_runtime
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 TURN_TIMEOUT = 180.0
 
 _SECRET_ENV_SUFFIXES = ("_API_KEY", "_TOKEN", "_SECRET", "_ACCESS_KEY", "_SESSION_TOKEN")
 _PASSTHROUGH_ENV = frozenset({
-    "PATH", "LANG", "LANGUAGE", "USER", "LOGNAME", "SHELL", "TMPDIR", "TZ",
+    "PATH", "LANG", "LANGUAGE", "USER", "LOGNAME", "SHELL", "TMPDIR", "TZ", "HERMES_DISABLE_LAZY_INSTALLS",
     "SYSTEMROOT", "SystemRoot", "COMSPEC", "PATHEXT", "WINDIR", "TEMP", "TMP",
 })
 
@@ -108,7 +108,7 @@ def make_home(root: Path, model: dict[str, Any], *, env_file: dict[str, str] | N
     (nh.hermes_home / "config.yaml").write_text(yaml.safe_dump(cfg, sort_keys=False), encoding="utf-8")
     lines = [f"{k}={v}" for k, v in (env_file or {}).items()]
     (nh.hermes_home / ".env").write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
-    seal_fixture_home(nh.hermes_home)
+    prepare_fixture_runtime(nh.hermes_home, REPO_ROOT)
     return nh
 
 

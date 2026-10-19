@@ -29,7 +29,7 @@ import hermes_yaml as yaml
 from tests.fakes.providers.anthropic_messages import MODEL_ID, AnthropicMessagesServer, Response, Responder
 from tests.fakes.providers.oauth_token_server import TLSInterceptProxy, make_test_ca
 
-from tests.e2e.vault_home import connect_state, run_unlocked, seal_fixture_home
+from tests.e2e.vault_home import connect_state, run_unlocked, prepare_fixture_runtime
 from hermes_security import io as state_io
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -38,7 +38,7 @@ VENDOR_HOST = "api.anthropic.com"
 TURN_TIMEOUT = 180.0
 
 _SECRET_ENV_SUFFIXES = ("_API_KEY", "_TOKEN", "_SECRET", "_ACCESS_KEY")
-_PASSTHROUGH_ENV = frozenset({"PATH", "LANG", "LANGUAGE", "USER", "LOGNAME", "SHELL", "TMPDIR", "TZ"})
+_PASSTHROUGH_ENV = frozenset({"PATH", "LANG", "LANGUAGE", "USER", "LOGNAME", "SHELL", "TMPDIR", "TZ", "HERMES_DISABLE_LAZY_INSTALLS"})
 
 
 @dataclass
@@ -157,7 +157,7 @@ def start_rig(root: Path, script: list[Response] | Responder, *, config: dict[st
         cfg[key] = {**cfg.get(key, {}), **value} if isinstance(value, dict) else value
     (rig.hermes_home / "config.yaml").write_text(yaml.safe_dump(cfg, sort_keys=False), encoding="utf-8")
     (rig.hermes_home / ".env").write_text("ANTHROPIC_API_KEY=sk-ant-api03-e2e-fake-key\n", encoding="utf-8")
-    seal_fixture_home(rig.hermes_home)
+    prepare_fixture_runtime(rig.hermes_home, REPO_ROOT)
     return rig
 
 

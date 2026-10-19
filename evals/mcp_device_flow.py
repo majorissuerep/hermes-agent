@@ -117,11 +117,13 @@ def oauth_fixture(mode="success"):
 def run_cli(repo, mode):
     from hermes_constants import reset_hermes_home_override, set_hermes_home_override
     from hermes_security import io as state_io
+    from hermes_security import vault
     from tests.e2e.vault_home import prepare_fixture_runtime, run_unlocked
 
     with tempfile.TemporaryDirectory(prefix="hermes-device-wire-") as directory, oauth_fixture(mode) as (base, wire), ExitStack() as scope:
         home = Path(directory)
         scope.callback(reset_hermes_home_override, set_hermes_home_override(home))
+        scope.callback(vault.lock_now, home)
         oauth = {"flow": "device", "cimd": False, "scope": "fixture.read", "timeout": 15}
         if mode == "preregistered":
             oauth.update(client_id="fixture-client", client_secret="fixture-client-secret")

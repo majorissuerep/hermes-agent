@@ -115,7 +115,8 @@ def _probe(root):
     module._SYSTEMD_SCOPE_AVAILABLE = False  # Own the test process tree, not a host service.
     registry = module.ProcessRegistry()
     sessions = []
-    command = f"exec {shlex.quote(sys.executable)} {shlex.quote(__file__)}"
+    child = Path(__file__).with_name("_process_exit_child.py")
+    command = f"exec {shlex.quote(sys.executable)} {shlex.quote(str(child))}"
     try:
         for name in ("owner", "sibling"):
             session = registry.spawn_local(
@@ -128,7 +129,7 @@ def _probe(root):
         owner, sibling = sessions
         deadline = time.monotonic() + 5
         while not all(name + "-output" in s.output_buffer for name, s in zip(("owner", "sibling"), sessions)):
-            assert time.monotonic() < deadline, "writers did not become ready"
+            assert time.monotonic() < deadline, [(s.process.poll(), s.output_buffer[-2000:]) for s in sessions]
             time.sleep(0.01)
         assert all(s.process.poll() is None for s in sessions)
         (root / "owner-exit").touch()
@@ -181,21 +182,5 @@ def _probe(root):
                 break
 
 
-def _child(gate):
-    subprocess.Popen(
-        [sys.executable, __file__, "writer", str(gate)], stdin=subprocess.DEVNULL,
-    )
-    deadline = time.monotonic() + 15
-    while not Path(str(gate) + "-exit").exists() and time.monotonic() < deadline:
-        time.sleep(0.01)
-
-
-def _writer(gate):
-    deadline = time.monotonic() + 15
-    while not Path(str(gate) + "-stop").exists() and time.monotonic() < deadline:
-        print(gate.name + "-output", flush=True)
-        time.sleep(0.02)
-
-
 if __name__ == "__main__":
-    {"probe": _probe, "child": _child, "writer": _writer}[sys.argv[1]](Path(sys.argv[2]))
+    _probe(Path(sys.argv[2]))

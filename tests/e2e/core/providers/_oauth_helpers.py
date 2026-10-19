@@ -23,14 +23,14 @@ import hermes_yaml as yaml
 
 from tests.fakes.providers.anthropic_messages import ApiError, AnthropicMessagesServer, Reply, Response, Text, ToolUse
 
-from tests.e2e.vault_home import run_unlocked, seal_fixture_home, spawn_unlocked
+from tests.e2e.vault_home import run_unlocked, prepare_fixture_runtime, spawn_unlocked
 from hermes_security import io as state_io
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 TAG_VAR = "OAUTH_E2E_TAG"
 
 _SECRET_ENV_SUFFIXES = ("_API_KEY", "_TOKEN", "_SECRET", "_ACCESS_KEY")
-_PASSTHROUGH_ENV = frozenset({"PATH", "LANG", "LANGUAGE", "USER", "LOGNAME", "SHELL", "TMPDIR", "TZ"})
+_PASSTHROUGH_ENV = frozenset({"PATH", "LANG", "LANGUAGE", "USER", "LOGNAME", "SHELL", "TMPDIR", "TZ", "HERMES_DISABLE_LAZY_INSTALLS"})
 
 
 @dataclass
@@ -74,7 +74,7 @@ class FakeHome:
             state_io.write_text(path, yaml.safe_dump(base, sort_keys=False), purpose="config")
         else:
             path.write_text(yaml.safe_dump(base, sort_keys=False), encoding="utf-8")
-            seal_fixture_home(self.hermes_home)
+            prepare_fixture_runtime(self.hermes_home, REPO_ROOT)
 
     def write_auth(self, store: dict[str, Any]) -> None:
         state_io.write_json(self.auth_path, store, purpose="auth")
