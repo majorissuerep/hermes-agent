@@ -703,10 +703,10 @@ def test_a_branch_switch_whose_marker_cannot_be_written_never_starts(checkout, c
     assert _git(root, "rev-parse", "--abbrev-ref", "HEAD") == "feat"
 
 
-def test_a_branch_switch_owes_the_restart_for_the_commit_it_lands_on(checkout, commit_point):
+def test_a_branch_switch_owes_local_completion_for_the_tree_it_lands_on(checkout, commit_point):
     """Local main (A) trails origin/main (B): CP0 lands on A, so a stop before CP1 must leave debt
     a checkout at A can discharge, never B's (N16)."""
-    from hermes_cli.update_host_obligation import read_host_obligation
+    from hermes_cli.venv_sync import completion_pending_path
 
     root, a, b = checkout
     _git(root, "checkout", "-q", "-b", "feat")
@@ -715,8 +715,8 @@ def test_a_branch_switch_owes_the_restart_for_the_commit_it_lands_on(checkout, c
 
     result = update_cmd._switch_branch_at_commit_point(["git"], "main", "origin/main", pre=parked, stash=None)
 
-    assert result.returncode == 0 and _git(root, "rev-parse", "HEAD") == a
-    assert (read_host_obligation() or {}).get("expected_sha") == a != b
+    assert result.returncode == 0 and _git(root, "rev-parse", "HEAD") == a != b
+    assert completion_pending_path(root).is_file()
 
 
 def test_an_unmarked_rollback_that_fails_never_reports_the_install_unchanged(checkout, commit_point, monkeypatch, capsys):

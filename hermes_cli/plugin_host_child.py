@@ -521,7 +521,6 @@ def extract_profiles_main(path: str, module_name: str) -> int:
     import json
     reader, writer = _take_protocol_streams()
     del reader
-    import hermes_bootstrap
     try:
         payload = {"profiles": [describe_profile(p) for p in capture_profiles(path, module_name)]}
     except Exception as exc:
@@ -533,7 +532,6 @@ def extract_profiles_main(path: str, module_name: str) -> int:
 
 def main() -> int:
     reader, writer = _take_protocol_streams()
-    import hermes_bootstrap
     logging.basicConfig(stream=sys.stderr, level=os.environ.get("HERMES_PLUGIN_HOST_LOG_LEVEL", "WARNING"),
                         format="%(levelname)s %(name)s: %(message)s")
     runtime = HostRuntime(reader, writer)
@@ -544,6 +542,14 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    from contextlib import redirect_stdout
+
+    # A legitimate PM relaunch must happen before wire descriptors are
+    # duplicated/redirected. Keep preparation chatter off the untouched wire.
+    with redirect_stdout(sys.stderr):
+        import hermes_bootstrap
+        hermes_bootstrap.harden_import_path()
+
     code = (extract_profiles_main(sys.argv[2], sys.argv[3]) if sys.argv[1:2] == ["--extract-profiles"]
             else main())
     sys.stderr.flush()

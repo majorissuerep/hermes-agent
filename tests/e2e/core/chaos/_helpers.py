@@ -116,7 +116,8 @@ def hermetic_env(home: Path, hermes_home: Path, tag: str) -> dict[str, str]:
         k: v for k, v in os.environ.items()
         if not (
             k.endswith(("_API_KEY", "_TOKEN", "_SECRET"))
-            or k.startswith(("HERMES_", "OPENROUTER", "ANTHROPIC", "OPENAI", "NOUS_"))
+            or (k.startswith(("HERMES_", "OPENROUTER", "ANTHROPIC", "OPENAI", "NOUS_"))
+                and k != "HERMES_DISABLE_LAZY_INSTALLS")
             or k in {"PYTEST_CURRENT_TEST"}
         )
     }

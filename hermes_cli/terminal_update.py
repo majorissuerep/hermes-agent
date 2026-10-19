@@ -31,18 +31,40 @@ def update_source(args) -> None:
     snapshot = update._run_pre_update_backup(args)
     update._record_pre_update_backup_outcome(args, snapshot)
     update._record_snapshot_stage(args, snapshot)
-    use_zip, git, is_fork = update._prepare_git_command()
     request = update._source_completion_request(options, None, snapshot, None, False, False)
-    branch = main._resolve_update_branch(args)
-    request['branch'] = branch
-    target_ref, release_sha, target_is_head, repository = check.select_apply_target(
-        args, branch, request, git_cmd=None if use_zip else git, stop=lambda: None)
-    branch = request['branch']
-    if use_zip:
-        update._update_via_zip(args, had_desktop_app_before_update=False,
-            target_sha=release_sha, completion_request=request,
-            **({'target_repository': repository} if repository else {}))
-        return
+    release_sha = repository = None
+    target_selected = False
+    try:
+        use_zip, git, is_fork = update._prepare_git_command()
+        branch = main._resolve_update_branch(args)
+        request['branch'] = branch
+        target_ref, release_sha, target_is_head, repository = check.select_apply_target(
+            args, branch, request, git_cmd=None if use_zip else git, stop=lambda: None)
+        target_selected = True
+        if not use_zip:
+            _apply_git(args, options, request, git, is_fork, target_ref, release_sha, target_is_head)
+            return
+    except subprocess.CalledProcessError as error:
+        # Only the established untouched-Windows-Git predicate may authorize an overlay.
+        # Ownership refusals and post-move/dependency failures retain their original boundary.
+        if not update._should_zip_fallback_on_update_error(error):
+            raise
+        if not target_selected:
+            branch = main._resolve_update_branch(args)
+            request['branch'] = branch
+            _, release_sha, _, repository = check.select_apply_target(
+                args, branch, request, git_cmd=None, stop=lambda: None)
+        print("→ Git file I/O failed; falling back to the selected source ZIP...")
+    update._update_via_zip(args, had_desktop_app_before_update=False,
+        target_sha=release_sha, completion_request=request,
+        **({'target_repository': repository} if repository else {}))
+
+
+def _apply_git(args, options, request, git, is_fork, target_ref, release_sha, target_is_head):
+    """Git-only stage; its failures retain the preselected identity for bounded ZIP recovery."""
+    from hermes_cli import main, update_cmd as update, update_cmd_check as check
+
+    root, branch = main.PROJECT_ROOT, request['branch']
     update._heal_stale_shallow_checkout(root, branch)
     fetch = None if release_sha and target_is_head else (
         ['fetch', '--no-tags', 'origin', target_ref] if release_sha else

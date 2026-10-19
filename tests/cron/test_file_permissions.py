@@ -1,6 +1,7 @@
 """Tests for file permissions hardening on sensitive files.
 
-POSIX permission bits (0700/0600) are only meaningful on POSIX filesystems;
+Private-umask creation works on hosts and containers without overriding an
+operator's existing mounted-directory permissions. POSIX bits (0700/0600) only apply on POSIX filesystems;
 native Windows does not implement them, so these tests are host-gated (the
 repo's host-native rule: never fake the platform).
 """
@@ -23,10 +24,12 @@ class TestCronFilePermissions(unittest.TestCase):
 
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp()
+        self.previous_umask = os.umask(0o077)
         self.cron_dir = Path(self.tmpdir) / "cron"
         self.output_dir = self.cron_dir / "output"
 
     def tearDown(self):
+        os.umask(self.previous_umask)
         import shutil
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
@@ -89,8 +92,10 @@ class TestConfigFilePermissions(unittest.TestCase):
 
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp()
+        self.previous_umask = os.umask(0o077)
 
     def tearDown(self):
+        os.umask(self.previous_umask)
         import shutil
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 

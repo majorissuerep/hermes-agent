@@ -22,7 +22,7 @@ WORKDIR /opt/hermes-sandbox
 ENV HERMES_RUNTIME_DIR=/opt/hermes-sandbox/tools
 COPY pm/ pm/
 COPY hermes_constants.py hermes_constants.py
-COPY hermes_cli/__init__.py hermes_cli/runtime_state.py hermes_cli/
+COPY hermes_cli/__init__.py hermes_cli/runtime_state.py hermes_cli/update_vault.py hermes_cli/
 COPY scripts/bundles/payload.py scripts/bundles/payload.py
 RUN python3 -c 'from pathlib import Path; from pm import ensure; [ensure(name, explicit=True) for name in ("agent-browser", "chromium")]; from pm import installed_package; [Path("/usr/local/bin", name).symlink_to(installed_package(name).binary) for name in ("agent-browser", "chromium")]' && \
     agent-browser --version && chromium --version && \

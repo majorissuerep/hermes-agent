@@ -311,7 +311,8 @@ def _npm_graph(source):
 def test_selected_child_builds_and_finalizes_under_parent_lock(completion):
     from hermes_cli.config_defaults import DEFAULT_CONFIG
     from hermes_cli.update_lock import UpdateLock
-    from hermes_security.io import read_yaml
+    from hermes_security.io import read_text
+    import hermes_yaml
 
     source, home, request, context, result, run = completion
     node = _npm_graph(source)
@@ -334,7 +335,7 @@ def test_selected_child_builds_and_finalizes_under_parent_lock(completion):
     assert environment["old_module"] is False
     assert environment["argv"] == [str(source / "hermes"), "update"]
     assert context.read_bytes() == before
-    config = read_yaml(home / "config.yaml", purpose="config")
+    config = hermes_yaml.safe_load(read_text(home / "config.yaml", purpose="config"))
     assert config["_config_version"] == DEFAULT_CONFIG["_config_version"], child.stdout + child.stderr
     assert config["model"]["default"] == "retained-model"
     receipt = _receipt(home)
@@ -355,7 +356,8 @@ def test_real_compiler_failure_is_owed_build_and_completion_continues(completion
     still runs, the exit is 0, and the tail stays pending until it builds."""
     from hermes_cli.config_defaults import DEFAULT_CONFIG
     from hermes_cli.venv_sync import completion_pending_path
-    from hermes_security.io import read_yaml
+    from hermes_security.io import read_text
+    import hermes_yaml
 
     source, home, request, context, result, run = completion
     _npm_graph(source)
@@ -368,7 +370,7 @@ def test_real_compiler_failure_is_owed_build_and_completion_continues(completion
     assert (source / "npm-python.json").is_file()
     assert not (source / "ui-tui/dist/entry.js").exists()
     # Actual encrypted config migration was not skipped by the build failure.
-    config = read_yaml(home / "config.yaml", purpose="config")
+    config = hermes_yaml.safe_load(read_text(home / "config.yaml", purpose="config"))
     assert config["_config_version"] == DEFAULT_CONFIG["_config_version"]
     assert config["model"]["default"] == "retained-model"
     assert context.read_bytes() == context_before

@@ -129,7 +129,7 @@ def _discharge_host_update_obligation():
 
 
 @pytest.fixture
-def isolated_source_completion(monkeypatch):
+def isolated_source_completion(monkeypatch, tmp_path):
     """Unit-test the completion tail in-process; real transport is tested separately."""
     from hermes_cli import update_cmd, update_completion
 
@@ -137,9 +137,13 @@ def isolated_source_completion(monkeypatch):
     monkeypatch.setattr("hermes_cli.venv_sync.publish_launchers", lambda *a: None)
 
     def complete(request):
-        update_completion._complete_selected(request)
-        return {"exit_code": 0, "receipt": update_completion._read_terminal_receipt(request),
-                "windows_resume": request["windows_resume"]}
+        result = tmp_path / "native-completion-result.json"
+        code = update_completion._finish(request, result)
+        answer = update_completion.json.loads(result.read_text())
+        assert answer["exit_code"] == code
+        if code == 0:
+            assert answer["receipt"] is not None and answer["receipt"]["finished_at"]
+        return answer
 
     monkeypatch.setattr(update_cmd, "run_completion", complete)
 

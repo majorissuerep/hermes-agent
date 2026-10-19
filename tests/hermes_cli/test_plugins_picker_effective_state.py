@@ -1,10 +1,4 @@
-"""The bare ``hermes plugins`` picker writes only the rows the user flipped.
-
-Bundled platforms are active without a ``plugins.enabled`` entry; the picker used to open them unticked
-and save every unticked row into ``plugins.disabled`` on any exit, so opening and closing it silenced
-Telegram and Slack on the next gateway restart. Drives the real ``cmd_toggle`` (text fallback) through
-real admission.
-"""
+"""The native plugins picker writes only user-flipped rows and preserves unrelated selections."""
 import pytest
 import hermes_yaml as yaml
 
@@ -19,10 +13,10 @@ def run_picker(plugin_world, monkeypatch):
     from hermes_cli import plugins_cmd
 
     world = plugin_world
-    for leaf in ("telegram", "slack"):
-        platform = world.core / "plugins" / "platforms" / leaf
+    for leaf in ("first", "second"):
+        platform = world.core / "plugins" / "tools" / leaf
         platform.mkdir(parents=True)
-        (platform / "plugin.yaml").write_text(f"name: {leaf}-platform\nkind: platform\n", encoding="utf-8")
+        (platform / "plugin.yaml").write_text(f"name: {leaf}-tool\nkind: standalone\n", encoding="utf-8")
     monkeypatch.setattr("hermes_cli.plugins.get_bundled_plugins_dir", lambda: world.core / "plugins")
     monkeypatch.setattr(plugins_cmd, "_provider_categories", list)
     monkeypatch.setattr(plugins_cmd.sys.stdin, "isatty", lambda: True)
@@ -45,11 +39,11 @@ def test_open_and_exit_without_changes_writes_nothing(run_picker):
 
 
 def test_only_flipped_rows_are_written(run_picker):
-    # Telegram is disabled under its canonical key AND its legacy manifest name; ticking it must clear
-    # both. Slack is unticked. The enabled entry for a plugin the picker never shows must survive.
+    # The first plugin is disabled under both canonical key and manifest alias.
+    # Enable it and disable the second; preserve a selected but unshown plugin.
     plugins = run_picker(
-        {"enabled": ["some/unshown-plugin"], "disabled": ["platforms/telegram", "telegram-platform"]},
-        toggle_keys=("platforms/telegram", "platforms/slack"),
+        {"enabled": ["tools/second", "some/unshown-plugin"], "disabled": ["tools/first", "first-tool"]},
+        toggle_keys=("tools/first", "tools/second"),
     )
-    assert plugins["disabled"] == ["platforms/slack"]
-    assert sorted(plugins["enabled"]) == ["platforms/telegram", "some/unshown-plugin"]
+    assert plugins["disabled"] == ["tools/second"]
+    assert sorted(plugins["enabled"]) == ["tools/first", "some/unshown-plugin"]

@@ -1,6 +1,6 @@
-"""Stdio JSON-RPC driver for a REAL ``python -m tui_runtime.entry`` subprocess.
+"""Stdio JSON-RPC driver for a real, explicitly prepared ``python -m tui_runtime`` child.
 
-This is the process the Ink TUI and Desktop talk to: newline-delimited JSON-RPC 2.0 on
+This is the private process the Ink terminal talks to: newline-delimited JSON-RPC 2.0 on
 stdin/stdout, responses carry the request ``id``, server-pushed events are
 ``{"method": "event", "params": {"type", "session_id", "payload"}}``. The driver keeps
 one reader thread that routes responses to waiters and appends every event to a log,
@@ -18,8 +18,8 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
-from tests.e2e.core.chaos._helpers import python_exe
-from tests.e2e.vault_home import spawn_unlocked
+from tests.e2e.core.chaos._helpers import REPO_ROOT, python_exe
+from tests.e2e.vault_home import prepare_fixture_runtime, spawn_unlocked
 
 
 class RpcError(AssertionError):
@@ -28,6 +28,8 @@ class RpcError(AssertionError):
 
 class TuiRuntimeProcess:
     def __init__(self, env: dict[str, str], cwd: Path, stderr_path: Path) -> None:
+        # Dependency selection and encryption are setup, never part of a fault/ready deadline.
+        prepare_fixture_runtime(Path(env["HERMES_HOME"]), REPO_ROOT)
         self._stderr_fh = open(stderr_path, "wb")
         self.stderr_path = stderr_path
         self.proc = spawn_unlocked(

@@ -116,7 +116,8 @@ def test_dotenv_loading_is_preserved_when_external_secrets_are_skipped(
 
 
 @pytest.mark.platforms("posix")  # the 'command' secret source is POSIX-only
-def test_update_probe_children_skip_external_secret_sources(tmp_path):
+@pytest.mark.live_system_guard_bypass  # import-health code names update but never applies it
+def test_update_probe_children_skip_external_secret_sources(tmp_path, monkeypatch):
     """The critical-module import probe imports ``run_agent``, whose dotenv load must not run a
     configured secret helper: a slow helper (op/bws/command, 120s budget) inside the 120s probe
     surfaced as ``timed out before reporting import health`` on a healthy install (#110823)."""
@@ -126,8 +127,15 @@ def test_update_probe_children_skip_external_secret_sources(tmp_path):
     (home / "config.yaml").write_text(
         f"secrets:\n  command:\n    enabled: true\n    command: 'touch {hit}'\n", encoding="utf-8",
     )
-    result = subprocess.run(
+    from tests.e2e.vault_home import prepare_fixture_runtime, run_unlocked
+
+    monkeypatch.setenv("HERMES_HOME", str(home))
+    prepare_fixture_runtime(home, REPO_ROOT)
+    result = run_unlocked(
         [sys.executable, "-c",
+         "import hermes_bootstrap\n"
+         "from hermes_security.handoff import adopt_inherited_key\n"
+         "assert adopt_inherited_key()\n"
          "import sys; sys.argv = ['hermes', 'update']\n"
          "from hermes_cli.update_cmd_validation import _validate_critical_modules_import\n"
          "print('PROBE=' + repr(_validate_critical_modules_import(__import__('os').getcwd())))"],

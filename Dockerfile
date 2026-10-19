@@ -106,7 +106,7 @@ WORKDIR /opt/hermes
 ENV HERMES_RUNTIME_DIR=/opt/hermes/tools
 COPY pm/ pm/
 COPY hermes_constants.py hermes_constants.py
-COPY hermes_cli/__init__.py hermes_cli/runtime_state.py hermes_cli/
+COPY hermes_cli/__init__.py hermes_cli/runtime_state.py hermes_cli/update_vault.py hermes_cli/
 COPY scripts/bundles/payload.py scripts/bundles/payload.py
 RUN set -eu; \
     python3 -c 'from pm import ensure; [ensure(name, explicit=True) for name in ("uv", "chromium", "npm", "ffmpeg", "ripgrep")]'; \

@@ -5,6 +5,7 @@ a false negative for the rest of the session (#44750)."""
 import pytest
 
 from tools.file_operations import ShellFileOperations
+from tests.tools.file_ops_fixtures import bash_program
 
 
 class _DeadEnv:
@@ -19,6 +20,7 @@ class _HealthyEmptyEnv:
     cwd = "/workspace"
 
     def execute(self, command: str, cwd=None, **kwargs) -> dict:
+        command = bash_program(command)
         if command.startswith("if [ -f"):
             return {"output": "__hermes_missing__\n", "returncode": 0}
         if command.startswith("test -e"):

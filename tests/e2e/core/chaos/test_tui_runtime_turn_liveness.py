@@ -31,7 +31,6 @@ import os
 import re
 import signal
 import subprocess
-import sys
 import time
 import uuid
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -79,7 +78,7 @@ from tests.fakes.fake_llm_provider import (
 )
 
 pytestmark = [
-    pytest.mark.skipif(sys.platform != "linux", reason="orphan scan reads /proc; POSIX stdio gateway"),
+    pytest.mark.platforms("linux"),
 ]
 
 # The healthy dispatcher answers ping/session.status in ~1 ms; a dispatcher blocked by the
