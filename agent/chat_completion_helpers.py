@@ -3321,7 +3321,10 @@ class _StreamingCall(StreamingWaitMonitor, StreamFallbackMixin):
                 "Clean EOF, no finish_reason: server ended the stream (no transport exception) after delivering "
                 "text with no tool calls. The server or a proxy closed the stream cleanly.")
             return _build_partial_stream_stub(role, full_content, full_reasoning, model_name, usage_obj, clean_eof=True)
-        effective_finish_reason = "length" if has_truncated_tool_args else (finish_reason or "stop")
+        # Only the provider can confirm an output cap. A completed malformed call
+        # must reach argument validation, not an unchanged-prompt replay that can
+        # silently replace the failed action with an ordinary answer.
+        effective_finish_reason = finish_reason or "stop"
         provider_stream_error = _provider_stream_error_from_text(
             full_content or "", effective_finish_reason, response=getattr(stream, "response", None))
         if provider_stream_error is not None:

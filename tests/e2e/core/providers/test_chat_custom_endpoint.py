@@ -25,7 +25,6 @@ from tests.e2e.core.providers._openai_helpers import (
     READ_TOOL,
     HarnessError,
     Home,
-    bug_assertions,
     chat_messages,
     custom_chat_config,
     db_tool_calls,
@@ -38,14 +37,6 @@ from tests.fakes.providers.chat_variants import CDropToolCall, CText, CTools, Fa
 pytestmark = pytest.mark.skipif(not sys.platform.startswith("linux"), reason="subprocess harness is Linux-gated")
 
 STRICT_TURN_BUDGET = 60.0
-
-KNOWN: dict[str, tuple[str, str]] = {
-    "unrepairable_args_surfaced": (
-        r"the unparseable write_file call vanished: the next request never told the model it did not run "
-        r"and the turn reported success",
-        "#119389 unrepairable tool_call arguments silently dropped, turn reports success"),
-}
-
 
 def test_ollama_strict_endpoint_always_receives_the_user_turn(tmp_path) -> None:
     h = Home(tmp_path)
@@ -100,7 +91,6 @@ def test_unrepairable_tool_arguments_are_surfaced_not_dropped(tmp_path, finish) 
         m.get("role") == "tool" or "write_file" in str(m.get("content") or "")
         for m in mains[1]["messages"][len(mains[0]["messages"]):])
     failed_visibly = run.proc.returncode != 0 or run.usage.get("failed")
-    with bug_assertions(KNOWN, "unrepairable_args_surfaced"):
-        assert told or failed_visibly, (
-            "the unparseable write_file call vanished: the next request never told the model it did not run "
-            f"and the turn reported success ({run.stdout.strip()!r}); out.md={(h.project / 'out.md').read_text()!r}")
+    assert told or failed_visibly, (
+        "the unparseable write_file call vanished: the next request never told the model it did not run "
+        f"and the turn reported success ({run.stdout.strip()!r}); out.md={(h.project / 'out.md').read_text()!r}")
