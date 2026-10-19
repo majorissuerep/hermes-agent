@@ -1,9 +1,9 @@
 """Historical takeover completion in a fresh, dependency-selected process.
 
 PM preparation has its own worker tests. Here the tool provisioner supplies
-the real test Node/npm and icons are pre-prepared. npm ci, both compilers,
+the real test Node/npm and icons are pre-prepared. npm ci, the native TUI compiler,
 application imports, maintenance/config migration and receipts are real.
-Only fleet discovery/restarts and machine-wide post-update repairs are seams.
+Only tool provisioning and machine-wide ancillary repairs are seams.
 """
 from __future__ import annotations
 
@@ -28,6 +28,11 @@ def _put(root, name, content):
     return path
 
 
+def _receipt(home):
+    from hermes_security.io import read_json
+    return read_json(home / "logs/update_receipts/latest.json", purpose="state")
+
+
 @pytest.fixture
 def completion(tmp_path, monkeypatch):
     from hermes_cli.config_defaults import DEFAULT_CONFIG
@@ -43,12 +48,12 @@ def completion(tmp_path, monkeypatch):
     # Copies give bootstrap/main a genuine selected checkout identity. No file
     # in the working checkout is modified, even by import-time self-heals.
     for path in ROOT.glob("*.py"):
-        shutil.copy2(path, source / path.name)
-    for name in ("hermes_state", "hermes_cli", "hermes_platform", "hermes_security", "pm", "agent", "gateway", "tools", "cron"):
+        shutil.copyfile(path, source / path.name)
+    for name in ("hermes_state", "hermes_cli", "hermes_platform", "hermes_security", "pm", "agent", "tools", "cron"):
         shutil.copytree(ROOT / name, source / name,
-                        ignore=shutil.ignore_patterns("__pycache__", "web_dist", "tui_dist"))
+                        ignore=shutil.ignore_patterns("__pycache__", "tui_dist"), copy_function=shutil.copyfile)
     shutil.copytree(ROOT / "scripts/build", source / "scripts/build",
-                    ignore=shutil.ignore_patterns("__pycache__"))
+                    ignore=shutil.ignore_patterns("__pycache__"), copy_function=shutil.copyfile)
     _put(source, "pyproject.toml", '[project]\nname="takeover-fixture"\nversion="2.0"\n')
     # Successful completion stamps the selected checkout's own git identity.
     git_env = {**os.environ, "GIT_AUTHOR_NAME": "fixture", "GIT_AUTHOR_EMAIL": "fixture@example.invalid",
@@ -79,6 +84,8 @@ def completion(tmp_path, monkeypatch):
         "packages": {"venv": {"environment": str(generation)}}}))
     _put(home / ".hermes", "config.yaml",
          f"_config_version: {DEFAULT_CONFIG['_config_version'] - 1}\nmodel:\n  default: retained-model\n")
+    from tests.e2e.vault_home import seal_fixture_home
+    seal_fixture_home(home / ".hermes")
     env = {key: value for key, value in os.environ.items()
            if not key.startswith(("HERMES_", "PYTHON", "PYTEST_", "VIRTUAL_ENV", "npm_", "NPM_"))}
     env.update(HOME=str(home), HERMES_HOME=str(home / ".hermes"),
@@ -153,12 +160,7 @@ def completion(tmp_path, monkeypatch):
                     # startup; all dependencies must be available by now.
                     from hermes_cli import update_cmd as update
                     from hermes_cli import update_cmd_maint as maint
-                    from hermes_cli import update_cmd_fleet as fleet
-                    from hermes_cli import update_cmd_fleet_verify as fleet_verify
-                    from hermes_cli import gateway_migrate
                     from hermes_cli import macos_tcc_anchor
-                    from hermes_cli import source_build
-                    from hermes_cli.update_inventory import UpdatePlan, RuntimeRecord
                     from pm.package import Runner
                     import pm
                     import os
@@ -179,62 +181,11 @@ def completion(tmp_path, monkeypatch):
                         }))
                         return Runner(name, base_env)
                     pm.ensure = provision
-                    web = source_build.build_source_web
-                    source_build.build_source_web = lambda root, **kwargs: web(root, icons=root, **kwargs)
-                    build = source_build.build_update_products
-                    def build_products(root, *, desktop):
-                        (root / 'desktop-build.json').write_text(json.dumps(desktop), encoding='utf-8')
-                        return build(root, desktop=desktop)
-                    source_build.build_update_products = build_products
-                    maintenance = update._run_post_update_maintenance
-                    def maintain(**kwargs):
-                        (root / 'desktop-maintenance.json').write_text(
-                            json.dumps(kwargs['had_desktop_app_before_update']), encoding='utf-8')
-                        return maintenance(**kwargs)
-                    update._run_post_update_maintenance = maintain
                     # Ancillary system changes are not the acceptance target.
                     macos_tcc_anchor.ensure_tcc_anchor = lambda: None
                     maint._print_post_update_notices_and_self_heals = lambda: None
                     maint._sync_profiles_after_update = lambda: None
                     maint._print_bundled_skills_sync_report = lambda: None
-                    fleet_verify._print_legacy_units_warning = lambda: None
-                    maint._refresh_dashboard_after_update = lambda **kwargs: None
-                    gateway_migrate.maybe_auto_migrate_after_update = lambda: None
-                    update._surviving_pre_update_serve_runtimes = lambda plan: []
-                    fleet_verify._collect_fleet_snapshot = lambda *args: []
-                    def restart(plan, gateway_mode):
-                        if fault == 'restart':
-                            raise RuntimeError('systemctl restart timed out')
-                        assert isinstance(plan, UpdatePlan)
-                        assert isinstance(plan.runtimes[0], RuntimeRecord)
-                        assert plan.to_dict() == request['plan'] | {
-                            'updatable_in_place': True, 'update_mechanism': 'hermes update'}
-                        (root / 'restarted-plan.json').write_text(json.dumps(plan.to_dict()))
-                        return fleet._GatewayRestartOutcome(
-                            incomplete=False, phase_errors=[], pre_restart_gateway_pids=[],
-                            restarted_services=[], failed_or_stale_units=[], relaunched_profiles=[],
-                            externally_supervised_profiles=[], killed_pids=set())
-                    update._restart_gateway_fleet_after_update = restart
-                    if fault == 'interrupt':
-                        verify = update._verify_fleet_after_update
-                        def verify_then_interrupt(*args, **kwargs):
-                            verify(*args, **kwargs)  # closes the run as a success
-                            raise KeyboardInterrupt()
-                        update._verify_fleet_after_update = verify_then_interrupt
-                    merge = update._resume_windows_gateways_and_merge_outcome
-                    def resume(outcome, token, gateway_mode):
-                        assert token == request['windows_resume']
-                        (root / 'resumed-token.json').write_text(json.dumps(token))
-                        return merge(outcome, token, gateway_mode)
-                    update._resume_windows_gateways_and_merge_outcome = resume
-                    if fault == 'scm':
-                        # The Windows service manager refuses the paused gateway's restart.
-                        from hermes_cli import update_cmd_holders
-                        def scm(token):
-                            if token and token.get('resume_needed'):
-                                raise RuntimeError('Could not restart Windows gateway service(s): HermesGatewayProbe')
-                        module._resume_windows_gateways_after_update = scm
-                        update_cmd_holders._resume_windows_gateways_after_update = scm
                 spec.loader.exec_module = execute
                 return spec
         sys.meta_path.insert(0, CompletionImports())
@@ -242,13 +193,20 @@ def completion(tmp_path, monkeypatch):
         runpy.run_path(sys.argv[0], run_name='__main__')
     '''))
     def run(fault=""):
-        return subprocess.run([str(python), "-I", "-B", str(runner), str(context), str(result), fault],
-                              cwd=tmp_path, env=env, capture_output=True, text=True, timeout=90, check=False)
+        from hermes_cli.update_lock import checkout_lock_fds
+        from hermes_cli.update_vault import child_vault
+
+        child_env = dict(env)
+        with child_vault(child_env) as transport:
+            transport["pass_fds"] = tuple(set(transport.get("pass_fds", ())) | set(checkout_lock_fds(source)))
+            return subprocess.run([str(python), "-I", "-B", str(runner), str(context), str(result), fault],
+                                  cwd=tmp_path, env=child_env, **transport,
+                                  capture_output=True, text=True, timeout=90, check=False)
     return source, home / ".hermes", request, context, result, run
 
 
 @pytest.mark.platforms("posix")
-@pytest.mark.parametrize("fault", ["import", "activation", "plan", "receipt"])
+@pytest.mark.parametrize("fault", ["import", "activation", "receipt"])
 def test_failure_preserves_original_receipt_before_build(completion, fault):
     source, home, request, context, result, run = completion
     request["gateway_mode"] = True
@@ -259,10 +217,6 @@ def test_failure_preserves_original_receipt_before_build(completion, fault):
 
         shutil.rmtree(site_packages(selected_venv(source)))
         message = "dependency environment has no site-packages"
-    elif fault == "plan":
-        request["plan"]["runtimes"] = [{"profile": "missing required kind"}]
-        context.write_text(json.dumps(request), encoding="utf-8")
-        message = "kind"
     elif fault == "receipt":
         message = "cannot accept prepared receipt"
     request["receipt"]["steps"][0]["detail"] = "日本 café"
@@ -271,7 +225,7 @@ def test_failure_preserves_original_receipt_before_build(completion, fault):
     child = run(fault)
     assert child.returncode == 1, child.stdout + child.stderr
     assert message in child.stderr
-    receipt = json.loads((home / "logs/update_receipts/latest.json").read_text())
+    receipt = _receipt(home)
     assert receipt["update_id"] == request["update_id"]
     assert receipt["started_at"] == request["receipt"]["started_at"]
     assert receipt["pre_update"] == request["receipt"]["pre_update"]
@@ -281,94 +235,26 @@ def test_failure_preserves_original_receipt_before_build(completion, fault):
     assert receipt["outcome"] == "failed"
     assert receipt["exit_code"] == child.returncode
     assert json.loads(result.read_text())["receipt_handled"] is True
-    assert (home / ".update_exit_code").read_text().strip() == "1"
     assert context.read_bytes() == before
     assert not (source / "build-environment.json").exists()
 
 
 @pytest.mark.platforms("posix")
-def test_refused_gateway_resume_after_commit_is_a_followup_not_exit_1(completion):
-    """C3 for the historical takeover child: the code is committed, so a Windows gateway resume
-    that the service manager refuses is an owed ``windows_resume`` follow-up, never exit 1."""
-    _source, home, request, context, result, run = completion
-    request["gateway_mode"] = True
-    # A real start time names the run's archive file, so the running and terminal records share one
-    # file (the fixture's placeholder falls back to the clock and can split them across a second).
-    request["receipt"]["started_at"] = "2026-10-04T12:00:00+00:00"
-    request["windows_resume"] = {"resume_needed": True, "profiles": {}, "unmapped": [],
-                                 "services": ["HermesGatewayProbe"],
-                                 "service_profiles": {"HermesGatewayProbe": "default"}}
-    context.write_text(json.dumps(request), encoding="utf-8")
-    child = run("scm")
-    assert child.returncode == 0, child.stdout + child.stderr
-    receipt = json.loads((home / "logs/update_receipts/latest.json").read_text())
-    assert receipt["update_id"] == request["update_id"]
-    assert receipt["outcome"] == "success"
-    assert "windows_resume" in [row["step"] for row in receipt["followups"]], child.stdout + child.stderr
-    assert (home / ".update_exit_code").read_text().strip() == "0"
-    # The attempt is reported: the historical parent must not replay it at its own exit.
-    assert json.loads(result.read_text())["resume_handled"] is True
-
-
-@pytest.mark.platforms("posix")
-def test_raising_fleet_restart_after_commit_is_a_followup_not_exit_1(completion):
-    """Review P3 (invariant 3): the takeover child's restart/verify run after the commit point, so
-    a raising fleet restart is an owed ``gateway_restart`` follow-up and exit 0, never exit 1 with a
-    ``failed`` receipt and a gateway watcher told 1."""
-    _source, home, request, context, _result, run = completion
-    request["gateway_mode"] = True
-    request["receipt"]["started_at"] = "2026-10-04T12:00:00+00:00"
-    context.write_text(json.dumps(request), encoding="utf-8")
-    child = run("restart")
-    assert child.returncode == 0, child.stdout + child.stderr
-    receipt = json.loads((home / "logs/update_receipts/latest.json").read_text(encoding="utf-8-sig"))
-    assert receipt["update_id"] == request["update_id"]
-    assert receipt["outcome"] == "success"
-    owed = {row["step"]: row["reason"] for row in receipt["followups"]}
-    assert "systemctl restart timed out" in owed.get("gateway_restart", ""), child.stdout + child.stderr
-    assert (home / ".update_exit_code").read_text(encoding="utf-8-sig").strip() == "0"
-
-
-@pytest.mark.platforms("posix")
-def test_interrupt_after_verification_closed_the_run_keeps_gateway_status_0(completion):
-    """Review regression 3: verification already finalized the takeover's run as ``success``; an
-    interrupt landing after it must not rewrite the gateway /update status to 1."""
-    _source, home, request, context, _result, run = completion
-    request["gateway_mode"] = True
-    request["receipt"]["started_at"] = "2026-10-04T12:00:00+00:00"
-    context.write_text(json.dumps(request), encoding="utf-8")
-    child = run("interrupt")
-    receipt = json.loads((home / "logs/update_receipts/latest.json").read_text(encoding="utf-8-sig"))
-    assert receipt["update_id"] == request["update_id"]
-    assert receipt["outcome"] == "success", child.stdout + child.stderr
-    assert (home / ".update_exit_code").read_text(encoding="utf-8-sig").strip() == "0", child.stdout + child.stderr
-
-
-@pytest.mark.platforms("posix")
-@pytest.mark.parametrize("captured, installed, expected", [
-    (None, None, False),
-    (None, "renderer", True),
-    (None, "packaged", True),
-    (False, "packaged", False),
-    (True, None, True),
-])
-def test_missing_desktop_observation_uses_installed_products(completion, captured, installed, expected):
-    source, _home, request, context, result, run = completion
-    request["desktop"] = captured
-    context.write_text(json.dumps(request), encoding="utf-8")
-    if installed == "renderer":
-        _put(source, "apps/desktop/dist/index.html", "old renderer")
-    elif installed == "packaged":
-        executable = ("mac-arm64/Hermes.app/Contents/MacOS/Hermes" if sys.platform == "darwin"
-                      else "linux-unpacked/hermes")
-        _put(source, f"apps/desktop/release/{executable}", "old packaged app")
+def test_frozen_remote_fields_are_acknowledged_without_restarting_retired_surfaces(completion):
+    source, home, request, context, result, run = completion
+    request.update(gateway_mode=True, desktop=True)
+    request["windows_resume"]["resume_needed"] = True
+    request["plan"]["runtimes"] = [{"malformed_retired_service": True}]
+    context.write_text(json.dumps(request))
     before = context.read_bytes()
     child = run()
     assert child.returncode == 0, child.stdout + child.stderr
-    assert json.loads((source / "desktop-build.json").read_text()) is expected
-    assert json.loads((source / "desktop-maintenance.json").read_text()) is expected
+    receipt = _receipt(home)
+    assert receipt["outcome"] == "success"
+    assert not {row["step"] for row in receipt["followups"]} & {"gateway_restart", "windows_resume"}
     assert context.read_bytes() == before
-    assert json.loads(result.read_text())["receipt_handled"] is True
+    assert json.loads(result.read_text()) == {"resume_handled": True, "receipt_handled": True}
+    assert not (source / "apps/desktop").exists()
 
 
 def _npm_graph(source):
@@ -377,7 +263,7 @@ def _npm_graph(source):
     tools = {}
     node = shutil.which("node")
     assert node, "source completion acceptance requires Node and npm"
-    for name in ("esbuild", "typescript", "vite"):
+    for name in ("esbuild",):
         probe = subprocess.run([node, "-p", f"require.resolve('{name}/package.json')"],
                                cwd=ROOT, capture_output=True, text=True, check=False)
         if probe.returncode:
@@ -386,10 +272,10 @@ def _npm_graph(source):
             pytest.skip(f"source completion acceptance requires {name} from the checkout's node_modules")
         tools[name] = str(Path(probe.stdout.strip()).parent)
     root = {"name": "completion-graph", "version": "1.0.0", "private": True, "type": "module",
-            "workspaces": ["ui-tui", "web", "packages/value"],
+            "workspaces": ["ui-tui", "packages/value"],
             "scripts": {"postinstall": "node prepare-tools.mjs"}}
     packages = {"": root}
-    for directory, name in (("ui-tui", "fixture-tui"), ("web", "fixture-web"),
+    for directory, name in (("ui-tui", "fixture-tui"),
                             ("packages/value", "fixture-value")):
         manifest = {"name": name, "version": "1.0.0", "type": "module"}
         if name == "fixture-value":
@@ -407,7 +293,7 @@ def _npm_graph(source):
         import {{ execFileSync }} from 'node:child_process';
         const tools = {json.dumps(tools)};
         for (const [name, target] of Object.entries(tools)) {{
-          const workspace = name === 'esbuild' ? 'ui-tui' : 'web';
+          const workspace = 'ui-tui';
           mkdirSync(workspace + '/node_modules', {{recursive: true}});
           symlinkSync(target, workspace + '/node_modules/' + name, 'dir');
         }}
@@ -418,13 +304,6 @@ def _npm_graph(source):
     _put(source, "packages/value/index.js", "export const value = 'compiled local graph';\n")
     _put(source, "packages/value/index.d.ts", "export const value: string;\n")
     _put(source, "ui-tui/src/entry.tsx", "import { value } from 'fixture-value'; console.log(value);\n")
-    _put(source, "web/src/main.ts", "import { value } from 'fixture-value'; document.body.textContent = value;\n")
-    _put(source, "web/index.html", '<html><body><script type="module" src="/src/main.ts"></script></body></html>')
-    _put(source, "web/tsconfig.json", json.dumps({"compilerOptions": {
-        "target": "ES2022", "module": "ESNext", "moduleResolution": "bundler",
-        "types": [], "noEmit": True}, "include": ["src"]}))
-    _put(source, "web/vite.config.ts", "export default {};\n")
-    _put(source, "web/public/favicon.ico", "prepared icon input")
     return node
 
 
@@ -432,12 +311,12 @@ def _npm_graph(source):
 def test_selected_child_builds_and_finalizes_under_parent_lock(completion):
     from hermes_cli.config_defaults import DEFAULT_CONFIG
     from hermes_cli.update_lock import UpdateLock
-    import hermes_yaml
+    from hermes_security.io import read_yaml
 
     source, home, request, context, result, run = completion
     node = _npm_graph(source)
     before = context.read_bytes()
-    with UpdateLock() as lock:
+    with UpdateLock(install_root=source) as lock:
         assert lock.acquired
         marker = lock.path.read_bytes()
         child = run()
@@ -446,8 +325,6 @@ def test_selected_child_builds_and_finalizes_under_parent_lock(completion):
     built = subprocess.run([node, str(source / "ui-tui/dist/entry.js")],
                            capture_output=True, text=True, check=True)
     assert built.stdout.strip() == "compiled local graph"
-    assert (source / "hermes_cli/web_dist/index.html").is_file()
-    assert any("compiled local graph" in p.read_text() for p in (source / "hermes_cli/web_dist/assets").glob("*.js"))
     assert (source / "node_modules/.hermes-node-deps").is_file()
     environment = json.loads((source / "build-environment.json").read_text())
     assert "repairing the recorded dependency environment" not in child.stderr
@@ -457,12 +334,10 @@ def test_selected_child_builds_and_finalizes_under_parent_lock(completion):
     assert environment["old_module"] is False
     assert environment["argv"] == [str(source / "hermes"), "update"]
     assert context.read_bytes() == before
-    assert json.loads((source / "restarted-plan.json").read_text())["expected_sha"] == "old-sha"
-    assert json.loads((source / "resumed-token.json").read_text()) == request["windows_resume"]
-    config = hermes_yaml.safe_load((home / "config.yaml").read_text())
+    config = read_yaml(home / "config.yaml", purpose="config")
     assert config["_config_version"] == DEFAULT_CONFIG["_config_version"], child.stdout + child.stderr
     assert config["model"]["default"] == "retained-model"
-    receipt = json.loads((home / "logs/update_receipts/latest.json").read_text())
+    receipt = _receipt(home)
     assert receipt["outcome"] == "success"
     assert receipt["update_id"] == request["update_id"]
     assert receipt["pre_update"] == request["receipt"]["pre_update"]
@@ -477,29 +352,27 @@ def test_selected_child_builds_and_finalizes_under_parent_lock(completion):
 def test_real_compiler_failure_is_owed_build_and_completion_continues(completion):
     """Contract C3 for the historical takeover child: the code is committed, so a failed product
     build is an owed ``build`` follow-up, never a failed update. Maintenance (config migration)
-    and the fleet restart still run, the exit is 0, and the tail stays pending until it builds."""
+    still runs, the exit is 0, and the tail stays pending until it builds."""
     from hermes_cli.config_defaults import DEFAULT_CONFIG
     from hermes_cli.venv_sync import completion_pending_path
-    import hermes_yaml
+    from hermes_security.io import read_yaml
 
     source, home, request, context, result, run = completion
     _npm_graph(source)
-    # A real TypeScript error: dependency installation and TUI succeed; the web product fails.
-    _put(source, "web/src/main.ts", "const broken: string = 42; document.body.textContent = broken;\n")
+    # A real TUI syntax error, after the actual npm lifecycle child has run.
+    _put(source, "ui-tui/src/entry.tsx", "export const broken = ;\n")
     context_before = context.read_bytes()
     child = run()
     assert child.returncode == 0, child.stdout + child.stderr
-    assert "TypeScript build failed" in child.stdout + child.stderr
+    assert "Building the TUI failed" in child.stdout + child.stderr
     assert (source / "npm-python.json").is_file()
-    assert (source / "ui-tui/dist/entry.js").is_file()
-    assert not (source / "hermes_cli/web_dist/index.html").exists()
-    # Maintenance and the fleet restart were not skipped by the build failure.
-    config = hermes_yaml.safe_load((home / "config.yaml").read_text())
+    assert not (source / "ui-tui/dist/entry.js").exists()
+    # Actual encrypted config migration was not skipped by the build failure.
+    config = read_yaml(home / "config.yaml", purpose="config")
     assert config["_config_version"] == DEFAULT_CONFIG["_config_version"]
     assert config["model"]["default"] == "retained-model"
-    assert (source / "restarted-plan.json").is_file()
     assert context.read_bytes() == context_before
-    receipt = json.loads((home / "logs/update_receipts/latest.json").read_text())
+    receipt = _receipt(home)
     assert receipt["outcome"] == "success"
     assert [row["step"] for row in receipt["followups"]] == ["build"]
     # Only a build follow-up marks the build stage failed (an owed config/dependency step does not).

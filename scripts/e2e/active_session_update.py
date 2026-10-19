@@ -15,7 +15,7 @@ import secrets
 import subprocess
 import sys
 
-from scripts.e2e.active_update_proof import GET_COMMAND, SET_COMMAND, UPDATE_COMMAND, prefix_hash, verify_calls
+from scripts.e2e.active_update_proof import GET_COMMAND, SET_COMMAND, UPDATE_COMMAND, paired_calls, prefix_hash, verify_calls
 
 
 class Acceptance:
@@ -85,6 +85,70 @@ class Acceptance:
             db.row_factory = sqlite.row_class()
             return [dict(row) for row in db.execute("SELECT id,parent_session_id FROM sessions")]
 
+    def delegation_rows(self):
+        from hermes_security import sqlite
+        path = self.home / "state.db"
+        if not path.exists():
+            return []
+        with sqlite.connect(f"file:{path}?mode=ro", uri=True) as db:
+            db.row_factory = sqlite.row_class()
+            return [dict(row) for row in db.execute(
+                "SELECT delegation_id,parent_session_id,state,completed_at,result_json FROM async_delegations")]
+
+    def capture_proof(self):
+        import hashlib
+        from hermes_security.io import read_json
+        from hermes_cli.update_receipt import read_latest_receipt
+
+        def select(record, names):
+            return {name: record[name] for name in names if name in record}
+
+        def result_view(result):
+            view = select(result, ("status", "mode", "delegation_id", "subagent_ids", "session_id",
+                                   "exit_code"))
+            if result.get("command") in {UPDATE_COMMAND, GET_COMMAND, SET_COMMAND}:
+                view["command"] = result["command"]
+            if "output" in result:
+                output = str(result["output"])
+                view["output_sha256"] = hashlib.sha256(output.encode()).hexdigest()
+                if output.strip() == "23":
+                    view["config_value"] = "23"
+            if isinstance(result.get("results"), list):
+                view["results"] = [select(entry, ("task_index", "status")) for entry in result["results"]]
+            return view
+
+        calls = []
+        for pair in paired_calls(self.messages()):
+            calls.append({**select(pair, ("session_id", "message_id", "name")),
+                "args": {**select(pair["args"], ("action", "session_id")),
+                         **({"command": pair["args"]["command"]}
+                            if pair["args"].get("command") in {UPDATE_COMMAND, GET_COMMAND, SET_COMMAND} else {})},
+                "result": result_view(pair["result"])})
+        delegations = []
+        for row in self.delegation_rows():
+            delegations.append({**select(row, ("delegation_id", "parent_session_id", "state", "completed_at")),
+                                "result": result_view(json.loads(row["result_json"] or "{}"))})
+        snapshot = {"baseline": self.args.baseline, "candidate": self.args.candidate,
+            "source_head": self.head(), "parent_session_id": self.parent_id,
+            "sessions": self.session_rows(), "calls": calls, "delegations": delegations,
+            "child_identities": self.observer_identities(),
+            "update_receipt": select(read_latest_receipt() or {},
+                ("update_id", "outcome", "finished_at")),
+            "processes": [select(read_json(path, purpose="state"),
+                ("id", "parent_session_id", "exit_code"))
+                for path in (self.home / "logs/process-results").glob("proc_*.json")]}
+        encoded = json.dumps(snapshot, indent=2, sort_keys=True)
+        for secret in (self.password, *self.secret_values):
+            if secret:
+                encoded = encoded.replace(secret, "<fixture-secret-redacted>")
+        (self.evidence / "durable-tool-proof.json").write_text(encoded)
+        self.receipt["durable_tool_proof_sha256"] = hashlib.sha256(encoded.encode()).hexdigest()
+
+    def observer_identities(self):
+        from scripts.e2e.active_update_observer import read_identities
+        path = getattr(self, "observer_path", None)
+        return read_identities(path) if path is not None else []
+
     def runtime_identity(self):
         import psutil
         from hermes_cli.update_lock import _is_runtime_host
@@ -114,6 +178,9 @@ class Acceptance:
         from tests.tui_runtime.test_terminal_model_pty import TerminalPTY
         if self.args.baseline == self.args.candidate or self.head() != self.args.baseline:
             raise RuntimeError("the controlled native install must start at the exact distinct baseline")
+        from scripts.e2e.active_update_observer import install_observer
+        self.observer_path = install_observer(self.home, self.evidence)
+        self.receipt["instrumentation"] = "fixture-owned subagent_start identity-only observer installed before session"
         before_ids = {row["id"] for row in self.session_rows()}
         self.terminal = TerminalPTY(self.env, self.password, self.evidence / "ink-transcript.log",
             argv=[str(self.args.launcher.resolve()), "chat", "--yolo", "--accept-hooks", "--toolsets", "terminal,file,delegation"],
@@ -132,7 +199,7 @@ class Acceptance:
         identity = self.runtime_identity()
         prefix = [row for row in self.messages() if row["session_id"] == parent]
         self.receipt.update(parent_session_id=parent, runtime_before=identity, durable_prefix_sha256=prefix_hash(prefix))
-        self.phase("Use terminal to run this exact foreground command, timeout=2400: `" + UPDATE_COMMAND +
+        self.phase("Use terminal to run this exact foreground command, timeout=600: `" + UPDATE_COMMAND +
                    "`. It updates THIS controlled install. Do not substitute --check, combine shell commands, "
                    "restart this session, or pass a password/key. Only after it succeeds, reply exactly ACTIVE-UPDATED.",
                    "ACTIVE-UPDATED", timeout=3000)
@@ -165,7 +232,9 @@ class Acceptance:
         if [row for row in rows if row["id"] in {item["id"] for item in prefix}] != prefix:
             raise RuntimeError("the original durable prompt prefix was changed by the active update")
         children = {row["id"] for row in self.session_rows() if row["parent_session_id"] == parent}
-        calls = verify_calls(rows, parent, children)
+        from scripts.e2e.active_update_observer import read_identities
+        calls = verify_calls(rows, parent, children, delegations=self.delegation_rows(),
+                             child_links=read_identities(self.observer_path))
         receipt = read_latest_receipt() or {}
         if receipt.get("outcome") != "success" or not receipt.get("finished_at") or not receipt.get("post_update") or receipt.get("followups"):
             raise RuntimeError("the actual child updater did not publish a settled successful receipt")
@@ -201,8 +270,19 @@ class Acceptance:
             self.receipt["terminal_process_reaped"] = bool(self.terminal and self.terminal.process.poll() is not None)
             if not self.receipt["cleanup_verified"] or forced:
                 self.receipt["status"] = "failed"
-            self.vault.lock_now(self.home)
-            (self.evidence / "receipt.json").write_text(json.dumps(self.receipt, indent=2))
+            previous_status, self.receipt["status"] = self.receipt["status"], "failed"
+            try:
+                self.capture_proof()
+                self.receipt["status"] = previous_status
+            except Exception as error:
+                self.receipt["proof_capture_error"] = type(error).__name__
+                # Keep the original product/grade failure reason alongside evidence failure.
+                if previous_status != "failed":
+                    self.receipt["error"] = "DurableProofCaptureFailed"
+                raise
+            finally:
+                self.vault.lock_now(self.home)
+                (self.evidence / "receipt.json").write_text(json.dumps(self.receipt, indent=2))
 
 
 def main():

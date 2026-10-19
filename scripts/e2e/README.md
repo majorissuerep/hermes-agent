@@ -196,3 +196,17 @@ second unlock. It exits Ink normally and checks independent locked-owner refusal
 The sanitized PTY transcript and receipt distinguish this from private-RPC-only
 proof; `--kind strict-fixture` is not live-provider qualification. The caller still
 owns dedicated-key revocation and disposable namespace cleanup.
+
+The update tool uses the native 600-second foreground ceiling, not an over-cap
+request that the terminal correctly promotes to background. A spawn acknowledgement's
+zero exit code is never command-completion proof. Explicit background grading additionally
+requires the exact process id in a paired successful wait and a same-parent durable process
+receipt. Native TUI delegation joins the actual dispatched delegation id to its same-parent
+completed SQLCipher ledger row and successful child results; inline results are not assumed.
+A fixture-owned plugin is enabled before session start and observes only the native
+`subagent_start` parent/session/subagent identifiers. Ordered dispatch IDs and completed
+task indexes must join those identities to the actual SQLCipher child performing the read;
+missing or unrelated hook observations fail qualification.
+Before dropping vault authority, the driver writes a sanitized `durable-tool-proof.json`
+containing only the tool graph, ownership/receipt rows and source identity, with a SHA-256
+in the receipt. The original grade is immutable; any later grading must identify itself separately.

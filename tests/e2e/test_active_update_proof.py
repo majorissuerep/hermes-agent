@@ -21,14 +21,14 @@ def _delegation():
              "content": None, "tool_calls": json.dumps([{"id": "delegated", "function": {
                  "name": "delegate_task", "arguments": "{}"}}])},
             {"id": 8, "session_id": "parent", "role": "tool", "tool_call_id": "delegated",
-             "tool_calls": None, "content": json.dumps({"results": [{"status": "completed", "summary": "23"}]})}]
+             "tool_calls": None, "content": json.dumps(_dispatch())}]
 
 
 def test_successful_update_requires_later_parent_and_child_native_calls():
     rows = (_call(1, "parent", UPDATE_COMMAND) + _call(3, "parent", SET_COMMAND) +
             _call(5, "child", GET_COMMAND))
     rows += _delegation()
-    proof = verify_calls(rows, "parent", {"child"})
+    proof = verify_calls(rows, "parent", {"child"}, delegations=_receipts(), child_links=_links())
     assert proof["successful_update_calls"] == 1
     assert proof["post_update_parent_config_writes"] == proof["post_update_child_config_reads"] == 1
 
@@ -68,3 +68,120 @@ def test_child_rows_without_completed_parent_delegate_tool_do_not_qualify(result
         rows[-1]["content"] = json.dumps(result)
     with pytest.raises(RuntimeError, match="actual delegate_task"):
         verify_calls(rows, "parent", {"child"})
+
+
+def _tool(number, session, name, args, result):
+    identity = f"native-{number}"
+    return [{"id": number, "session_id": session, "role": "assistant", "tool_call_id": None,
+             "tool_calls": json.dumps([{"id": identity, "function": {"name": name, "arguments": json.dumps(args)}}])},
+            {"id": number + 1, "session_id": session, "role": "tool", "tool_call_id": identity,
+             "tool_calls": None, "content": json.dumps(result)}]
+
+
+def _async_delegation_case():
+    rows = (_call(1, "parent", UPDATE_COMMAND) + _call(3, "parent", SET_COMMAND) + _call(5, "child", GET_COMMAND))
+    rows += _tool(7, "parent", "delegate_task", {"goal": "read config"},
+                  {"status": "dispatched", "mode": "background", "delegation_id": "delegation-owned", "subagent_ids": ["sa-owned"]})
+    receipts = [{"delegation_id": "delegation-owned", "parent_session_id": "parent", "state": "completed",
+                 "completed_at": 123.5, "result_json": json.dumps({"results": [{"task_index": 0, "status": "completed"}]})}]
+    return rows, receipts
+
+
+def test_native_async_delegation_requires_joined_durable_completion():
+    rows, receipts = _async_delegation_case()
+    assert verify_calls(rows, "parent", {"child"}, delegations=receipts, child_links=_links())["completed_parent_delegations"] == 1
+
+
+@pytest.mark.parametrize("field,value", [
+    ("delegation_id", "some-other-delegation"), ("parent_session_id", "another-owner"),
+    ("state", "running"), ("completed_at", None),
+    ("result_json", '{"results": []}'), ("result_json", '{"results": [{"status": "failed"}]}'),
+])
+def test_dispatch_words_or_foreign_unfinished_ledger_cannot_qualify(field, value):
+    rows, receipts = _async_delegation_case()
+    receipts[0][field] = value
+    with pytest.raises(RuntimeError, match="actual delegate_task"):
+        verify_calls(rows, "parent", {"child"}, delegations=receipts, child_links=_links())
+
+
+def _background_update_case():
+    rows = _tool(1, "parent", "terminal", {"command": UPDATE_COMMAND},
+                 {"session_id": "proc_owned", "exit_code": 0, "output": "Background process started"})
+    rows += _tool(3, "parent", "process_manage", {"action": "wait", "session_id": "proc_owned"},
+                  {"status": "exited", "command": UPDATE_COMMAND, "exit_code": 0})
+    rows += _call(5, "parent", SET_COMMAND) + _call(7, "child", GET_COMMAND)
+    rows += _tool(9, "parent", "delegate_task", {}, _dispatch())
+    processes = [{"id": "proc_owned", "command": UPDATE_COMMAND, "parent_session_id": "parent", "exit_code": 0}]
+    return rows, processes
+
+
+def test_background_spawn_requires_explicit_mode_and_same_owned_completed_wait():
+    rows, processes = _background_update_case()
+    with pytest.raises(RuntimeError, match="foreground update required"):
+        verify_calls(rows, "parent", {"child"}, processes=processes)
+    proof = verify_calls(rows, "parent", {"child"}, processes=processes, allow_background_update=True,
+                     delegations=_receipts(), child_links=_links())
+    assert proof["update_mode"] == "background-joined"
+    assert proof["update_message_id"] == 4
+
+
+@pytest.mark.parametrize("defect", ["wrong-wait-id", "fake-wait", "wrong-receipt-id", "foreign-owner", "failed", "missing"])
+def test_any_zero_exit_or_unjoined_process_cannot_qualify_background_update(defect):
+    rows, processes = _background_update_case()
+    if defect == "wrong-wait-id":
+        calls = json.loads(rows[2]["tool_calls"])
+        calls[0]["function"]["arguments"] = json.dumps({"action": "wait", "session_id": "proc_unrelated"})
+        rows[2]["tool_calls"] = json.dumps(calls)
+    elif defect == "fake-wait":
+        rows[3]["content"] = json.dumps({"status": "running", "command": UPDATE_COMMAND, "exit_code": 0})
+    elif defect == "wrong-receipt-id":
+        processes[0]["id"] = "proc_unrelated"
+    elif defect == "foreign-owner":
+        processes[0]["parent_session_id"] = "other"
+    elif defect == "failed":
+        processes[0]["exit_code"] = 2
+    else:
+        processes.clear()
+    with pytest.raises(RuntimeError, match="same owned process"):
+        verify_calls(rows, "parent", {"child"}, processes=processes, allow_background_update=True,
+                     delegations=_receipts(), child_links=_links())
+
+
+def _links():
+    return [{"parent_session_id": "parent", "child_session_id": "child", "child_subagent_id": "sa-owned"}]
+
+
+@pytest.mark.parametrize("defect", ["wrong-dispatch", "foreign-child", "missing-hook", "wrong-index"])
+def test_completed_unrelated_children_cannot_qualify(defect):
+    rows, receipts = _async_delegation_case()
+    links = _links()
+    if defect == "wrong-dispatch":
+        value = json.loads(rows[-1]["content"])
+        value["subagent_ids"] = ["sa-foreign"]
+        rows[-1]["content"] = json.dumps(value)
+    elif defect == "foreign-child":
+        links[0]["child_session_id"] = "unrelated-child"
+    elif defect == "missing-hook":
+        links = []
+    else:
+        receipts[0]["result_json"] = json.dumps({"results": [{"task_index": 9, "status": "completed"}]})
+    with pytest.raises(RuntimeError, match="actual delegate_task"):
+        verify_calls(rows, "parent", {"child"}, delegations=receipts, child_links=links)
+
+
+def _dispatch():
+    return {"status": "dispatched", "mode": "background", "delegation_id": "delegation-owned",
+            "subagent_ids": ["sa-owned"]}
+
+
+def _receipts():
+    return [{"delegation_id": "delegation-owned", "parent_session_id": "parent", "state": "completed",
+             "completed_at": 123.5,
+             "result_json": json.dumps({"results": [{"task_index": 0, "status": "completed"}]})}]
+
+
+def test_inline_completion_cannot_bypass_native_dispatch_identity_proof():
+    rows, receipts = _async_delegation_case()
+    rows[-1]["content"] = json.dumps({"results": [{"task_index": 0, "status": "completed"}]})
+    with pytest.raises(RuntimeError, match="actual delegate_task"):
+        verify_calls(rows, "parent", {"child"}, delegations=receipts, child_links=_links())
