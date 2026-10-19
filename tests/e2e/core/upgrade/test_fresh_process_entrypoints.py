@@ -50,7 +50,7 @@ from tests.e2e.core.upgrade._helpers import (
     sandbox_required_reason,
 )
 from tests.fakes.fake_llm_provider import FakeLLMServer, Text, write_hermes_home
-from tests.e2e.vault_home import connect_state, prepare_fixture_runtime
+from tests.e2e.vault_home import connect_state, prepare_fixture_runtime, prepare_fixture_tui
 from hermes_security import vault
 from hermes_security.handoff import prepare_child_key
 
@@ -590,7 +590,8 @@ def test_pre_handoff_updater_stale_graph_imports_post_update_modules(tmp_path):
     tag, _purge_file = found
     old_manifest = _git("show", f"{tag}:pyproject.toml")
     assert old_manifest.returncode == 0, old_manifest.stderr
-    old_deps = tomllib.loads(old_manifest.stdout)["project"]["dependencies"]
+    old_project = tomllib.loads(old_manifest.stdout)
+    old_deps = old_project["project"]["dependencies"]
     # The old updater starts under its installed dependencies, then switches code in place.
     # The current test environment deliberately lacks PyYAML; provision the legacy direct
     # requirement in an isolated PM environment rather than mutating the test interpreter.
@@ -604,8 +605,9 @@ def test_pre_handoff_updater_stale_graph_imports_post_update_modules(tmp_path):
         root=tmp_path / "legacy-deps", explicit=True,
     )
     pkg_tops = sorted({p.split(".")[0] for p in PYPROJECT["tool"]["setuptools"]["packages"]["find"]["include"]})
+    old_pkg_tops = {p.split(".")[0] for p in old_project["tool"]["setuptools"]["packages"]["find"]["include"]}
     old_entries = [n for n in _git("ls-tree", "--name-only", tag).stdout.split()
-                   if n.endswith(".py") or n in pkg_tops]
+                   if n.endswith(".py") or n in old_pkg_tops]
     checkout = tmp_path / "checkout"
     checkout.mkdir()
     archive = subprocess.run(["git", "archive", "--format=tar", tag, "--", *old_entries], cwd=str(WORKTREE),
@@ -803,7 +805,8 @@ def test_entrypoint_in_a_fresh_process(case, tmp_path, request):
     with FakeLLMServer([Text(reply)]) as srv:
         write_hermes_home(hermes_home, srv.base_url)
         request.addfinalizer(lambda: vault.lock_now(hermes_home))
-        prepare_fixture_runtime(hermes_home, WORKTREE)
+        prepare = prepare_fixture_tui if entry.tty else prepare_fixture_runtime
+        prepare(hermes_home, WORKTREE)
         env.pop("HERMES_ALLOW_NO_VAULT", None)
         config_before = (hermes_home / "config.yaml").read_bytes()
         args = [*entry.args, canary] if entry.turn else list(entry.args)

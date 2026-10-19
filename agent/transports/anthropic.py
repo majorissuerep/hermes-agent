@@ -20,6 +20,11 @@ def _unprefix_oauth_tool_name(name: str) -> str:
     for candidate in (name, "mcp_" + bare, bare):
         if _tool_registry.get_entry(candidate):
             return candidate
+    # Bridge tools are assembled per call, not registered like executable tools.
+    from tools.tool_search_catalog import BRIDGE_TOOL_NAMES
+
+    if bare in BRIDGE_TOOL_NAMES:
+        return bare
     return _OAUTH_TOOL_NAME_REVERSE_ALIASES.get(bare, name)
 
 

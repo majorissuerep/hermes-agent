@@ -38,9 +38,12 @@ def test_bridge_name_slots_decode_without_changing_opaque_arguments(oauth, form)
     response = _make_response(_make_tool_use_block("mcp__tool_describe", input_data=describe),
                               _make_tool_use_block("mcp__tool_call", input_data=calls),
                               _make_tool_use_block("mcp__tool_describe", input_data=scalar))
-    registry = _FakeRegistry({"tool_describe", "tool_call", "session_search", "memory"})
+    registry = _FakeRegistry({"session_search", "memory"})
     with patch("tools.registry.registry", registry):
         result = AnthropicTransport().normalize_response(response, strip_tool_prefix=oauth)
+    assert [call.name for call in result.tool_calls] == (
+        ["tool_describe", "tool_call", "tool_describe"] if oauth else
+        ["mcp__tool_describe", "mcp__tool_call", "mcp__tool_describe"])
     arguments = [json.loads(call.arguments) for call in result.tool_calls]
     mapped = {"name": "session_search", "arguments": {"query": "chat_history_lookup"}}
     expected_call = {"calls": {"list": [mapped], "object": mapped, "json": json.dumps([mapped])}.get(form)}
@@ -57,7 +60,7 @@ def test_bridge_registered_alias_name_keeps_registry_precedence():
 
     response = _make_response(_make_tool_use_block("mcp__tool_describe",
                                                   input_data={"names": ["chat_history_lookup"]}))
-    registry = _FakeRegistry({"tool_describe", "session_search", "chat_history_lookup"})
+    registry = _FakeRegistry({"session_search", "chat_history_lookup"})
     with patch("tools.registry.registry", registry):
         result = AnthropicTransport().normalize_response(response, strip_tool_prefix=True)
     assert json.loads(result.tool_calls[0].arguments) == {"names": ["chat_history_lookup"]}

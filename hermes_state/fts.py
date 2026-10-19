@@ -12,7 +12,7 @@ from typing import Sequence
 from hermes_constants import get_hermes_home
 from hermes_state.common import (FTS_CJK_STALE_KEY, FTS_STALE_KEY, _FTS_CJK_TRIGGERS, _FTS_TRIGGERS,
     routed_sessions_setting)
-from hermes_state.errors import is_fts_scoped_corruption_error, is_sqlite_lock_error
+from hermes_state.errors import is_fts_scoped_corruption_error, is_malformed_db_error, is_sqlite_lock_error
 
 # caplog tests pin the "hermes_state" logger name.
 logger = logging.getLogger("hermes_state")
@@ -351,6 +351,36 @@ class SessionFtsSetupMixin:
         gateway transcript retry: see :func:`hermes_state.errors.is_fts_scoped_corruption_error`."""
         return is_fts_scoped_corruption_error(exc)
 
+    def _prove_unscoped_fts_corruption(self, conn, deadline: float) -> bool:
+        """SQLCipher can flatten CORRUPT_VTAB to CORRUPT; prove scope under the write lock.
+
+        An integrity report must name ONLY derived FTS objects, every other table
+        must independently pass integrity checks, and encrypted pages must authenticate.
+        No content is repaired here. An incomplete/timed-out proof refuses recovery.
+        """
+        if time.monotonic() >= deadline:
+            return False
+        conn.set_progress_handler(lambda: int(time.monotonic() >= deadline), 1000)
+        try:
+            reports = [str(row[0]) for row in conn.execute("PRAGMA integrity_check")]
+            if not reports or not all(is_fts_scoped_corruption_error(report) for report in reports):
+                return False
+            if time.monotonic() >= deadline or conn.execute("PRAGMA cipher_integrity_check").fetchall():
+                return False
+            tables = [row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")]
+            for name in tables:
+                if name in self._FTS_TABLES:
+                    continue
+                quoted = str(name).replace("'", "''")
+                results = conn.execute(f"PRAGMA integrity_check('{quoted}')").fetchall()
+                if [row[0] for row in results] != ["ok"]:
+                    return False
+            return conn.in_transaction and time.monotonic() < deadline
+        except sqlite3.Error:
+            return False
+        finally:
+            conn.set_progress_handler(None, 0)
+
     def _enter_fts_fail_open(
         self, exc: sqlite3.DatabaseError, *, deadline: float | None = None, patience_s: float | None = None,
     ) -> bool:
@@ -362,7 +392,12 @@ class SessionFtsSetupMixin:
         ``_WRITE_PATIENCE_S``), like ``_execute_write``: the writer connection's busy
         timeout is only 1 s, and the usual holder is a sibling writer detaching the
         same corrupt index — giving up after 1 s cost that turn's canonical write."""
-        if not self._fts_enabled or not self._is_fts_write_corruption_error(exc):
+        scoped = self._is_fts_write_corruption_error(exc)
+        unscoped_candidate = (
+            getattr(exc, "sqlite_errorcode", None) in (None, sqlite3.SQLITE_CORRUPT)
+            and (is_malformed_db_error(exc) or is_fts_scoped_corruption_error(str(exc)))
+        )
+        if not self._fts_enabled or not (scoped or unscoped_candidate):
             return False
         if patience_s is None:
             patience_s = self._WRITE_PATIENCE_S
@@ -379,6 +414,9 @@ class SessionFtsSetupMixin:
                         self._reopen_after_close_locked(context="write")
                     self._conn.execute("BEGIN IMMEDIATE")
                     try:
+                        if not scoped and not self._prove_unscoped_fts_corruption(self._conn, deadline):
+                            self._conn.rollback()
+                            return False
                         self._conn.execute(
                             "INSERT INTO state_meta (key, value) VALUES (?, '1') "
                             "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
