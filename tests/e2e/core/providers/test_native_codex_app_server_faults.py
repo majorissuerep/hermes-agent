@@ -13,8 +13,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
-from tests.e2e.core._pending_fixes import known_gate
-from tests.e2e.core.providers._native_helpers import KnownSymptom, messages, wait_until
+from tests.e2e.core.providers._native_helpers import messages, wait_until
 from tests.fakes.providers.codex_app_server import CodexRun, pid_alive, run_codex_scenario
 
 pytestmark = [
@@ -23,17 +22,6 @@ pytestmark = [
     # bypass covers its SIGKILL fallback for anything still alive (reparented to init by then).
     pytest.mark.live_system_guard_bypass,
 ]
-
-# Red on current main for a tracked, open bug: key -> (the bug's own failure-message pattern, reason).
-KNOWN: dict[str, tuple[str, str]] = {
-    "q_approval": (r"^approval parked \d+\.\ds on a prompt nobody can answer in -q",
-                   "#121296 approval in `chat -q` waits the full approvals.timeout instead of single_query_mode"),
-    # The poll itself raises the symptom; anchor on its own subject so no other wait can match.
-    "orphan": (r"^timed out after [\d.]+s waiting for app-server descendant \d+ to be reaped after CLI exit",
-               "#121298 `chat -q` exit never closes the codex session; own-session descendants orphaned"),
-    "failed_hidden": (r"^turn failure reason never shown to the user: ",
-                      "#121299 failed turn after an agentMessage prints the message and hides the reason"),
-}
 
 YOLO = ["--yolo"]
 APPROVAL_TIMEOUT_S = 8
@@ -111,9 +99,7 @@ def test_will_retry_error_notification_is_not_terminal(runs):
 def test_failed_turn_after_agent_message_surfaces_reason(runs):
     run = runs["failed_hidden"]
     assert run.results[0].returncode != 0 and "PARTIAL-B" in run.results[0].stdout, run.results[0].describe()
-    with known_gate(KNOWN, "failed_hidden", raises=KnownSymptom):
-        if "FAIL-MARKER-89" not in run.output:
-            raise KnownSymptom(f"turn failure reason never shown to the user: {run.output!r}")
+    assert "FAIL-MARKER-89" in run.output, f"turn failure reason never shown to the user: {run.output!r}"
 
 
 def test_single_query_approval_resolves_without_waiting_for_a_human(runs):
@@ -126,9 +112,7 @@ def test_single_query_approval_resolves_without_waiting_for_a_human(runs):
     reply = replies[0]
     assert reply["msg"]["id"] == sent[0]["msg"]["id"] and not reply.get("violation"), reply
     waited = reply["t"] - sent[0]["t"]
-    with known_gate(KNOWN, "q_approval", raises=KnownSymptom):
-        if waited >= APPROVAL_TIMEOUT_S / 2:
-            raise KnownSymptom(f"approval parked {waited:.1f}s on a prompt nobody can answer in -q")
+    assert waited < APPROVAL_TIMEOUT_S / 2, f"approval parked {waited:.1f}s on a prompt nobody can answer in -q"
 
 
 def test_permissions_request_reply_matches_protocol(runs):
@@ -144,6 +128,5 @@ def test_cli_exit_reaps_app_server_descendants(runs):
     assert run.results[0].returncode == 0 and "REAP-DONE" in run.results[0].stdout, run.results[0].describe()
     children = run.fake.grandchild_pids()
     assert len(children) == 1, f"the fake must have spawned exactly one descendant: {children}"
-    with known_gate(KNOWN, "orphan", raises=KnownSymptom):
-        wait_until(lambda: not pid_alive(children[0]), 3.0,
-                   f"app-server descendant {children[0]} to be reaped after CLI exit", error=KnownSymptom)
+    wait_until(lambda: not pid_alive(children[0]), 3.0,
+               f"app-server descendant {children[0]} to be reaped after CLI exit")
