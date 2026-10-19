@@ -336,6 +336,14 @@ jobs:
           test-environment: 'true'
           prune-python-cache: true
 
+      - name: Build the Ink TUI for fresh entrypoint acceptance
+        if: matrix.shard == 'core'
+        # This shard starts the public interactive module in a fresh process;
+        # its fixture requires the canonical compiler receipt before measuring it.
+        uses: ./.github/actions/retry
+        with:
+          command: npm ci --workspace ui-tui --ignore-scripts --no-audit --no-fund && npm run build --workspace ui-tui
+
       - name: Install bubblewrap
         # Every spawned updater runs in bwrap (own PID namespace, no user
         # systemd bus, only the test tmp writable). Ubuntu 24.04 restricts
