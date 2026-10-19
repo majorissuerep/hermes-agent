@@ -17,7 +17,7 @@ import { WHEEL_SCROLL_STEP } from '../config/limits.js'
 import { RESIZE_COALESCE_MS } from '../config/timing.js'
 import { hasLeadGap, prevRenderedMsg } from '../domain/blockLayout.js'
 import { SECTION_NAMES, sectionMode } from '../domain/details.js'
-import { composeTabTitle, fmtProjectCwdBranch, shortCwd } from '../domain/paths.js'
+import { fmtProjectCwdBranch } from '../domain/paths.js'
 import type { SubagentListResponse } from '../gatewayTypes.js'
 import type {
   AnyGatewayEvent,
@@ -57,6 +57,7 @@ import { $goodVibesTick } from './petFlashStore.js'
 import { applyProcessSnapshot, type ProcessEntry } from './processRoster.js'
 import { scrollWithSelectionBy } from './scroll.js'
 import { respondToServerRequest } from './serverRequestStore.js'
+import { terminalSessionTitles, titleFromActiveSessions } from './sessionTitles.js'
 import { captureDestination, isCurrentDestination, type SubmissionDestination } from './submissionDestination.js'
 import { turnController } from './turnController.js'
 import { patchTurnState, useTurnSelector } from './turnStore.js'
@@ -66,11 +67,7 @@ import { useComposerState } from './useComposerState.js'
 import { useConfigSync } from './useConfigSync.js'
 import { shouldDetachEditedHistoryInput, useInputHandlers } from './useInputHandlers.js'
 import { useLongRunToolCharms } from './useLongRunToolCharms.js'
-import {
-  backendGaveUp,
-  backendGaveUpActivity,
-  lastStderrLine
-} from './userMessages.js'
+import { backendGaveUp, backendGaveUpActivity, lastStderrLine } from './userMessages.js'
 import { useSessionLifecycle } from './useSessionLifecycle.js'
 import { useSubmission } from './useSubmission.js'
 const BRACKET_PASTE_ON = '\x1b[?2004h'
@@ -725,7 +722,9 @@ export function useMainApp(gw: LocalAgentClient) {
           }
         })
         .catch(() => {})
-      requestLiveSessions(gw, getUiState().sid)
+      const requestedSid = getUiState().sid
+      const requestedTitle = getUiState().sessionTitle
+      requestLiveSessions(gw, requestedSid)
         .then(raw => {
           const result = asRpcResult<SessionActiveListResponse>(raw)
 
@@ -735,7 +734,15 @@ export function useMainApp(gw: LocalAgentClient) {
             // titlebar. The active_list poll already carries it, so no extra
             // round-trip is needed.
             const currentSid = getUiState().sid
-            const sessionTitle = result.sessions.find(s => s.current || s.id === currentSid)?.title?.trim() ?? ''
+
+            const sessionTitle = titleFromActiveSessions(
+              result.sessions,
+              requestedSid,
+              currentSid,
+              getUiState().sessionTitle,
+              requestedTitle
+            )
+
             // Only patch when something actually changed. patchUiState always
             // produces a new state object, which notifies every $uiState
             // subscriber; patching unconditionally on each 1.5s poll re-renders
@@ -763,14 +770,7 @@ export function useMainApp(gw: LocalAgentClient) {
   const model = ui.info?.model?.replace(/^.*\//, '') ?? ''
   const marker = overlay.approval || overlay.clarify || hasSensitivePrompt(overlay) ? '⚠' : ui.busy ? '⏳' : '✓'
   const tabCwd = ui.info?.cwd
-  useTerminalTitle(
-    model
-      ? {
-          tab: composeTabTitle(marker, ui.sessionTitle, '', ''),
-          window: composeTabTitle(marker, ui.sessionTitle, model, tabCwd ? shortCwd(tabCwd, 24) : '')
-        }
-      : 'Hermes'
-  )
+  useTerminalTitle(terminalSessionTitles(marker, ui.sessionTitle, ui.sid, model, tabCwd ?? ''))
   useEffect(() => {
     if (!ui.sid || !stdout) {
       return

@@ -301,23 +301,41 @@ What happens:
 
 ## Session Naming
 
-Give sessions human-readable titles so you can find and resume them easily.
+Session names identify your conversation in the TUI, saved history, and terminal
+tab/window on Linux and macOS. A new terminal shows its working directory and a
+short session identifier until the conversation has a name.
 
 ### Auto-Generated Titles
 
-Hermes automatically generates a short descriptive title (3–7 words) for each session after the first exchange. This runs in a background thread using a fast auxiliary model, so it adds no latency. You'll see auto-generated titles when browsing sessions with `hermes sessions list` or `hermes sessions browse`.
+The opening message supplies an immediate descriptive name. If automatic title
+generation is enabled, a background auxiliary model can refine it to a short
+title. The name updates in the TUI and terminal without waiting for the next
+message. A slow or unavailable naming model does not block the conversation;
+the initial name remains usable.
 
-Auto-titling only fires once per session and is skipped if you've already set a title manually.
+Automatic naming never overwrites a manually chosen name. Renaming changes
+session metadata, not the model's conversation history or cached prompt prefix.
 
 ### Setting a Title Manually
 
-Use the `/title` slash command inside any chat session (CLI or gateway):
+Use these commands in the local TUI:
 
-```
-/title my research project
-```
+| Command | Result |
+| --- | --- |
+| `/name` | Ask the naming model for a concise name from this conversation |
+| `/name my research project` | Set a name directly, without a model call |
+| `/rename my research project` | Alias for `/name my research project` |
+| `/title my research project` | Set the same saved name directly |
+| `/title` | Show the current saved name |
+| `/new my next project` | Start a separate conversation with an explicit name |
 
-The title is applied immediately. If the session hasn't been created in the database yet (e.g., you run `/title` before sending your first message), it's queued and applied once the session starts.
+You can set a name before sending the first message. Bare `/name` needs existing
+conversation text. It uses this session's profile and auxiliary-model settings;
+while it works, a later manual rename takes precedence over its delayed result.
+
+The short name goes to the terminal's tab title and the fuller name/model/path
+to its window title. Terminal title changes must be enabled in your terminal
+profile; an explicitly fixed tab title can override application updates.
 
 You can also rename existing sessions from the command line:
 
@@ -341,13 +359,6 @@ When a session's context is compressed (manually via `/compress` or automaticall
 ```
 
 When you resume by name (`hermes -c "my project"`), it automatically picks the most recent session in the lineage.
-
-### /title in Messaging Platforms
-
-The `/title` command works in all gateway platforms (Telegram, Discord, Slack, WhatsApp):
-
-- `/title My Research` — set the session title
-- `/title` — show the current title
 
 ## Session Management Commands
 

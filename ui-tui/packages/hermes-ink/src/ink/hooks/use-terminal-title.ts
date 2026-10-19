@@ -22,30 +22,30 @@ import { TerminalWriteContext } from '../useTerminalNotification.js'
  */
 export function useTerminalTitle(title: string | TerminalTitlePair | null): void {
   const writeRaw = useContext(TerminalWriteContext)
+  const enabled = title !== null
+  const separate = typeof title === 'object' && title !== null
+  const tab = stripAnsi(typeof title === 'string' ? title : (title?.tab ?? ''))
+  const window = stripAnsi(typeof title === 'string' ? title : (title?.window ?? ''))
 
   useEffect(() => {
-    if (title === null || !writeRaw) {
+    if (!enabled || !writeRaw) {
       return
     }
 
     if (process.platform === 'win32') {
-      const clean = stripAnsi(typeof title === 'string' ? title : (title.window ?? title.tab ?? ''))
-      process.title = clean
+      process.title = window || tab
 
       return
     }
 
-    if (typeof title === 'string') {
-      writeRaw(osc(OSC.SET_TITLE_AND_ICON, stripAnsi(title)))
+    if (!separate) {
+      writeRaw(osc(OSC.SET_TITLE_AND_ICON, window))
 
       return
     }
 
     // Separate tab (OSC 1) and window (OSC 2) titles so narrow tab bars
     // show the short session name instead of a truncated tail.
-    const tab = stripAnsi(title.tab ?? '')
-    const window = stripAnsi(title.window ?? '')
-
     if (tab && window) {
       writeRaw(osc(OSC.SET_ICON, tab) + osc(OSC.SET_TITLE, window))
     } else if (window) {
@@ -53,7 +53,7 @@ export function useTerminalTitle(title: string | TerminalTitlePair | null): void
     } else if (tab) {
       writeRaw(osc(OSC.SET_TITLE_AND_ICON, tab))
     }
-  }, [title, writeRaw])
+  }, [enabled, separate, tab, window, writeRaw])
 }
 
 export interface TerminalTitlePair {

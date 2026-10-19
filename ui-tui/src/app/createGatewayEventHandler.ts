@@ -1020,6 +1020,13 @@ export function createGatewayEventHandler(ctx: GatewayEventHandlerContext): (ev:
         applySessionInfo(ev.payload, { appendMessage, setHistoryItems, setStatus })
 
         return
+
+      case 'session.title':
+        if (sid && ev.session_id === sid && typeof ev.payload?.title === 'string') {
+          patchUiState({ sessionTitle: ev.payload.title.trim() })
+        }
+
+        return
       case 'session.usage': {
         // Live usage tick while a turn runs (see tui_runtime
         // _start_usage_ticker) — keeps the status-bar context window current

@@ -191,7 +191,7 @@ export function useSessionLifecycle(opts: UseSessionLifecycleOptions) {
     turnController.fullReset()
     setVoiceRecording(false)
     setVoiceProcessing(false)
-    patchUiState({ bgTasks: new Set(), info: null, sid: null, storedSid: null, usage: ZERO })
+    patchUiState({ bgTasks: new Set(), info: null, sessionTitle: '', sid: null, storedSid: null, usage: ZERO })
     setHistoryItems([])
     setLastUserMsg('')
     setStickyPrompt('')

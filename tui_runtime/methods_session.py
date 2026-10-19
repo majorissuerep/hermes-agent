@@ -1151,45 +1151,12 @@ def _title_read(session: dict, db, key: str) -> str:
 
 
 @method("session.title")
+@_profile_scoped
 @_with_db(5007, session_scoped=True)
 def _(rid, params: dict, session: dict, db) -> dict:
-    if params.get("generate"):
-        from hermes_cli.session_naming import generate_session_name
-        agent = session.get("agent")
-        try:
-            title = generate_session_name(
-                db.get_messages_as_conversation(session["session_key"]),
-                main_runtime=getattr(agent, "_primary_runtime", None))
-        except ValueError as exc:
-            return _err(rid, 4022, str(exc))
-        params = {**params, "title": title}
-    key = session["session_key"]
-    if "title" not in params:
-        result = {"title": _title_read(session, db, key), "session_key": key}
-    elif not (title := (params.get("title", "") or "").strip()):
-        return _err(rid, 4021, "title required")
-    else:
-        try:
-            if db.set_session_title(key, title):
-                pending, value = False, title
-            # rowcount == 0 can mean "same value" as well as "missing row".
-            elif existing_row := db.get_session(key):
-                pending, value = False, existing_row.get("title") or title
-            else:
-                # No row yet: an explicit /title is clear intent, so persist the row NOW (as the gateway's
-                # _handle_title_command); the min-messages sidebar filter hides a titled 0-message row. If
-                # row creation didn't take, queue so the post-turn apply block can recover.
-                _ensure_session_db_row(session)
-                with _session_db(session) as scoped_db:
-                    pending, value = not (scoped_db is not None and scoped_db.set_session_title(key, title)), title
-        except ValueError as e:
-            return _err(rid, 4022, str(e))
-        except Exception as e:
-            return _err(rid, 5007, str(e))
-        session["pending_title"] = value if pending else None
-        result = {"pending": pending, "title": value}
-    _emit_session_info_for_session(params.get("session_id", ""), session)
-    return _ok(rid, result)
+    from tui_runtime.session_titles import session_title
+
+    return session_title(rid, params, session, db)
 
 
 @method("session.archive")
