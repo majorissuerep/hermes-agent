@@ -7,9 +7,11 @@ from contextlib import contextmanager
 from pathlib import Path
 import secrets
 import subprocess
+from threading import RLock
 from unittest.mock import patch
 
 _FIXTURE_PASSWORDS: dict[Path, str] = {}
+_PM_HOME_LOCK = RLock()
 
 
 def write_encrypted_home(home: Path, base_url: str, **kwargs) -> Path:
@@ -51,23 +53,26 @@ def _fixture_pm_home(home: Path):
     """Match the child's home for both scoped readers and process-root PM stores."""
     import hermes_constants as constants
 
-    home = home.resolve()
-    token = constants.set_hermes_home_override(home)
-    try:
-        with patch.dict(os.environ, {"HERMES_HOME": str(home)}), patch.object(
-            constants, "_PINNED_PROCESS_HERMES_HOME", str(home)
-        ):
-            yield
-    finally:
-        constants.reset_hermes_home_override(token)
+    # Provider scenarios prepare homes in threads, but PM's process-root/store
+    # readers are deliberately global. Never interleave those temporary roots.
+    with _PM_HOME_LOCK:
+        home = home.resolve()
+        token = constants.set_hermes_home_override(home)
+        try:
+            with patch.dict(os.environ, {"HERMES_HOME": str(home)}), patch.object(
+                constants, "_PINNED_PROCESS_HERMES_HOME", str(home)
+            ):
+                yield
+        finally:
+            constants.reset_hermes_home_override(token)
 
 
 def prepare_fixture_runtime(home: Path, source: Path, *, extras: tuple[str, ...] = ("all",)) -> None:
     """Prepare a real owning PM selection before a sealed child imports the app."""
     from pm import sync_venv
 
-    seal_fixture_home(home)
     with _fixture_pm_home(home):
+        seal_fixture_home(home)
         sync_venv(extras=list(extras), explicit=True, project_root=source)
 
 
