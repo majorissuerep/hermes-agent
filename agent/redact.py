@@ -67,7 +67,7 @@ def _profile_credential_values() -> set[str]:
     """Current authority only: no process-env borrowing or persistent plaintext cache."""
     from agent.secret_scope import current_secret_scope, current_secret_scope_home, load_env_file
     from hermes_constants import get_hermes_home, hermes_home_key
-    from hermes_security import io as state_io, vault
+    from hermes_security import io as state_io
 
     home = get_hermes_home()
     scope = current_secret_scope()
@@ -77,10 +77,13 @@ def _profile_credential_values() -> set[str]:
         mappings.append(scope)
     env_path = home / ".env"
     owner = state_io._home_for(env_path)
-    if owner is not None and vault.is_unlocked(owner):
-        # This parser authenticates every vaulted read and propagates integrity failures.
-        # The owning vault may be an ancestor; the parsed file is still THIS profile's.
-        mappings.append(load_env_file(env_path))
+    if owner is not None:
+        from hermes_security import vault
+
+        if vault.is_unlocked(owner):
+            # This parser authenticates every vaulted read and propagates integrity failures.
+            # The owning vault may be an ancestor; the parsed file is still THIS profile's.
+            mappings.append(load_env_file(env_path))
     return {value for mapping in mappings for key, value in mapping.items()
             if is_secret_field_name(key) and isinstance(value, str) and value}
 
