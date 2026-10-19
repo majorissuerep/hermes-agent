@@ -65,6 +65,7 @@ def test_public_profile_create_publishes_authenticated_independent_state(encrypt
         assert text is not None
         assert (destination / filename).read_bytes().startswith(b"HRMVAULT\x00")
     assert not (destination / ".hermes-vault").exists(), "A clone must not copy root vault authority"
+    assert all(not (destination / name).exists() for name in ("installs", "tools", "cache", "venv", ".venv"))
     if kind != "fresh":
         assert "profile-owner-private-fixture" in read_text(destination / ".env", purpose="env")
     write_text(destination / ".env", "ACME_TOKEN=independent-profile-fixture\n", purpose="env")

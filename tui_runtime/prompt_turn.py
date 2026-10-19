@@ -937,6 +937,9 @@ def _release_turn_scopes(sid: str, session: dict, st: _TurnRun) -> None:
             _restart_slash_worker(sid, session)
             _persist_live_session_runtime(session)
             _persist_live_session_system_prompt(session)
+            _append_model_switch_marker(
+                session, model=st.agent.model, provider=st.agent.provider)
+            _emit_session_info(sid, session)
         except Exception:
             logger.debug("TUI one-turn model restore failed", exc_info=True)
     scopes = st.scopes

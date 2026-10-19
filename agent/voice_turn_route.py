@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import copy
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -161,8 +161,6 @@ def begin_voice_turn_route(agent: Any, messages: list[dict[str, Any]], system_pr
             _warn_once(agent, target, reason)
             agent._voice_route_state = {"reasoning_config": state["reasoning_config"]}
             return agent._cached_system_prompt or system_prompt
-        from agent.chat_completion_helpers import rewrite_prompt_model_identity
-        rewrite_prompt_model_identity(agent, agent.model, agent.provider)
         for name in _REJECTION_FIELDS:
             setattr(agent, name, False)
         agent._turn_route_task = TASK

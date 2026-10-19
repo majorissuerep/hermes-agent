@@ -10,7 +10,7 @@ import os
 import re
 import sys
 import time
-from datetime import datetime, timezone, UTC
+from datetime import datetime, UTC
 from typing import Callable, Iterable, cast
 from urllib.parse import quote, urlparse
 
@@ -801,6 +801,20 @@ def list_objects(
             "lastModified": {scope.logical_key(key): value for key, value in last_modified.items()}}
 
 
+
+
+def get_object(
+    creds: dict[str, str], base: str, bucket: str, key: str, now: str,
+    fetcher: Callable[..., Response] | None = None,
+) -> str | None:
+    """Read metadata through the same authenticated, disposable-scope transport."""
+    url = R2Scope.configured().object_url(base, bucket, key)
+    response = (
+        fetcher(method="GET", url=url, body_hash=EMPTY_SHA)
+        if fetcher is not None
+        else signed_request("GET", url, creds=creds, now=now)
+    )
+    return response.text() if response.status < 400 else None
 
 
 def canary_doomed_keys(keys: list[str], cutoff: str) -> list[str]:

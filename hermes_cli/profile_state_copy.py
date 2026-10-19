@@ -128,7 +128,11 @@ def publish_profile_state(staging: Path, destination: Path) -> None:
 
 def profile_clone_exclusions(directory: Path, names: list[str], *, source_root: Path) -> set[str]:
     """Vault authority and live synchronization sidecars never belong to a new profile."""
+    from hermes_cli.home_data_layout import PM_RUNTIME_ROOT_DIRS
+
     excluded = {name for name in names if name == ".hermes-vault" or name.startswith(".hermes-vault.")}
+    if directory == source_root:
+        excluded.update(PM_RUNTIME_ROOT_DIRS & set(names))
     for name in names:
         relative = (directory / name).relative_to(source_root)
         if _public_asset(relative):

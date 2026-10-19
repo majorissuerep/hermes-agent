@@ -397,7 +397,10 @@ def _apply_switch_reasoning(sid: str, session, agent, effort: str, *, persist_gl
         return
     if agent is not None:
         agent.reasoning_config = parsed
-    if one_turn or not isinstance(session, dict):
+    if one_turn:
+        _emit_session_info(sid, session)
+        return
+    if not isinstance(session, dict):
         return
     if persist_global:
         _write_config_key("agent.reasoning_effort", effort)

@@ -236,7 +236,7 @@ class ModelRouter:
         switch_model(
             agent, destination.model, runtime["provider"], api_key=runtime["api_key"],
             base_url=runtime["base_url"], api_mode=destination.api_mode or runtime.get("api_mode", ""),
-            capabilities=runtime.get("capabilities"), preserve_prompt=True,
+            capabilities=runtime.get("capabilities"),
         )
         # Automatic routing is not a user rejection of the previous provider.
         agent._fallback_chain = fallback_chain

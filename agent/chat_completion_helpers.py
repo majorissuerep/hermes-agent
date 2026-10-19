@@ -22,13 +22,12 @@ import time
 import uuid
 from dataclasses import dataclass
 from types import SimpleNamespace
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 from hermes_cli.timeouts import get_provider_request_timeout, get_provider_stale_timeout
 from hermes_constants import PARTIAL_STREAM_STUB_ID, FINISH_REASON_LENGTH
 from agent.error_classifier import (
-    FailoverReason, PROVIDER_STREAM_EMPTY_FRAME_ERROR_CODE, PROVIDER_STREAM_NON_JSON_ERROR_CODE,
-    _extract_status_code)
+    FailoverReason, PROVIDER_STREAM_EMPTY_FRAME_ERROR_CODE, PROVIDER_STREAM_NON_JSON_ERROR_CODE)
 from agent.sdk_transform_bypass import bypass_chat_sdk_request_transform
 from agent.errors import EmptyStreamError
 from agent.chat_completion_stream_monitor import StreamingWaitMonitor
@@ -1774,25 +1773,6 @@ def build_assistant_message(agent, assistant_message, finish_reason: str) -> dic
     return msg
 
 
-def rewrite_prompt_model_identity(agent, model: str, provider: str) -> None:
-    """Rewrite the cached prompt's ``Model:``/``Provider:`` lines after a provider switch.
-
-    Not persisted: the stored row keeps the primary's labels so a restored primary replays a
-    byte-identical prompt (prefix cache intact). Only the LAST occurrence of each line is touched —
-    earlier matches may be user content (memory snapshots, context files)."""
-    sp = getattr(agent, "_cached_system_prompt", None)
-    if not isinstance(sp, str) or not sp:
-        return
-    for label, value in (("Model", model), ("Provider", provider)):
-        if not value:
-            continue
-        matches = list(re.finditer(rf"(?m)^{label}: .*$", sp))
-        if matches:
-            last = matches[-1]
-            sp = f"{sp[:last.start()]}{label}: {value}{sp[last.end():]}"
-    agent._cached_system_prompt = sp
-
-
 def _fallback_entry_key(fb: dict) -> tuple[str, str, str]:
     return (str(fb.get("provider") or "").strip().lower(), str(fb.get("model") or "").strip(),
             str(fb.get("base_url") or "").strip().rstrip("/"))
@@ -2115,7 +2095,6 @@ def try_activate_fallback(agent, reason: FailoverReason | None = None, reset_at=
                 continue
             old_model, old_provider = bound
             fb_model = agent.model  # normalized by the binder
-            rewrite_prompt_model_identity(agent, fb_model, fb_provider)
 
             notice = (
                 f"⚠️ Model fallback: {old_model} via {old_provider} unavailable "

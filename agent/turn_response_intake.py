@@ -10,7 +10,7 @@ from dataclasses import dataclass
 import json
 import logging
 import re
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 from agent.provider_projection import splice_provider_projection
 from agent.trajectory import has_incomplete_scratchpad
@@ -183,8 +183,7 @@ def normalize_model_response(
             response=response,
         )
         if _codex_result is CODEX_FALLBACK_ACTIVATED:
-            # The failover rewrote the Model:/Provider: identity on the cached system prompt;
-            # rebind it so the next iteration's request is rebuilt with the new identity.
+            # Rebind the frozen logical prompt while adapting the provider's wire layout.
             from agent.conversation_loop import _sync_failover_system_message
             active_system_prompt = _sync_failover_system_message(agent, api_messages, active_system_prompt)
             return _verdict("continue")

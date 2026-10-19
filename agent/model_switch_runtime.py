@@ -8,7 +8,6 @@ logger = logging.getLogger(__name__)
 
 def switch_model(
     agent, new_model, new_provider, api_key='', base_url='', api_mode='', capabilities=None,
-    *, preserve_prompt=False,
 ):
     """Switch the model/provider in-place for a live agent (rebuild clients, caching flags,
     compressor). Mirrors ``_try_activate_fallback()`` but also updates ``_primary_runtime`` so
@@ -56,10 +55,8 @@ def switch_model(
         )
     except Exception as _reasoning_err:
         logger.debug("switch_model: could not re-resolve reasoning_config: %s", _reasoning_err)
-    # Automatic routing preserves the session's prompt and tool arrays; explicit picks
-    # keep the existing next-turn prompt rebuild behavior.
-    if not preserve_prompt:
-        agent._cached_system_prompt = None
+    # Routing changes the client, never the established conversation prefix.
+    # Model/provider labels describe the session at construction, not live authority.
     # Publish the destination capability map only after every runtime setup above has succeeded.
     # Failed switches must leave the old map intact.
     agent.runtime_capabilities = destination_capabilities

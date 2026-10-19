@@ -379,13 +379,19 @@ def _prompt_building_session(profile_home, key):
 
 
 def test_off_turn_prompt_rebuilds_run_under_the_sessions_profile_scope(two_homes, monkeypatch):
-    """Regression for #112927: ``session.context_breakdown`` (Desktop refetches it after every turn) and the
-    model-switch prompt re-persist rebuilt the system prompt with no secret scope, so the external memory
-    provider's ``system_prompt_block()`` hit ``UnscopedSecretError`` on the LAUNCH profile once the process
-    hosted a second home — and for a secondary they resolved the launch profile's credential/home."""
+    """Context inspection binds real profile secrets; persistence never rebuilds frozen bytes."""
     from agent import system_prompt
 
     root, b = two_homes
+    observed = []
+    original = _MemoryManager.build_system_prompt
+
+    def read_scoped_memory(manager):
+        value = original(manager)
+        observed.append(value)
+        return value
+
+    monkeypatch.setattr(_MemoryManager, "build_system_prompt", read_scoped_memory)
     (root / ".env").write_text((root / ".env").read_text() + "MEM_PROVIDER_KEY=launch-mem-key\n")
     (b / ".env").write_text((b / ".env").read_text() + "MEM_PROVIDER_KEY=b-mem-key\n")
     monkeypatch.setattr(system_prompt, "build_system_prompt_parts",
@@ -397,8 +403,13 @@ def test_off_turn_prompt_rebuilds_run_under_the_sessions_profile_scope(two_homes
     assert _probe("b")["b_ref"] == B_VAL  # flips the process to fail-closed multi-profile hosting
 
     for sid, home, key in (("sa", root, "launch-mem-key"), ("sb", b, "b-mem-key"), ("sa", root, "launch-mem-key")):
+        frozen = f"{home}|{key}"
+        sessions[sid]["agent"]._cached_system_prompt = frozen
         resp = server._methods["session.context_breakdown"]("rid", {"session_id": sid})
         assert "error" not in resp, resp
+        assert observed[-1] == frozen
+        reads = len(observed)
         server._persist_live_session_system_prompt(sessions[sid])
-        assert sessions[sid]["agent"]._cached_system_prompt == f"{home}|{key}"
+        assert len(observed) == reads
+        assert sessions[sid]["agent"]._cached_system_prompt == frozen
     assert os.environ.get("MEM_PROVIDER_KEY") is None

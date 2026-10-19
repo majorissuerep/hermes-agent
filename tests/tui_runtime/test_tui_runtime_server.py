@@ -20457,11 +20457,7 @@ def test_prompt_submit_unconfirmed_truncation_refuses_before_target_resolution(
 
 
 def test_persist_live_session_system_prompt_uses_profile_home(monkeypatch, tmp_path):
-    """Issue #50233: _persist_live_session_system_prompt must re-bind
-    HERMES_HOME to the session's profile before rebuilding the system
-    prompt.  Without this, a /model switch rebuilds the prompt with the
-    root profile's SOUL.md and skills instead of the session's profile.
-    """
+    """Persist the frozen session prompt without consulting another profile or cwd."""
     profile_home = tmp_path / "profile-work"
     profile_home.mkdir()
     (profile_home / "SOUL.md").write_text(
@@ -20473,7 +20469,7 @@ def test_persist_live_session_system_prompt_uses_profile_home(monkeypatch, tmp_p
     class FakeAgent:
         model = "test-model"
         provider = "test"
-        _cached_system_prompt = None
+        _cached_system_prompt = "Frozen session prompt"
         _session_db = None
 
         def _build_system_prompt(self, system_message=None):
@@ -20501,13 +20497,9 @@ def test_persist_live_session_system_prompt_uses_profile_home(monkeypatch, tmp_p
 
     server._persist_live_session_system_prompt(session)
 
-    # The system prompt must have been built while the override pointed
-    # to the profile home, not the root ~/.hermes.
-    assert len(built_homes) == 1, f"expected 1 build, got {built_homes}"
-    assert str(profile_home) in built_homes[0], (
-        f"system prompt built with wrong home: {built_homes[0]}"
-    )
-    assert "Work persona" in agent._cached_system_prompt
+    # A route change must not read either the session's or the launch profile's files.
+    assert built_homes == []
+    assert agent._cached_system_prompt == "Frozen session prompt"
 
     # The override must have been reset after the call.
     from hermes_constants import get_hermes_home_override
@@ -20515,11 +20507,10 @@ def test_persist_live_session_system_prompt_uses_profile_home(monkeypatch, tmp_p
 
 
 def test_persist_live_session_system_prompt_no_profile_is_unchanged(monkeypatch):
-    """Sessions without a profile_home must not set/clear any override —
-    the function should behave identically to before the fix."""
+    """Persist the frozen session prompt without consulting another profile or cwd."""
     class FakeAgent:
         model = "test"
-        _cached_system_prompt = None
+        _cached_system_prompt = "Frozen session prompt"
         _session_db = None
 
         def _build_system_prompt(self, system_message=None):
@@ -20537,16 +20528,13 @@ def test_persist_live_session_system_prompt_no_profile_is_unchanged(monkeypatch)
         "profile_home": None,
     }
 
-    # Should not raise, should still build and cache.
+    # The previously frozen prompt stays authoritative.
     server._persist_live_session_system_prompt(session)
-    assert agent._cached_system_prompt == "plain prompt"
+    assert agent._cached_system_prompt == "Frozen session prompt"
 
 
 def test_persist_live_session_system_prompt_restores_pre_existing_override(tmp_path):
-    """reset_hermes_home_override() restores the previous ContextVar state,
-    not just the unset case: when a caller already holds an override, the
-    persist call must scope to the session's profile and then hand the
-    caller's override back, rather than clearing it to None."""
+    """Persist the frozen session prompt without consulting another profile or cwd."""
     from hermes_constants import get_hermes_home_override
 
     outer_home = tmp_path / "profile-outer"
@@ -20562,7 +20550,7 @@ def test_persist_live_session_system_prompt_restores_pre_existing_override(tmp_p
     class FakeAgent:
         model = "test-model"
         provider = "test"
-        _cached_system_prompt = None
+        _cached_system_prompt = "Frozen session prompt"
         _session_db = None
 
         def _build_system_prompt(self, system_message=None):
@@ -20586,8 +20574,8 @@ def test_persist_live_session_system_prompt_restores_pre_existing_override(tmp_p
     try:
         server._persist_live_session_system_prompt(session)
 
-        # The prompt was built under the session's profile, not the outer one.
-        assert built_homes == [str(inner_home)]
+        # No profile is consulted while persisting the established bytes.
+        assert built_homes == []
         # The caller's pre-existing override survived, instead of being reset
         # to None.
         assert get_hermes_home_override() == str(outer_home)
@@ -20597,17 +20585,7 @@ def test_persist_live_session_system_prompt_restores_pre_existing_override(tmp_p
 
 
 def test_persist_live_session_system_prompt_binds_session_cwd(monkeypatch, tmp_path):
-    """The prompt rebuild after a live model switch must record the SESSION's
-    working directory, not the process TERMINAL_CWD.
-
-    The function runs on the RPC dispatcher thread (model.switch, config.set
-    model). On that thread the _SESSION_CWD contextvar is not set, so
-    resolve_agent_cwd() falls back to TERMINAL_CWD, which the desktop pins
-    to the home directory. The wrong cwd line then persists into the stored
-    prompt. Later turns restore the stored bytes without change (the
-    prologue rebuilds only when _cached_system_prompt is None), so the
-    poisoned line never self-heals.
-    """
+    """Persist the frozen session prompt without consulting another profile or cwd."""
     session_cwd = tmp_path / "project"
     session_cwd.mkdir()
     process_cwd = tmp_path / "home-fallback"
@@ -20620,7 +20598,7 @@ def test_persist_live_session_system_prompt_binds_session_cwd(monkeypatch, tmp_p
         model = "test-model"
         provider = "test"
         session_id = "cwd-test-session"
-        _cached_system_prompt = None
+        _cached_system_prompt = "Frozen session prompt"
         _session_db = None
 
         def _build_system_prompt(self, system_message=None):
@@ -20655,7 +20633,7 @@ def test_persist_live_session_system_prompt_binds_session_cwd(monkeypatch, tmp_p
     t.start()
     t.join()
 
-    expected = f"Current working directory: {session_cwd}"
+    expected = "Frozen session prompt"
     assert result["cached"] == expected, result["cached"]
     assert persisted["prompt"] == expected, persisted["prompt"]
 

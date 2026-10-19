@@ -3,6 +3,7 @@
 import logging
 
 from agent.model_metadata import is_local_endpoint
+from agent.error_classifier import _extract_status_code
 
 logger = logging.getLogger("agent.chat_completion_helpers")
 
@@ -46,19 +47,15 @@ def silent_proxy_read_timeout(call, error) -> bool:
 
 
 def _probe_allowed(call, error, silent_timeout):
-    from agent import chat_completion_helpers as h
-
     if (getattr(call.agent, "_interrupt_requested", False) or call.deltas_were_sent["yes"]
             or getattr(call.agent, "api_mode", "") not in ("", "chat_completions")):
         return False
-    status = h._extract_status_code(error)
+    status = _extract_status_code(error)
     return silent_timeout or (status is not None and status >= 500)
 
 
 def _record_probe_failure(call, error, silent_timeout):
-    from agent import chat_completion_helpers as h
-
-    status = h._extract_status_code(error)
+    status = _extract_status_code(error)
     if silent_timeout or (status is not None and status < 500):
         call.result["error"] = error
         return True  # Propagate the real failure; do not open another identical stream.

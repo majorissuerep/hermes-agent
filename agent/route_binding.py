@@ -8,7 +8,7 @@ is the inverse that ``restore_primary_runtime`` runs once its gates pass.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Optional
 
 from utils import base_url_host_matches
 
@@ -129,11 +129,8 @@ def reinstall_runtime_snapshot(agent: Any, rt: dict[str, Any]) -> None:
     if saved_reasoning is not None:
         agent.reasoning_config = dict(saved_reasoning)
     # Reset the stale-call circuit breaker: its streak measured the route being left.
-    from agent.chat_completion_helpers import _reset_stale_streak, rewrite_prompt_model_identity
+    from agent.chat_completion_helpers import _reset_stale_streak
     _reset_stale_streak(agent)
-    # Undo the identity rewrite so the prompt is byte-identical to the stored copy again
-    # (prefix cache match).
-    rewrite_prompt_model_identity(agent, rt["model"], rt["provider"])
 
 
 def reinstall_primary_runtime(

@@ -15,7 +15,6 @@
 
 from __future__ import annotations
 
-import base64
 import hashlib
 import html
 import http.client
@@ -667,7 +666,6 @@ def test_verify_remote_artifact_streams_without_buffering(r2_server, bounded_rea
 
 def test_download_streams_verified_bytes_and_preserves_destination_on_failure(r2_server, tmp_path, monkeypatch, bounded_reads):
     import hashlib
-    import http.client
 
     payload = os.urandom(3 * 1024 * 1024 + 7)
     key = "releases/tag/v1.2.3/package.msix"

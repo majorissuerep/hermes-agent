@@ -333,14 +333,22 @@ def test_public_ink_model_picker_and_scoped_switches(tmp_path, monkeypatch, lazy
         assert any(row["role"] == "assistant" and "fixture-reply-1" in str(row.get("content")) for row in history)
         terminal.submit("/model fixture-beta --once --reasoning high")
         terminal.until(lambda text: "model → fixture-beta" in text, "one-turn switch settlement")
+        terminal.until(lambda _: any("─ ready │" in row and " high │" in row
+                                     for row in terminal.screen.display()), "one-turn high effort footer")
         for offset in (2, 3):
             terminal.submit(f"once-check-{offset}")
             terminal.until(lambda text: f"fixture-reply-{count + offset}" in text, "one-turn route reply")
         assert [request["model"] for request in server.requests][-2:] == ["fixture-beta", "fixture-gamma"]
         assert server.requests[-2].get("reasoning_effort") == "high"
         assert server.requests[-1].get("reasoning_effort") in (None, "none")
+        pivots = [str(row.get("content")) for row in server.requests[-1]["messages"]
+                  if row["role"] == "user" and str(row.get("content")).startswith("[System: The active model")]
+        assert "fixture-gamma" in pivots[-1], pivots
         if not lazy:
             _exercise_failed_model_controls(terminal, server)
+        first_system = server.requests[0]["messages"][0]
+        assert first_system["role"] == "system"
+        assert all(request["messages"][0] == first_system for request in server.requests)
         assert (home / "config.yaml").read_bytes() == before
         assert terminal.prompts == 1
     finally:

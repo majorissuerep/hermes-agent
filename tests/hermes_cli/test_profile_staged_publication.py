@@ -48,6 +48,13 @@ def test_staged_profile_keeps_all_native_state_readable_after_publish(tmp_path, 
     io.write_text(home / "mem0.json", '{"api_key":"private-memory-provider"}', purpose="state")
     (home / "skills/probe").mkdir(parents=True)
     (home / "skills/probe/SKILL.md").write_text("public skill code")
+    for name in ("installs", "tools", "cache", "venv", ".venv"):
+        runtime = home / name / "generation"
+        runtime.mkdir(parents=True)
+        (runtime / ".lease-managed").write_text("machine-local generation")
+    nested_data = home / "skills/probe/installs/user-data.txt"
+    nested_data.parent.mkdir()
+    nested_data.write_text("user-owned skill data")
     with closing(sqlite.connect(home / "kanban.db")) as db:
         db.execute("CREATE TABLE retained_work (body TEXT)")
         db.execute("INSERT INTO retained_work VALUES ('unexecuted private work')")
@@ -79,6 +86,8 @@ def test_staged_profile_keeps_all_native_state_readable_after_publish(tmp_path, 
         assert "private-memory-provider" in io.read_text(result / "mem0.json", purpose="state")
         assert (result / "skills/probe/SKILL.md").read_text() == "public skill code"
     if kind == "clone-all":
+        assert all(not (result / name).exists() for name in ("installs", "tools", "cache", "venv", ".venv"))
+        assert (result / "skills/probe/installs/user-data.txt").read_text() == "user-owned skill data"
         assert not (result / "logs/update_receipts/.pm-write.lock").exists()
         with closing(sqlite.connect(result / "kanban.db")) as db:
             assert db.execute("SELECT body FROM retained_work").fetchall() == [("unexecuted private work",)]

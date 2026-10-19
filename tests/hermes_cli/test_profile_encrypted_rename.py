@@ -31,6 +31,9 @@ def test_rename_rebinds_settings_and_database_without_changing_other_profile(tmp
         with SessionDB(source / "state.db") as db:
             db.create_session("retained-history", source="cli")
             db.append_message("retained-history", "user", "immutable history prefix")
+        machine_runtime = source / "installs/local-owner/environments/test-generation"
+        machine_runtime.mkdir(parents=True)
+        (machine_runtime / ".lease-managed").touch()
         before_root = (home / ".env").read_bytes()
         renamed = profiles.rename_profile("old", "new")
         assert not source.exists()
@@ -40,6 +43,7 @@ def test_rename_rebinds_settings_and_database_without_changing_other_profile(tmp
             assert db.execute("SELECT content FROM messages").fetchall() == [("immutable history prefix",)]
         assert (home / ".env").read_bytes() == before_root
         assert not (renamed / ".hermes-vault").exists()
+        assert not (renamed / "installs").exists()
         assert not list(renamed.parent.glob(".*.renaming-*"))
     finally:
         reset_hermes_home_override(token)

@@ -14,7 +14,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Optional
 
 from agent.file_safety import HOME_CREDENTIAL_DIRS
 from hermes_cli.archive_safe import archive_root_dirs, make_targz, normalize_archive_parts, safe_extract_targz
@@ -70,6 +70,7 @@ _CLONE_ALL_DEFAULT_EXCLUDE_ROOT: frozenset[str] =  frozenset({
     "profiles",
     "bin",
     "node_modules",
+    "venv", ".venv",
     # Managed runtime trees — install artifacts, never profile state
     # (install/profile bucket split; see test_install_bucket_separation).
     ".hermes-runtime",
@@ -126,7 +127,7 @@ def _clone_all_copytree_ignore(source_dir: Path):
     """copytree ignore for --clone-all: history artifacts for any source, infrastructure
     only when the source is the default profile (see the two exclude sets above)."""
     source_resolved = source_dir.resolve()
-    root_exclude = set(_CLONE_ALL_HISTORY_EXCLUDE_ROOT)
+    root_exclude = set(_CLONE_ALL_HISTORY_EXCLUDE_ROOT) | PM_RUNTIME_ROOT_DIRS
     if source_resolved == _get_default_hermes_home().resolve():
         root_exclude |= _CLONE_ALL_DEFAULT_EXCLUDE_ROOT
 
@@ -1966,7 +1967,6 @@ def _rename_profile_owned(old_name: str, new_name: str) -> Path:
     from hermes_cli.profile_identity import _migrate_profile_identity
     _migrate_profile_identity(old_canon, new_canon)
 
-    # 7. Hot-serve the renamed profile now (mirrors create; a missed signal only delays it).
     return new_dir
 
 

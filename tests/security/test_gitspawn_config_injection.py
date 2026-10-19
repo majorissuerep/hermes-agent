@@ -154,8 +154,8 @@ def test_coding_workspace_snapshot_is_safe(malicious_repo):
     assert _fired(marker) == []
 
 
-def test_gateway_git_probe_is_safe(malicious_repo):
-    from tui_gateway import git_probe
+def test_native_git_probe_is_safe(malicious_repo):
+    from tui_runtime import git_probe
     repo, marker = malicious_repo
     git_probe.branch(str(repo))
     git_probe.run_git(str(repo), "status", "--porcelain")
@@ -166,14 +166,6 @@ def test_working_diff_is_safe(malicious_repo):
     from tools.working_diff import collect_working_diff
     repo, marker = malicious_repo
     collect_working_diff(str(repo), "working")
-    assert _fired(marker) == []
-
-
-def test_web_git_diff_is_safe(malicious_repo):
-    from hermes_cli import web_git
-    repo, marker = malicious_repo
-    web_git._git(str(repo), ["status", "--porcelain=v2", "-z"])
-    web_git._git_out(str(repo), ["diff", "HEAD"])
     assert _fired(marker) == []
 
 
@@ -202,7 +194,7 @@ def test_index_reading_probes_and_kanban_gc_git_are_safe(malicious_repo, tmp_pat
     from hermes_cli import kanban_db_workspace as kw
     from hermes_cli import worktree_gc, worktree_ops
     from tools.async_delegation_recovery_hints import git_state_hint
-    from tui_gateway import server
+    from tui_runtime import server
     repo, marker = malicious_repo
     assert git_state_hint(str(repo)) is not None
     assert "README" in list(server._git_repo_files(str(repo)))

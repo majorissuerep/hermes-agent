@@ -130,8 +130,7 @@ jobs:
   # Lane-gated sub-workflows. Each runs in parallel after detect finishes.
   # Skipped workflows (if condition is false) don't spin up runners.
   #
-  # The E2E suites (e2e, e2e-upgrade, both Desktop suites, and the two
-  # Windows journeys in tests-os) run ONLY on a release run (inputs.release)
+  # The native E2E suites (e2e and e2e-upgrade) run ONLY on a release run (inputs.release)
   # or a manual dispatch; the detect gate forces their lanes off for pull
   # requests and pushes to main.
   # ─────────────────────────────────────────────────────────────────────

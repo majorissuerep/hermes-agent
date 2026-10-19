@@ -1,19 +1,10 @@
-"""Tests for system-prompt model-identity sync across provider failover.
-
-The system prompt is session-stable and embeds ``Model:``/``Provider:``
-identity lines.  When ``try_activate_fallback`` swaps the runtime, the
-prompt must be rewritten in place (and synced into the in-flight
-``api_messages``) or the agent reports the primary model's name while a
-fallback model is answering — e.g. a local gemma fallback claiming to be
-gpt-5.4-mini after a Codex usage-limit 429.
-"""
+"""Provider cache decoration must preserve the frozen logical system prompt."""
 
 from copy import deepcopy
 from types import SimpleNamespace
 
 import pytest
 
-from agent.chat_completion_helpers import rewrite_prompt_model_identity
 from agent.conversation_loop import (
     _redecorate_prompt_cache_for_provider,
     _sync_failover_system_message,
@@ -80,34 +71,15 @@ def _cache_agent(
     )
 
 
-class TestRewritePromptModelIdentity:
-
-    def test_only_last_occurrence_is_rewritten(self):
-        agent = _agent()
-        rewrite_prompt_model_identity(agent, "gemma4:e2b-mlx", "custom")
-        # Earlier matching lines may be user content (memory snapshots,
-        # context files) and must survive untouched.
-        assert "Model: decoy-from-memory" in agent._cached_system_prompt
-
-
-    def test_noop_when_prompt_missing_or_empty(self):
-        for prompt in (None, ""):
-            agent = _agent(prompt=prompt)
-            rewrite_prompt_model_identity(agent, "m", "p")
-            assert agent._cached_system_prompt == prompt
-
-
-
 class TestSyncFailoverSystemMessage:
-    def test_patches_in_flight_system_message(self):
+    def test_keeps_in_flight_system_message_frozen(self):
         agent = _agent()
-        rewrite_prompt_model_identity(agent, "gemma4:e2b-mlx", "custom")
         api_messages = [
             {"role": "system", "content": _PROMPT},
             {"role": "user", "content": "what model are you?"},
         ]
         result = _sync_failover_system_message(agent, api_messages, _PROMPT)
-        assert "Model: gemma4:e2b-mlx" in api_messages[0]["content"]
+        assert "Model: gpt-5.4-mini" in api_messages[0]["content"]
         assert result == agent._cached_system_prompt
 
 
@@ -150,7 +122,6 @@ class TestSyncFailoverPreservesCacheDecoration:
         api_messages = self._decorated(prompt)
         assert isinstance(api_messages[0]["content"], list)
 
-        rewrite_prompt_model_identity(agent, "gemma4:e2b-mlx", "custom")
         _sync_failover_system_message(agent, api_messages, prompt)
 
         content = api_messages[0]["content"]
@@ -161,9 +132,9 @@ class TestSyncFailoverPreservesCacheDecoration:
         )
         # The static prefix must stay byte-identical or its cache entry misses.
         assert content[0]["text"] == self._STATIC
-        # The identity refresh still lands, in the volatile tail.
-        assert "Model: gemma4:e2b-mlx" in content[1]["text"]
-        assert "Provider: custom" in content[1]["text"]
+        # Even the identity tail stays frozen across the route change.
+        assert "Model: gpt-5.4-mini" in content[1]["text"]
+        assert "Provider: openai-codex" in content[1]["text"]
 
     def test_keeps_single_block_shape(self):
         prompt = "Model: gpt-5.4-mini\nProvider: openai-codex"
@@ -178,13 +149,12 @@ class TestSyncFailoverPreservesCacheDecoration:
         assert isinstance(api_messages[0]["content"], list)
         assert len(api_messages[0]["content"]) == 1
 
-        rewrite_prompt_model_identity(agent, "gemma4:e2b-mlx", "custom")
         _sync_failover_system_message(agent, api_messages, prompt)
 
         content = api_messages[0]["content"]
         assert isinstance(content, list) and len(content) == 1
         assert content[0].get("cache_control")
-        assert "Model: gemma4:e2b-mlx" in content[0]["text"]
+        assert "Model: gpt-5.4-mini" in content[0]["text"]
 
 
 
