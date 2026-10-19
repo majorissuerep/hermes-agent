@@ -16,9 +16,8 @@ WSL2 Linux distribution; native Windows, MSIX, and Windows services are not supp
 | Linux container | [Build this fork's Dockerfile](../user-guide/docker.md) | Replace the image; retain the encrypted state volume |
 | Linux/macOS with Nix | [Flake and modules](./nix-setup.md) | Nix owns the immutable runtime; update the flake |
 
-The CLI, TUI, desktop source app, and messaging gateway share the same agent core.
-Actual feature availability depends on the host, selected tools, and installed
-extras. Linux services use systemd; macOS uses launchd.
+The local CLI, Ink TUI, and terminal sub-agents share the same agent core.
+Tool availability depends on the host, selected tools, and installed extras.
 
 ## Qualification
 
