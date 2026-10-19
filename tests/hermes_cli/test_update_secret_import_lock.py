@@ -49,6 +49,10 @@ secrets:
         f"sys.argv = {argv!r}\n"
         "import hermes_cli.main as hermes_main\n"
         f"{dispatch}"
+        "import logging\n"
+        "from hermes_logging import flush_log_queue\n"
+        "logging.getLogger('hermes.update.import_probe').warning('metadata-only updater import probe')\n"
+        "flush_log_queue()\n"
         "print('LOADED_MODULES=' + json.dumps(sorted(sys.modules)))\n"
     )
     result = subprocess.run(
