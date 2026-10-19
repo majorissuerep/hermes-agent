@@ -34,6 +34,7 @@ describe('voice.submit_mode live composer rendering', () => {
             },
             session: {
               STARTUP_RESUME_ID: '',
+              hasSessionSelection: () => false,
               colsRef: ref(80),
               newSession: vi.fn(),
               resetSession: vi.fn(),

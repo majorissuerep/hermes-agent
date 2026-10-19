@@ -13,6 +13,7 @@ const buildCtx = (request: ReturnType<typeof vi.fn>) =>
     gateway: { gw: { request }, rpc: vi.fn(async () => null) },
     session: {
       STARTUP_RESUME_ID: '',
+      hasSessionSelection: () => false,
       colsRef: ref(80),
       newSession: vi.fn(),
       resetSession: vi.fn(),

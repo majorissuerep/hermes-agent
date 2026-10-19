@@ -616,7 +616,7 @@ function applySessionInfo(payload: unknown, { appendMessage, setHistoryItems, se
 export function createGatewayEventHandler(ctx: GatewayEventHandlerContext): (ev: AnyGatewayEvent) => void {
   syncThemeToTerminalBackground()
   const { gw, rpc } = ctx.gateway
-  const { STARTUP_RESUME_ID, newSession, resumeById, setCatalog } = ctx.session
+  const { STARTUP_RESUME_ID, hasSessionSelection, newSession, resumeById, setCatalog } = ctx.session
   const { bellOnComplete, bellOnPrompt, stdout, sys } = ctx.system
 
   // display.bell_on_prompt — BEL whenever a blocking prompt modal opens
@@ -906,6 +906,11 @@ export function createGatewayEventHandler(ctx: GatewayEventHandlerContext): (ev:
         turnController.pushActivity(t('gatewayMsg.startup.commandCatalogUnavailable', rpcErrorMessage(e)), 'info')
       )
 
+    // A typed session selection outranks the delayed startup defaults.
+    if (hasSessionSelection()) {
+      return
+    }
+
     if (STARTUP_RESUME_ID) {
       patchUiState({ status: t('session.status.resuming') })
       resumeById(STARTUP_RESUME_ID)
@@ -922,6 +927,10 @@ export function createGatewayEventHandler(ctx: GatewayEventHandlerContext): (ev:
     // users aren't surprised.  (Shares the memoized full-config read.)
     getFullConfigOnce()
       .then(cfg => {
+        if (hasSessionSelection()) {
+          return
+        }
+
         if (!cfg?.config?.display?.tui_auto_resume_recent) {
           patchUiState({ status: t('gatewayMsg.status.forgingSession') })
           newSession()
@@ -931,6 +940,10 @@ export function createGatewayEventHandler(ctx: GatewayEventHandlerContext): (ev:
         }
 
         return rpc<SessionMostRecentResponse>('session.most_recent', {}).then(r => {
+          if (hasSessionSelection()) {
+            return
+          }
+
           const target = r?.session_id
 
           if (target) {
@@ -947,6 +960,10 @@ export function createGatewayEventHandler(ctx: GatewayEventHandlerContext): (ev:
         })
       })
       .catch(() => {
+        if (hasSessionSelection()) {
+          return
+        }
+
         patchUiState({ status: t('gatewayMsg.status.forgingSession') })
         newSession()
         scheduleStartupPrompt()

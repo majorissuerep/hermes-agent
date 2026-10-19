@@ -53,15 +53,6 @@ CELLS = [
     "slash_resume_no_word_twice", "slash_resume_tail_once", "summary_never_twice",
     "slash_resume_at_startup_survives",
 ]
-# cell -> (regex on the bug's own failure message, "#<issue> <symptom>"): XFAILs only while the cell
-# fails exactly that way, passes once the fix lands, and any other failure stays red.
-KNOWN: dict[str, tuple[str, str]] = {
-    "slash_resume_at_startup_survives": (
-        r"the resumed transcript is gone after startup: protected tail words not exactly once",
-        "#121456 /resume typed while the TUI starts is replaced by the startup session"),
-}
-
-
 def _reply(t: int) -> str:
     return " ".join(words(f"s{t}", WORDS_PER_REPLY))
 
@@ -214,4 +205,4 @@ def run(tmp_path_factory):
 
 @pytest.mark.parametrize("cell", cell_params(CELLS))
 def test_long_session_compress_and_resume_render_once(run, cell: str) -> None:
-    run.check(cell, KNOWN)
+    run.check(cell)

@@ -526,6 +526,7 @@ export function useSessionLifecycle(opts: UseSessionLifecycleOptions) {
       closeForExit,
       closeSession,
       guardBusySessionSwitch,
+      hasSessionSelection: () => attachmentFlight.current > 0,
       newLiveSession,
       newSession,
       resetSession,

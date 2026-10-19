@@ -971,6 +971,7 @@ export function useMainApp(gw: LocalAgentClient) {
         gateway,
         session: {
           STARTUP_RESUME_ID,
+          hasSessionSelection: session.hasSessionSelection,
           colsRef,
           newSession: session.newSession,
           resetSession: session.resetSession,
@@ -995,6 +996,7 @@ export function useMainApp(gw: LocalAgentClient) {
       composerActions.setInput,
       gateway,
       panel,
+      session.hasSessionSelection,
       session.newSession,
       session.resetSession,
       session.resumeById,

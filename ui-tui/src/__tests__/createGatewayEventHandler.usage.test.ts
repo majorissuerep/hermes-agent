@@ -12,6 +12,7 @@ const ctx = () =>
     gateway: { gw: { request: vi.fn(async () => null) }, rpc: vi.fn(async () => null) },
     session: {
       STARTUP_RESUME_ID: '',
+      hasSessionSelection: () => false,
       colsRef: ref(80),
       newSession: vi.fn(),
       resetSession: vi.fn(),
