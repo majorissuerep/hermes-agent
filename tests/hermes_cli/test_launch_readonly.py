@@ -7,7 +7,7 @@ import sys
 
 import pytest
 
-from tests.e2e.vault_home import seal_fixture_home, run_unlocked
+from tests.e2e.vault_home import prepare_fixture_runtime, run_unlocked
 
 
 @pytest.mark.parametrize("populated", [False, True])
@@ -15,16 +15,8 @@ def test_resume_and_exit_read_without_writing(tmp_path, monkeypatch, populated):
     repo = Path(__file__).resolve().parents[2]
     home = tmp_path / "profile"
     home.mkdir()
-    seal_fixture_home(home)
     monkeypatch.setenv("HERMES_HOME", str(home))
-    from hermes_constants import reset_hermes_home_override, set_hermes_home_override
-    from pm import sync_venv
-
-    token = set_hermes_home_override(home)
-    try:
-        sync_venv(extras=['all'], explicit=True, project_root=repo)
-    finally:
-        reset_hermes_home_override(token)
+    prepare_fixture_runtime(home, repo)
     env = {k: os.environ[k] for k in ("PATH", "SYSTEMROOT", "LANG", "TZ") if k in os.environ}
     env.update(HOME=str(tmp_path), USERPROFILE=str(tmp_path), HERMES_HOME=str(home), PYTHONPATH=str(repo))
     code = '''

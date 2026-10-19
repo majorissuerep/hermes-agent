@@ -260,16 +260,13 @@ export async function hydrateFullConfig(
 ): Promise<ConfigFullResponse | null> {
   const params = scope ? { session_id: scope.sid } : {}
 
-  const [cfg, busy] = await Promise.all([
-    quietRpc<ConfigFullResponse>(gw, 'config.get', { key: 'full', ...params }),
-    null
-  ])
+  const cfg = await quietRpc<ConfigFullResponse>(gw, 'config.get', { key: 'full', ...params })
 
-  if (scope && !scope.isCurrent()) {
+  if (!cfg || (scope && !scope.isCurrent())) {
     return null
   }
 
-  applyDisplay(cfg, setBell, setVoiceRecordKey, setBellOnPrompt, !false)
+  applyDisplay(cfg, setBell, setVoiceRecordKey, setBellOnPrompt)
 
   // Same fail-safe as the voice key: a null config (transient RPC failure)
   // keeps the last language rather than snapping back to English.

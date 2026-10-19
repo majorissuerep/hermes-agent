@@ -44,6 +44,19 @@ def fixture_password(home: Path) -> str:
     return _FIXTURE_PASSWORDS[home.resolve()]
 
 
+def prepare_fixture_runtime(home: Path, source: Path) -> None:
+    """Prepare a real owning PM selection before a sealed child imports the app."""
+    from hermes_constants import reset_hermes_home_override, set_hermes_home_override
+    from pm import sync_venv
+
+    seal_fixture_home(home)
+    token = set_hermes_home_override(home)
+    try:
+        sync_venv(extras=["all"], explicit=True, project_root=source)
+    finally:
+        reset_hermes_home_override(token)
+
+
 def spawn_unlocked(argv, *, env: dict[str, str], **kwargs) -> subprocess.Popen:
     """A real child consumes one inherited key pipe at its public/private vault gate."""
     from hermes_security.handoff import prepare_child_key

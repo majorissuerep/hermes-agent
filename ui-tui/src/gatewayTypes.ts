@@ -4,6 +4,7 @@ import type {
   GatewayEvent,
   GatewayEventMap,
   InflightTurn,
+  OpenRequestEntry,
   TranscriptMessage,
   Usage
 } from '@hermes/shared/gateway-events'
@@ -212,6 +213,7 @@ export interface SessionActiveListResponse {
 }
 
 export interface SessionActivateResponse {
+  open_requests?: OpenRequestEntry[] | null
   stored_session_id?: string
   inflight?: null | InflightTurn
   info?: SessionInfo
@@ -355,6 +357,9 @@ export interface ShellExecResponse {
 
 export interface ClipboardPasteResponse {
   attached?: boolean
+  name?: string
+  path?: string
+  mime?: string
   count?: number
   height?: number
   message?: string

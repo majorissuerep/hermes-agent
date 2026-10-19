@@ -157,6 +157,23 @@ export const getOverlayState = () => $overlayState.get()
 export const patchOverlayState = (next: Partial<OverlayState> | ((state: OverlayState) => OverlayState)) =>
   $overlayState.set(typeof next === 'function' ? next($overlayState.get()) : { ...$overlayState.get(), ...next })
 
+/** The channel delivers open requests before the session response; retain those cards across reset. */
+export function sessionRequestOverlays(requests: Array<{ id: string }> | null | undefined): Partial<OverlayState> {
+  const ids = new Set(requests?.map(request => request.id))
+  const state = $overlayState.get()
+  const retained: Partial<OverlayState> = {}
+
+  for (const key of ['approval', 'clarify', ...SENSITIVE_PROMPTS] as const) {
+    const card = state[key]
+
+    if (card && ids.has(card.requestId)) {
+      Object.assign(retained, { [key]: card })
+    }
+  }
+
+  return retained
+}
+
 /** Full reset — used by session/turn teardown and tests. */
 export const resetOverlayState = () => $overlayState.set(buildOverlayState())
 

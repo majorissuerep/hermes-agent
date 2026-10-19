@@ -363,7 +363,9 @@ class TurnController {
     } = {}
   ) {
     {
-      gw.request<SessionInterruptResponse>('session.interrupt', { session_id: sid }).catch(() => {})
+      gw.request<SessionInterruptResponse>('session.interrupt', { session_id: sid }).catch((error: Error) => {
+        sys(`interrupt failed: ${error.message}`)
+      })
     }
 
     this.interrupted = true

@@ -99,7 +99,9 @@ def begin_process(kind: str) -> None:
         if not _collection_on():
             home = get_hermes_home()
             purge_pending_receipts(home)  # parked while on / left by the installer, never counted once off
-            for directory in (markers_dir(home), setup_markers_dir(home)):  # likewise pending exits/setups
+            # Opt-out also erases legacy Desktop markers; no retired producer is loaded.
+            for directory in (markers_dir(home), setup_markers_dir(home),
+                              home / "telemetry" / "shared_metrics" / "desktop_onboarding"):
                 shutil.rmtree(directory, ignore_errors=True)
             return
         from hermes_platform.processes import get_process_start_time

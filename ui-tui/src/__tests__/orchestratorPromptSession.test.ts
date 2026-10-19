@@ -7,7 +7,7 @@ import { t } from '../i18n/runtime.js'
 describe('startPromptLiveSession', () => {
   it('keeps the created target through a delayed model switch without publishing into the new focus', async () => {
     patchUiState({ sid: 'created' })
-    let finish!: (value: { model: string }) => void
+    let finish!: (value: { value: string }) => void
     const dispatched: unknown[] = []
     const notices: string[] = []
 
@@ -29,7 +29,7 @@ describe('startPromptLiveSession', () => {
 
     await new Promise(resolve => setImmediate(resolve))
     patchUiState({ sid: 'other' })
-    finish({ model: 'chosen' })
+    finish({ value: 'chosen' })
     await pending
     expect(dispatched).toEqual([{ text: 'private prompt', destination: expect.objectContaining({ sid: 'created' }) }])
     expect(notices).toEqual([])
@@ -56,7 +56,7 @@ describe('startPromptLiveSession', () => {
 
         return method === 'session.resume'
           ? { revision: 8, execution_generation: 4 }
-          : { model: 'kimi-k2.6', warning: '' }
+          : { value: 'kimi-k2.6', warning: '' }
       },
       sys: text => calls.push(['sys', text])
     })
@@ -64,24 +64,21 @@ describe('startPromptLiveSession', () => {
     expect(sid).toBe('abc123')
     expect(calls).toEqual([
       ['new', { message: t('session.lifecycle.newLiveSessionStarted'), title: undefined }],
-      ['rpc', { method: 'session.resume', params: { session_id: 'abc123' } }],
       [
         'rpc',
         {
-          method: 'session.mutate',
+          method: 'config.set',
           params: {
             session_id: 'abc123',
-            request_id: expect.any(String),
-            expected_revision: 8,
-            expected_generation: 4,
-            operation: 'model',
-            payload: { model: 'kimi-k2.6', provider: 'ollama-cloud' }
+            key: 'model',
+            value: 'kimi-k2.6 --provider ollama-cloud --session',
+            confirm_expensive_model: false
           }
         }
       ],
       ['sys', t('session.main.modelSwitched', 'kimi-k2.6')],
-      ['warn', { model: 'kimi-k2.6', value: 'kimi-k2.6', warning: '' }],
-      ['model-switched', { result: { model: 'kimi-k2.6', value: 'kimi-k2.6', warning: '' }, value: 'kimi-k2.6' }],
+      ['warn', { value: 'kimi-k2.6', warning: '' }],
+      ['model-switched', { result: { value: 'kimi-k2.6', warning: '' }, value: 'kimi-k2.6' }],
       ['dispatch', 'Build the thing']
     ])
   })

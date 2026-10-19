@@ -337,6 +337,10 @@ export function useComposerState({ gw, submitRef, sys }: UseComposerStateOptions
             return null
           }),
         r => {
+          if (r?.attached && r.name) {
+            return attachImageToken(r, value, cursor)
+          }
+
           if (!quiet) {
             sys(r?.message || 'No image found in clipboard')
           }
@@ -345,7 +349,7 @@ export function useComposerState({ gw, submitRef, sys }: UseComposerStateOptions
         }
       )
     },
-    [gw, resolveAttachment, sys]
+    [attachImageToken, gw, resolveAttachment, sys]
   )
 
   const handleResolvedPaste = useCallback(

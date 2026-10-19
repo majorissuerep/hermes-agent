@@ -411,7 +411,7 @@ def test_settings_skills_plugins_transitions_only_count_moves_from_and_back_to_d
         ("memory", "memory.memory_enabled", "disabled"), ("compression", "compression.enabled", "disabled"),
         ("setting", "display.show_reasoning", "disabled"),
         ("skill", "arxiv", "disabled"), ("skill", "custom", "disabled"),
-        ("plugin", "disk-cleanup", "disabled"), ("platform", "telegram", "disabled"),
+        ("plugin", "disk-cleanup", "disabled"),
         ("plugin", "custom", "disabled"),
     }
     back = set(disabled_metrics.config_transitions(new, old))

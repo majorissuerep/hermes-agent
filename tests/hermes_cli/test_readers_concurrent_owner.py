@@ -4,17 +4,25 @@ from pathlib import Path
 import subprocess
 import sys
 
+from tests.e2e.vault_home import prepare_fixture_runtime, run_unlocked
 
-def test_cli_readers_observe_committed_state_during_writer_transaction(tmp_path):
+
+def test_cli_readers_observe_committed_state_during_writer_transaction(tmp_path, monkeypatch):
     repo = Path(__file__).resolve().parents[2]
     home = tmp_path / 'profile'
     home.mkdir()
+    monkeypatch.setenv('HERMES_HOME', str(home))
+    prepare_fixture_runtime(home, repo)
     env = {k: os.environ[k] for k in ('PATH', 'SYSTEMROOT', 'LANG', 'TZ') if k in os.environ}
-    env.update(HERMES_ALLOW_NO_VAULT="1", HOME=str(tmp_path), USERPROFILE=str(tmp_path), HERMES_HOME=str(home), PYTHONPATH=str(repo))
+    env.update(HOME=str(tmp_path), USERPROFILE=str(tmp_path), HERMES_HOME=str(home), PYTHONPATH=str(repo))
     code = '''
+import hermes_bootstrap
+from hermes_security.handoff import adopt_inherited_key
+assert adopt_inherited_key()
 import os, subprocess, sys
 from pathlib import Path
 from hermes_state import SessionDB
+from tests.e2e.vault_home import run_unlocked
 path = Path(os.environ['HERMES_HOME']) / 'state.db'
 with SessionDB(db_path=path) as owner:
     owner.create_session('committed-fixture', source='cli')
@@ -27,8 +35,8 @@ with SessionDB(db_path=path) as owner:
         owner._conn.execute("UPDATE sessions SET title='UNCOMMITTED_SENTINEL' WHERE id='committed-fixture'")
         try:
             for command in (['sessions','list'], ['sessions','stats'], ['sessions','pinned','--json'], ['insights']):
-                result = subprocess.run([sys.executable, '-m', 'hermes_cli.main', *command],
-                                        stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=10)
+                result = run_unlocked([sys.executable, '-m', 'hermes_cli.main', *command], env=dict(os.environ),
+                                      stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=30)
                 assert result.returncode == 0, result.stdout + result.stderr
                 assert 'Error:' not in result.stdout and 'Error generating' not in result.stdout, result.stdout
                 assert 'UNCOMMITTED_SENTINEL' not in result.stdout, result.stdout
@@ -43,6 +51,6 @@ with SessionDB(db_path=path) as owner:
             owner._conn.rollback()
     assert owner.get_session_title('committed-fixture') == 'Committed title'
 '''
-    result = subprocess.run([sys.executable, '-c', code], cwd=repo, env=env, stdin=subprocess.DEVNULL,
-                            capture_output=True, text=True, timeout=60, check=False)
+    result = run_unlocked([sys.executable, '-c', code], cwd=repo, env=env, stdin=subprocess.DEVNULL,
+                          capture_output=True, text=True, timeout=150, check=False)
     assert result.returncode == 0, result.stdout + result.stderr

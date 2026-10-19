@@ -230,33 +230,44 @@ class SharedMetricsStore:
         self, state_key: str, metric_name: str, dimensions: dict[str, str],
         resource: dict[str, str],
     ) -> bool:
-        """Transactional compare-and-set latch shared by concurrent Hermes processes."""
+        """Commit once across processes; a busy store defers without advancing the latch."""
         self._validate_counter(metric_name, dimensions, resource)
         now = _utc_now()
-        with self._write() as connection:
-            row = connection.execute(
-                "SELECT value FROM telemetry_state WHERE key = ?", (state_key,)
-            ).fetchone()
-            last_recorded = self._parse_state_timestamp(row["value"]) if row is not None else None
-            if last_recorded is not None and last_recorded > now:
-                # A wall-clock correction must not suppress activity until the stale future
-                # timestamp plus another full interval.
-                connection.execute(
-                    "UPDATE telemetry_state SET value = ? WHERE key = ?",
-                    (_isoformat(now), state_key),
-                )
-                return False
-            if last_recorded is not None and now < last_recorded + _ACTIVE_INSTALL_INTERVAL:
-                return False
-            self._install_id(connection)
-            self._record_counter_in_transaction(
-                connection, metric_name, dimensions, resource, now.date().isoformat()
-            )
+        recorded = False
+
+        def record(connection):
+            nonlocal recorded
+            recorded = self._record_interval_in_transaction(
+                connection, state_key, metric_name, dimensions, resource, now)
+
+        self._write_or_defer(record)
+        return recorded
+
+    def _record_interval_in_transaction(
+        self, connection: sqlite3.Connection, state_key: str, metric_name: str,
+        dimensions: dict[str, str], resource: dict[str, str], now: datetime,
+    ) -> bool:
+        row = connection.execute(
+            "SELECT value FROM telemetry_state WHERE key = ?", (state_key,)
+        ).fetchone()
+        last_recorded = self._parse_state_timestamp(row["value"]) if row is not None else None
+        if last_recorded is not None and last_recorded > now:
+            # A wall-clock correction must not suppress activity until the stale future
+            # timestamp plus another full interval.
             connection.execute(
-                "INSERT INTO telemetry_state(key, value) VALUES (?, ?)"
-                " ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-                (state_key, _isoformat(now)),
+                "UPDATE telemetry_state SET value = ? WHERE key = ?", (_isoformat(now), state_key),
             )
+            return False
+        if last_recorded is not None and now < last_recorded + _ACTIVE_INSTALL_INTERVAL:
+            return False
+        self._install_id(connection)
+        self._record_counter_in_transaction(
+            connection, metric_name, dimensions, resource, now.date().isoformat()
+        )
+        connection.execute(
+            "INSERT INTO telemetry_state(key, value) VALUES (?, ?)"
+            " ON CONFLICT(key) DO UPDATE SET value = excluded.value", (state_key, _isoformat(now)),
+        )
         return True
 
     def record_counter(

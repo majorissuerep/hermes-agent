@@ -6,14 +6,20 @@ import sys
 
 import pytest
 
+from tests.e2e.vault_home import prepare_fixture_runtime, run_unlocked
 
 @pytest.mark.parametrize('populated', [False, True])
-def test_session_observation_preserves_storage(tmp_path, populated):
+def test_session_observation_preserves_storage(tmp_path, monkeypatch, populated):
     repo = Path(__file__).resolve().parents[2]
     env = {k: os.environ[k] for k in ('PATH', 'SYSTEMROOT', 'LANG', 'TZ') if k in os.environ}
     env.update(HOME=str(tmp_path), USERPROFILE=str(tmp_path), HERMES_HOME=str(tmp_path / 'profile'), PYTHONPATH=str(repo))
     (tmp_path / 'profile').mkdir()
+    monkeypatch.setenv('HERMES_HOME', str(tmp_path / 'profile'))
+    prepare_fixture_runtime(tmp_path / 'profile', repo)
     code = '''
+import hermes_bootstrap
+from hermes_security.handoff import adopt_inherited_key
+assert adopt_inherited_key()
 from pathlib import Path
 from types import SimpleNamespace
 from contextlib import redirect_stdout
@@ -45,6 +51,6 @@ for action in ('list', 'stats', 'pinned', 'export'):
     after = path.read_bytes() if path.exists() else None
     assert after == before, action + ' created or mutated state.db'
 '''.replace('POPULATED', repr(populated))
-    result = subprocess.run([sys.executable, '-c', code], cwd=repo, env=env, stdin=subprocess.DEVNULL,
+    result = run_unlocked([sys.executable, '-c', code], cwd=repo, env=env, stdin=subprocess.DEVNULL,
                             capture_output=True, text=True, timeout=30, check=False)
     assert result.returncode == 0, result.stdout + result.stderr

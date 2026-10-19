@@ -24,7 +24,7 @@ import type { Msg, PanelSection, SessionInfo } from '../types.js'
 
 import { applyConnectionRequest, clearConnectionOperation } from './connectionOperationStore.js'
 import type { ComposerActions, GatewayRpc, StateSetter } from './interfaces.js'
-import { patchOverlayState } from './overlayStore.js'
+import { patchOverlayState, sessionRequestOverlays } from './overlayStore.js'
 import { scheduleResumeScrollToBottom } from './sessionResumeView.js'
 import { captureDestination } from './submissionDestination.js'
 import { turnController } from './turnController.js'
@@ -379,7 +379,9 @@ export function useSessionLifecycle(opts: UseSessionLifecycleOptions) {
           const storedSid = r.session_key || r.stored_session_id || r.info?.stored_session_id || r.session_id
           const info = r.info ? { ...r.info, stored_session_id: storedSid } : null
           const running = Boolean(r.running || r.status === 'working' || r.status === 'waiting')
+          const requestCards = sessionRequestOverlays(r.open_requests)
           resetSession()
+          patchOverlayState(requestCards)
           setSessionStartedAt(r.started_at ? r.started_at * 1000 : Date.now())
           const transcript = [...toTranscriptMessages(r.messages), ...liveSessionInflightMessages(r.inflight)]
           setHistoryItems(info ? [introMsg(info), ...transcript] : transcript)
@@ -461,7 +463,9 @@ export function useSessionLifecycle(opts: UseSessionLifecycleOptions) {
             // A successful resume authorizes the requested source → canonical
             // successor mapping; ordinary focus changes never migrate input.
             migratePendingInputs(destination, r.session_id, info?.stored_session_id)
+            const requestCards = sessionRequestOverlays(r.open_requests)
             resetSession()
+            patchOverlayState(requestCards)
             setSessionStartedAt(r.started_at ? r.started_at * 1000 : Date.now())
             const resumed = [...toTranscriptMessages(r.messages), ...liveSessionInflightMessages(r.inflight)]
             setHistoryItems(info ? [introMsg(info), ...resumed] : resumed)

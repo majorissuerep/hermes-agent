@@ -440,23 +440,19 @@ describe('syncMcpReload (revision-aware ack)', () => {
 // + apply body is now shared as ``hydrateFullConfig()``, exercised
 // directly from both the initial hydration and the poll-tick body.
 describe('hydrateFullConfig', () => {
-  it('hydrates the session busy preference instead of profile defaults and preserves it on read failure', async () => {
+  it('hydrates native profile preferences and preserves them on read failure', async () => {
     patchUiState({ sid: 'owner', busyInputMode: 'queue' })
 
-    const request = vi.fn(async (_method: string, params: any) =>
-      params.key === 'busy' ? { value: 'steer' } : { config: { display: { busy_input_mode: 'interrupt' } } }
-    )
+    const request = vi.fn(async () => ({ config: { display: { busy_input_mode: 'steer' } } }))
 
-    const gw = { isCanonical: true, request } as any
+    const gw = { request } as any
     const scope = { sid: 'owner', isCurrent: () => true }
     await hydrateFullConfig(gw, vi.fn(), undefined, undefined, scope)
     expect(request).toHaveBeenCalledWith('config.get', { key: 'full', session_id: 'owner' })
-    expect(request).toHaveBeenCalledWith('config.get', { key: 'busy', session_id: 'owner' })
+    expect(request).toHaveBeenCalledTimes(1)
     expect($uiState.get().busyInputMode).toBe('steer')
-    request.mockImplementation(async (_method, params) => {
-      if (params.key === 'busy') {throw new Error('disconnected')}
-
-      return { config: { display: { busy_input_mode: 'interrupt' } } }
+    request.mockImplementation(async () => {
+      throw new Error('disconnected')
     })
     await hydrateFullConfig(gw, vi.fn(), undefined, undefined, scope)
     expect($uiState.get().busyInputMode).toBe('steer')
@@ -530,13 +526,10 @@ describe('hydrateFullConfig', () => {
 
     const result = await hydrateFullConfig(gw, setBell, setVoiceRecordKey)
 
-    // quietRpc() swallows the error and returns null; applyDisplay
-    // sees cfg=null and skips the voice setter (Copilot round-8).
+    // A failed refresh must not replace the last known preferences.
     expect(result).toBeNull()
     expect(setVoiceRecordKey).not.toHaveBeenCalled()
-    // bell setter still fires — applyDisplay's null-cfg path applies
-    // the documented bell default (false).
-    expect(setBell).toHaveBeenCalledWith(false)
+    expect(setBell).not.toHaveBeenCalled()
   })
 
   it('threads through without a voice setter (back-compat call sites)', async () => {

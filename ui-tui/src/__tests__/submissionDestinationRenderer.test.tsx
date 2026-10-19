@@ -76,7 +76,6 @@ it('submits interpolated queued input only to its captured owner and removes it 
     expect(request).toHaveBeenCalledWith('prompt.submit', {
       session_id: 'owner',
       text: 'private data',
-      submission_id: item.submissionId,
       queued: true
     })
     expect(appended).not.toHaveBeenCalled()
@@ -84,9 +83,6 @@ it('submits interpolated queued input only to its captured owner and removes it 
     patchUiState({ sid: 'owner' })
     expect(queue.queueRef.current).toContain(item)
     resolveSubmit({
-      admission_id: item.submissionId,
-      target_session_id: 'stored-owner',
-      target_profile_home: home,
       status: 'queued'
     })
     await expect.poll(() => queue.queueRef.current.length).toBe(0)

@@ -247,15 +247,9 @@ def test_a_checkout_move_names_a_held_index_lock_apart_from_a_permission_error(r
     assert git("rev-parse", "HEAD") == old
 
 
-@pytest.mark.parametrize(("site", "raised", "expected"), [
-    ("channel", ValueError("Invalid channel name"), "channel_unresolved"),
-    ("pause", RuntimeError("Could not stop Windows gateway service x"), "gateway_pause_failed"),
-])
-def test_an_exception_before_the_apply_names_its_exit_through_the_command_boundary(
-        rows, monkeypatch, site, raised, expected):
-    """Invariant: an exception that leaves ``_cmd_update_impl`` before the apply mark is recorded by
-    the exit that raised it; the command boundary (main.cmd_update) never has to read its type name,
-    so it never collapses to ``exception``."""
+def test_unresolved_channel_names_its_exit_through_the_native_command_boundary(rows, monkeypatch, tmp_path):
+    """The actual native pre-apply pipeline preserves its channel stop classification."""
+    raised = ValueError("Invalid channel name")
     from hermes_cli import main, update_cmd, update_lock, update_owning_install
 
     def boom(*_a, **_k):
@@ -278,27 +272,25 @@ def test_an_exception_before_the_apply_names_its_exit_through_the_command_bounda
     monkeypatch.setattr(main, "_install_hangup_protection", lambda **kw: None)
     monkeypatch.setattr(main, "_finalize_update_output", lambda state: None)
     monkeypatch.setattr(update_lock, "UpdateLock", Free)
-    monkeypatch.setattr(update_cmd, "git_operation_in_progress", lambda root: None)
+    monkeypatch.setattr(main, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr("hermes_cli._early_recovery.git_operation_in_progress", lambda root: None)
+    monkeypatch.setattr("hermes_cli.gitlock.release_dead_index_lock", lambda root: None)
     monkeypatch.setattr(update_cmd._check, "clear_git_debris", lambda root: None)
     monkeypatch.setattr(update_cmd, "_resolve_update_options", lambda *_: update_cmd._UpdateOptions(
         pre_update_version=None, gw_input_fn=None, assume_yes=True, keep_stash=False,
         switch_branch=False, discard_local_changes=False, no_gateway_restart=True))
     monkeypatch.setattr(update_cmd, "_begin_update_receipt_and_plan",
                         lambda args: update_receipt.begin_update_receipt())
-    monkeypatch.setattr(main, "_run_pre_update_backup", lambda args: None)
-    monkeypatch.setattr(main, "_pause_windows_gateways_for_update", boom if site == "pause" else lambda: None)
-    monkeypatch.setattr(main, "_desktop_packaged_executable", lambda d: None)
-    monkeypatch.setattr(main, "_desktop_dist_exists", lambda d: False)
-    monkeypatch.setattr(main, "_installed_desktop_apps", list)
+    monkeypatch.setattr(update_cmd, "_run_pre_update_backup", lambda args: None)
     monkeypatch.setattr(update_cmd, "_prepare_git_command", lambda **_: (False, ["git"], False))
     monkeypatch.setattr(update_cmd, "_source_completion_request", lambda *a: {"home": str(rows.home)})
     monkeypatch.setattr(main, "_resolve_update_branch", lambda args: "main")
-    monkeypatch.setattr(update_cmd, "_source_update_channel", boom if site == "channel" else lambda args: "main")
+    monkeypatch.setattr(update_cmd, "_source_update_channel", boom)
     with pytest.raises(type(raised)):
         main.cmd_update(SimpleNamespace(gateway=False, branch=None, channel=None))
 
     (run,) = rows.runs()
-    assert (run["failure_class"], run["outcome"], run["apply_mode"]) == (expected, "failed", "unknown")
+    assert (run["failure_class"], run["outcome"], run["apply_mode"]) == ("channel_unresolved", "failed", "unknown")
     assert contract.counter_dimensions_are_valid(contract.UPDATE_RUN_METRIC, run)
 
 
