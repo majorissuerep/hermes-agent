@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import hashlib
+import os
 import time
 from typing import Dict, Optional
 from hermes_cli.auth_constants import httpx
@@ -99,6 +100,20 @@ def detect_zai_endpoint(api_key: str, timeout: float = 8.0) -> Optional[dict[str
         return _first_ready(require_done=False)
     finally:
         pool.shutdown(wait=False)
+
+
+def _zai_endpoint_override(pconfig) -> str:
+    """Resolve explicit relay intent before authenticated vendor discovery."""
+    from hermes_cli import auth
+    from hermes_cli.providers import normalize_provider
+
+    explicit = os.getenv(pconfig.base_url_env_var, "").strip() if pconfig.base_url_env_var else ""
+    if explicit:
+        return explicit
+    model = auth.read_raw_config().get("model")
+    if isinstance(model, dict) and normalize_provider(str(model.get("provider") or "")) == "zai":
+        return str(model.get("base_url") or "").strip()
+    return ""
 
 
 def _resolve_zai_base_url(api_key: str, default_url: str, env_override: str) -> str:
