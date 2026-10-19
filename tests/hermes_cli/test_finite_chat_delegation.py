@@ -154,6 +154,10 @@ def test_finite_chat_joins_parallel_children_before_final_response(tmp_path, mod
                 history = database.execute("SELECT content FROM messages WHERE session_id=? ORDER BY id",
                                            ("finite-resume",)).fetchall()
                 assert [row[0] for row in history[:2]] == ["Earlier retained question", "Earlier retained answer"]
+    except subprocess.TimeoutExpired as exc:
+        pytest.fail(str({"timeout_seconds": exc.timeout, "stdout": exc.stdout,
+                         "stderr": exc.stderr, "joined_results": joined_results,
+                         "children": children, "provider_errors": errors}))
     finally:
         server.shutdown()
         server.server_close()

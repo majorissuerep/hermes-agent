@@ -21,7 +21,7 @@ from collections import Counter
 import pytest
 
 from tests.e2e.core.tui_pty._helpers import (
-    TmuxTui, cell_params, poll, private_tui_dir, require_tui, run_cells, words,
+    TmuxTui, cell_params, poll, require_tui, run_cells, words,
 )
 from tests.fakes.fake_llm_provider import FakeLLMServer, Text
 
@@ -135,12 +135,11 @@ def _first_tui(root, llm, cells, summaries: list[int]) -> str:
 def _startup_resume(root, llm, home_env: dict[str, str], sid: str, cells) -> None:
     """/resume typed while the status bar still reads 'summoning hermes…' must stick."""
     cells.phase = "slash_resume_at_startup"
-    tui_dir = private_tui_dir(root / "startup")
     landed = 0
     last = ""
     for i in range(STARTUP_TRIES * 3):
         tui = TmuxTui(root / "startup" / str(i), llm.base_url, cols=140, rows=200, write_home=False,
-                      env_extra=home_env, tui_dir=tui_dir)
+                      env_extra=home_env)
         try:
             tui.wait_raw()
             try:  # the status bar paints a moment after raw mode

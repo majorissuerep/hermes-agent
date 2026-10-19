@@ -15,7 +15,6 @@ import fcntl
 import os
 import re
 import signal
-import shutil
 import sqlite3
 import struct
 import subprocess
@@ -28,7 +27,7 @@ from typing import Callable
 
 from tests.e2e.core.terminal._vt import Screen
 from tests.fakes.fake_llm_provider import FakeLLMServer
-from tests.e2e.vault_home import connect_state, spawn_unlocked, write_encrypted_home
+from tests.e2e.vault_home import connect_state, prepare_fixture_runtime, spawn_unlocked, write_encrypted_home
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 
@@ -115,6 +114,10 @@ class PtyHermes:
             f"sandbox {self.hermes_home} sits inside the operator's Hermes home")
         if llm is not None:
             write_encrypted_home(self.hermes_home, llm.base_url, extra_config=extra_config)
+        prepare_fixture_runtime(self.hermes_home, REPO_ROOT)
+        from hermes_cli._launchers import runtime_command
+
+        command = runtime_command(REPO_ROOT)
         self.llm = llm
         self.screen = Screen(rows, cols)
         self.raw = bytearray()
@@ -128,15 +131,14 @@ class PtyHermes:
             PYTHONUNBUFFERED="1", HERMES_STATE_DB_GUARD_BYPASS="1",
         )
         master, slave = os.openpty()
-        env["HERMES_NODE"] = shutil.which("node")
-        for tool_env in ("HERMES_PYTHON", "HERMES_RUNTIME_DIR"):
+        for tool_env in ("HERMES_RUNTIME_DIR",):
             if tool_env in os.environ:
                 env[tool_env] = os.environ[tool_env]
         self._set_winsize(master, rows, cols)
         self.master = master
         self.pts = os.ttyname(slave)
         self.proc = spawn_unlocked(
-            [sys.executable, "-c", _SESSION_LEADER, sys.executable, "-m", "hermes_cli.main", *argv_tail],
+            [sys.executable, "-c", _SESSION_LEADER, *command, *argv_tail],
             stdin=slave, stdout=slave, stderr=slave, cwd=str(root / "work"), env=env,
             start_new_session=True, close_fds=True)
         os.close(slave)

@@ -45,6 +45,7 @@ class TuiRuntimeProcess:
         self._lock = threading.Condition()
         self._responses: dict[Any, dict[str, Any]] = {}
         self.events: list[dict[str, Any]] = []
+        self.server_requests: list[dict[str, Any]] = []
         self.malformed: list[bytes] = []
         self._write_lock = threading.Lock()
         self._reader = threading.Thread(target=self._read_loop, name="tui-rpc-reader", daemon=True)
@@ -67,6 +68,8 @@ class TuiRuntimeProcess:
                     self.events.append(params)
                 elif "id" in frame and ("result" in frame or "error" in frame):
                     self._responses[frame["id"]] = frame
+                elif "id" in frame and "method" in frame:
+                    self.server_requests.append(frame)
                 self._lock.notify_all()
         with self._lock:
             self._lock.notify_all()
@@ -132,6 +135,25 @@ class TuiRuntimeProcess:
         with self._lock:
             evs = list(self.events[start:])
         return [e for e in evs if sid is None or e.get("session_id") == sid]
+
+    def wait_request(self, method: str, sid: str, timeout: float) -> dict[str, Any]:
+        deadline = time.monotonic() + timeout
+        with self._lock:
+            while True:
+                for frame in self.server_requests:
+                    if frame["method"] == method and frame.get("params", {}).get("session_id") == sid:
+                        return frame
+                remaining = deadline - time.monotonic()
+                if remaining <= 0 or self.proc.poll() is not None:
+                    raise AssertionError(f"No {method} request for {sid}: {self.tail()}")
+                self._lock.wait(min(remaining, 0.5))
+
+    def respond(self, request_id: str, result: dict[str, Any]) -> None:
+        line = json.dumps({"jsonrpc": "2.0", "id": request_id, "result": result})
+        assert self.proc.stdin is not None
+        with self._write_lock:
+            self.proc.stdin.write((line + "\n").encode())
+            self.proc.stdin.flush()
 
     # ── lifecycle ──────────────────────────────────────────────────────────
     def close_stdin_and_wait(self, timeout: float) -> int | None:

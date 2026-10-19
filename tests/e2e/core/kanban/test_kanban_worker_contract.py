@@ -36,7 +36,7 @@ KNOWN: dict[str, tuple[str, str]] = {
         "#119619 dispatcher-owned worker with a stale --skill pin exits rc=1 before its session"),
 }
 
-_TASK_RE = re.compile(r"work kanban task (t_[0-9a-f]+)")
+_TASK_RE = re.compile(r"work kanban task (t_[0-9a-f]+)", re.IGNORECASE)
 _EXIT_RE = re.compile(r"\[kanban-worker-exit\] rc=(-?\d+)")
 _REFUSAL_KIND_RE = re.compile(r"block|refus|reject|artifact|violation")
 SKILL_MARK = "E2E_PINNED_SKILL_BODY_7f3a"

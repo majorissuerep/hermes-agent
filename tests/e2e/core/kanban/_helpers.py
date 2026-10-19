@@ -9,14 +9,15 @@ from __future__ import annotations
 
 import json
 import os
-import signal
-import sqlite3
 import subprocess
 import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional
+
+from hermes_platform.processes import terminate_pid
+from tests.e2e.vault_home import connect_state, prepare_fixture_runtime, run_unlocked, spawn_unlocked
 
 REPO = Path(__file__).resolve().parents[4]
 PY = sys.executable
@@ -77,13 +78,11 @@ class Board:
             "  api_max_retries: 1\n"
             "updates:\n"
             "  check: false\n"
-            # Workers run inside the profile's owner daemon; its embedded dispatcher would race
-            # the explicit ticks these tests count. A test that wants it brings its own block.
-            + ("" if "kanban:" in self.extra_config else "kanban:\n  dispatch_in_gateway: false\n")
             + self.extra_config,
             encoding="utf-8",
         )
         (self.hermes_home / ".env").write_text("OPENAI_API_KEY=sk-fake-e2e\n", encoding="utf-8")
+        prepare_fixture_runtime(self.hermes_home, REPO)
         # Workers run with cwd=<task workspace>; the wrapper pins THIS checkout on the path.
         self.hermes_bin = self.root / "hermes-bin"
         self.hermes_bin.write_text(
@@ -103,14 +102,14 @@ class Board:
             # Children keep pytest's PYTEST_VERSION, which arms the live-DB guard against the scratch
             # HOME's own state.db; the whole tree is under ``root`` (asserted below), so let workers
             # open their real session store.
-            "HERMES_STATE_DB_GUARD_BYPASS": "1", "HERMES_ALLOW_NO_VAULT": "1",
+            "HERMES_STATE_DB_GUARD_BYPASS": "1",
             **FAST_ENV, **self.env_extra,
         })
         assert env["HERMES_HOME"].startswith(str(self.root))
         return env
 
     def cli(self, *args: str, timeout: float = 90.0, check: bool = True) -> subprocess.CompletedProcess:
-        proc = subprocess.run(
+        proc = run_unlocked(
             [PY, "-m", "hermes_cli.main", "kanban", *args], cwd=str(self.root), env=self.env(),
             capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL,
             check=False,
@@ -118,6 +117,12 @@ class Board:
         if check and proc.returncode != 0:
             raise AssertionError(f"kanban {' '.join(args)} rc={proc.returncode}\n{proc.stdout}\n{proc.stderr}")
         return proc
+
+    def spawn(self, *args: str, **kwargs) -> subprocess.Popen:
+        return spawn_unlocked(
+            [PY, "-m", "hermes_cli.main", "kanban", *args],
+            cwd=self.root, env=self.env(), **kwargs,
+        )
 
     def cli_json(self, *args: str, **kw: Any) -> Any:
         out = self.cli(*args, "--json", **kw).stdout
@@ -134,12 +139,27 @@ class Board:
                 self.spawned_pids.add(int(pid))
         return res
 
+    def kill_worker(self, pid: int) -> None:
+        owners = self._q(
+            "SELECT worker_started_at FROM task_runs WHERE worker_pid = ? "
+            "AND worker_started_at IS NOT NULL ORDER BY id DESC", (pid,),
+        )
+        assert owners, f"No witnessed process identity for worker {pid}"
+        terminate_pid(pid, force=True, expected_start_time=owners[0]["worker_started_at"])
+
     def kill_workers(self) -> None:
-        for pid in list(self.spawned_pids):
-            try:
-                os.kill(pid, signal.SIGKILL)  # windows-footgun: ok — Linux-gated (module skips off Linux)
-            except (ProcessLookupError, PermissionError):
-                pass
+        for pid in self.spawned_pids:
+            owners = self._q(
+                "SELECT worker_started_at FROM task_runs WHERE worker_pid = ? "
+                "AND worker_started_at IS NOT NULL", (pid,),
+            )
+            for owner in owners:
+                try:
+                    terminate_pid(pid, force=True, expected_start_time=owner["worker_started_at"])
+                    break
+                except OSError:
+                    # Exited or PID reused: neither permits an unguarded fallback signal.
+                    continue
 
     # state readback --------------------------------------------------------
     @property
@@ -147,8 +167,7 @@ class Board:
         return self.hermes_home / "kanban.db"
 
     def _q(self, sql: str, args: tuple = ()) -> list[dict]:
-        conn = sqlite3.connect(f"file:{self.db_path}?mode=ro", uri=True, timeout=30)
-        conn.row_factory = sqlite3.Row
+        conn = connect_state(self.db_path)
         try:
             return [dict(r) for r in conn.execute(sql, args).fetchall()]
         finally:

@@ -23,7 +23,6 @@ import shutil
 import signal
 import sqlite3
 import subprocess
-import sys
 import tempfile
 import termios  # windows-footgun: ok — tmux/pty suite, skipped off Linux
 import time
@@ -37,7 +36,7 @@ import pytest
 from tests.e2e.core._pending_fixes import known_failure
 from tests.e2e.core.terminal._pty import cmdline, poll, session_members
 from tests.e2e.core.terminal._vt import Screen
-from tests.e2e.vault_home import connect_state, fixture_password, write_encrypted_home
+from tests.e2e.vault_home import connect_state, fixture_password, prepare_fixture_runtime, write_encrypted_home
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 TITLE = "Scripted session title"
@@ -74,26 +73,6 @@ def require_tui() -> None:
     if os.environ.get("HERMES_E2E_REQUIRE_TUI") == "1" and missing != ["tmux"]:
         pytest.fail(f"{missing} missing but HERMES_E2E_REQUIRE_TUI=1")
     pytest.skip(f"needs {missing}")
-
-
-def private_tui_dir(root: Path) -> Path:
-    """A private copy of the prebuilt bundle for ``HERMES_TUI_DIR``.
-
-    A checkout launch of ``hermes --tui`` re-runs esbuild on ``ui-tui/dist/entry.js`` every
-    time, non-atomically, so a TUI started by another worker (or another e2e suite) while it
-    rebuilds dies with a Node ``SyntaxError`` on a half-written bundle. The prebuilt-bundle path
-    runs the same file without rebuilding; a copy that ``node --check`` accepts is immune to
-    concurrent rebuilds of the shared one.
-    """
-    src = REPO_ROOT / "ui-tui" / "dist" / "entry.js"
-    dest = root / "tui" / "dist" / "entry.js"
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    for _ in range(20):
-        shutil.copyfile(src, dest)
-        if subprocess.run(["node", "--check", str(dest)], capture_output=True, timeout=60, check=False).returncode == 0:
-            return dest.parent.parent
-        time.sleep(0.5)  # caught a rebuild mid-write; take another copy
-    raise AssertionError(f"{src} never parsed (a rebuild kept rewriting it?)")
 
 
 def words(tag: str, n: int, start: int = 0) -> list[str]:
@@ -223,8 +202,7 @@ class TmuxTui:
 
     def __init__(self, root: Path, base_url: str, *, cols: int = 120, rows: int = 50,
                  extra_config: str = "", args: Iterable[str] = ("--yolo",), inline: bool = False,
-                 env_extra: dict[str, str] | None = None, write_home: bool = True,
-                 tui_dir: Path | None = None) -> None:
+                 env_extra: dict[str, str] | None = None, write_home: bool = True) -> None:
         self.root = root
         self.home = root / "home"
         self.hermes_home = self.home / ".hermes"
@@ -249,14 +227,15 @@ class TmuxTui:
                if not k.startswith(("HERMES_", "TMUX", "OPENAI_", "OPENROUTER_", "ANTHROPIC_"))}
         env.update(HOME=str(self.home), HERMES_HOME=str(self.hermes_home), PYTHONPATH=str(REPO_ROOT),
                    TMPDIR=str(root / "tmp"), LANG="C.UTF-8", LC_ALL="C.UTF-8", PYTHONUNBUFFERED="1",
-                   HERMES_STATE_DB_GUARD_BYPASS="1", HERMES_TUI_INLINE="1" if inline else "0",
-                   HERMES_TUI_DIR=str(tui_dir or private_tui_dir(root)))
+                   HERMES_STATE_DB_GUARD_BYPASS="1", HERMES_TUI_INLINE="1" if inline else "0")
         env.update(env_extra or {})
-        env["HERMES_NODE"] = shutil.which("node")
-        for tool_env in ("HERMES_PYTHON", "HERMES_RUNTIME_DIR"):
+        for tool_env in ("HERMES_RUNTIME_DIR",):
             if tool_env in os.environ:
                 env[tool_env] = os.environ[tool_env]
-        argv = [sys.executable, "-m", "hermes_cli.main", "--tui", *args]
+        prepare_fixture_runtime(Path(env["HERMES_HOME"]), REPO_ROOT)
+        from hermes_cli._launchers import runtime_command
+
+        argv = [*runtime_command(REPO_ROOT), "chat", *args]
         subprocess.run(["tmux", "-S", self.sock, "-f", str(conf), "new-session", "-d", "-s", "p",
                         "-x", str(cols), "-y", str(rows), "-c", str(root / "work"), *argv],
                        env=env, check=True, timeout=30)
