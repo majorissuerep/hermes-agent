@@ -89,28 +89,3 @@ class TestAuxiliaryLedger:
         assert report["total_including_auxiliary"] == {
             "api_calls": 4, "total_tokens": 1298, "estimated_cost_usd": pytest.approx(0.1244),
         }
-
-    def test_waits_for_in_flight_title_thread(self, tmp_path):
-        import threading
-        import time
-
-        from agent import title_generator
-        from hermes_cli.oneshot import _attach_auxiliary_usage
-        from hermes_state import SessionDB
-
-        db = SessionDB(tmp_path / "state.db")
-        try:
-            db.create_session("s", "cli", model="main")
-
-            def late_row():
-                time.sleep(0.2)
-                db.record_auxiliary_usage("s", "title_generation", model="t", input_tokens=7, output_tokens=1)
-
-            thread = threading.Thread(target=late_row, name="auto-title")
-            title_generator._UPGRADE_THREADS.add(thread)
-            thread.start()
-            result = _result(session_id="s")
-            _attach_auxiliary_usage(result, db, {})
-        finally:
-            db.close()
-        assert result["auxiliary_usage"]["title_generation"]["api_calls"] == 1

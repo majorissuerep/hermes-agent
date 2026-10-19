@@ -260,6 +260,10 @@ def _maybe_title_session_at_turn_start(
             ),
             title_preview=title_preview,
         )
+        if upgrade is not None:
+            # Finite owners must drain every writer, not just deferred or billed titles.
+            running = [thread for thread in getattr(agent, "_title_upgrade_threads", ()) if thread.is_alive()]
+            agent._title_upgrade_threads = [*running, upgrade]
         # Unstarted = the title call would share a self-hosted endpoint with this turn's request
         # (#117296); ``finalize_turn`` starts it once the model has answered.
         if upgrade is not None and upgrade.ident is None:
@@ -276,6 +280,18 @@ def start_deferred_title_upgrade(agent: Any) -> None:
     agent._deferred_title_upgrade = None
     from agent.title_generator import start_title_upgrade
     start_title_upgrade(upgrade)
+
+
+def wait_for_agent_title_upgrades(agent: Any) -> None:
+    """Drain this owner's started title writers before accounting or closing its store.
+
+    The auxiliary request owns its timeout. A shorter join would let its accounting/title
+    writes reopen the closed store just before a finite command hard-exits.
+    """
+    for upgrade in getattr(agent, "_title_upgrade_threads", ()):
+        if upgrade.ident is not None:
+            upgrade.join()
+    agent._title_upgrade_threads = []
 
 
 def reanchor_current_turn_user_idx(messages: list[Any], user_message: Any) -> int:
