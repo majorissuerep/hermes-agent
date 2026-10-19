@@ -40,7 +40,9 @@ on:
         default: false
   pull_request:
   push:
-    branches: [main]
+    # Push checks qualify protected-main updates; dispatch checks are diagnostic.
+    # One explicit staging ref keeps non-PR qualification intentional.
+    branches: [main, qualification/terminal-release]
 
 permissions:
   contents: read
@@ -99,22 +101,26 @@ jobs:
         uses: ./.github/actions/detect-changes
         with:
           github-token: ${{ github.token }}
-      - name: Force all lanes on release; E2E only on release or dispatch
+      - name: Force all lanes on release; qualify full lifecycle checks explicitly
         # Overwrite the classifier outputs with 'true' when inputs.release. The E2E
-        # lanes are forced off unless this is a release run or a manual dispatch
-        # (whose empty diff already turns every lane on): never on a pull request
-        # or a push to main, whatever the diff or labels say.
+        # lanes run on releases, diagnostic dispatches and the qualification push.
+        # They stay off on pull requests and ordinary main pushes.
         id: gate-lanes
         env:
           RELEASE: ${{ inputs.release }}
           EVENT_NAME: ${{ github.event_name }}
+          QUALIFICATION_PUSH: ${{ github.event_name == 'push' && github.ref == 'refs/heads/qualification/terminal-release' }}
           CLASSIFIED: ${{ toJSON(steps.classify.outputs) }}
         run: |
           python3 - <<'PY'
           import json, os
           values = json.loads(os.environ['CLASSIFIED'])
           release = os.environ['RELEASE'] == 'true'
-          e2e_allowed = release or os.environ['EVENT_NAME'] == 'workflow_dispatch'
+          e2e_allowed = (
+              release
+              or os.environ['EVENT_NAME'] == 'workflow_dispatch'
+              or os.environ['QUALIFICATION_PUSH'] == 'true'
+          )
           with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
               for lane, value in values.items():
                   if lane.startswith('e2e') and not e2e_allowed:
@@ -130,9 +136,8 @@ jobs:
   # Lane-gated sub-workflows. Each runs in parallel after detect finishes.
   # Skipped workflows (if condition is false) don't spin up runners.
   #
-  # The native E2E suites (e2e and e2e-upgrade) run ONLY on a release run (inputs.release)
-  # or a manual dispatch; the detect gate forces their lanes off for pull
-  # requests and pushes to main.
+  # The native E2E suites run on releases, diagnostic dispatches and the explicit
+  # qualification push; the detect gate disables them on PRs and main pushes.
   # ─────────────────────────────────────────────────────────────────────
   tests:
     name: Python tests
