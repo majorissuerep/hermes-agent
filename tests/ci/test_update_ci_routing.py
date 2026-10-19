@@ -95,12 +95,13 @@ def _on(workflow: dict) -> dict:
     return workflow.get("on", workflow.get(True)) or {}
 
 
-def _detect_outputs(lanes: dict[str, bool], event_name: str = "workflow_dispatch") -> dict[str, Any]:
+def _detect_outputs(lanes: dict[str, bool], event_name: str = "workflow_dispatch", *,
+                    ref: str = "refs/heads/main") -> dict[str, Any]:
     """The classifier's lines -> the composite action's outputs -> ci.yaml ``detect`` outputs.
 
-    Replays a manual dispatch by default: E2E lanes reach their consumers only on a dispatch or a
-    release run (pull requests and main pushes force them off), and the routing tests below check
-    that a set lane reaches its suites."""
+    Replays a diagnostic dispatch by default. Releases and the explicit qualification push also
+    admit E2E; pull requests and main pushes keep them off. The routing tests below check that a
+    set lane reaches its suites."""
     raw = {k: gha.to_string(v) for k, v in lanes.items()}
     action = _yaml(".github/actions/detect-changes/action.yml")
     action_out = {k: gha.render(v["value"], {"steps": {"classify": {"outputs": raw}}})
@@ -110,7 +111,7 @@ def _detect_outputs(lanes: dict[str, bool], event_name: str = "workflow_dispatch
     classify = next(s for s in detect["steps"] if s.get("id") == "classify")
     assert classify["uses"] == "./.github/actions/detect-changes"
     steps = {"classify": {"outputs": action_out}}
-    ctx = {"steps": steps, "github": {"event_name": event_name}, "inputs": {}}
+    ctx = {"steps": steps, "github": {"event_name": event_name, "ref": ref}, "inputs": {}}
     steps["gate-lanes"] = {"outputs": workflow_steps.outputs(gate, ctx)}
     return {k: gha.render(v, ctx) for k, v in detect["outputs"].items()}
 
@@ -748,6 +749,21 @@ def test_pull_requests_and_main_pushes_never_run_e2e(event_name):
         assert not any(_consumers_reached(run, lane).values()), f"{event_name}: {lane} ran"
     assert "e2e-desktop-core" not in run
     assert "tests" in run and "tests-os" in run  # the unit lanes still run
+
+
+@pytest.mark.parametrize("event_name,ref,enabled", [
+    ("push", "refs/heads/qualification/terminal-release", True),
+    ("push", "refs/heads/main", False),
+    ("push", "refs/heads/qualification/other", False),
+    ("pull_request", "refs/heads/qualification/terminal-release", False),
+    ("workflow_dispatch", "refs/heads/main", True),
+])
+def test_qualification_push_replays_full_lifecycle_lane_selection(event_name, ref, enabled):
+    lanes = cc.classify([], run_e2e=True)
+    outputs = _detect_outputs(lanes, event_name, ref=ref)
+    assert outputs["python"] == "true"
+    for lane in ("e2e", "e2e_upgrade"):
+        assert outputs[lane] == gha.to_string(enabled), (event_name, ref, lane, outputs)
 
 
 def test_run_tests_forwards_the_strict_switch():
