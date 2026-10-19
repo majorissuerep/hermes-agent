@@ -1156,11 +1156,12 @@ def _print_failure_report(
 
 
 def _print_run_summary(*, file_count: int, tests_done: int, approx_total_tests: int,
-                       tests_passed: int, tests_failed: int, tests_skipped: int,
+                       tests_passed: int, tests_failed: int, tests_errors: int, tests_skipped: int,
                        files_crashed: int, tests_collected: int, files_failed: int, elapsed: float,
                        jobs: int, collection_only: bool) -> None:
     pct = min(100, (tests_done / approx_total_tests * 100)) if approx_total_tests else 0
     skipped_note = f", {tests_skipped} skipped" if tests_skipped else ""
+    errors_note = f", {tests_errors} error{'s' if tests_errors != 1 else ''}" if tests_errors else ""
     # A crashed interpreter has no failed-test count; say so on the one line
     # everyone reads, or "0 failed" + exit 1 looks like a runner bug.
     crashed_note = (
@@ -1169,7 +1170,7 @@ def _print_run_summary(*, file_count: int, tests_done: int, approx_total_tests: 
     )
     outcome = (f"{tests_collected} tests collected, 0 tests executed, {files_failed} files failed" if collection_only else
                f"{tests_passed} tests passed, {tests_failed} failed")
-    print(f"=== Summary: {file_count} files, {outcome}{crashed_note}{skipped_note} ({pct:.0f}% complete) in {elapsed:.1f}s ({jobs} workers) ===")
+    print(f"=== Summary: {file_count} files, {outcome}{errors_note}{crashed_note}{skipped_note} ({pct:.0f}% complete) in {elapsed:.1f}s ({jobs} workers) ===")
 
 
 
@@ -1492,6 +1493,7 @@ def main() -> int:
     fail_count = 0
     tests_passed = 0
     tests_failed = 0
+    tests_errors = 0
     tests_skipped = 0
     skipped_files: list[tuple[Path, int]] = []
     # Every collected outcome, not just pass/fail: a legitimately all-skipped
@@ -1504,7 +1506,7 @@ def main() -> int:
 
     def _on_done(file: Path, started_at: float, fut: Future[tuple[Path, int, str, dict[str, int], float]]) -> None:
         nonlocal files_done, tests_done, pass_count, fail_count, tests_passed, tests_failed, tests_skipped
-        nonlocal tests_collected, files_crashed
+        nonlocal tests_collected, files_crashed, tests_errors
         n_tests = test_counts.get(file, 0)
         try:
             fpath, rc, output, summary, subproc_wall = fut.result()
@@ -1517,7 +1519,7 @@ def main() -> int:
                 _print_progress(
                     tests_done, approx_total_tests, file, 1,
                     time.monotonic() - started_at,
-                    repo_root, tests_passed, tests_failed,
+                    repo_root, tests_passed, tests_failed + tests_errors,
                     test_counts,
                     subproc_wall=0.0,
                 )
@@ -1528,6 +1530,7 @@ def main() -> int:
             # Accumulate test-level counts from parsed summary.
             tests_passed += summary.get("passed", 0)
             tests_failed += summary.get("failed", 0)
+            tests_errors += summary.get("errors", 0)
             tests_skipped += summary.get("skipped", 0)
             if summary.get("skipped", 0):
                 skipped_files.append((fpath, summary["skipped"]))
@@ -1545,7 +1548,7 @@ def main() -> int:
             _print_progress(
                 tests_done, approx_total_tests, fpath, rc,
                 time.monotonic() - started_at,
-                repo_root, tests_passed, tests_failed,
+                repo_root, tests_passed, tests_failed + tests_errors,
                 test_counts,
                 file_summary=summary,
                 subproc_wall=subproc_wall,
@@ -1583,7 +1586,7 @@ def main() -> int:
     elapsed = time.monotonic() - started
     print()
     _print_run_summary(file_count=len(files), tests_done=tests_done, approx_total_tests=approx_total_tests,
-        tests_passed=tests_passed, tests_failed=tests_failed, tests_skipped=tests_skipped,
+        tests_passed=tests_passed, tests_failed=tests_failed, tests_errors=tests_errors, tests_skipped=tests_skipped,
         files_crashed=files_crashed, tests_collected=tests_collected, files_failed=fail_count, elapsed=elapsed,
         jobs=args.jobs, collection_only=collection_only)
 

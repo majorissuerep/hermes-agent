@@ -109,6 +109,31 @@ def test_progress_output_tolerates_legacy_stdout_encoding(tmp_path: Path) -> Non
     assert "1 tests passed" in proc.stdout
 
 
+def test_setup_errors_are_counted_in_the_run_headline(tmp_path: Path) -> None:
+    root = _probe_root(tmp_path)
+    probe = tmp_path / "test_setup_error.py"
+    probe.write_text(textwrap.dedent("""\
+        import pytest
+        @pytest.fixture
+        def broken():
+            raise RuntimeError("synthetic setup failure")
+        def test_healthy():
+            pass
+        def test_first(broken):
+            pass
+        def test_second(broken):
+            pass
+    """))
+    result = subprocess.run(
+        [sys.executable, str(root / "scripts/run_tests_parallel.py"),
+         "--files", str(probe), "-j", "1", "--file-retries", "0", "--file-timeout", "30"],
+        capture_output=True, text=True, timeout=60, check=False,
+    )
+    assert result.returncode == 1, result.stdout + result.stderr
+    headline = next(line for line in result.stdout.splitlines() if line.startswith("=== Summary:"))
+    assert "1 tests passed, 0 failed, 2 errors" in headline, headline
+
+
 @pytest.mark.platforms("posix")
 @pytest.mark.live_system_guard_bypass
 def test_grandchild_leak_is_killed_by_runner(tmp_path: Path) -> None:
