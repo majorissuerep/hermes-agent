@@ -21,7 +21,7 @@ from tests.waiting import wait_until
 from tests.e2e.core.terminal._vt import Screen
 
 ROOT = Path(__file__).resolve().parents[2]
-pytestmark = pytest.mark.platforms("linux", "macos")
+pytestmark = [pytest.mark.platforms("linux", "macos"), pytest.mark.live_system_guard_bypass]
 
 
 class ModelWire(http.server.BaseHTTPRequestHandler):
@@ -192,8 +192,18 @@ def test_public_ink_model_picker_and_scoped_switches(tmp_path, monkeypatch, lazy
         "auxiliary": {"title_generation": {"enabled": False}},
         "display": {"details_mode": "expanded"},
         "agent": {"reasoning_effort": "none"}}, merge_existing=False)
+    from pm import sync_venv
+
+    sync_venv(extras=["all"], explicit=True, project_root=ROOT)
     vault.clear_vault_cache()
-    terminal = TerminalPTY(dict(os.environ), password, tmp_path / "terminal-model-transcript.log")
+    from hermes_cli._launchers import runtime_command
+
+    env = dict(os.environ)
+    env.pop("HERMES_PYTHON", None)
+    # Exercise the real installation-bound store interpreter, not the dependency-bearing
+    # test interpreter that masks missing activation in Node's private Python child.
+    terminal = TerminalPTY(env, password, tmp_path / "terminal-model-transcript.log",
+                           argv=runtime_command(ROOT))
     anchor = "history-" + secrets.token_hex(10)
     try:
         terminal.until(lambda text: "─ ready │" in text and "❯" in text, "Ink composer ready")
