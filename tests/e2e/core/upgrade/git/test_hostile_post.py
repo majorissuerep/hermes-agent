@@ -203,7 +203,7 @@ def _publish_tui_release(w: G.World, tag: str) -> str:
     """A release whose TUI build obeys the toggles and whose tui inputs changed (TUI stale)."""
     return w.publish(f"release: e2e hostile post tui {tag}", {
         "scripts/build/tui.mjs": _hostile_tui_mjs(w),
-        f"ui-tui/e2e-hostile-post-{tag}.txt": f"tui input changed by release {tag}\n",
+        "ui-tui/src/entry.tsx": _head_file(w, "ui-tui/src/entry.tsx") + f"\n// e2e: build input {tag}\n",
     })
 
 

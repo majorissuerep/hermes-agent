@@ -112,7 +112,11 @@ def _head_containing(git_cmd, cwd, commit: str, repository: str) -> str | None:
     head = run("rev-parse", "HEAD").stdout.strip()
     if not _SHA.fullmatch(head):
         return None
-    ancestry = run("merge-base", "--is-ancestor", commit, head).returncode
+    try:
+        ancestry = run("merge-base", "--is-ancestor", commit, head).returncode
+    except subprocess.TimeoutExpired:
+        # Exhausting the local graph budget proves neither ancestry nor a safe rollback.
+        ancestry = None
     if ancestry == 0:
         return head
     # A shallow boundary makes exit 1 a guess; full history makes it proof.

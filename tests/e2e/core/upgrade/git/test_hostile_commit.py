@@ -113,7 +113,7 @@ def _launch(sb, marker: str) -> subprocess.CompletedProcess:
 
 
 def _update(sb) -> subprocess.CompletedProcess:
-    return P.run_env(sb, [*_RETRY_PREFIX, sb.hermes, "update", "--yes", "--branch", "main", "--no-gateway-restart"],
+    return P.run_env(sb, [*_RETRY_PREFIX, sb.hermes, "update", "--yes", "--branch", "main"],
                      sb.env, timeout=P.UPDATE_TIMEOUT)
 
 

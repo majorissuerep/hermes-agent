@@ -695,7 +695,6 @@ def _source_completion_request(opts, plan, snapshot_id, windows_resume, desktop,
         "schema": 1, "source": str(_m().PROJECT_ROOT.resolve()),
         "home": str(get_hermes_home()), "branch": "main", "desktop": desktop,
         "assume_yes": opts.assume_yes, "gateway_mode": gateway_mode,
-        "no_gateway_restart": getattr(opts, "no_gateway_restart", False),
         "pre_update_version": opts.pre_update_version, "snapshot_id": snapshot_id,
         "sibling_snapshots": deepcopy(_completion_config._LAST_SIBLING_SNAPSHOTS),
         "plan": plan.to_dict() if plan is not None else None,
@@ -1441,7 +1440,6 @@ class _UpdateOptions:
     keep_stash: bool
     switch_branch: bool
     discard_local_changes: bool
-    no_gateway_restart: bool = False
 
 
 def _resolve_update_options(args, gateway_mode: bool) -> _UpdateOptions:
@@ -1452,18 +1450,13 @@ def _resolve_update_options(args, gateway_mode: bool) -> _UpdateOptions:
     gw_input_fn = (
         (lambda prompt, default="": _gateway_prompt(prompt, default)) if gateway_mode else None)
     assume_yes = bool(getattr(args, "yes", False))
-    # --keep-stash (desktop updater): never re-apply the autostash; only when an update
+    # --keep-stash: never re-apply the autostash; only when an update
     # landed — abort/no-op paths still restore since the tree is unchanged.
     keep_stash = bool(getattr(args, "keep_stash", False))
     # --switch-branch: prefer switching over an in-place merge so an update never writes the
     # branch's history; only meaningful with parked_branch_strategy "update_in_place".
     # See #89507.
     switch_branch = bool(getattr(args, "switch_branch", False))
-    # --no-gateway-restart (cron inside the gateway's own cgroup): update code
-    # and dependencies but defer the fleet restart so the updater is not killed
-    # by its own restart. The pending-restart marker is kept for catch-up.
-    no_gateway_restart = bool(getattr(args, "no_gateway_restart", False))
-
     # Interactive terminals always stash-and-ask; only non-interactive updates consult
     # updates.non_interactive_local_changes (auto-restore vs discard).
     discard_local_changes = False
@@ -1475,8 +1468,7 @@ def _resolve_update_options(args, gateway_mode: bool) -> _UpdateOptions:
     return _UpdateOptions(
         pre_update_version=pre_update_version,
         gw_input_fn=gw_input_fn, assume_yes=assume_yes, keep_stash=keep_stash,
-        switch_branch=switch_branch, discard_local_changes=discard_local_changes,
-        no_gateway_restart=no_gateway_restart)
+        switch_branch=switch_branch, discard_local_changes=discard_local_changes)
 
 
 def _begin_update_receipt_and_plan(args):

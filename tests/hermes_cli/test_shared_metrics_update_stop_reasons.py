@@ -278,7 +278,7 @@ def test_unresolved_channel_names_its_exit_through_the_native_command_boundary(r
     monkeypatch.setattr(update_cmd._check, "clear_git_debris", lambda root: None)
     monkeypatch.setattr(update_cmd, "_resolve_update_options", lambda *_: update_cmd._UpdateOptions(
         pre_update_version=None, gw_input_fn=None, assume_yes=True, keep_stash=False,
-        switch_branch=False, discard_local_changes=False, no_gateway_restart=True))
+        switch_branch=False, discard_local_changes=False))
     monkeypatch.setattr(update_cmd, "_begin_update_receipt_and_plan",
                         lambda args: update_receipt.begin_update_receipt())
     monkeypatch.setattr(update_cmd, "_run_pre_update_backup", lambda args: None)

@@ -49,3 +49,23 @@ def test_full_history_behind_release_is_proof(history, tmp_path, monkeypatch):
     monkeypatch.setattr(source_check, "_github_compare", lambda *a, **k: pytest.fail("no network on proof"))
     assert source_releases._head_containing(["git"], clone, shas[2], "o/r") is None
     assert source_releases._head_containing(["git"], clone, shas[0], "o/r") == shas[0]
+
+
+@pytest.mark.parametrize("compare,keeps_head", [(None, True), ({"status": "ahead"}, True),
+                                               ({"status": "behind"}, False)])
+def test_bounded_ancestry_timeout_is_unknown_not_a_failed_channel(history, monkeypatch, compare, keeps_head):
+    origin, shas = history
+    before = (origin / ".git" / "config").read_bytes()
+    original = subprocess.run
+
+    def timed_out_graph(argv, **kwargs):
+        if "merge-base" in argv:
+            assert kwargs["timeout"] == 10
+            raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
+        return original(argv, **kwargs)
+
+    monkeypatch.setattr(source_releases.subprocess, "run", timed_out_graph)
+    monkeypatch.setattr(source_check, "_github_compare", lambda *a, **k: compare)
+    selected = source_releases._head_containing(["git"], origin, shas[0], "o/r")
+    assert selected == (shas[2] if keeps_head else None)
+    assert (origin / ".git" / "config").read_bytes() == before

@@ -180,8 +180,8 @@ class Rig:
 
     def update(self, name: str) -> subprocess.Popen:
         env = self.env(name)
-        argv = H.sandbox_argv([sys.executable, "-m", "hermes_cli.main", "update", "--yes", "--branch", "main",
-                               "--no-gateway-restart"], writable=[self.root])
+        argv = H.sandbox_argv([sys.executable, "-m", "hermes_cli.main", "update", "--yes", "--branch", "main"],
+                             writable=[self.root])
         return subprocess.Popen(argv, env=env, cwd=self.checkout, stdin=subprocess.DEVNULL,
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
 
