@@ -45,7 +45,10 @@ def clone_memory_provider_config(source_dir: Path, profile_dir: Path, provider: 
     copied = False
     src_dir = source_dir / provider
     if src_dir.is_dir():
-        shutil.copytree(src_dir, profile_dir / provider, dirs_exist_ok=True)
+        from functools import partial
+        from hermes_cli.profile_state_copy import copy_profile_tree_file
+        shutil.copytree(src_dir, profile_dir / provider, dirs_exist_ok=True,
+                        copy_function=partial(copy_profile_tree_file, source_root=source_dir))
         for root, _dirs, files in os.walk(profile_dir / provider):
             for filename in files:
                 with contextlib.suppress(OSError):
@@ -54,7 +57,8 @@ def clone_memory_provider_config(source_dir: Path, profile_dir: Path, provider: 
     src_file = source_dir / f"{provider}.json"
     if src_file.is_file():
         dst = profile_dir / f"{provider}.json"
-        shutil.copy2(src_file, dst)
+        from hermes_cli.profile_state_copy import copy_profile_file
+        copy_profile_file(src_file, dst, purpose="state")
         with contextlib.suppress(OSError):
             os.chmod(str(dst), 0o600)
         copied = True

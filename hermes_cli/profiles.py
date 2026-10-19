@@ -138,6 +138,8 @@ def _clone_all_copytree_ignore(source_dir: Path):
             # Fail open — better to over-copy than silently drop user data.
             at_root = False
         ignored = _non_exportable_entries(directory, names)
+        from hermes_cli.profile_state_copy import profile_clone_exclusions
+        ignored.update(profile_clone_exclusions(Path(directory), names, source_root=source_dir))
         if at_root:
             ignored.update(root_exclude & set(names))
         return ignored
@@ -696,18 +698,15 @@ def _load_yaml_dict(path: Path) -> Optional[dict]:
         return None
     try:
         import hermes_yaml as yaml
-        data = yaml.safe_load(path.read_text(encoding="utf-8-sig")) or {}
+        from hermes_security.io import read_text
+        purpose = "config" if path.name == "config.yaml" else "state"
+        data = yaml.safe_load(read_text(path, purpose=purpose, encoding="utf-8-sig")) or {}
     except Exception:
         return None
     return data if isinstance(data, dict) else None
 
 
-# (path, kind) -> (file signature, the small derived value). `list_profiles` re-reads three YAML
-# files PER PROFILE, and it is the shared body of `GET /api/profiles` and `profiles.list`, which the
-# Bots roster polls every 5s per connection — so an installer-seeded config.yaml (the annotated
-# template, ~119KB) was re-parsed for every bot every five seconds to yield the same two strings.
-# Only DERIVED values are cached, never a document a caller could write back: the raw readers
-# (`read_user_config_raw`, `_load_yaml_dict`) keep their uncached contract. See #117378.
+# Cache only derived presentation values, invalidated by the underlying file signature.
 _PROFILE_FILE_CACHE: dict[tuple, tuple] = {}
 _PROFILE_FILE_CACHE_MAX = 512
 
@@ -969,8 +968,13 @@ def write_profile_meta(
     # Atomic write: bare open("w") truncates before the dump, and the read path swallows
     # parse errors as {}, so a crashed write would silently drop unspecified fields.
     # See #51356.
-    from utils import atomic_yaml_write
-    atomic_yaml_write(path, existing, sort_keys=False)
+    from hermes_security import io
+    if io._home_for(path) is None:
+        from utils import atomic_yaml_write
+        atomic_yaml_write(path, existing, sort_keys=False)
+    else:
+        import hermes_yaml as yaml
+        io.write_text(path, yaml.safe_dump(existing, sort_keys=False), purpose="state")
 
 
 def format_profile_label(name: str, display_name: Optional[str]) -> str:
@@ -1055,7 +1059,11 @@ def _seed_file_if_missing(path: Path, text: str, mode: Optional[int] = None,
             from hermes_cli.profiles_soul import write_profile_soul
             write_profile_soul(path.parent, text, destination=destination)
         else:
-            path.write_text(text, encoding="utf-8")
+            from hermes_security import io
+            if io._home_for(path) is None:
+                path.write_text(text, encoding="utf-8")
+            else:
+                io.write_text(path, text, purpose="env" if path.name == ".env" else "state")
         if mode is not None:
             os.chmod(str(path), mode)
 
@@ -1094,7 +1102,9 @@ def _materialize_symlinked_files(profile_dir: Path) -> list[str]:
         target = Path(os.path.realpath(path))
         path.unlink()
         if target.is_file():
-            shutil.copy2(target, path)
+            from hermes_cli.profile_state_copy import copy_profile_file
+            copy_profile_file(target, path, purpose="env" if name == ".env" else
+                              "config" if name == "config.yaml" else "auth" if name == "auth.json" else "state")
         done.append(name)
     return done
 
@@ -1116,7 +1126,8 @@ def _junction_target(path: str) -> Optional[str]:
     return target.removeprefix("\\\\?\\")
 
 
-def _copytree_keep_junctions(src: Path, dst: Path, ignore, dirs_exist_ok: bool = False) -> None:
+def _copytree_keep_junctions(src: Path, dst: Path, ignore, dirs_exist_ok: bool = False,
+                             copy_function=shutil.copy2) -> None:
     """``shutil.copytree(symlinks=True)`` that re-creates NTFS junctions as junctions instead of
     traversing them. A ``skills/foo`` junction into a ``skills.external_dirs`` root copied as a
     physical tree is a second same-named candidate and ``_locate_skill`` refuses to guess (#113471).
@@ -1132,7 +1143,8 @@ def _copytree_keep_junctions(src: Path, dst: Path, ignore, dirs_exist_ok: bool =
                 ignored.add(name)
         return ignored
 
-    shutil.copytree(src, dst, symlinks=True, dirs_exist_ok=dirs_exist_ok, ignore=_ignore)
+    shutil.copytree(src, dst, symlinks=True, dirs_exist_ok=dirs_exist_ok, ignore=_ignore,
+                    copy_function=copy_function)
     if junctions:
         import _winapi  # Windows-only stdlib module; only reachable once a junction was seen
     for link, target in junctions.items():
@@ -1145,7 +1157,10 @@ def _copytree_keep_junctions(src: Path, dst: Path, ignore, dirs_exist_ok: bool =
 def _clone_all_into(source_dir: Path, profile_dir: Path, canon: str) -> None:
     """--clone-all: full copytree minus infrastructure/history, then strip runtime files
     and cloned single-use OAuth grants."""
-    _copytree_keep_junctions(source_dir, profile_dir, _clone_all_copytree_ignore(source_dir))
+    from functools import partial
+    from hermes_cli.profile_state_copy import copy_profile_tree_file
+    _copytree_keep_junctions(source_dir, profile_dir, _clone_all_copytree_ignore(source_dir),
+                             copy_function=partial(copy_profile_tree_file, source_root=source_dir))
     materialized = _materialize_symlinked_files(profile_dir)
     if materialized:
         logger.info("profile %s: materialized symlinked %s so the clone never writes through to %s",
@@ -1319,7 +1334,9 @@ def create_profile(
             if stripped:
                 logger.info("profile %s: cloned without messaging channels %s", canon, stripped)
         from hermes_cli.profiles_initialization import finish_profile_layout
-        finish_profile_layout(staging, no_skills=no_skills, clone_all=clone_all, description=description, soul=soul, final_profile_dir=profile_dir)
+        finish_profile_layout(staging, no_skills=no_skills, clone_all=clone_all, description=description, soul=soul)
+        from hermes_cli.profile_state_copy import publish_profile_state
+        publish_profile_state(staging, profile_dir)
         os.rename(staging, profile_dir)
     except BaseException:
         shutil.rmtree(staging, ignore_errors=True)
@@ -1913,34 +1930,16 @@ def _rename_profile_owned(old_name: str, new_name: str) -> Path:
     if new_dir.exists():
         raise _profile_exists_error(new_canon)
 
-    # 1. Remove the old name's service even when its gateway is stopped: the unit is named after
-    # the old profile and runs ``--profile <old>``, so the service manager would crash-loop it on
-    # the next login or container boot. Then stop the gateway and the screen whose launcher
-    # holds paths under the old name.
-
-    # 1b. Unroute the old name from a live multiplexer BEFORE the rename (same protocol as
-    # delete_profile). A multiplexed secondary has no gateway.pid of its own, so the check above
-    # reports it stopped while the default gateway still holds its adapters, cron ticker, logging
-    # and SQLite handles; those re-``mkdir`` the old home the moment it moves (no tombstone →
-    # ``mkdir_under_hermes_home`` does not refuse it) and the periodic reconcile re-adopts the
-    # resurrected dir as a ghost served profile (#109267).
-
-    # 1c. Release this process's cached MCP stderr handle into the old home (same as
-    # delete_profile): Windows refuses to rename a directory holding an open file, and the
-    # handle would otherwise stay cached under the old key after the move.
+    # Close local MCP handles before moving the owning profile directory.
     from hermes_constants import hermes_home_key
     from tools.mcp_tool_lifecycle import shutdown_mcp_servers
     shutdown_mcp_servers(scope=hermes_home_key(old_dir))
 
-    # 2. Rename directory. If the move fails (cross-device EXDEV, permissions, a racing writer),
-    # undo the unroute so the profile is never stranded tombstoned-but-present.
     try:
         old_dir.rename(new_dir)
     except Exception:
         raise
     print(f"✓ Renamed {old_dir.name} → {new_dir.name}")
-    # The tombstone lives at profiles/.deleted/<old_name>; old_dir is gone so nothing can
-    # resurrect it, and a future profile reusing the old name must not read as deleted.
 
     # 2b. Record the rename so Bot Mode group chats can re-link persisted
     # member descriptors to the new slug (#110200). Best-effort: a metadata
