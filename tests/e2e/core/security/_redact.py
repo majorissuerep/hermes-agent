@@ -12,14 +12,14 @@ import re
 import secrets
 import shlex
 import string
-import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
 import pytest
 
-from tests.e2e.core.security._helpers import BoundaryBreach, db_blob, files_containing, run_hermes
+from hermes_cli._launchers import runtime_command
+from tests.e2e.core.security._helpers import BoundaryBreach, REPO_ROOT, db_blob, files_containing, run_hermes
 from tests.fakes.fake_llm_provider import Error, Response, Text, ToolCall
 
 
@@ -93,9 +93,28 @@ def _tee(c: Ctx, name: str, src: str | Path) -> str:
 
 def _tee_raw_env(c: Ctx) -> str:
     """Public self-called children unlock the real profile; cat would see ciphertext."""
-    commands = [shlex.join([sys.executable, "-m", "hermes_cli.main", "config", "get", "--raw", key])
+    commands = [shlex.join(runtime_command(REPO_ROOT, ["config", "get", "--raw", key]))
                 for key in ("OPENAI_API_KEY", "ACME_SERVICE_TOKEN")]
-    return "{ " + " && ".join(commands) + "; } | tee " + shlex.quote(str(c.ws / "echoed_managed_env.txt"))
+    target = shlex.quote(str(c.ws / "echoed_managed_env.txt"))
+    return f"{commands[0]} > {target} && {commands[1]} >> {target} && cat {target}"
+
+
+def assert_managed_env_read_succeeded(requests: list[dict], ctx: Ctx) -> None:
+    """A failed self-management child must not masquerade as successful redaction."""
+    ids = set()
+    result = None
+    for request in requests:
+        for message in request.get("body", {}).get("messages", []):
+            for call in message.get("tool_calls") or []:
+                args = json.loads(call["function"]["arguments"])
+                if args.get("command") == _tee_raw_env(ctx):
+                    ids.add(call["id"])
+            if message.get("role") == "tool" and message.get("tool_call_id") in ids:
+                result, _ = json.JSONDecoder().raw_decode(message["content"].lstrip())
+    detail = json.dumps(result)
+    for value in (ctx.keys.provider, ctx.keys.env_opaque):
+        detail = detail.replace(value, "[REDACTED]")
+    assert result is not None and result.get("exit_code") == 0, detail
 
 
 SCENARIOS: dict[str, Scenario] = {s.name: s for s in (

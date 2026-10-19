@@ -26,7 +26,8 @@ import pytest
 from tests.e2e.core._pending_fixes import known_gate
 from tests.e2e.core.security._helpers import BoundaryBreach, run_hermes, write_home
 from tests.e2e.core.security._redact import (
-    CONFIG, SCENARIOS, Ctx, Director, Secrets, World, assert_harness_sane, cell_id, cells, check, collect,
+    CONFIG, SCENARIOS, Ctx, Director, Secrets, World, assert_harness_sane, assert_managed_env_read_succeeded,
+    cell_id, cells, check, collect,
     echo_preconditions, prompt_for, seed_workspace,
 )
 from tests.fakes.fake_llm_provider import FakeLLMServer
@@ -62,6 +63,8 @@ def cli_world(tmp_path_factory) -> World:
                 assert r2.returncode == 0, f"{name}: follow-up turn failed\n{r2.stdout}\n{r2.stderr}"
             elif name != "provider_error_echo":
                 assert r.returncode == 0, f"{name}: turn failed\n{runs[name]}"
+            if name == "tool_reads_env_file":
+                assert_managed_env_read_succeeded(list(llm.requests), ctx)
         sinks = collect(home, list(llm.requests))
         gets = [r for r in llm.requests if r["kind"] == "get"]
     assert_harness_sane(sinks)

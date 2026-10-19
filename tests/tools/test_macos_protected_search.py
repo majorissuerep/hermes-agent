@@ -8,6 +8,7 @@ from tools import file_operations
 from tools.environments.local import LocalEnvironment
 from tools.file_operations import ShellFileOperations
 from tools.file_operations_search import _macos_protected_search_exclusions
+from tests.tools.file_ops_fixtures import bash_program
 
 
 class RecordingEnvironment:
@@ -16,6 +17,7 @@ class RecordingEnvironment:
         self.commands = []
 
     def execute(self, command, cwd=None, **kwargs):
+        command = bash_program(command)
         self.commands.append(command)
         if command.startswith("test -e"):
             return {"output": "exists\n", "returncode": 0}
@@ -117,6 +119,7 @@ def test_rg_multi_root_scopes_protected_globs_and_restores_absolute_paths(monkey
     monkeypatch.setattr(file_operations, "_HOME", "/Users/alice")
 
     def execute(command, cwd=None, **kwargs):
+        command = bash_program(command)
         env.commands.append(command)
         if command.startswith("test -e"):
             output = "not_found\n" if "'/Users/alice /repo'" in command else "exists\n"
@@ -158,6 +161,7 @@ def test_rg_scoped_multi_root_terminates_options_before_dash_prefixed_root(monke
     monkeypatch.setattr(file_operations, "_HOME", "/Users/alice")
 
     def execute(command, cwd=None, **kwargs):
+        command = bash_program(command)
         env.commands.append(command)
         if command.startswith("test -e"):
             output = "not_found\n" if "'., --version'" in command else "exists\n"

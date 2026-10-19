@@ -26,6 +26,8 @@ from pathlib import Path
 import re
 import subprocess
 
+from tests.docker.conftest import OWNER_KEY_PROGRAM
+
 
 _VERSION_LINE = re.compile(r"^version:\s+(?P<rest>.+)$", re.MULTILINE)
 # The stamp-first version line is "X.Y.Z [<sha>] (YYYY-MM-DD)" — the sha
@@ -43,7 +45,7 @@ def _run_dump(image: str) -> str:
     would break cleanup on non-root hosts).
     """
     r = subprocess.run(
-        ["docker", "run", "--rm", image, "dump"],
+        ["docker", "run", "--rm", image, "/opt/hermes/.venv/bin/python", "-c", OWNER_KEY_PROGRAM, "dump"],
         capture_output=True, text=True, timeout=120,
         check=False,
     )

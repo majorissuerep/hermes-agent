@@ -36,7 +36,7 @@ import pytest
 from tests.e2e.core._pending_fixes import known_failure
 from tests.e2e.core.terminal._pty import cmdline, poll, session_members
 from tests.e2e.core.terminal._vt import Screen
-from tests.e2e.vault_home import connect_state, fixture_password, prepare_fixture_runtime, write_encrypted_home
+from tests.e2e.vault_home import connect_state, fixture_password, prepare_fixture_tui, write_encrypted_home
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 TITLE = "Scripted session title"
@@ -232,7 +232,7 @@ class TmuxTui:
         for tool_env in ("HERMES_RUNTIME_DIR",):
             if tool_env in os.environ:
                 env[tool_env] = os.environ[tool_env]
-        prepare_fixture_runtime(Path(env["HERMES_HOME"]), REPO_ROOT)
+        prepare_fixture_tui(Path(env["HERMES_HOME"]), REPO_ROOT)
         from hermes_cli._launchers import runtime_command
 
         argv = [*runtime_command(REPO_ROOT), "chat", *args]

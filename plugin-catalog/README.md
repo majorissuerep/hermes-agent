@@ -45,21 +45,13 @@ meaningful:
    appear as warnings in the CI log and the reviewer reads them before merging.
    In exchange, installs at the pinned SHA accept `caution` without a prompt
    (`dangerous` still blocks). Review the warnings; do not merge past them.
-8. **Desktop plugins stay inside the SDK surface.** A `desktop/plugin.js` runs
-   in the Desktop renderer with the app's full authority (the loader isolates
-   errors, not capabilities), so a listed one may only use the plugin SDK:
-   no prototype patching (`X.prototype.y =`, `Object.defineProperty(...prototype`),
-   no `eval`/`new Function`, no `import()` of anything but `@hermes/plugin-sdk`
-   / `react` (app bundle chunks, blob or http URLs included), no script-tag
-   injection, no reaching into the app's internal stores or its own markup
-   (querying `data-slot` / `data-tour` / `data-sidebar` / `data-testid`
-   elements from `document`, or a `document.body` MutationObserver, to restyle,
-   hide, click or rewrite core UI). `hermes plugins validate` refuses these at
-   admission (`desktop surface` check); a plugin that needs a capability the
-   SDK lacks asks for an SDK hook instead of patching around it.
+8. **Only shipped local surfaces are admissible.** Plugins must provide a Python
+   entrypoint, portable Agent Plugin manifest, or declared language pack that
+   this fork can load. Desktop renderer bundles and inbound messaging adapters
+   alone are not loadable plugins. Do not advertise a removed host as supported.
 9. **No runtime overrides of Hermes core.** A listed plugin extends Hermes only
    through public surfaces: hooks, middleware, provider profiles and the
-   other `register_*` APIs, and Desktop SDK slots and routes. It must not
+   other `register_*` APIs. It must not
    replace, wrap or rebind core functions, methods, module attributes or
    private dicts in place (`AIAgent.<method> = ...`, `setattr(server, ...)`,
    `sys.modules[...]`, writes into a core module's tables). Two plugins
@@ -69,7 +61,7 @@ meaningful:
    undocumented core module, by file and line. If the hook you need does not
    exist, open an issue describing it: we would rather add the seam than list
    a patch.
-10. **Dependency security policy is the plugin's.** Hermes's 3-day
+10. **Dependency security policy is the plugin's.** Hermes's 14-day
    `exclude-newer` release-age check covers Hermes's own dependencies only, at
    the time Hermes locks them; a plugin's `python_dependencies` /
    `pyproject.toml` install under the plugin's policy (no age check), inside
@@ -98,8 +90,8 @@ meaningful:
    Hermes's approval system: no auto-approving, no disabling guards, and no
    spawning Hermes or shell children that inherit YOLO or non-interactive mode
    to run commands nobody approved. Anything that waits for a person (a prompt,
-   an OAuth browser flow) fails cleanly or times out under cron, the messaging
-   gateway and other unattended runs instead of hanging the agent.
+   an OAuth browser flow) fails cleanly or times out under cron and other
+   unattended runs instead of hanging the agent.
 13. **Risky behaviour is disclosed.** What a user would want to know before
    installing goes in the PR description and the plugin's README: network calls
    to third-party services, reads outside the plugin's own data, shell commands,

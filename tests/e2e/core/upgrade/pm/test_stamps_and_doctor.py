@@ -10,12 +10,12 @@ is not the installer's. Then:
   updates; it reports the workspace copy instead (gated on #122425 and #122627);
 * ``hermes doctor`` on that healthy install reports nothing wrong with the command installation
   (#124050 is the false positive class) and ``hermes pm status`` reports the update as a success;
-* real drift is caught and healed: a user uninstalls pydantic (a required core package the native runtime
+* real drift is caught and healed: a user uninstalls openai (a required core package the native runtime
   imports) from the selected environment. ``hermes doctor`` must say so, and ``hermes pm repair``
   must bring the native runtime's import back;
 * a dependency update that cannot resolve after the tree moved is an owed follow-up (contract C3,
   A6): ``hermes update`` exits 0 but says loudly that the dependencies are not installed yet, the
-  receipt names the ``dependencies`` follow-up, the source-update tail stays armed for the next
+  PM receipt names the failed ``dependency-sync``, the source-update tail stays armed for the next
   launch, and the previous generation stays selected and working.
 """
 
@@ -122,12 +122,12 @@ def test_pm_status_receipt_reports_the_successful_update(updated):
 
 @pytest.fixture(scope="module")
 def drifted(updated):
-    """The user removes pydantic (a required core package) from the selected environment by hand."""
+    """Remove a directly diagnosed native dependency from the selected environment by hand."""
     sb = updated["sb"]
-    assert P.managed_imports(sb, "pydantic")["pydantic"] == "ok", "harness: pydantic not installed to begin with"
+    assert P.managed_imports(sb, "openai")["openai"] == "ok", "harness: openai not installed to begin with"
     uv = next((sb.hermes_home / "tools").glob("uv-*/uv"), None) or I.real_uv()
-    P.ok(sb.run([str(uv), "pip", "uninstall", "--python", sb.python, "pydantic"]), "harness: uninstall failed")
-    assert P.managed_imports(sb, "pydantic")["pydantic"] != "ok", "harness: pydantic still importable"
+    P.ok(sb.run([str(uv), "pip", "uninstall", "--python", sb.python, "openai"]), "harness: uninstall failed")
+    assert P.managed_imports(sb, "openai")["openai"] != "ok", "harness: openai still importable"
     doctor = sb.cli("doctor", timeout=300)
     repair = sb.cli("pm", "repair")
     return {"sb": sb, "doctor": doctor, "repair": repair}
@@ -137,16 +137,16 @@ def test_doctor_reports_native_dependency_drift(drifted):
     cp = drifted["doctor"]
     assert I.TRACEBACK not in cp.stdout + cp.stderr, I.describe(cp)
     flagged = [line for line in cp.stdout.splitlines()
-               if re.search(r"(?i)pydantic|dependency.*(missing|not installed)", line)
+               if "OpenAI SDK" in line and "missing" in line
                and line.lstrip().startswith(("⚠", "✗"))]
-    assert flagged, ("hermes doctor is silent about pydantic missing from the selected environment "
+    assert flagged, ("hermes doctor is silent about OpenAI SDK missing from the selected environment "
                      f"(rc={cp.returncode})\n" + I.describe(cp))
 
 
 def test_pm_repair_heals_the_drift(drifted):
     sb, rp = drifted["sb"], drifted["repair"]
     assert rp.returncode == 0, "hermes pm repair failed on a drifted environment:\n" + P.diagnostics(sb, rp)
-    imports = P.managed_imports(sb, "pydantic", "tui_runtime")
+    imports = P.managed_imports(sb, "openai", "tui_runtime")
     assert set(imports.values()) == {"ok"}, (
         f"`hermes pm repair` exited 0 but the native runtime still cannot import: {imports}\n" + P.diagnostics(sb, rp))
 
@@ -154,7 +154,7 @@ def test_pm_repair_heals_the_drift(drifted):
 def test_failed_dependency_update_is_an_owed_followup(updated):
     """A release whose uv.lock uv rejects, synced after the tree moved: the code is committed, so
     the update exits 0 (A6) but must say loudly that the dependencies are not installed yet, the
-    receipt must name the owed follow-up, the tail must stay armed, and the install must keep
+    PM receipt must name the failed dependency sync, the tail must stay armed, and the install must keep
     running on the generation it had."""
     sb = updated["sb"]
     before = P.selected_generation(sb)
@@ -169,8 +169,10 @@ def test_failed_dependency_update_is_an_owed_followup(updated):
     assert I.git("rev-parse", "HEAD", cwd=sb.checkout) == target, "the code update did not land\n" + P.diagnostics(sb, up)
     assert re.search(r"⚠ Update follow-up 'dependencies' did not finish: .*dependencies not installed yet",
                      up.stdout + up.stderr), "the owed dependency sync is not reported loudly\n" + P.diagnostics(sb, up)
-    assert receipt.get("outcome") == "success" and "dependencies" in [
-        f.get("step") for f in receipt.get("followups") or []], (
+    assert (receipt.get("kind") == "sync" and receipt.get("outcome") == "failed"
+            and receipt.get("exit_code") not in (None, 0)
+            and any(step.get("name") == "dependency-sync" and step.get("ok") is False
+                    and step.get("detail") for step in receipt.get("steps") or [])), (
         f"the receipt does not name the owed dependency sync: {receipt}\n" + P.diagnostics(sb, up))
     assert P.pending_marker(sb).exists(), "the owed source-update tail is not armed for the next launch"
     assert P.selected_generation(sb) == before, "a failed dependency sync switched the selected generation"

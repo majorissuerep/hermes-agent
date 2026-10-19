@@ -193,7 +193,8 @@ COPY --chmod=0755 docker/entrypoint-dispatch.sh /opt/hermes/docker/entrypoint-di
 
 ENV PATH="/opt/hermes/bin:/opt/hermes/.venv/bin:/opt/data/.local/bin:${PATH}"
 # Keep COPY portable to isolated builders without weakening immutable code.
-RUN mkdir -p /opt/data && chmod 0644 /opt/hermes/tools/facts.json && \
+RUN mkdir -p /opt/data && install -d -o hermes -g hermes -m 0700 /opt/data-migration-backups && \
+    chmod 0644 /opt/hermes/tools/facts.json && \
     chmod -R a+rX,go-w /opt/hermes && \
     rm -f /opt/hermes/.venv/.lock /opt/hermes/pm-runtime/.lock
 ENV HERMES_PYTHON=/opt/hermes/.venv/bin/python

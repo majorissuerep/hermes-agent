@@ -3,7 +3,7 @@
 Everything runs through ``tests/e2e/core/upgrade/_helpers.py`` (bwrap sandbox, allowlisted env)
 and ``_install_helpers.py`` (local bare origin + URL rewrite, git wrapper). This module only adds
 what a host shape needs on top: a sandbox rooted at an arbitrary path, the configured fake
-provider, a one-shot turn, a background ``hermes gateway run`` and a login-shell probe.
+provider, a one-shot turn, and a login-shell probe.
 """
 
 from __future__ import annotations
@@ -11,9 +11,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
-import signal
 import subprocess
-import time
 from pathlib import Path
 
 from tests.e2e.core.upgrade import _helpers as H
@@ -100,61 +98,3 @@ def missing_entries(entries: list[str]) -> list[str]:
     """Entries that name a location that does not exist (a mangled or half-quoted path)."""
     return [e for e in entries
             if e and not os.path.exists(e) and not e.endswith(".zip") and not e.endswith(".__path_hook__")]
-
-
-class Gateway:
-    """``hermes gateway run`` in the foreground of its own sandbox, as a user starts it by hand."""
-
-    def __init__(self, sb: I.Sandbox):
-        self.sb = sb
-        self.log = sb.root / "gateway-run.log"
-        self.proc: subprocess.Popen | None = None
-
-    def state(self) -> dict:
-        f = self.sb.hermes_home / "gateway_state.json"
-        try:
-            return json.loads(f.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            return {}
-
-    def start(self, timeout: float = 180) -> dict:
-        fh = open(self.log, "w", encoding="utf-8")
-        self.proc = subprocess.Popen(
-            H.sandbox_argv([self.sb.hermes, "gateway", "run"], writable=[self.sb.root]),
-            env=self.sb.env, cwd=str(self.sb.root), stdin=subprocess.DEVNULL, stdout=fh,
-            stderr=subprocess.STDOUT, start_new_session=True)
-        fh.close()
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            st = self.state()
-            if st.get("gateway_state") == "running":
-                return st
-            if self.proc.poll() is not None:
-                break
-            time.sleep(0.5)
-        raise AssertionError(
-            f"gateway did not reach gateway_state=running (rc={self.proc.poll()}, state={self.state()})\n"
-            + self.tail())
-
-    def tail(self, n: int = 6000) -> str:
-        parts = []
-        for label, p in (("gateway stdout", self.log), ("agent.log", self.sb.hermes_home / "logs" / "agent.log"),
-                         ("errors.log", self.sb.hermes_home / "logs" / "errors.log")):
-            try:
-                parts.append(f"--- {label} ---\n{p.read_text(encoding='utf-8', errors='replace')[-n:]}")
-            except OSError:
-                parts.append(f"--- {label} --- (missing)")
-        return "\n".join(parts)
-
-    def stop(self) -> None:
-        if self.proc is None:
-            return
-        if self.proc.poll() is None:
-            try:
-                os.killpg(self.proc.pid, signal.SIGTERM)
-                self.proc.wait(timeout=60)
-            except subprocess.TimeoutExpired:
-                pass
-            except ProcessLookupError:
-                pass
-        H.kill_tree(self.proc)

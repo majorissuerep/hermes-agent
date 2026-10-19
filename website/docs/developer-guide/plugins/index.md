@@ -246,9 +246,7 @@ cd ~/.hermes/plugins/calculator
 manifest parser, namespaced import, `register(ctx)`, hook registry, and tool
 registry used by Hermes itself. It reports invalid hook names, callbacks that do
 not accept `**kwargs`, registration failures, and drift between declared and
-registered tools/hooks. For a package with a `desktop/plugin.js`, it also warns
-when the Desktop app is running a stale copy of it (see
-Pass `--ci` to exit non-zero on an error:
+registered tools/hooks. Pass `--ci` to exit non-zero on an error:
 
 ```bash
 hermes plugins doctor . --ci
@@ -510,7 +508,7 @@ When both exist the `pyproject.toml` wins. What Hermes does with them:
 - **`python_runtime: external`** keeps a sidecar's dependencies out of the shared union.
   Hermes does not install that Python runtime or modify its declaration.
 - **Nothing to load is an error** — `hermes plugins validate` rejects `plugin.yaml` without
-  `__init__.py`, `desktop/plugin.js`, or `plugin.json` beside it. Pip-layout packages need
+  `__init__.py`, `plugin.json`, or declared language-pack resources beside it. Pip-layout packages need
   a directory-plugin wrapper.
 - `security.allow_lazy_installs: false` blocks on-demand acquisition. Explicit dependency
   consent and explicit enablement authorize PM preparation; discovery never installs.

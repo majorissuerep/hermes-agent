@@ -7,7 +7,6 @@ a unique ``OAUTH_E2E_TAG`` so cleanup signals only this test's processes.
 
 from __future__ import annotations
 
-import json
 import os
 import signal
 import subprocess
@@ -74,7 +73,8 @@ class FakeHome:
             state_io.write_text(path, yaml.safe_dump(base, sort_keys=False), purpose="config")
         else:
             path.write_text(yaml.safe_dump(base, sort_keys=False), encoding="utf-8")
-            prepare_fixture_runtime(self.hermes_home, REPO_ROOT)
+        extras = ("all", "anthropic") if base.get("model", {}).get("provider") == "anthropic" else ("all",)
+        prepare_fixture_runtime(self.hermes_home, REPO_ROOT, extras=extras)
 
     def write_auth(self, store: dict[str, Any]) -> None:
         state_io.write_json(self.auth_path, store, purpose="auth")

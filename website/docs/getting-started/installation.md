@@ -47,6 +47,10 @@ variable. Migration creates a pre-encryption backup. Verify the installation bef
 securely removing that **plaintext backup**. Losing every unlock credential means
 losing access to encrypted data.
 
+Container images keep their code immutable. When the data home's parent is
+read-only, migration uses the provisioned owner-only sibling directory
+`<HERMES_HOME>-migration-backups`; the reported backup remains outside the encrypted home.
+
 Unlock once when starting a session. Local self-management commands and delegated
 terminal agents reuse temporary, profile-scoped session authority without another
 prompt. Closing the owner revokes it. An independent new session still unlocks.

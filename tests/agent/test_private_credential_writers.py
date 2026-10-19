@@ -3,7 +3,7 @@
 The credential writers (auth.json, MCP OAuth tokens, secret-source cache, iron-proxy state, the
 exchanged-JWT store, the Photon sidecar record, pairing data, the vault blob, the third-party
 credential file, the spawn ledger, the meet-node token) all funnel through ``utils.atomic_json_write`` / ``atomic_write_text`` /
-``atomic_write_bytes`` with ``mode=0o600``. The contract under test: the *temp* file is created
+``atomic_write_bytes`` with ``mode=0o600``; managed MCP state also uses the unlocked home vault. The contract under test: the *temp* file is created
 with mode 0600 (``O_EXCL``) BEFORE any byte lands and the final file carries 0600 — never
 "open at umask, then chmod" (the #19673 window). POSIX-only: mode bits are not enforced on Windows.
 """
@@ -12,8 +12,8 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 import stat
-import sys
 from pathlib import Path
 
 import pytest
@@ -41,7 +41,7 @@ def opens_spy(monkeypatch):
     return observed
 
 
-def _writers(home: Path, monkeypatch):
+def _writers(home: Path, monkeypatch, mcp_token):
     """``(label, callable, target_path)`` for every private-credential writer."""
     from agent import anthropic_credentials
     from agent.secret_sources._cache import CachedFetch, DiskCache
@@ -57,7 +57,7 @@ def _writers(home: Path, monkeypatch):
          auth_mod._auth_file_path()),
         ("third-party credentials", lambda: anthropic_credentials._atomic_write_private_json(
             home / "cc" / ".credentials.json", {"tok": 1}), home / "cc" / ".credentials.json"),
-        ("mcp oauth tokens", lambda: mcp_oauth._write_json(home / "mcp" / "probe.tokens.json", {"access_token": "x"}),
+        ("mcp oauth tokens", lambda: mcp_oauth._write_json(home / "mcp" / "probe.tokens.json", {"access_token": mcp_token}),
          home / "mcp" / "probe.tokens.json"),
         ("secret-source cache", lambda: cache.write("k", CachedFetch(secrets={"A": "b"}, fetched_at=1.0), 60, home),
          cache.path(home)),
@@ -73,12 +73,22 @@ def test_every_credential_writer_creates_its_temp_file_at_0600(tmp_path, monkeyp
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("HERMES_HOME", str(home))
+    from hermes_security import vault, io as state_io
+
+    password = secrets.token_urlsafe(24)
+    vault.init_vault(home, password)
+    vault.unlock(home, password)
+    mcp_token = "MCP_PRIVATE_" + secrets.token_hex(16)
     old_umask = os.umask(0o022)  # a "write then chmod" regression would surface as 0o644
     try:
-        for label, write, target in _writers(home, monkeypatch):
+        for label, write, target in _writers(home, monkeypatch, mcp_token):
             del opens_spy[:]
             write()
             assert target.exists(), f"{label}: nothing written at {target}"
+            if label == "mcp oauth tokens":
+                assert target.read_bytes().startswith(b"HRMVAULT\x00")
+                assert mcp_token.encode() not in target.read_bytes()
+                assert json.loads(state_io.read_text(target, purpose="state")) == {"access_token": mcp_token}
             assert stat.S_IMODE(target.stat().st_mode) == _PRIVATE, f"{label}: final file not 0600"
             creates = [(p, m) for p, fl, m in opens_spy if Path(p).parent == target.parent]
             assert creates, f"{label}: no temp file created in {target.parent}; opens={opens_spy!r}"
@@ -86,6 +96,7 @@ def test_every_credential_writer_creates_its_temp_file_at_0600(tmp_path, monkeyp
                 assert mode == _PRIVATE, f"{label}: temp file {path} created 0o{mode:o}, not 0600"
     finally:
         os.umask(old_umask)
+        vault.lock_now(home)
 
 
 def test_canonical_private_writers_round_trip_json_text_and_bytes(tmp_path):

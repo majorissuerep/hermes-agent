@@ -21,17 +21,15 @@ import sys
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Optional
 
 from hermes_cli.plugin_validate_core_override import check_core_override
-from hermes_cli.plugin_validate_desktop import check_desktop_surface
 from hermes_cli.plugin_validate_private_imports import check_private_imports
 from hermes_cli.plugin_validate_locales import check_language_packs
 from hermes_cli.plugins_manifest import _CONFIG_SCHEMA_TYPES
 
 _UPPER_SNAKE_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
-# Admission accepts exactly the ``config_schema`` types the loader type-checks at load time (and the
-# Desktop settings renderer keys its field table on) — a private copy drifted and rejected ``secret``.
+# Admission accepts exactly the ``config_schema`` types the loader type-checks at load time.
 _CONFIG_TYPES = frozenset(_CONFIG_SCHEMA_TYPES)
 _PROBE_TIMEOUT = 30
 _PROBE_SENTINEL = "HERMES_VALIDATE_JSON:"
@@ -536,19 +534,18 @@ def validate_plugin_dir(
     _check_security_scan(report, plugin_dir)
     check_core_override(report, plugin_dir)
     check_private_imports(report, plugin_dir)
-    check_desktop_surface(report, plugin_dir)
     check_language_packs(report, manifest, plugin_dir)
     from hermes_cli.plugin_isolation_audit import audit_plugin_dir
     report.isolation = audit_plugin_dir(plugin_dir, manifest).to_dict()
     return report
 
 
-_LOADABLE_ENTRYPOINTS = ("__init__.py", "desktop/plugin.js", "plugin.json")
+_LOADABLE_ENTRYPOINTS = ("__init__.py", "plugin.json")
 
 
 def _check_loadable(report: ValidationReport, plugin_dir: Path, manifest: Optional[dict] = None) -> None:
     """A plugin.yaml with nothing beside it that Hermes can load (no ``register()`` module, no
-    desktop bundle, no portable manifest, no declared language pack) installs "successfully" and does
+    portable manifest, no declared language pack) installs "successfully" and does
     nothing — a pip-layout repo whose code lives under ``src/`` behind an entry point is the usual shape."""
     present = [rel for rel in _LOADABLE_ENTRYPOINTS if (plugin_dir / rel).is_file()]
     if (manifest or {}).get("provides_locales") and (plugin_dir / "locales").is_dir():
@@ -556,7 +553,7 @@ def _check_loadable(report: ValidationReport, plugin_dir: Path, manifest: Option
     report.add(
         "loadable", bool(present),
         f"entry: {', '.join(present)}" if present else
-        "nothing to load: no __init__.py, desktop/plugin.js, plugin.json or provides_locales + locales/ beside "
+        "nothing to load: no __init__.py, plugin.json or provides_locales + locales/ beside "
         "plugin.yaml (pip-layout packages need a directory-plugin wrapper with a pyproject.toml declaring the deps)",
     )
 
@@ -647,7 +644,6 @@ def _validate_portable_plugin(report: ValidationReport, plugin_dir: Path) -> Val
             detail += f", path {result.path}"
         report.add(f"server availability: {server_name}", True, detail)
     _check_security_scan(report, plugin_dir)
-    check_desktop_surface(report, plugin_dir)
     from hermes_cli.plugin_isolation_audit import audit_plugin_dir
     report.isolation = audit_plugin_dir(plugin_dir, manifest).to_dict()
     return report

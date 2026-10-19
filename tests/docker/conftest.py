@@ -11,6 +11,7 @@ the repo's Dockerfile once per session.
 """
 from __future__ import annotations
 
+
 import os
 import shutil
 import subprocess
@@ -18,6 +19,39 @@ import time
 from collections.abc import Iterator
 
 import pytest
+
+
+OWNER_KEY_PROGRAM = '''
+import os, pwd, secrets, subprocess, sys
+from pathlib import Path
+owner = pwd.getpwnam("hermes")
+initial_uid, initial_gid = os.geteuid(), os.getegid()
+if initial_uid == 0:
+    os.setegid(owner.pw_gid)
+    os.seteuid(owner.pw_uid)
+from hermes_security import migrate, vault
+home = Path(os.environ["HERMES_HOME"])
+password = secrets.token_urlsafe(24)
+assert migrate.migrate_home(home, password).ok
+vault.unlock(home, password)
+del password
+if initial_uid == 0:
+    os.seteuid(initial_uid)
+    os.setegid(initial_gid)
+from hermes_security.handoff import prepare_child_key
+fd, additions = prepare_child_key()
+try:
+    result = subprocess.run(["/opt/hermes/bin/hermes", *sys.argv[1:]],
+                            env={**os.environ, **additions}, pass_fds=(fd,),
+                            capture_output=True, text=True, timeout=30, check=False)
+finally:
+    os.close(fd)
+    vault.lock_now(home)
+print(result.stdout, end="")
+print(result.stderr, file=sys.stderr, end="")
+raise SystemExit(result.returncode)
+'''
+
 
 IMAGE_TAG = os.environ.get("HERMES_TEST_IMAGE", "hermes-agent-harness:latest")
 

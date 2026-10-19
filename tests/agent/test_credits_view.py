@@ -1,11 +1,4 @@
-"""Tests for the /credits command — shared view core + gateway handler.
-
-`/credits` is the focused money surface (balance in, top-up out). These tests
-exercise the surface-agnostic `build_credits_view()` core and assert the gateway
-handler renders the block + tappable top-up URL + no-wait copy. The CLI panel is
-a thin wrapper over the same view (interactive prompt_toolkit modal — covered by
-the view-core tests plus manual verification).
-"""
+"""The shared credits view retains balance, identity and account-specific top-up URLs."""
 
 from __future__ import annotations
 
@@ -61,20 +54,3 @@ def test_view_built_with_org_pinned_url_and_identity(_logged_in_account):
     assert "alice@example.test" in view.identity_line and "Acme Inc" in view.identity_line
     assert view.depleted is False
     assert "$30.00" in "\n".join(view.balance_lines)
-
-# ── gateway _handle_topup_command (the messaging billing surface) ────────────
-
-class _FakeEvent:
-    pass
-
-def _make_gateway_stub():
-    """Minimal object exposing the mixin's _handle_topup_command."""
-    from gateway.slash_commands import GatewaySlashCommandsMixin
-
-    class _Stub(GatewaySlashCommandsMixin):
-        def __init__(self):
-            pass
-
-    return _Stub()
-
-# ── command registry ────────────────────────────────────────────────────────

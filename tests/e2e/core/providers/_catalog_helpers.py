@@ -216,7 +216,14 @@ def write_home(root: Path, model: dict[str, Any], extra_cfg: dict[str, Any] | No
            "agent": {"api_max_retries": 1, "auto_recovery_cycles": 0}, "updates": {"check": False},
            **(extra_cfg or {})}
     (home / ".hermes" / "config.yaml").write_text(yaml.safe_dump(cfg, sort_keys=False), encoding="utf-8")
-    prepare_fixture_runtime(home / ".hermes", REPO_ROOT)
+    routes = [model, *cfg.get("fallback_providers", [])]
+    needs_anthropic = any(
+        route.get("provider") == "anthropic"
+        or cfg.get("providers", {}).get(route.get("provider"), {}).get("transport") == "anthropic_messages"
+        for route in routes
+    )
+    extras = ("all", "anthropic") if needs_anthropic else ("all",)
+    prepare_fixture_runtime(home / ".hermes", REPO_ROOT, extras=extras)
     return home
 
 

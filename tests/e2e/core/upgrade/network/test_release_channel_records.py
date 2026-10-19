@@ -79,7 +79,7 @@ def test_fork_refuses_even_a_valid_upstream_stable_record(inst):
     before = inst.state()
     I.git("remote", "set-url", "origin", "https://github.com/majorissuerep/hermes-agent.git", cwd=inst.sb.checkout)
     try:
-        r = _update(inst, N.static_app(S.stable_objects(release)))
+        r = _update(inst, N.static_app(S.stable_release(inst, release)))
     finally:
         I.git("remote", "set-url", "origin", f"https://github.com/{S.REPOSITORY}.git", cwd=inst.sb.checkout)
     _refused(inst, r, before, "upstream stable record")

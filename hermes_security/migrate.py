@@ -20,10 +20,9 @@ code stay public: they are installable artifacts with no user content.
 from __future__ import annotations
 
 import hashlib
-import json
 import os
-import shutil
 import sqlite3
+import stat
 import tarfile
 import tempfile
 import time
@@ -285,7 +284,7 @@ def _restore_env_from_backup(vault, home: Path, path: Path, rel: Path, garbage: 
     (written OUTSIDE the home by migrate_home) holds the last plaintext copy."""
 
     member = rel.as_posix()
-    for tar_path in sorted(home.parent.glob(f"hermes-premigration-{home.name}-*.tar"), reverse=True):
+    for tar_path in _migration_backups(home):
         try:
             with tarfile.open(tar_path) as tar:
                 extracted = tar.extractfile(member)
@@ -370,10 +369,46 @@ def _sha(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def _private_backup_directory(home: Path) -> Optional[Path]:
+    directory = home.parent / f"{home.name}-migration-backups"
+    try:
+        info = directory.lstat()
+    except FileNotFoundError:
+        return None
+    if (not stat.S_ISDIR(info.st_mode) or info.st_mode & 0o077
+            or info.st_uid != home.stat().st_uid):
+        return None
+    return directory
+
+
+def _migration_backups(home: Path) -> list[Path]:
+    directories = [home.parent]
+    private = _private_backup_directory(home)
+    if private is not None:
+        directories.append(private)
+    return sorted((path for directory in directories
+                   for path in directory.glob(f"hermes-premigration-{home.name}-*.tar")),
+                  key=lambda path: path.name, reverse=True)
+
+
+def _open_migration_backup(home: Path, dest_dir: Path, prefix: str):
+    try:
+        return tempfile.mkstemp(prefix=prefix, suffix=".tar", dir=dest_dir)
+    except PermissionError:
+        # A volume can be writable inside an immutable container's /opt.
+        # Its image provisions this owner-private sibling; code remains immutable.
+        private = _private_backup_directory(home) if dest_dir == home.parent else None
+        if private is None:
+            raise PermissionError(
+                f"Cannot create a pre-migration backup in {dest_dir}; provide an owner-only "
+                f"directory at {home.parent / (home.name + '-migration-backups')} (mode 0700)"
+            ) from None
+        return tempfile.mkstemp(prefix=prefix, suffix=".tar", dir=private)
+
+
 def _backup_home(home: Path, dest_dir: Path) -> Path:
     stamp = time.strftime("%Y%m%d-%H%M%S")
-    fd, name = tempfile.mkstemp(prefix=f"hermes-premigration-{home.name}-{stamp}-",
-                                suffix=".tar", dir=dest_dir)
+    fd, name = _open_migration_backup(home, dest_dir, f"hermes-premigration-{home.name}-{stamp}-")
     backup = Path(name)
     # mkstemp is owner-only from creation, not after the sensitive first write.
     with os.fdopen(fd, "wb") as handle:
@@ -492,7 +527,6 @@ def _migrate_database(home: Path, path: Path, rel: Path, report: MigrationReport
 
 
 def _migrate_envelope(home: Path, path: Path, rel: Path, report: MigrationReport) -> None:
-    from hermes_security.io import read_bytes as _plain_check
     from hermes_security.io import write_bytes as _seal_write
 
     purpose = _purpose_for(rel)

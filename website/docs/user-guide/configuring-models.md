@@ -116,6 +116,11 @@ auxiliary:
 there is no fallback to an unrelated logged-in provider. Start a new conversation
 for changes that affect prompt construction.
 
+Terminal subagents inherit reasoning unless `delegation.reasoning_effort` overrides
+it. Noninteractive use of vendor data-training tiers remains refused unless
+`security.allow_data_training_tiers_noninteractive` explicitly acknowledges it.
+The legacy `nous.anthropic_wire` setting does not enable a Nous model provider.
+
 ## Troubleshooting
 
 - **Missing provider:** run `hermes model` or `hermes setup` in the correct profile.

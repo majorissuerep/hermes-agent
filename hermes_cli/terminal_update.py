@@ -107,3 +107,23 @@ def print_plan(root: Path) -> None:
     print(f"Source checkout: {root}")
     print("Snapshot state; preserve local changes; select source commit; prepare PM runtime and Ink TUI.")
     print("Running terminals are not restarted; exit and resume them to use the updated runtime.")
+
+
+def format_update_failure(error: Exception) -> str:
+    """Keep bounded captured command diagnostics, with credentials removed at the UI boundary."""
+    from agent.redact import redact_sensitive_text
+
+    message = f"✗ Update failed: {error}"[:8192]
+    if isinstance(error, subprocess.CalledProcessError):
+        details = []
+        for value in (error.stderr, error.stdout):
+            text = value.decode("utf-8", errors="replace") if isinstance(value, bytes) else value
+            if text and text.strip() not in details:
+                details.append(text.strip())
+        if details:
+            detail = "\n".join(details)[-8192:]
+            if any(reason in detail.lower() for reason in
+                   ("could not resolve", "failed to connect", "connection refused", "network is unreachable")):
+                message += "\nNetwork unavailable; cannot reach the source remote."
+            message += "\n" + detail
+    return redact_sensitive_text(message, force=True, redact_url_credentials=True)

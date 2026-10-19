@@ -29,38 +29,13 @@ from collections.abc import Iterator
 
 import pytest
 
-from tests.docker.conftest import wait_for_container_ready
+from tests.docker.conftest import OWNER_KEY_PROGRAM, wait_for_container_ready
 
 
 def _run_config_write_with_owner_key(container: str, key: str) -> subprocess.CompletedProcess:
     """A trusted fixture grants this root-invoked shim one in-memory owner key."""
-    script = '''
-import os, pwd, secrets, subprocess, sys
-from pathlib import Path
-owner = pwd.getpwnam("hermes")
-os.setegid(owner.pw_gid)
-os.seteuid(owner.pw_uid)
-from hermes_security import migrate, vault
-home = Path(os.environ["HERMES_HOME"])
-password = secrets.token_urlsafe(24)
-assert migrate.migrate_home(home, password).ok
-vault.unlock(home, password)
-os.seteuid(0)
-os.setegid(0)
-from hermes_security.handoff import prepare_child_key
-fd, additions = prepare_child_key()
-try:
-    result = subprocess.run(["/opt/hermes/bin/hermes", "config", "set", sys.argv[1], "1"],
-                            env={**os.environ, **additions}, pass_fds=(fd,),
-                            capture_output=True, text=True, timeout=30, check=False)
-finally:
-    os.close(fd)
-print(result.stdout, end="")
-print(result.stderr, file=sys.stderr, end="")
-raise SystemExit(result.returncode)
-'''
     return subprocess.run(
-        ["docker", "exec", container, "/opt/hermes/.venv/bin/python", "-c", script, key],
+        ["docker", "exec", container, "/opt/hermes/.venv/bin/python", "-c", OWNER_KEY_PROGRAM, "config", "set", key, "1"],
         capture_output=True, text=True, timeout=45, check=False,
     )
 

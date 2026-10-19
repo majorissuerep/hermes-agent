@@ -44,7 +44,7 @@ def fixture_password(home: Path) -> str:
     return _FIXTURE_PASSWORDS[home.resolve()]
 
 
-def prepare_fixture_runtime(home: Path, source: Path) -> None:
+def prepare_fixture_runtime(home: Path, source: Path, *, extras: tuple[str, ...] = ("all",)) -> None:
     """Prepare a real owning PM selection before a sealed child imports the app."""
     from hermes_constants import reset_hermes_home_override, set_hermes_home_override
     from pm import sync_venv
@@ -52,7 +52,22 @@ def prepare_fixture_runtime(home: Path, source: Path) -> None:
     seal_fixture_home(home)
     token = set_hermes_home_override(home)
     try:
-        sync_venv(extras=["all"], explicit=True, project_root=source)
+        sync_venv(extras=list(extras), explicit=True, project_root=source)
+    finally:
+        reset_hermes_home_override(token)
+
+
+def prepare_fixture_tui(home: Path, source: Path) -> None:
+    """Prepare PM-owned frontend tools before measuring a real public TUI child."""
+    from hermes_constants import reset_hermes_home_override, set_hermes_home_override
+    from hermes_cli.source_build import source_build_env, source_product_current
+
+    prepare_fixture_runtime(home, source)
+    token = set_hermes_home_override(home)
+    try:
+        source_build_env(explicit=True)
+        assert source_product_current(source, "tui", source / "ui-tui/dist"), (
+            "public TUI acceptance requires the canonical compiler's current build receipt")
     finally:
         reset_hermes_home_override(token)
 

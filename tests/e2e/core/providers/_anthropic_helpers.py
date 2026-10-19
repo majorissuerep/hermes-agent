@@ -157,7 +157,7 @@ def start_rig(root: Path, script: list[Response] | Responder, *, config: dict[st
         cfg[key] = {**cfg.get(key, {}), **value} if isinstance(value, dict) else value
     (rig.hermes_home / "config.yaml").write_text(yaml.safe_dump(cfg, sort_keys=False), encoding="utf-8")
     (rig.hermes_home / ".env").write_text("ANTHROPIC_API_KEY=sk-ant-api03-e2e-fake-key\n", encoding="utf-8")
-    prepare_fixture_runtime(rig.hermes_home, REPO_ROOT)
+    prepare_fixture_runtime(rig.hermes_home, REPO_ROOT, extras=("all", "anthropic"))
     return rig
 
 

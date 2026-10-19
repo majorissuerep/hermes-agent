@@ -27,7 +27,7 @@ from typing import Callable
 
 from tests.e2e.core.terminal._vt import Screen
 from tests.fakes.fake_llm_provider import FakeLLMServer
-from tests.e2e.vault_home import connect_state, prepare_fixture_runtime, spawn_unlocked, write_encrypted_home
+from tests.e2e.vault_home import connect_state, prepare_fixture_tui, spawn_unlocked, write_encrypted_home
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 
@@ -114,7 +114,7 @@ class PtyHermes:
             f"sandbox {self.hermes_home} sits inside the operator's Hermes home")
         if llm is not None:
             write_encrypted_home(self.hermes_home, llm.base_url, extra_config=extra_config)
-        prepare_fixture_runtime(self.hermes_home, REPO_ROOT)
+        prepare_fixture_tui(self.hermes_home, REPO_ROOT)
         from hermes_cli._launchers import runtime_command
 
         command = runtime_command(REPO_ROOT)

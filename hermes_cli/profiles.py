@@ -700,12 +700,12 @@ def _load_yaml_dict(path: Path) -> Optional[dict]:
     try:
         import hermes_yaml as yaml
         from hermes_security.io import read_text
-        purpose = "config" if path.name == "config.yaml" else "state"
-        data = yaml.safe_load(read_text(path, purpose=purpose, encoding="utf-8-sig")) or {}
+        from hermes_cli.config import read_user_config_raw
+        data = (read_user_config_raw(config_path=path) if path.name == "config.yaml" else
+                yaml.safe_load(read_text(path, purpose="state", encoding="utf-8-sig")) or {})
     except Exception:
         return None
     return data if isinstance(data, dict) else None
-
 
 # Cache only derived presentation values, invalidated by the underlying file signature.
 _PROFILE_FILE_CACHE: dict[tuple, tuple] = {}

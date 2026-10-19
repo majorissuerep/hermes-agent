@@ -157,6 +157,12 @@ class HomeIOGuard:
         )
 
     def install(self, monkeypatch):
+        def preserve_capabilities(original, guarded):
+            for name in ("supports_follow_symlinks", "supports_dir_fd", "supports_fd", "supports_effective_ids"):
+                supported = getattr(os, name)
+                if original in supported:
+                    monkeypatch.setattr(os, name, supported | {guarded})
+
         def wrap(module, name, parameters, *, metadata=False, destructive=False):
             original = getattr(module, name)
 
@@ -168,6 +174,7 @@ class HomeIOGuard:
                                destructive=destructive(args, kwargs) if callable(destructive) else destructive)
                 return original(*args, **kwargs)
 
+            preserve_capabilities(original, guarded)
             monkeypatch.setattr(module, name, guarded)
 
         def open_writes(args, kwargs):
@@ -206,5 +213,6 @@ class HomeIOGuard:
             self.directories.pop(fd, None)
             return original_close(fd)
 
+        preserve_capabilities(original_open, guarded_open)
         monkeypatch.setattr(os, "open", guarded_open)
         monkeypatch.setattr(os, "close", guarded_close)

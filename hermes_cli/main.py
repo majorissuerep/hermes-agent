@@ -2062,7 +2062,7 @@ def cmd_update(args):
         _record_stop("lock_held", without_receipt="refused")  # no receipt: latest.json is the holder's
         sys.exit(UPDATE_EXIT_CONCURRENT)
 
-    from hermes_cli.terminal_update import update_source
+    from hermes_cli.terminal_update import format_update_failure, update_source
     from pm import InstallError
 
     def _custody_refusal() -> str | None:
@@ -2075,7 +2075,7 @@ def cmd_update(args):
         update_source(args)
     except (InstallError, OSError, subprocess.SubprocessError) as exc:
         refusal = _custody_refusal()
-        print(refusal or f"✗ Update failed: {exc}")
+        print(refusal or format_update_failure(exc))
         _finalize_update_receipt(1, f"{type(exc).__name__}: {exc}")
 
         raise SystemExit(1) from exc

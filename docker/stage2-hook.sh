@@ -225,6 +225,17 @@ tree_has_non_hermes_owner() {
     find "$target" \( ! -user hermes -o ! -group hermes \) -print -quit 2>/dev/null | grep -q .
 }
 
+# Keep migration rollback outside the encrypted volume and the immutable code.
+migration_backup_dir="${HERMES_HOME%/}-migration-backups"
+if refuse_symlinked_path "migration backup" "$migration_backup_dir"; then
+    :
+else
+    mkdir -p -m 0700 "$migration_backup_dir"
+    if tree_has_non_hermes_owner "$migration_backup_dir"; then
+        chown_hermes_tree "$migration_backup_dir"
+    fi
+fi
+
 needs_chown=false
 if [ "$(stat -c %u "$HERMES_HOME" 2>/dev/null)" != "$actual_hermes_uid" ]; then
     needs_chown=true

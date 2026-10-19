@@ -30,8 +30,6 @@ from tests.e2e.core._pending_fixes import known_gate
 from tests.e2e.core.security._helpers import BoundaryBreach, run_hermes, write_home
 from tests.fakes.fake_llm_provider import FakeLLMServer, Text, ToolCall
 
-pytestmark = pytest.mark.platforms("posix")
-
 MANUAL = "approvals:\n  mode: manual\n  timeout: 120\n"
 
 # name -> command template; ``{X}`` is the victim dir, relative to the terminal's cwd.
@@ -51,7 +49,6 @@ VARIANTS: dict[str, str] = {
     "ifs_split": "rm${{IFS}}-rf${{IFS}}{X}",
     "abs_path": "/bin/rm -rf {X}",
     "split_flags": "rm -r -f {X}",
-    "long_flags": "rm --recursive --force {X}",
     "find_delete": "find {X} -delete",
     "find_exec": "find {X} -exec rm -rf {{}} +",
     "xargs": "echo {X} | xargs rm -rf",
@@ -68,6 +65,7 @@ VARIANTS: dict[str, str] = {
 KNOWN: dict[str, tuple[str, str]] = {}
 
 CONTROL = "touch benign_marker"
+GNU_VARIANTS = {"long_flags": "rm --recursive --force {X}"}
 
 
 # --- CLI ------------------------------------------------------------------------------------------
@@ -97,19 +95,19 @@ def _parse_tool_content(content: str) -> dict[str, Any]:
     return {**(payload if isinstance(payload, dict) else {}), "_raw": text}
 
 
-def _plant(root: Path) -> Path:
+def _plant(root: Path, variants: dict[str, str]) -> Path:
     victims = root / "victims"
     victims.mkdir(parents=True)
-    for name in VARIANTS:
+    for name in variants:
         (victims / name).mkdir()
         (victims / name / "keep.txt").write_text("sentinel", encoding="utf-8")
     return victims
 
 
-def _single_query_run(root: Path, single_query_mode: str) -> dict[str, Any]:
+def _single_query_run(root: Path, single_query_mode: str, variants: dict[str, str] = VARIANTS) -> dict[str, Any]:
     """One ``hermes chat -q`` whose model calls ``terminal`` once per variant, then the control."""
-    home, victims = root / "home", _plant(root)
-    script: list[Any] = [ToolCall("terminal", {"command": t.format(X=n)}) for n, t in VARIANTS.items()]
+    home, victims = root / "home", _plant(root, variants)
+    script: list[Any] = [ToolCall("terminal", {"command": t.format(X=n)}) for n, t in variants.items()]
     script += [ToolCall("terminal", {"command": CONTROL}), Text("done")]
     key = "sk-approval-cli"
     with FakeLLMServer(script, api_key=key) as srv:
@@ -119,10 +117,23 @@ def _single_query_run(root: Path, single_query_mode: str) -> dict[str, Any]:
         requests = srv.main_requests()
     assert proc.returncode == 0, f"hermes chat -q failed rc={proc.returncode}\n{proc.stdout[-2000:]}\n{proc.stderr[-2000:]}"
     results = _tool_results(requests)
-    missing = [n for n, t in VARIANTS.items() if t.format(X=n) not in results] + (
+    missing = [n for n, t in variants.items() if t.format(X=n) not in results] + (
         [] if CONTROL in results else ["control"])
     assert not missing, f"the agent never reported a tool result for {missing}; stdout={proc.stdout[-1500:]}"
     return {"victims": victims, "results": results}
+
+
+@pytest.mark.platforms("linux")
+@pytest.mark.parametrize("mode", ["approve", "deny"])
+def test_gnu_long_flags_delete_only_when_approved(tmp_path, mode):
+    """BSD rm rejects GNU long options; exercise their real deletion on Linux."""
+    run = _single_query_run(tmp_path, mode, GNU_VARIANTS)
+    result = run["results"][GNU_VARIANTS["long_flags"].format(X="long_flags")]
+    assert (run["victims"] / "long_flags" / "keep.txt").exists() == (mode == "deny"), result
+    if mode == "approve":
+        assert result.get("exit_code") == 0, result
+    else:
+        assert result.get("status") == "blocked" and result.get("exit_code") != 0, result
 
 
 @pytest.fixture(scope="module")
@@ -135,6 +146,7 @@ def cli_approve(tmp_path_factory):
     return _single_query_run(tmp_path_factory.mktemp("approval-cli-approve"), "approve")
 
 
+@pytest.mark.platforms("posix")
 def test_cli_variants_are_live_deletes(cli_approve):
     """Discriminator for the table: approved, every spelling really deletes its victim."""
     victims = cli_approve["victims"]
@@ -144,6 +156,7 @@ def test_cli_variants_are_live_deletes(cli_approve):
     assert control.get("exit_code") == 0 and (victims / "benign_marker").exists(), control
 
 
+@pytest.mark.platforms("posix")
 def test_cli_benign_control_runs(cli_deny):
     """A harmless command runs in the same -q session that blocks the dangerous ones."""
     result = cli_deny["results"][CONTROL]
@@ -151,6 +164,7 @@ def test_cli_benign_control_runs(cli_deny):
     assert (cli_deny["victims"] / "benign_marker").exists(), "benign control command did not run"
 
 
+@pytest.mark.platforms("posix")
 @pytest.mark.parametrize("variant", list(VARIANTS))
 def test_cli_dangerous_variant_blocked_without_approval(cli_deny, variant):
     victim = cli_deny["victims"] / variant

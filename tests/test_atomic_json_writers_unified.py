@@ -1,7 +1,7 @@
 """Invariant for the non-secret atomic JSON writers that used to inline ``utils._atomic_write``.
 
-Contract under test for ``gateway/session_persistence``, ``cron/suggestions`` and
-``agent/shell_hooks``: a failed replace leaves the previous file byte-identical AND leaves no temp
+Contract under test for ``cron/suggestions`` and ``agent/shell_hooks``:
+a failed replace leaves the previous file byte-identical AND leaves no temp
 file behind (the interrupt-safe cleanup only the canonical helper guarantees). A hand-rolled copy
 that skips the cleanup, or writes through the target instead of a sibling temp, fails this.
 """
@@ -27,21 +27,6 @@ def broken_replace(monkeypatch):
     import utils
 
     monkeypatch.setattr(utils, "atomic_replace", _failing_replace)
-
-
-def test_sessions_json_failed_replace_keeps_old_bytes_and_no_temp(tmp_path, monkeypatch, broken_replace):
-    from gateway.session_persistence import SessionPersistenceMixin
-
-    sessions_dir = tmp_path / "sessions"
-    sessions_dir.mkdir()
-    target = sessions_dir / "sessions.json"
-    target.write_text('{"old": true}', encoding="utf-8")
-    store = SessionPersistenceMixin()
-    store.sessions_dir = sessions_dir
-    with pytest.raises(OSError):
-        store._save_sessions_json({"k": "v"})
-    assert target.read_text(encoding="utf-8") == '{"old": true}'
-    assert _leftovers(sessions_dir, "sessions.json") == []
 
 
 def test_suggestions_failed_replace_keeps_old_bytes_and_no_temp(tmp_path, monkeypatch, broken_replace):
@@ -115,20 +100,16 @@ def test_new_non_secret_file_follows_umask_while_secret_and_existing_modes_hold(
 @pytest.mark.platforms("linux")
 def test_mkstemp_heritage_writers_keep_new_files_owner_only(tmp_path):
     """Writers that published through mkstemp on main created NEW files at 0600 regardless of umask
-    (bot mailboxes, turn markers); folding them into utils must not loosen that to umask."""
+    (turn markers); folding them into utils must not loosen that to umask."""
     import os
     import stat
 
-    from tools.bot_relay import _atomic_write_json
-    from tui_gateway.turn_marker import _store
+    from tui_runtime.turn_marker import _store
 
     old_umask = os.umask(0o022)
     try:
-        relay_target = tmp_path / "relay" / "inbox.json"
-        _atomic_write_json(relay_target, {"k": 1})
         marker = tmp_path / "turn-marker.json"
         _store(marker, {"sess": {"started_at": 1.0}})
-        for path in (relay_target, marker):
-            assert stat.S_IMODE(path.stat().st_mode) == 0o600, path
+        assert stat.S_IMODE(marker.stat().st_mode) == 0o600
     finally:
         os.umask(old_umask)

@@ -1,4 +1,4 @@
-"""Install, update, gateway and a turn in a home whose path has spaces and non-ASCII bytes.
+"""Install, update, persistent finite turns in a home whose path has spaces and non-ASCII bytes.
 
 Failure class: path handling. Users run Hermes from homes like ``/home/José Müller`` or a
 CJK-named directory. Every path the installer and updater write (clone target, uv/python/node
@@ -7,14 +7,14 @@ survive a space and non-ASCII bytes.
 
 One real install through HEAD's ``scripts/install.sh`` with the whole sandbox (HOME, HERMES_HOME,
 TMPDIR) under ``José Müller 漢字 dir``; then a one-shot turn, a new login shell resolving
-``hermes``, an upstream release and ``hermes update``, a turn on the new commit and
-``hermes gateway run``. The symlinked-home shapes live in ``test_paths_symlinked.py`` so the two
+``hermes``, an upstream release and ``hermes update``, a turn on the new commit and a resumed native session. The symlinked-home shapes live in ``test_paths_symlinked.py`` so the two
 installs run in parallel.
 """
 
 from __future__ import annotations
 
 import os
+import json
 import shutil
 
 import pytest
@@ -52,7 +52,7 @@ def odd_home(tmp_path_factory, provider):
     return {"sb": sb, "origin": origin, "root": root, "install": first}
 
 
-def test_install_update_gateway_and_turn_under_a_non_ascii_spaced_home(odd_home, provider):
+def test_install_update_and_resume_under_a_non_ascii_spaced_home(odd_home, provider):
     sb, first = odd_home["sb"], odd_home["install"]
     assert ODD_DIR in str(sb.home), "harness: sandbox HOME is not under the odd directory"
     assert first.returncode == 0, "install.sh failed under a non-ASCII, spaced HOME:\n" + I.describe(first)
@@ -73,6 +73,10 @@ def test_install_update_gateway_and_turn_under_a_non_ascii_spaced_home(odd_home,
     assert not X.missing_entries(seen["sys_path"]), f"sys.path names locations that do not exist: {X.missing_entries(seen['sys_path'])}"
     assert os.path.exists(seen["executable"]), f"sys.executable does not exist: {seen['executable']!r}"
 
+    marker = "persistent native history under José Müller 漢字 dir"
+    first_chat = sb.cli("chat", "-q", marker, "-Q", timeout=900)
+    assert first_chat.returncode == 0 and provider.default_text in first_chat.stdout, I.describe(first_chat)
+
     target = I.publish_commit(odd_home["origin"], odd_home["root"], "release: host-paths bump",
                               {"docs/e2e-host-paths-marker.txt": "release 1\n"})
     up = sb.cli("update", "--yes", "--branch", "main", timeout=X.UPDATE_TIMEOUT)
@@ -84,9 +88,11 @@ def test_install_update_gateway_and_turn_under_a_non_ascii_spaced_home(odd_home,
     seen = X.interpreter_paths(sb)
     assert not X.missing_entries(seen["sys_path"]), f"after update, sys.path names missing locations: {X.missing_entries(seen['sys_path'])}"
 
-    gw = X.Gateway(sb)
-    try:
-        st = gw.start()
-        assert st.get("pid") and gw.proc.poll() is None, f"gateway state says running but the process is gone: {st}\n{gw.tail()}"
-    finally:
-        gw.stop()
+    count = len(provider.main_requests())
+    followup = "resume after the odd-path source update"
+    resumed = sb.cli("chat", "-q", followup, "-Q", "--resume", "latest", timeout=900)
+    assert resumed.returncode == 0 and provider.default_text in resumed.stdout, I.describe(resumed)
+    calls = provider.main_requests()[count:]
+    assert len(calls) == 1, I.describe(resumed)
+    history = json.dumps(calls[0]["messages"], ensure_ascii=False)
+    assert marker in history and followup in history, "native resume lost its durable history"

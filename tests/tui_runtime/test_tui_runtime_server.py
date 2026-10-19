@@ -8906,7 +8906,7 @@ def test_config_set_model_switches_agent_without_touching_env(monkeypatch):
             self.provider = kwargs["new_provider"]
 
         def _build_system_prompt(self, _system_message=None):
-            return f"Model: {self.model}\nProvider: {self.provider}"
+            pytest.fail("switching an active route must not rebuild its cached system prefix")
 
     class SessionDB:
         def __init__(self):
@@ -8932,6 +8932,7 @@ def test_config_set_model_switches_agent_without_touching_env(monkeypatch):
             return 0
 
     agent = Agent()
+    original_system_prompt = agent._cached_system_prompt
     db = SessionDB()
     agent._session_db = db
     session = _session(agent=agent)
@@ -8975,18 +8976,13 @@ def test_config_set_model_switches_agent_without_touching_env(monkeypatch):
         # ...override recorded on the session...
         assert session["model_override"]["model"] == "anthropic/claude-sonnet-4.6"
         assert session["model_override"]["provider"] == "anthropic"
-        # ...the persisted prompt snapshot tracks the new runtime identity too.
-        # Without this, the next turn restored the old system prompt from the DB:
-        # API calls went to the new model, but "what model are you?" still read
-        # "Model: old/model" from the stored prompt.
-        assert db.system_prompt == (
-            "Model: anthropic/claude-sonnet-4.6\nProvider: anthropic"
-        )
+        # Route identity is appended below, never rewritten into the cached prefix.
+        assert db.system_prompt == original_system_prompt
         assert agent._cached_system_prompt == db.system_prompt
         assert session["history"][-1]["role"] == "user"
         assert "changed to anthropic/claude-sonnet-4.6" in session["history"][-1]["content"]
         assert db.messages[-1] == {
-            # The agent's own db handle belongs to the agent's live session id, not the gateway's
+            # The agent's own db handle belongs to its live session id, not the runtime's
             # session_key — the same `getattr(agent, "session_id", None) or session_key` the sibling
             # system-prompt persist uses one screen up (#123545: these two must not diverge).
             "session_id": agent.session_id,

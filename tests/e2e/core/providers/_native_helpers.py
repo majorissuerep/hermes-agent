@@ -108,7 +108,14 @@ def make_home(root: Path, model: dict[str, Any], *, env_file: dict[str, str] | N
     (nh.hermes_home / "config.yaml").write_text(yaml.safe_dump(cfg, sort_keys=False), encoding="utf-8")
     lines = [f"{k}={v}" for k, v in (env_file or {}).items()]
     (nh.hermes_home / ".env").write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
-    prepare_fixture_runtime(nh.hermes_home, REPO_ROOT)
+    routes = [model, *cfg.get("fallback_providers", [])]
+    needs_anthropic = any(
+        route.get("provider") == "anthropic"
+        or cfg.get("providers", {}).get(route.get("provider"), {}).get("transport") == "anthropic_messages"
+        for route in routes
+    )
+    extras = ("all", "anthropic") if needs_anthropic else ("all",)
+    prepare_fixture_runtime(nh.hermes_home, REPO_ROOT, extras=extras)
     return nh
 
 
