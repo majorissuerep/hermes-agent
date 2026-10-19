@@ -68,6 +68,40 @@ def test_rerun_parks_local_work_before_updating(tmp_path):
     assert "local edit" in _git(install, "stash", "show", "-p", "stash@{0}")
 
 
+@pytest.mark.parametrize("old_origin,migrate", [
+    ("https://github.com/NousResearch/hermes-agent.git", True),
+    ("git@github.com:NousResearch/hermes-agent.git", True),
+    ("ssh://git@github.com/NousResearch/hermes-agent.git", True),
+    ("https://github.com/operator/hermes-agent.git", False),
+    ("https://mirror.example/NousResearch/hermes-agent.git", False),
+])
+def test_default_rerun_migrates_only_known_upstream_origin(tmp_path, old_origin, migrate):
+    origin = _origin(tmp_path / "origin")
+    assert _stage(tmp_path, origin).returncode == 0
+    install = tmp_path / "install"
+    _git(install, "remote", "set-url", "origin", old_origin)
+    target = _commit(origin, "fork release")
+    # Only fetch transport is redirected to this real local repository. Origin
+    # inspection remains genuine, so the installer must choose its own source.
+    prelude = f'''git() {{
+        if [ "${{3:-}}" = fetch ]; then
+            command git -c url.{shlex.quote(str(origin))}.insteadOf=https://github.com/majorissuerep/hermes-agent.git \\
+                -c url.{shlex.quote(str(origin))}.insteadOf={shlex.quote(old_origin)} "$@"
+        else command git "$@"; fi
+    }}'''
+    env = {"HERMES_REPO_URL": ""}
+    if old_origin.startswith("https://github.com/NousResearch/"):
+        global_config = tmp_path / "redirect.gitconfig"
+        _git(install, "config", "--file", str(global_config), f"url.{origin}.insteadOf", old_origin)
+        env["GIT_CONFIG_GLOBAL"] = str(global_config)
+    result = _run(tmp_path, prelude + "\nstage_repository", env=env)
+    assert result.returncode == 0, result.stdout + result.stderr
+    expected = "https://github.com/majorissuerep/hermes-agent.git" if migrate else old_origin
+    assert _git(install, "config", "--get", "remote.origin.url") == expected
+    assert _git(install, "rev-parse", "HEAD") == target
+    assert (install / "README").read_text() == "fork release"
+
+
 def test_rerun_stops_when_local_work_cannot_be_parked(tmp_path):
     origin = _origin(tmp_path / "origin")
     assert _stage(tmp_path, origin).returncode == 0
