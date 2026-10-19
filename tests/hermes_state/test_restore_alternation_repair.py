@@ -14,7 +14,6 @@ export consumers (trace upload, context guard) read the transcript as-is.
 import pytest
 
 from hermes_state import SessionDB
-import itertools
 
 
 @pytest.fixture()
@@ -56,47 +55,3 @@ def test_repaired_load_is_stable_under_prerequest_repair(db):
     _seed_wedged_session(db)
     messages = db.get_messages_as_conversation("s1", repair_alternation=True)
     assert repair_message_sequence(None, messages) == 0
-
-
-
-
-# ---------------------------------------------------------------------------
-# The live-replay restore SITES must pass repair_alternation=True. The initial
-# fix covered gateway load_transcript + CLI startup resume; these are the other
-# live-replay restore paths (ACP session resume, CLI /resume, TUI resume) that
-# hand the loaded transcript to a live agent for subsequent turns.
-# ---------------------------------------------------------------------------
-
-
-def _seed_wedged_acp_session(db, session_id="acp1"):
-    db.create_session(session_id, "acp")
-    db.append_message(session_id=session_id, role="user", content="first ask")
-    db.append_message(session_id=session_id, role="assistant", content="first reply")
-    db.append_message(session_id=session_id, role="user", content="unanswered turn")
-    db.append_message(session_id=session_id, role="user", content="next turn")
-    db.append_message(session_id=session_id, role="assistant", content="next reply")
-
-
-def test_acp_restore_heals_alternation_for_live_replay(db):
-    """acp_adapter.SessionManager._restore feeds LIVE REPLAY: the loaded history
-    becomes the resumed agent's working conversation. It must be alternation-
-    clean so the pre-request repair doesn't re-fire every turn."""
-    from acp_adapter.session import SessionManager
-
-    _seed_wedged_acp_session(db, "acp1")
-
-    class _StubAgent:
-        model = "stub"
-
-    mgr = SessionManager(agent_factory=lambda: _StubAgent(), db=db)
-    state = mgr._restore("acp1")
-
-    assert state is not None
-    roles = [m["role"] for m in state.history]
-    # No consecutive user turns — the durable user;user wedge was healed.
-    assert roles == ["user", "assistant", "user", "assistant"], roles
-    for a, b in itertools.pairwise(roles):
-        assert not (a == "user" and b == "user"), "unhealed user;user in ACP live replay"
-    # No user input lost — both user texts survive, merged in order.
-    merged = state.history[2]["content"]
-    assert "unanswered turn" in merged and "next turn" in merged

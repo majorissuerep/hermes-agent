@@ -421,37 +421,6 @@ def test_list_cli_paginates_and_decodes_keys(r2_server, capsys):
     assert capsys.readouterr().out.splitlines() == keys
 
 
-@pytest.mark.parametrize('bad_feed', [None, b'', b'<html>boom</html>',
-    b'version: 0.28.0\nfiles: []', b'version: 0.28.0\nfiles: [{}]'])
-def test_real_prune_retention_and_second_feed_failure(r2_server, capsys, bad_feed):
-    import hermes_yaml as yaml
-
-    tag_reference = 'releases/tag/v0.27.2+canary.20260801T000000Z/live.zip'
-    other_reference = 'releases/tag/v0.27.2+canary.20260801T000000Z/other.dmg'
-
-    def feed(key):
-        return yaml.safe_dump({'version': '0.27.2+canary.20260801T000000Z', 'files': [
-            {'url': '/' + key, 'sha512': base64.b64encode(b'x' * 64).decode(), 'size': 8}]}).encode()
-
-    doomed = {'releases/tag/v0.27.2+canary.20260801T000000Z/old.zip'}
-    kept = {tag_reference, tag_reference + '.blockmap', other_reference, other_reference + '.blockmap',
-            'releases/tag/v0.28.0/old.zip', 'releases/tag/v0.28.0+canary.20260904T000000Z/today.zip'}
-    r2_server.store.update({key: (b'artifact', '"e"') for key in doomed | kept})
-    r2_server.store['releases/darwin/canary/canary-mac.yml'] = (feed(tag_reference), '"e"')
-    r2_server.store['releases/darwin/stable/stable-mac.yml'] = (feed(other_reference) if bad_feed is None else bad_feed, '"e"')
-    r2_server.page_size = 3
-    before = dict(r2_server.store)
-    if bad_feed is not None:
-        with pytest.raises(ValueError):
-            r2.prune(keep_days=14, now_epoch=1788547200)
-        assert r2_server.store == before
-        assert not any(method == 'DELETE' for method, _, _ in r2_server.requests)
-        return
-    r2.prune(keep_days=14, dry_run=True, now_epoch=1788547200)
-    assert {line.removeprefix('(dry-run) would delete r2:') for line in capsys.readouterr().out.splitlines()} == doomed
-    assert r2_server.store == before and not any(method == 'DELETE' for method, _, _ in r2_server.requests)
-    r2.prune(keep_days=14, now_epoch=1788547200)
-    assert set(r2_server.store) == set(before) - doomed
 
 
 def test_cli_usage_rejects_unknown_flags(capsys):

@@ -701,14 +701,6 @@ def put_object(
     print(f"OK r2: {key} ({size} bytes)")
 
 
-def finalize(tag: str, dir: str, variant: str | None = None, archive: str | None = None,
-             arches: tuple[str, ...] | None = None, verify_bytes: bool = True) -> None:
-    """Lazy re-export of the Darwin finalize so callers can treat
-    scripts.releases.r2 as the single transport surface."""
-    from . import darwin as darwin_module
-
-    darwin_module.finalize(tag=tag, dir=dir, variant=variant, archive=archive, arches=arches,
-                           verify_bytes=verify_bytes)
 
 
 def put(
@@ -729,7 +721,7 @@ def put(
 
 
 # ---------------------------------------------------------------------------
-# list + prune helpers (pure)
+# Object listing helpers
 # ---------------------------------------------------------------------------
 
 def parse_list_xml(xml: str) -> dict:
@@ -809,18 +801,6 @@ def list_objects(
             "lastModified": {scope.logical_key(key): value for key, value in last_modified.items()}}
 
 
-def get_object(
-    creds: dict[str, str], base: str, bucket: str, key: str, now: str,
-    fetcher: Callable[..., Response] | None = None,
-) -> str | None:
-    """GET one object's body, or None when it does not exist / cannot be read."""
-    url = R2Scope.configured().object_url(base, bucket, key)
-    response = (
-        fetcher(method="GET", url=url, body_hash=EMPTY_SHA)
-        if fetcher is not None
-        else signed_request("GET", url, creds=creds, now=now)
-    )
-    return response.text() if response.status < 400 else None
 
 
 def canary_doomed_keys(keys: list[str], cutoff: str) -> list[str]:
@@ -836,70 +816,19 @@ def canary_doomed_keys(keys: list[str], cutoff: str) -> list[str]:
     return doomed
 
 
-def prune(
-    keep_days: int,
-    dry_run: bool = False,
-    fetcher: Callable[..., Response] | None = None,
-    now_epoch: float | None = None,
-) -> None:
-    """Cutoff dated by the canary suffix in the KEY (a re-uploaded old tag
-    never resets its clock). Live referenced objects are never deleted."""
-    creds, base, bucket = credentials()
-    current = now_epoch if now_epoch is not None else time.time()
-    cutoff_date = time.strftime(
-        "%Y%m%d", time.gmtime(current - keep_days * 86400)
-    )
-    listing = list_objects(creds=creds, base=base, bucket=bucket, fetcher=fetcher)
-    keys = listing["keys"]
-    now = amz_timestamp()
-
-    protected: set[str] = set()
-
-    # Darwin feeds protect their artifacts (key + .blockmap) too.
-    from . import darwin as darwin_module
-
-    for key in [k for k in keys if k.startswith("releases/darwin/") and k.endswith("-mac.yml")]:
-        text = get_object(creds, base, bucket, key, now, fetcher=fetcher)
-        if text is None:
-            # Fail closed: an unreadable Darwin feed might reference the very
-            # objects the pruner is about to delete.
-            raise RuntimeError(f"Cannot read Darwin feed {key}; refusing to prune")
-        for reference in darwin_module.mac_feed_references(text):
-            protected.add(reference)
-
-    doomed = [key for key in canary_doomed_keys(keys, cutoff_date) if key not in protected]
-
-    if not doomed:
-        print(f"OK r2: no canary objects older than {keep_days} days")
-        return
-    for key in sorted(doomed):
-        if dry_run:
-            print(f"(dry-run) would delete r2:{key}")
-            continue
-        url = R2Scope.configured().object_url(base, bucket, key)
-        response = (
-            fetcher(method="DELETE", url=url, body_hash=EMPTY_SHA)
-            if fetcher is not None
-            else signed_request("DELETE", url, creds=creds, now=now)
-        )
-        if response.status >= 400:
-            raise R2RequestError("DELETE", key, response.status)
-        print(f"deleted r2:{key}")
 
 
 USAGE = """usage:
   python -m scripts.releases.r2 put --tag vX.Y.Z --key <filename> --file <path> [--key-is-full] [--immutable]
-  python -m scripts.releases.r2 finalize --tag vX.Y.Z --dir <staging-dir> [--variant light]
   python -m scripts.releases.r2 list [--prefix <p>]
-  python -m scripts.releases.r2 prune-canaries --keep-days <n> [--dry-run]
 
   --key-is-full: the --key is a FULL object key (e.g. releases/darwin/stable/...),
                  not a filename to archive under releases/tag/<tag>/.
   --immutable:   send If-None-Match: * (refuse to overwrite an existing object).
 """
 
-_VALUE_FLAGS = {"--tag", "--key", "--file", "--prefix", "--keep-days", "--dir", "--variant"}
-_BOOL_FLAGS = {"--dry-run", "--key-is-full", "--immutable"}
+_VALUE_FLAGS = {"--tag", "--key", "--file", "--prefix"}
+_BOOL_FLAGS = {"--key-is-full", "--immutable"}
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -946,28 +875,10 @@ def main(argv: list[str] | None = None) -> None:
             key_is_full=bool(args.get("key-is-full")),
             immutable=bool(args.get("immutable")) or immutable,
         )
-    elif cmd == "finalize":
-        tag, dir_path = args.get("tag"), args.get("dir")
-        if not tag or not dir_path:
-            print(USAGE, file=sys.stderr)
-            raise SystemExit(2)
-        from . import darwin as darwin_module
-
-        darwin_module.finalize(tag=tag, dir=dir_path, variant=args.get("variant"))
     elif cmd == "list":
         listing = list_objects(prefix=str(args.get("prefix") or ""))
         for key in listing["keys"]:
             print(key)
-    elif cmd == "prune-canaries":
-        try:
-            keep_days = int(args.get("keep-days", ""))
-        except ValueError:
-            print(USAGE, file=sys.stderr)
-            raise SystemExit(2)
-        if keep_days <= 0:
-            print(USAGE, file=sys.stderr)
-            raise SystemExit(2)
-        prune(keep_days, dry_run=bool(args.get("dry-run")))
     else:
         print(USAGE, file=sys.stderr)
         raise SystemExit(2)

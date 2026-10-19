@@ -2,7 +2,7 @@
 
 The gate is the fork's key feature. These tests pin the contract:
 - vault-less home + no escape -> SystemExit(2), both interactive and not
-- vault present + locked -> prompts / HERMES_MASTER_PASSWORD / wrong pw exit
+- vault present + locked -> human prompt or a scoped key; env passphrases are refused
 - read-only surfaces (secure-vault, --version, update --check) pass
 - HERMES_ALLOW_NO_VAULT=1 is the only bypass
 """
@@ -61,17 +61,11 @@ def test_no_vault_offers_migration_on_tty(_arm_gate, monkeypatch):
     assert hv.vault_exists(home)
 
 
-def test_chat_is_gated(_arm_gate, monkeypatch):
-    """command=None (interactive chat) must NOT bypass."""
+@pytest.mark.parametrize("command", [None, "chat", "config", "profile", "memory", "skills"])
+def test_state_touching_commands_are_gated(_arm_gate, monkeypatch, command):
     monkeypatch.setattr(vault_gate, "_tty_available", lambda: False)
     with pytest.raises(SystemExit):
-        vault_gate.gate_startup(_args(None))
-
-
-def test_gateway_command_gated(_arm_gate, monkeypatch):
-    monkeypatch.setattr(vault_gate, "_tty_available", lambda: False)
-    with pytest.raises(SystemExit):
-        vault_gate.gate_startup(_args("gateway"))
+        vault_gate.gate_startup(_args(command))
 
 
 def test_read_only_surfaces_pass(_arm_gate):
@@ -95,7 +89,7 @@ def test_allow_no_vault_escape(_arm_gate, monkeypatch):
 def test_locked_vault_env_password_is_refused(_arm_gate, monkeypatch, capsys):
     """Fork policy (inverted contract): the passphrase is NEVER read from the environment —
     even a CORRECT one must leave the vault locked (env leaks via /proc/environ, children,
-    unit EnvironmentFiles). The daemon path is a key file (HERMES_VAULT_PRIVATE_KEY)."""
+    unit EnvironmentFiles). Non-interactive authorization uses a scoped key, never a password."""
     home = _arm_gate
     hv.init_vault(home, "gate-pw-1", _allow_existing_state=True)
     monkeypatch.setenv("HERMES_MASTER_PASSWORD", "gate-pw-1")
@@ -136,21 +130,3 @@ def test_locked_vault_noninteractive_without_password_exits(_arm_gate, monkeypat
     with pytest.raises(SystemExit) as e:
         vault_gate.gate_startup(_args("config"))
     assert e.value.code == 2
-
-
-@pytest.mark.parametrize("verb", ["ls", "send", "peek", "close", "interrupt"])
-def test_host_only_deck_verbs_pass_a_locked_vault(_arm_gate, monkeypatch, verb):
-    """An agent's `hermes deck send` has no TTY and no password; the verbs only talk to the unlocked host."""
-    hv.init_vault(_arm_gate, "gate-pw-deck")
-    hv.clear_vault_cache()
-    monkeypatch.setattr(vault_gate, "_tty_available", lambda: False)
-    vault_gate.gate_startup(_args("deck", deck_command=verb))
-
-
-@pytest.mark.parametrize("verb", ["attach", None])
-def test_deck_verbs_that_launch_a_tui_stay_gated(_arm_gate, monkeypatch, verb):
-    hv.init_vault(_arm_gate, "gate-pw-deck")
-    hv.clear_vault_cache()
-    monkeypatch.setattr(vault_gate, "_tty_available", lambda: False)
-    with pytest.raises(SystemExit):
-        vault_gate.gate_startup(_args("deck", deck_command=verb))

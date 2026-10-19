@@ -1,7 +1,6 @@
 """Named-profile agents must FAIL CLOSED when their profile state.db won't open.
 
-Desktop Bot Mode / app-global remote mode talks to a single TUI backend while
-stamping ``profile_home`` for a named profile. The deferred agent build opens
+The local TUI owns sessions with an explicit named-profile ``profile_home``. The deferred agent build opens
 that profile's ``state.db`` and hands it to ``_make_agent``. If that open used
 to fail, the build silently fell back to the launch handle (``session_db =
 None`` → ``_make_agent``'s ``_get_db()`` default), so the session's rows and
@@ -27,6 +26,8 @@ import pytest
 
 import hermes_state
 from hermes_state import SessionDB
+from hermes_security import sqlite, vault
+from tests.e2e.vault_home import seal_fixture_home
 
 
 @pytest.fixture
@@ -37,13 +38,16 @@ def homes(tmp_path, monkeypatch):
     profile.mkdir(parents=True)
     monkeypatch.setenv("HERMES_HOME", str(root))
     monkeypatch.setattr(hermes_state, "DEFAULT_DB_PATH", hermes_state._IMPORT_DEFAULT_DB_PATH)
-    return root, profile
+    seal_fixture_home(root)
+    seal_fixture_home(profile)
+    yield root, profile
+    vault.clear_vault_cache()
 
 
 def _ids(db_path: Path) -> set[str]:
     if not db_path.exists():
         return set()
-    conn = sqlite3.connect(str(db_path))
+    conn = sqlite.connect(str(db_path))
     try:
         try:
             return {row[0] for row in conn.execute("SELECT id FROM sessions")}
@@ -62,7 +66,7 @@ def _make_store_unopenable(profile: Path) -> Path:
 
 def test_open_profile_session_db_returns_profile_handle(homes):
     root, profile = homes
-    from tui_gateway import server
+    from tui_runtime import server
 
     db = server._open_profile_session_db(str(profile))
     try:
@@ -77,7 +81,7 @@ def test_open_profile_session_db_returns_profile_handle(homes):
 def test_open_profile_session_db_raises_when_store_unopenable(homes):
     """A genuinely unopenable state.db (directory in its place) must raise."""
     root, profile = homes
-    from tui_gateway import server
+    from tui_runtime import server
 
     _make_store_unopenable(profile)
     with pytest.raises(RuntimeError, match="profile session store unavailable"):
@@ -88,7 +92,7 @@ def test_open_profile_session_db_raises_when_store_unopenable(homes):
 def test_open_profile_session_db_does_not_fallback_on_open_failure(homes, monkeypatch):
     """SessionDB constructor failure must raise, not reuse/return launch."""
     root, profile = homes
-    from tui_gateway import server
+    from tui_runtime import server
 
     class Boom(Exception):
         pass
@@ -113,7 +117,7 @@ def test_deferred_build_fails_closed_when_profile_store_unopenable(homes, monkey
     emit an error event, and never reach _make_agent.
     """
     root, profile = homes
-    from tui_gateway import server
+    from tui_runtime import server
 
     _make_store_unopenable(profile)
     launch = SessionDB(db_path=root / "state.db")
@@ -162,7 +166,9 @@ def test_deferred_build_fails_closed_when_profile_store_unopenable(homes, monkey
         assert _ids(root / "state.db") == set()
     finally:
         with server._sessions_lock:
-            server._sessions.pop(sid, None)
+            record = server._sessions.pop(sid, None)
+        if record is not None:
+            server._close_session_authority(record)
         launch.close()
 
 
@@ -174,7 +180,7 @@ def test_init_session_skips_launch_db_when_profile_store_unopenable(homes, monke
     patched to a tripwire: any call proves the launch store was touched.
     """
     root, profile = homes
-    from tui_gateway import server
+    from tui_runtime import server
 
     _make_store_unopenable(profile)
     sid = "sid-worker-init"
@@ -208,7 +214,9 @@ def test_init_session_skips_launch_db_when_profile_store_unopenable(homes, monke
         assert _ids(root / "state.db") == set()
     finally:
         with server._sessions_lock:
-            server._sessions.pop(sid, None)
+            record = server._sessions.pop(sid, None)
+        if record is not None:
+            server._close_session_authority(record)
 
 
 def _stub_rebuild_env(monkeypatch, server, launch) -> list[str]:
@@ -230,58 +238,12 @@ def _stub_rebuild_env(monkeypatch, server, launch) -> list[str]:
     return homes_seen
 
 
-def test_bot_capability_rebuild_stays_on_the_profile_store(homes, monkeypatch):
-    """A Bot Chat capability refresh must not migrate the session onto the launch profile.
-
-    ``_sync_bot_capabilities`` swaps in a fresh agent for a LIVE session at turn start. It used to call
-    ``_make_agent`` with neither the session's ``state.db`` handle nor its HERMES_HOME, so the replacement
-    agent bound the launch ``_get_db()`` handle and built its prompt/skills from the launch profile: every
-    later turn of a named-profile bot appended to ``~/.hermes/state.db`` under the same session id while the
-    desktop replayed ``profiles/<bot>/state.db`` and showed a stale transcript (#104079).
-    """
-    root, profile = homes
-    from tui_gateway import server
-
-    launch = SessionDB(db_path=root / "state.db")
-    profile_db = server._open_profile_session_db(str(profile))
-    homes_seen = _stub_rebuild_env(monkeypatch, server, launch)
-    monkeypatch.setattr(server, "_session_cwd", lambda _s: str(root))
-    monkeypatch.setattr(server, "_session_source", lambda _s: "desktop")
-    monkeypatch.setattr("tools.bot_mode_probe.capability_fingerprint", lambda _home: "caps-v2")
-
-    old_agent = SimpleNamespace(
-        _session_db=profile_db, _owns_session_db=True, _session_title_hint="Bot Chat")
-    session = {
-        "session_key": "key-bot",
-        "profile_home": str(profile),
-        "agent": old_agent,
-        "bot_caps_seen": "caps-v1",  # a CHANGED fingerprint is what triggers the rebuild
-    }
-    try:
-        server._sync_bot_capabilities("sid-bot", session)
-
-        new_agent = session["agent"]
-        assert new_agent is not old_agent, "capability change must have rebuilt the agent"
-        # The rebuilt agent writes to the SAME store as the session it continues...
-        assert new_agent._session_db is profile_db
-        # ...and was built with that profile's home bound, not the launch home.
-        assert homes_seen == [str(profile)]
-        # Ownership moves with the handle, so teardown still releases it exactly once.
-        assert new_agent._owns_session_db is True
-        assert old_agent._owns_session_db is False
-
-        new_agent._session_db.create_session("20260906_bot", "tui", profile_name="worker")
-        assert _ids(profile / "state.db") == {"20260906_bot"}
-        assert _ids(root / "state.db") == set()
-    finally:
-        profile_db.close()
-        launch.close()
 
 
 def test_reset_session_agent_stays_on_the_profile_store(homes, monkeypatch):
     """The tools.configure session reset must retain the same profile binding."""
     root, profile = homes
-    from tui_gateway import server
+    from tui_runtime import server
 
     launch = SessionDB(db_path=root / "state.db")
     profile_db = server._open_profile_session_db(str(profile))
@@ -296,7 +258,7 @@ def test_reset_session_agent_stays_on_the_profile_store(homes, monkeypatch):
         "session_key": "key-reset",
         "profile_home": str(profile),
         "agent": old_agent,
-        "source": "desktop",
+        "source": "tui",
         "cwd": str(root),
         "explicit_cwd": True,
         "history": ["old"],

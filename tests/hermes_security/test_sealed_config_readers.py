@@ -1,11 +1,4 @@
-"""Fork regression: sealed config.yaml must reach every config reader, not just the CLI's.
-
-Incident (luoman-MS73-HB1, 2026-09-25): the vaulted gateway booted on env-only config because
-``gateway.config_loader.read_yaml_layers`` and ``utils.load_yaml_file_readonly`` (terminal scope's
-reader) opened the sealed envelope with a plain ``open()`` and failed on UTF-8 decode — platform
-authz (telegram.allowed_chats) silently ran on defaults and the terminal tool was hard-down with
-``TerminalPolicyUnavailable``.
-"""
+"""Sealed config reaches CLI and terminal-policy readers; locked reads fail closed."""
 
 from __future__ import annotations
 
@@ -28,7 +21,7 @@ def sealed_home(tmp_path, monkeypatch):
     home = tmp_path / ".hermes"
     home.mkdir()
     (home / "config.yaml").write_text(
-        "terminal:\n  backend: local\n  timeout: 123\ntelegram:\n  allowed_chats: [42]\n", encoding="utf-8"
+        "terminal:\n  backend: local\n  timeout: 123\n", encoding="utf-8"
     )
     (home / ".env").write_text("TERMINAL_ENV=local\nOPENAI_API_KEY=x\n", encoding="utf-8")
     monkeypatch.setenv("HERMES_HOME", str(home))
@@ -43,22 +36,22 @@ def _is_sealed(path: Path) -> bool:
     return path.read_bytes().startswith(b"HRMVAULT\x00")
 
 
-def test_gateway_yaml_layer_reads_sealed_config(sealed_home):
-    from gateway import config_loader
+def test_raw_config_reader_reads_sealed_config(sealed_home):
+    from hermes_cli.config import read_user_config_raw
 
     assert _is_sealed(sealed_home / "config.yaml"), "fixture must seal config.yaml"
-    data = config_loader.read_yaml_layers(sealed_home)
-    assert data.get("telegram", {}).get("allowed_chats") == [42]
+    data = read_user_config_raw(sealed_home / "config.yaml")
+    assert data["terminal"]["timeout"] == 123
 
 
-def test_gateway_yaml_layer_locked_vault_degrades_to_empty(sealed_home, monkeypatch):
-    """Locked vault → empty layer (caller warns + falls back), never a decode crash."""
-    from gateway import config_loader
+def test_raw_config_reader_locked_vault_refuses_without_replacing_state(sealed_home):
+    from hermes_cli.config import read_user_config_raw
 
-    hv.clear_vault_cache()  # locked now
-    monkeypatch.delenv("HERMES_MASTER_PASSWORD", raising=False)
-    data = config_loader.read_yaml_layers(sealed_home)
-    assert data == {}
+    before = (sealed_home / "config.yaml").read_bytes()
+    hv.clear_vault_cache()
+    with pytest.raises(hv.VaultLockedError):
+        read_user_config_raw(sealed_home / "config.yaml")
+    assert (sealed_home / "config.yaml").read_bytes() == before
 
 
 def test_load_yaml_file_readonly_reads_sealed_config(sealed_home):

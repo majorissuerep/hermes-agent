@@ -98,7 +98,7 @@ def test_cold_cli_builds_own_runtime_discovers_plugins_and_repairs_app(tmp_path,
     source = Path(__file__).resolve().parents[2]
     repo = tmp_path / "source"
     repo.mkdir()
-    for name in ("pm", "hermes_state", "hermes_cli", "hermes_security", "hermes_platform", "agent", "gateway", "tools", "cron"):
+    for name in ("pm", "hermes_state", "hermes_cli", "hermes_security", "hermes_platform", "agent", "tui_runtime", "tools", "cron"):
         shutil.copytree(source / name, repo / name,
                         ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
     for path in source.glob("*.py"):

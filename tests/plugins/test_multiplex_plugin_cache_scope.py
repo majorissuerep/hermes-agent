@@ -139,28 +139,3 @@ def test_disk_cleanup_protected_cron_paths_follow_the_active_home(homes):
     with scoped(b):
         assert dc._is_protected_cron_path(b / "cron")
         assert not dc._is_protected_cron_path(a / "cron")
-
-
-def test_yuanbao_active_adapter_resolves_per_profile(homes, monkeypatch):
-    """Each profile's turn reads back its own adapter; the unscoped slot still serves single-profile."""
-    from gateway.config import PlatformConfig
-    from gateway.platforms.yuanbao import YuanbaoAdapter
-
-    a, b = homes
-    cfg = PlatformConfig(enabled=True, extra={"app_id": "x", "app_secret": "y"})
-    monkeypatch.setattr(YuanbaoAdapter, "_active_instance", None)
-    monkeypatch.setattr(YuanbaoAdapter, "_active_instances", {})
-    with scoped(a):
-        adapter_a = YuanbaoAdapter(cfg)
-        YuanbaoAdapter.set_active(adapter_a)
-    with scoped(b):
-        adapter_b = YuanbaoAdapter(cfg)
-        YuanbaoAdapter.set_active(adapter_b)
-    with scoped(a):
-        assert YuanbaoAdapter.get_active() is adapter_a
-    with scoped(b):
-        assert YuanbaoAdapter.get_active() is adapter_b
-    assert YuanbaoAdapter.get_active() is None  # scoped adapters never claim the unscoped slot
-    unscoped = YuanbaoAdapter(cfg)
-    YuanbaoAdapter.set_active(unscoped)
-    assert YuanbaoAdapter.get_active() is unscoped

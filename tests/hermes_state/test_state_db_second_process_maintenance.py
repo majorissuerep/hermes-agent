@@ -55,7 +55,7 @@ def test_repair_refuses_delete_mode_db_held_open_by_another_process(delete_mode_
         holder.stdin.close()
         holder.wait(timeout=10)
     assert report["repaired"] is False
-    assert "stop the gateway" in (report["error"] or "").lower()
+    assert "live writer still holds state.db" in (report["error"] or "").lower()
 
 
 def test_holder_scan_sees_through_a_symlinked_home(tmp_path):

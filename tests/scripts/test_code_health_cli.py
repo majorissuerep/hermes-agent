@@ -409,12 +409,12 @@ _FUNC = "import os\n\n\ndef build(cmd):\n{}    return cmd\n"
     ("    # Avoid env = os.environ.copy(); use the scoped builder.\n", False),
     ('    """Avoid env = os.environ.copy(); use the scoped builder."""\n', False),
     ('    """Builder.\n\n    Never env = os.environ.copy() here.\n    """\n', False),
-    ("    # don't read os.getenv(\"DISCORD_TOKEN\") directly\n", False),
-    ("    cmd = [cmd]  # not os.environ.get('SLACK_TOKEN')\n", False),
+    ("    # don't read os.getenv(\"HINDSIGHT_API_KEY\") directly\n", False),
+    ("    cmd = [cmd]  # not os.environ.get('BRV_API_KEY')\n", False),
     ("    'inert example: env = os.environ.copy()'\n", False),
     # positive controls: the real operations, including a literal env-key argument
     ("    env = os.environ.copy()\n    cmd = (cmd, env)\n", True),
-    ("    token = os.getenv(\"DISCORD_TOKEN\")\n    cmd = (cmd, token)\n", True),
+    ("    token = os.getenv(\"HINDSIGHT_API_KEY\")\n    cmd = (cmd, token)\n", True),
     ("    env = dict(os.environ)  # copy it\n    cmd = (cmd, env)\n", True),
 ])
 def test_profile_regex_rules_ignore_comments_and_docstrings(tmp_path, capsys, body, flagged):

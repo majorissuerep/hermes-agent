@@ -21,7 +21,6 @@ def test_zip_restores_settings_secret_and_database_without_disabling_encryption(
     monkeypatch.setenv("HOME", str(user))
     monkeypatch.setattr(Path, "home", lambda: user)
     monkeypatch.setenv("HERMES_HOME", str(home))
-    monkeypatch.setattr(backup, "_revive_gateway_after_import", lambda *args: None)
     (home / "config.yaml").write_text("agent:\n  max_turns: 37\n")
     (home / ".env").write_text("LEGACY_IMPORT_API_KEY=synthetic-legacy-secret\n")
     with SessionDB(home / "state.db") as database:

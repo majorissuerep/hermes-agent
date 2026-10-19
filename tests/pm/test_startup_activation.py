@@ -82,37 +82,21 @@ def test_drift_activates_intact_chains_and_reports_the_live_verdict(checked_stor
     assert os.environ["PATH"].split(os.pathsep) == [str(binaries[0].parent), user_dir]
 
 
-@pytest.mark.parametrize("surface", ["gateway", "cli"])
 @pytest.mark.parametrize("damaged", [False, True])
-def test_startup_uses_one_verdict(checked_store, monkeypatch, capsys, caplog, surface, damaged):
+def test_cli_startup_uses_one_verdict(checked_store, monkeypatch, capsys, caplog, damaged):
+    from hermes_cli import main
+
     binaries, checks = checked_store
-    if surface == "gateway":
-        from gateway import run
+    monkeypatch.setattr("hermes_cli.boot_bootstrap.maybe_run_boot_bootstrap", lambda _root: None)
+    for name in ("_set_process_title", "_advertise_agent_env", "_sweep_stale_bytecode_if_checkout_changed",
+                 "_try_termux_fast_tui_launch", "_try_termux_fast_cli_launch", "_try_fast_chat_launch"):
+        monkeypatch.setattr(main, name, lambda: None)
+    monkeypatch.setattr(sys, "argv", ["hermes", "--help"])
 
-        async def started(*args, **kwargs):
-            return True
-
-        monkeypatch.setattr(run, "start_gateway", started)
-        monkeypatch.setattr(run, "_exit_after_graceful_shutdown", lambda code: None)
-        monkeypatch.setattr("hermes_cli.boot_bootstrap.maybe_run_boot_bootstrap", lambda _root: None)
-        monkeypatch.setattr(sys, "argv", ["gateway"])
-        start = run.main
-    else:
-        from hermes_cli import main
-
-        # Stop at --help: exercise the actual startup block, not an agent session.
-        monkeypatch.setattr("hermes_cli.boot_bootstrap.maybe_run_boot_bootstrap", lambda _root: None)
-        for name in ("_set_process_title", "_advertise_agent_env",
-                     "_sweep_stale_bytecode_if_checkout_changed",
-                     "_try_termux_fast_tui_launch", "_try_termux_fast_cli_launch",
-                     "_try_fast_serve_launch", "_try_fast_chat_launch"):
-            monkeypatch.setattr(main, name, lambda: None)
-        monkeypatch.setattr(sys, "argv", ["hermes", "--help"])
-
-        def start():
-            with pytest.raises(SystemExit) as exit_info:
-                main.main()
-            assert exit_info.value.code == 0
+    def start():
+        with pytest.raises(SystemExit) as exit_info:
+            main.main()
+        assert exit_info.value.code == 0
 
     if damaged:
         binaries[1].unlink()

@@ -1,17 +1,11 @@
 """Identity editing surfaces must preserve envelope semantics, including profile publish."""
-import asyncio
 from pathlib import Path
-
-import pytest
 
 from hermes_security import io, vault
 
 
-@pytest.mark.parametrize("surface", ["web", "rpc"])
-def test_profile_soul_editors_preserve_encryption_a_b_a(tmp_path, monkeypatch, surface):
-    from hermes_cli import profiles
-    from hermes_cli.web_routers import profiles as web
-    from tui_gateway import server
+def test_profile_identity_writes_preserve_encryption_a_b_a(tmp_path):
+    from hermes_cli.profiles_soul import write_profile_soul
 
     homes = {name: tmp_path / name for name in ("alpha", "beta")}
     for name, home in homes.items():
@@ -19,23 +13,15 @@ def test_profile_soul_editors_preserve_encryption_a_b_a(tmp_path, monkeypatch, s
         vault.unlock(home, "synthetic-soul-edit")
         io.write_text(home / "config.yaml", "{}", purpose="config")
         io.write_text(home / "SOUL.md", name, purpose="state")
-    monkeypatch.setattr(profiles, "get_profile_dir", lambda name: homes[name])
-    monkeypatch.setattr(web, "_resolve_profile_dir", lambda name: homes[name])
     try:
         for index, name in enumerate(("alpha", "beta", "alpha")):
             home = homes[name]
-            expected = io.read_text(home / "SOUL.md", purpose="state")
-            if surface == "web":
-                assert asyncio.run(web.get_profile_soul(name))["content"] == expected
-                result = asyncio.run(web.update_profile_soul(name, web.ProfileSoulUpdate(content=f"edit {index}")))
-                assert result["ok"]
-            else:
-                result = server._methods["profiles.describe"](1, {"name": name})
-                assert result["result"]["soul"] == expected, result
-                result = server._methods["profiles.configure"](2, {"name": name, "soul": f"edit {index}"})
-                assert result["result"]["applied"]["soul"], result
+            sibling = homes["beta" if name == "alpha" else "alpha"] / "SOUL.md"
+            untouched = sibling.read_bytes()
+            write_profile_soul(home, f"edit {index}")
             assert io.looks_like_envelope(home / "SOUL.md")
             assert io.read_text(home / "SOUL.md", purpose="state") == f"edit {index}"
+            assert sibling.read_bytes() == untouched
     finally:
         vault.clear_vault_cache()
 

@@ -211,7 +211,7 @@ def test_interactive_stages_skip_without_a_terminal(tmp_path):
     hermes.write_text(f"#!/bin/sh\ntouch {shlex.quote(marker.as_posix())}\n")
     hermes.chmod(0o755)
     # A new session has no controlling terminal, so opening /dev/tty fails.
-    result = _run(tmp_path, "NON_INTERACTIVE=false\nstage_setup\nstage_gateway", start_new_session=True,
+    result = _run(tmp_path, "NON_INTERACTIVE=false\nstage_setup", start_new_session=True,
                   stdin=subprocess.DEVNULL)
     assert result.returncode == 0, result.stdout + result.stderr
     assert not marker.exists()

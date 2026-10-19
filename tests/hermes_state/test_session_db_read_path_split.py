@@ -60,7 +60,6 @@ def test_reads_do_not_take_writer_lock(db):
 def test_background_state_reads_never_touch_shared_writer(db):
     """Background pollers must not race transcript writes on ``_conn``."""
     db.try_acquire_compression_lock("s1", "holder", ttl_seconds=60)
-    assert db.request_handoff("s1", "telegram") is True
     # Open this thread's read connection before poisoning the shared writer.
     assert db._get_read_conn() is not None
 
