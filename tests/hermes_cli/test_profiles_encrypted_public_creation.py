@@ -28,6 +28,7 @@ def encrypted_profile_install(tmp_path):
 
 
 @pytest.mark.platforms("posix")
+@pytest.mark.live_system_guard_bypass
 @pytest.mark.parametrize("kind", ["fresh", "clone", "clone-all"])
 def test_public_profile_create_publishes_authenticated_independent_state(encrypted_profile_install, kind):
     from hermes_cli._launchers import runtime_command
