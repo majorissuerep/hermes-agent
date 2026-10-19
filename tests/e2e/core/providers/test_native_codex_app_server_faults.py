@@ -28,8 +28,6 @@ pytestmark = [
 KNOWN: dict[str, tuple[str, str]] = {
     "q_approval": (r"^approval parked \d+\.\ds on a prompt nobody can answer in -q",
                    "#121296 approval in `chat -q` waits the full approvals.timeout instead of single_query_mode"),
-    "permissions": (r"^PermissionsRequestApprovalResponse without `permissions`: .*'violation': 'missing field `permissions`'",
-                    "#121297 reply to item/permissions/requestApproval omits required `permissions`"),
     # The poll itself raises the symptom; anchor on its own subject so no other wait can match.
     "orphan": (r"^timed out after [\d.]+s waiting for app-server descendant \d+ to be reaped after CLI exit",
                "#121298 `chat -q` exit never closes the codex session; own-session descendants orphaned"),
@@ -138,9 +136,6 @@ def test_permissions_request_reply_matches_protocol(runs):
     replies = run.fake.replies_to("item/permissions/requestApproval")
     assert len(replies) == 1, f"permissions request unanswered: {replies}"
     violation = replies[0].get("violation") or ""
-    with known_gate(KNOWN, "permissions", raises=KnownSymptom):
-        if "permissions" in violation:
-            raise KnownSymptom(f"PermissionsRequestApprovalResponse without `permissions`: {replies[0]}")
     assert not violation, f"invalid PermissionsRequestApprovalResponse: {replies[0]}"
 
 
