@@ -73,10 +73,16 @@ jobs:
       - name: Set up locked Python and test dependencies
         uses: ./.github/actions/setup-pm
         with:
+          toolchain: all
           packages: 'ripgrep'
           extras: '["all", "anthropic", "mistral", "fal", "modal", "daytona", "parallel-web"]'
           test-environment: 'true'
           prune-python-cache: true
+
+      - name: Install Node deps and build the Ink TUI
+        uses: ./.github/actions/retry
+        with:
+          command: npm ci --workspace ui-tui --ignore-scripts --no-audit --no-fund && npm run build --workspace ui-tui
 
       - name: Run ${{ matrix.marker }} tests
         # scripts/run_tests.sh — the canonical runner, same as every other
@@ -140,6 +146,7 @@ jobs:
           # Match the standard macOS runner's three cores; native terminal tests
           # also spawn their own Python/Node children.
           HERMES_TEST_WORKERS: ${{ github.repository == 'NousResearch/hermes-agent' && '16' || '3' }}
+          HERMES_E2E_REQUIRE_TUI: '1'
           HERMES_TEST_SLICE: ${{ matrix.slice || '' }}
           # Belt-and-suspenders with tests/conftest.py's env blanking: no
           # test may reach a real provider API.

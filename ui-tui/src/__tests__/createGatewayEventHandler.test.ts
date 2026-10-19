@@ -17,55 +17,14 @@ import { ZERO } from '../domain/usage.js'
 import { estimateTokensRough } from '../lib/text.js'
 import type { Msg } from '../types.js'
 
+import { buildGatewayEventContext as buildCtx } from './gatewayEventFixture.js'
+
 // Mock the external-URL opener so the billing.step_up.verification test can
 // assert it's invoked without spawning a real browser process.
 const openExternalUrlMock = vi.fn((_url: string) => true)
 vi.mock('../lib/openExternalUrl.js', () => ({
   openExternalUrl: (url: string) => openExternalUrlMock(url)
 }))
-
-const ref = <T>(current: T) => ({ current })
-
-const buildCtx = (appended: Msg[]) =>
-  ({
-    composer: {
-      dequeue: () => undefined,
-      queueEditRef: ref<null | number>(null),
-      sendQueued: vi.fn(),
-      setInput: vi.fn()
-    },
-    gateway: {
-      gw: { request: vi.fn(async () => null) },
-      rpc: vi.fn(async () => null)
-    },
-    session: {
-      STARTUP_RESUME_ID: '',
-      hasSessionSelection: () => false,
-      colsRef: ref(80),
-      newSession: vi.fn(),
-      resetSession: vi.fn(),
-      resumeById: vi.fn(),
-      setCatalog: vi.fn()
-    },
-    submission: {
-      submitRef: { current: vi.fn() }
-    },
-    system: {
-      bellOnComplete: false,
-      sys: vi.fn()
-    },
-    transcript: {
-      appendMessage: (msg: Msg) => appended.push(msg),
-      panel: (title: string, sections: any[]) =>
-        appended.push({ kind: 'panel', panelData: { sections, title }, role: 'system', text: '' }),
-      setHistoryItems: vi.fn()
-    },
-    voice: {
-      setProcessing: vi.fn(),
-      setRecording: vi.fn(),
-      setVoiceEnabled: vi.fn()
-    }
-  }) as any
 
 /** Deliver one server→client request (`tui_runtime/server_requests.py`) to the TUI's request handler. */
 const serverRequest = (method: string, params: Record<string, unknown>, id = `srq-${method}`) => {
