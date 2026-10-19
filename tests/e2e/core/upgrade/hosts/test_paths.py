@@ -38,17 +38,29 @@ ODD_DIR = "José Müller 漢字 dir"
 
 def _assert_native_package_map(sb):
     """Probe the real installed project, not a dependency-only test recipe."""
+    from pm.environments import install_key
+
+    selected = Path(sb.python).parent.parent.resolve()
+    generations = (sb.hermes_home / "installs" / install_key(sb.checkout) / "environments").resolve()
+    assert selected.parent.parent == generations and selected.name == "venv", selected
+    workspace = selected.parent / "workspace"
+    assert workspace.is_dir(), f"selected PM generation workspace is missing: {workspace}"
     packages = ["agent", "tools", "hermes_cli", "hermes_state", "hermes_security",
                 "hermes_platform", "cron", "pm", "providers", "tui_runtime"]
     result = sb.run([sb.python, "-I", "-c",
                      "import importlib.util,json,sys; "
-                     "print(json.dumps({name:(spec.origin if (spec:=importlib.util.find_spec(name)) else None) "
-                     "for name in sys.argv[1:]}))", *packages])
+                     "print(json.dumps({'prefix':sys.prefix,'origins':{name:"
+                     "(spec.origin if (spec:=importlib.util.find_spec(name)) else None) "
+                     "for name in sys.argv[1:]}}))", *packages])
     assert result.returncode == 0, I.describe(result)
-    origins = json.loads(result.stdout)
+    probe = json.loads(result.stdout)
+    assert Path(probe["prefix"]).resolve() == selected, probe
+    origins = probe["origins"]
     for package in packages:
         assert origins[package] is not None, f"{package} is absent from the installed package map"
-        assert Path(origins[package]).resolve().is_relative_to(sb.checkout), (package, origins[package])
+        expected = workspace / package / "__init__.py"
+        assert expected.is_file(), f"{package} is absent from the selected generation workspace"
+        assert Path(origins[package]).resolve() == expected.resolve(), (package, origins[package], str(expected))
 
 
 @pytest.fixture(scope="module")
