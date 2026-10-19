@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import json
+import sys
 from contextlib import contextmanager
 from pathlib import Path
 import secrets
@@ -67,24 +69,32 @@ def _fixture_pm_home(home: Path):
             constants.reset_hermes_home_override(token)
 
 
+def _prepare_fixture_pm(home: Path, source: Path, extras: tuple[str, ...], *, tui: bool = False) -> None:
+    """PM owns a separate process: pytest may reset its own home between test cases."""
+    seal_fixture_home(home)
+    env = {**os.environ, "HERMES_HOME": str(home.resolve())}
+    argv = [sys.executable, "-m", "tests.e2e.vault_home", str(home.resolve()),
+            str(source.resolve()), json.dumps(extras), "tui" if tui else "runtime"]
+    with spawn_unlocked(argv, env=env, cwd=source, stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT, text=True) as process:
+        try:
+            output, _ = process.communicate(timeout=600)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.communicate()
+            raise
+        if process.returncode:
+            raise RuntimeError(f"fixture PM preparation failed ({process.returncode}): {output[-12000:]}")
+
+
 def prepare_fixture_runtime(home: Path, source: Path, *, extras: tuple[str, ...] = ("all",)) -> None:
     """Prepare a real owning PM selection before a sealed child imports the app."""
-    from pm import sync_venv
-
-    with _fixture_pm_home(home):
-        seal_fixture_home(home)
-        sync_venv(extras=list(extras), explicit=True, project_root=source)
+    _prepare_fixture_pm(home, source, extras)
 
 
 def prepare_fixture_tui(home: Path, source: Path) -> None:
-    """Prepare PM-owned frontend tools before measuring a real public TUI child."""
-    from hermes_cli.source_build import source_build_env, source_product_current
-
-    prepare_fixture_runtime(home, source)
-    with _fixture_pm_home(home):
-        source_build_env(explicit=True)
-        assert source_product_current(source, "tui", source / "ui-tui/dist"), (
-            "public TUI acceptance requires the canonical compiler's current build receipt")
+    """Prepare PM tools and verify the canonical compiler's existing build receipt."""
+    _prepare_fixture_pm(home, source, ("all",), tui=True)
 
 
 def spawn_unlocked(argv, *, env: dict[str, str], **kwargs) -> subprocess.Popen:
@@ -123,3 +133,19 @@ def run_unlocked(argv, *, env, timeout, capture_output=False, check=False, **kwa
         if check:
             result.check_returncode()
         return result
+
+
+if __name__ == "__main__":
+    from hermes_security.handoff import adopt_inherited_key
+    from pm import sync_venv
+
+    assert adopt_inherited_key(), "fixture PM child must inherit its synthetic vault"
+    selected_home, selected_source = Path(sys.argv[1]), Path(sys.argv[2])
+    with _fixture_pm_home(selected_home):
+        sync_venv(extras=json.loads(sys.argv[3]), explicit=True, project_root=selected_source)
+        if sys.argv[4] == "tui":
+            from hermes_cli.source_build import source_build_env, source_product_current
+
+            source_build_env(explicit=True)
+            assert source_product_current(selected_source, "tui", selected_source / "ui-tui/dist"), (
+                "public TUI acceptance requires the canonical compiler's current build receipt")
