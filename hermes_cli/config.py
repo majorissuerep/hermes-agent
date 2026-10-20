@@ -2054,30 +2054,7 @@ def _omitted_config_paths(
     return omitted
 
 
-def _write_config_state(
-    config_path: Path, data: dict[str, Any], *, allow_omissions: bool,
-    extra_content_on_create: Optional[str] = None,
-) -> None:
-    """Shared comment-preserving config writer; omission policy is selected by the public wrapper."""
-    from utils import atomic_roundtrip_yaml_save
-
-    _refuse_failed_read(config_path, data)
-    if not allow_omissions:
-        existing = require_readable_config_before_write(config_path)
-        omitted = _omitted_config_paths(existing, data)
-        if omitted:
-            shown = ", ".join(omitted[:12])
-            if len(omitted) > 12:
-                shown += f", +{len(omitted) - 12} more"
-            exc = ValueError(f"omitted config paths: {shown}")
-            raise _refuse_overwrite(
-                config_path,
-                "would lose settings omitted by this write",
-                exc,
-                "Pass the complete current config, or use atomic_config_replace() only when "
-                "deletion by omission is deliberate.",
-            ) from exc
-    atomic_roundtrip_yaml_save(config_path, data, extra_content_on_create=extra_content_on_create)
+from hermes_cli.config_transactions import transactional_config
 
 
 def atomic_config_write(
@@ -2089,7 +2066,8 @@ def atomic_config_write(
     Use ``atomic_config_replace`` for a deliberate full-state replacement where omitted keys are
     meant to be deleted. Both paths retain the unreadable-file guard and ruamel comment preservation.
     """
-    _write_config_state(
+    from hermes_cli.config_transactions import write_config_state
+    write_config_state(
         config_path, data, allow_omissions=False, extra_content_on_create=extra_content_on_create)
 
 
@@ -2097,7 +2075,8 @@ def atomic_config_replace(
     config_path: Path, data: dict[str, Any], *, extra_content_on_create: Optional[str] = None,
 ) -> None:
     """Persist the complete desired config state; omitted mapping keys are deliberately deleted."""
-    _write_config_state(
+    from hermes_cli.config_transactions import write_config_state
+    write_config_state(
         config_path, data, allow_omissions=True, extra_content_on_create=extra_content_on_create)
 
 
@@ -2482,6 +2461,7 @@ def _commented_sections_for_save(normalized: dict[str, Any]) -> Optional[str]:
     return "".join(parts) or None
 
 
+@transactional_config()
 def save_config(
     config: dict[str, Any], *, strip_defaults: bool = True,
     preserve_keys: Optional[set[tuple[str, ...]]] = None, merge_existing: bool = False):
@@ -3341,6 +3321,7 @@ def _unknown_subkey_refusal(key: str, suggestion: Optional[str]) -> str:
     return "\n".join(lines)
 
 
+@transactional_config()
 def set_config_value(key: str, value: str, force: bool = False):
     """Set a configuration value at a dotted ``key``; ``value`` is auto-coerced to bool/int/float.
     ``force`` writes a known key given under the wrong prefix (``agent.terminal.timeout`` where
@@ -3517,6 +3498,7 @@ def get_config_value(key: str, *, as_json: bool = False, raw: bool = False):
                 print(color(f"  Did you mean: {suggestion}", Colors.YELLOW), file=sys.stderr)
 
 
+@transactional_config()
 def unset_config_value(key: str):
     """Remove a user-set configuration or .env value."""
     if is_managed():

@@ -24,6 +24,15 @@ hermes config set delegation.max_concurrent_children 4
 hermes config check
 ```
 
+For structured, arbitrary/nested edits, prefer `hermes manage schema` and
+`hermes manage apply`: JSON stdin, typed path arrays, redacted raw inspection,
+revision-checked config batches, and encrypted secret writers. Do not edit
+managed files directly. `secret.set` and `passphrase.change` take an inherited
+one-shot `secret_fd`, distinct from unlock authority; values never go in command
+arguments, environment variables, chat, or the JSON request. The current session
+grant avoids another unlock. A profile grant cannot rotate an ancestor vault.
+See the installed management schema for exact operations and lifecycle commands.
+
 Settings go through encrypted, atomic config writers; secrets belong in the encrypted
 credential store, not `config.yaml`, argv, or chat. Use the local command's
 supported stdin or interactive secret-input flow. Use native memory/skill tools for

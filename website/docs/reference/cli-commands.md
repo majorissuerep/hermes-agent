@@ -29,6 +29,10 @@ and approval controls. Unsupported flags fail instead of silently being dropped.
 
 ## Setup and configuration
 
+For structured agent-facing operations, see [Local JSON management](management-cli.md):
+`hermes manage schema` discovers typed config batches, redacted inspection,
+secret FD writes and passphrase rotation without a network management service.
+
 ```sh
 hermes setup
 hermes model

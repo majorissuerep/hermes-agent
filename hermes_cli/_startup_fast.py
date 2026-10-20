@@ -24,6 +24,7 @@ toward the slow path, which then does the authoritative parse).
 
 from __future__ import annotations
 
+
 import os
 import sys
 
@@ -40,6 +41,20 @@ __all__ = [
     "read_openai_version",
     "try_fast_version",
 ]
+
+
+def try_management(argv: list[str]) -> None:
+    """Dispatch JSON management before dotenv/profile gates can emit non-JSON errors."""
+    if argv[:1] == ["manage"]:
+        args = argv[1:]
+    elif len(argv) >= 3 and argv[0] in {"-p", "--profile"} and argv[2] == "manage":
+        args = ["--profile", argv[1], *argv[3:]]
+    elif len(argv) >= 2 and argv[0].startswith("--profile=") and argv[1] == "manage":
+        args = [argv[0], *argv[2:]]
+    else:
+        return
+    from hermes_cli.management import main
+    raise SystemExit(main(args))
 
 
 def _read_text(path: str) -> str | None:

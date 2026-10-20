@@ -32,6 +32,7 @@ from agent.error_classifier import (
     is_reasoning_required_rejection,
 )
 from agent.auxiliary_reasoning_floor import remember_reasoning_floor, with_reasoning_floor
+from agent.auxiliary_main_route import main_headers_allowed, scoped_main_headers
 from agent.auxiliary_structured_output import _route_key, _without_structured_output_format, remember_structured_output_rejection
 from agent.codex_headers import (
     CODEX_AUX_BASE_URL as _CODEX_AUX_BASE_URL,
@@ -856,6 +857,8 @@ def _apply_user_default_headers(headers: dict | None) -> dict | None:
     """Merge user ``model.default_headers`` onto resolved headers (user wins; ``model.extra_headers``
     alias wins over both). Mirrors ``AIAgent._apply_user_default_headers`` so a custom endpoint behind a
     WAF rejecting ``User-Agent`` / ``X-Stainless-*`` works for aux calls. SECURITY: never log values."""
+    if not main_headers_allowed():
+        return headers
     try:
         from hermes_cli.config import cfg_get, load_config
         _cfg = load_config()
@@ -5387,6 +5390,7 @@ _EXPLICIT_PROVIDER_BRANCHES: dict[str, Callable[[_ResolveRequest], _ResolveResul
 }
 
 
+@scoped_main_headers
 def resolve_provider_client(
     provider: str, model: str | None = None, async_mode: bool = False, raw_codex: bool = False,
     explicit_base_url: str | None = None, explicit_api_key: Optional[str | Callable[[], str]] = None,
@@ -5399,9 +5403,9 @@ def resolve_provider_client(
     (full auto-detection chain). ``model=None`` → provider's default aux model. ``raw_codex`` → bare OpenAI
     client for ``responses.stream()`` callers. ``api_mode`` forces "codex_responses"/"chat_completions"/
     "anthropic_messages" instead of auto-detect. Returns (client, resolved_model) or (None, None)."""
-    _validate_proxy_env_urls()
-    # Keep the pre-alias name so a custom_providers entry named like a built-in alias
-    # (e.g. "kimi" → "kimi-coding") is still reachable via the named-custom branch.
+    from agent.auxiliary_main_route import inherit_main_route
+    provider, model, explicit_base_url, explicit_api_key, api_mode = inherit_main_route(
+        provider, model, explicit_base_url, explicit_api_key, api_mode, main_runtime)
     original_provider = (provider or "").strip().lower()
     provider = _normalize_aux_provider(provider)
     api_mode = _canonical_api_mode(str(api_mode or "")).lower() or None
@@ -5483,7 +5487,7 @@ def get_text_auxiliary_client(task: str = "", *, main_runtime: Optional[dict[str
     provider, model, base_url, api_key, api_mode = _resolve_task_provider_model(task or None)
     return resolve_provider_client(
         provider, model=model, explicit_base_url=base_url, explicit_api_key=api_key,
-        api_mode=api_mode, main_runtime=main_runtime,
+        api_mode=api_mode, main_runtime=main_runtime, task=task or None,
     )
 
 
@@ -5657,15 +5661,14 @@ def resolve_vision_provider_client(
     api_key: Optional[str] = None, async_mode: bool = False,
     main_runtime: Optional[dict[str, Any]] = None,
 ) -> tuple[Optional[str], Optional[Any], Optional[str]]:
-    """Resolve the client actually used for vision tasks.
-
-    Direct endpoint overrides beat provider selection; explicit providers may force
-    experimental backends; auto mode only tries backends known to work.
-    """
+    """Resolve vision on its requested route; explicit main retains the full active connection."""
     runtime = _normalize_main_runtime(main_runtime)
     requested, resolved_model, resolved_base_url, resolved_api_key, resolved_api_mode = _resolve_task_provider_model(
         "vision", provider, model, base_url, api_key
     )
+    if requested.strip().lower() == "main":
+        from agent.auxiliary_main_route import main_vision_route
+        return main_vision_route(resolved_model, resolved_base_url, resolved_api_key, resolved_api_mode, runtime, async_mode)
     # The raw name keeps a llama.cpp alias distinguishable from bare ``custom`` for the last resolve.
     raw_requested, requested = requested, _normalize_vision_provider(requested)
     if resolved_base_url:
@@ -6022,11 +6025,8 @@ def _get_cached_client(
     # Build outside the lock. For pool-backed providers derive the key from the pool entry:
     # resolve_api_key_provider_credentials prefers env vars, which would bypass pool rotation
     # and retry an exhausted key.
-    effective_api_key = api_key
-    if not effective_api_key:
-        _pe = _peek_pool_entry(_normalize_aux_provider(provider))
-        if _pe is not None:
-            effective_api_key = _pool_runtime_api_key(_pe) or api_key
+    from agent.auxiliary_main_route import explicit_or_pool_key
+    effective_api_key = explicit_or_pool_key(provider, api_key)
     client, default_model = resolve_provider_client(
         provider, model, async_mode, explicit_base_url=base_url, explicit_api_key=effective_api_key,
         api_mode=api_mode, main_runtime=runtime, is_vision=is_vision, task=task,

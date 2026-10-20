@@ -10,6 +10,14 @@ hermes model
 hermes tools
 ```
 
+For machine-readable inspection and atomic config batches, use
+`hermes manage schema` followed by `hermes manage apply` with one JSON stdin
+request. Paths are arrays (including keys containing dots); writes require the
+revision returned by `config.get`. Inspection is redacted and never expands
+secret references. Secret/passphrase changes use a distinct inherited one-shot
+FD, never literal values in command arguments or JSON. See
+`encrypted-self-management.md`; changes default to the next session.
+
 Settings (`config.yaml`), secrets (`.env` / auth stores) and conversation state are
 encrypted at rest. Do not read or replace ciphertext through plaintext file tools.
 Local calls and delegated terminal agents reuse the unlocked session's temporary,
