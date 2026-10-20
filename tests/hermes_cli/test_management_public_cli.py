@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 import json
 import os
 from pathlib import Path
 import secrets
+import signal
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
@@ -24,7 +26,7 @@ class ManagementWorld:
     password: str
     authority: object
 
-    def call(self, request=None, *, secret=None, env=None, profile=None):
+    def call(self, request=None, *, secret=None, env=None, profile=None, global_profile=False):
         from hermes_cli._launchers import runtime_command
 
         data = dict(request) if request is not None else None
@@ -37,8 +39,8 @@ class ManagementWorld:
                 os.close(writer)
             data["secret_fd"] = fd
         try:
-            args = ["manage"]
-            if profile is not None:
+            args = ["-p", profile, "manage"] if global_profile else ["manage"]
+            if profile is not None and not global_profile:
                 args.extend(["--profile", profile])
             args.append("apply" if data is not None else "schema")
             result = subprocess.run(
@@ -223,7 +225,8 @@ def test_public_management_schema_needs_no_vault(tmp_path, monkeypatch):
     assert not (home / ".hermes-vault").exists()
 
 
-def test_external_keyfile_management_honors_the_selected_profile(world, tmp_path):
+@pytest.mark.parametrize("global_profile", [False, True], ids=["manage-profile", "global-profile"])
+def test_external_keyfile_management_honors_the_selected_profile(world, tmp_path, global_profile):
     from hermes_cli.config import save_config
     from hermes_constants import reset_hermes_home_override, set_hermes_home_override
     from hermes_security import vault
@@ -250,8 +253,86 @@ def test_external_keyfile_management_honors_the_selected_profile(world, tmp_path
     finally:
         reset_hermes_home_override(token)
     result, output = world.call({"op": "config.get", "path": ["agent", "max_turns"]},
-                                env=external, profile="work")
+                                env=external, profile="work", global_profile=global_profile)
     assert result.returncode == 0 and output["result"]["value"] == 61
     assert world.get(["agent", "max_turns"])["value"] == 19
-    result, output = world.call({"op": "config.get", "path": []}, profile="work")
+    result, output = world.call({"op": "config.get", "path": []}, profile="work", global_profile=global_profile)
     assert result.returncode != 0 and output["ok"] is False
+
+
+def test_stalled_secret_pipe_refuses_without_rotating_or_leaving_a_child(world):
+    from hermes_cli._launchers import runtime_command
+
+    names = (".hermes-vault", "config.yaml", "state.db")
+    before = {name: (world.home / name).read_bytes() for name in names}
+    secret = secrets.token_urlsafe(32)
+    reader, writer = os.pipe()
+    proc = None
+    try:
+        # The writer deliberately remains open through the refusal: valid bytes are not EOF.
+        os.write(writer, secret.encode("utf-8"))
+        proc = subprocess.Popen(
+            runtime_command(ROOT, ["manage", "apply"]), env=world.env, cwd=ROOT,
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, pass_fds=(reader,), start_new_session=True,
+        )
+        stdout, stderr = proc.communicate(
+            json.dumps({"op": "passphrase.change", "secret_fd": reader}), timeout=60,
+        )
+        output = json.loads(stdout)
+        assert proc.returncode != 0 and output["version"] == 1 and output["ok"] is False, (output, stderr)
+        assert output["error"]["code"] == "secret_timeout", output
+        assert secret not in stdout + stderr
+        assert before == {name: (world.home / name).read_bytes() for name in names}
+        with pytest.raises(ProcessLookupError):
+            os.killpg(proc.pid, 0)
+    finally:
+        os.close(reader)
+        os.close(writer)
+        if proc is not None:
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(proc.pid, signal.SIGKILL)
+            proc.communicate(timeout=10)
+    assert world.get(["agent", "max_turns"])["value"] == 19
+
+
+def test_rotated_vault_public_backup_import_restores_config_and_history(world, tmp_path):
+    from hermes_cli._launchers import runtime_command
+    from hermes_state import SessionDB
+
+    def command(args):
+        proc = subprocess.Popen(
+            runtime_command(ROOT, args), env=world.env, cwd=ROOT,
+            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, start_new_session=True,
+        )
+        try:
+            stdout, stderr = proc.communicate(timeout=180)
+            assert proc.returncode == 0, (stdout, stderr)
+            with pytest.raises(ProcessLookupError):
+                os.killpg(proc.pid, 0)
+        finally:
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(proc.pid, signal.SIGKILL)
+            proc.communicate(timeout=10)
+
+    new_password = secrets.token_urlsafe(32)
+    result, output = world.call({"op": "passphrase.change"}, secret=new_password)
+    assert result.returncode == 0, (output, result.stderr)
+    original = world.get()["value"]
+    with SessionDB(world.home / "state.db") as db:
+        history = db.get_messages("management-history")
+    archive = tmp_path / "rotated-vault.zip"
+    command(["backup", "--output", str(archive)])
+    assert archive.is_file() and archive.stat().st_size > 0
+    result, output = world.call({"op": "config.set", "revision": world.get()["revision"],
+                                "path": ["agent", "max_turns"], "value": 73})
+    assert result.returncode == 0, (output, result.stderr)
+    assert world.get(["agent", "max_turns"])["value"] == 73
+    command(["import", str(archive), "--force"])
+    assert world.get()["value"] == original
+    with SessionDB(world.home / "state.db") as db:
+        assert db.get_messages("management-history") == history
+        assert db._conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+    assert _fresh_unlock(world, world.password).returncode != 0
+    assert _fresh_unlock(world, new_password).returncode == 0
