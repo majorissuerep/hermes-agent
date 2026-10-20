@@ -11,7 +11,7 @@ import signal
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import pytest
 
@@ -22,9 +22,20 @@ pytestmark = [pytest.mark.platforms("linux", "macos"), pytest.mark.live_system_g
 @dataclass
 class ManagementWorld:
     home: Path
-    env: dict[str, str]
-    password: str
-    authority: object
+    env: dict[str, str] = field(repr=False)
+    password: str = field(repr=False)
+    authority: object = field(repr=False)
+
+    def diagnostic(self, value, *, secret=None, env=None):
+        text = str(value)
+        hidden = {self.password, secret}
+        for source in (self.env, env or {}):
+            hidden.update(value for name, value in source.items() if any(
+                part in name.upper() for part in ("VAULT", "KEY", "TOKEN", "PASSWORD", "SECRET", "AUTHORIZATION")
+            ))
+        for value in sorted((item for item in hidden if item), key=len, reverse=True):
+            text = text.replace(value, "[REDACTED]")
+        return text[:8000]
 
     def call(self, request=None, *, secret=None, env=None, profile=None, global_profile=False):
         from hermes_cli._launchers import runtime_command
@@ -52,9 +63,16 @@ class ManagementWorld:
         finally:
             if fd is not None:
                 os.close(fd)
-        output = json.loads(result.stdout)
-        assert output["version"] == 1, output
-        assert output["ok"] is (result.returncode == 0), (output, result.stderr)
+        diagnostic = self.diagnostic(
+            {"returncode": result.returncode, "stdout": result.stdout, "stderr": result.stderr},
+            secret=secret, env=env,
+        )
+        try:
+            output = json.loads(result.stdout)
+        except json.JSONDecodeError:
+            raise AssertionError(f"management did not return valid JSON: {diagnostic}") from None
+        assert output["version"] == 1, diagnostic
+        assert output["ok"] is (result.returncode == 0), diagnostic
         return result, output
 
     def get(self, path=()):
@@ -195,9 +213,20 @@ def test_public_management_cas_and_damaged_state_fail_closed(world, tmp_path):
     assert result.returncode != 0 and output["ok"] is False
     assert (world.home / "config.yaml").read_bytes() == original
     other = tmp_path / "other"
+    from hermes_cli.config import save_config
+    from hermes_constants import reset_hermes_home_override, set_hermes_home_override
     from hermes_security import vault
+    from tests.e2e.vault_home import prepare_fixture_runtime
 
-    vault.init_vault(other, secrets.token_urlsafe(32))
+    other_password = secrets.token_urlsafe(32)
+    vault.init_vault(other, other_password)
+    vault.unlock(other, other_password)
+    token = set_hermes_home_override(other)
+    try:
+        save_config({"agent": {"max_turns": 11}, "updates": {"check": False}}, strip_defaults=False)
+        prepare_fixture_runtime(other, ROOT)
+    finally:
+        reset_hermes_home_override(token)
     result, output = world.call({"op": "config.get", "path": []}, env=dict(world.env, HERMES_HOME=str(other)))
     assert result.returncode != 0 and output["ok"] is False
     damaged = original[:-1] + bytes([original[-1] ^ 1])
