@@ -31,7 +31,7 @@ def schema():
                        "invalid_config", "conflict", "secret_operation_required", "secret_timeout", "locked", "state_refused"],
             "lifecycle_commands": ["hermes profile --help", "hermes sessions --help", "hermes skills --help",
                                    "hermes mcp --help", "hermes plugins --help", "hermes cron --help",
-                                   "hermes backup --help", "hermes secure-vault --help", "hermes update --help"]}
+                                   "hermes backup --help", "hermes import --help", "hermes secure-vault --help", "hermes update --help"]}
 
 
 def _request(value):

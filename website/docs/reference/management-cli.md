@@ -104,6 +104,6 @@ never secret values. Missing, damaged, locked or unsafe symbolic state paths
 fail closed; no empty replacement is used as recovery.
 
 Use existing canonical commands for other lifecycle work:
-`hermes profile`, `sessions`, `skills`, `mcp`, `plugins`, `cron`, `backup`,
+`hermes profile`, `sessions`, `skills`, `mcp`, `plugins`, `cron`, `backup`, `import`,
 `secure-vault`, and `update` (each has `--help`). `manage schema` catalogues these
 commands; it does not pretend to implement them as generic JSON transactions.
