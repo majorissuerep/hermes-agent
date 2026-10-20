@@ -205,33 +205,9 @@ def cmd_vault(args: Any) -> int:
         return 0
 
     if command == "status":
-        if not vault_mod.vault_exists(home):
-            print(f"○ No vault at {home} (state writes will be refused; run 'hermes secure-vault migrate')")
-            return 1
-        status = vault_mod.vault_status(home)
-        meta = status["meta"]
-        print(f"● Vault present at {home}")
-        print(f"  Integrity        : {status['integrity']}")
-        print(f"  Unlocked in proc : {'yes' if status['unlocked'] else 'no'}")
-        if meta:
-            kdf = meta.get("kdf", "unknown")
-            n = meta.get("kdf_n", "?")
-            r = meta.get("kdf_r", "?")
-            p = meta.get("kdf_p", "?")
-            print(f"  KDF              : {kdf} (n={n}, r={r}, p={p})")
-            print(f"  Version          : v{meta.get('version', '?')}")
-            # salt is public metadata; show hex + length for verification
-            salt_b64 = meta.get("salt", "")
-            if salt_b64:
-                import base64 as _b64
+        from hermes_cli.vault_status import print_status
 
-                salt_hex = _b64.urlsafe_b64decode(salt_b64).hex()
-                print(f"  Salt             : {salt_hex} ({len(salt_b64)} b64 chars)")
-        envelopes, dbs, frames = status["encrypted_files"]
-        print(f"  Encrypted files  : {envelopes} envelope(s), {dbs} database(s), {frames} frame stream(s)")
-        if not status["unlocked"]:
-            print("  (use 'hermes secure-vault unlock', or HERMES_VAULT_PRIVATE_KEY=<key-file path>, to unlock)")
-        return 0
+        return print_status(home)
 
     if command == "unlock":
         if not vault_mod.vault_exists(home):
@@ -309,6 +285,7 @@ def cmd_vault(args: Any) -> int:
         if slot is None:
             print("✗ --slot <index> required (see 'hermes secure-vault slots')")
             return 1
+        gate_locked_vault(args, home)
         vault_mod.remove_key_slot(home, index=slot)
         print(f"✓ Key slot {slot} removed")
         return 0
