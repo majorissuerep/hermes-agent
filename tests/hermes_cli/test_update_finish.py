@@ -366,7 +366,7 @@ def test_real_compiler_failure_is_owed_build_and_completion_continues(completion
     context_before = context.read_bytes()
     child = run()
     assert child.returncode == 0, child.stdout + child.stderr
-    assert "Building the TUI failed" in child.stdout + child.stderr
+    assert 'src/entry.tsx:1:22: ERROR: Unexpected ";"' in child.stderr, child.stdout + child.stderr
     assert (source / "npm-python.json").is_file()
     assert not (source / "ui-tui/dist/entry.js").exists()
     # Actual encrypted config migration was not skipped by the build failure.

@@ -7,7 +7,6 @@ import os
 from pathlib import Path
 import secrets
 import select
-import signal
 import shutil
 import struct
 import subprocess
@@ -117,6 +116,12 @@ class TerminalPTY:
             env={**env, "TERM": "xterm-256color"}, start_new_session=True,
             preexec_fn=lambda: fcntl.ioctl(0, termios.TIOCSCTTY, 0))  # noqa: PLW1509 -- child requires its controlling PTY
         os.close(slave)
+        from hermes_platform.processes import get_process_start_time
+        self.owner_start = get_process_start_time(self.process.pid)
+        self.owner_session = os.getsid(self.process.pid)
+        self.owner_group = os.getpgid(self.process.pid)
+        assert self.owner_start is not None and self.owner_session == self.process.pid
+        self.closed = False
 
     def read(self):
         if select.select([self.master], [], [], 0.1)[0]:
@@ -191,10 +196,56 @@ class TerminalPTY:
             self.until(lambda text: f"filter: {query[:index]}" in text, "filter keystroke rendered")
 
     def close(self):
-        if self.process.poll() is None:
-            os.killpg(self.process.pid, signal.SIGKILL)
-        self.process.wait(timeout=10)
-        os.close(self.master)
+        import psutil
+        from hermes_platform.processes import get_process_start_time, pid_exists, terminate_pid
+
+        if self.closed:
+            return
+        self.closed = True
+        deadline = time.monotonic() + 10
+        owned = {}
+        try:
+            current = get_process_start_time(self.process.pid)
+            assert current is None or current == self.owner_start, "PTY owner PID was reused"
+            # The root can move groups; a group signal alone does not prove its exit.
+            if self.process.poll() is None:
+                current = get_process_start_time(self.process.pid)
+                assert current is None or current == self.owner_start, "PTY owner PID was reused"
+                try:
+                    children = psutil.Process(self.process.pid).children(recursive=True)
+                except psutil.NoSuchProcess:
+                    children = []
+                for child in children:
+                    owned[child.pid] = get_process_start_time(child.pid)
+                if current is not None:
+                    owned[self.process.pid] = self.owner_start
+            for candidate in psutil.process_iter(["pid", "uids"]):
+                if candidate.info["uids"] is None or candidate.info["uids"].real != os.getuid():
+                    continue
+                try:
+                    if os.getsid(candidate.pid) == self.owner_session:
+                        owned[candidate.pid] = get_process_start_time(candidate.pid)
+                except ProcessLookupError:
+                    continue
+            for pid, started in owned.items():
+                if pid_exists(pid):
+                    assert started is not None, f"PTY child {pid} has no start identity"
+                    try:
+                        terminate_pid(pid, force=True, expected_start_time=started)
+                    except ProcessLookupError:
+                        continue
+                    except OSError as error:
+                        if isinstance(error, PermissionError) or pid_exists(pid):
+                            raise
+            self.process.wait(timeout=max(0, deadline - time.monotonic()))
+            wait_until(lambda: all(not pid_exists(pid) or get_process_start_time(pid) != started
+                for pid, started in owned.items()), timeout=max(0, deadline - time.monotonic()),
+                what="owned PTY descendants terminated")
+        finally:
+            os.close(self.master)
+            self._save_transcript()
+
+    def _save_transcript(self):
         raw = self.output.decode("utf-8", errors="replace")
         for value in self.sensitive_values:
             if value:
@@ -204,6 +255,14 @@ class TerminalPTY:
             **self.read_metrics, "elapsed_s": time.monotonic() - self.started_at,
             "bytes": len(self.output), "unlock_prompts": self.prompts,
             "returncode": self.process.returncode}, indent=2))
+
+
+def _composer_ready(terminal):
+    rows = terminal.screen.display()
+    current = "\n".join(rows)
+    composer = "\n".join(rows[-12:])
+    return ("─ ready │" in composer and "❯" in composer
+            and "Esc/q close" not in current and "Config File:" not in current)
 
 
 def _exercise_failed_model_controls(terminal, server):
@@ -294,16 +353,18 @@ def test_public_ink_model_picker_and_scoped_switches(tmp_path, monkeypatch, lazy
                            argv=runtime_command(ROOT))
     anchor = "history-" + secrets.token_hex(10)
     try:
-        terminal.until(lambda text: "─ ready │" in text and "❯" in text, "Ink composer ready")
+        terminal.until(lambda _: _composer_ready(terminal), "Ink composer ready")
         before = (home / "config.yaml").read_bytes()
         terminal.submit("/config")
-        terminal.until(lambda text: "(^_^) Configuration" in text, "real slash child config output")
+        terminal.until(lambda _: "(^_^) Configuration" in "\n".join(terminal.screen.display())
+                       and "Esc/q close" in "\n".join(terminal.screen.display()),
+                       "complete config pager ready for keyboard input")
         terminal.key(b"q")
-        terminal.until(lambda text: "Config File:" not in "\n".join(terminal.screen.display())
-                       and "─ ready │" in text, "config pager closed")
+        terminal.until(lambda _: _composer_ready(terminal), "config pager closed; composer ready")
         if not lazy:
             terminal.submit(anchor)
-            terminal.until(lambda text: "fixture-reply-1" in text, "first local agent reply")
+            terminal.until(lambda text: "fixture-reply-1" in text and _composer_ready(terminal),
+                           "first local agent reply; composer ready")
         terminal.submit("/model")
         terminal.until(lambda text: "Select provider (step 1/3)" in text, "provider picker rendered")
         terminal.key(b"\x1b[200~Fixture\x1b[201~")

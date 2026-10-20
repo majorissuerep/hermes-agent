@@ -32,7 +32,7 @@ from agent.error_classifier import (
     is_reasoning_required_rejection,
 )
 from agent.auxiliary_reasoning_floor import remember_reasoning_floor, with_reasoning_floor
-from agent.auxiliary_main_route import main_headers_allowed, scoped_main_headers
+from agent.auxiliary_main_route import main_headers_allowed, request_provider, scoped_main_headers
 from agent.auxiliary_structured_output import _route_key, _without_structured_output_format, remember_structured_output_rejection
 from agent.codex_headers import (
     CODEX_AUX_BASE_URL as _CODEX_AUX_BASE_URL,
@@ -7389,7 +7389,7 @@ def _resolve_call_client(
 ) -> _ResolvedAuxRoute:
     """Resolve the client for one aux call: vision chain, or cached text client with the
     explicit-provider fallback_chain / auto-chain rescue; RuntimeError when nothing is configured."""
-    effective_provider = resolved_provider
+    effective_provider = request_provider(resolved_provider, resolved_model, resolved_base_url, resolved_api_key, resolved_api_mode, main_runtime)
     if task == "vision":
         effective_provider, client, final_model = resolve_vision_provider_client(
             provider=resolved_provider if resolved_provider != "auto" else provider,
@@ -7409,7 +7409,7 @@ def _resolve_call_client(
             resolved_provider, resolved_model, async_mode=async_mode, base_url=resolved_base_url,
             api_key=resolved_api_key, api_mode=resolved_api_mode, main_runtime=main_runtime,
             task=task)
-        effective_provider = _effective_provider_for_client(client, resolved_provider)
+        effective_provider = _effective_provider_for_client(client, effective_provider)
         if client is None:
             # Explicit provider with no credentials: honor the task fallback_chain before
             # raising (fallback entries may use OAuth / credential-pool auth).

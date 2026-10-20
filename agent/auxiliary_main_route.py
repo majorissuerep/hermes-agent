@@ -66,3 +66,10 @@ def explicit_or_pool_key(provider, api_key):
         return api_key
     entry = aux._peek_pool_entry(aux._normalize_aux_provider(provider))
     return (aux._pool_runtime_api_key(entry) or api_key) if entry is not None else api_key
+
+
+def request_provider(provider, model, base_url, api_key, api_mode, runtime):
+    """Project wire policy from the active connection while caching its main sentinel unchanged."""
+    if str(provider or "").strip().lower() == "main":
+        return inherit_main_route(provider, model, base_url, api_key, api_mode, runtime)[0]
+    return provider

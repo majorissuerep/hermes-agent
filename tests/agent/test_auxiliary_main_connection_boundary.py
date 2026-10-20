@@ -51,3 +51,22 @@ def test_explicit_task_endpoint_key_and_mode_do_not_copy_named_route_headers(con
     assert "X-Api-Key" not in constructed[-1].get("default_headers", {})
     aux.resolve_provider_client("main", main_runtime=runtime)
     assert constructed[-1]["default_headers"]["X-Api-Key"] == "main-header-secret"
+
+
+def test_main_request_projects_the_active_custom_route_after_a_session_switch(constructed, tmp_path, monkeypatch):
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    (tmp_path / "config.yaml").write_text(
+        "model:\n  provider: litellm\nauxiliary:\n  title_generation:\n    provider: main\n"
+        "providers:\n  session-route:\n    base_url: https://active.example/v1\n")
+    runtime = {"provider": "custom:session-route", "model": "active-model",
+               "base_url": "https://active.example/v1", "api_key": "active-key",
+               "api_mode": "chat_completions"}
+    request = aux._prepare_aux_request("title_generation", provider="main", model=None,
+        base_url=None, api_key=None, main_runtime=runtime, messages=[{"role": "user", "content": "Name this"}],
+        temperature=None, max_tokens=512, tools=None, timeout=30, extra_body=None,
+        reasoning_config={"enabled": False}, extra_headers=None, api_mode=None, route_info=None,
+        async_mode=False)
+    assert (request.kwargs["model"], str(request.client.base_url), request.client.api_key) == (
+        "active-model", runtime["base_url"], "active-key")
+    assert request.kwargs.get("reasoning_effort") == "none", request.kwargs
+    assert "reasoning" not in request.kwargs.get("extra_body", {})

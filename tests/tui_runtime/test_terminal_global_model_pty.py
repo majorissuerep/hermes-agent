@@ -75,6 +75,9 @@ def test_global_model_survives_independent_public_terminal_owner(tmp_path, monke
         assert server.requests[-1]["model"] == "fixture-alpha"
         first.submit("/model fixture-beta --global --reasoning high")
         first.until(lambda text: "model → fixture-beta" in text, "global switch acknowledged")
+        first.submit("/quit")
+        first.until(lambda _text: first.process.poll() is not None, "first public owner exited")
+        assert first.process.returncode == 0
         first.close()
         terminals.remove(first)
         assert first.prompts == 1
@@ -97,6 +100,9 @@ def test_global_model_survives_independent_public_terminal_owner(tmp_path, monke
         assert server.requests[-1].get("reasoning_effort") == "high"
         assert anchor not in str(server.requests[-1]["messages"])
         assert second.prompts == 1
+        second.submit("/quit")
+        second.until(lambda _text: second.process.poll() is not None, "independent public owner exited")
+        assert second.process.returncode == 0
     finally:
         for terminal in terminals:
             terminal.transcript.write_text(terminal.text())
