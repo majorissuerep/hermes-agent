@@ -144,6 +144,49 @@ def _resolved_or_raw(filepath: str, task_id: str) -> str:
         return filepath
 
 
+def _managed_state_kind(path: Path, home: Path) -> bool:
+    try:
+        rel = path.relative_to(home)
+    except ValueError:
+        return False
+    from hermes_cli.home_data_layout import profile_root_entry
+
+    entry = profile_root_entry(rel.parts)
+    if entry in {"config.yaml", "config.yaml.lock", ".env", "auth.json"} or (entry or "").startswith(".hermes-vault"):
+        return True
+    if (entry or "").startswith(".env."):
+        return True
+    from hermes_security.vault import _is_in_skip_dir
+
+    name = path.name.lower()
+    return (not _is_in_skip_dir(rel)
+            and any(name.endswith(suffix + tail) for suffix in (".db", ".sqlite", ".sqlite3")
+                    for tail in ("", "-wal", "-shm", "-journal")))
+
+
+def _managed_state_write_error(candidate: str) -> str | None:
+    """Guard model-facing edits, not canonical writers or same-UID arbitrary shell commands."""
+    path = Path(candidate).expanduser().resolve(strict=False)
+    homes = {Path(home) for home in _hermes_exempt_homes()}
+    homes.update(parent for parent in path.parents if (parent / ".hermes-vault").is_file())
+    managed = any(_managed_state_kind(path, home) for home in homes)
+    if not managed and path.is_file() and path.stat().st_nlink > 1:
+        # A hard link has no realpath back to its owner. Check known credential/state aliases too.
+        for home in homes:
+            roots = [home, *home.glob("profiles/*")]
+            if any(target.is_file() and path.samefile(target) for root in roots
+                   for target in (root / name for name in ("config.yaml", "config.yaml.lock", ".env",
+                                                           ".hermes-vault", ".hermes-vault.lock",
+                                                           "state.db", "state.db-wal", "state.db-shm", "auth.json"))):
+                managed = True
+                break
+    if managed:
+        return (f"Refusing direct edits to managed Hermes configuration, credentials or database state: {candidate}. "
+                "Use 'hermes manage schema' and 'hermes manage apply' (or the canonical Hermes config command); "
+                "do not write or patch the underlying files.")
+    return None
+
+
 def _check_sensitive_path(filepath: str, task_id: str = "default") -> str | None:
     """Return an error message if the path targets a sensitive system location."""
     # NT/device-namespace guard on the RAW string, BEFORE the task-base join:
@@ -170,7 +213,9 @@ def _check_sensitive_path(filepath: str, task_id: str = "default") -> str | None
         return (
             f"Refusing to write to Hermes config file: {filepath}\n"
             "Agent cannot modify security-sensitive configuration. "
-            "Edit ~/.hermes/config.yaml directly or use 'hermes config' instead.")
+            "Use 'hermes manage schema' and 'hermes manage apply', or the canonical 'hermes config' command.")
+    if managed_error := _managed_state_write_error(candidates[0]):
+        return managed_error
     from hermes_security.sandbox.paths import write_block_reason
     return write_block_reason(candidates[0])
 

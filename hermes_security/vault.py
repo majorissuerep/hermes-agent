@@ -1,8 +1,8 @@
-"""Master-password vault: scrypt root key, HKDF domain separation, AES-GCM envelopes.
+"""Master-password vault: scrypt credentials, HKDF domain separation, AES-GCM envelopes.
 
 The root key never touches disk.  The home contains only a public metadata
-file (KDF parameters + random salt + password verifier).  The verifier lets
-us reject a wrong password at unlock time before any file is decrypted.
+file (KDF parameters, salt, master-key proof and optional authenticated wrapping).
+Credential metadata can evolve without altering the data key or v1 file envelopes.
 """
 
 from __future__ import annotations
@@ -98,9 +98,12 @@ def _atomic_write(path: Path, data: bytes, *, mode: int = 0o600) -> None:
 def _load_meta(home: Path) -> Optional[dict[str, Any]]:
     meta_path = home / _META_FILENAME
     try:
-        raw = meta_path.read_bytes()
+        with meta_path.open("rb") as stream:
+            raw = stream.read(1024 * 1024 + 1)
     except FileNotFoundError:
         return None
+    if len(raw) > 1024 * 1024:
+        raise VaultIntegrityError(f"Vault metadata at {meta_path} is too large")
     try:
         meta = json.loads(raw.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -319,7 +322,7 @@ def init_vault(
     salt = secrets.token_bytes(_SALT_BYTES)
     root_key = _derive_root_key(password, salt, _SCRYPT_N, _SCRYPT_R, _SCRYPT_P)
     meta = {
-        "version": _VERSION,
+        "version": 1,  # legacy credential metadata format, independent of envelope _VERSION
         "kdf": "scrypt",
         "kdf_n": _SCRYPT_N,
         "kdf_r": _SCRYPT_R,
@@ -357,7 +360,7 @@ def _check_verifier(root_key: bytes, salt: bytes, verifier: bytes) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Key slots (v2 metadata): LUKS-style multiple credentials wrap ONE master
+# Key slots (legacy and wrapped metadata): multiple credentials wrap ONE master
 # key. The system stores ONLY public material on disk (salt + verifier, or
 # an X25519 PUBLIC key + the master key sealed to it). The credential —
 # passphrase or private key — lives wherever the HUMAN wants it. Either
@@ -445,11 +448,9 @@ def add_key_slot(
     with the human.
     """
 
-    home_path = Path(home).expanduser().resolve()
-    meta = _load_meta(home_path)
-    if meta is None:
-        raise VaultNotInitializedError(f"No vault at {home_path}")
+    from hermes_security.vault_metadata import exact_home, writer
 
+    home_path = exact_home(home)
     vault = unlocked_vault
     if vault is None:
         if password is None:
@@ -458,24 +459,28 @@ def add_key_slot(
     if public_key_raw is None:
         raise ValueError("public_key_raw is required")
 
-    slots = list(meta.get("key_slots") or [])
-    slots.append(_seal_to_public_key(public_key_raw, vault.master_key))
-    meta["key_slots"] = slots
-    _atomic_write(home_path / _META_FILENAME, json.dumps(meta).encode("utf-8"))
+    with writer(home_path, vault) as transaction:
+        meta = dict(transaction.meta)
+        slots = list(meta.get("key_slots") or [])
+        slots.append(_seal_to_public_key(public_key_raw, vault.master_key))
+        meta["key_slots"] = slots
+        transaction.commit(meta)
 
 
 def remove_key_slot(home: Path | str, *, index: int) -> None:
     """Drop key slot *index* (rotation: add new, remove old)."""
-    home_path = Path(home).expanduser().resolve()
-    meta = _load_meta(home_path)
-    if meta is None:
-        raise VaultNotInitializedError(f"No vault at {home_path}")
-    slots = list(meta.get("key_slots") or [])
-    if not 0 <= index < len(slots):
-        raise VaultError(f"No key slot {index} (vault has {len(slots)})")
-    slots.pop(index)
-    meta["key_slots"] = slots
-    _atomic_write(home_path / _META_FILENAME, json.dumps(meta).encode("utf-8"))
+    from hermes_security.vault_metadata import exact_home, writer
+
+    home_path = exact_home(home)
+
+    with writer(home_path, get_vault(home_path, allow_env_unlock=False)) as transaction:
+        meta = dict(transaction.meta)
+        slots = list(meta.get("key_slots") or [])
+        if not 0 <= index < len(slots):
+            raise VaultError(f"No key slot {index} (vault has {len(slots)})")
+        slots.pop(index)
+        meta["key_slots"] = slots
+        transaction.commit(meta)
 
 
 def unlock_with_private_key(home: Path | str, private_key_raw: bytes) -> Vault:
@@ -502,6 +507,9 @@ def unlock_with_private_key(home: Path | str, private_key_raw: bytes) -> Vault:
         except WrongMasterPasswordError as exc:
             last_error = exc
             continue
+        from hermes_security.passphrase import verify_master_key
+
+        verify_master_key(meta, master_key)
         vault = Vault(home=home_path, master_key=master_key)
         with _VAULT_LOCK:
             _VAULTS[home_path] = vault
@@ -531,17 +539,9 @@ def unlock(home: Path | str, password: str | bytes) -> Vault:
         if cached is not None:
             return cached
 
-    salt = _b64d(meta.get("salt", ""))
-    verifier = _b64d(meta.get("verifier", ""))
-    if len(salt) != _SALT_BYTES or len(verifier) < _NONCE_BYTES + 16:
-        raise VaultIntegrityError(f"Vault metadata at {home_path} is corrupt")
-    n, r, p = (int(meta.get(k, d)) for k, d in (("kdf_n", _SCRYPT_N), ("kdf_r", _SCRYPT_R), ("kdf_p", _SCRYPT_P)))
-    if meta.get("kdf") != "scrypt" or n <= 0 or r <= 0 or p <= 0:
-        raise VaultIntegrityError(f"Vault metadata at {home_path} has unsupported KDF parameters")
+    from hermes_security.passphrase import unlock_master_key
 
-    root_key = _derive_root_key(password, salt, n, r, p)
-    if not _check_verifier(root_key, salt, verifier):
-        raise WrongMasterPasswordError("The master password does not open this vault")
+    root_key = unlock_master_key(meta, password)
     vault = Vault(home=home_path, master_key=root_key)
     with _VAULT_LOCK:
         _VAULTS[home_path] = vault
@@ -572,13 +572,14 @@ def adopt_unlocked_key(home: Path | str, master_key: bytes) -> Vault:
     meta = _load_meta(home_path)
     if meta is None:
         raise VaultNotInitializedError(f"No vault at {home_path}")
-    salt, verifier = _b64d(meta.get("salt", "")), _b64d(meta.get("verifier", ""))
-    if len(salt) != _SALT_BYTES or len(verifier) < _NONCE_BYTES + 16:
-        raise VaultIntegrityError(f"Vault metadata at {home_path} is corrupt")
-    if not _check_verifier(bytes(master_key), salt, verifier):
-        raise WrongMasterPasswordError("The handed-over key does not open this vault")
+    from hermes_security.passphrase import verify_master_key
+
+    verify_master_key(meta, bytes(master_key))
     vault = Vault(home=home_path, master_key=bytes(master_key))
     with _VAULT_LOCK:
+        if cached := _VAULTS.get(home_path):
+            if not secrets.compare_digest(cached.master_key, vault.master_key):
+                raise VaultIntegrityError("The cached owner no longer matches the handed-over vault")
         return _VAULTS.setdefault(home_path, vault)
 
 

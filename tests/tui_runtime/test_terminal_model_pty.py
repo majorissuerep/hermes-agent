@@ -280,9 +280,9 @@ def test_public_ink_model_picker_and_scoped_switches(tmp_path, monkeypatch, lazy
         "auxiliary": {"title_generation": {"enabled": False}},
         "display": {"details_mode": "expanded"},
         "agent": {"reasoning_effort": "none"}}, merge_existing=False)
-    from pm import sync_venv
+    from tests.e2e.vault_home import prepare_fixture_tui
 
-    sync_venv(extras=["all"], explicit=True, project_root=ROOT)
+    prepare_fixture_tui(home, ROOT)
     vault.clear_vault_cache()
     from hermes_cli._launchers import runtime_command
 

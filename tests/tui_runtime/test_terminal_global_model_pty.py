@@ -17,7 +17,7 @@ pytestmark = [pytest.mark.platforms("linux", "macos"), pytest.mark.live_system_g
 def _configure_global_home(tmp_path, monkeypatch, url):
     from hermes_cli.config import ensure_hermes_home, save_config, save_env_value
     from hermes_security import migrate, vault
-    from pm import sync_venv
+    from tests.e2e.vault_home import prepare_fixture_tui
 
     home = tmp_path / "home"
     monkeypatch.setenv("HERMES_HOME", str(home))
@@ -36,7 +36,7 @@ def _configure_global_home(tmp_path, monkeypatch, url):
         "auxiliary": {"title_generation": {"enabled": False}},
         "display": {"tui_auto_resume_recent": False},
         "agent": {"reasoning_effort": "none"}}, merge_existing=False)
-    sync_venv(extras=["all"], explicit=True, project_root=ROOT)
+    prepare_fixture_tui(home, ROOT)
     vault.clear_vault_cache()
     return home, password
 
