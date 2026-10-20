@@ -7,14 +7,14 @@ name: OS-specific tests
 # suite, so neither native host relies on optional TUI skips or a faked OS.
 #
 #   macos    → ``-m platforms``    on macos-latest
-#   linux    → three public terminal-usability files on ubuntu-latest
+#   linux    → public terminal and update-completion contracts on ubuntu-latest
 #
 # (tests/conftest.py's ``pytest_collection_modifyitems`` hook skips
 # foreign-OS ``platforms(...)`` markers on each host, so one shared ``-m
 # platforms`` expression selects "this host's own marked tests" on either
 # lane — the helper narrows WHICH FILES get imported first.)
 #
-# macOS keeps its two existing file slices; Linux runs its three files serially.
+# macOS keeps its two existing file slices; Linux runs its explicit files serially.
 # Each lane FAILS when it selects zero tests — a
 # renamed marker or bad selector can never report a green job that ran
 # nothing.
@@ -57,6 +57,8 @@ jobs:
               tests/tui_runtime/test_terminal_model_pty.py
               tests/tui_runtime/test_terminal_global_model_pty.py
               tests/tui_runtime/test_terminal_session_naming_pty.py
+              tests/tui_runtime/test_terminal_pty_custody.py
+              tests/hermes_cli/test_update_finish.py
           # Two slices on the free standard runner (3 cores, 3 workers): one lane ran
           # ~7.5 min and became the slowest required job once the Linux suite split.
           - name: macOS-only tests (1/2)
