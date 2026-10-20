@@ -18,12 +18,14 @@ def test_published_management_command_survives_login_path_reset(tmp_path, monkey
     from hermes_constants import reset_hermes_home_override, set_hermes_home_override
     from hermes_security import vault
     from hermes_security.session_authority import start_session_authority
-    from tests.e2e.vault_home import prepare_fixture_runtime
+    from pm import ensure
+    from tests.e2e.vault_home import _fixture_pm_home, prepare_fixture_runtime
     from tools.environments import local
 
     home = tmp_path / "state"
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("HERMES_HOME", str(home))
+    monkeypatch.delenv("HERMES_RUNTIME_DIR", raising=False)
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     token = set_hermes_home_override(home)
     password = secrets.token_urlsafe(32)
@@ -34,7 +36,9 @@ def test_published_management_command_survives_login_path_reset(tmp_path, monkey
         vault.unlock(home, password)
         save_config({"agent": {"max_turns": 43}}, strip_defaults=False)
         prepare_fixture_runtime(home, ROOT)
-        active = stage_launcher("hermes", ROOT, tmp_path / "published")
+        with _fixture_pm_home(home):
+            ensure("python", explicit=True)
+            active = stage_launcher("hermes", ROOT, tmp_path / "published")
         assert active is not None and active.is_file()
         # Only installation-location discovery is injected; the real published launcher,
         # CLI/bootstrap, login shell, snapshot, local backend and vault grant remain real.
