@@ -1,6 +1,5 @@
 import type { SessionLiveInfo, SubagentStatus, ToolLabel } from '@hermes/shared/gateway-events'
 
-
 export interface ActiveTool {
   context?: string
   id: string

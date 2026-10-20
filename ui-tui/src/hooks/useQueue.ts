@@ -196,7 +196,10 @@ export function useQueue() {
     [getQueue]
   )
 
-  const queuedDisplay = queueRef.current.map(item => `${item.failed ? t('canonical.queue.unconfirmedPrefix') : ''}${item.display}`)
+  const queuedDisplay = queueRef.current.map(
+    item => `${item.failed ? t('canonical.queue.unconfirmedPrefix') : ''}${item.display}`
+  )
+
   const queueDraft = useCallback((index: number) => queueRef.current[index]?.display ?? '', [queueRef])
 
   const queueEditIdx = queueEditRef.current
@@ -318,7 +321,10 @@ export function useQueue() {
 
   const dequeue = useCallback(
     (retry = false) => {
-      if (getUiState().gatewayConnected === false) { return undefined }
+      if (getUiState().gatewayConnected === false) {
+        return undefined
+      }
+
       const queue = getQueue()
       const item = queue.items[0]
 

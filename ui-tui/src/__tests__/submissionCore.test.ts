@@ -171,8 +171,10 @@ it('retains failed local submissions without attempting another protocol', async
     const settle = vi.fn()
     const item = { text: 'private', display: 'private', submissionId: 'retained-id', settle }
     const request = vi.fn().mockRejectedValue(Object.assign(new Error('not admitted'), { code }))
-    submitPrompt(item.text, makeDeps({ request } as unknown as LocalAgentClient), true, undefined,
-      { skipDetectDrop: true, queueItem: item })
+    submitPrompt(item.text, makeDeps({ request } as unknown as LocalAgentClient), true, undefined, {
+      skipDetectDrop: true,
+      queueItem: item
+    })
     await vi.waitFor(() => expect(settle).toHaveBeenLastCalledWith(false))
     expect(request).toHaveBeenCalledTimes(1)
   }
@@ -204,7 +206,9 @@ describe('submissionCore.submitPrompt — voice marker ownership', () => {
       queueItem: { queued: false, submissionId: 'c1', text: 'hello' } as never
     })
     submitPrompt('hello', makeDeps(gw), true, undefined, { skipDetectDrop: true })
-    await vi.waitFor(() => expect(request.mock.calls.map(([method]) => method)).toEqual(['prompt.submit', 'prompt.submit']))
+    await vi.waitFor(() =>
+      expect(request.mock.calls.map(([method]) => method)).toEqual(['prompt.submit', 'prompt.submit'])
+    )
 
     for (const [, params] of request.mock.calls) {
       expect(params).not.toHaveProperty('voice_turn')

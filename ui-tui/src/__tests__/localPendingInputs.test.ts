@@ -11,8 +11,20 @@ import { loadPendingInputs, migratePendingInputs, removePendingInput, savePendin
 
 it('retains unsent text in this terminal without leaving plaintext files in its profile', () => {
   const home = mkdtempSync(join(tmpdir(), 'hermes-draft-'))
-  const destination: SubmissionDestination = { sid: randomUUID(), storedSid: null, profile: 'default', profileHome: home }
-  const item: QueueItem = { text: `private-${randomUUID()}`, display: 'unsent Ω', submissionId: randomUUID(), destination }
+
+  const destination: SubmissionDestination = {
+    sid: randomUUID(),
+    storedSid: null,
+    profile: 'default',
+    profileHome: home
+  }
+
+  const item: QueueItem = {
+    text: `private-${randomUUID()}`,
+    display: 'unsent Ω',
+    submissionId: randomUUID(),
+    destination
+  }
 
   try {
     savePendingInput(item)
@@ -27,7 +39,13 @@ it('retains unsent text in this terminal without leaving plaintext files in its 
 })
 
 it('keeps profile drafts isolated and moves them only on an explicit resume mapping', () => {
-  const destination: SubmissionDestination = { sid: randomUUID(), storedSid: randomUUID(), profile: 'a', profileHome: '/synthetic/a' }
+  const destination: SubmissionDestination = {
+    sid: randomUUID(),
+    storedSid: randomUUID(),
+    profile: 'a',
+    profileHome: '/synthetic/a'
+  }
+
   const item: QueueItem = { text: 'kept', display: 'kept', submissionId: randomUUID(), destination }
 
   try {

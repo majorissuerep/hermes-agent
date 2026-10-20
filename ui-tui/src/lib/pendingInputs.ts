@@ -19,7 +19,10 @@ export function pendingInputOwner(destination: SubmissionDestination): Submissio
     seen.add(key)
     const next = successors.get(key)
 
-    if (!next) {break}
+    if (!next) {
+      break
+    }
+
     current = next
   }
 
@@ -27,14 +30,19 @@ export function pendingInputOwner(destination: SubmissionDestination): Submissio
 }
 
 export function migratePendingInputs(previous: SubmissionDestination, sid: string, storedSid?: string): void {
-  if (!previous.sid || !sid || (previous.sid === sid && previous.storedSid === storedSid)) {return}
+  if (!previous.sid || !sid || (previous.sid === sid && previous.storedSid === storedSid)) {
+    return
+  }
+
   const successor = Object.freeze({ ...previous, sid, storedSid: storedSid ?? null })
 
   for (const item of loadPendingInputs(previous, true)) {
     successors.set(pendingDestinationKey(item.ownerDestination ?? item.destination!), successor)
     item.ownerDestination = successor
 
-    if (!item.failed) {item.destination = successor}
+    if (!item.failed) {
+      item.destination = successor
+    }
   }
 
   successors.set(pendingDestinationKey(previous), successor)
@@ -42,18 +50,29 @@ export function migratePendingInputs(previous: SubmissionDestination, sid: strin
 }
 
 export function savePendingInput(item: QueueItem): void {
-  if (item.submissionId && item.destination?.sid) {pending.set(item.submissionId, { ...item })}
+  if (item.submissionId && item.destination?.sid) {
+    pending.set(item.submissionId, { ...item })
+  }
 }
 
 export function removePendingInput(item: QueueItem): void {
-  if (item.submissionId) {pending.delete(item.submissionId)}
+  if (item.submissionId) {
+    pending.delete(item.submissionId)
+  }
 }
 
 export function loadPendingInputs(destination: SubmissionDestination, resume = false): QueueItem[] {
-  return [...pending.values()].filter(item => {
-    const owner = pendingInputOwner(item.ownerDestination ?? item.destination!)
+  return [...pending.values()]
+    .filter(item => {
+      const owner = pendingInputOwner(item.ownerDestination ?? item.destination!)
 
-    return owner.profileHome === destination.profileHome && owner.profile === destination.profile &&
-      (resume ? (owner.storedSid || owner.sid) === (destination.storedSid || destination.sid) : owner.sid === destination.sid)
-  }).sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0))
+      return (
+        owner.profileHome === destination.profileHome &&
+        owner.profile === destination.profile &&
+        (resume
+          ? (owner.storedSid || owner.sid) === (destination.storedSid || destination.sid)
+          : owner.sid === destination.sid)
+      )
+    })
+    .sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0))
 }

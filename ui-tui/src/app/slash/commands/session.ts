@@ -26,7 +26,11 @@ const TUI_SESSION_MODEL_RE = new RegExp(`(?:^|\\s)${TUI_SESSION_MODEL_FLAG}(?:\\
 const REASONING_SESSION_FLAGS = new Set(['--session'])
 const REASONING_GLOBAL_FLAGS = new Set(['--global'])
 
-function isStaleCompressReply(_reply: SessionCompressResponse, current: ReturnType<typeof getUiState>, ctx: SlashRunCtx) {
+function isStaleCompressReply(
+  _reply: SessionCompressResponse,
+  current: ReturnType<typeof getUiState>,
+  ctx: SlashRunCtx
+) {
   return current.busy !== ctx.ui.busy || current.info?.stored_session_id !== ctx.ui.info?.stored_session_id
 }
 

@@ -28,9 +28,11 @@ export const canonicalEn = {
       legacyUnconfirmedWith: (message: string) =>
         `legacy delivery unconfirmed: ${message} — input retained; check the session before sending a new input`,
       statusDeliveryUnconfirmed: 'delivery unconfirmed',
-      deliveryNotResent: 'delivery unconfirmed — check the session before sending a new input; retained input was not resent',
+      deliveryNotResent:
+        'delivery unconfirmed — check the session before sending a new input; retained input was not resent',
       busyTextOnly: 'busy corrections accept text only — image input retained; submit it with /queue',
-      inputRetained: (message: string) => `input retained: ${message} — check the conversation before editing and resending`,
+      inputRetained: (message: string) =>
+        `input retained: ${message} — check the conversation before editing and resending`,
       imageNotSubmitted: (message: string) => `image not submitted: ${message} — input retained`,
       statusImageNotSubmitted: 'image not submitted',
       interruptFailed: (message: string) => `interrupt failed: ${message}`,

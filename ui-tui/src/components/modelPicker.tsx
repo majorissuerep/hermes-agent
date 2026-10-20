@@ -543,11 +543,13 @@ export function ModelPicker({
     }
 
     // Bracketed paste arrives as one input event, not one event per character.
-    const printable = ch && Array.from(ch).every(char => {
-      const code = char.codePointAt(0)!
+    const printable =
+      ch &&
+      Array.from(ch).every(char => {
+        const code = char.codePointAt(0)!
 
-      return code >= 32 && (code < 127 || code > 159)
-    })
+        return code >= 32 && (code < 127 || code > 159)
+      })
 
     if (printable && !key.ctrl && !key.meta) {
       setFilter(v => v + ch)

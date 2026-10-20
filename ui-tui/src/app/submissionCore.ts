@@ -85,11 +85,7 @@ function beginOwnedTurn(
   turnController.interrupted = false
 }
 
-function prepareQueueItem(
-  item: QueueItem,
-  submitText: string,
-  opts: SubmitPromptOpts
-): void {
+function prepareQueueItem(item: QueueItem, submitText: string, opts: SubmitPromptOpts): void {
   item.preparedText ??= submitText
 
   item.attachments ??= opts.attachments?.map(attachment => ({ ...attachment }))
@@ -181,7 +177,10 @@ export function submitPrompt(
         submitParams(sid, item, submitText, opts.attachments, !opts.behindTurn && voiceTranscript === submitText.trim())
       )
       .then(r => {
-        const accepted = Boolean(r?.voice_stopped || ['streaming', 'queued', 'steered', 'redirected'].includes(r?.status ?? ''))
+        const accepted = Boolean(
+          r?.voice_stopped || ['streaming', 'queued', 'steered', 'redirected'].includes(r?.status ?? '')
+        )
+
         item?.settle?.(accepted)
 
         // The gateway consumed a typed voice stop phrase server-side (voice
@@ -191,43 +190,41 @@ export function submitPrompt(
           patchUiState({ busy: false, status: 'ready' })
         }
       })
-      .catch(
-        (e: Error) => {
-          if (item) {
-            item.settle?.(false)
+      .catch((e: Error) => {
+        if (item) {
+          item.settle?.(false)
 
-            if (focused()) {
-              deps.sys(t('canonical.submit.inputRetained', e.message))
-              patchUiState({ status: t('canonical.submit.statusAdmissionUnconfirmed') })
-            }
-
-            return
+          if (focused()) {
+            deps.sys(t('canonical.submit.inputRetained', e.message))
+            patchUiState({ status: t('canonical.submit.statusAdmissionUnconfirmed') })
           }
 
-          // Defensive: prompt.submit no longer rejects a mid-turn send with
-          // "session busy" (the gateway queues it and returns success), but keep
-          // the re-queue path as a safety net for any future/legacy gateway that
-          // still errors, so a message is never silently dropped.
-          if (isSessionBusyError(e)) {
-            deps.enqueue(submitText, displayOverride, destination)
+          return
+        }
 
-            if (!focused()) {
-              return
-            }
-
-            patchUiState({ busy: true, status: 'queued for next turn' })
-
-            return deps.sys(`queued: "${submitText.slice(0, 50)}${submitText.length > 50 ? '…' : ''}"`)
-          }
+        // Defensive: prompt.submit no longer rejects a mid-turn send with
+        // "session busy" (the gateway queues it and returns success), but keep
+        // the re-queue path as a safety net for any future/legacy gateway that
+        // still errors, so a message is never silently dropped.
+        if (isSessionBusyError(e)) {
+          deps.enqueue(submitText, displayOverride, destination)
 
           if (!focused()) {
             return
           }
 
-          deps.sys(`error: ${e.message}`)
-          patchUiState({ busy: false, status: 'ready' })
+          patchUiState({ busy: true, status: 'queued for next turn' })
+
+          return deps.sys(`queued: "${submitText.slice(0, 50)}${submitText.length > 50 ? '…' : ''}"`)
         }
-      )
+
+        if (!focused()) {
+          return
+        }
+
+        deps.sys(`error: ${e.message}`)
+        patchUiState({ busy: false, status: 'ready' })
+      })
   }
 
   // Always ask the backend whether this looks like a file drop. The backend's

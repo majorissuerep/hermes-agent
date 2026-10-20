@@ -25,11 +25,17 @@ function mount(immediate = false, extra: (method: string, params: any) => unknow
   const request = vi.fn((method: string, params: any) => {
     const handled = extra(method, params)
 
-    if (handled !== undefined) { return Promise.resolve(handled) }
+    if (handled !== undefined) {
+      return Promise.resolve(handled)
+    }
 
-    if (method === 'prompt.submit') { return Promise.resolve({ status: 'streaming' }) }
+    if (method === 'prompt.submit') {
+      return Promise.resolve({ status: 'streaming' })
+    }
 
-    if (method === 'input.detect_drop') { return Promise.resolve({ matched: false }) }
+    if (method === 'input.detect_drop') {
+      return Promise.resolve({ matched: false })
+    }
 
     if (method === 'image.attach' || method === 'clipboard.paste') {
       if (immediate) {
@@ -40,15 +46,21 @@ function mount(immediate = false, extra: (method: string, params: any) => unknow
       }
 
       return new Promise(resolve => {
-        pending.push({ sid: params.session_id, finish(path) {
-          images.set(params.session_id, [...(images.get(params.session_id) ?? []), path])
-          resolve({ attached: true, name: 'image.png', path })
-        } })
+        pending.push({
+          sid: params.session_id,
+          finish(path) {
+            images.set(params.session_id, [...(images.get(params.session_id) ?? []), path])
+            resolve({ attached: true, name: 'image.png', path })
+          }
+        })
       })
     }
 
     if (method === 'image.detach') {
-      images.set(params.session_id, (images.get(params.session_id) ?? []).filter(path => path !== params.path))
+      images.set(
+        params.session_id,
+        (images.get(params.session_id) ?? []).filter(path => path !== params.path)
+      )
     } else if (!method.startsWith('complete.') && method !== 'shared_metrics.slash_command') {
       throw new Error(`Unexpected RPC: ${method}`)
     }
@@ -65,25 +77,52 @@ function mount(immediate = false, extra: (method: string, params: any) => unknow
   let submission!: ReturnType<typeof useSubmission>
   const stdout = Object.assign(new PassThrough(), { columns: 80, rows: 20, isTTY: false })
   let output = ''
-  stdout.on('data', chunk => { output += chunk.toString() })
+  stdout.on('data', chunk => {
+    output += chunk.toString()
+  })
 
   function Harness() {
     composer = useComposerState({ gw, submitRef, sys })
-    submission = useSubmission({ gw, submitRef, slashRef, sys, composerActions: composer.actions,
-      composerRefs: composer.refs, composerState: composer.state, appendMessage: vi.fn(), setLastUserMsg: vi.fn() })
-    slashRef.current = createSlashHandler({ gateway: { gw }, local: {}, transcript: { sys, send: submission.send },
-      composer: composer.actions, slashFlightRef } as any)
+    submission = useSubmission({
+      gw,
+      submitRef,
+      slashRef,
+      sys,
+      composerActions: composer.actions,
+      composerRefs: composer.refs,
+      composerState: composer.state,
+      appendMessage: vi.fn(),
+      setLastUserMsg: vi.fn()
+    })
+    slashRef.current = createSlashHandler({
+      gateway: { gw },
+      local: {},
+      transcript: { sys, send: submission.send },
+      composer: composer.actions,
+      slashFlightRef
+    } as any)
 
     return <Text>{composer.state.input}</Text>
   }
 
-  const instance = renderSync(<Harness />, { stdin: new PassThrough() as any, stdout: stdout as any,
-    stderr: new PassThrough() as any, patchConsole: false })
+  const instance = renderSync(<Harness />, {
+    stdin: new PassThrough() as any,
+    stdout: stdout as any,
+    stderr: new PassThrough() as any,
+    patchConsole: false
+  })
 
   return {
-    home, images, pending, request,
-    get composer() { return composer },
-    get output() { return output },
+    home,
+    images,
+    pending,
+    request,
+    get composer() {
+      return composer
+    },
+    get output() {
+      return output
+    },
     async submit(command: string) {
       composer.actions.setInput(command)
       await flush()
@@ -103,7 +142,12 @@ function mount(immediate = false, extra: (method: string, params: any) => unknow
 it('native slash images submit owned paths and deleting tokens detaches them', async () => {
   const h = mount(true)
   const path = join(h.home, 'shot.png')
-  const bytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2nL8AAAAASUVORK5CYII=', 'base64')
+
+  const bytes = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2nL8AAAAASUVORK5CYII=',
+    'base64'
+  )
+
   writeFileSync(path, bytes)
 
   try {
@@ -123,7 +167,9 @@ it('native slash images submit owned paths and deleting tokens detaches them', a
     h.composer.actions.syncTokens('')
     expect(h.composer.refs.tokensRef.current).toEqual([])
     expect(h.request.mock.calls.some(([method]) => method === 'image.detach')).toBe(true)
-  } finally { h.close() }
+  } finally {
+    h.close()
+  }
 })
 
 it('slash attachment submission leaves a visible removable image in the cleared composer', async () => {
@@ -147,7 +193,9 @@ it('slash attachment submission leaves a visible removable image in the cleared 
       h.composer.actions.setInput('')
       await flush()
       expect(h.images.get('owner')).toEqual([])
-    } finally { h.close() }
+    } finally {
+      h.close()
+    }
   }
 })
 
@@ -194,7 +242,9 @@ it('stale attachment cleanup uses its captured owner and preserves a concurrent 
               expect(detach).toEqual([['image.detach', { session_id: 'owner', path: '/owned.png' }]])
               expect(h.images.get('owner')).not.toContain('/owned.png')
             }
-          } finally { h.close() }
+          } finally {
+            h.close()
+          }
         }
       }
     }
@@ -202,13 +252,25 @@ it('stale attachment cleanup uses its captured owner and preserves a concurrent 
 })
 
 it('a skill slash command keeps the staged image descriptors through the expanded skill send', async () => {
-  const skill = (method: string, params: any) => method === 'slash.exec'
-    ? { type: 'skill', name: 'review', message: `SKILL BODY\n\nUser request: ${params.command.replace(/^review\s*/, '')}`, display: `/${params.command}` }
-    : undefined
+  const skill = (method: string, params: any) =>
+    method === 'slash.exec'
+      ? {
+          type: 'skill',
+          name: 'review',
+          message: `SKILL BODY\n\nUser request: ${params.command.replace(/^review\s*/, '')}`,
+          display: `/${params.command}`
+        }
+      : undefined
 
   const h = mount(true, skill)
   const path = join(h.home, 'shot.png')
-  writeFileSync(path, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2nL8AAAAASUVORK5CYII=', 'base64'))
+  writeFileSync(
+    path,
+    Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2nL8AAAAASUVORK5CYII=',
+      'base64'
+    )
+  )
 
   try {
     await h.submit(`/image ${path}`)
@@ -221,7 +283,9 @@ it('a skill slash command keeps the staged image descriptors through the expande
     expect(wire.text).toContain('SKILL BODY')
     expect(wire.text).not.toContain('[[ Image')
     expect(h.composer.refs.tokensRef.current).toEqual([])
-  } finally { h.close() }
+  } finally {
+    h.close()
+  }
 })
 
 it('queues text and its image together in memory without a plaintext journal', async () => {
@@ -242,5 +306,7 @@ it('queues text and its image together in memory without a plaintext journal', a
     claimed.settle!(false)
     expect(h.composer.actions.dequeue()).toBeUndefined()
     expect(h.composer.actions.dequeue(true)).toMatchObject({ text: claimed.text, inFlight: true })
-  } finally { h.close() }
+  } finally {
+    h.close()
+  }
 })

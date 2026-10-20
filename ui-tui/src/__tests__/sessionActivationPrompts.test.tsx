@@ -19,14 +19,29 @@ const noop = () => {}
 
 // Native session payloads replay still-open private requests through the actual channel.
 const snapshotA = {
-  session_id: 'a', session_key: 'a', running: true, status: 'waiting', messages: [],
+  session_id: 'a',
+  session_key: 'a',
+  running: true,
+  status: 'waiting',
+  messages: [],
   info: { model: 'test', tools: {}, skills: {}, stored_session_id: 'a' },
-  open_requests: [{ id: 'p-a', method: 'approval', params: { session_id: 'a',
-    description: 'review command', command: 'sentinel', choices: ['once', 'deny'] } }]
+  open_requests: [
+    {
+      id: 'p-a',
+      method: 'approval',
+      params: { session_id: 'a', description: 'review command', command: 'sentinel', choices: ['once', 'deny'] }
+    }
+  ]
 }
 
-const snapshotB = { ...snapshotA, session_id: 'b', session_key: 'b', running: false,
-  open_requests: [], info: { ...snapshotA.info, stored_session_id: 'b' } }
+const snapshotB = {
+  ...snapshotA,
+  session_id: 'b',
+  session_key: 'b',
+  running: false,
+  open_requests: [],
+  info: { ...snapshotA.info, stored_session_id: 'b' }
+}
 
 function mount() {
   const home = mkdtempSync(join(tmpdir(), 'ink-activate-prompts-'))
@@ -37,23 +52,37 @@ function mount() {
   const handle = createServerRequestHandler({ ringPromptBell: noop, setStatus: noop })
   const channel = new JsonRpcRequestChannel()
   channel.onRequest(request => handle(request))
-  channel.attach({ send(text) {
-    const frame = JSON.parse(text)
+  channel.attach({
+    send(text) {
+      const frame = JSON.parse(text)
 
-    if (!frame.method) { return }
+      if (!frame.method) {
+        return
+      }
 
-    const result = frame.params?.session_id === 'b' ? snapshotB : snapshotA
-    queueMicrotask(() => channel.handleFrame(JSON.stringify({ jsonrpc: '2.0', id: frame.id, result })))
-  } })
+      const result = frame.params?.session_id === 'b' ? snapshotB : snapshotA
+      queueMicrotask(() => channel.handleFrame(JSON.stringify({ jsonrpc: '2.0', id: frame.id, result })))
+    }
+  })
   vi.spyOn(gw, 'request').mockImplementation((method, params) => channel.request(method, params))
 
   let lifecycle!: ReturnType<typeof useSessionLifecycle>
 
   function Harness() {
     lifecycle = useSessionLifecycle({
-      colsRef: { current: 80 }, composerActions: { setComposerTokens: noop }, gw, rpc: async () => null,
-      scrollRef: { current: null }, panel: noop, sys: noop, setHistoryItems: noop, setLastUserMsg: noop,
-      setSessionStartedAt: noop, setStickyPrompt: noop, setVoiceProcessing: noop, setVoiceRecording: noop
+      colsRef: { current: 80 },
+      composerActions: { setComposerTokens: noop },
+      gw,
+      rpc: async () => null,
+      scrollRef: { current: null },
+      panel: noop,
+      sys: noop,
+      setHistoryItems: noop,
+      setLastUserMsg: noop,
+      setSessionStartedAt: noop,
+      setStickyPrompt: noop,
+      setVoiceProcessing: noop,
+      setVoiceRecording: noop
     } as any)
 
     return <Text>probe</Text>
@@ -62,12 +91,21 @@ function mount() {
   const instance = renderSync(<Harness />, {
     stdin: new PassThrough() as any,
     stdout: Object.assign(new PassThrough(), { columns: 80, rows: 20, isTTY: false }) as any,
-    stderr: new PassThrough() as any, patchConsole: false
+    stderr: new PassThrough() as any,
+    patchConsole: false
   })
 
   return {
-    get lifecycle() { return lifecycle },
-    cleanup() { instance.unmount(); turnController.fullReset(); resetUiState(); vi.unstubAllEnvs(); rmSync(home, { recursive: true, force: true }) }
+    get lifecycle() {
+      return lifecycle
+    },
+    cleanup() {
+      instance.unmount()
+      turnController.fullReset()
+      resetUiState()
+      vi.unstubAllEnvs()
+      rmSync(home, { recursive: true, force: true })
+    }
   }
 }
 
@@ -86,5 +124,7 @@ it('activating a live session hydrates its pending approval exactly like resume 
     h.lifecycle.activateLiveSession('a')
     await expect.poll(() => $uiState.get().sid).toBe('a')
     await expect.poll(() => $overlayState.get().approval?.requestId).toBe('p-a')
-  } finally { h.cleanup() }
+  } finally {
+    h.cleanup()
+  }
 })

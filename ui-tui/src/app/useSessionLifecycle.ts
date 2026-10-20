@@ -323,17 +323,7 @@ export function useSessionLifecycle(opts: UseSessionLifecycleOptions) {
         return r.session_id
       }
     },
-    [
-      closeSession,
-      colsRef,
-      onFreshSessionStarted,
-      panel,
-      resetSession,
-      rpc,
-      setHistoryItems,
-      setSessionStartedAt,
-      sys
-    ]
+    [closeSession, colsRef, onFreshSessionStarted, panel, resetSession, rpc, setHistoryItems, setSessionStartedAt, sys]
   )
 
   const newSession = useCallback(

@@ -473,7 +473,10 @@ describe('hydrateFullConfig', () => {
     current = false
     patchUiState({ sid: 'new', busyInputMode: 'interrupt' })
 
-    for (const reply of replies) {reply({ config: { display: { busy_input_mode: 'steer' } }, value: 'steer' })}
+    for (const reply of replies) {
+      reply({ config: { display: { busy_input_mode: 'steer' } }, value: 'steer' })
+    }
+
     await pending
     expect(setBell).not.toHaveBeenCalled()
     expect($uiState.get().busyInputMode).toBe('interrupt')

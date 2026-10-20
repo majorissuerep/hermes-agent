@@ -15,18 +15,38 @@ it('filters providers and models with pasted names as well as individual keys', 
   const onSelect = vi.fn()
   let output = ''
 
-  stdout.on('data', chunk => { output += stripAnsi(chunk.toString()) })
-  const request = vi.fn(async () => ({ model: 'fixture-alpha', providers: [
-    { slug: 'fixture', name: 'Fixture Endpoint', authenticated: true,
-      models: ['fixture-alpha', 'fixture-beta'], capabilities: { 'fixture-beta': { reasoning: false } } }
-  ] }))
-
-  const view = renderSync(<ModelPicker gw={{ request } as unknown as LocalAgentClient}
-    onCancel={vi.fn()} onSelect={onSelect} sessionId="owner" t={DEFAULT_THEME} />, {
-    stdout: stdout as unknown as NodeJS.WriteStream,
-    stdin: stdin as unknown as NodeJS.ReadStream,
-    stderr: new PassThrough() as unknown as NodeJS.WriteStream, patchConsole: false
+  stdout.on('data', chunk => {
+    output += stripAnsi(chunk.toString())
   })
+
+  const request = vi.fn(async () => ({
+    model: 'fixture-alpha',
+    providers: [
+      {
+        slug: 'fixture',
+        name: 'Fixture Endpoint',
+        authenticated: true,
+        models: ['fixture-alpha', 'fixture-beta'],
+        capabilities: { 'fixture-beta': { reasoning: false } }
+      }
+    ]
+  }))
+
+  const view = renderSync(
+    <ModelPicker
+      gw={{ request } as unknown as LocalAgentClient}
+      onCancel={vi.fn()}
+      onSelect={onSelect}
+      sessionId="owner"
+      t={DEFAULT_THEME}
+    />,
+    {
+      stdout: stdout as unknown as NodeJS.WriteStream,
+      stdin: stdin as unknown as NodeJS.ReadStream,
+      stderr: new PassThrough() as unknown as NodeJS.WriteStream,
+      patchConsole: false
+    }
+  )
 
   try {
     await vi.waitFor(() => expect(output).toContain('Select provider'))

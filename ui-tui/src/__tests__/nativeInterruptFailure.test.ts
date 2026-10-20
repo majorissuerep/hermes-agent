@@ -7,7 +7,11 @@ it('stops the local display immediately but reports a refused native interrupt o
   resetUiState()
   turnController.fullReset()
   patchUiState({ sid: 'owner', busy: true })
-  const request = vi.fn(async () => { throw new Error('owner unavailable') })
+
+  const request = vi.fn(async () => {
+    throw new Error('owner unavailable')
+  })
+
   const sys = vi.fn()
 
   try {

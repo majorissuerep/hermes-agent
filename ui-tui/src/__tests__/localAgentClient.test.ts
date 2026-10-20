@@ -12,9 +12,14 @@ const homes: string[] = []
 const clients: LocalAgentClient[] = []
 
 afterEach(() => {
-  for (const client of clients.splice(0)) {client.kill('test cleanup')}
+  for (const client of clients.splice(0)) {
+    client.kill('test cleanup')
+  }
 
-  for (const home of homes.splice(0)) {rmSync(home, { recursive: true, force: true })}
+  for (const home of homes.splice(0)) {
+    rmSync(home, { recursive: true, force: true })
+  }
+
   vi.unstubAllEnvs()
 })
 

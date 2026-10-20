@@ -10,10 +10,7 @@ export function capturePromptResponseGuard<K extends 'approval' | 'clarify' | 's
 ): () => boolean {
   const destination = captureDestination()
 
-  return () =>
-    Boolean(prompt) &&
-    isCurrentDestination(destination) &&
-    $overlayState.get()[key] === prompt
+  return () => Boolean(prompt) && isCurrentDestination(destination) && $overlayState.get()[key] === prompt
 }
 
 const buildOverlayState = (): OverlayState => ({

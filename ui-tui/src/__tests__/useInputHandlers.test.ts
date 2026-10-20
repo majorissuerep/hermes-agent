@@ -131,8 +131,6 @@ describe('handleIdleHotkeyExit', () => {
     expect(actions.die).toHaveBeenCalledTimes(1)
     expect(actions.sys).not.toHaveBeenCalled()
   })
-
-
 })
 
 describe('applyVoiceRecordResponse', () => {
