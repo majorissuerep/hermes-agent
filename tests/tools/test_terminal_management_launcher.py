@@ -38,6 +38,7 @@ def test_published_management_command_survives_login_path_reset(tmp_path, monkey
         prepare_fixture_runtime(home, ROOT)
         with _fixture_pm_home(home):
             ensure("python", explicit=True)
+            (tmp_path / "published").mkdir()
             active = stage_launcher("hermes", ROOT, tmp_path / "published")
         assert active is not None and active.is_file()
         # Only installation-location discovery is injected; the real published launcher,
