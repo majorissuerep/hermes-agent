@@ -392,6 +392,8 @@ def test_hermes_bin_resolution_and_unresolved_noop(child_env, monkeypatch):
     bin_dir = child_env / "bin"
     bin_dir.mkdir()
     monkeypatch.setattr(local, "_HERMES_BIN_DIR", local._SENTINEL)
+    # This case exercises ambient fallback, not an owning installation's launcher.
+    monkeypatch.setattr(local, "_source_hermes_bin_dir", lambda: None)
     monkeypatch.setattr(local.shutil, "which", lambda name: str(bin_dir / "hermes") if name == "hermes" else None)
     assert local._resolve_hermes_bin_dir() == str(bin_dir)
     monkeypatch.setattr(local, "_HERMES_BIN_DIR", None)

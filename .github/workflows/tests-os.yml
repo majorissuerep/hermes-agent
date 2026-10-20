@@ -59,6 +59,7 @@ jobs:
               tests/tui_runtime/test_terminal_session_naming_pty.py
               tests/tui_runtime/test_terminal_pty_custody.py
               tests/hermes_cli/test_update_finish.py
+              tests/tools/test_terminal_management_launcher.py
           # Two slices on the free standard runner (3 cores, 3 workers): one lane ran
           # ~7.5 min and became the slowest required job once the Linux suite split.
           - name: macOS-only tests (1/2)

@@ -412,6 +412,10 @@ def test_public_ink_model_picker_and_scoped_switches(tmp_path, monkeypatch, lazy
         assert all(request["messages"][0] == first_system for request in server.requests)
         assert (home / "config.yaml").read_bytes() == before
         assert terminal.prompts == 1
+        terminal.until(lambda _: _composer_ready(terminal), "completed model controls; composer ready")
+        terminal.submit("/quit")
+        terminal.until(lambda _: terminal.process.poll() is not None, "public model-control owner exited")
+        assert terminal.process.returncode == 0
     finally:
         terminal.transcript.write_text(terminal.text().replace(password, "[REDACTED]"))
         terminal.close()

@@ -601,10 +601,18 @@ _HERMES_BIN_DIR: str | None | object = _SENTINEL
 _HERMES_BIN_DIR_IS_PAYLOAD = False
 
 
+def _source_hermes_bin_dir() -> str | None:
+    """The active source installation, independent of the caller's ambient checkout."""
+    directory = Path(__file__).resolve().parents[2] / ".hermes" / "bin"
+    command = directory / ("hermes.exe" if _IS_WINDOWS else "hermes")
+    return str(directory) if command.is_file() and os.access(command, os.X_OK) else None
+
+
 def _resolve_hermes_bin_dir() -> str | None:
     """Directory holding the ``hermes`` console-script, or None (cached). A gateway
     launched by systemd/cron/a desktop launcher lacks the install dir on PATH and bare
-    ``hermes`` exits 127. Order: a sealed payload's own launcher dir; ``which``; absolute
+    ``hermes`` exits 127. Order: a sealed payload's own launcher dir; the active source
+    install's published command; ``which``; absolute
     ``sys.argv[0]`` naming a real hermes executable; ``sys.executable``'s dir if it holds
     the shim."""
     global _HERMES_BIN_DIR, _HERMES_BIN_DIR_IS_PAYLOAD
@@ -618,6 +626,9 @@ def _resolve_hermes_bin_dir() -> str | None:
     if payload_dir is not None and payload_dir.is_dir():
         _HERMES_BIN_DIR, _HERMES_BIN_DIR_IS_PAYLOAD = str(payload_dir), True
         return _HERMES_BIN_DIR
+    if source_dir := _source_hermes_bin_dir():
+        _HERMES_BIN_DIR, _HERMES_BIN_DIR_IS_PAYLOAD = source_dir, False
+        return source_dir
     which = shutil.which("hermes")
     argv0 = sys.argv[0] if sys.argv else ""
     base = os.path.basename(argv0).lower()
@@ -636,11 +647,11 @@ def _resolve_hermes_bin_dir() -> str | None:
 
 
 def _prepend_hermes_bin_dir(existing_path: str) -> str:
-    """Prepend the hermes install dir to ``existing_path`` if missing. A sealed payload's
-    launcher dir moves to the front even when already listed: a login PATH can list
+    """Prepend the hermes install dir to ``existing_path`` if missing. An owned source or
+    sealed payload launcher moves to the front even when already listed: a login PATH can list
     another install's ``hermes`` ahead of it."""
     bin_dir = _resolve_hermes_bin_dir()
-    if bin_dir and _HERMES_BIN_DIR_IS_PAYLOAD:
+    if bin_dir and (_HERMES_BIN_DIR_IS_PAYLOAD or bin_dir == _source_hermes_bin_dir()):
         rest = [entry for entry in existing_path.split(os.pathsep) if entry and entry != bin_dir]
         return os.pathsep.join([bin_dir, *rest])
     return _prepend_missing_path_entries(existing_path, [bin_dir] if bin_dir else [])

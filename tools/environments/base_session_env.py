@@ -175,6 +175,7 @@ def _wrap_command_script(
     passthrough_names: Iterable[str], snapshot_ready: bool, cwd_marker: str,
     user_shell: str | None = None,
     persist_env: bool = True,
+    hermes_bin_dir: str | None = None,
 ) -> str:
     """Per-command bash script: source snapshot, cd, run, re-dump env, emit CWD marker.
     ``persist_env=False`` skips the re-dump, so every command starts from the login-time
@@ -200,6 +201,11 @@ def _wrap_command_script(
     if snapshot_ready:
         parts.append(f"source {quoted_snap} >/dev/null 2>&1 || true")
     parts += restore
+    if hermes_bin_dir:
+        # Login files and saved shell state can replace the outer process PATH.
+        # Reassert only the active local launcher, retaining all user tool entries.
+        directory = shlex.quote(hermes_bin_dir)
+        parts.append(f'if [ "${{PATH%%:*}}" != {directory} ]; then export PATH={directory}${{PATH:+":$PATH"}}; fi')
     parts += [
         'export AI_AGENT="${AI_AGENT:-hermes-agent}" HERMES_AGENT="${HERMES_AGENT:-true}"',
         'export GIT_PAGER="${GIT_PAGER:-cat}" PAGER="${PAGER:-cat}"',

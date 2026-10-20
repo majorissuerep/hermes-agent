@@ -426,8 +426,13 @@ class BaseEnvironment(ABC):
         native login shell when it is not bash."""
         from tools.environments.user_shell import resolve_user_shell
 
+        hermes_bin_dir = None
+        if self.is_local:
+            from tools.environments.local import _resolve_hermes_bin_dir
+            hermes_bin_dir = _resolve_hermes_bin_dir()
         return _wrap_command_script(
             command,
+            hermes_bin_dir=hermes_bin_dir,
             user_shell=resolve_user_shell(),
             passthrough_names=self._snapshot_excluded_passthrough_names(),
             snapshot_ready=self._snapshot_ready,
