@@ -69,9 +69,30 @@ def _fixture_pm_home(home: Path):
             constants.reset_hermes_home_override(token)
 
 
+def _share_fixture_download_cache(home: Path) -> None:
+    """Opt in to CI's existing content-addressed downloads, never its runtime/state."""
+    from hermes_constants import get_default_hermes_root
+
+    configured = os.environ.get("UV_CACHE_DIR")
+    if not configured:
+        return
+    shared = Path(configured)
+    if not shared.is_absolute() or not shared.is_dir():
+        raise ValueError("UV_CACHE_DIR must name an existing absolute download-cache directory")
+    shared = shared.resolve(strict=True)
+    cache = get_default_hermes_root(home=home) / "cache" / "uv"
+    if cache.is_symlink() and cache.resolve(strict=True) == shared:
+        return
+    if cache.exists() or cache.is_symlink():
+        raise FileExistsError(f"Refusing to replace fixture download cache: {cache}")
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    cache.symlink_to(shared, target_is_directory=True)
+
+
 def _prepare_fixture_pm(home: Path, source: Path, extras: tuple[str, ...], *, tui: bool = False) -> None:
     """PM owns a separate process: pytest may reset its own home between test cases."""
     with _PM_HOME_LOCK:
+        _share_fixture_download_cache(home)
         seal_fixture_home(home)
         env = {**os.environ, "HERMES_HOME": str(home.resolve())}
         argv = [sys.executable, "-m", "tests.e2e.vault_home", str(home.resolve()),

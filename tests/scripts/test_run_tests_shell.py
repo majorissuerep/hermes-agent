@@ -11,11 +11,14 @@ import pytest
 def test_shell_runner_executes_tests_and_propagates_failure(tmp_path):
     case = tmp_path / "test_runner_canary.py"
     marker = tmp_path / "executed"
+    cache = tmp_path / "shared-downloads"
+    cache.mkdir()
     case.write_text(
         "from pathlib import Path\nimport os\n"
         "def test_canary():\n"
         f"    Path({str(marker)!r}).write_text('executed')\n"
         "    assert os.environ['PATHEXT'] == '.COM;.EXE;.BAT;.CMD'\n"
+        f"    assert os.environ['UV_CACHE_DIR'] == {str(cache)!r}\n"
         "    assert False, 'runner failure propagation canary'\n",
         encoding="utf-8",
     )
@@ -24,7 +27,7 @@ def test_shell_runner_executes_tests_and_propagates_failure(tmp_path):
         ["bash", str(root / "scripts/run_tests.sh"), "-j", "1", str(case)],
         cwd=tmp_path, capture_output=True, text=True, timeout=180,
         env={**os.environ, "HERMES_PYTHON": sys.executable, "HERMES_TEST_FILE_RETRIES": "0",
-             "PATHEXT": ".COM;.EXE;.BAT;.CMD"},
+             "PATHEXT": ".COM;.EXE;.BAT;.CMD", "UV_CACHE_DIR": str(cache)},
              check=False,
     )
     assert marker.read_text(encoding="utf-8") == "executed", result.stdout + result.stderr

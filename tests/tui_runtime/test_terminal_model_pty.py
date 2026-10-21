@@ -474,7 +474,18 @@ def test_public_ink_starts_with_migrated_oauth_and_switches_provider(tmp_path, m
                 "curator": {"enabled": False}, "updates": {"check": False},
                 "auxiliary": {"title_generation": {"enabled": False}},
                 "agent": {"reasoning_effort": "none"}}, merge_existing=False)
-            _prepare_fixture_pm(home, ROOT, ("all", "anthropic"), tui=True)
+            # CI supplies the already downloaded locked wheels. A fresh fixture
+            # must prepare without Python package downloads; pinned tool archives
+            # may still bootstrap the fixture's independent tool store.
+            from unittest.mock import patch
+            from contextlib import nullcontext
+            offline = ({"HTTP_PROXY": "http://127.0.0.1:9", "HTTPS_PROXY": "http://127.0.0.1:9",
+                        "http_proxy": "http://127.0.0.1:9", "https_proxy": "http://127.0.0.1:9",
+                        "NO_PROXY": "github.com,.githubusercontent.com,nodejs.org,registry.npmjs.org",
+                        "no_proxy": "github.com,.githubusercontent.com,nodejs.org,registry.npmjs.org"}
+                       if os.environ.get("UV_CACHE_DIR") else None)
+            with patch.dict(os.environ, offline) if offline is not None else nullcontext():
+                _prepare_fixture_pm(home, ROOT, ("all", "anthropic"), tui=True)
             vault.clear_vault_cache()
             from hermes_cli._launchers import runtime_command
 
