@@ -423,4 +423,100 @@ def test_public_ink_model_picker_and_scoped_switches(tmp_path, monkeypatch, lazy
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
+
+
+def test_public_ink_starts_with_migrated_oauth_and_switches_provider(tmp_path, monkeypatch):
+    """A pre-existing OAuth singleton must survive encryption, startup and the model picker."""
+    node = shutil.which("node")
+    if not node or not (ROOT / "ui-tui/dist/entry.js").is_file():
+        if os.environ.get("HERMES_E2E_REQUIRE_TUI") == "1":
+            pytest.fail("PM Node and a built Ink bundle are required for this acceptance contract")
+        pytest.skip("requires PM Node and a built Ink bundle")
+    from hermes_cli.config import ensure_hermes_home, save_config, save_env_value
+    from hermes_security import migrate, vault
+    from tests.e2e.vault_home import _prepare_fixture_pm
+    from tests.fakes.providers.anthropic_messages import MODEL_ID, AnthropicMessagesServer
+    from tests.fakes.providers.oauth_token_server import TLSInterceptProxy, make_test_ca
+
+    home = tmp_path / "home"
+    monkeypatch.setenv("HERMES_HOME", str(home))
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("HERMES_NODE", node)
+    monkeypatch.delenv("HERMES_TUI_DIR", raising=False)
+    for name in ("ANTHROPIC_API_KEY", "ANTHROPIC_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"):
+        monkeypatch.delenv(name, raising=False)
+    ensure_hermes_home()
+    token = "sk-ant-oat01-synthetic-migrated-grant"
+    oauth_path = home / ".anthropic_oauth.json"
+    oauth_path.write_text(json.dumps({"accessToken": token, "refreshToken": "synthetic-refresh",
+                                    "expiresAt": int(time.time() * 1000) + 3600000}))
+    password = secrets.token_urlsafe(24)
+    assert migrate.migrate_home(home, password).ok
+    original_grant = oauth_path.read_bytes()
+    assert original_grant.startswith(b"HRMVAULT\x00")
+    with AnthropicMessagesServer(default_text="migrated-oauth-reply") as anthropic:
+        ca = make_test_ca(tmp_path / "ca", ["api.anthropic.com"])
+        proxy = TLSInterceptProxy(anthropic, ca, ["api.anthropic.com"]).start()
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), ModelWire)
+        server.requests = []
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        terminal = None
+        try:
+            url = f"http://127.0.0.1:{server.server_port}/v1"
+            save_env_value("MODEL_PTY_KEY", "synthetic-fixture-key")
+            save_config({"onboarding": {"profile_build": "off"},
+                "model": {"provider": "anthropic", "default": MODEL_ID, "context_length": 64000},
+                "auth": {"adopt_external_logins": False},
+                "providers": {"fixture": {"name": "Fixture Endpoint", "base_url": url,
+                    "key_env": "MODEL_PTY_KEY", "api_mode": "chat_completions",
+                    "models": ["fixture-alpha", "fixture-beta", "fixture-gamma"]}},
+                "curator": {"enabled": False}, "updates": {"check": False},
+                "auxiliary": {"title_generation": {"enabled": False}},
+                "agent": {"reasoning_effort": "none"}}, merge_existing=False)
+            _prepare_fixture_pm(home, ROOT, ("all", "anthropic"), tui=True)
+            vault.clear_vault_cache()
+            from hermes_cli._launchers import runtime_command
+
+            env = {**os.environ, "HTTPS_PROXY": proxy.url, "HTTP_PROXY": proxy.url,
+                   "NO_PROXY": "127.0.0.1,localhost", "SSL_CERT_FILE": str(ca.ca_pem)}
+            env.pop("HERMES_PYTHON", None)
+            terminal = TerminalPTY(env, password, tmp_path / "terminal-oauth-transcript.log",
+                                   argv=runtime_command(ROOT), sensitive_values=(token,))
+            terminal.until(lambda _: _composer_ready(terminal), "encrypted OAuth composer ready")
+            anchor = "migrated-history-" + secrets.token_hex(10)
+            terminal.submit(anchor)
+            terminal.until(lambda text: "migrated-oauth-reply" in text and _composer_ready(terminal),
+                           "native Anthropic reply using migrated OAuth grant")
+            assert len(anthropic.requests) == 1
+            assert anthropic.requests[0]["bearer"] == token
+            assert not anthropic.requests[0]["schema_errors"]
+            terminal.submit("/model")
+            terminal.until(lambda _: "Select provider (step 1/3)" in "\n".join(terminal.screen.display()),
+                           "model picker after migrated OAuth startup")
+            terminal.key(b"\x1b")
+            terminal.until(lambda _: _composer_ready(terminal), "picker canceled")
+            terminal.submit("/model fixture-beta --provider custom:fixture --session --reasoning none")
+            terminal.until(lambda text: "model → fixture-beta" in text, "cross-provider switch settled")
+            terminal.submit("after-migrated-oauth-switch")
+            terminal.until(lambda text: "fixture-reply-1" in text and _composer_ready(terminal),
+                           "custom OpenAI reply after OAuth provider switch")
+            assert server.requests[-1]["model"] == "fixture-beta"
+            assert any(row["role"] == "user" and anchor in str(row.get("content"))
+                       for row in server.requests[-1]["messages"])
+            assert any(row["role"] == "assistant" and "migrated-oauth-reply" in str(row.get("content"))
+                       for row in server.requests[-1]["messages"])
+            assert terminal.prompts == 1
+            assert oauth_path.read_bytes() == original_grant
+            terminal.submit("/quit")
+            terminal.until(lambda _: terminal.process.poll() is not None, "OAuth session exited normally")
+            assert terminal.process.returncode == 0
+        finally:
+            if terminal is not None:
+                terminal.close()
+                save_fixture_runtime_logs(home, password, tmp_path / "oauth-runtime-diagnostics.log")
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
+            proxy.stop()
         vault.clear_vault_cache()
