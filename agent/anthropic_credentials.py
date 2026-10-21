@@ -106,12 +106,18 @@ class CredentialPersistError(RuntimeError):
 
 
 def _load_json_if_exists(path: Path, what: str) -> Optional[Any]:
-    """Parsed JSON from *path*, or None when missing/unreadable/corrupt (debug-logged)."""
+    """Read managed state strictly; external missing/unreadable/corrupt JSON yields None."""
+    from hermes_security import io as state_io
+
+    # Managed credentials must retain vault integrity/authority failures. External
+    # Claude-owned plaintext files keep their historical best-effort semantics.
+    if state_io._home_for(path) is not None:
+        return state_io.read_json(path, purpose="state")
     if not path.exists():
         return None
     try:
         return json.loads(path.read_text(encoding="utf-8-sig"))
-    except (json.JSONDecodeError, OSError) as e:
+    except (json.JSONDecodeError, OSError, UnicodeDecodeError) as e:
         logger.debug("Failed to read %s: %s", what, e)
         return None
 
@@ -119,7 +125,12 @@ def _load_json_if_exists(path: Path, what: str) -> Optional[Any]:
 def _atomic_write_private_json(path: Path, payload: Any) -> None:
     """0600-from-creation temp file + fsync + atomic replace (the token is never briefly umask-readable).
     The parent dir's mode is left alone (~/.claude/ is owned by Claude Code)."""
-    atomic_json_write(path, payload, mode=0o600)
+    from hermes_security import io as state_io
+
+    if state_io._home_for(path) is not None:
+        state_io.atomic_write_state_json(path, payload, purpose="state")
+    else:
+        atomic_json_write(path, payload, mode=0o600)
 
 
 def _commit_private_json(path: Path, payload: Any, what: str) -> None:
@@ -161,34 +172,34 @@ def spent_rotation_source_path(source: Any) -> Optional[Path]:
 def _read_spent_rotation_sidecar(source_path: Optional[Path]) -> set:
     if source_path is None:
         return set()
-    try:
-        raw = json.loads(
-            _spent_rotation_sidecar_path(source_path).read_text(encoding="utf-8-sig")
-        )
-    except (OSError, ValueError):
-        return set()
+    raw = _load_json_if_exists(_spent_rotation_sidecar_path(source_path), "spent-rotation fingerprints")
     fingerprints = raw.get("fingerprints") if isinstance(raw, dict) else None
     return {fp for fp in fingerprints if isinstance(fp, str) and fp} if isinstance(fingerprints, list) else set()
 
 
 def _append_spent_rotation_sidecar(source_path: Path, fingerprints: list) -> None:
-    """Merge fingerprints into the sidecar (atomic replace; caller holds the path lock). Fail-soft: a sidecar
-    write failure must never mask the process-local verdict."""
+    """Merge fingerprints atomically under the caller's lock. External sidecars are best-effort;
+    managed vault failures remain visible rather than forgetting a spent credential."""
     sidecar = _spent_rotation_sidecar_path(source_path)
+    from hermes_security.io import _home_for
+
+    if _home_for(sidecar) is not None:
+        _write_spent_rotation_sidecar(source_path, fingerprints)
+        return
     try:
-        merged = _read_spent_rotation_sidecar(source_path)
-        merged.update(fingerprints)
-        payload = json.dumps({
-            "version": 1,
-            "comment": _SPENT_ROTATION_SIDECAR_COMMENT,
-            "fingerprints": sorted(merged)[-_SPENT_ROTATION_MAX_TRACKED * 4 :],
-        }, indent=2)
-        sidecar.parent.mkdir(parents=True, exist_ok=True)
-        tmp = sidecar.with_name(sidecar.name + ".tmp")
-        tmp.write_text(payload, encoding="utf-8")
-        os.replace(tmp, sidecar)
+        _write_spent_rotation_sidecar(source_path, fingerprints)
     except Exception:
         logger.debug("Failed to persist spent-rotation fingerprints to %s", sidecar, exc_info=True)
+
+
+def _write_spent_rotation_sidecar(source_path: Path, fingerprints: list) -> None:
+    merged = _read_spent_rotation_sidecar(source_path)
+    merged.update(fingerprints)
+    _atomic_write_private_json(_spent_rotation_sidecar_path(source_path), {
+        "version": 1,
+        "comment": _SPENT_ROTATION_SIDECAR_COMMENT,
+        "fingerprints": sorted(merged)[-_SPENT_ROTATION_MAX_TRACKED * 4 :],
+    })
 
 
 def _fingerprint(secret: Any) -> Optional[str]:
