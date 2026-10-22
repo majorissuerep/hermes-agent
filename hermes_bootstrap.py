@@ -468,7 +468,16 @@ def harden_import_path(src_root: str | None = None) -> None:
             return False
         return candidate != root_abs and os.path.isfile(os.path.join(candidate, "hermes_bootstrap.py"))
 
-    sys.path[:] = [p for p in sys.path if not _foreign_hermes_root(p)]
+    # Only entries AHEAD of the own root can shadow the packages it ships. The
+    # tail may legitimately SUPPLY packages a minimal source tree does not ship
+    # (a disposable launch fixture importing pm/hermes_cli from the real
+    # checkout) — those survive; the own root still wins everything it serves.
+    try:
+        own_index = next(i for i, p in enumerate(sys.path) if os.path.abspath(p) == root_abs)
+    except StopIteration:
+        own_index = 0  # root not listed yet: it is inserted at the front below,
+        # so every existing foreign entry would precede it.
+    sys.path[:] = [p for i, p in enumerate(sys.path) if i >= own_index or not _foreign_hermes_root(p)]
     sys.path[:] = [p for p in sys.path if os.path.abspath(p) != root_abs]
     sys.path.insert(0, root)
 

@@ -43,13 +43,17 @@ def _own_first_env(foreign: Path, tmp_path: Path) -> dict:
 
 def test_own_launch_shape_never_runs_foreign_bootstrap(tmp_path):
     """Own root FIRST (the fork's child-env shape): the own bootstrap wins the
-    import and the guard drops the foreign entry from sys.path."""
+    import. A foreign entry AFTER the own root may remain (it cannot win any
+    import the own root serves — and minimal launch fixtures legitimately use
+    such a tail as a package supplier); what must never happen is foreign code
+    executing or shadowing."""
     foreign = _foreign_tree(tmp_path)
     code = (
         "import hermes_bootstrap, sys, os; "
         f"assert sys.path[0] == {str(PROJECT_ROOT)!r}, sys.path; "
-        f"assert {str(foreign)!r} not in [os.path.abspath(p) for p in sys.path], sys.path; "
-        "import utils; assert 'foreign-hermes' not in utils.__file__"
+        f"assert {str(foreign)!r} != sys.path[0]; "
+        "import utils; assert 'foreign-hermes' not in utils.__file__; "
+        "assert hermes_bootstrap.__file__.startswith(%r)" % str(PROJECT_ROOT)
     )
     result = subprocess.run(
         [sys.executable, "-c", code], capture_output=True, text=True,
