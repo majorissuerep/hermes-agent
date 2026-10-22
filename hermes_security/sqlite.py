@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from hermes_security.errors import VaultError
+from hermes_security.errors import VaultKeyMismatchError
 from hermes_security.vault import find_vault_home, get_vault
 
 _PURPOSE = "sqlcipher"
@@ -126,6 +127,19 @@ def connect(db_path: Path | str, *, purpose: str = _PURPOSE, key_path: Path | st
         conn.execute(f"PRAGMA key = \"x'{hexkey}'\"")
         # Force a schema read: wrong keys fail now, not on first query.
         conn.execute("SELECT count(*) FROM sqlite_master")
+    except sqlcipher.DatabaseError as exc:
+        conn.close()
+        # Fork: a wrong/unreadable key is a CREDENTIAL failure, never corruption.
+        # Callers with corruption probes (kanban's integrity guard) must not
+        # quarantine the file on this class — the board itself is healthy; this
+        # process simply holds a key from a different vault (profile homes share
+        # the default-root board by design). Distinguishable message so guards
+        # can re-raise instead of classifying "not a database".
+        raise VaultKeyMismatchError(
+            f"The vault credential of this process does not open the encrypted database "
+            f"at {target} (vault home {home}); wrong key, not a damaged file. Unlock the "
+            f"vault that owns the database or run this command from its home."
+        ) from exc
     except BaseException:
         conn.close()
         raise

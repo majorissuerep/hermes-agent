@@ -26,6 +26,15 @@ _VAULT_CREDENTIAL_ERRORS = frozenset({
     "VaultLockedError", "VaultNotInitializedError", "WrongMasterPasswordError", "VaultIntegrityError",
 })
 
+# Fork: reads that refused PLAINTEXT state inside a vaulted home. The file was
+# clobbered by a pre-vault process (see secure-vault repair); editing it by hand
+# or restoring a "last good" copy is the wrong remedy — re-sealing is.
+_CLOBBERED_STATE_ERRORS = frozenset({"PlaintextStateError"})
+
+_PARSE_FAILURE_CLOBBER_MSG = (
+    "An older Hermes process rewrote this file as plaintext inside your encrypted home. "
+    "Run `hermes secure-vault repair` to re-seal it; nothing was overwritten.")
+
 # path -> (mtime_ns, size, error message) of active parse failures. Written by
 # _warn_config_parse_failure() (the single funnel for every load-path parse failure) and
 # probed by get_active_config_parse_failure() so provider auto-resolution can refuse to
@@ -62,11 +71,16 @@ def _yaml_error_details(exc: Exception) -> str:
 def format_config_parse_failure(config_path: Path, exc: Exception, *, fallback: str = "defaults") -> str:
     """User copy for an unparseable config.yaml: what happened, what Hermes is doing, how to fix.
     Only the problem line/column is printed; the raw PyYAML text goes to a ``Details:`` line."""
+    if isinstance(exc, OSError):  # the file is intact; EMFILE/EIO/sharing violation, not a YAML problem
+        fallback_msg = _PARSE_FAILURE_FALLBACK_MSG.get(fallback, _PARSE_FAILURE_DEFAULTS_MSG)
+        return f"Your settings file ({config_path}) could not be read. {fallback_msg} {_read_error_fix(exc)}"
+    if type(exc).__name__ in _CLOBBERED_STATE_ERRORS:
+        # Fork: plaintext inside a vaulted home is clobbered sealed state, not YAML
+        # damage — the remedy is re-sealing, never a hand edit of the raw file.
+        return f"Your settings file ({config_path}) was left as plaintext inside your encrypted home. {_PARSE_FAILURE_CLOBBER_MSG}"
     where = _yaml_error_location(exc)
     at = f" at {where}" if where else ""
     fallback_msg = _PARSE_FAILURE_FALLBACK_MSG.get(fallback, _PARSE_FAILURE_DEFAULTS_MSG)
-    if isinstance(exc, OSError):  # the file is intact; EMFILE/EIO/sharing violation, not a YAML problem
-        return f"Your settings file ({config_path}) could not be read. {fallback_msg} {_read_error_fix(exc)}"
     repair = _PARSE_FAILURE_REPAIR_MSG.format(where=where or "the problem")
     return f"Your settings file ({config_path}) has a formatting error{at}. {fallback_msg} {repair}"
 
@@ -89,6 +103,7 @@ def _warn_config_parse_failure(
     """
     if type(exc).__name__ in _VAULT_CREDENTIAL_ERRORS:
         return
+    clobbered = type(exc).__name__ in _CLOBBERED_STATE_ERRORS
     try:
         st = config_path.stat()
         sig = file_signature(st)
@@ -101,7 +116,9 @@ def _warn_config_parse_failure(
     _CONFIG_PARSE_WARNED.add(key)
     from hermes_cli.config_backups import backup_config
     # A read error leaves an intact file behind: no "corrupt" copy of a good file.
-    backup_path = None if isinstance(exc, OSError) else backup_config(config_path, "corrupt")
+    # Clobbered sealed state must not be backed up either: the copy would hold
+    # plaintext whose later re-seal (repair) would bless it as the good config.
+    backup_path = None if (isinstance(exc, OSError) or clobbered) else backup_config(config_path, "corrupt")
     msg = format_config_parse_failure(config_path, exc, fallback=fallback)
     if backup_path is not None:
         msg += f" A copy of the broken file was saved to {backup_path}."

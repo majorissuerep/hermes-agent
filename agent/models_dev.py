@@ -230,9 +230,30 @@ def _quietly(what: str, fn, default=None):
         return default
 
 
+def _sealed_state_path(path: Path) -> bool:
+    """Migration seals home-root state in a vaulted home; the regenerable
+    ``cache/`` subtree stays plaintext. Shared predicate from hermes_security."""
+    from hermes_security.io import is_sealed_state_path
+
+    return is_sealed_state_path(path)
+
+
 def _load_etag() -> str:
-    """Last-known ETag from disk, or "" if missing."""
-    return _quietly("load models.dev ETag", lambda: _get_etag_path().read_text(encoding="utf-8-sig").strip() if _get_etag_path().exists() else "", "")
+    """Last-known ETag from disk, or "" if missing.
+
+    Fork: sealed state in a vaulted home — read through the envelope-aware reader
+    (a plain read hits ciphertext and every boot refetches unconditionally)."""
+    def read() -> str:
+        etag_path = _get_etag_path()
+        if not etag_path.exists():
+            return ""
+        if _sealed_state_path(etag_path):
+            from hermes_security.io import read_state_text
+
+            return (read_state_text(etag_path, purpose="state") or "").strip()
+        return etag_path.read_text(encoding="utf-8-sig").strip()
+
+    return _quietly("load models.dev ETag", read, "")
 
 
 def _save_etag(etag: str) -> None:
@@ -241,6 +262,11 @@ def _save_etag(etag: str) -> None:
         from hermes_constants import mkdir_under_hermes_home
 
         mkdir_under_hermes_home(etag_path.parent)
+        if _sealed_state_path(etag_path):
+            from hermes_security.io import write_state_text
+
+            write_state_text(etag_path, etag, purpose="state")
+            return
         atomic_write_text(etag_path, etag)
     _quietly("save models.dev ETag", write)
 
@@ -265,12 +291,22 @@ def _validate_registry(data: Any) -> bool:
 
 def _load_disk_cache() -> dict[str, Any]:
     """Load the disk cache; a corrupt/empty one is quarantined with a warning so it never
-    masquerades as ``{}`` and breaks provider/model resolution."""
+    masquerades as ``{}`` and breaks provider/model resolution.
+
+    Fork: in a vaulted home the cache is a sealed envelope — read through the
+    envelope-aware reader. A ciphertext-hitting plain read used to quarantine the
+    SEALED file aside (``.json.corrupt``), deleting the ETag sidecar: the sealed
+    registry was thrown away and every boot refetched from the network."""
     try:
         cache_path = _get_cache_path()
         if cache_path.exists():
-            with open(cache_path, encoding="utf-8-sig") as f:
-                data = json.load(f)
+            if _sealed_state_path(cache_path):
+                from hermes_security.io import read_json
+
+                data = read_json(cache_path, purpose="state") or {}
+            else:
+                with open(cache_path, encoding="utf-8-sig") as f:
+                    data = json.load(f)
             if _validate_registry(data):
                 return data
             logger.warning("models.dev disk cache is corrupt or empty; quarantining (will refetch from network)")
@@ -304,8 +340,20 @@ def _disk_cache_age_seconds() -> Optional[float]:
 
 
 def _save_disk_cache(data: dict[str, Any], etag: str = "") -> None:
-    """Save the registry atomically, plus the ETag sidecar when non-empty."""
-    _quietly("save models.dev disk cache", lambda: atomic_json_write(_get_cache_path(), data, indent=None, separators=(",", ":")))
+    """Save the registry atomically, plus the ETag sidecar when non-empty.
+
+    Fork: sealed state writes through the envelope-aware writer so a refresh
+    never replaces the envelope with plaintext."""
+    def write() -> None:
+        cache_path = _get_cache_path()
+        if _sealed_state_path(cache_path):
+            from hermes_security.io import atomic_write_state_json
+
+            atomic_write_state_json(cache_path, data, purpose="state")
+        else:
+            atomic_json_write(cache_path, data, indent=None, separators=(",", ":"))
+
+    _quietly("save models.dev disk cache", write)
     if etag:
         _save_etag(etag)
 

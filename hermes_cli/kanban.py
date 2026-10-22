@@ -18,6 +18,7 @@ from typing import Optional
 
 from hermes_cli import kanban_db as kb
 from hermes_cli import kanban_db_connect as kbc
+from hermes_security.errors import VaultKeyMismatchError
 from hermes_cli import kanban_db_dispatch as kbd
 from hermes_cli import kanban_db_workspace as kbw
 from hermes_cli import kanban_db_notify as kbn
@@ -150,6 +151,13 @@ def kanban_command(args: argparse.Namespace) -> int:
         # "no such table: tasks" on first use from a fresh HERMES_HOME.
         try:
             kb.init_db()
+        except VaultKeyMismatchError as exc:
+            # Fork: credential, not corruption — name the shared-board shape and
+            # the owning home instead of a generic init failure.
+            return _err(
+                f"kanban: {exc}\n"
+                "  The kanban board is shared across profiles at the default home; run this "
+                "command from the home whose vault owns the board, or unlock that vault.")
         except Exception as exc:
             return _err(f"kanban: could not initialize database: {exc}")
 

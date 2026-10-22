@@ -97,10 +97,24 @@ def _get_json(
 
 
 def _read_json_cache(path: Path, *, errors=Exception) -> Optional[dict]:
-    """Load a JSON-object cache file; None when missing, unreadable, or not a dict."""
+    """Load a JSON-object cache file; None when missing, unreadable, or not a dict.
+
+    Fork: inside a vaulted home, home-root cache state (``provider_models_cache.json``)
+    is a sealed envelope — read through ``hermes_security.io`` so the cached models
+    survive migration instead of failing open to ``{}`` (which the write path would
+    then persist as plaintext, clobbering the envelope). Regenerable ``cache/``
+    subdirectories stay plaintext by migration design and read unchanged.
+    """
     try:
-        with open(path, encoding="utf-8-sig") as fh:
-            data = json.load(fh)
+        from hermes_security.io import is_sealed_state_path
+
+        if is_sealed_state_path(path):
+            from hermes_security.io import read_json
+
+            data = read_json(path, purpose="state")
+        else:
+            with open(path, encoding="utf-8-sig") as fh:
+                data = json.load(fh)
     except errors:
         return None
     return data if isinstance(data, dict) else None
@@ -108,11 +122,22 @@ def _read_json_cache(path: Path, *, errors=Exception) -> Optional[dict]:
 
 def _write_json_cache(path: Path, data: Any, **dump_kwargs: Any) -> None:
     """Atomically persist a cache file (creating parents). Raises on failure — callers decide
-    whether a failed cache write is worth logging."""
-    from utils import atomic_json_write
+    whether a failed cache write is worth logging.
+
+    Fork: sealed state (vaulted home, outside regenerable cache dirs) writes through
+    the envelope-aware atomic writer so a refresh never replaces the envelope with
+    plaintext.
+    """
     from hermes_constants import mkdir_under_hermes_home
 
     mkdir_under_hermes_home(path.parent)
+    from hermes_security.io import atomic_write_state_json, is_sealed_state_path
+
+    if is_sealed_state_path(path):
+        atomic_write_state_json(path, data, purpose="state")
+        return
+    from utils import atomic_json_write
+
     atomic_json_write(path, data, **dump_kwargs)
 
 
@@ -1271,61 +1296,28 @@ def resolve_fast_mode_overrides(
 
 
 def _first_exchangeable_copilot_token(raw_tokens) -> str:
-    """Exchange stored GitHub tokens in order; the first that validates AND exchanges wins (every
-    entry is tried so a later valid token survives an earlier malformed one)."""
-    from hermes_cli.copilot_auth import exchange_copilot_token, validate_copilot_token
+    """Fork split: implementation in ``hermes_cli.models_copilot_key`` (file-size cap)."""
+    from hermes_cli.models_copilot_key import first_exchangeable_copilot_token
 
-    for raw in raw_tokens:
-        raw = str(raw or "").strip()
-        if not raw or not validate_copilot_token(raw)[0]:
-            continue
-        try:
-            api_token = exchange_copilot_token(raw)[0]  # (api_token, expires_at, base_url)
-        except Exception:
-            continue
-        if api_token:
-            return api_token
-    return ""
+    return first_exchangeable_copilot_token(raw_tokens)
 
 
 def _copilot_cli_config_tokens() -> list[str]:
-    """``copilotTokens`` from the GitHub Copilot CLI's own plaintext store (JSONC — strip
-    ``//``-comment lines), written by ``copilot login`` on hosts without an OS keychain."""
-    cli_config = os.path.expanduser("~/.copilot/config.json")
-    if not os.path.isfile(cli_config):
-        return []
-    with open(cli_config, "r", encoding="utf-8-sig", errors="ignore") as fh:
-        raw_text = "\n".join(
-            line for line in fh.read().splitlines() if not line.lstrip().startswith("//"))
-    data = json.loads(raw_text) if raw_text.strip() else {}
-    tokens = data.get("copilotTokens")
-    return list(tokens.values()) if isinstance(tokens, dict) else []
+    """Fork split: implementation in ``hermes_cli.models_copilot_key`` (file-size cap)."""
+    from hermes_cli.models_copilot_key import copilot_cli_config_tokens
+
+    return copilot_cli_config_tokens()
 
 
 def _resolve_copilot_catalog_api_key() -> str:
-    """Best-effort GitHub token for the Copilot catalog: env vars / ``gh auth token`` via
-    ``resolve_api_key_provider_credentials``, then ``auth.json`` ``credential_pool.copilot[]``, then
-    ``~/.copilot/config.json`` ``copilotTokens`` (the ACP CLI's own store). Without the latter two,
-    keyless users see the picker fall back to the stale curated list on a silent 401."""
-    def _pool_token() -> str:
-        from hermes_cli.auth import read_credential_pool
+    """Fork split: implementation in ``hermes_cli.models_copilot_key`` (file-size cap)."""
+    from hermes_cli.auth import read_credential_pool
+    from hermes_cli.models_copilot_key import resolve_copilot_catalog_api_key
 
-        return _first_exchangeable_copilot_token(
-            entry.get("access_token") for entry in read_credential_pool("copilot") if isinstance(entry, dict))
-
-    sources = (
-        lambda: _api_key_credentials("copilot")[0],
-        _pool_token,
-        lambda: _first_exchangeable_copilot_token(_copilot_cli_config_tokens()),
+    return resolve_copilot_catalog_api_key(
+        api_key_credentials=_api_key_credentials,
+        read_credential_pool=lambda: read_credential_pool("copilot"),
     )
-    for source in sources:
-        try:
-            token = source()
-        except Exception:
-            continue
-        if token:
-            return token
-    return ""
 
 
 def _model_dedup_key(model_id: str) -> str:
