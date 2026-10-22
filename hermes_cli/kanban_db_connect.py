@@ -19,6 +19,7 @@ import time
 from dataclasses import dataclass
 from dataclasses import field
 from hermes_cli.sqlite_util import add_column_if_missing as _add_column_if_missing
+from hermes_security.errors import VaultKeyMismatchError
 from pathlib import Path
 from typing import Any
 from typing import Optional
@@ -528,6 +529,10 @@ def _probe_for_corruption(resolved: Path) -> tuple[Optional[list[str]], Optional
     try:
         messages = _probe_integrity(resolved)
     except sqlite3.OperationalError:
+        raise
+    except VaultKeyMismatchError:
+        # Fork: wrong vault key (profile home opening the shared default-root
+        # board) — the DB is healthy; NEVER classify or quarantine as corrupt.
         raise
     except sqlite3.DatabaseError as exc:
         return None, f"sqlite refused to open file: {exc}"

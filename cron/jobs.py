@@ -1375,6 +1375,15 @@ def load_jobs() -> list[dict[str, Any]]:
         raise RuntimeError(f"Failed to read cron database: {e}") from e
     except Exception as e:
         logger.error("Failed to auto-repair jobs.json: %s", e)
+        if type(e).__name__ == "PlaintextStateError":
+            # Fork: plaintext jobs.json inside a vaulted home is clobbered sealed state
+            # (an old-venv process rewrote it); the store is fine, re-seal it instead
+            # of calling it unrepairable and dumping a traceback on the user.
+            raise RuntimeError(
+                "The cron job store was left as plaintext inside your encrypted home "
+                f"({jobs_file}). Run `hermes secure-vault repair` to re-seal it; "
+                "scheduled jobs are preserved."
+            ) from e
         raise RuntimeError(f"Cron database corrupted and unrepairable: {e}") from e
 
     # Accept the canonical dict, or a bare list (auto-repair); any other top-level shape is

@@ -184,3 +184,27 @@ def looks_like_envelope(path: Path | str) -> bool:
             return handle.read(len(_MAGIC)) == _MAGIC
     except OSError:
         return False
+
+
+def is_sealed_state_path(path: Path | str) -> bool:
+    """True when *path* is home-root STATE sealed by migration: inside a vaulted
+    home and OUTSIDE the regenerable skip dirs (``cache``, ``image_cache``,
+    ``audio_cache`` — migration leaves those plaintext by design).
+
+    Consumers that cache both state (``provider_models_cache.json``) and
+    regenerable artifacts (``cache/openrouter_curated_catalog.json``) use this
+    to pick the envelope-aware reader/writer only for the state instance.
+    """
+    target = Path(path).expanduser()
+    home = _home_for(target)
+    if home is None:
+        return False
+    try:
+        rel = target.resolve(strict=False).relative_to(home.resolve(strict=False))
+    except ValueError:
+        return False
+    if not rel.parts:
+        return False
+    from hermes_security.vault import _SKIP_DIRS
+
+    return rel.parts[0] not in _SKIP_DIRS

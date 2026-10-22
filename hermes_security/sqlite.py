@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from hermes_security.errors import VaultError
+from hermes_security.errors import VaultKeyMismatchError
 from hermes_security.vault import find_vault_home, get_vault
 
 _PURPOSE = "sqlcipher"
@@ -112,10 +113,15 @@ def connect(db_path: Path | str, *, purpose: str = _PURPOSE, key_path: Path | st
     # original database so publishing or archiving the staging file is safe.
     home = find_vault_home(key_source)
     vault = get_vault(home)
+    outside_vault_home = False
     try:
         rel = key_source.resolve(strict=False).relative_to(home).as_posix()
     except ValueError:
-        rel = key_source.name  # outside a known home: still filename-bound
+        # Outside every real vault tree: find_vault_home fell back to the ACTIVE
+        # home, so this vault does not own the database by ancestry (a legacy
+        # plaintext board misrouted into SQLCipher — the shared-board incident).
+        rel = key_source.name
+        outside_vault_home = True
     key = vault.derive_key(f"{purpose}:{rel}")
     hexkey = key.hex()
 
@@ -126,6 +132,22 @@ def connect(db_path: Path | str, *, purpose: str = _PURPOSE, key_path: Path | st
         conn.execute(f"PRAGMA key = \"x'{hexkey}'\"")
         # Force a schema read: wrong keys fail now, not on first query.
         conn.execute("SELECT count(*) FROM sqlite_master")
+    except sqlcipher.DatabaseError as exc:
+        conn.close()
+        if outside_vault_home:
+            # Fork: the vault reached by FALLBACK does not own this database —
+            # its derived key failing page-1 authentication is a credential/
+            # routing problem, never corruption. Callers with corruption probes
+            # (kanban's integrity guard) must not quarantine or back up the
+            # file on this class. (When the DB DOES live inside the vault home,
+            # the key is definitionally correct and a page-1 failure remains a
+            # genuine-damage DatabaseError.)
+            raise VaultKeyMismatchError(
+                f"The vault credential of this process does not open the encrypted database "
+                f"at {target} (vault home {home}); wrong key, not a damaged file. Unlock the "
+                f"vault that owns the database or run this command from its home."
+            ) from exc
+        raise
     except BaseException:
         conn.close()
         raise

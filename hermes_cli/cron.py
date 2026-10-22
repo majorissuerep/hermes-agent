@@ -782,7 +782,15 @@ def cron_command(args):
     subcmd = getattr(args, 'cron_command', None)
     handler = _CRON_SUBCOMMANDS.get("list" if subcmd is None else subcmd)
     if handler is not None:
-        return handler(args)
+        try:
+            return handler(args)
+        except RuntimeError as exc:
+            # Fork: clobbered sealed state (an old-venv process rewrote jobs.json
+            # as plaintext) must print its remedy, never a raw traceback.
+            if "secure-vault repair" in str(exc):
+                print(f"cron: {exc}", file=sys.stderr)
+                return 1
+            raise
     print(f"Unknown cron command: {subcmd}\n"
           "Usage: hermes cron [list|create|edit|pause|resume|run|remove|status|runs|doctor|tick]")
     sys.exit(1)

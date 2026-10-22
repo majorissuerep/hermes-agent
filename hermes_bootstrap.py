@@ -441,6 +441,15 @@ def harden_import_path(src_root: str | None = None) -> None:
     dropped and the Hermes root is *relocated* to the front, not merely inserted when
     absent. ``src_root`` defaults to this module's directory (the repo root for every
     shipped entry point), so no spawner env var is required.
+
+    Fork: a spawner that exports ``PYTHONPATH`` pointing at ANOTHER Hermes checkout
+    (an installed ``~/.hermes/hermes-agent``, a sibling worktree) lets the foreign
+    tree's ``hermes_cli``/``hermes_security`` win the import — the fork then runs the
+    other tree's code against THIS tree's encrypted home and surfaces ciphertext as
+    "corrupt config". A foreign root is recognizable structurally (it ships
+    ``hermes_bootstrap.py``); every such entry ahead of the true root is dropped, not
+    reordered — the checkout that owns this process must never execute foreign state
+    code. Entries AFTER the true root are harmless (it wins) and left for tools.
     """
     root = src_root or os.environ.get("HERMES_PYTHON_SRC_ROOT") or os.path.dirname(
         os.path.abspath(__file__)
@@ -449,6 +458,26 @@ def harden_import_path(src_root: str | None = None) -> None:
     sys.path[:] = [p for p in sys.path if p not in ("", ".")]
 
     root_abs = os.path.abspath(root)
+
+    def _foreign_hermes_root(entry: str) -> bool:
+        # Structural marker, not a name: another checkout's bootstrap beside its
+        # packages. The true root never matches (it is removed after this scan).
+        try:
+            candidate = os.path.abspath(entry)
+        except (TypeError, ValueError):
+            return False
+        return candidate != root_abs and os.path.isfile(os.path.join(candidate, "hermes_bootstrap.py"))
+
+    # Only entries AHEAD of the own root can shadow the packages it ships. The
+    # tail may legitimately SUPPLY packages a minimal source tree does not ship
+    # (a disposable launch fixture importing pm/hermes_cli from the real
+    # checkout) — those survive; the own root still wins everything it serves.
+    try:
+        own_index = next(i for i, p in enumerate(sys.path) if os.path.abspath(p) == root_abs)
+    except StopIteration:
+        own_index = 0  # root not listed yet: it is inserted at the front below,
+        # so every existing foreign entry would precede it.
+    sys.path[:] = [p for i, p in enumerate(sys.path) if i >= own_index or not _foreign_hermes_root(p)]
     sys.path[:] = [p for p in sys.path if os.path.abspath(p) != root_abs]
     sys.path.insert(0, root)
 
