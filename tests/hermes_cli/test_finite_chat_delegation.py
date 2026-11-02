@@ -15,7 +15,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 @pytest.mark.platforms("posix")
-@pytest.mark.parametrize("mode", ["quiet", "oneshot", "redirected", "resumed", "self-management"])
+@pytest.mark.parametrize("mode", ["quiet", "oneshot", "redirected", "resumed", "self-management", "managed-subprocess"])
 def test_finite_chat_joins_parallel_children_before_final_response(tmp_path, mode):
     """Real parser, CLI, agent loops and delegate_task. Only inference is synthetic.
 
@@ -29,6 +29,7 @@ def test_finite_chat_joins_parallel_children_before_final_response(tmp_path, mod
     lock = threading.Lock()
     children, joined_results, errors = [], [], []
     workers = ("WORKER_ALPHA", "WORKER_BETA")
+    self_management = mode in {"self-management", "managed-subprocess"}
 
     class Provider(http.server.BaseHTTPRequestHandler):
         def do_GET(self):
@@ -50,7 +51,7 @@ def test_finite_chat_joins_parallel_children_before_final_response(tmp_path, mod
                         with lock:
                             children.append(worker)
                         barrier.wait(timeout=20)
-                    if mode == "self-management" and not results:
+                    if self_management and not results:
                         message = {"role": "assistant", "content": None, "tool_calls": [{
                             "id": "call_child_management", "type": "function", "function": {
                                 "name": "terminal", "arguments": json.dumps({
@@ -59,7 +60,7 @@ def test_finite_chat_joins_parallel_children_before_final_response(tmp_path, mod
                             },
                         }]}
                     else:
-                        successful = mode != "self-management" or any(
+                        successful = not self_management or any(
                             row.get("exit_code") == 0 and str(row.get("output", "")).strip() == "69"
                             for row in results)
                         message = {"role": "assistant", "content": worker + ("_COMPLETE" if successful else "_FAILED")}
@@ -141,9 +142,11 @@ def test_finite_chat_joins_parallel_children_before_final_response(tmp_path, mod
     (home / ".env").write_text(f"OPENAI_API_KEY=local-test-only\nOPENAI_BASE_URL={url}\n")
     prepare_fixture_runtime(home, REPO_ROOT)
     common = ["--provider", "custom", "--model", "test-model", "--base-url", url,
-              "--toolsets", "terminal,delegation" if mode == "self-management" else "delegation",
+              "--toolsets", "terminal,delegation" if self_management else "delegation",
               "--ignore-rules", "--reasoning", "high", "--max-turns", "10"]
     command = [sys.executable, "-m", "hermes_cli.main"]
+    if mode == "managed-subprocess":
+        command += ["manage", "run", "hermes"]
     if mode == "oneshot":
         command += ["-z", query.read_text(), *common]
     else:
@@ -165,7 +168,7 @@ def test_finite_chat_joins_parallel_children_before_final_response(tmp_path, mod
             assert any(len(row.get("results", [])) == 2 and all(
                 entry.get("status") == "completed" for entry in row["results"])
                 for row in saved), saved
-            if mode == "self-management":
+            if self_management:
                 assert sum(row.get("exit_code") == 0 and str(row.get("output", "")).strip() == "69"
                            for row in saved) == 2, saved
                 assert (home / "config.yaml").read_bytes().startswith(b"HRMVAULT")

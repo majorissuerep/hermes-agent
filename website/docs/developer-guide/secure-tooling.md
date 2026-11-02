@@ -72,6 +72,12 @@ Nested executor output may contain a capability unknown to the parent's exact
 secret registry. The output redactor recognizes the grant structure, including
 one JSON wrapper, before optional redaction preferences. It removes the bearer
 token while preserving diagnostic routing metadata.
+Managed runners use the existing profile-aware environment builder and remove
+launch-profile residue and native executor tokens before selecting vendor
+credentials. A profile's endpoint accompanies its API key; a CLI-owned login
+keeps its own routing. Codex receives the key through its documented per-run
+`CODEX_API_KEY` interface, rather than relying on `OPENAI_API_KEY` to override
+saved CLI authentication.
 
 The consequential assumptions are that the public command inherits the correct
 installation and grant, and that external executors preserve the grant through

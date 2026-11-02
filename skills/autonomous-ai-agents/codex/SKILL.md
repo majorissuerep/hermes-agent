@@ -33,6 +33,10 @@ Hermes tools and encrypted conversation history.
 Hermes-managed OpenAI OAuth and Codex CLI OAuth are separate logins. Never copy
 credential files, export vault keys or ask for a passphrase in chat. Use
 `hermes manage schema` to inspect supported runners and management operations.
+The runner passes the owning profile's OpenAI key through Codex's
+[per-run API-key interface](https://learn.chatgpt.com/docs/non-interactive-mode#authenticate-in-automation)
+and pairs it with that profile's configured endpoint. Inherited executor keys
+are stripped; the CLI uses its own saved login when no profile API key is set.
 
 ## How to Run
 

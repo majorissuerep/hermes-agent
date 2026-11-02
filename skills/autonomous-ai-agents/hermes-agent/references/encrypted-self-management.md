@@ -105,8 +105,10 @@ management command families. The runner selects the current installation,
 binds the current encrypted profile and temporary unlock, and passes stdin and
 stdout through. Codex runs `exec --ephemeral`; Claude runs print mode with
 session persistence disabled. Each executor retains its permission controls.
-Only its own provider API key may be read from the selected encrypted secret
-store; other provider, GitHub and infrastructure credentials are scrubbed.
+Only its own provider API key and endpoint may be read from the selected encrypted
+secret store. Other provider, GitHub and registered remote-compute credentials
+follow the standard child scrub policy; routed launch-profile residue and
+inherited executor tokens are removed.
 External CLI OAuth remains that CLI's own login, distinct from Hermes OAuth.
 
 A sandbox can refuse access to the management command or its local unlock

@@ -98,6 +98,9 @@ def main() -> None:
         Path(env["TMPDIR"]).mkdir()
         setup(env, directory)
         python = env["HERMES_PYTHON"]
+        run([python, "-c", "import sqlite3, hermes_state.wal as w; "
+             "print('SQLite', sqlite3.sqlite_version); "
+             "assert not w.is_sqlite_wal_reset_vulnerable(), 'PM Python must qualify WAL tests'"], env)
         run([python, "scripts/check", "--base", base], env)
         run([python, "scripts/gen-bootstrap-pins.py", "--check"], env)
         if classify(paths)["uv_lock"]:

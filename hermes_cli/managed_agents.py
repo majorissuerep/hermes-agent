@@ -15,6 +15,11 @@ RUNNERS = {
               "-c", "history.persistence=none", "-c", "memories.generate_memories=false"], "persistence": "disabled"},
     "claude": {"command": "claude", "arguments": ["--print", "--no-session-persistence"], "persistence": "disabled"},
 }
+_VENDOR_ENV = {
+    "codex": (("OPENAI_API_KEY", "CODEX_API_KEY"), ("OPENAI_API_BASE", "OPENAI_BASE_URL"),
+              ("OPENAI_BASE_URL", "OPENAI_BASE_URL")),
+    "claude": (("ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY"), ("ANTHROPIC_BASE_URL", "ANTHROPIC_BASE_URL")),
+}
 
 
 def _command(runner: str, arguments: list[str]) -> list[str]:
@@ -53,13 +58,13 @@ def run(home: Path, runner: str, arguments: list[str]) -> int:
     _authorize(home)
     from agent.session_context import scoped_current_session_id
     from hermes_security.session_authority import start_session_authority
-    from tools.environments.local import hermes_subprocess_env, _prepend_hermes_bin_dir
+    from tools.environments.local import served_profile_child_env, _prepend_hermes_bin_dir
     authority = start_session_authority(home, "managed-" + uuid.uuid4().hex, pipe=True)
     if authority is None:
         raise ManagementError("locked", "the selected profile is not unlocked")
     try:
         with scoped_current_session_id(authority.session_id):
-            env = hermes_subprocess_env()
+            env = served_profile_child_env(target_home=home)
             env["PATH"] = _prepend_hermes_bin_dir(env.get("PATH", ""))
             from tools.environments.local import _resolve_hermes_bin_dir
             env["HERMES_MANAGEMENT_BIN"] = _resolve_hermes_bin_dir() or ""
@@ -70,11 +75,18 @@ def run(home: Path, runner: str, arguments: list[str]) -> int:
             env.pop("HERMES_VAULT_KEY_FD", None)
             env.pop("HERMES_VAULT_PRIVATE_KEY", None)
             env.pop("HERMES_MASTER_PASSWORD", None)
+            for name in ("CODEX_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_AUTH_TOKEN"):
+                env.pop(name, None)
             if runner != "hermes":
                 from agent.secret_scope import build_profile_secret_scope
-                key = "OPENAI_API_KEY" if runner == "codex" else "ANTHROPIC_API_KEY"
-                if value := build_profile_secret_scope(home).get(key):
-                    env[key] = value
+                scope = build_profile_secret_scope(home)
+                bindings = _VENDOR_ENV[runner]
+                # A profile endpoint travels with its key; a CLI-owned login
+                # keeps its own routing when the profile has no vendor key.
+                if scope.get(bindings[0][0]):
+                    for source, destination in bindings:
+                        if value := scope.get(source):
+                            env[destination] = value
             command = _command(runner, arguments)
             if runner == "codex":
                 command.extend(["--add-dir", str(authority.server.path)])
