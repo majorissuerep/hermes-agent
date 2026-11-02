@@ -145,6 +145,9 @@ class SessionAuthority:
             for alias, authority in list(_sessions.items()):
                 if authority is self:
                     del _sessions[alias]
+        self._stop_server()
+
+    def _stop_server(self) -> None:
         self.server.shutdown()
         self.server.server_close()
         self.thread.join(timeout=2)
@@ -207,6 +210,21 @@ def forget_inherited_authority(home: Path | None = None) -> None:
         for selected in list(_adopted):
             if home is None or _vault_home(Path(selected)) == home:
                 del _adopted[selected]
+
+
+def revoke_home_authorities(home: Path) -> None:
+    """An explicit lock permanently revokes every grant backed by that vault.
+
+    Detach identities before stopping servers so a concurrent new unlock cannot
+    revive an old token or have its freshly registered authority closed instead.
+    """
+    with _lock:
+        authorities = {authority for authority in _sessions.values() if authority.vault_home == home}
+        for identity, authority in list(_sessions.items()):
+            if authority in authorities:
+                del _sessions[identity]
+    for authority in authorities:
+        authority._stop_server()
 
 
 def session_environment(home: Path | str, session_id: str) -> dict[str, str]:

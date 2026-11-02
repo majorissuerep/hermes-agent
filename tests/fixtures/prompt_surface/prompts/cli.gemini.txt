@@ -51,8 +51,8 @@ For repeated questions or planned follow-up work on the same codebase or documen
 
 <available_skills>
   autonomous-ai-agents: Skills for spawning and orchestrating autonomous AI coding agents and multi-agent workflows — running independent agent processes, delegating tasks, and coordinating parallel workstreams.
-    - claude-code: Delegate coding to Claude Code CLI (features, PRs).
-    - codex: Delegate coding to OpenAI Codex CLI (features, PRs).
+    - claude-code: Delegate to Claude Code through an encrypted local session.
+    - codex: Delegate to Codex through an encrypted local session.
     - computer-use: Drive the desktop background-first; escalate on signal.
     - hermes-agent: Operate encrypted, terminal-only Hermes Agent.
     - opencode: Delegate coding to OpenCode CLI (features, PR review).

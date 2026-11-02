@@ -23,6 +23,19 @@ def run(argv: list[str], env: dict[str, str]) -> None:
     subprocess.run(argv, cwd=ROOT, env=env, check=True, timeout=7200)
 
 
+def git(*arguments: str) -> str:
+    return subprocess.check_output(["git", *arguments], cwd=ROOT,
+                                   text=True, encoding="utf-8", timeout=30).strip()
+
+
+def require_clean_checkout(head: str) -> None:
+    dirty = git("status", "--porcelain=v1", "--untracked-files=normal")
+    if dirty:
+        raise SystemExit("Verification requires a clean committed checkout:\n" + dirty)
+    if git("rev-parse", "HEAD") != head:
+        raise SystemExit("The checkout revision changed during verification.")
+
+
 def plan(paths: list[str], event: str) -> dict[str, bool]:
     """Unknown/no diff and CI edits fail open; ordinary PRs reuse the classifier."""
     if event != "pull_request" or any(p.startswith((".woodpecker/", "scripts/ci/")) for p in paths):
@@ -62,25 +75,26 @@ def main() -> None:
     event = args.event or env.get("CI_PIPELINE_EVENT") or env.get("GITHUB_EVENT_NAME", "manual")
     base = args.base or "HEAD^1"
     if event == "pull_request" and args.base is None:
-        base = subprocess.check_output(
-            ["git", "merge-base", "HEAD", "origin/main"], cwd=ROOT,
-            text=True, encoding="utf-8", timeout=30,
-        ).strip()
-    paths = subprocess.check_output(
-        ["git", "diff", "--name-only", base, "HEAD"], cwd=ROOT,
-        text=True, encoding="utf-8", timeout=30,
-    ).splitlines()
+        base = git("merge-base", "HEAD", "origin/main")
+    base = git("rev-parse", "--verify", "--end-of-options", base + "^{commit}")
+    head = git("rev-parse", "HEAD")
+    paths = git("diff", "--name-only", base, head).splitlines()
     lanes = plan(paths, event)
+    print(f"Verification revision: {head}; base: {base}", flush=True)
     print("Validation lanes: " + json.dumps(lanes), flush=True)
     if args.plan:
         return
+    require_clean_checkout(head)
     with tempfile.TemporaryDirectory(prefix="hermes-inhouse-") as temporary:
         directory = Path(temporary)
         env.update({
             "HERMES_HOME": str(directory / "home"), "HERMES_RUNTIME_DIR": str(directory / "tools"),
             "TMPDIR": str(directory / "tmp"), "HERMES_TEST_WORKERS": "2",
-            "HERMES_TEST_FILE_RETRIES": "0", "VITEST_MAX_WORKERS": "2",
+            "HERMES_TEST_FILE_RETRIES": "0", "HERMES_TEST_FILE_TIMEOUT": "600", "VITEST_MAX_WORKERS": "2",
         })
+        for name in ("HERMES_TEST_PATHS", "HERMES_TEST_SLICE"):
+            env.pop(name, None)
+        env.setdefault("NODE_OPTIONS", "--max-old-space-size=2048")
         Path(env["TMPDIR"]).mkdir()
         setup(env, directory)
         python = env["HERMES_PYTHON"]
@@ -88,6 +102,7 @@ def main() -> None:
         run([python, "scripts/gen-bootstrap-pins.py", "--check"], env)
         if classify(paths)["uv_lock"]:
             run([python, "-m", "pm.build_env", "--source", ".", "--check-lock"], env)
+        run(["node", "scripts/generate-icons.mjs", "--check"], env)
         if lanes["frontend"] or lanes["python"]:
             run(["npm", "ci"], env)
             run(["npm", "run", "build", "--prefix", "ui-tui"], env)
@@ -97,14 +112,15 @@ def main() -> None:
             run(["node", ".github/scripts/run-workspace-checks.mjs", "--concurrency", "1"], env)
         if lanes["site"]:
             run(["npm", "ci", "--prefix", "website"], env)
+            for script in ("extract-skills.py", "generate-skill-docs.py", "generate-llms-txt.py",
+                           "extract-automation-blueprints.py", "extract-plugins.py", "check_doc_links.py"):
+                run([python, "website/scripts/" + script], env)
+            run([python, "-m", "scripts.ci.python_packages", "ascii-guard==2.3.0", "--", "-c",
+                 "from ascii_guard.cli import main; raise SystemExit(main())",
+                 "lint", "--exclude-code-blocks", "website/docs"], env)
             run(["npm", "run", "typecheck", "--prefix", "website"], env)
             run(["npm", "run", "build:fast", "--prefix", "website"], env)
-        dirty = subprocess.check_output(
-            ["git", "status", "--porcelain=v1", "--untracked-files=normal"], cwd=ROOT,
-            text=True, encoding="utf-8", timeout=30,
-        ).strip()
-        if dirty:
-            raise SystemExit("Validation modified the checkout:\n" + dirty)
+        require_clean_checkout(head)
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 ---
 name: codex
-description: "Delegate coding through an encrypted local session."
+description: "Delegate to Codex through an encrypted local session."
 version: 1.1.0
 author: "Fork maintainers; upstream Hermes Agent contributors"
 license: MIT

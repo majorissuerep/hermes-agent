@@ -1,6 +1,6 @@
 ---
 name: claude-code
-description: "Delegate coding through an encrypted local session."
+description: "Delegate to Claude Code through an encrypted local session."
 version: 2.3.0
 author: "Teknium, Hermes Agent; fork maintainers"
 license: MIT

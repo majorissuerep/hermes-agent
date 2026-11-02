@@ -86,6 +86,16 @@ def test_foreign_invalid_and_closed_grants_cannot_unlock_another_home(tmp_path, 
         invalid = json.loads(grants[0].environment()[ENV_NAME])
         invalid['token'] = 'not-the-session-token'
         assert child(homes[0], {ENV_NAME: json.dumps(invalid)}).returncode != 0
+        locked_grant = grants[0].environment()
+        vault.lock_now(homes[0])
+        vault.unlock(homes[0], "synthetic-independent-password")
+        assert child(homes[0], locked_grant).returncode != 0, "reunlock revived a revoked session grant"
+        assert child(homes[1], grants[1].environment()).returncode == 0
+        fresh = start_session_authority(homes[0], "fresh-owner")
+        try:
+            assert child(homes[0], fresh.environment()).returncode == 0
+        finally:
+            fresh.close()
         expired = grants[0].environment()
         grants[0].close()
         assert child(homes[0], expired).returncode != 0

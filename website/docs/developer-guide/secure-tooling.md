@@ -13,7 +13,7 @@ command exit alone does not establish that outcome.
 
 The starting fork revision is `1815472adf69eb16cc201c0d9ac4c7e69f5fa51b`.
 On 2026-11-02 upstream main was fetched at
-`5e7c2b254d414e4e25105231f818f385fee67469`: 6,826 upstream commits after
+`40b566502a84e24ed97afdc7ea5056968e071472`: 6,830 upstream commits after
 the shared base `eb75627faf532fa6ffbdae59a0d14b0b385fc780`. The unfinished
 `sync/upstream-20261022` and `ci/gitea-primary-20261028` branches are inputs to
 review, not accepted product evidence.
@@ -50,6 +50,29 @@ forge-specific scripts. Port relevant upstream changes in reviewable increments;
 a wholesale merge currently includes more than two million added lines and would
 cross removed product boundaries.
 
+Ordinary POSIX children redeem grants through private, owner-only Unix sockets.
+The managed coding-agent runner uses private kernel FIFOs because a real Codex
+workspace sandbox rejected even Unix socket connections with networking disabled.
+Only FIFO nodes and an empty lock inode exist on disk. Keys and requests remain
+in process memory and pipe buffers; client responses are correlated and bounded.
+The runner adds only this transport directory to Codex's writable paths. Profile
+writes outside the workspace require the caller's explicit `--add-dir` selection.
+
+Compression reanchors conversation identity without replacing unlock ownership;
+old grants for running children expire with the same owner. Delegated and nested
+authorities validate their parent when redeemed. Interpreter key-FD handoffs
+validate any inherited session grant before adopting the key, preserving that
+revocation chain. Ordinary handoffs carry one selected vault owner. Maintenance
+must explicitly name additional already-unlocked homes; it never enumerates all
+cached keys or drops unreadable members from PM's existing shared dependency union.
+An explicit lock detaches all grants backed by that vault before stopping their
+transports; a later unlock cannot revive the old tokens or revoke another vault.
+
+Nested executor output may contain a capability unknown to the parent's exact
+secret registry. The output redactor recognizes the grant structure, including
+one JSON wrapper, before optional redaction preferences. It removes the bearer
+token while preserving diagnostic routing metadata.
+
 The consequential assumptions are that the public command inherits the correct
 installation and grant, and that external executors preserve the grant through
 their own shell boundaries. Real child commands against synthetic encrypted
@@ -61,7 +84,76 @@ make a test pass.
 
 ## Evidence and review
 
-Record the final candidate revision, commands, native OS, protocol or live
-provider, failures, skipped coverage and cleanup here as work is verified.
+The November 2 investigation retained these negative results: encrypted xAI
+credentials were invisible to its availability probe; compression changed the
+conversation ID without reanchoring authority; login shells dropped executable
+locations; nested key-FD handoffs could renew authority after owner close; and
+unregistered nested grants escaped output redaction. A lock/unlock cycle also
+revived old session tokens until permanent lock revocation was added. Behavioral regressions
+reproduced each failure before its corresponding fix. No plaintext fallback,
+global networking opt-in or permission bypass was used to resolve them.
+
+Live host evidence at `813d2970f4eb25a3f5f3287b886cdbfe98a68821` used Linux
+6.6.114.1 WSL2 x86_64, Codex CLI 0.166.0 and Claude Code 2.1.316 with their own
+existing logins. Both executed an owning-Hermes configuration read and write;
+independent command refusal, owner-close revocation, ciphertext and synthetic-home
+removal were independently checked. Codex used `workspace-write` with networking
+disabled. Claude used narrowly selected Bash permissions. These are CLI integration
+receipts, not cold-install or every-provider qualification.
+
+Native Linux protocol evidence includes the real public finite-chat/delegation
+path, encrypted SQLCipher history, two native children calling the management CLI,
+real PTY keyboard/transcript round trips and Docker source transport with no host
+mounts or inherited model credential. The host's native macOS coverage is pending.
+The six cold lifecycle/live-gateway scenarios require their existing dedicated
+credentials and disposable environments; they remain pending here.
+
+The repository-wide security scan was executed and failed: existing shell lint
+findings, synthetic-secret detections, static audit findings, dependency advisories
+and npm advisories remain visible. The committed patch's secret scan was clean.
+The PM-built test environment's audit reported 65 advisories in seven existing
+locked packages; no dependencies or lockfile were changed. Do not present this as
+a clean security audit or weaken directory permissions to satisfy a scanner's
+incorrect recommendation to replace owner-only directory mode 0700 with 0644.
+
+The task PR records the final candidate and exact-head verification results.
 The fork maintainer owns review after an unlock regression, plaintext-state
 finding, child ownership failure, upstream boundary change or CI coverage drift.
+
+## Upstream and CI operation
+
+Refresh the source inventory without executing upstream code or changing the
+checkout:
+
+```sh
+review_dir="$(mktemp -d)"
+python3 -m scripts.ci.upstream_review --fetch --output "$review_dir/upstream.json"
+python3 scripts/ci/verify.py --plan --event pull_request
+python3 scripts/ci/verify.py --base origin/main
+```
+
+The inventory records source/base SHAs, graph distance, affected local/excluded
+areas and a bounded candidate list. It creates a new output exclusively and
+does not count file parity as qualification. This increment ports upstream
+`6fa171ce5423457fa46da227562ddea766c9ef69` and
+`35c2783b6ab7419209cad9f746f64d215f400b60` login-PATH behavior, with the background
+spawn wiring from `29fef14fbf3501ac02140bc34ea339d64ff650ce`. Foreground/background
+tests execute actual tools from absolute and relative PATH entries. The larger
+upstream merge remains unaccepted.
+
+One proposed Woodpecker quality flow invokes the shared verification command:
+PM-pinned bootstrap, blocking lint guards, lock consistency, canonical Python
+tests, icon freshness, Ink/workspace checks, generated skill pages, agent-facing
+documentation indexes and documentation build. The common blocking command also
+retains the existing added-line critical-source/dependency-bound patterns and
+tracked infographic policy; these narrow guards are not a comprehensive security
+audit. Workers are bounded and
+test retries are disabled. The driver pins and prints input revisions and refuses
+dirty or replaced checkouts. Historical GitHub workflow definitions remain
+inactive references; this change does not deploy CI or replace missing statuses.
+
+Observed repository settings require GitHub Actions' `All required checks pass
+(v2)` while Actions is disabled. A Woodpecker result cannot satisfy that
+application-bound check. Repository protection/visibility and public exposure
+decisions remain unchanged. Merge acceptance stays pending until the established
+CI reports every required check green on the candidate head.
