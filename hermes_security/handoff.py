@@ -17,13 +17,16 @@ from pathlib import Path
 KEY_FD_ENV = "HERMES_VAULT_KEY_FD"
 
 
-def prepare_child_key(home: Path | str | None = None) -> tuple[int, dict[str, str]] | None:
-    """One selected home's unlocked owner, never every key cached by a local process.
+def prepare_child_key(home: Path | str | None = None, *,
+                      additional_homes: tuple[Path, ...] = ()) -> tuple[int, dict[str, str]] | None:
+    """Selected owners only, never every key cached by a local process.
 
     The caller passes ``read_fd`` in ``pass_fds`` and closes it after spawn,
     including on failure. An omitted home resolves the current profile at call time.
+    A maintenance caller must name every additional home it needs explicitly.
     """
     from hermes_security.vault import is_unlocked, export_unlocked_key
+    from hermes_security.errors import VaultError, VaultLockedError
     from hermes_security.session_authority import _vault_home
     if home is None:
         from hermes_constants import get_hermes_home
@@ -31,11 +34,20 @@ def prepare_child_key(home: Path | str | None = None) -> tuple[int, dict[str, st
     owner = _vault_home(Path(home).expanduser().resolve())
     if owner is None or not is_unlocked(owner):
         return None
-    keys = [{"home": str(owner), "key": base64.b64encode(export_unlocked_key(owner)).decode("ascii")}]
+    owners = {owner}
+    for selected in additional_homes:
+        extra = _vault_home(Path(selected).expanduser().resolve())
+        if extra is None or not is_unlocked(extra):
+            raise VaultLockedError("Every named maintenance home must already be unlocked.")
+        owners.add(extra)
+    keys = [{"home": str(selected), "key": base64.b64encode(export_unlocked_key(selected)).decode("ascii")}
+            for selected in sorted(owners)]
     payload = json.dumps(keys).encode("utf-8")
+    if len(payload) > 4096:
+        raise VaultError("The named maintenance owners exceed the one-shot pipe limit.")
     read_fd, write_fd = os.pipe()
     try:
-        os.write(write_fd, payload)  # a few hundred bytes: one write into an empty pipe never blocks
+        os.write(write_fd, payload)  # bounded by PIPE_BUF: one write into an empty pipe never blocks
     finally:
         os.close(write_fd)
     os.set_inheritable(read_fd, True)

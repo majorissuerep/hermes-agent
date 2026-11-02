@@ -57,15 +57,16 @@ def test_forged_key_is_refused(tmp_path):
 
 
 @pytest.mark.platforms("linux", "macos")
-def test_local_handoff_carries_only_the_selected_profiles_key(tmp_path, monkeypatch):
+@pytest.mark.parametrize("maintenance", [False, True])
+def test_local_handoff_carries_only_explicitly_selected_profiles_keys(tmp_path, monkeypatch, maintenance):
     from hermes_security.handoff import prepare_child_key
 
-    homes = [tmp_path / name for name in ("selected", "sibling")]
+    homes = [tmp_path / name for name in ("selected", "sibling", "unselected")]
     monkeypatch.setenv("HERMES_HOME", str(homes[0]))
     for home in homes:
         vault_mod.init_vault(home, "synthetic-handoff-password")
         vault_mod.unlock(home, "synthetic-handoff-password")
-    handoff = prepare_child_key(homes[0])
+    handoff = prepare_child_key(homes[0], additional_homes=(homes[1],) if maintenance else ())
     assert handoff is not None
     fd, additions = handoff
     script = """
@@ -74,14 +75,19 @@ from hermes_security.vault import is_unlocked
 import sys
 assert adopt_inherited_key()
 assert is_unlocked(sys.argv[1])
-assert not is_unlocked(sys.argv[2])
+assert is_unlocked(sys.argv[2]) == (sys.argv[4] == 'True')
+assert not is_unlocked(sys.argv[3])
 print('exact-profile-handoff')
 """
     try:
-        result = subprocess.run([sys.executable, "-c", script, *map(str, homes)], env={**os.environ, **additions},
+        result = subprocess.run([sys.executable, "-c", script, *map(str, homes), str(maintenance)], env={**os.environ, **additions},
                                 pass_fds=(fd,), capture_output=True, text=True, timeout=20, check=False)
         assert result.returncode == 0 and result.stdout.strip() == "exact-profile-handoff", result.stderr
         assert prepare_child_key(tmp_path / "unrelated") is None
+        vault_mod.lock_now(homes[1])
+        from hermes_security.errors import VaultLockedError
+        with pytest.raises(VaultLockedError):
+            prepare_child_key(homes[0], additional_homes=(homes[1],))
     finally:
         os.close(fd)
         vault_mod.clear_vault_cache()

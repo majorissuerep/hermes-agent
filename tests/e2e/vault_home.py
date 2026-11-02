@@ -95,9 +95,14 @@ def _prepare_fixture_pm(home: Path, source: Path, extras: tuple[str, ...], *, tu
         _share_fixture_download_cache(home)
         seal_fixture_home(home)
         env = {**os.environ, "HERMES_HOME": str(home.resolve())}
+        # PM rebuilds the existing shared union. This fixture owns every named
+        # participating home; ordinary agent/terminal children still get one key.
+        with _fixture_pm_home(home):
+            from pm.plugins_state import dependency_homes
+            maintenance_homes = tuple(dependency_homes())
         argv = [sys.executable, "-m", "tests.e2e.vault_home", str(home.resolve()),
                 str(source.resolve()), json.dumps(extras), "tui" if tui else "runtime"]
-        with spawn_unlocked(argv, env=env, cwd=source, stdout=subprocess.PIPE,
+        with spawn_unlocked(argv, env=env, additional_homes=maintenance_homes, cwd=source, stdout=subprocess.PIPE,
                             stderr=subprocess.STDOUT, text=True) as process:
             try:
                 output, _ = process.communicate(timeout=600)
@@ -119,11 +124,11 @@ def prepare_fixture_tui(home: Path, source: Path) -> None:
     _prepare_fixture_pm(home, source, ("all",), tui=True)
 
 
-def spawn_unlocked(argv, *, env: dict[str, str], **kwargs) -> subprocess.Popen:
+def spawn_unlocked(argv, *, env: dict[str, str], additional_homes: tuple[Path, ...] = (), **kwargs) -> subprocess.Popen:
     """A real child consumes one inherited key pipe at its public/private vault gate."""
     from hermes_security.handoff import prepare_child_key
 
-    handoff = prepare_child_key(env["HERMES_HOME"])
+    handoff = prepare_child_key(env["HERMES_HOME"], additional_homes=additional_homes)
     assert handoff is not None, "E2E parent must own a synthetic unlocked vault"
     fd, additions = handoff
     try:

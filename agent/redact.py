@@ -4,6 +4,7 @@ Short tokens (< 18 chars) are fully masked; longer ones keep the first 6 and
 last 4 characters for debuggability.
 """
 
+import json
 import logging
 import os
 import re
@@ -61,6 +62,37 @@ def clear_vault_redaction_values() -> None:
     """Drop the current profile's registered values (profile teardown / explicit lock)."""
     with _VAULT_REDACTION_LOCK:
         _VAULT_REDACTION_VALUES.pop(_vault_scope(), None)
+
+
+_SESSION_GRANT_OBJECT_RE = re.compile(r"\{[^{}]{1,8192}\}")
+
+
+def redact_session_grants(text: str) -> str:
+    """Recognize nested-process capabilities without sharing secret registries.
+
+    Executors may wrap terminal output in another JSON string. Decode at most
+    that one wrapper; preserve unrelated token fields and all routing metadata.
+    """
+    if "session_id" not in text or "token" not in text:
+        return text
+
+    def scrub(match):
+        raw = match.group(0)
+        try:
+            candidate = json.loads(raw)
+        except ValueError:
+            try:
+                candidate = json.loads(json.loads('"' + raw + '"'))
+            except (ValueError, TypeError):
+                return raw
+        token = candidate.get("token") if isinstance(candidate, dict) else None
+        if (not isinstance(token, str) or not token or not isinstance(candidate.get("home"), str)
+                or not isinstance(candidate.get("session_id"), str)
+                or not {"pipe", "socket", "port"}.intersection(candidate)):
+            return raw
+        return raw.replace(token, "«redacted-local-authority»")
+
+    return _SESSION_GRANT_OBJECT_RE.sub(scrub, text)
 
 
 def _profile_credential_values() -> set[str]:
@@ -956,7 +988,7 @@ def redact_sensitive_text(text: str, *, force: bool = False, code_file: bool = F
     if not text:
         return text
     # Vault secrets are a hard model-egress boundary: scrubbed regardless of the redact_secrets preference.
-    text = redact_registered_vault_values(text)
+    text = redact_session_grants(redact_registered_vault_values(text))
     if not (force or _redact_enabled()):
         return text
     # ``secret_file`` is authoritative: a caller that classified the source as secret-bearing must not
