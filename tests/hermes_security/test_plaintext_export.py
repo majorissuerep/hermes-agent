@@ -80,7 +80,7 @@ def test_export_round_trips_sqlcipher_wal_envelopes_streams_and_user_skills(tmp_
             assert plain.execute("SELECT * FROM retained ORDER BY id").fetchall() == before[-2]
             assert plain.execute("PRAGMA user_version").fetchone()[0] == 19
             assert plain.execute("PRAGMA application_id").fetchone()[0] == 8127
-        assert (recovered / "logs" / "agent.log").read_bytes() == b"first line\nsecond line\n"
+        assert (recovered / "logs" / "agent.log").read_bytes() == b"first line\nsecond line"
         assert (recovered / "skills" / "retained" / "SKILL.md").read_text() == "# User-created skill\n"
         assert not (recovered / "vault.key").exists()
         assert (recovered / "vault" / "vault.key").read_bytes() == b"synthetic-browser-vault-key"

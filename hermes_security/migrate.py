@@ -158,7 +158,7 @@ def _text_lines(data: bytes, *, jsonl: bool) -> Optional[list[bytes]]:
         return None
     if "\x00" in text:
         return None
-    return [line.encode("utf-8") for line in text.splitlines() if line.strip() or not jsonl]
+    return [line.encode("utf-8") for line in text.splitlines(keepends=not jsonl) if line.strip() or not jsonl]
 
 
 def _is_mangled_text(data: bytes) -> bool:
@@ -552,7 +552,7 @@ def _migrate_frames(home: Path, path: Path, rel: Path, report: MigrationReport) 
     if path.suffix == ".jsonl":
         payloads = [line.encode("utf-8") for line in plaintext.decode("utf-8", errors="replace").splitlines() if line.strip()]
     else:
-        payloads = [line.encode("utf-8") for line in plaintext.decode("utf-8", errors="replace").splitlines()]
+        payloads = [line.encode("utf-8") for line in plaintext.decode("utf-8", errors="replace").splitlines(keepends=True)]
     if not payloads:
         # empty log: an empty frame stream is the correct sealed form
         import os

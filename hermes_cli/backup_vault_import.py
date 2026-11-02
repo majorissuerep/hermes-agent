@@ -69,7 +69,7 @@ def _seal_frames(raw: bytes, target: Path, vault) -> bytes:
     text = raw.decode("utf-8")
     if any(ord(character) < 32 and character not in "\n\r\t" for character in text):
         raise ValueError("archive contains an incomplete or unauthenticated frame stream")
-    lines = text.splitlines()
+    lines = text.splitlines(keepends=target.suffix == ".log")
     if target.suffix == ".jsonl":
         lines = [line for line in lines if line.strip()]
         for line in lines:

@@ -3,6 +3,7 @@ interpolation, hidden-whitespace and suspicious-entry filtering, the filtered
 subprocess env, command resolution, the cached-npx binary shortcut and the shared stderr log."""
 
 import codecs
+import contextvars
 import hashlib
 import json
 import logging
@@ -23,27 +24,49 @@ _mcp_stderr_log_fh: dict[str, Any] = {}  # profile home key -> handle
 _mcp_stderr_log_lock = threading.Lock()
 
 
+class _VaultMCPLog:
+    """Text sink for the existing encrypted log frame format; no plaintext file FD."""
+
+    def __init__(self, path: Path):
+        from hermes_security import frames
+        from hermes_security.errors import VaultIntegrityError
+        self.name = str(path)
+        self.closed = False
+        try:
+            frames.append(path, b"", purpose="log")
+        except VaultIntegrityError as exc:
+            raise VaultIntegrityError(
+                "MCP log authentication failed; stop this profile and run "
+                "`hermes secure-vault repair` before restarting. Existing bytes are preserved."
+            ) from exc
+
+    def write(self, text: str) -> int:
+        from hermes_security import frames
+        if self.closed:
+            raise ValueError("MCP log is closed")
+        frames.append(self.name, text.encode("utf-8", errors="replace"), purpose="log")
+        return len(text)
+
+    def flush(self) -> None:
+        """Frame appends already flush and fsync before returning."""
+
+    def close(self) -> None:
+        self.closed = True
+
+
 def _get_mcp_stderr_log() -> Any:
-    """Shared append-mode handle for MCP subprocess stderr, cached until shutdown PER PROFILE HOME (a
-    multiplexed gateway's secondary profile must log under ITS ``logs/``, not the launch profile's). Must
-    expose a real fd (asyncio wires the child's stderr to it); falls back to ``/dev/null``, then real stderr."""
+    """Profile-owned text sink. Child stderr reaches it through a kernel pipe."""
     from hermes_constants import get_hermes_home, hermes_home_key, mkdir_under_hermes_home
+    from hermes_security.io import _home_for
     home_key = hermes_home_key()
     with _mcp_stderr_log_lock:
         fh = _mcp_stderr_log_fh.get(home_key)
         if fh is None or fh.closed:
-            try:
-                log_dir = get_hermes_home() / "logs"
-                mkdir_under_hermes_home(log_dir)
-                # Line-buffered so output lands promptly; errors="replace" tolerates garbled binary.
-                fh = open(log_dir / "mcp-stderr.log", "a", encoding="utf-8", errors="replace", buffering=1)
-                fh.fileno()  # confirm a real fd before committing
-            except Exception as exc:  # pragma: no cover — best-effort fallback
-                logger.debug("Failed to open MCP stderr log, using devnull: %s", exc)
-                try:
-                    fh = open(os.devnull, "w", encoding="utf-8")
-                except Exception:
-                    fh = sys.stderr
+            log_dir = get_hermes_home() / "logs"
+            mkdir_under_hermes_home(log_dir)
+            path = log_dir / "mcp-stderr.log"
+            fh = (_VaultMCPLog(path) if _home_for(path) is not None else
+                  open(path, "a", encoding="utf-8", errors="replace", buffering=1))
             _mcp_stderr_log_fh[home_key] = fh
         return fh
 
@@ -74,10 +97,20 @@ class _StderrTee:
         read_fd, write_fd = os.pipe()
         self.sink = os.fdopen(write_fd, "wb", buffering=0)
         self._log, self._tail = log_fh, bytearray()
-        self._reader = threading.Thread(target=self._pump, args=(read_fd,), name="mcp-stderr", daemon=True)
+        self._error = None
+        self._owner_context = contextvars.copy_context()
+        from agent.memory_provider import spawn_context_thread
+        self._reader = spawn_context_thread(self._pump, args=(read_fd,), name="mcp-stderr")
         self._reader.start()
 
     def _pump(self, read_fd: int) -> None:
+        from hermes_security.errors import VaultError
+        try:
+            self._drain(read_fd)
+        except (VaultError, OSError, ValueError) as exc:
+            self._error = exc
+
+    def _drain(self, read_fd: int) -> None:
         decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
         pending = ""
         with os.fdopen(read_fd, "rb", buffering=0) as source:
@@ -92,29 +125,34 @@ class _StderrTee:
     def _write_lines(self, lines: list[str]) -> None:
         if not lines:
             return
+        from agent.redact import redact_sensitive_text
+        text = redact_sensitive_text("".join(stamp_line(line) for line in lines), force=True)
         try:
-            self._log.write("".join(stamp_line(line) for line in lines))
+            self._log.write(text)
             self._log.flush()
-        except (OSError, ValueError):  # log closed at shutdown: keep draining the child
-            pass
+        except (OSError, ValueError):
+            if not self._log.closed:
+                raise
+            # Log closed at shutdown: keep draining the child until its transport ends.
 
     def close(self, timeout: float = 2.0) -> str:
         """Close our write end and give the reader *timeout* to drain (a surviving grandchild can keep
         the pipe open); the tail read so far."""
         self.sink.close()
         self._reader.join(timeout)
-        return self._tail.decode("utf-8", errors="replace")
+        if self._error is not None:
+            raise self._error
+        from agent.redact import redact_sensitive_text
+        return self._owner_context.copy().run(
+            redact_sensitive_text, self._tail.decode("utf-8", errors="replace"), force=True)
 
 
 def _write_stderr_log_header(server_name: str) -> None:
     """Session marker so operators can find each server's output in the shared log; it leads with the
     same stamp as every server line (``_StderrTee``) so ``hermes logs mcp --since`` can filter it."""
     fh = _get_mcp_stderr_log()
-    try:
-        fh.write(f"\n{timestamp()} ===== starting MCP server '{server_name}' =====\n")
-        fh.flush()
-    except Exception:
-        pass
+    fh.write(f"\n{timestamp()} ===== starting MCP server '{server_name}' =====\n")
+    fh.flush()
 
 
 def _tail_server_stderr(server_name: str, *, max_bytes: int = 8192, max_lines: int = 8) -> str:
@@ -129,11 +167,16 @@ def _tail_server_stderr(server_name: str, *, max_bytes: int = 8192, max_lines: i
         path = getattr(fh, "name", None)
         if not path or path == os.devnull:
             return ""
-        with open(path, "rb") as raw:
-            raw.seek(0, os.SEEK_END)
-            size = raw.tell()
-            raw.seek(max(0, size - max_bytes))
-            chunk = raw.read().decode("utf-8", "replace")
+        from hermes_security.io import _home_for
+        if _home_for(Path(path)) is not None:
+            from hermes_security import frames
+            chunk = b"".join(frames.read_frames(path, purpose="log"))[-max_bytes:].decode("utf-8", "replace")
+        else:
+            with open(path, "rb") as raw:
+                raw.seek(0, os.SEEK_END)
+                size = raw.tell()
+                raw.seek(max(0, size - max_bytes))
+                chunk = raw.read().decode("utf-8", "replace")
         cut = chunk.rfind(f"starting MCP server '{server_name}'")
         if cut < 0:
             return ""
@@ -200,6 +243,8 @@ def _build_safe_env(user_env: Optional[dict]) -> dict:
     for key in ("HERMES_KANBAN_DB", "HERMES_KANBAN_BOARD"):
         if key in os.environ:
             env[key] = os.environ[key]
+    from hermes_constants import get_hermes_home
+    env["HERMES_HOME"] = str(get_hermes_home())
     if user_env:
         env.update(user_env)
     from agent.delegation_context import delegated_child_subprocess_env

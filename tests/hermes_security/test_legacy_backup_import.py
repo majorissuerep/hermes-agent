@@ -52,7 +52,7 @@ def test_zip_restores_settings_secret_and_database_without_disabling_encryption(
     assert archive.read_bytes() == original
     from hermes_security.frames import read_frames
 
-    assert list(read_frames(home / "logs" / "retained.log", purpose="log")) == [b"retained original log"]
+    assert list(read_frames(home / "logs" / "retained.log", purpose="log")) == [b"retained original log\n"]
 
 
 def test_foreign_vault_metadata_is_refused_before_any_file_is_replaced(tmp_path, monkeypatch):

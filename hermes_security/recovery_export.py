@@ -53,6 +53,8 @@ def _plaintext(path: Path, relative: Path, vault) -> bytes:
         payloads, consumed = frames.split_stream(raw, vault=vault, purpose=_frame_purpose(path), strict=True)
         if consumed != len(raw):
             raise VaultIntegrityError(f"Incomplete stream {relative}; run secure-vault repair first")
+        if path.suffix == ".log":
+            return b"".join(payloads)
         return b"".join(payload + b"\n" for payload in payloads)
     if not vault_mod._is_in_skip_dir(relative):
         raise VaultIntegrityError(f"Unsealed state {relative}; run secure-vault repair first")

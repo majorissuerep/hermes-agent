@@ -13,7 +13,7 @@ command exit alone does not establish that outcome.
 
 The starting fork revision is `1815472adf69eb16cc201c0d9ac4c7e69f5fa51b`.
 On 2026-11-02 upstream main was fetched at
-`40b566502a84e24ed97afdc7ea5056968e071472`: 6,830 upstream commits after
+`8bf1b7ef75e27f1e9eec969f4beec47f06519fdb`: 6,894 upstream commits after
 the shared base `eb75627faf532fa6ffbdae59a0d14b0b385fc780`. The unfinished
 `sync/upstream-20261022` and `ci/gitea-primary-20261028` branches are inputs to
 review, not accepted product evidence.
@@ -79,6 +79,17 @@ keeps its own routing. Codex receives the key through its documented per-run
 `CODEX_API_KEY` interface, rather than relying on `OPENAI_API_KEY` to override
 saved CLI authentication.
 
+Outgoing MCP stdio servers receive the owning profile path, with an explicit
+server override still honored. Their environment remains filtered and does not
+inherit vault grants, key FDs or passphrases. MCP diagnostics use the existing
+encrypted log frames, and the pipe reader retains the profile's redaction scope.
+An unreadable log stops startup with a repair remedy; a write failure is reported.
+Offline repair retains legacy diagnostics and enables subsequent encrypted appends.
+Log migration, legacy-backup import and explicit recovery export retain line
+terminators and partial final lines; JSONL record framing is unchanged.
+The native parent-death supervisor keeps its kernel-pipe diagnostics and filtered
+environment without receiving unlock material.
+
 The consequential assumptions are that the public command inherits the correct
 installation and grant, and that external executors preserve the grant through
 their own shell boundaries. Real child commands against synthetic encrypted
@@ -113,6 +124,10 @@ path, a managed Hermes chat subprocess, encrypted SQLCipher history, two native
 children calling the management CLI,
 real PTY keyboard/transcript round trips and Docker source transport with no host
 mounts or inherited model credential. The host's native macOS coverage is pending.
+The public MCP stdio scenarios completed four checks; seven pre-existing expected
+failures for unsupported image results and empty metadata remain unqualified.
+Separate real-SDK regressions verify owning/explicit child homes, filtered unlock
+material, encrypted/redacted diagnostics, write failure and legacy-log recovery.
 The six cold lifecycle/live-gateway scenarios require their existing dedicated
 credentials and disposable environments; they remain pending here.
 
@@ -148,6 +163,8 @@ does not count file parity as qualification. This increment ports upstream
 spawn wiring from `29fef14fbf3501ac02140bc34ea339d64ff650ce`. Foreground/background
 tests execute actual tools from absolute and relative PATH entries. The larger
 upstream merge remains unaccepted.
+The profile-path port from `9d8efb3504d75810080bca994ed8a5a2bbf137c3` is adapted
+to the fork's encrypted MCP diagnostics and existing filtered environment.
 
 One Woodpecker quality flow invokes the shared verification command:
 PM-pinned bootstrap, blocking lint guards, lock consistency, canonical Python
@@ -164,6 +181,10 @@ mode selected a shallow tree-filtered checkout despite depth 0. It was cancelled
 A subsequent full-history fetch hit the service's HTTP 504 deadline. Neither run
 counts as qualification; bounded history retains the reviewed diff without an
 unbounded archive transfer through the ingress.
+The verifier copies the immutable checkout from the shared NAS onto the pod's
+temporary disk before provisioning and testing, avoiding repeated network-file
+imports. It remains bounded to two CPUs, 6 GiB RAM and 8 GiB temporary storage,
+within the existing namespace limits; the temporary copy is removed on exit.
 
 The private source is `unpossible/hermes-agent` on the existing Gitea service;
 the public mirror is `majorissuerep/hermes-agent` on GitHub. The sole GitHub

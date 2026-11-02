@@ -584,19 +584,26 @@ _supervised_pgids: set = set()
 def _spawn_death_supervisor():
     """Start the shared supervisor, or None if it cannot be started."""
     import subprocess
+    from tools.mcp_tool_config import _StderrTee, _build_safe_env
     supervisor = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mcp_death_supervisor.py")
+    stderr = None
     try:
+        stderr = _StderrTee(_get_mcp_stderr_log())
         # start_new_session=True is load-bearing: shutdown paths killpg this process's own group,
         # which would kill the supervisor before it could reap anything.
         return subprocess.Popen(
             [sys.executable, supervisor, "--parent-pgid", str(os.getpgid(0))],
-            stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=_get_mcp_stderr_log(),
-            start_new_session=True, close_fds=True, text=True)
+            stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=stderr.sink,
+            env=_build_safe_env(None), start_new_session=True, close_fds=True, text=True)
     except Exception:
         # Never let supervisor bookkeeping block a real MCP connection: graceful shutdown paths
         # still reap normally; only the ungraceful-exit safety net is lost.
         logger.debug("Could not start the MCP parent-death supervisor", exc_info=True)
         return None
+    finally:
+        if stderr is not None:
+            # The child's duplicate owns the pipe lifetime; EOF drains the reader.
+            stderr.sink.close()
 
 
 def _prune_dead_supervised_pgids() -> set:

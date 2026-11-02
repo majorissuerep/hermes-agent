@@ -86,9 +86,29 @@ def test_repair_recovers_the_clobbered_home(tmp_path, monkeypatch):
     assert not report["unrecoverable"], report
     rows, lines, env_text = _state(home)
     assert (rows, env_text) == (expected[0], expected[2])
-    assert lines == [*expected[1], b"old venv plaintext", b"appended after the wrap"]
+    assert lines == [*expected[1], b"old venv plaintext\n", b"appended after the wrap"]
     again = mig.repair_clobbered_state(home)
     assert not any(again[key] for key in ("sealed", "unwrapped", "reframed", "restored", "unrecoverable"))
+
+
+@pytest.mark.parametrize("operation", ["migrate", "repair"])
+def test_log_conversion_retains_line_boundaries_and_partial_last_line(tmp_path, monkeypatch, operation):
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HERMES_HOME", str(home))
+    if operation == "repair":
+        hv.init_vault(home, PW)
+        hv.unlock(home, PW)
+    path = home / "logs" / "mcp-stderr.log"
+    path.parent.mkdir()
+    original = b"first\r\n\r\nsecond\npartial last line"
+    path.write_bytes(original)
+    if operation == "migrate":
+        assert mig.migrate_home(home, PW).ok
+    else:
+        assert mig.repair_clobbered_state(home)["unrecoverable"] == []
+    assert b"".join(sec_frames.read_frames(path, purpose="log")) == original
+    assert b"first" not in path.read_bytes()
 
 
 @pytest.mark.platforms("any")

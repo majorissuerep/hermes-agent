@@ -118,7 +118,8 @@ def test_same_named_server_with_other_credentials_is_a_separate_connection(two_p
 
     # A routed profile reconciles with NO ambient secret scope (``discover_mcp_tools`` binds the
     # owner scope only around the config load, #113746): with a source-tagged secret the adopter's
-    # stdio identity still resolves in ITS OWN scope, so an equal value shares the owner's child.
+    # stdio identity still resolves in ITS OWN scope. An explicitly shared server home and
+    # equal credential value permit reuse; default profile homes are distinct spawn inputs.
     import sys
     from agent import secret_scope
     from hermes_cli import env_loader
@@ -126,7 +127,8 @@ def test_same_named_server_with_other_credentials_is_a_separate_connection(two_p
     monkeypatch.setattr(env_loader, "_SECRET_SOURCES", {"FIXTURE_TOKEN": "op"})
     for profile in ("a", "b"):
         (tmp_path / "profiles" / profile / ".env").write_text("FIXTURE_TOKEN=tok\n", encoding="utf-8")
-    cfg_s = {"command": sys.executable, "args": ["-c", "pass"]}
+    cfg_s = {"command": sys.executable, "args": ["-c", "pass"],
+             "env": {"HERMES_HOME": str(tmp_path / "shared-server-home")}}
     two_profiles("a")
     with disc._owner_secret_scope():  # the connecting task records its digest in the owner's scope
         srv_s = _server("s", cfg_s)

@@ -18,6 +18,11 @@ steps:
     commands:
       - apt-get update
       - apt-get install --no-install-recommends -y zsh
+      - verification_root="$(mktemp -d)"
+      - trap 'rm -rf -- "$verification_root"' EXIT
+      - cp -a . "$verification_root/source"
+      - cd "$verification_root/source"
+      - export CI_WORKSPACE="$verification_root/source"
       - python3 scripts/ci/verify.py
     environment:
       CI: "true"
@@ -29,6 +34,8 @@ steps:
           requests:
             cpu: "2"
             memory: 4Gi
+            ephemeral-storage: 2Gi
           limits:
             cpu: "2"
             memory: 6Gi
+            ephemeral-storage: 8Gi
