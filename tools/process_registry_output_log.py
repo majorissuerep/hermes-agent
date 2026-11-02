@@ -64,7 +64,7 @@ def spawn_output_worker(log: Path, argv: list[str], *, env: dict, execution_id: 
 
     if _IS_WINDOWS:
         raise RuntimeError("Durable encrypted background processes require Linux or macOS")
-    handoff = prepare_child_key()
+    handoff = prepare_child_key(get_hermes_home())
     if handoff is None:
         raise RuntimeError("Durable process output requires an unlocked profile vault")
     key_fd, key_env = handoff

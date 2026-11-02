@@ -1112,18 +1112,17 @@ class ProcessRegistry(ProcessTerminationMixin, ProcessCheckpointMixin, ProcessOu
     def spawn_local(
         self, command: str, cwd: str | None = None, task_id: str = "", session_key: str = "",
         env_vars: dict | None = None, use_pty: bool = False, owner_task_id: str = "",
-        persist_on_release: bool = False) -> ProcessSession:
-        """Spawn a background process locally (TERMINAL_ENV=local; other backends use
-        spawn_via_env()). ``use_pty`` requests a pseudo-terminal via ptyprocess/pywinpty
-        for interactive CLIs, falling back to a plain pipe when unavailable or failing.
-        ``persist_on_release`` keeps the process out of agent-lifecycle kill sweeps (#41225)."""
-        # Bash parses ``A && B &`` as ``(A && B) &`` — a subshell that holds our stdout
-        # pipe open forever when B is a long-running server. The rewriter turns it into
-        # ``A && { B & }``. Lazy import: terminal_tool imports this module.
-        # Guard against the `A && B &` subshell-wait trap (issue #68915).
+        persist_on_release: bool = False, restore_login_path: bool = False) -> ProcessSession:
+        """Spawn a local pipe/PTY process; remote callers use spawn_via_env().
+        ``persist_on_release`` survives agent close; ``restore_login_path`` retains
+        executor locations after a login profile resets PATH."""
+        # Avoid the ``A && B &`` subshell-wait trap (#68915).
         from tools.terminal_tool_sudo import _rewrite_compound_background as _rewrite_bg
 
         safe_command = _rewrite_bg(command)
+        if restore_login_path and not _IS_WINDOWS:
+            from tools.environments.login_path import append_dropped_path_entries
+            safe_command = append_dropped_path_entries(safe_command, self._spawn_env(env_vars).get("PATH", ""))
         session = self._new_session(command, task_id, owner_task_id, session_key, _resolve_safe_cwd(cwd or os.getcwd()),
                                     persist_on_release=persist_on_release)
         pty_scope_attempted = False

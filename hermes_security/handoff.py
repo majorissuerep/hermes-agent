@@ -3,8 +3,8 @@
 The parent writes the master key into a pipe and passes only the READ END as an inherited fd; the
 child reads it once at its vault gate, closes it, and proves the key against the vault verifier
 before caching it (``vault.adopt_unlocked_key``). The key never exists anywhere but the two processes'
-memory and a kernel pipe buffer that is drained on first read. Used by the session host launcher
-(``hermes_cli/session_host.py``): a detached host has no TTY to prompt on.
+memory and a kernel pipe buffer that is drained on first read. Local TUI, dependency-interpreter
+and encrypted-output handoffs select their owning home explicitly.
 """
 
 from __future__ import annotations
@@ -17,16 +17,21 @@ from pathlib import Path
 KEY_FD_ENV = "HERMES_VAULT_KEY_FD"
 
 
-def prepare_child_key() -> tuple[int, dict[str, str]] | None:
-    """``(read_fd, env additions)`` carrying every vault unlocked in THIS process (a machine-level child may
-    serve several profile homes), or None when nothing is unlocked. The caller passes ``read_fd`` in
-    ``pass_fds`` and closes it after the spawn."""
-    from hermes_security.vault import unlocked_homes, export_unlocked_key
+def prepare_child_key(home: Path | str | None = None) -> tuple[int, dict[str, str]] | None:
+    """One selected home's unlocked owner, never every key cached by a local process.
 
-    keys = [{"home": str(home), "key": base64.b64encode(export_unlocked_key(home)).decode("ascii")}
-            for home in unlocked_homes()]
-    if not keys:
+    The caller passes ``read_fd`` in ``pass_fds`` and closes it after spawn,
+    including on failure. An omitted home resolves the current profile at call time.
+    """
+    from hermes_security.vault import is_unlocked, export_unlocked_key
+    from hermes_security.session_authority import _vault_home
+    if home is None:
+        from hermes_constants import get_hermes_home
+        home = get_hermes_home()
+    owner = _vault_home(Path(home).expanduser().resolve())
+    if owner is None or not is_unlocked(owner):
         return None
+    keys = [{"home": str(owner), "key": base64.b64encode(export_unlocked_key(owner)).decode("ascii")}]
     payload = json.dumps(keys).encode("utf-8")
     read_fd, write_fd = os.pipe()
     try:

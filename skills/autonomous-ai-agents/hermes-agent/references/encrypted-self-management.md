@@ -91,6 +91,28 @@ state. A child can run the same config commands and create encrypted state witho
 another prompt. Closing a child must not revoke the parent's access. New independent
 sessions started after the owner closes must unlock normally.
 
+For a new Hermes CLI child or an external coding-agent task, use the local
+managed runner through `terminal`:
+
+```sh
+hermes manage run hermes chat -q 'Inspect this project and report the result'
+hermes manage run codex -- --sandbox workspace-write 'Inspect this project'
+hermes manage run claude -- --allowedTools Read 'Inspect this project'
+```
+
+`hermes manage schema` describes the available runners and all existing
+management command families. The runner selects the current installation,
+binds the current encrypted profile and temporary unlock, and passes stdin and
+stdout through. Codex runs `exec --ephemeral`; Claude runs print mode with
+session persistence disabled. Each executor retains its permission controls.
+Only its own provider API key may be read from the selected encrypted secret
+store; other provider, GitHub and infrastructure credentials are scrubbed.
+External CLI OAuth remains that CLI's own login, distinct from Hermes OAuth.
+
+A sandbox can refuse access to the management command or its local unlock
+channel. Report the refused boundary; do not retry with sandbox or permissions
+disabled. Never replace encrypted files with plaintext to make a child work.
+
 ## Unexpected unlock prompts
 
 If a local command or subagent requests another passphrase, stop that operation

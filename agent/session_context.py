@@ -6,7 +6,7 @@ other's routing ids.  ``get_session_env`` is a drop-in for ``os.getenv``.
 """
 
 import os
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from contextvars import ContextVar
 from typing import Any, Iterator
 
@@ -21,6 +21,16 @@ _session_context_engaged: bool = False
 def session_context_engaged() -> bool:
     """True if any session has been bound via set_session_vars in this process."""
     return _session_context_engaged
+
+
+def rebind_compressed_session(agent, session_id: str) -> None:
+    """Keep management authority, tool identity and logging on the committed continuation."""
+    from hermes_security.session_authority import reanchor_agent_authority
+    reanchor_agent_authority(agent, session_id)
+    set_current_session_id(session_id)
+    with suppress(Exception):
+        from hermes_logging import set_session_context
+        set_session_context(session_id)
 
 
 # --- Per-task session variables: bound by set_session_vars / cleared to "" by clear_session_vars;

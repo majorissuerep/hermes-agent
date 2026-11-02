@@ -365,3 +365,57 @@ def test_rotated_vault_public_backup_import_restores_config_and_history(world, t
         assert db._conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
     assert _fresh_unlock(world, world.password).returncode != 0
     assert _fresh_unlock(world, new_password).returncode == 0
+
+
+@pytest.mark.parametrize("runner", ["codex", "claude"])
+def test_managed_coding_executor_calls_owning_encrypted_cli_without_another_unlock(world, tmp_path, runner):
+    from hermes_cli._launchers import runtime_command
+    from hermes_security import io
+
+    io.write_text(world.home / ".env", "OPENAI_API_KEY=synthetic-codex\nANTHROPIC_API_KEY=synthetic-claude\n", purpose="env")
+    directory = tmp_path / "executors"
+    directory.mkdir()
+    executable = directory / runner
+    executable.write_text(f"#!{sys.executable}\n" + """
+import json, os, subprocess, sys
+name = os.path.basename(sys.argv[0])
+assert ('--ephemeral' in sys.argv) if name == 'codex' else ('--no-session-persistence' in sys.argv and '--print' in sys.argv)
+expected = 'OPENAI_API_KEY' if name == 'codex' else 'ANTHROPIC_API_KEY'
+foreign = 'ANTHROPIC_API_KEY' if name == 'codex' else 'OPENAI_API_KEY'
+assert os.environ[expected] == 'synthetic-' + name
+assert foreign not in os.environ and 'GH_TOKEN' not in os.environ
+assert 'HERMES_VAULT_KEY_FD' not in os.environ and 'HERMES_MASTER_PASSWORD' not in os.environ
+request = {'op': 'config.get', 'path': ['agent', 'max_turns']}
+read = subprocess.run(['/bin/bash', '-lc', 'hermes manage apply'], input=json.dumps(request), text=True, capture_output=True, timeout=60)
+assert read.returncode == 0
+result = json.loads(read.stdout)['result']
+assert result['value'] == 19
+request = {'op': 'config.set', 'path': ['agent', 'max_turns'], 'value': 47, 'revision': result['revision']}
+write = subprocess.run(['/bin/bash', '-lc', 'hermes manage apply'], input=json.dumps(request), text=True, capture_output=True, timeout=60)
+assert write.returncode == 0
+print('encrypted-child-management-ok')
+""")
+    executable.chmod(0o700)
+    env = dict(world.env, PATH=str(directory) + os.pathsep + world.env["PATH"], GH_TOKEN="synthetic-foreign-github")
+    result = subprocess.run(runtime_command(ROOT, ["manage", "run", runner]),
+                            env=env, cwd=ROOT, input="synthetic task via stdin", capture_output=True, text=True,
+                            timeout=120, check=False)
+    assert result.returncode == 0, world.diagnostic((result.stdout, result.stderr), env=env)
+    assert result.stdout.strip() == "encrypted-child-management-ok"
+    assert world.get(["agent", "max_turns"])["value"] == 47
+    assert (world.home / "config.yaml").read_bytes().startswith(b"HRMVAULT")
+
+
+def test_managed_native_cli_keeps_parent_unlocked_and_standalone_refuses(world):
+    from hermes_cli._launchers import runtime_command
+
+    command = runtime_command(ROOT, ["manage", "run", "hermes", "config", "get", "agent.max_turns"])
+    result = subprocess.run(command, env=world.env, cwd=ROOT, stdin=subprocess.DEVNULL,
+                            text=True, capture_output=True, timeout=90, check=False)
+    assert result.returncode == 0 and "19" in result.stdout, world.diagnostic((result.stdout, result.stderr))
+    assert world.get(["agent", "max_turns"])["value"] == 19
+    independent = {k: v for k, v in world.env.items() if k != "HERMES_SESSION_VAULT"}
+    refused = subprocess.run(command, env=independent, cwd=ROOT, stdin=subprocess.DEVNULL,
+                             text=True, capture_output=True, timeout=90, check=False)
+    assert refused.returncode != 0
+    assert json.loads(refused.stdout)["ok"] is False

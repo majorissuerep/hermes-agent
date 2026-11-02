@@ -1189,9 +1189,8 @@ def _init_session_state(agent, session_id, session_db, parent_session_id, reason
     agent.session_start = datetime.now()
     agent.session_id = session_id or new_session_id(agent.session_start)
     _publish_session_id(agent.session_id)
-    from hermes_security.session_authority import start_session_authority
-    agent._vault_session_authority = start_session_authority(get_hermes_home(), agent.session_id)
-
+    from hermes_security.session_authority import bind_agent_authority
+    bind_agent_authority(agent, parent_session_id)
     # ~/.hermes/sessions/ — kept unconditionally for request_dump_*.json debug breadcrumbs.
     agent.logs_dir = get_hermes_home() / "sessions"
     agent.logs_dir.mkdir(parents=True, exist_ok=True)

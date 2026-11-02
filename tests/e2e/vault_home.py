@@ -123,7 +123,7 @@ def spawn_unlocked(argv, *, env: dict[str, str], **kwargs) -> subprocess.Popen:
     """A real child consumes one inherited key pipe at its public/private vault gate."""
     from hermes_security.handoff import prepare_child_key
 
-    handoff = prepare_child_key()
+    handoff = prepare_child_key(env["HERMES_HOME"])
     assert handoff is not None, "E2E parent must own a synthetic unlocked vault"
     fd, additions = handoff
     try:

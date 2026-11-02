@@ -15,7 +15,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 @pytest.mark.platforms("posix")
-@pytest.mark.parametrize("mode", ["quiet", "oneshot", "redirected", "resumed"])
+@pytest.mark.parametrize("mode", ["quiet", "oneshot", "redirected", "resumed", "self-management"])
 def test_finite_chat_joins_parallel_children_before_final_response(tmp_path, mode):
     """Real parser, CLI, agent loops and delegate_task. Only inference is synthetic.
 
@@ -46,10 +46,23 @@ def test_finite_chat_joins_parallel_children_before_final_response(tmp_path, mod
                 results = [json.loads(m["content"]) for m in messages if m["role"] == "tool"]
                 message: dict[str, Any]
                 if worker:
-                    with lock:
-                        children.append(worker)
-                    barrier.wait(timeout=20)
-                    message = {"role": "assistant", "content": worker + "_COMPLETE"}
+                    if not results:
+                        with lock:
+                            children.append(worker)
+                        barrier.wait(timeout=20)
+                    if mode == "self-management" and not results:
+                        message = {"role": "assistant", "content": None, "tool_calls": [{
+                            "id": "call_child_management", "type": "function", "function": {
+                                "name": "terminal", "arguments": json.dumps({
+                                    "command": "hermes config get agent.max_turns", "timeout": 30,
+                                }),
+                            },
+                        }]}
+                    else:
+                        successful = mode != "self-management" or any(
+                            row.get("exit_code") == 0 and str(row.get("output", "")).strip() == "69"
+                            for row in results)
+                        message = {"role": "assistant", "content": worker + ("_COMPLETE" if successful else "_FAILED")}
                 elif results:
                     with lock:
                         joined_results.extend(results)
@@ -103,6 +116,7 @@ def test_finite_chat_joins_parallel_children_before_final_response(tmp_path, mod
     url = f"http://127.0.0.1:{server.server_port}/v1"
     (home / "config.yaml").write_text(
         f"model:\n  provider: custom\n  base_url: {url}\n  api_mode: chat_completions\n"
+        "agent:\n  max_turns: 69\n"
         "auxiliary:\n  title_generation:\n    enabled: false\n"
         "memory:\n  memory_enabled: false\n  user_profile_enabled: false\n"
         "terminal:\n  env: local\n  oneshot_completion_wait_seconds: 1\n"
@@ -127,7 +141,8 @@ def test_finite_chat_joins_parallel_children_before_final_response(tmp_path, mod
     (home / ".env").write_text(f"OPENAI_API_KEY=local-test-only\nOPENAI_BASE_URL={url}\n")
     prepare_fixture_runtime(home, REPO_ROOT)
     common = ["--provider", "custom", "--model", "test-model", "--base-url", url,
-              "--toolsets", "delegation", "--ignore-rules", "--reasoning", "high", "--max-turns", "10"]
+              "--toolsets", "terminal,delegation" if mode == "self-management" else "delegation",
+              "--ignore-rules", "--reasoning", "high", "--max-turns", "10"]
     command = [sys.executable, "-m", "hermes_cli.main"]
     if mode == "oneshot":
         command += ["-z", query.read_text(), *common]
@@ -150,6 +165,11 @@ def test_finite_chat_joins_parallel_children_before_final_response(tmp_path, mod
             assert any(len(row.get("results", [])) == 2 and all(
                 entry.get("status") == "completed" for entry in row["results"])
                 for row in saved), saved
+            if mode == "self-management":
+                assert sum(row.get("exit_code") == 0 and str(row.get("output", "")).strip() == "69"
+                           for row in saved) == 2, saved
+                assert (home / "config.yaml").read_bytes().startswith(b"HRMVAULT")
+                assert not (home / "state.db").read_bytes().startswith(b"SQLite format 3")
             if mode == "resumed":
                 history = database.execute("SELECT content FROM messages WHERE session_id=? ORDER BY id",
                                            ("finite-resume",)).fetchall()

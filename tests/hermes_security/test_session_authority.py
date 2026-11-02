@@ -93,3 +93,71 @@ def test_foreign_invalid_and_closed_grants_cannot_unlock_another_home(tmp_path, 
         for grant in grants:
             grant.close()
         vault.clear_vault_cache()
+
+
+@pytest.mark.platforms("posix")
+def test_derived_grants_end_with_the_owner_but_child_close_keeps_parent(tmp_path, monkeypatch):
+    from hermes_security.session_authority import start_session_authority
+    from hermes_cli.config import save_config
+
+    home = tmp_path / "state"
+    monkeypatch.setenv("HERMES_HOME", str(home))
+    vault.init_vault(home, "synthetic-lineage-password")
+    vault.unlock(home, "synthetic-lineage-password")
+    save_config({"agent": {"max_turns": 29}}, merge_existing=True)
+    owner = start_session_authority(home, "owner")
+    delegated = start_session_authority(home, "delegated", parent_session_id="owner")
+    sibling = start_session_authority(home, "sibling", parent_session_id="owner")
+    try:
+        assert child(home, delegated.environment()).returncode == 0
+        delegated.close()
+        assert child(home, owner.environment()).returncode == 0
+        assert child(home, sibling.environment()).returncode == 0
+        owner.close()
+        assert child(home, sibling.environment()).returncode != 0
+    finally:
+        for authority in (delegated, sibling, owner):
+            authority.close()
+        vault.clear_vault_cache()
+
+
+@pytest.mark.platforms("posix")
+def test_nested_hermes_cannot_renew_its_grant_past_the_original_owner(tmp_path, monkeypatch):
+    from hermes_security.session_authority import start_session_authority
+    from hermes_cli.config import save_config
+
+    home = tmp_path / "state"
+    monkeypatch.setenv("HERMES_HOME", str(home))
+    vault.init_vault(home, "synthetic-nested-password")
+    vault.unlock(home, "synthetic-nested-password")
+    save_config({"agent": {"max_turns": 31}}, merge_existing=True)
+    owner = start_session_authority(home, "owner")
+    script = """
+import json, sys
+from hermes_security.handoff import adopt_inherited_key
+from hermes_security.session_authority import start_session_authority
+from hermes_constants import get_hermes_home
+assert adopt_inherited_key()
+nested = start_session_authority(get_hermes_home(), 'nested')
+try:
+    print(json.dumps(nested.environment()), flush=True)
+    sys.stdin.read(1)
+finally:
+    nested.close()
+"""
+    env = dict(os.environ, **owner.environment())
+    env.pop("HERMES_VAULT_KEY_FD", None)
+    with subprocess.Popen([sys.executable, "-c", script], env=env, cwd=ROOT,
+                          stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                          text=True) as process:
+        try:
+            import select
+            assert select.select([process.stdout], [], [], 15)[0], "nested owner failed to start"
+            grant = json.loads(process.stdout.readline())
+            assert child(home, grant).returncode == 0
+            owner.close()
+            assert child(home, grant).returncode != 0
+        finally:
+            process.communicate("x", timeout=20)
+            owner.close()
+            vault.clear_vault_cache()

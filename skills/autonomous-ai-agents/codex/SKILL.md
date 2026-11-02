@@ -1,151 +1,99 @@
 ---
 name: codex
-description: "Delegate coding to OpenAI Codex CLI (features, PRs)."
-version: 1.0.1
-author: Hermes Agent
+description: "Delegate coding through an encrypted local session."
+version: 1.1.0
+author: "Fork maintainers; upstream Hermes Agent contributors"
 license: MIT
-platforms: [linux, macos, windows]
+platforms: [linux, macos]
 metadata:
   hermes:
-    tags: [Coding-Agent, Codex, OpenAI, Code-Review, Refactoring]
+    tags: [Coding-Agent, Codex, OpenAI, Code-Review]
     related_skills: [claude-code, hermes-agent]
 ---
 
-# Codex CLI
+# Codex CLI Skill
 
-Delegate coding tasks to [Codex](https://github.com/openai/codex) via the Hermes terminal. Codex is OpenAI's autonomous coding agent CLI.
+Use `terminal` to run a focused Codex task under the current encrypted Hermes
+profile. The managed runner retains the owning Hermes command and unlock while
+Codex keeps its own sandbox and approval policy.
 
-## When to use
+## When to Use
 
-- Building features
-- Refactoring
-- PR reviews
-- Batch issue fixing
-
-Requires the codex CLI and a git repository.
+Delegate implementation, investigation, refactoring or review in a selected
+working directory. Use `delegate_task` for native Hermes children that need
+Hermes tools and encrypted conversation history.
 
 ## Prerequisites
 
-- Codex installed: `npm install -g @openai/codex`
-- OpenAI auth configured: either `OPENAI_API_KEY` or Codex OAuth credentials
-  from the Codex CLI login flow
-- **Must run inside a git repository** — Codex refuses to run outside one
-- Use `pty=true` in terminal calls — Codex is an interactive terminal app
+- An unlocked local Hermes session on Linux or macOS.
+- Codex CLI installed and authenticated through its own login, or an
+  `OPENAI_API_KEY` in the selected profile's encrypted secret store.
+- A concrete task, working directory, completion condition and permission scope.
 
-For Hermes itself, `model.provider: openai-codex` uses Hermes-managed Codex
-OAuth from `~/.hermes/auth.json` after `hermes auth add openai-codex`. For the
-standalone Codex CLI, a valid CLI OAuth session may live under
-`~/.codex/auth.json`; do not treat a missing `OPENAI_API_KEY` alone as proof
-that Codex auth is missing.
+Hermes-managed OpenAI OAuth and Codex CLI OAuth are separate logins. Never copy
+credential files, export vault keys or ask for a passphrase in chat. Use
+`hermes manage schema` to inspect supported runners and management operations.
 
-## One-Shot Tasks
+## How to Run
 
-```
-terminal(command="codex exec 'Add dark mode toggle to settings'", workdir="~/project", pty=true)
-```
-
-For scratch work (Codex needs a git repo):
-```
-terminal(command="cd $(mktemp -d) && git init && codex exec 'Build a snake game in Python'", pty=true)
+```python
+terminal(
+    command="hermes manage run codex -- --sandbox workspace-write 'Inspect the project and report the failing behavior'",
+    workdir="/path/to/project",
+    timeout=120,
+)
 ```
 
-## Background Mode (Long Tasks)
+The runner uses `codex exec --ephemeral`, disables credential-bearing shell
+snapshots, and retains a temporary home/session capability. A private kernel-pipe
+bridge works with network access disabled; it stores no key file. One-shot mode
+does not require a PTY. Do not add another `exec` subcommand.
 
-```
-# Start in background with PTY
-terminal(command="codex exec --sandbox workspace-write 'Refactor the auth module'", workdir="~/project", background=true, pty=true)
-# Returns session_id
+## Quick Reference
 
-# Monitor progress
-process(action="poll", session_id="<id>")
-process(action="log", session_id="<id>")
+| Need | Mechanism |
+| --- | --- |
+| Implementation | `--sandbox workspace-write` in a narrow workspace |
+| Model choice | `--model MODEL` if the task calls for it |
+| Structured events | `--json`; verify actual command results |
+| Long task | `terminal(background=true)` and `process_manage` |
+| Existing repository review | Ask for a read-only review and inspect its diff |
+| Non-repository scratch work | Deliberately select `--skip-git-repo-check` |
+| Hermes settings | Child runs `hermes manage schema` or existing public CLI |
 
-# Send input if Codex asks a question
-process(action="submit", session_id="<id>", data="yes")
+## Procedure
 
-# Kill if needed
-process(action="kill", session_id="<id>")
-```
+1. Inspect the project and instructions with `read_file` and `search_files`.
+2. Select the workspace and smallest permission scope that supports the task.
+3. Start the managed runner through `terminal`. Put the full task in the prompt
+   or pass it on stdin; never include secrets in either.
+4. For a background task, keep its returned process id and use
+   `process_manage(action="wait", session_id="...")` to collect completion.
+5. Inspect output and changed files with native tools. Run the relevant checks
+   before accepting the result or publishing any changes.
 
-## Key Flags
+## Pitfalls
 
-| Flag | Effect |
-|------|--------|
-| `exec "prompt"` | One-shot execution, exits when done |
-| `--sandbox workspace-write` (`-s`) | Sandboxed but auto-approves file changes in the workspace (the recommended auto-build mode) |
-| `--dangerously-bypass-approvals-and-sandbox` | No sandbox, no approvals (fastest, most dangerous; `--yolo` still works as a hidden alias) |
-| `--sandbox danger-full-access` | No Codex sandbox; useful when the host service context breaks bubblewrap |
+- A zero executor exit is not proof that its shell commands succeeded. Check
+  the command result and an independent artifact or state observation.
+- Codex may refuse writes outside its workspace, including Hermes settings.
+  Add only a deliberately authorized directory with `--add-dir`; retain the
+  sandbox. A parent Hermes sandbox still applies and can refuse that access.
+- Do not use unrestricted mode as an automatic retry for a refused task.
+- The managed runner starts a new one-shot task. It refuses resume/fork modes
+  and cannot keep a revoked owner's management access alive.
+- Keep external task output in the parent's encrypted history or an explicitly
+  requested workspace artifact. Do not create a second plaintext transcript.
+- An update changes code for subsequent sessions; it does not replace cached
+  instructions in an already-running agent.
 
-> **Deprecated:** `--full-auto` still works but the live CLI warns to use `--sandbox workspace-write` instead.
+## Verification
 
-## Hermes Gateway Caveat
+Require the expected result from an actual tool call, inspect the diff and run
+checks. For encrypted self-management, read a fresh non-secret marker through
+`hermes config get`, verify the owning file remains ciphertext, and confirm that
+an independent command without authority stays locked. A refused or unexecuted
+check remains incomplete.
 
-When invoking the Codex CLI from a Hermes gateway/service context (for example,
-Telegram-driven agent sessions), Codex `workspace-write` sandboxing may fail even
-when the same command works in the user's interactive shell. A typical symptom is
-bubblewrap/user-namespace errors such as `setting up uid map: Permission denied`
-or `loopback: Failed RTM_NEWADDR: Operation not permitted`.
-
-In that context, prefer:
-
-```
-codex exec --sandbox danger-full-access "<task>"
-```
-
-Use process boundaries as the safety layer instead: explicit `workdir`, clean git
-status before launch, narrow task prompts, `git diff` review, targeted tests, and
-human/agent confirmation before committing broad changes.
-
-## PR Reviews
-
-Clone to a temp directory for safe review:
-
-```
-terminal(command="REVIEW=$(mktemp -d) && git clone https://github.com/user/repo.git $REVIEW && cd $REVIEW && gh pr checkout 42 && codex review --base origin/main", pty=true)
-```
-
-## Parallel Issue Fixing with Worktrees
-
-```
-# Create worktrees
-terminal(command="git worktree add -b fix/issue-78 ~/.hermes/cache/scratch/issue-78 main", workdir="~/project")
-terminal(command="git worktree add -b fix/issue-99 ~/.hermes/cache/scratch/issue-99 main", workdir="~/project")
-
-# Launch Codex in each
-terminal(command="codex --sandbox workspace-write exec 'Fix issue #78: <description>. Commit when done.'", workdir="~/.hermes/cache/scratch/issue-78", background=true, pty=true)
-terminal(command="codex --sandbox workspace-write exec 'Fix issue #99: <description>. Commit when done.'", workdir="~/.hermes/cache/scratch/issue-99", background=true, pty=true)
-
-# Monitor
-process(action="list")
-
-# After completion, push and create PRs
-terminal(command="cd ~/.hermes/cache/scratch/issue-78 && git push -u origin fix/issue-78")
-terminal(command="gh pr create --repo user/repo --head fix/issue-78 --title 'fix: ...' --body '...'")
-
-# Cleanup
-terminal(command="git worktree remove ~/.hermes/cache/scratch/issue-78", workdir="~/project")
-```
-
-## Batch PR Reviews
-
-```
-# Fetch all PR refs
-terminal(command="git fetch origin '+refs/pull/*/head:refs/remotes/origin/pr/*'", workdir="~/project")
-
-# Review multiple PRs in parallel
-terminal(command="codex exec 'Review PR #86. git diff origin/main...origin/pr/86'", workdir="~/project", background=true, pty=true)
-terminal(command="codex exec 'Review PR #87. git diff origin/main...origin/pr/87'", workdir="~/project", background=true, pty=true)
-
-# Post results
-terminal(command="gh pr comment 86 --body '<review>'", workdir="~/project")
-```
-
-## Rules
-
-1. **Always use `pty=true`** — Codex is an interactive terminal app and hangs without a PTY
-2. **Git repo required** — Codex won't run outside a git directory. Use `mktemp -d && git init` for scratch
-3. **Use `exec` for one-shots** — `codex exec "prompt"` runs and exits cleanly
-4. **`--sandbox workspace-write` for building** — auto-approves changes within the sandbox (`--full-auto` is deprecated for this)
-5. **Background for long tasks** — use `background=true` and monitor with `process` tool
-6. **Don't interfere** — monitor with `poll`/`log`, be patient with long-running tasks
-7. **Parallel is fine** — run multiple Codex processes at once for batch work
+The [official configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference)
+explains environment inheritance, permission profiles and shell snapshots.

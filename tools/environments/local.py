@@ -1080,13 +1080,16 @@ class LocalEnvironment(BaseEnvironment):
     def _run_bash(self, cmd_string: str, *, login: bool = False, timeout: int = 120,
                   stdin_data: str | None = None) -> subprocess.Popen:
         bash = _find_bash()
+        run_env = _make_run_env(self.env)
         # Login invocations (init_session's env snapshot) source the user's rc /
         # custom init files so nvm/asdf/pyenv land on PATH in the snapshot.
         if login:
+            if not _IS_WINDOWS:
+                from tools.environments.login_path import append_dropped_path_entries
+                cmd_string = append_dropped_path_entries(cmd_string, run_env.get("PATH", ""))
             cmd_string = _prepend_shell_init(cmd_string, _resolve_shell_init_files())
         args = [bash, *(["-l"] if login else []), "-c", cmd_string]
         self._recover_cwd()
-        run_env = _make_run_env(self.env)
         # Model-driven commands (terminal, file tools, snapshots) run inside the session's
         # OS sandbox when it is enabled; raises (e.g. on Windows) rather than run unconfined.
         from hermes_security.sandbox.spawn import apply_env, sandboxed_spawn

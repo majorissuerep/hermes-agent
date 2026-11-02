@@ -659,6 +659,8 @@ def lock_now(home: Path | str | None = None) -> None:
     home_path = Path(home).expanduser().resolve()
     with _VAULT_LOCK:
         _VAULTS.pop(home_path, None)
+    from hermes_security.session_authority import forget_inherited_authority
+    forget_inherited_authority(home_path)
 
 
 def clear_vault_cache() -> None:
@@ -666,6 +668,8 @@ def clear_vault_cache() -> None:
 
     with _VAULT_LOCK:
         _VAULTS.clear()
+    from hermes_security.session_authority import forget_inherited_authority
+    forget_inherited_authority()
 
 
 # ---------------------------------------------------------------------------

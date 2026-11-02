@@ -23,15 +23,18 @@ SECRET_READ_DEADLINE_SECONDS = 5.0
 
 
 def schema():
+    from hermes_cli.managed_agents import RUNNERS
     return {"version": 1, "operations": OPERATIONS, "path": "array of string keys or integer list indices",
             "secrets": "inherited one-shot secret_fd >= 3, distinct from unlock FD; UTF-8, no trailing newline",
             "secret_read_deadline_seconds": SECRET_READ_DEADLINE_SECONDS,
             "config_batch": "atomic config-only; no cross-file transactions", "effect": "next_session",
             "errors": ["invalid_request", "invalid_operation", "invalid_path", "not_found", "invalid_type", "invalid_value",
-                       "invalid_config", "conflict", "secret_operation_required", "secret_timeout", "locked", "state_refused"],
+                       "invalid_config", "conflict", "secret_operation_required", "secret_timeout", "locked", "state_refused", "unavailable"],
+            "runners": RUNNERS, "run": "hermes manage run RUNNER [--] ARGS; stdin/stdout passed through; existing permissions retained",
             "lifecycle_commands": ["hermes profile --help", "hermes sessions --help", "hermes skills --help",
                                    "hermes mcp --help", "hermes plugins --help", "hermes cron --help",
-                                   "hermes backup --help", "hermes import --help", "hermes secure-vault --help", "hermes update --help"]}
+                                   "hermes backup --help", "hermes import --help", "hermes secure-vault --help", "hermes update --help",
+                                   "hermes pm --help", "hermes tools --help", "hermes memory --help", "hermes auth --help"]}
 
 
 def _request(value):
@@ -167,12 +170,32 @@ def _home_scope(profile):
         reset_hermes_home_override(token)
 
 
-def main(argv=None):
-    parser = _Parser(prog="hermes manage", description="Local structured management; secrets use inherited FDs.")
+def _parser():
+    parser = _Parser(prog="hermes manage", description="Encrypted local management and scoped coding-agent runners.")
     parser.add_argument("--profile", help="existing profile, otherwise the selected owning home")
-    parser.add_argument("command", choices=("schema", "apply"), nargs="?", default="schema")
+    commands = parser.add_subparsers(dest="command", parser_class=_Parser)
+    for name, description in (("schema", "Describe JSON operations and local runners"),
+                              ("apply", "Apply one JSON request from stdin"),
+                              ("run", "Run a foreground child with temporary unlock authority")):
+        command = commands.add_parser(name, help=description)
+        command.add_argument("--profile", default=argparse.SUPPRESS, help="existing owning profile")
+        if name == "run":
+            command.add_argument("runner", choices=("hermes", "codex", "claude"))
+            command.add_argument("arguments", nargs=argparse.REMAINDER, help="runner arguments, optionally after --")
+    parser.set_defaults(command="schema")
+    return parser
+
+
+def main(argv=None):
     try:
-        args = parser.parse_args(argv)
+        args = _parser().parse_args(argv)
+        if args.command == "run":
+            arguments = args.arguments
+            if arguments[:1] == ["--"]:
+                arguments = arguments[1:]
+            from hermes_cli.managed_agents import run
+            with _home_scope(args.profile) as home:
+                return run(home, args.runner, arguments)
         if args.command == "schema":
             result = schema()
         else:

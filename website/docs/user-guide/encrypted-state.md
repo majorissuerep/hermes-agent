@@ -30,6 +30,31 @@ verification. Config/tool changes normally take effect next session; do not
 reload the system prompt in a running conversation merely to apply a file edit.
 Never edit encrypted config, auth, or database bytes as plaintext.
 
+### Local coding agents
+
+From an unlocked session, use the installed CLI through its managed runner:
+
+```sh
+hermes manage schema
+hermes manage run hermes config get agent.max_turns
+hermes manage run codex -- --sandbox workspace-write "Inspect this project"
+hermes manage run claude -- --allowedTools Read,Grep,Glob "Inspect this project"
+```
+
+Install and authenticate Codex or Claude separately. These foreground runners
+lend only the selected profile's temporary unlock authority and its own vendor
+API key when configured. They disable the executor's additional conversation
+persistence and keep its permission controls. A child can call `hermes config`
+or `hermes manage apply` without asking for the passphrase again. JSON management
+uses revision-checked encrypted writes; see `hermes manage schema` for operations.
+
+Codex's workspace sandbox still requires explicit `--add-dir /path/to/profile`
+authorization for writes outside the workspace. Only the private kernel-pipe
+transport directory is added automatically. No vault key or passphrase is put
+in that directory, argv or environment. Do not print temporary grants, disable
+the executor's confinement to solve a refusal, or resume a managed task outside
+its owner session. Closing the owner revokes subsequent child redemptions.
+
 ## Diagnose and repair
 
 ```sh

@@ -523,7 +523,8 @@ def _launch_tui(
     try:
         try:
             from hermes_security.handoff import prepare_child_key
-            handoff = prepare_child_key()
+            from hermes_constants import get_hermes_home
+            handoff = prepare_child_key(get_hermes_home())
             try:
                 if handoff:
                     key_fd, key_env = handoff
