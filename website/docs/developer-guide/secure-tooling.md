@@ -157,10 +157,13 @@ retains the existing added-line critical-source/dependency-bound patterns and
 tracked infographic policy; these narrow guards are not a comprehensive security
 audit. Workers are bounded and
 test retries are disabled. The driver pins and prints input revisions and refuses
-dirty or replaced checkouts. The clone explicitly disables partial fetching and
-fetches the target branch: the first live run exposed that the clone plugin's
-default partial mode selected a shallow tree-filtered checkout despite depth 0.
-That run was cancelled rather than counted as qualification.
+dirty or replaced checkouts. The clone explicitly disables partial fetching,
+bounds history to 256 commits and fetches the target branch; a missing merge base
+fails closed. The first live run exposed that the clone plugin's default partial
+mode selected a shallow tree-filtered checkout despite depth 0. It was cancelled.
+A subsequent full-history fetch hit the service's HTTP 504 deadline. Neither run
+counts as qualification; bounded history retains the reviewed diff without an
+unbounded archive transfer through the ingress.
 
 The private source is `unpossible/hermes-agent` on the existing Gitea service;
 the public mirror is `majorissuerep/hermes-agent` on GitHub. The sole GitHub

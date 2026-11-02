@@ -7,7 +7,7 @@ clone:
   git:
     image: docker.io/woodpeckerci/plugin-git@sha256:9802cb7852dcf31f9c5c1d1ddeadfb9002d4fae85751f7b6a792eedb267bcc59
     settings:
-      depth: 0
+      depth: 256
       partial: false
       fetch_target_branch: true
       target_branch: main
