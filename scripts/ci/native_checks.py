@@ -1,0 +1,83 @@
+"""Native host and daemon evidence that the ordinary in-house pod cannot supply."""
+from __future__ import annotations
+
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+
+ROOT = Path(__file__).resolve().parents[2]
+LINUX_FILES = [
+    "tests/tui_runtime/test_terminal_model_pty.py",
+    "tests/tui_runtime/test_terminal_global_model_pty.py",
+    "tests/tui_runtime/test_terminal_session_naming_pty.py",
+    "tests/tui_runtime/test_terminal_pty_custody.py",
+    "tests/hermes_cli/test_update_finish.py",
+    "tests/tools/test_terminal_management_launcher.py",
+    "tests/e2e/test_fixture_download_cache.py",
+]
+
+
+def run(*args: str, env: dict[str, str]) -> None:
+    print("+ " + " ".join(args), flush=True)
+    subprocess.run(args, cwd=ROOT, env=env, check=True, timeout=1800)
+
+
+def bootstrap_protocol(env: dict[str, str], directory: Path) -> None:
+    """Exercise the current installer/stamp protocol against this exact checkout."""
+    manifest = subprocess.run(["bash", "-s", "--", "--manifest"],
+                              input=(ROOT / "scripts/install.sh").read_bytes(),
+                              capture_output=True, env=env, check=True, timeout=30)
+    stages = json.loads(manifest.stdout)
+    assert stages["protocol_version"] == 1
+    assert [stage["name"] for stage in stages["stages"]] == [
+        "prerequisites", "repository", "venv", "python-deps", "config", "products", "setup", "complete"]
+    sha = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True, timeout=30).strip()
+    mirror, install = directory / "source.git", directory / "installed"
+    run("git", "init", "--bare", str(mirror), env=env)
+    run("git", "push", str(mirror), "HEAD:refs/heads/ci-under-test", env=env)
+    installer_env = dict(env, HERMES_INSTALL_DIR=str(install), HERMES_HOME=str(directory / "home"),
+                         HERMES_RUNTIME_DIR=str(directory / "tools"), HERMES_REPO_URL=str(mirror))
+    for stage in ("prerequisites", "repository", "config", "complete"):
+        run("bash", "scripts/install.sh", "--branch", "ci-under-test", "--commit", sha,
+            "--non-interactive", "--stage", stage, "--json", env=installer_env)
+    run(sys.executable, "scripts/verify-bootstrap-version-stamp.py", "--stamp",
+        str(install / ".hermes-bootstrap-complete"), "--repo", str(install), "--expect-commit", sha,
+        "--expect-branch", "ci-under-test", "--no-source-stamp", env=env)
+    observed = subprocess.check_output(["git", "-C", str(install), "rev-parse", "HEAD"],
+                                       text=True, timeout=30).strip()
+    assert observed == sha
+
+
+def main() -> None:
+    env = dict(os.environ, HERMES_TEST_FILE_RETRIES="0", HERMES_TEST_FILE_TIMEOUT="600",
+               HERMES_TEST_WORKERS="2", HERMES_E2E_REQUIRE_TUI="1")
+    for key in ("HERMES_TEST_PATHS", "HERMES_TEST_SLICE"):
+        env.pop(key, None)
+    if sys.platform == "darwin":
+        files = subprocess.check_output([sys.executable, "scripts/ci/list_os_marked_tests.py", "macos"],
+                                        cwd=ROOT, text=True, timeout=30).splitlines()
+    elif sys.platform.startswith("linux"):
+        files = LINUX_FILES
+    else:
+        raise SystemExit("Native qualification requires a supported Linux or macOS host")
+    if not files:
+        raise SystemExit("Native qualification must select tests")
+    run("scripts/run_tests.sh", "--files", os.pathsep.join(files), "--file-retries", "0",
+        "--", "-m", "platforms and not integration", env=env)
+    if sys.platform.startswith("linux"):
+        run("scripts/run_tests.sh", "--fail-on-skip", "--file-retries", "0",
+            "tests/tools/test_ssh_environment.py", "tests/tools/test_docker_backend_real.py",
+            "tests/scripts/e2e/test_container_docker_live.py", "tests/scripts/test_fresh_source_install.py", env=env)
+        with tempfile.TemporaryDirectory(prefix="hermes-bootstrap-protocol-") as temporary:
+            bootstrap_protocol(env, Path(temporary))
+    run("git", "diff", "--exit-code", env=env)
+    if subprocess.check_output(["git", "ls-files", "--others", "--exclude-standard"],
+                               cwd=ROOT, text=True, timeout=30).strip():
+        raise SystemExit("Native qualification left an untracked artifact")
+
+
+if __name__ == "__main__":
+    main()

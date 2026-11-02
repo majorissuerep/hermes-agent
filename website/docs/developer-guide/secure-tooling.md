@@ -99,16 +99,18 @@ revived old session tokens until permanent lock revocation was added. Behavioral
 reproduced each failure before its corresponding fix. No plaintext fallback,
 global networking opt-in or permission bypass was used to resolve them.
 
-Live host evidence at `813d2970f4eb25a3f5f3287b886cdbfe98a68821` used Linux
+Live host evidence at `ea337ed0db3b24d3a29ee533d23c0e78e9ade192` used Linux
 6.6.114.1 WSL2 x86_64, Codex CLI 0.166.0 and Claude Code 2.1.316 with their own
-existing logins. Both executed an owning-Hermes configuration read and write;
+existing logins with invalid ambient executor tokens deliberately supplied.
+Both executed an owning-Hermes configuration read and write;
 independent command refusal, owner-close revocation, ciphertext and synthetic-home
 removal were independently checked. Codex used `workspace-write` with networking
 disabled. Claude used narrowly selected Bash permissions. These are CLI integration
 receipts, not cold-install or every-provider qualification.
 
 Native Linux protocol evidence includes the real public finite-chat/delegation
-path, encrypted SQLCipher history, two native children calling the management CLI,
+path, a managed Hermes chat subprocess, encrypted SQLCipher history, two native
+children calling the management CLI,
 real PTY keyboard/transcript round trips and Docker source transport with no host
 mounts or inherited model credential. The host's native macOS coverage is pending.
 The six cold lifecycle/live-gateway scenarios require their existing dedicated
@@ -147,7 +149,7 @@ spawn wiring from `29fef14fbf3501ac02140bc34ea339d64ff650ce`. Foreground/backgro
 tests execute actual tools from absolute and relative PATH entries. The larger
 upstream merge remains unaccepted.
 
-One proposed Woodpecker quality flow invokes the shared verification command:
+One Woodpecker quality flow invokes the shared verification command:
 PM-pinned bootstrap, blocking lint guards, lock consistency, canonical Python
 tests, icon freshness, Ink/workspace checks, generated skill pages, agent-facing
 documentation indexes and documentation build. The common blocking command also
@@ -155,11 +157,32 @@ retains the existing added-line critical-source/dependency-bound patterns and
 tracked infographic policy; these narrow guards are not a comprehensive security
 audit. Workers are bounded and
 test retries are disabled. The driver pins and prints input revisions and refuses
-dirty or replaced checkouts. Historical GitHub workflow definitions remain
-inactive references; this change does not deploy CI or replace missing statuses.
+dirty or replaced checkouts. The clone explicitly disables partial fetching and
+fetches the target branch: the first live run exposed that the clone plugin's
+default partial mode selected a shallow tree-filtered checkout despite depth 0.
+That run was cancelled rather than counted as qualification.
 
-Observed repository settings require GitHub Actions' `All required checks pass
-(v2)` while Actions is disabled. A Woodpecker result cannot satisfy that
-application-bound check. Repository protection/visibility and public exposure
-decisions remain unchanged. Merge acceptance stays pending until the established
-CI reports every required check green on the candidate head.
+The private source is `unpossible/hermes-agent` on the existing Gitea service;
+the public mirror is `majorissuerep/hermes-agent` on GitHub. The sole GitHub
+entrypoint, `quality.yml`, requires the exact revision's latest verification
+from the existing `hermes-ci` identity and supplies native host/daemon evidence.
+Older green statuses, other workflows and other status writers cannot qualify a
+revision. Historical GitHub entrypoints remain disabled.
+
+A separate main-only Woodpecker mirror flow depends on verification. It first
+pushes the ordinary `mirror/qualification` branch, waits for GitHub Actions'
+unchanged `All required checks pass (v2)` application-bound check, then
+fast-forwards public main. It checks source-main identity before and after
+publication, requires public-main ancestry, and reads back the resulting SHA.
+It never forces a push or synthesizes a passing status. Source drift, divergent
+history, failure and missing evidence stop publication. The source credential is
+read-only; the SSH deploy key can write only the existing public repository.
+Woodpecker supplies these credentials only to push events in the allowed image,
+not pull requests. No vault key or real model credential is used by ordinary CI.
+
+The aggregate GitHub gate retains native Linux/macOS tests, real terminal input,
+real SSH/Docker, installer protocol/stamp checks and Docker/shell lint. Full
+production cold installs and live-provider acceptance remain separate evidence.
+Repository protection/visibility and public exposure decisions remain unchanged.
+Acceptance requires the final source revision's green verification and matching
+public-main readback; configuration alone is not a completed mirror run.

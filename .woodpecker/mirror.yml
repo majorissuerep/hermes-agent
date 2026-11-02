@@ -1,0 +1,32 @@
+when:
+  - event: push
+    branch: main
+
+depends_on: [verify]
+
+clone:
+  git:
+    image: docker.io/woodpeckerci/plugin-git@sha256:9802cb7852dcf31f9c5c1d1ddeadfb9002d4fae85751f7b6a792eedb267bcc59
+    settings:
+      depth: 0
+      partial: false
+
+steps:
+  - name: publish-qualified-main
+    image: docker.io/library/python@sha256:a8cf203c684b61fd2676ec5a17159cf68ed38ad471481e1f4ebc4679825250bd
+    commands:
+      - python3 -m scripts.ci.publish_public
+    environment:
+      GITHUB_PUBLISH_KEY:
+        from_secret: github_publish_key
+      GITEA_STATUS_TOKEN:
+        from_secret: gitea_status_token
+    backend_options:
+      kubernetes:
+        resources:
+          requests:
+            cpu: "0.25"
+            memory: 256Mi
+          limits:
+            cpu: "1"
+            memory: 512Mi

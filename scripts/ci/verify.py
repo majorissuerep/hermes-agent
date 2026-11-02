@@ -103,7 +103,7 @@ def main() -> None:
              "assert not w.is_sqlite_wal_reset_vulnerable(), 'PM Python must qualify WAL tests'"], env)
         run([python, "scripts/check", "--base", base], env)
         run([python, "scripts/gen-bootstrap-pins.py", "--check"], env)
-        if classify(paths)["uv_lock"]:
+        if event != "pull_request" or classify(paths)["uv_lock"]:
             run([python, "-m", "pm.build_env", "--source", ".", "--check-lock"], env)
         run(["node", "scripts/generate-icons.mjs", "--check"], env)
         if lanes["frontend"] or lanes["python"]:

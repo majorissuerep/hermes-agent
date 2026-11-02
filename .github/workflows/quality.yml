@@ -1,0 +1,98 @@
+name: Qualified public mirror
+
+on:
+  push:
+    branches: [mirror/qualification]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: qualified-mirror-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  inhouse:
+    name: Exact revision passed in-house verification
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a # v7.0.1
+      - name: Require the existing Woodpecker identity's latest verification
+        env:
+          GITEA_STATUS_TOKEN: ${{ secrets.HERMES_GITEA_STATUS_TOKEN }}
+          QUALIFIED_SHA: ${{ github.sha }}
+        run: python3 -m scripts.ci.inhouse_status "$QUALIFIED_SHA"
+
+  native:
+    name: Native qualification (${{ matrix.os }})
+    needs: inhouse
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    env:
+      HERMES_TEST_FILE_RETRIES: '0'
+      HERMES_TEST_IMAGE_REF: debian:13-slim@sha256:a29215f6a35e51e22adffa17f89e9d2ef06214e64a2bad10d765c46aea49f11f
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/setup-pm
+        with:
+          toolchain: all
+          packages: ripgrep
+          extras: '["all", "anthropic", "mistral", "fal", "modal", "daytona", "parallel-web"]'
+          test-environment: 'true'
+      - name: Build the real terminal UI
+        run: npm ci --workspace ui-tui --ignore-scripts --no-audit --no-fund && npm run build --workspace ui-tui
+      - name: Start the real SSH host
+        if: runner.os == 'Linux'
+        env:
+          HERMES_TEST_SSHD_IMAGE: ${{ env.HERMES_TEST_IMAGE_REF }}
+        run: scripts/ci/start_test_sshd.sh "$RUNNER_TEMP/hermes-test-sshd"
+      - name: Native terminal, platform and lifecycle protocols
+        env:
+          HERMES_TEST_DOCKER_IMAGE: ${{ env.HERMES_TEST_IMAGE_REF }}
+        run: python -m scripts.ci.native_checks
+      - name: Lint the application Dockerfile
+        if: runner.os == 'Linux'
+        uses: hadolint/hadolint-action@54c9adbab1582c2ef04b2016b760714a4bfde3cf # v3.1.0
+        with:
+          dockerfile: Dockerfile
+          config: .hadolint.yaml
+          failure-threshold: warning
+      - name: Lint the terminal sandbox Dockerfile
+        if: runner.os == 'Linux'
+        uses: hadolint/hadolint-action@54c9adbab1582c2ef04b2016b760714a4bfde3cf # v3.1.0
+        with:
+          dockerfile: docker/sandbox-terminal.Dockerfile
+          config: .hadolint.yaml
+          failure-threshold: warning
+      - name: Check container shell scripts
+        if: runner.os == 'Linux'
+        uses: ludeeus/action-shellcheck@00cae500b08a931fb5698e11e79bfbd38e612a38 # v2.0.0
+        env:
+          SHELLCHECK_OPTS: --severity=error
+        with:
+          scandir: ./docker
+
+  required:
+    name: All required checks pass (v2)
+    needs: [inhouse, native]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Require every selected consumer to succeed
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          results = json.loads(os.environ['RESULTS'])
+          assert results and all(row['result'] == 'success' for row in results.values()), results
+          PY
