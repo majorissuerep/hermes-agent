@@ -683,7 +683,7 @@ _ENTRIES = {
 
 def _spawn_native_entrypoint(argv, *, env, cwd, writable, **kwargs):
     """Keep the one-use vault FD through the optional real bubblewrap boundary."""
-    inherited = prepare_child_key()
+    inherited = prepare_child_key(env["HERMES_HOME"])
     assert inherited is not None
     fd, additions = inherited
     try:

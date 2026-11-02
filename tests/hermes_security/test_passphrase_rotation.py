@@ -61,7 +61,7 @@ def test_repeated_rotation_keeps_master_proof_and_prepared_key_fd_valid(home, mo
     from hermes_security.handoff import adopt_inherited_key, prepare_child_key
 
     owner = vault.get_vault(home)
-    first, additions = prepare_child_key()
+    first, additions = prepare_child_key(home)
     try:
         change_passphrase(home, "second password")
         meta = json.loads((home / ".hermes-vault").read_text())

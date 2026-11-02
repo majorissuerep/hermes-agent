@@ -67,7 +67,7 @@ def test_fresh_passwords_key_slot_prepared_fd_and_live_session_grant_after_rotat
     connection.close()
     before = (home / "state.db").read_bytes()
     authority = start_session_authority(home, "rotation-owner")
-    handoff = prepare_child_key()
+    handoff = prepare_child_key(home)
     try:
         grant = authority.environment()
         change_passphrase(home, "replacement synthetic secret")
@@ -106,7 +106,7 @@ else: vault.add_key_slot(request['home'],public_key_raw=bytes.fromhex(request['p
                          unlocked_vault=vault.get_vault(request['home'],allow_env_unlock=False))
 print('committed')
 '''
-    handoff = prepare_child_key()
+    handoff = prepare_child_key(home)
     env = {name: value for name, value in os.environ.items()
            if name not in {"HERMES_SESSION_VAULT", "HERMES_VAULT_KEY_FD", "HERMES_VAULT_PRIVATE_KEY"}}
     env.update(handoff[1], HERMES_HOME=str(home))
