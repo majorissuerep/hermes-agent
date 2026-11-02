@@ -181,10 +181,16 @@ mode selected a shallow tree-filtered checkout despite depth 0. It was cancelled
 A subsequent full-history fetch hit the service's HTTP 504 deadline. Neither run
 counts as qualification; bounded history retains the reviewed diff without an
 unbounded archive transfer through the ingress.
+The pinned clone image also required matching `home` and `HOME`: otherwise its
+secondary target-branch fetch lost private-repository authentication. An isolated
+image probe verifies both the candidate and target SHA after the authenticated fetch.
 The verifier copies the immutable checkout from the shared NAS onto the pod's
 temporary disk before provisioning and testing, avoiding repeated network-file
 imports. It remains bounded to two CPUs, 6 GiB RAM and 8 GiB temporary storage,
 within the existing namespace limits; the temporary copy is removed on exit.
+Native SSH fixtures pin their generated host key in a private trust file through
+the real clients, and only replace a container bearing the same fixture ownership
+label. Repeated runs do not write test keys into the operator's SSH trust store.
 
 The private source is `unpossible/hermes-agent` on the existing Gitea service;
 the public mirror is `majorissuerep/hermes-agent` on GitHub. The sole GitHub
