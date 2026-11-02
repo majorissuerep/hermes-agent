@@ -2,6 +2,7 @@
 import json
 import os
 from pathlib import Path
+from contextlib import ExitStack
 import subprocess
 import sys
 
@@ -122,7 +123,8 @@ def test_derived_grants_end_with_the_owner_but_child_close_keeps_parent(tmp_path
 
 
 @pytest.mark.platforms("posix")
-def test_nested_hermes_cannot_renew_its_grant_past_the_original_owner(tmp_path, monkeypatch):
+@pytest.mark.parametrize("key_handoff", [False, True])
+def test_nested_hermes_cannot_renew_its_grant_past_the_original_owner(tmp_path, monkeypatch, key_handoff):
     from hermes_security.session_authority import start_session_authority
     from hermes_cli.config import save_config
 
@@ -147,9 +149,17 @@ finally:
 """
     env = dict(os.environ, **owner.environment())
     env.pop("HERMES_VAULT_KEY_FD", None)
-    with subprocess.Popen([sys.executable, "-c", script], env=env, cwd=ROOT,
-                          stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                          text=True) as process:
+    with ExitStack() as resources:
+        descriptors = ()
+        if key_handoff:
+            from hermes_security.handoff import prepare_child_key
+            fd, additions = prepare_child_key(home)
+            resources.callback(os.close, fd)
+            env.update(additions)
+            descriptors = (fd,)
+        process = resources.enter_context(subprocess.Popen(
+            [sys.executable, "-c", script], env=env, cwd=ROOT, pass_fds=descriptors,
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True))
         try:
             import select
             assert select.select([process.stdout], [], [], 15)[0], "nested owner failed to start"

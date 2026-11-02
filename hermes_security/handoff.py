@@ -74,6 +74,11 @@ def adopt_inherited_key() -> bool:
         except OSError:
             pass
     from hermes_security.vault import adopt_unlocked_key
+    from hermes_security.session_authority import adopt_session_authority
+
+    # An interpreter/key-FD handoff must retain a borrowed session's lifetime.
+    # Validate its grant before adopting keys; a stale grant fails closed.
+    adopt_session_authority()
 
     for entry in json.loads(b"".join(chunks).decode("utf-8")):
         adopt_unlocked_key(entry["home"], base64.b64decode(entry["key"]))
