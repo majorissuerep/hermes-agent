@@ -6,15 +6,14 @@ when:
 clone:
   git:
     image: docker.io/woodpeckerci/plugin-git@sha256:9802cb7852dcf31f9c5c1d1ddeadfb9002d4fae85751f7b6a792eedb267bcc59
-    settings:
-      # Secondary plugin Git commands must use the same private credential home.
-      home: /root
-      depth: 256
-      partial: false
-      fetch_target_branch: true
-      target_branch: main
     environment:
+      # Secondary plugin Git commands must use the same private credential home.
+      PLUGIN_HOME: /root
       HOME: /root
+      PLUGIN_DEPTH: "256"
+      PLUGIN_PARTIAL: "false"
+      PLUGIN_FETCH_TARGET_BRANCH: "true"
+      PLUGIN_TARGET_BRANCH: main
 
 steps:
   - name: checks

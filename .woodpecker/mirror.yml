@@ -7,13 +7,12 @@ depends_on: [verify]
 clone:
   git:
     image: docker.io/woodpeckerci/plugin-git@sha256:9802cb7852dcf31f9c5c1d1ddeadfb9002d4fae85751f7b6a792eedb267bcc59
-    settings:
-      # Match HOME so all plugin Git commands retain clone authentication.
-      home: /root
-      depth: 256
-      partial: false
     environment:
+      # Match HOME so all plugin Git commands retain clone authentication.
+      PLUGIN_HOME: /root
       HOME: /root
+      PLUGIN_DEPTH: "256"
+      PLUGIN_PARTIAL: "false"
 
 steps:
   - name: publish-qualified-main
