@@ -15,11 +15,11 @@ clone:
       target_branch: main
       # Repository-only read authority stays valid through slow checkouts.
       use_ssh: true
-      remote_ssh: ssh://git@git.theincompetent.dev:30022/unpossible/hermes-agent.git
+      remote_ssh: ssh://git@gitea-ssh.gitea.svc.cluster.local:22/unpossible/hermes-agent.git
       ssh_key_private:
         from_secret: gitea_clone_key
       ssh_host_key: >-
-        [git.theincompetent.dev]:30022 ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQC+lDMP3jYyOTUUwvWF9TbPAuQufFKJLIY4z4Ulj2SjHIobVqXOPZON9Dog85VkUA+0X65g7mgfs31uzRPpwo6FXR4Cxa0LD0NqXqWMdllRJx8rAvOetb3I3MySuNt6/yq4optACplYelKEQu+SdqDJoVdoaK8Bf49BXTLvNXq+yzktztdLsxBCgTtfs2owdB2biR9gdp4HMELrcuBvYg56mpXPaCBSmTvngZEzXJcpQajIvnD2BSIO07hGDGee6G8V27pcqgskzgMRBAImR2uPRPohtl0GxYNVoFOTUuoaktHrtoSEUDVD0BXyMaHWy0r5V+zjnavRx2SuiB65jCbBeNdwjA+3dX6nO5vEl3CDRX8d9wFVQeKh+IGs4eYHVj3VOTeWhoq0cB7g3sa+rITzhocJIX2+Zl8NIe0d9RyloD4MYeiS0MQtMqB1prx0tsNZuWTZJ5aLt3K0yHQX9xuq9bujFRsXwc4hdh4aUZTrJjBpJTHIZLJccyPlOmOiBYEnQeILMnNKsyKHpmDFpHjWX+VjvEBCfB/V62+gzk4KoKuYAYggfgsvHCFrJMT9Ql+3Mn6vCsnvAFe1RTAC/EVpsMv41TXIkGBA9o7hbxAFY4CoqY2W/NxTPl6v4POZjjPHibY7VaIAvXM1suVcu9Wsup9v+5mHiIOna6WaJnIzdw==
+        gitea-ssh.gitea.svc.cluster.local ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQC+lDMP3jYyOTUUwvWF9TbPAuQufFKJLIY4z4Ulj2SjHIobVqXOPZON9Dog85VkUA+0X65g7mgfs31uzRPpwo6FXR4Cxa0LD0NqXqWMdllRJx8rAvOetb3I3MySuNt6/yq4optACplYelKEQu+SdqDJoVdoaK8Bf49BXTLvNXq+yzktztdLsxBCgTtfs2owdB2biR9gdp4HMELrcuBvYg56mpXPaCBSmTvngZEzXJcpQajIvnD2BSIO07hGDGee6G8V27pcqgskzgMRBAImR2uPRPohtl0GxYNVoFOTUuoaktHrtoSEUDVD0BXyMaHWy0r5V+zjnavRx2SuiB65jCbBeNdwjA+3dX6nO5vEl3CDRX8d9wFVQeKh+IGs4eYHVj3VOTeWhoq0cB7g3sa+rITzhocJIX2+Zl8NIe0d9RyloD4MYeiS0MQtMqB1prx0tsNZuWTZJ5aLt3K0yHQX9xuq9bujFRsXwc4hdh4aUZTrJjBpJTHIZLJccyPlOmOiBYEnQeILMnNKsyKHpmDFpHjWX+VjvEBCfB/V62+gzk4KoKuYAYggfgsvHCFrJMT9Ql+3Mn6vCsnvAFe1RTAC/EVpsMv41TXIkGBA9o7hbxAFY4CoqY2W/NxTPl6v4POZjjPHibY7VaIAvXM1suVcu9Wsup9v+5mHiIOna6WaJnIzdw==
 
 steps:
   - name: checks

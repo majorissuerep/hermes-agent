@@ -1,0 +1,27 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: hermes-readonly-source-clone
+  namespace: woodpecker-pipelines
+  labels:
+    app.kubernetes.io/part-of: hermes-ci
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: pipeline
+      woodpecker-ci.org/repo-id: "17"
+      woodpecker-ci.org/step: git
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: gitea
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/instance: gitea
+              app.kubernetes.io/name: gitea
+      ports:
+        - protocol: TCP
+          port: 2222

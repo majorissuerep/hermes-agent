@@ -251,6 +251,11 @@ environment-based binding was rejected by Woodpecker's image-filter rules;
 those rules remain enforced. The actual pinned clone image fetched both refs,
 verified the candidate and target SHAs, and received Gitea's explicit refusal
 of a write dry run using that same read-only key.
+CI pods use the private cluster SSH service. The host-facing SSH route was
+unreachable under the CI namespace's default-deny egress policy. The checked-in
+`scripts/ci/woodpecker-clone-egress.yaml` allows only this repository's `git`
+clone pods to reach Gitea's SSH pod port; verification pods remain outside that
+rule. Public ingress, DNS and repository protections are unchanged.
 The verifier copies the immutable checkout from the shared NAS onto the pod's
 temporary disk before provisioning and testing, avoiding repeated network-file
 imports. Four Python workers are bounded to four CPUs, 6 GiB RAM and 16 GiB

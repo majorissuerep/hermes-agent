@@ -26,6 +26,10 @@ push events through its documented plugin settings, with a pinned host key.
 It cannot use the mirror write key. This binding avoids an hourly OAuth
 snapshot expiring between Git fetches during a slow checkout; the shared CI
 bot's interactive login remains unchanged.
+The clone uses Gitea's private cluster service. Operators apply
+`scripts/ci/woodpecker-clone-egress.yaml` to allow only repository 17's `git`
+pods to reach the Gitea SSH pod port; verification pods keep their existing
+default-deny policy. This adds no public endpoint.
 
 Live-provider and cold lifecycle acceptance remain separate, explicit runs.
 See [the tooling contract](../../website/docs/developer-guide/secure-tooling.md).
