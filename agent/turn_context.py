@@ -1182,6 +1182,8 @@ def build_turn_context(
         original_user_message=original_user_message, messages=messages,
         conversation_history=conversation_history,
     )
+    from agent.formal_logic import begin_turn as begin_formal_turn
+    plugin_user_context += begin_formal_turn(agent, original_user_message)
     # Every turn, not only on a prompt restore: a long-lived agent (CLI, TUI, Desktop) keeps its
     # prompt in memory for the whole conversation and would never re-check its skills index.
     stage_skills_index_note(agent, active_system_prompt, messages)

@@ -1256,9 +1256,11 @@ def _notify_context_engine_turn_complete(
         )
 
 
-def _decode_inline_moa_turn(user_message, persist_user_message):
+def _decode_inline_moa_turn(user_message, persist_user_message, moa_config=None):
     """Decode a MoA preset encoded into ``user_message``; returns ``(user_message,
     moa_config, persist_user_message)``, unchanged with ``moa_config=None`` otherwise."""
+    if moa_config is not None:
+        return user_message, moa_config, persist_user_message
     try:
         from hermes_cli.moa_config import decode_moa_turn
         _decoded_message, _decoded_moa_config = decode_moa_turn(user_message)
@@ -1484,10 +1486,9 @@ def _run_conversation_turn(
     ``persist_user_display_*``:
     display-only event rendering; the model still receives the message unchanged.
     ``prelude``: scripted tool calls played before the first model call (``agent/turn_scripted_prelude.py``)."""
-    if moa_config is None:
-        user_message, moa_config, persist_user_message = _decode_inline_moa_turn(
-            user_message, persist_user_message
-        )
+    user_message, moa_config, persist_user_message = _decode_inline_moa_turn(
+        user_message, persist_user_message, moa_config
+    )
 
     # The gateway caches agents across turns; compression state is per-turn, or a stale
     # in-place boundary would make a later uncompressed result look compacted.
@@ -1592,6 +1593,8 @@ def _run_conversation_turn(
             _ri = _run_phase(normalize_model_response, agent, s)
             if _ri.action == "return":
                 return _ri.result
+            if _ri.action == "break":
+                break
             if _ri.action == "continue":
                 continue
             _v = _run_phase(
@@ -1647,6 +1650,9 @@ def run_conversation(
     from agent.voice_turn_route import end_voice_turn_route
     from tools.vision_tools_history_budget import native_turn_images
 
+    from agent.formal_logic import reset_delivery, seal_result
+    reset_delivery(agent)
+
     # Steer / redirect / interrupt set this mid-turn; the result reports whether the turn ran untouched.
     agent._turn_user_intervened = False
     # Images attached natively to this user turn stay visible to vision_analyze for the turn, so
@@ -1673,6 +1679,7 @@ def run_conversation(
         finally:
             end_voice_turn_route(agent)
     result = export_current_turn_boundary(agent, result, user_message)
+    result = seal_result(agent, result)
     if isinstance(result, dict):
         result["user_intervened"] = bool(getattr(agent, "_turn_user_intervened", False))
     _close_durable_failed_turn(agent, result)

@@ -84,6 +84,15 @@ def main() -> None:
             "tests/scripts/e2e/test_container_docker_live.py", "tests/scripts/test_fresh_source_install.py", env=env)
         with tempfile.TemporaryDirectory(prefix="hermes-bootstrap-protocol-") as temporary:
             bootstrap_protocol(env, Path(temporary))
+    # The opt-in verifier needs real kernel evidence on both supported native hosts.
+    with tempfile.TemporaryDirectory(prefix="hermes-lean-qualification-") as temporary:
+        executable = subprocess.check_output(
+            [sys.executable, "scripts/ci/install_lean.py", "--directory", str(Path(temporary) / "toolchain")],
+            cwd=ROOT, text=True, timeout=600).strip()
+        logic_env = dict(env, PATH=str(Path(executable).parent) + os.pathsep + env["PATH"])
+        run("scripts/run_tests.sh", "--fail-on-skip", "--file-retries", "0",
+            "tests/e2e/core/formal_logic/test_native_checkpoints.py",
+            "tests/e2e/core/formal_logic/test_terminal_mode.py", env=logic_env)
     run("git", "diff", "--exit-code", env=env)
     if subprocess.check_output(["git", "ls-files", "--others", "--exclude-standard"],
                                cwd=ROOT, text=True, timeout=30).strip():

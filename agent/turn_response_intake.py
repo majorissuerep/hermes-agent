@@ -148,6 +148,10 @@ def normalize_model_response(
     from hermes_cli.observability.shared_metrics_harness import record_reply_content
     record_reply_content(agent, response, assistant_message)
 
+    from agent.formal_logic import intermediate_gate, repair_exhausted
+    if intermediate_gate(agent, assistant_message, messages, conversation_history):
+        return _verdict("break" if repair_exhausted(agent) else "continue")
+
     content = assistant_message.content
     if content and not agent.quiet_mode:
         if agent.verbose_logging:
