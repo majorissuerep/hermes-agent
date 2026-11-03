@@ -6,6 +6,10 @@ when:
 clone:
   git:
     image: docker.io/woodpeckerci/plugin-git@sha256:9802cb7852dcf31f9c5c1d1ddeadfb9002d4fae85751f7b6a792eedb267bcc59
+    backend_options:
+      kubernetes:
+        nodeSelector:
+          theincompetent.dev/hermes-verification: "true"
     settings:
       # Use the same credential home for the initial and target-branch fetches.
       home: /root

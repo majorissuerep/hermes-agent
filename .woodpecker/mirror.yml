@@ -7,6 +7,10 @@ depends_on: [verify]
 clone:
   git:
     image: docker.io/woodpeckerci/plugin-git@sha256:9802cb7852dcf31f9c5c1d1ddeadfb9002d4fae85751f7b6a792eedb267bcc59
+    backend_options:
+      kubernetes:
+        nodeSelector:
+          theincompetent.dev/hermes-verification: "true"
     settings:
       # Keep plugin classification so clone-only secret filters remain enforced.
       home: /root
@@ -32,6 +36,8 @@ steps:
         from_secret: gitea_status_token
     backend_options:
       kubernetes:
+        nodeSelector:
+          theincompetent.dev/hermes-verification: "true"
         resources:
           requests:
             cpu: "0.25"

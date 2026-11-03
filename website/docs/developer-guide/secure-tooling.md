@@ -390,9 +390,11 @@ sample before releasing the node; Linux uses its real subreaper.
 The same run recorded about 50-60% full I/O stall on its worker, followed by
 unrelated 600-second updater-file timeouts. Those failures remain negative
 evidence. Verification requires the operator-maintained node label
-`theincompetent.dev/hermes-verification=true`; clone and publication keep their
-existing placement. Qualify a worker with native pressure observations, a
-disposable write/fsync probe, sufficient allocatable resources, and a complete
+`theincompetent.dev/hermes-verification=true`; clone and publication use the same
+eligible pool after an actual clone also stalled on the original worker.
+Clone remains a plugin with image-filtered credentials. Qualify a worker with
+native pressure observations, a disposable write/fsync probe, sufficient
+allocatable resources, and a complete
 zero-retry run. Remove the label when pressure, eviction or repeated deadline
 failures invalidate that evidence; qualify a replacement before reapplying it.
 Kubernetes pressure taints, test deadlines, resource limits and required checks
