@@ -206,8 +206,39 @@ def test_picker_direct_chatgpt_positive_control(monkeypatch, picker_http):
     assert _authorized_hosts(picker_http) == {"chatgpt.com"}
 
 
+@pytest.fixture
+def picker_usage_http(monkeypatch):
+    """Keep the picker's real usage workers inside their owning HTTP/profile fixture."""
+    import httpx
+    from agent import account_usage_cache
+
+    seen = []
+    monkeypatch.setattr(account_usage_cache, "has_account_usage", lambda provider: provider == "openai-codex")
+    monkeypatch.setattr(httpx, "Client", lambda **kw: _UsageRecorder(seen))
+    workers = []
+
+    def supervised(refresh):
+        def start(*args):
+            started = refresh(*args)
+            workers.extend(started)
+            for worker in started:
+                worker.join(timeout=5)
+                assert not worker.is_alive(), "picker usage worker outlived its HTTP fixture"
+            return started
+        return start
+
+    for name in ("refresh_account_usage_async", "refresh_account_usage_entries_async"):
+        monkeypatch.setattr(account_usage_cache, name, supervised(getattr(account_usage_cache, name)))
+    try:
+        yield seen
+    finally:
+        for worker in workers:
+            worker.join(timeout=5)
+            assert not worker.is_alive(), "picker usage worker did not settle"
+
+
 @pytest.mark.parametrize("suffix", ["", "/"])
-def test_full_picker_discovers_codex_models_with_pinned_canonical_url(monkeypatch, suffix):
+def test_full_picker_discovers_codex_models_with_pinned_canonical_url(monkeypatch, suffix, picker_usage_http):
     """A saved canonical URL must not bypass account discovery via the relay-only API-key path."""
     import httpx
 
@@ -240,6 +271,9 @@ def test_full_picker_discovers_codex_models_with_pinned_canonical_url(monkeypatc
     assert seen
     assert all(urlparse(url).hostname == "chatgpt.com" for url, _ in seen)
     assert all(headers["Authorization"] == f"Bearer {JWT}" for _, headers in seen)
+    assert picker_usage_http
+    assert _authorized_hosts(picker_usage_http) == {"chatgpt.com"}
+    assert all(auth == f"Bearer {JWT}" for _, auth in picker_usage_http)
     assert json.loads((home / "auth.json").read_bytes())["providers"]["openai-codex"]["tokens"] == tokens_before
     assert (home / "config.yaml").read_bytes() == config_before
 

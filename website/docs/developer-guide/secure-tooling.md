@@ -344,6 +344,15 @@ real-Git regressions refuse failed, pending or missing private proof before any
 qualification push, and refuse proof that regresses while native checks run.
 The unchanged GitHub aggregate still requires both native host jobs to pass.
 
+Another zero-retry run exposed HTTP-fixture interference in the Codex host
+binding tests. Earlier picker cases started usage workers that could outlive
+their mocks and enter a later case's recorder with a different synthetic key.
+The picker cases now keep real Codex usage workers within the owning fixture,
+mock unrelated provider usage, and wait for worker settlement before restoring
+HTTP/profile state. They also assert the usage requests' host and credential;
+the later fallback test keeps its exact key assertion. Production credential
+selection and background behavior are unchanged.
+
 The aggregate GitHub gate retains native Linux/macOS tests, real terminal input,
 real SSH/Docker, installer protocol/stamp checks and Docker/shell lint. Full
 production cold installs and live-provider acceptance remain separate evidence.
