@@ -80,7 +80,10 @@ def review(agent, checkpoint: Checkpoint, answer: str, task: str, decisions: dic
         judgment = _judge(agent, payload)
         return _validate_review(checkpoint, judgment, evidence, decisions)
     except Exception as error:  # health: allow BLE001 -- service failures return unresolved review, never approval
-        return {"status": "review_unavailable", "error": str(error)[:1200]}
+        from agent.redact import redact_sensitive_text
+
+        diagnostic = redact_sensitive_text(str(error), force=True, redact_url_credentials=True)
+        return {"status": "review_unavailable", "error": diagnostic[:1200]}
 
 
 def _validate_review(checkpoint: Checkpoint, judgment: Any, evidence: dict, decisions: dict) -> dict:

@@ -158,3 +158,19 @@ def test_formal_gate_preserves_native_reasoning_answer_sidecar(monkeypatch):
                                pending_verification_response=None, pending_verification_response_previewed=False)
     assert not verdict.continue_turn and message["content"] == ""
     assert message["api_content"] == verdict.final_response
+
+
+def test_review_error_credentials_are_removed_before_repair_feedback(monkeypatch):
+    agent = SimpleNamespace(_formal_logic_state=mode.FormalState("lean", 3))
+    mode.state(agent).task = "Assume P; P implies Q. Show Q."
+    monkeypatch.setattr(mode, "verify", lambda *args: {"status": "logic_verified", "checkpoint": "fixture"})
+    monkeypatch.setattr("agent.redact._redact_enabled", lambda: False)
+    def failed_review(*args):
+        raise RuntimeError("Review request failed: https://fixture-user:fixture-password@review.invalid/check?api_key=fixture-query-key")
+    monkeypatch.setattr("agent.formal_logic_review._judge", failed_review)
+    messages = []
+    assert mode.gate_final(agent, {"role": "assistant", "content": candidate()}, candidate(), messages) == (True, "")
+    feedback = messages[-1]["content"]
+    assert "review_unavailable" in feedback and "Review request failed" in feedback
+    assert all(secret not in feedback for secret in ("fixture-user", "fixture-password", "fixture-query-key"))
+    assert mode.before_tool(agent, "clarify", {"questions": [{"question": "Fix the review service?"}]})
