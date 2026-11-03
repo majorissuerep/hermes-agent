@@ -303,6 +303,15 @@ acknowledgment for its idle global write, then verifies ciphertext and an
 independent owner's actual model/reasoning request. Mid-turn picks keep their
 existing next-turn deferral.
 
+A subsequent full run timed out a cold SQLCipher acquisition before a stubbed
+archive writer started. These response-framing tests now prepare and retain a
+real encrypted registry store before running the job, matching their earlier
+owner-fixture intent. They assert that the stub agent receives that exact store
+and that its file is ciphertext. Production acquisition deadlines and the
+separate timeout, late-close and fail-closed contracts are unchanged. A quick
+native rerun passed before this repair, so it does not disprove the CI failure;
+the complete new-head run remains the acceptance evidence.
+
 The private source is `unpossible/hermes-agent` on the existing Gitea service;
 the public mirror is `majorissuerep/hermes-agent` on GitHub. The sole GitHub
 entrypoint, `quality.yml`, requires the exact revision's latest verification

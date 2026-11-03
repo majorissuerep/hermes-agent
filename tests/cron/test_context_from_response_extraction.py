@@ -38,6 +38,19 @@ def cron_env(tmp_path, monkeypatch):
     return hermes_home
 
 
+@pytest.fixture
+def cron_session_store(cron_env):
+    """Prepare real encrypted persistence before timing the stubbed archive writer."""
+    from hermes_state.registry import acquire
+
+    db = acquire(cron_env / "state.db")
+    try:
+        assert not (cron_env / "state.db").read_bytes().startswith(b"SQLite format 3")
+        yield db
+    finally:
+        db.close()
+
+
 def _write_archive(cron_env, job_id: str, filename: str, body: str) -> None:
     from cron.jobs import OUTPUT_DIR
 
@@ -46,11 +59,11 @@ def _write_archive(cron_env, job_id: str, filename: str, body: str) -> None:
     write_text(out_dir / filename, body, purpose="state")
 
 
-def _run_stub_job(monkeypatch, job, answer):
+def _run_stub_job(monkeypatch, job, answer, session_db):
     """Run ``job`` through the real writer with a stub agent returning ``answer``."""
     class Agent:
         def __init__(self, *args, **kwargs):
-            pass
+            assert kwargs["session_db"] is session_db
 
         def run_conversation(self, *args, **kwargs):
             return {"final_response": answer, "completed": True, "failed": False}
@@ -122,7 +135,7 @@ class TestScriptModeArchives:
         assert "```\nplain script payload\nline two\n```" in prompt
 
 
-def test_writer_reader_preserve_response_with_nested_frames(cron_env, monkeypatch):
+def test_writer_reader_preserve_response_with_nested_frames(cron_env, monkeypatch, cron_session_store):
     from cron.jobs import create_job, save_job_output
     from cron.scheduler_prompt import _inject_context_from
 
@@ -130,7 +143,7 @@ def test_writer_reader_preserve_response_with_nested_frames(cron_env, monkeypatc
 
     job = create_job(prompt="Original prompt noise\r\n**Response Characters:** 4\n## Response\n\nbody",
                      schedule="0 8 * * *", context_from="self")
-    success, archive, _final, error = _run_stub_job(monkeypatch, job, answer)
+    success, archive, _final, error = _run_stub_job(monkeypatch, job, answer, cron_session_store)
     assert success, error
     save_job_output(job["id"], archive)
     prompt, injected = _inject_context_from(job, "Next task")
@@ -139,7 +152,7 @@ def test_writer_reader_preserve_response_with_nested_frames(cron_env, monkeypatc
     assert "Original prompt noise" not in prompt
 
 
-def test_truncated_outer_frame_cannot_promote_a_quoted_inner_frame(cron_env, monkeypatch):
+def test_truncated_outer_frame_cannot_promote_a_quoted_inner_frame(cron_env, monkeypatch, cron_session_store):
     import os
     from cron.jobs import create_job, save_job_output, OUTPUT_DIR
     from cron.scheduler_prompt import _inject_context_from
@@ -151,7 +164,7 @@ def test_truncated_outer_frame_cannot_promote_a_quoted_inner_frame(cron_env, mon
               + suffix)
 
     job = create_job(prompt="Report", schedule="0 8 * * *", context_from="self")
-    success, archive, _final, error = _run_stub_job(monkeypatch, job, answer)
+    success, archive, _final, error = _run_stub_job(monkeypatch, job, answer, cron_session_store)
     assert success, error
     save_job_output(job["id"], archive)
     saved = next((OUTPUT_DIR / job["id"]).glob("*.md"))
