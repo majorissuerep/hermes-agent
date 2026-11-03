@@ -124,6 +124,10 @@ path, a managed Hermes chat subprocess, encrypted SQLCipher history, two native
 children calling the management CLI,
 real PTY keyboard/transcript round trips and Docker source transport with no host
 mounts or inherited model credential. The host's native macOS coverage is pending.
+A full native owner also launches a managed Hermes chat child, which reads the
+owning encrypted configuration; after its exit the parent reads that same state.
+Five provider requests and two SQLCipher sessions independently establish this
+round trip. Synthetic profiles must first receive a real PM dependency selection.
 The public MCP stdio scenarios completed four checks; seven pre-existing expected
 failures for unsupported image results and empty metadata remain unqualified.
 Separate real-SDK regressions verify owning/explicit child homes, filtered unlock
