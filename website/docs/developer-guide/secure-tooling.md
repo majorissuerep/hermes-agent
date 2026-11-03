@@ -204,6 +204,10 @@ entrypoint, `quality.yml`, requires the exact revision's latest verification
 from the existing `hermes-ci` identity and supplies native host/daemon evidence.
 Older green statuses, other workflows and other status writers cannot qualify a
 revision. Historical GitHub entrypoints remain disabled.
+The status reader traverses history pages before selecting the newest trusted
+result: the deployed Gitea 1.22 reverses the documented `highestindex` ordering.
+Real HTTP regressions cover an older green followed by pending, failure or
+success on a later page.
 
 A separate main-only Woodpecker mirror flow depends on verification. It first
 pushes the ordinary `mirror/qualification` branch, waits for GitHub Actions'

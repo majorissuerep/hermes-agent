@@ -42,10 +42,21 @@ def require_source_head(sha: str, token: str) -> None:
         raise RuntimeError("Source main moved; qualify its new revision before publishing")
 
 
+def verification_statuses(sha: str, token: str) -> list[dict]:
+    """Read history completely: Gitea 1.22's highestindex sorts oldest first."""
+    rows = []
+    for page in range(1, 101):
+        batch = read_json(GITEA_API + f"/statuses/{sha}?sort=highestindex&limit=50&page={page}", token)
+        rows.extend(batch)
+        if len(batch) < 50:
+            return rows
+    raise RuntimeError("Verification status history exceeds the bounded review window")
+
+
 def wait_for_verification(sha: str, token: str, timeout: int = 300) -> None:
     deadline = time.monotonic() + timeout
     while True:
-        rows = read_json(GITEA_API + f"/statuses/{sha}?sort=highestindex&limit=50", token)
+        rows = verification_statuses(sha, token)
         row = latest_verification(rows)
         if row and row["status"] == "success":
             print(f"In-house verification passed for {sha}: {row['target_url']}", flush=True)

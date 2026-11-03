@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import subprocess
 import threading
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
@@ -27,6 +28,47 @@ def test_only_latest_trusted_verification_and_native_application_qualify():
         assert not inhouse_status.github_qualified([check, newer], "a" * 40)
     assert not inhouse_status.github_qualified([dict(check, app={"id": 1})], "a" * 40)
     assert not inhouse_status.github_qualified([check], "b" * 40)
+
+
+@pytest.mark.parametrize("latest_state", ["pending", "failure", "success"])
+def test_verification_checks_later_history_pages_before_accepting_old_green(monkeypatch, latest_state):
+    sha = "a" * 40
+    status = {"context": "ci/woodpecker/pr/verify", "status": "success",
+              "creator": {"login": "hermes-ci"},
+              "target_url": "https://ci.theincompetent.dev/repos/17/pipeline/8/1"}
+    rows = [dict(status, id=index) for index in range(1, 52)]
+    rows[-1]["status"] = latest_state
+    pages = []
+
+    class History(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            query = parse_qs(urlsplit(self.path).query)
+            page = int(query.get("page", ["1"])[0])
+            pages.append(page)
+            raw = json.dumps(rows[(page - 1) * 50:page * 50]).encode()
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+
+        def log_message(self, *args):
+            pass
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), History)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    monkeypatch.setattr(inhouse_status, "GITEA_API", f"http://127.0.0.1:{server.server_port}")
+    try:
+        if latest_state == "success":
+            inhouse_status.wait_for_verification(sha, "fixture-read-only", timeout=0)
+        else:
+            with pytest.raises((RuntimeError, TimeoutError)):
+                inhouse_status.wait_for_verification(sha, "fixture-read-only", timeout=0)
+        assert pages == [1, 2]
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
 
 
 @pytest.mark.parametrize("fault", [None, "source-moved", "wrong-application", "public-diverged"])
