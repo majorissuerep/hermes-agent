@@ -9,6 +9,7 @@ Real git, real processes, no mocks:
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 import os
 import subprocess
 import sys
@@ -18,6 +19,7 @@ from pathlib import Path
 
 import pytest
 from tests.hermes_cli.update_test_support import isolated_command_checkout as isolated_command_checkout  # noqa: PLC0414 -- register the shared autouse fixture
+from tests.waiting import wait_until
 
 
 from hermes_cli import update_lock as ul
@@ -426,7 +428,7 @@ def _heartbeat_writer(beat: Path) -> str:
     custody SIGKILLs this writer at an arbitrary instant, and an in-place ``write_text`` killed
     between its truncating open and its write leaves ``beat`` empty, so the test could no longer
     read the pid back out of it."""
-    return (f"import os, pathlib, time; os.setsid(); os.closerange(3, 4096); p = pathlib.Path({str(beat)!r})\n"  # windows-footgun: ok - Linux-only callers
+    return (f"import os, pathlib, time; os.setsid(); os.closerange(3, 4096); p = pathlib.Path({str(beat)!r})\n"  # windows-footgun: ok - POSIX-only callers
             "t = p.with_name(p.name + '.tmp')\n"
             "for i in range(300):\n    t.write_text(f'{os.getpid()} {i}'); os.replace(t, p); time.sleep(0.1)")
 
@@ -438,19 +440,15 @@ def _node_starting(writer: str, *, then: str) -> list[str]:
             f"subprocess.Popen([sys.executable, '-c', {writer!r}], stdin=d, stdout=d, stderr=d); {then}"]
 
 
-def _launch_in_custody(repo: Path, tmp_path: Path, command: list[str], *, platform: str | None = None,
-                       **popen) -> subprocess.Popen:
+def _launch_in_custody(repo: Path, tmp_path: Path, command: list[str], **popen) -> subprocess.Popen:
     """Start ``command`` the way the build runner does (contained_command under a held checkout
-    lock); ``platform`` makes the launcher see another ``sys.platform`` (its no-subreaper path)."""
+    lock). Host-specific custody runs on its native host."""
     from hermes_cli.update_custody import contained_command
 
     lock = ul.UpdateLock(path=tmp_path / "marker", install_root=repo)
     assert lock.acquire()
     try:
         with contained_command(command, root=repo) as (argv, custody):
-            assert argv[3] == "-c", argv
-            if platform is not None:
-                argv[4] = f"import sys; sys.platform = {platform!r}\n" + argv[4]
             return subprocess.Popen(argv, stdin=subprocess.DEVNULL, **custody, **popen)
     finally:
         lock.release()
@@ -576,34 +574,90 @@ def test_a_ctrl_c_keeps_custody_until_a_detached_writer_is_gone(repo, tmp_path, 
             os.kill(int(beat.read_text(encoding="utf-8").split()[0]), signal.SIGKILL)  # windows-footgun: ok - Linux-only test
 
 
-@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="POSIX sessions + /proc")
-@pytest.mark.parametrize("platform", [None, "darwin"], ids=["subreaper", "ps-walk"])
-def test_a_detached_grandchild_outliving_node_dies_before_the_build_returns(repo, tmp_path, platform):
+def _record_native_ps_sample(tmp_path: Path, beat: Path, sampled: Path) -> dict[str, str]:
+    """Observe the real macOS process table without changing its rows or host semantics."""
+    from hermes_platform.resolver import locate_command
+
+    ps = locate_command("ps").command
+    assert ps, "custody qualification requires the native ps command"
+    directory = tmp_path / "sample-recorder"
+    directory.mkdir()
+    recorder = directory / "ps"
+    recorder.write_text(f"#!{sys.executable}\n" + textwrap.dedent(f"""\
+        import pathlib, subprocess, sys
+        result = subprocess.run([{ps[0]!r}, *sys.argv[1:]], capture_output=True, check=False)
+        sys.stdout.buffer.write(result.stdout)
+        sys.stderr.buffer.write(result.stderr)
+        beat = pathlib.Path({str(beat)!r})
+        if beat.exists():
+            pid = beat.read_text().split()[0].encode()
+            if any(row.split()[:1] == [pid] for row in result.stdout.splitlines()):
+                pathlib.Path({str(sampled)!r}).touch()
+        raise SystemExit(result.returncode)
+        """), encoding="utf-8")
+    recorder.chmod(0o755)
+    return {**os.environ, "PATH": f"{directory}{os.pathsep}{os.environ['PATH']}"}
+
+
+@contextmanager
+def _started_build(repo: Path, tmp_path: Path):
+    """Keep node and its detached writer alive until the test releases or stops the build."""
+    from hermes_platform.processes import (
+        get_process_start_time, process_record_is_live, terminate_pid,
+    )
+
+    beat, node_pid = tmp_path / "beat", tmp_path / "node.pid"
+    finish, sampled = tmp_path / "finish", tmp_path / "sampled"
+    node = _node_starting(_heartbeat_writer(beat), then=(
+        "import os, pathlib; from tests.waiting import wait_until; "
+        f"pathlib.Path({str(node_pid)!r}).write_text(str(os.getpid())); "
+        f"wait_until(pathlib.Path({str(finish)!r}).exists, timeout=30, what='build release')"
+    ))
+    env = _record_native_ps_sample(tmp_path, beat, sampled) if sys.platform == "darwin" else dict(os.environ)
+    launcher = _launch_in_custody(repo, tmp_path, node, start_new_session=True, env=env)
+    identities = []
+    try:
+        wait_until(lambda: beat.exists() and node_pid.exists(), timeout=30, what="node and detached writer started")
+        for pid in (int(node_pid.read_text()), int(beat.read_text().split()[0])):
+            identity = {"pid": pid, "start_time": get_process_start_time(pid)}
+            assert identity["start_time"] is not None and process_record_is_live(identity)
+            identities.append(identity)
+        if sys.platform == "darwin":
+            wait_until(sampled.exists, timeout=30, what="custodian sampled the native descendant table")
+        yield launcher, identities, finish
+    finally:
+        if launcher.poll() is None:
+            launcher.terminate()
+            launcher.wait(timeout=20)
+        for identity in identities:
+            if process_record_is_live(identity):
+                terminate_pid(identity["pid"], force=True, expected_start_time=identity["start_time"])
+
+
+@pytest.mark.platforms("posix")
+def test_a_detached_grandchild_outliving_node_dies_before_the_build_returns(repo, tmp_path):
     """N13/L1: a descendant that left node's process group (its own session) and outlives node
     is still killed before the build call returns: Linux through the subreaper, elsewhere
     through the recorded descendant tree."""
-    late = tmp_path / "late"
-    node = _node_starting(_late_writer(late, detach=True), then="time.sleep(1.2)")
-    launcher = _launch_in_custody(repo, tmp_path, node, platform=platform)
-    assert launcher.wait(timeout=30) == 0
-    time.sleep(3)
-    assert not late.exists(), "a detached build descendant kept writing after the build call returned"
+    from hermes_platform.processes import process_record_is_live
+
+    with _started_build(repo, tmp_path) as (launcher, identities, finish):
+        finish.touch()
+        assert launcher.wait(timeout=30) == 0
+        assert not any(map(process_record_is_live, identities)), "a build process outlived the build call"
 
 
-@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="POSIX signals + /proc")
+@pytest.mark.platforms("posix")
 def test_a_terminated_launcher_takes_node_and_its_descendants_with_it(repo, tmp_path):
     """L1: SIGTERM to the launcher (a service manager, the caller's polite stop) is forwarded to
     node, and what node started is killed too, before the launcher exits."""
     import signal
+    from hermes_platform.processes import process_record_is_live
 
-    late = tmp_path / "late"
-    node = _node_starting(_late_writer(late), then="time.sleep(30)")
-    launcher = _launch_in_custody(repo, tmp_path, node, start_new_session=True)
-    time.sleep(1)
-    launcher.send_signal(signal.SIGTERM)
-    assert launcher.wait(timeout=20) == 128 + signal.SIGTERM
-    time.sleep(3)
-    assert not late.exists(), "a build descendant kept writing after its launcher was terminated"
+    with _started_build(repo, tmp_path) as (launcher, identities, _finish):
+        launcher.send_signal(signal.SIGTERM)
+        assert launcher.wait(timeout=20) == 128 + signal.SIGTERM
+        assert not any(map(process_record_is_live, identities)), "a build process outlived launcher termination"
 
 
 

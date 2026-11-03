@@ -377,6 +377,27 @@ now covers all three forms. Real-Git regressions use a transport recorder to
 prove refusal before any SSH process starts; the CLI dispatch checks, original
 deadline and verification pod's network fence remain unchanged.
 
+An I/O-stalled full run exposed two custody-test timing assumptions: a one-second
+delay did not establish that the launcher had started, and a writer's timer could
+expire before the build returned. The custody cases now wait for the actual node
+and detached writer, record PID/start-time identities, then assert that both are
+dead when the build or its termination returns. A controlled cold-launch delay
+reproduces the former signal failure and passes with readiness synchronization.
+The macOS tree-walk contract runs on macOS, without changing `sys.platform`.
+Its recorder forwards the native `ps` output unchanged and observes a descendant
+sample before releasing the node; Linux uses its real subreaper.
+
+The same run recorded about 50-60% full I/O stall on its worker, followed by
+unrelated 600-second updater-file timeouts. Those failures remain negative
+evidence. Verification requires the operator-maintained node label
+`theincompetent.dev/hermes-verification=true`; clone and publication keep their
+existing placement. Qualify a worker with native pressure observations, a
+disposable write/fsync probe, sufficient allocatable resources, and a complete
+zero-retry run. Remove the label when pressure, eviction or repeated deadline
+failures invalidate that evidence; qualify a replacement before reapplying it.
+Kubernetes pressure taints, test deadlines, resource limits and required checks
+are retained. Worker selection grants no credential or network authority.
+
 The aggregate GitHub gate retains native Linux/macOS tests, real terminal input,
 real SSH/Docker, installer protocol/stamp checks and Docker/shell lint. Full
 production cold installs and live-provider acceptance remain separate evidence.
