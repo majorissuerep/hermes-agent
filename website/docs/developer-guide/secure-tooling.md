@@ -192,8 +192,11 @@ credential injection. Failed runs exposed both conditions; an isolated image
 probe verifies candidate and target SHA after the authenticated fetch.
 The verifier copies the immutable checkout from the shared NAS onto the pod's
 temporary disk before provisioning and testing, avoiding repeated network-file
-imports. It remains bounded to two CPUs, 6 GiB RAM and 8 GiB temporary storage,
-within the existing namespace limits; the temporary copy is removed on exit.
+imports. Four Python workers are bounded to four CPUs, 6 GiB RAM and 8 GiB
+temporary storage, within the existing namespace limits. CPU/memory reservations
+remain two CPUs and 4 GiB. The two-worker live run's measured throughput projected
+beyond the existing two-hour job limit; worker width changes without narrowing
+tests or enabling retries. The temporary copy is removed on exit.
 Native SSH fixtures pin their generated host key in a private trust file through
 the real clients, and only replace a container bearing the same fixture ownership
 label. Repeated runs do not write test keys into the operator's SSH trust store.

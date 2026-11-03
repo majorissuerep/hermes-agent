@@ -89,7 +89,7 @@ def main() -> None:
         directory = Path(temporary)
         env.update({
             "HERMES_HOME": str(directory / "home"), "HERMES_RUNTIME_DIR": str(directory / "tools"),
-            "TMPDIR": str(directory / "tmp"), "HERMES_TEST_WORKERS": "2",
+            "TMPDIR": str(directory / "tmp"), "HERMES_TEST_WORKERS": "4",
             "HERMES_TEST_FILE_RETRIES": "0", "HERMES_TEST_FILE_TIMEOUT": "600", "VITEST_MAX_WORKERS": "2",
         })
         for name in ("HERMES_TEST_PATHS", "HERMES_TEST_SLICE"):
@@ -110,7 +110,7 @@ def main() -> None:
             run(["npm", "ci"], env)
             run(["npm", "run", "build", "--prefix", "ui-tui"], env)
         if lanes["python"]:
-            run(["scripts/run_tests.sh", "-j", "2", "--file-retries", "0"], env)
+            run(["scripts/run_tests.sh", "-j", "4", "--file-retries", "0"], env)
         if lanes["frontend"]:
             run(["node", ".github/scripts/run-workspace-checks.mjs", "--concurrency", "1"], env)
         if lanes["site"]:
