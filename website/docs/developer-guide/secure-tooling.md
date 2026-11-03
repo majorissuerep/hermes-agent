@@ -406,6 +406,16 @@ minutes scanning the shared volume for LFS checkout. Ordinary Git checkout and
 the full verifier remain required. Adding LFS-managed assets requires reviewing
 this setting and qualifying their actual hydrated content.
 
+A zero-retry run also caught the five-step stale-compression-holder fixture
+timing out before its blocked summary began. It now uses the existing
+summary-entry barrier from its sibling isolation cases. The actual blocked-work
+timeout stays bounded by that helper's shorter idle/ceiling, while real
+SQLCipher/worker preparation has its own readiness guard. After transferring
+the durable lease, the test joins the old worker before asserting unchanged
+cooldown, replacement-holder lease and transcript. A controlled preparation
+delay reproduces the former failure and passes with the barrier. Production
+compression budgets and fencing are unchanged.
+
 The aggregate GitHub gate retains native Linux/macOS tests, real terminal input,
 real SSH/Docker, installer protocol/stamp checks and Docker/shell lint. Full
 production cold installs and live-provider acceptance remain separate evidence.
