@@ -185,9 +185,11 @@ mode selected a shallow tree-filtered checkout despite depth 0. It was cancelled
 A subsequent full-history fetch hit the service's HTTP 504 deadline. Neither run
 counts as qualification; bounded history retains the reviewed diff without an
 unbounded archive transfer through the ingress.
-The pinned clone image also required matching `home` and `HOME`: otherwise its
-secondary target-branch fetch lost private-repository authentication. An isolated
-image probe verifies both the candidate and target SHA after the authenticated fetch.
+The pinned clone image requires `home: /root` so its initial and secondary Git
+commands use the same credential file. Clone options must remain in `settings`:
+Woodpecker 3.13 excludes steps with an `environment` block from trusted-plugin
+credential injection. Failed runs exposed both conditions; an isolated image
+probe verifies candidate and target SHA after the authenticated fetch.
 The verifier copies the immutable checkout from the shared NAS onto the pod's
 temporary disk before provisioning and testing, avoiding repeated network-file
 imports. It remains bounded to two CPUs, 6 GiB RAM and 8 GiB temporary storage,
