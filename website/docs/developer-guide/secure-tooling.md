@@ -241,12 +241,16 @@ commands use the same credential file. Clone options must remain in `settings`:
 Woodpecker 3.13 excludes steps with an `environment` block from trusted-plugin
 credential injection. Failed runs exposed both conditions; an isolated image
 probe verifies candidate and target SHA after the authenticated fetch. The
-clone now intentionally opts out of automatic injection and receives an
-explicit read-only source-token binding restricted to the pinned clone image.
+clone now uses a repository-only read-only SSH key through the plugin's
+documented settings, with a host key read from the running Gitea instance.
 The first actual token-expiry failure occurred between the initial fetch and
 the target-branch fetch after a slow checkout. This separate repository binding
 preserves both authenticated fetches without changing the shared CI bot's
-interactive OAuth login or giving PR verification the mirror write key.
+interactive OAuth login or giving PR verification the mirror write key. An
+environment-based binding was rejected by Woodpecker's image-filter rules;
+those rules remain enforced. The actual pinned clone image fetched both refs,
+verified the candidate and target SHAs, and received Gitea's explicit refusal
+of a write dry run using that same read-only key.
 The verifier copies the immutable checkout from the shared NAS onto the pod's
 temporary disk before provisioning and testing, avoiding repeated network-file
 imports. Four Python workers are bounded to four CPUs, 6 GiB RAM and 16 GiB
@@ -341,8 +345,8 @@ It never forces a push or synthesizes a passing status. Source drift, divergent
 history, failure and missing evidence stop publication. The source credential is
 read-only; the SSH deploy key can write only the existing public repository.
 Woodpecker supplies the publishing bindings only to push events in the allowed
-Python image. The clone image has a separate read-only source-token binding on
-clone events; PR verification cannot receive the mirror write key. No vault key
+Python image. The clone image has a separate repository-only read-only SSH key
+on clone events; PR verification cannot receive the mirror write key. No vault key
 or real model credential is used by ordinary CI.
 
 The first actual hosted GitHub gate failed because the private forge hostname
