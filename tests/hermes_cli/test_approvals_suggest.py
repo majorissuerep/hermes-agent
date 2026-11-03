@@ -146,16 +146,17 @@ class TestScan:
 # ---------------------------------------------------------------------------
 
 class TestNormalizeAndGlob:
-    def test_normalize_folds_home_prefix(self, tmp_path, monkeypatch):
-        home = str(tmp_path / "operator")
+    @pytest.mark.parametrize("home", [None, "/root"])
+    def test_normalize_folds_home_prefix(self, tmp_path, monkeypatch, home):
+        home = home or str(tmp_path / "operator")
         monkeypatch.setenv("HOME", home)
         monkeypatch.setenv("USERPROFILE", home)
         normalized = normalize_command(f"git checkout -- {home}/project/file.txt")
         assert "~/project/file.txt" in normalized
         assert home not in normalized
 
-    @pytest.mark.parametrize("home", ["/", "/root"])
-    def test_normalize_preserves_degenerate_home_prefixes(self, monkeypatch, home):
+    def test_normalize_preserves_filesystem_root(self, monkeypatch):
+        home = "/"
         monkeypatch.setenv("HOME", home)
         monkeypatch.setenv("USERPROFILE", home)
         command = f"git checkout -- {home.rstrip('/')}/project/file.txt"
