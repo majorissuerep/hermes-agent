@@ -178,8 +178,10 @@ def test_stale_fire_owner_cannot_mark_replacement_run(temp_home):
     assert persisted.get("last_run_at") is None
 
 
-def test_fire_claim_fence_serializes_terminal_revocation(temp_home):
+def test_fire_claim_fence_serializes_terminal_revocation(temp_home, monkeypatch):
     """A side effect authorized by owner linearizes before terminal revocation."""
+    from agent.memory_provider import spawn_context_thread
+    from cron import jobs
     from cron.jobs import (
         claim_job_for_fire,
         create_job,
@@ -192,20 +194,25 @@ def test_fire_claim_fence_serializes_terminal_revocation(temp_home):
     assert isinstance(claimed, dict)
     owner = claimed["fire_claim"]["by"]
     terminal_done = threading.Event()
+    result = {}
 
     def finish_run():
-        mark_job_run(job["id"], True, expected_fire_owner=owner)
+        result["revoked"] = mark_job_run(job["id"], True, expected_fire_owner=owner)
         terminal_done.set()
 
     with fire_claim_fence(job["id"], expected_owner=owner) as owns_claim:
         assert owns_claim is True
-        thread = threading.Thread(target=finish_run)
+        # A busy fence must refuse revocation when its lock budget is exhausted.
+        # Complete that attempt while the side effect still owns the real lock.
+        monkeypatch.setattr(jobs, "_JOBS_LOCK_TIMEOUT_SECONDS", 0.0)
+        thread = spawn_context_thread(finish_run, name="cron-revocation-contract")
         thread.start()
-        time.sleep(0.05)
-        assert terminal_done.is_set() is False
+        assert terminal_done.wait(timeout=10)
+        assert result["revoked"] is False
 
-    thread.join(timeout=1)
-    assert terminal_done.is_set() is True
+    thread.join(timeout=10)
+    assert not thread.is_alive()
+    assert mark_job_run(job["id"], True, expected_fire_owner=owner) is True
 
 
 def test_fire_claim_fence_rejects_stale_owner(temp_home):

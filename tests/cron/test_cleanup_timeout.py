@@ -58,10 +58,20 @@ class HangingAgent:
 
 
 def test_run_job_bounds_sessiondb_finalization(tmp_path):
+    from agent.memory_provider import spawn_context_thread
+
     release = threading.Event()
     fake_db = HangingSessionDB(release)
     fake_db.db_path = tmp_path / "state.db"
     job = {"id": "cleanup-sessiondb-hang", "name": "test", "prompt": "hello"}
+    completed = Future()
+    worker = None
+
+    def execute():
+        try:
+            completed.set_result(run_job(job))
+        except BaseException as error:
+            completed.set_exception(error)
 
     try:
         with _owner_execution(fake_db, job), \
@@ -76,17 +86,20 @@ def test_run_job_bounds_sessiondb_finalization(tmp_path):
             mock_agent.run_conversation.return_value = {"final_response": "ok"}
             mock_agent_cls.return_value = mock_agent
 
-            started = time.monotonic()
-            success, _output, final_response, error = run_job(job)
-            elapsed = time.monotonic() - started
+            worker = spawn_context_thread(execute, name="cron-finalization-contract")
+            worker.start()
+            assert fake_db.entered.wait(timeout=20)
+            # Bound the blocked finalizer, independently of job preparation time.
+            success, _output, final_response, error = completed.result(timeout=5)
 
-        assert fake_db.entered.wait(timeout=2.0)
-        assert elapsed < 5.0
+        assert not release.is_set()
         assert success is True
         assert final_response == "ok"
         assert error is None
     finally:
         release.set()
+        if worker is not None:
+            worker.join(timeout=10)
 
 
 def test_agent_teardown_is_bounded():

@@ -192,11 +192,15 @@ credential injection. Failed runs exposed both conditions; an isolated image
 probe verifies candidate and target SHA after the authenticated fetch.
 The verifier copies the immutable checkout from the shared NAS onto the pod's
 temporary disk before provisioning and testing, avoiding repeated network-file
-imports. Four Python workers are bounded to four CPUs, 6 GiB RAM and 8 GiB
+imports. Four Python workers are bounded to four CPUs, 6 GiB RAM and 16 GiB
 temporary storage, within the existing namespace limits. CPU/memory reservations
 remain two CPUs and 4 GiB. The two-worker live run's measured throughput projected
 beyond the existing two-hour job limit; worker width changes without narrowing
-tests or enabling retries. The temporary copy is removed on exit.
+tests or enabling retries. Concurrent PM fixture environments reached about
+7 GiB before the CLI suite finished, then the pod was evicted at its original
+8 GiB limit. The storage limit leaves room for four workers within the existing
+20 GiB per-container ceiling, while its reservation
+remains 2 GiB. The temporary copy is removed on exit.
 Native SSH fixtures pin their generated host key in a private trust file through
 the real clients, and only replace a container bearing the same fixture ownership
 label. Repeated runs do not write test keys into the operator's SSH trust store.
@@ -204,6 +208,13 @@ The root-run pod exposed six pre-existing container-path tests probing the real
 `/root/.hermes`. A disposable root container reproduces all six on the base;
 temporary mirror paths preserve their assertions without weakening the home-I/O
 guard or changing production safety code. The other root-path fixtures also pass.
+The full run also exposed two scheduler tests timing job preparation and thread
+scheduling instead of the blocked operation. Their contracts now synchronize on
+the finalizer and exercise fence refusal while the side effect still holds its
+lock, followed by successful revocation after release. Home-prefix normalization
+uses a temporary multi-component home and retains explicit short-prefix refusal
+checks; production approval rules are unchanged. These repairs require a fresh
+full run and do not turn the failing run into passing evidence.
 
 The private source is `unpossible/hermes-agent` on the existing Gitea service;
 the public mirror is `majorissuerep/hermes-agent` on GitHub. The sole GitHub
