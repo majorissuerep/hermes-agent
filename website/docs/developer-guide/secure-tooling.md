@@ -370,6 +370,13 @@ HTTP/profile state. They also assert the usage requests' host and credential;
 the later fallback test keeps its exact key assertion. Production credential
 selection and background behavior are unchanged.
 
+The first SSH-backed full run also exposed an incomplete offline guard in the
+lazy-secrets update probe: it rewrote HTTPS and SCP-style Git URLs but let
+`ssh://` reach the network and hit its 30-second subprocess deadline. The guard
+now covers all three forms. Real-Git regressions use a transport recorder to
+prove refusal before any SSH process starts; the CLI dispatch checks, original
+deadline and verification pod's network fence remain unchanged.
+
 The aggregate GitHub gate retains native Linux/macOS tests, real terminal input,
 real SSH/Docker, installer protocol/stamp checks and Docker/shell lint. Full
 production cold installs and live-provider acceptance remain separate evidence.

@@ -12,6 +12,7 @@ reviewer flagged as unproven.
 """
 
 import os
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -19,10 +20,8 @@ from pathlib import Path
 import pytest
 
 
-def _run_hermes(args: list[str], timeout: int = 30) -> subprocess.CompletedProcess[str]:
-    """Run hermes CLI as a subprocess from repo root.
-
-    The child runs with all git remote URLs rewritten to an unreachable
+def _offline_git_environment() -> dict[str, str]:
+    """Keep git remote URLs rewritten to an unreachable
     local path (GIT_CONFIG_* env overrides). These tests assert the
     lazy-crypto / no-self-lock invariants of the dispatch path, NOT update
     connectivity — but ``hermes update --check`` really does ``git fetch``
@@ -34,29 +33,61 @@ def _run_hermes(args: list[str], timeout: int = 30) -> subprocess.CompletedProce
     still exercises its full parser/dispatch/fetch code and exits 1, which
     the assertions already accept.
     """
-    repo_root = Path(__file__).parent.parent.parent
     env = dict(os.environ)
     env.update(
         {
-            "GIT_CONFIG_COUNT": "2",
-            # Rewrite every https:// and ssh remote to a nonexistent local
+            "GIT_CONFIG_COUNT": "3",
+            # Rewrite HTTPS, SCP-style SSH and SSH URIs to a nonexistent local
             # path so any fetch fails in milliseconds without touching the
             # network. insteadOf matching is prefix-based.
             "GIT_CONFIG_KEY_0": "url.file:///nonexistent-hermes-test-remote/.insteadOf",
             "GIT_CONFIG_VALUE_0": "https://",
             "GIT_CONFIG_KEY_1": "url.file:///nonexistent-hermes-test-remote/.insteadOf",
             "GIT_CONFIG_VALUE_1": "git@",
+            "GIT_CONFIG_KEY_2": "url.file:///nonexistent-hermes-test-remote/.insteadOf",
+            "GIT_CONFIG_VALUE_2": "ssh://",
         }
     )
+    return env
+
+
+def _run_hermes(args: list[str], timeout: int = 30) -> subprocess.CompletedProcess[str]:
+    """Run the real CLI with deterministic offline Git transport."""
+    repo_root = Path(__file__).parent.parent.parent
     return subprocess.run(
         [sys.executable, "-m", "hermes_cli.main"] + args,
         capture_output=True,
         text=True,
         cwd=str(repo_root),
-        env=env,
+        env=_offline_git_environment(),
         timeout=timeout,
         check=False,
     )
+
+
+@pytest.mark.parametrize("remote", [
+    "https://fixture.invalid/hermes.git",
+    "git@fixture.invalid:hermes.git",
+    "ssh://git@fixture.invalid:2222/hermes.git",
+])
+def test_offline_update_probe_refuses_git_remote_before_transport(tmp_path, remote):
+    marker = tmp_path / "transport-started"
+    transport = tmp_path / "ssh_transport.py"
+    transport.write_text(
+        "from pathlib import Path\n"
+        f"Path({str(marker)!r}).write_text('transport started')\n"
+        "raise SystemExit(97)\n",
+        encoding="utf-8",
+    )
+    env = _offline_git_environment()
+    env.update(GIT_SSH_COMMAND=shlex.join([sys.executable, str(transport)]), GIT_SSH_VARIANT="ssh")
+    result = subprocess.run(
+        ["git", "ls-remote", remote], cwd=tmp_path, env=env, capture_output=True,
+        text=True, timeout=5, check=False,
+    )
+    assert result.returncode != 0
+    assert not marker.exists(), "the offline update probe started an SSH transport"
+    assert "nonexistent-hermes-test-remote" in result.stderr
 
 
 class TestSecretsDispatchE2E:
