@@ -67,6 +67,8 @@ class PipeServer:
         try:
             fd = os.open(self.path / "response", os.O_WRONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
             try:
+                if not _is_protected(fd, stat.S_IFIFO):
+                    return  # a replaced node must never receive a credential frame
                 os.write(fd, payload)
             finally:
                 os.close(fd)
@@ -74,7 +76,8 @@ class PipeServer:
             return  # a cancelled client must not strand the serving thread
         except OSError as exc:
             import errno
-            if exc.errno != errno.ENXIO:
+            # A cancelled client or refused node must not stop the next valid request.
+            if exc.errno not in {errno.ENXIO, errno.ELOOP, errno.EISDIR, errno.EACCES, errno.EPERM}:
                 raise
 
     def shutdown(self):
@@ -86,11 +89,16 @@ class PipeServer:
         self.directory.cleanup()
 
 
+def _is_protected(fd: int, kind: int) -> bool:
+    """Validate the open inode, including after a node changes during a request."""
+    info = os.fstat(fd)
+    return (stat.S_IFMT(info.st_mode) == kind and info.st_uid == os.getuid()
+            and stat.S_IMODE(info.st_mode) == 0o600)
+
+
 def _open(directory: Path, name: str, kind: int) -> int:
     fd = os.open(directory / name, os.O_RDWR | os.O_NONBLOCK | os.O_NOFOLLOW)
-    info = os.fstat(fd)
-    if (stat.S_IFMT(info.st_mode) != kind or info.st_uid != os.getuid()
-            or stat.S_IMODE(info.st_mode) != 0o600):
+    if not _is_protected(fd, kind):
         os.close(fd)
         raise ValueError("unprotected authority pipe")
     return fd

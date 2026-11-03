@@ -56,6 +56,9 @@ workspace sandbox rejected even Unix socket connections with networking disabled
 The transport directory contains FIFO nodes, an empty lock inode and a
 credential-free command bound to the owning installation. Keys and requests remain
 in process memory and pipe buffers; client responses are correlated and bounded.
+Both ends validate the open descriptor's FIFO type, owner and private mode.
+A replaced response file, symlink, directory or shared FIFO is refused before a
+key frame is written, and repairing the node permits the next valid request.
 The runner adds only this transport directory to Codex's writable paths. Profile
 writes outside the workspace require the caller's explicit `--add-dir` selection.
 
@@ -124,6 +127,11 @@ unregistered nested grants escaped output redaction. A lock/unlock cycle also
 revived old session tokens until permanent lock revocation was added. Behavioral regressions
 reproduced each failure before its corresponding fix. No plaintext fallback,
 global networking opt-in or permission bypass was used to resolve them.
+
+A private-branch probe found that the FIFO server assumed its response path
+remained a private FIFO. Four node-replacement cases failed before the repair.
+The server now validates the open inode before writing a credential frame and
+refuses replaced nodes without stopping subsequent valid owner requests.
 
 Fresh root-container checks also exposed an ambient-console-script self-call,
 plaintext xAI migration I/O, an unhandled pre-filter Python 3.11 tar API, and a
