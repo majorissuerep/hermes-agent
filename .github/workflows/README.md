@@ -17,8 +17,14 @@ requires the exact revision's latest trusted Woodpecker result before pushing
 readback. It rechecks private verification immediately before the main push.
 Failed, pending, cancelled or missing checks cannot qualify publication.
 The deploy key belongs only to this repository; source access is read-only.
-Neither credential is available to pull-request steps. No workflow publishes a
-deployment or changes repository visibility/protection.
+The publishing bindings are push-only, and PR steps cannot receive the mirror
+write key. No workflow publishes a deployment or changes repository
+visibility/protection.
+
+The clone image receives a separate binding for the read-only source token on PR,
+manual and push events. It cannot use the mirror write key. This explicit
+binding avoids an hourly OAuth snapshot expiring between the two Git fetches
+during a slow checkout; the shared CI bot's interactive login remains unchanged.
 
 Live-provider and cold lifecycle acceptance remain separate, explicit runs.
 See [the tooling contract](../../website/docs/developer-guide/secure-tooling.md).

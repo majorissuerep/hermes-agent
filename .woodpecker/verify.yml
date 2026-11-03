@@ -7,12 +7,19 @@ clone:
   git:
     image: docker.io/woodpeckerci/plugin-git@sha256:9802cb7852dcf31f9c5c1d1ddeadfb9002d4fae85751f7b6a792eedb267bcc59
     settings:
-      # Keep trusted-plugin classification and the native Git credential home.
+      # Use the same credential home for the initial and target-branch fetches.
       home: /root
       depth: 256
       partial: false
       fetch_target_branch: true
       target_branch: main
+    # Explicit read-only auth avoids an hourly OAuth snapshot expiring while
+    # checkout runs. An environment block opts out of automatic netrc injection.
+    environment:
+      CI_NETRC_MACHINE: git.theincompetent.dev
+      CI_NETRC_USERNAME: hermes-ci
+      CI_NETRC_PASSWORD:
+        from_secret: gitea_clone_token
 
 steps:
   - name: checks
