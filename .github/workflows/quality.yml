@@ -13,21 +13,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  inhouse:
-    name: Exact revision passed in-house verification
-    runs-on: ubuntu-latest
-    timeout-minutes: 7
-    steps:
-      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a # v7.0.1
-      - name: Require the existing Woodpecker identity's latest verification
-        env:
-          GITEA_STATUS_TOKEN: ${{ secrets.HERMES_GITEA_STATUS_TOKEN }}
-          QUALIFIED_SHA: ${{ github.sha }}
-        run: python3 -m scripts.ci.inhouse_status "$QUALIFIED_SHA"
-
   native:
     name: Native qualification (${{ matrix.os }})
-    needs: inhouse
     strategy:
       fail-fast: false
       matrix:
@@ -84,7 +71,7 @@ jobs:
 
   required:
     name: All required checks pass (v2)
-    needs: [inhouse, native]
+    needs: [native]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2

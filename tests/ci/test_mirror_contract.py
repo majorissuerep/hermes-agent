@@ -71,7 +71,10 @@ def test_verification_checks_later_history_pages_before_accepting_old_green(monk
         thread.join(timeout=5)
 
 
-@pytest.mark.parametrize("fault", [None, "source-moved", "wrong-application", "public-diverged"])
+@pytest.mark.parametrize("fault", [
+    None, "source-moved", "wrong-application", "public-diverged",
+    "private-failed", "private-pending", "private-missing", "private-regressed",
+])
 def test_real_git_mirror_advances_only_a_qualified_source_head(tmp_path, monkeypatch, fault):
     def git(directory: Path, *args: str) -> str:
         return subprocess.check_output(["git", *args], cwd=directory, text=True,
@@ -103,6 +106,15 @@ def test_real_git_mirror_advances_only_a_qualified_source_head(tmp_path, monkeyp
             requests.append((self.path, self.headers.get("Authorization")))
             if self.path == "/source/branches/main":
                 body = {"commit": {"id": base if fault == "source-moved" else sha}}
+            elif self.path.startswith("/source/statuses/" + sha):
+                state = {"private-failed": "failure", "private-pending": "pending"}.get(fault, "success")
+                if fault == "private-regressed" and any(path.startswith("/public/") for path, _ in requests):
+                    state = "pending"
+                body = [] if fault == "private-missing" else [{
+                    "id": 1, "context": "ci/woodpecker/push/verify", "status": state,
+                    "creator": {"login": "hermes-ci"},
+                    "target_url": "https://ci.theincompetent.dev/repos/17/pipeline/18/1",
+                }]
             elif self.path.startswith("/public/commits/" + sha + "/check-runs"):
                 body = {"check_runs": [{"id": 1, "name": "All required checks pass (v2)", "head_sha": sha,
                                        "app": {"id": 1 if fault == "wrong-application" else 15368},
@@ -131,6 +143,13 @@ def test_real_git_mirror_advances_only_a_qualified_source_head(tmp_path, monkeyp
             with pytest.raises((RuntimeError, TimeoutError, subprocess.CalledProcessError)):
                 publish_public.publish(sha, dict(os.environ), "fixture-read-only", str(public), timeout=0)
             assert git(public, "rev-parse", "refs/heads/main") == before
+            if fault in {"private-failed", "private-pending", "private-missing"}:
+                assert not any(path.startswith("/public/") for path, _ in requests)
+                absent = subprocess.run(
+                    ["git", "-C", str(public), "show-ref", "--verify", "--quiet",
+                     "refs/heads/mirror/qualification"], capture_output=True, timeout=30, check=False,
+                )
+                assert absent.returncode != 0
         else:
             publish_public.publish(sha, dict(os.environ), "fixture-read-only", str(public), timeout=0)
             assert git(public, "rev-parse", "refs/heads/main") == sha

@@ -314,25 +314,35 @@ the complete new-head run remains the acceptance evidence.
 
 The private source is `unpossible/hermes-agent` on the existing Gitea service;
 the public mirror is `majorissuerep/hermes-agent` on GitHub. The sole GitHub
-entrypoint, `quality.yml`, requires the exact revision's latest verification
-from the existing `hermes-ci` identity and supplies native host/daemon evidence.
+entrypoint, `quality.yml`, supplies native host/daemon evidence. Private
+verification is enforced by the publisher on its existing private network;
+hosted GitHub runners need neither forge access nor a private-source credential.
 Older green statuses, other workflows and other status writers cannot qualify a
-revision. Historical GitHub entrypoints remain disabled.
+revision for publication. Historical GitHub entrypoints remain disabled.
 The status reader traverses history pages before selecting the newest trusted
 result: the deployed Gitea 1.22 reverses the documented `highestindex` ordering.
 Real HTTP regressions cover an older green followed by pending, failure or
 success on a later page.
 
 A separate main-only Woodpecker mirror flow depends on verification. It first
-pushes the ordinary `mirror/qualification` branch, waits for GitHub Actions'
+requires the exact revision's latest verification from `hermes-ci`, pushes the
+ordinary `mirror/qualification` branch, waits for GitHub Actions'
 unchanged `All required checks pass (v2)` application-bound check, then
-fast-forwards public main. It checks source-main identity before and after
-publication, requires public-main ancestry, and reads back the resulting SHA.
+rechecks private verification before fast-forwarding public main. It checks
+source-main identity before and after publication, requires public-main ancestry,
+and reads back the resulting SHA.
 It never forces a push or synthesizes a passing status. Source drift, divergent
 history, failure and missing evidence stop publication. The source credential is
 read-only; the SSH deploy key can write only the existing public repository.
 Woodpecker supplies these credentials only to push events in the allowed image,
 not pull requests. No vault key or real model credential is used by ordinary CI.
+
+The first actual hosted GitHub gate failed because the private forge hostname
+has no public DNS address. Moving its private-proof check to the publisher avoids
+a new runner, VPN, signing key or public ingress. Both gates remain mandatory:
+real-Git regressions refuse failed, pending or missing private proof before any
+qualification push, and refuse proof that regresses while native checks run.
+The unchanged GitHub aggregate still requires both native host jobs to pass.
 
 The aggregate GitHub gate retains native Linux/macOS tests, real terminal input,
 real SSH/Docker, installer protocol/stamp checks and Docker/shell lint. Full

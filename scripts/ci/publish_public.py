@@ -9,7 +9,7 @@ import subprocess
 import tempfile
 import time
 
-from scripts.ci.inhouse_status import PUBLIC_API, github_qualified, read_json, require_source_head
+from scripts.ci.inhouse_status import PUBLIC_API, github_qualified, read_json, require_source_head, wait_for_verification
 
 ROOT = Path(__file__).resolve().parents[2]
 PUBLIC_REMOTE = "ssh://git@ssh.github.com:443/majorissuerep/hermes-agent.git"
@@ -24,6 +24,7 @@ def publish(sha: str, env: dict[str, str], token: str, remote: str = PUBLIC_REMO
     if git("rev-parse", "HEAD") != sha or git("status", "--porcelain=v1"):
         raise RuntimeError("Publishing requires the clean, verified source revision")
     require_source_head(sha, token)
+    wait_for_verification(sha, token, timeout=0)
     git("fetch", "--no-tags", remote, "refs/heads/main", env=env)
     git("merge-base", "--is-ancestor", "FETCH_HEAD", sha)
     # This ordinary branch starts native host checks. It never changes public main.
@@ -37,6 +38,7 @@ def publish(sha: str, env: dict[str, str], token: str, remote: str = PUBLIC_REMO
             raise TimeoutError("GitHub's required application-bound check has not passed")
         time.sleep(60)
     require_source_head(sha, token)
+    wait_for_verification(sha, token, timeout=0)
     # No force, bypass, protection edits or success-status synthesis.
     git("push", "--atomic", remote, f"{sha}:refs/heads/main", env=env)
     observed = git("ls-remote", remote, "refs/heads/main", env=env).split()[0]
@@ -67,7 +69,7 @@ def main() -> None:
         env.pop("GITHUB_PUBLISH_KEY", None)
         env.pop("GITEA_STATUS_TOKEN", None)
         env["GIT_SSH_COMMAND"] = shlex.join([
-            "ssh", "-F", "/dev/null", "-o", "IdentitiesOnly=yes", "-o", "BatchMode=yes",
+            "ssh", "-F", "/dev/null", "-o", "IdentitiesOnly=yes", "-o", "IdentityAgent=none", "-o", "BatchMode=yes",
             "-o", "StrictHostKeyChecking=yes", "-o", f"UserKnownHostsFile={hosts}", "-i", str(key_path),
         ])
         publish(sha, env, token)
