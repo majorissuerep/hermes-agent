@@ -1,9 +1,10 @@
 """Public Ink keyboard flow preserves automatic verification and new-session toggles."""
 
 import os
-import shutil
 
 import pytest
+
+from hermes_platform.resolver import locate_command
 
 from tests.e2e.core.formal_logic.test_native_checkpoints import _answer, _checkpoint
 from tests.fakes.fake_llm_provider import FakeLLMServer, Text
@@ -19,9 +20,9 @@ def test_public_terminal_verifies_repairs_and_disables_mode_for_next_owner(tmp_p
     from hermes_cli.config import load_config_readonly, save_config
     from hermes_security import vault
 
-    node, lean = shutil.which("node"), shutil.which("lean")
+    node, lean = locate_command("node").command, locate_command("lean").command
     assert node and lean and (ROOT / "ui-tui/dist/entry.js").is_file(), "Build Ink and install pinned Lean first"
-    monkeypatch.setenv("HERMES_NODE", node)
+    monkeypatch.setenv("HERMES_NODE", node[0])
     monkeypatch.delenv("HERMES_TUI_DIR", raising=False)
     seen = []
     def main(record):
@@ -38,7 +39,7 @@ def test_public_terminal_verifies_repairs_and_disables_mode_for_next_owner(tmp_p
         try:
             vault.unlock(home, password)
             config = load_config_readonly()
-            config["agent"]["formal_logic"] = {"enabled": True, "lean_path": lean, "max_repairs": 3}
+            config["agent"]["formal_logic"] = {"enabled": True, "lean_path": lean[0], "max_repairs": 3}
             save_config(config, merge_existing=False)
             vault.clear_vault_cache()
             environment = dict(os.environ)

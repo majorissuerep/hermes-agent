@@ -5,23 +5,27 @@ from __future__ import annotations
 import argparse
 import hashlib
 from pathlib import Path
-import platform
 import subprocess
 import sys
 import time
 from urllib.request import urlopen
 
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from hermes_platform.host.facts import native_arch, os_family
+
 VERSION = "4.35.0"
 DIGESTS = {
-    ("Linux", "x86_64"): ("linux", "7289597a44543246c9227b8cae501767e095ce17f6d448b95fc4a8dc97268f6d"),
-    ("Linux", "aarch64"): ("linux_aarch64", "c8f0f8a3920e839718b1343e6781fd80a3e9b1024fbcd7078eb30f54e806b028"),
-    ("Darwin", "x86_64"): ("darwin", "0b43be5c7ecfb36016566a41005ab62bdb04743e6bfd5837e45f796ef4750b4e"),
-    ("Darwin", "arm64"): ("darwin_aarch64", "c0c6f34f35ba1dcc5c4a5fd106fefab9eb5e8469712624dd2c868d51b63177c2"),
+    ("linux", "amd64"): ("linux", "7289597a44543246c9227b8cae501767e095ce17f6d448b95fc4a8dc97268f6d"),
+    ("linux", "arm64"): ("linux_aarch64", "c8f0f8a3920e839718b1343e6781fd80a3e9b1024fbcd7078eb30f54e806b028"),
+    ("darwin", "amd64"): ("darwin", "0b43be5c7ecfb36016566a41005ab62bdb04743e6bfd5837e45f796ef4750b4e"),
+    ("darwin", "arm64"): ("darwin_aarch64", "c0c6f34f35ba1dcc5c4a5fd106fefab9eb5e8469712624dd2c868d51b63177c2"),
 }
 
 
 def install(directory: Path) -> Path:
-    key = (platform.system(), platform.machine())
+    key = (os_family(), native_arch())
     if key not in DIGESTS:
         raise RuntimeError("Formal logic qualification requires a supported native Linux/macOS architecture")
     suffix, expected = DIGESTS[key]
@@ -43,7 +47,8 @@ def install(directory: Path) -> Path:
                    check=True, timeout=180)
     archive.unlink()
     executable = directory / f"lean-{VERSION}-{suffix}" / "bin" / "lean"
-    subprocess.run([str(executable), "--version"], check=True, timeout=10, stdout=sys.stderr)
+    subprocess.run([str(executable), "--version"], stdin=subprocess.DEVNULL,
+                   check=True, timeout=10, stdout=sys.stderr)
     return executable
 
 

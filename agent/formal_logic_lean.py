@@ -6,11 +6,11 @@ import hashlib
 import json
 import os
 import re
-import shutil
 import subprocess
 import tempfile
 
 from agent.formal_logic_schema import Checkpoint, counterexample
+from hermes_platform.resolver import locate_command
 
 LEAN_VERSION = "4.35.0"
 LEAN_COMMIT = "eb6cafb7290e8bd5f2937522d8d804f58f02bafc"
@@ -87,9 +87,10 @@ def verify(checkpoint: Checkpoint, lean_path: str = "lean") -> dict:
     failure = counterexample(checkpoint)
     if failure is not None:
         return {"status": "logic_failed", **failure}
-    executable = shutil.which(lean_path)
-    if executable is None:
+    command = locate_command(lean_path).command
+    if not command:
         return {"status": "checker_unavailable", "error": "Pinned Lean 4.35.0 is unavailable"}
+    executable = command[0]
     source, expected = lean_source(checkpoint)
     try:
         version = subprocess.run([executable, "--version"], stdin=subprocess.DEVNULL,

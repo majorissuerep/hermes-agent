@@ -1,10 +1,10 @@
 """Real encrypted CLI, recorded model wire, and the pinned native Lean kernel."""
 
 import json
-import shutil
 
 import pytest
 
+from hermes_platform.resolver import locate_command
 from agent.formal_logic_lean import verify
 from agent.formal_logic_schema import parse_checkpoint
 from tests.e2e.core.mcp_plugins._helpers import build_home, run_chat_q
@@ -30,9 +30,9 @@ def _answer(data):
 
 
 def _lean():
-    executable = shutil.which("lean")
-    assert executable, "Install the pinned native Lean toolchain before running this qualification file"
-    return executable
+    command = locate_command("lean").command
+    assert command, "Install the pinned native Lean toolchain before running this qualification file"
+    return command[0]
 
 
 def _home(tmp_path, server, *, repairs=3):
