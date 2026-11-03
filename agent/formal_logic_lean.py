@@ -92,8 +92,8 @@ def verify(checkpoint: Checkpoint, lean_path: str = "lean") -> dict:
         return {"status": "checker_unavailable", "error": "Pinned Lean 4.35.0 is unavailable"}
     source, expected = lean_source(checkpoint)
     try:
-        version = subprocess.run([executable, "--version"], capture_output=True, text=True,
-                                 encoding="utf-8", timeout=5, check=False)
+        version = subprocess.run([executable, "--version"], stdin=subprocess.DEVNULL,
+                                 capture_output=True, text=True, encoding="utf-8", timeout=5, check=False)
         if version.returncode or f"version {LEAN_VERSION}," not in version.stdout or LEAN_COMMIT not in version.stdout:
             return {"status": "checker_unavailable", "error": "Lean version/commit differs from the pinned toolchain"}
         with tempfile.TemporaryDirectory(prefix="hermes-logic-") as cwd:
