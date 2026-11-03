@@ -4,6 +4,7 @@ conversation is one session row with its whole volume, and turns-before-switch n
 from __future__ import annotations
 
 import json
+import sqlite3
 from datetime import datetime, timezone, UTC
 
 import pytest
@@ -14,8 +15,9 @@ from hermes_cli.observability import relay_shared_metrics
 from hermes_cli.observability import shared_metrics_engagement as engagement
 from hermes_cli.observability.shared_metrics import SharedMetricsStore
 from tests.hermes_cli.test_relay_shared_metrics_runtime import (
+    _join_export_workers,
     _stored_values,
-    direct_runtime,
+    direct_runtime as direct_runtime,  # noqa: PLC0414 -- register the shared fixture
 )
 
 PUBLIC = "anthropic/claude-sonnet-4"
@@ -26,6 +28,11 @@ DAY1 = datetime(2026, 9, 27, 9, 0, tzinfo=UTC).timestamp()
 def _flush() -> None:
     for runtime in list(relay_shared_metrics._RUNTIMES.values()):
         runtime.relay.subscribers.flush()
+    # The fake Relay flush is synchronous; SQLite writes deferred under contention
+    # settle on the export worker rather than on that callback.
+    _join_export_workers()
+    for runtime in list(relay_shared_metrics._RUNTIMES.values()):
+        runtime.subscriber.store.drain_deferred()
 
 
 def _turn(session_id, task_id, *, platform="cli", model=PUBLIC, tools=0, clock=None, at=None, took=0.0):
@@ -224,6 +231,28 @@ def test_a_background_review_fork_on_the_session_id_adds_no_session_volume(direc
     _flush()
     [(row, _)] = _stored_values(tmp_path, "hermes.session.count")
     assert (row["turn_count_bucket"], row["model_call_count_bucket"], row["message_count_bucket"]) == ("1", "1", "2")
+
+
+def test_closed_session_summary_survives_a_busy_store(direct_runtime, tmp_path, monkeypatch):
+    """A busy counter write is pending, not lost; local inspection drains it first."""
+    _turn("busy", "t1")
+    _flush()
+    runtime = next(iter(relay_shared_metrics._RUNTIMES.values()))
+    store = runtime.subscriber.store
+    blocker = sqlite3.connect(store.database_path)
+    blocker.execute("BEGIN IMMEDIATE")
+    try:
+        # Release the writer before the scheduled export can attempt its own write.
+        with monkeypatch.context() as patch:
+            patch.setattr(runtime, "_schedule_flush_and_export", lambda _: None)
+            lifecycle.finalize_session(session_id="busy")
+        assert not any(row["metric_name"] == "hermes.session.count" for row in store.counter_snapshot())
+    finally:
+        blocker.rollback()
+        blocker.close()
+    _flush()
+    [(row, count)] = _stored_values(tmp_path, "hermes.session.count")
+    assert (row["turn_count_bucket"], count) == ("1", 1)
 
 
 def test_turns_before_switch_ignore_failover_and_review_forks(direct_runtime, tmp_path):

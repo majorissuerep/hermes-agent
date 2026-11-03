@@ -264,6 +264,16 @@ uses a temporary multi-component home and retains explicit short-prefix refusal
 checks; production approval rules are unchanged. These repairs require a fresh
 full run and do not turn the failing run into passing evidence.
 
+The next full run exposed a metrics fixture reading before deferred SQLite writes
+had settled. A held write transaction reproduces the missing session row on the
+base. The test's flush now waits for export workers and drains deferred writes
+before inspection; the fork's disabled collection policy is unchanged. The same
+run timed out the updater process fixture during sustained disk-write stalls.
+Its POSIX virtual environments now link the immutable interpreter rather than
+copying three large binaries for each case; their site-packages and checkout
+transitions remain isolated. The original file deadline and zero retries remain
+in force. These negative runs do not qualify the new candidate.
+
 The private source is `unpossible/hermes-agent` on the existing Gitea service;
 the public mirror is `majorissuerep/hermes-agent` on GitHub. The sole GitHub
 entrypoint, `quality.yml`, requires the exact revision's latest verification
