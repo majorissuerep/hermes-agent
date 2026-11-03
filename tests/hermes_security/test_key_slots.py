@@ -35,11 +35,12 @@ def test_keypair_shape():
 
 def test_slot_unlock_derives_same_master_key(vault_home):
     v1 = hv.unlock(vault_home, "passphrase-1234")
+    v1_key = bytes(v1.master_key)  # locks wipe the live custody; compare a snapshot
     priv, pub = hv.generate_keypair()
     hv.add_key_slot(vault_home, public_key_raw=pub, unlocked_vault=v1)
     hv.clear_vault_cache()
     v2 = hv.unlock_with_private_key(vault_home, priv)
-    assert v2.master_key == v1.master_key
+    assert v2.master_key == v1_key
 
 
 def test_metadata_holds_no_private_material(vault_home):
@@ -65,6 +66,7 @@ def test_wrong_key_refused(vault_home):
 
 def test_rotation_kills_old_slot(vault_home):
     v1 = hv.unlock(vault_home, "passphrase-1234")
+    v1_key = bytes(v1.master_key)  # locks wipe the live custody; compare a snapshot
     priv_old, pub_old = hv.generate_keypair()
     priv_new, pub_new = hv.generate_keypair()
     hv.add_key_slot(vault_home, public_key_raw=pub_old, unlocked_vault=v1)
@@ -72,7 +74,7 @@ def test_rotation_kills_old_slot(vault_home):
     hv.remove_key_slot(vault_home, index=0)  # old dies
     hv.clear_vault_cache()
     v2 = hv.unlock_with_private_key(vault_home, priv_new)
-    assert v2.master_key == v1.master_key
+    assert v2.master_key == v1_key
     hv.clear_vault_cache()
     with pytest.raises(hv.WrongMasterPasswordError):
         hv.unlock_with_private_key(vault_home, priv_old)
@@ -81,10 +83,11 @@ def test_rotation_kills_old_slot(vault_home):
 def test_passphrase_slot_survives_key_slots(vault_home):
     """v1 behavior untouched: passphrase still unlocks after slots added."""
     v1 = hv.unlock(vault_home, "passphrase-1234")
+    v1_key = bytes(v1.master_key)  # locks wipe the live custody; compare a snapshot
     _, pub = hv.generate_keypair()
     hv.add_key_slot(vault_home, public_key_raw=pub, unlocked_vault=v1)
     hv.clear_vault_cache()
-    assert hv.unlock(vault_home, "passphrase-1234").master_key == v1.master_key
+    assert hv.unlock(vault_home, "passphrase-1234").master_key == v1_key
 
 
 def test_no_slot_vault_rejects_key_unlock(vault_home):
@@ -96,6 +99,7 @@ def test_no_slot_vault_rejects_key_unlock(vault_home):
 
 def test_env_private_key_auto_unlock(vault_home, monkeypatch):
     v1 = hv.unlock(vault_home, "passphrase-1234")
+    v1_key = bytes(v1.master_key)  # locks wipe the live custody; compare a snapshot
     priv, pub = hv.generate_keypair()
     hv.add_key_slot(vault_home, public_key_raw=pub, unlocked_vault=v1)
     key_file = vault_home.parent / "priv.key"
@@ -105,7 +109,7 @@ def test_env_private_key_auto_unlock(vault_home, monkeypatch):
     hv.clear_vault_cache()
     monkeypatch.setenv("HERMES_VAULT_PRIVATE_KEY", str(key_file))
     got = hv.get_vault(vault_home)
-    assert got.master_key == v1.master_key
+    assert got.master_key == v1_key
 
 
 def test_seal_is_nondeterministic(vault_home):

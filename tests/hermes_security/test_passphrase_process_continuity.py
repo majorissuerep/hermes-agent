@@ -49,7 +49,7 @@ except Exception as exc:
     return result, json.loads(result.stdout)
 
 
-def test_fresh_passwords_key_slot_prepared_fd_and_live_session_grant_after_rotation(tmp_path):
+def test_fresh_passwords_key_slot_and_prepared_trusted_fd_survive_owner_rotation(tmp_path):
     from hermes_security import sqlite
     from hermes_security.handoff import prepare_child_key
     from hermes_security.session_authority import start_session_authority
@@ -74,10 +74,14 @@ def test_fresh_passwords_key_slot_prepared_fd_and_live_session_grant_after_rotat
         result, row = _child(home, "original synthetic secret")
         assert result.returncode == 2 and row == {"error": "WrongMasterPasswordError"}
         for kwargs in ({"password": "replacement synthetic secret"}, {"key": private},
-                       {"handoff": handoff}, {"grant": grant}):
+                       {"handoff": handoff}):
             result, row = _child(home, **kwargs)
             assert result.returncode == 0, result.stderr
             assert row == {"rows": [["retained random transcript"]], "unlocked": True}
+        result, row = _child(home, grant=grant)
+        assert result.returncode == 2, "a generic bearer unlocked a DB-reading interpreter"
+        from hermes_security.session_authority import operation_request, ENV_NAME
+        assert operation_request(home, grant[ENV_NAME], {"op": "check"})["live"] is True
         assert (home / "state.db").read_bytes() == before
         authority.close()
         result, row = _child(home, grant=grant)
@@ -98,7 +102,8 @@ from hermes_security import vault
 from hermes_security.handoff import adopt_inherited_key
 from hermes_security.passphrase import change_passphrase
 request=json.load(sys.stdin)
-assert adopt_inherited_key()
+if request['action']=='rotate': vault.unlock(request['home'],request['unlock_password'])
+else: assert adopt_inherited_key()
 os.write(request['ready'],b'1')
 assert os.read(request['start'],1)==b'1'
 if request['action']=='rotate': change_passphrase(request['home'],request['password'])
@@ -106,19 +111,24 @@ else: vault.add_key_slot(request['home'],public_key_raw=bytes.fromhex(request['p
                          unlocked_vault=vault.get_vault(request['home'],allow_env_unlock=False))
 print('committed')
 '''
-    handoff = prepare_child_key(home)
+    handoff = None if action == "rotate" else prepare_child_key(home)
     env = {name: value for name, value in os.environ.items()
            if name not in {"HERMES_SESSION_VAULT", "HERMES_VAULT_KEY_FD", "HERMES_VAULT_PRIVATE_KEY"}}
-    env.update(handoff[1], HERMES_HOME=str(home))
+    env.update(HERMES_HOME=str(home))
+    if handoff is not None:
+        env.update(handoff[1])
+    descriptors = (handoff[0], start, ready) if handoff else (start, ready)
     try:
         process = subprocess.Popen([sys.executable, "-I", "-c", code, str(ROOT)], env=env,
-                                   pass_fds=(handoff[0], start, ready), stdin=subprocess.PIPE,
+                                   pass_fds=descriptors, stdin=subprocess.PIPE,
                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     finally:
-        os.close(handoff[0])
+        if handoff is not None:
+            os.close(handoff[0])
     try:
         process.stdin.write(json.dumps({"home": str(home), "action": action, "public": public.hex(),
-                                       "password": "concurrent replacement", "start": start, "ready": ready}))
+                                       "password": "concurrent replacement", "unlock_password": "old concurrent password",
+                                       "start": start, "ready": ready}))
         process.stdin.close()
         process.stdin = None
     except BaseException:

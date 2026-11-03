@@ -51,8 +51,8 @@ import itertools
 # before the first reader — otherwise it resolves against cwd and scaffolds <cwd>/~/.hermes.
 _startup_fast.normalize_hermes_home_env()
 
+_startup_fast.try_session_proxy(sys.argv[1:])
 _startup_fast.try_management(sys.argv[1:])
-
 
 def _exit_after_oneshot(rc: object) -> None:
     """Exit one-shot mode without letting late native finalizers change rc.

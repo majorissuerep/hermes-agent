@@ -155,9 +155,11 @@ class HermesProviderMixin:
         self.context.redirect_handler = _with_offline_access
 
     async def _hermes_accept_origin_issued_metadata(self, response):
-        """Accept a path-scoped authorization server's metadata document whose ``issuer`` is the origin
-        it lives under (see ``metadata_issued_by_origin``); the SDK's exact-string check (RFC 8414 §3.3)
-        would reject it and park the connection on an issuer mismatch (Strava, #116233).
+        """Accept the origin-issued path-server exception and one root trailing-slash spelling.
+
+        The SDK's exact-string check rejects Strava's origin-issued path server (#116233) and
+        Otter's root issuer spelled with a trailing slash on only one side (#132233). Path-scoped
+        slash differences and doubled slashes still use the SDK's strict check.
 
         The SDK validates inside its Step 2 loop right after reading the response, so the document is
         installed on the context here and the SDK is handed an empty 204: ``handle_auth_metadata_response``
@@ -182,11 +184,16 @@ class HermesProviderMixin:
             metadata = OAuthMetadata.model_validate_json(await response.aread())
         except ValidationError:
             return response
-        if not metadata_issued_by_origin(metadata, self.context.auth_server_url, response):
+        advertised, issuer = self.context.auth_server_url, str(metadata.issuer)
+        if metadata_issued_by_origin(metadata, advertised, response):
+            relation = "is the origin of"
+        elif response.status_code == 200 and advertised and _root_issuer_slash_pair(issuer, advertised):
+            relation = "differs only by the root trailing slash from"
+        else:
             return response
         self._hermes_logger.info(
-            "MCP OAuth: accepting authorization-server metadata from %s whose issuer %s is the origin of the "
-            "advertised server %s", response.url, metadata.issuer, self.context.auth_server_url)
+            "MCP OAuth: accepting authorization-server metadata from %s whose issuer %s %s the "
+            "advertised server %s", response.url, issuer, relation, advertised)
         self.context.oauth_metadata = metadata
         return type(response)(204, request=response.request)
 
@@ -520,6 +527,19 @@ def _metadata_issuer(context: Any) -> str | None:
     meta = getattr(context, "oauth_metadata", None)
     issuer = getattr(meta, "issuer", None) if meta is not None else None
     return (str(issuer).rstrip("/") or None) if issuer else None
+
+
+def _root_issuer_slash_pair(issuer: str, advertised: str) -> bool:
+    """MCP 2.0 lacks the later SDK's issuers_match; accept only one root slash.
+
+    Port of upstream 1dadda835d's narrow root-spelling rule, without changing
+    this fork's bounded SDK pin or stripping slashes from path identifiers.
+    """
+    short, long = sorted((issuer, advertised), key=len)
+    if long != short + "/":
+        return False
+    parts = urlsplit(short)
+    return not parts.path and not parts.query and not parts.fragment and parts.username is None
 
 
 def metadata_issued_by_origin(metadata: Any, auth_server_url: str | None, response: Any) -> bool:

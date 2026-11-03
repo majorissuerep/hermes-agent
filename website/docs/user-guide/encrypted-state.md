@@ -10,13 +10,23 @@ and logs at rest. Source code and installed skill/plugin code remain ordinary
 files. Keep your passphrase or private key: encryption has no password-reset
 backdoor.
 
+Encrypted databases keep SQLite temporary tables, sorting work and other scratch
+storage in memory. A legacy `database.temp_store` setting cannot select file
+storage: Hermes reports the effective `MEMORY` setting and preserves the saved
+value so you can remove the obsolete option yourself. Ordinary external SQLite
+databases retain their configuration behavior. Memory storage can still be paged
+to swap by the operating system; it is not a guarantee that plaintext never
+reaches swap.
+
 ## Everyday self-management
 
 Unlock once when starting a session. Local Hermes commands and delegated agents
 reuse temporary, home-scoped authority; they do not need the passphrase again.
 The passphrase is not stored in session history, environment variables, or argv.
-Closing the owning session revokes its authority. Another profile or independent
-session still needs its own unlock.
+Closing the owning session revokes its authority, including retained borrowed
+vault handles. An explicit lock or cache clear wipes retained key custody; a new
+unlock creates a new owner and cannot revive an old handle. Another profile or
+independent session still needs its own unlock.
 
 ```sh
 hermes config get agent.max_turns
@@ -42,14 +52,31 @@ hermes manage run claude -- --allowedTools Read,Grep,Glob "Inspect this project"
 ```
 
 Install and authenticate Codex or Claude separately. These foreground runners
-lend only the selected profile's temporary unlock authority and its own vendor
-API key when configured. They disable the executor's additional conversation
+lend only the selected profile's temporary operation authority and its own
+vendor API key when configured. A general child grant cannot export a vault key;
+trusted native Hermes children receive a separate one-shot kernel descriptor. They disable the executor's additional conversation
 persistence and keep its permission controls. A child can call `hermes config`
 or `hermes manage apply` without asking for the passphrase again. JSON management
 uses revision-checked encrypted writes; see `hermes manage schema` for operations.
 
+Protected Codex/Claude scratch requires an existing directory proven to be RAM
+that cannot be swapped. Select it with the owning profile's
+`security.protected_work_dir` setting; otherwise Hermes checks `XDG_RUNTIME_DIR`.
+The current proof backend is Linux: ramfs, tmpfs mounted with `noswap`, or tmpfs
+on a host with no active swap. An ordinary tmpfs with active or unknown swap
+does not qualify. A missing proof returns an unavailable outcome before starting
+the vendor. This protected vendor path is currently unavailable on macOS;
+native Hermes self-management remains available.
+
+On Linux, the supervisor stops the managed process tree on owner death or
+cancellation and removes the exact owned scratch directory after the tree ends.
+It retains parent-directory descriptors and inode identities, so a replacement
+directory or symlink cannot redirect that cleanup. The vendor inherits neither
+those descriptors nor a vault key.
+
 Codex's workspace sandbox still requires explicit `--add-dir /path/to/profile`
-authorization for writes outside the workspace. Only the private kernel-pipe
+authorization for direct file writes outside the workspace. Mediated management
+writes execute in the owning Hermes process. Only the private kernel-pipe
 transport directory is added automatically. No vault key or passphrase is put
 in that directory, argv or environment. Do not print temporary grants, disable
 the executor's confinement to solve a refusal, or resume a managed task outside

@@ -29,7 +29,7 @@ def schema():
             "secret_read_deadline_seconds": SECRET_READ_DEADLINE_SECONDS,
             "config_batch": "atomic config-only; no cross-file transactions", "effect": "next_session",
             "errors": ["invalid_request", "invalid_operation", "invalid_path", "not_found", "invalid_type", "invalid_value",
-                       "invalid_config", "conflict", "secret_operation_required", "secret_timeout", "locked", "state_refused", "unavailable"],
+                       "invalid_config", "conflict", "secret_operation_required", "secret_timeout", "locked", "state_refused", "unavailable", "consent_required", "owner_restart_required"],
             "runners": RUNNERS, "run": "hermes manage run RUNNER [--] ARGS; stdin/stdout passed through; existing permissions retained",
             "lifecycle_commands": ["hermes profile --help", "hermes sessions --help", "hermes skills --help",
                                    "hermes mcp --help", "hermes plugins --help", "hermes cron --help",
@@ -80,8 +80,9 @@ def _authorize(home):
     owner = _owning_vault_home(home)
     if owner is None:
         raise ManagementError("locked", "initialize and unlock the selected home before management")
-    # The canonical handoff handles either one-shot FD or the current scoped session grant.
-    adopt_inherited_key()
+    # A proven owner needs no borrowed grant. Consume a provided trusted FD once.
+    if not vault.is_unlocked(owner) or "HERMES_VAULT_KEY_FD" in os.environ:
+        adopt_inherited_key()
     if not vault.is_unlocked(owner):
         if os.environ.get("HERMES_VAULT_PRIVATE_KEY"):
             vault.get_vault(owner)  # canonical key-slot proof + owner-only key-file policy
@@ -101,12 +102,23 @@ def _safe_target(home):
             raise ManagementError("state_refused", "management refuses symbolic state paths")
 
 
-def _execute(request, home):
+def _execute(request, home, secret_value=None):
     request = _request(request)
     from hermes_constants import get_hermes_home
     if home.resolve() != get_hermes_home().resolve():
         raise ManagementError("state_refused", "management target does not match the selected owning home")
     _safe_target(home)
+    from hermes_security.session_authority import ENV_NAME, has_borrowed_authority
+    from hermes_security.vault import is_unlocked
+    from hermes_cli.vault_gate import _owning_vault_home
+    raw = os.environ.get(ENV_NAME)
+    owner = _owning_vault_home(home)
+    if request["op"] == "passphrase.change" and (has_borrowed_authority(home)
+            or raw and (owner is None or not is_unlocked(owner))):
+        raise ManagementError("consent_required", "changing the passphrase requires the owning human's consent")
+    if raw and owner is not None and not is_unlocked(owner) and "HERMES_VAULT_KEY_FD" not in os.environ:
+        from hermes_security.authority_operations import proxy_management
+        return proxy_management(request, home, raw)
     _authorize(home)
     op = request["op"]
     if op.startswith("config."):
@@ -118,14 +130,17 @@ def _execute(request, home):
         from hermes_cli.config import load_env
         return {"home": str(home), "unlocked": True, "secret_names": sorted(load_env()), "effect": "next_session"}
     if op == "passphrase.change":
+        if has_borrowed_authority(home):
+            raise ManagementError("consent_required", "changing the passphrase requires the owning human's consent")
         from hermes_security.passphrase import change_passphrase
         change_passphrase(home, _secret(request))
         return {"changed": True, "effect": "future_unlocks"}
     from hermes_cli.management_secrets import secret_operation
-    return secret_operation(request, _secret(request) if op == "secret.set" else None)
+    return secret_operation(request, (secret_value if secret_value is not None else _secret(request))
+                            if op == "secret.set" else None)
 
 
-def execute(request, home):
+def execute(request, home, *, secret_value=None):
     """One-shot resource custody, including refusal paths; requires owning unlock authority."""
     fd = request.get("secret_fd") if isinstance(request, dict) else None
     unlock_fd = os.environ.get("HERMES_VAULT_KEY_FD")
@@ -137,7 +152,7 @@ def execute(request, home):
         if not inherited or str(fd) == unlock_fd:
             raise ManagementError("invalid_request", "secret_fd must be inherited and distinct from unlock authority")
     try:
-        return _execute(request, home)
+        return _execute(request, home, secret_value)
     finally:
         if fd is not None:
             with contextlib.suppress(OSError):
@@ -187,6 +202,7 @@ def _parser():
 
 
 def main(argv=None):
+    from hermes_security.session_authority import LegacySessionAuthorityError
     try:
         args = _parser().parse_args(argv)
         if args.command == "run":
@@ -208,6 +224,8 @@ def main(argv=None):
                     result = execute(request, home)
         response, rc = {"version": 1, "ok": True, "result": result}, 0
         json.dumps(response, allow_nan=False)
+    except LegacySessionAuthorityError as exc:
+        response, rc = {"version": 1, "ok": False, "error": {"code": "owner_restart_required", "message": str(exc)}}, 2
     except ManagementError as exc:
         response, rc = {"version": 1, "ok": False, "error": {"code": exc.code, "message": str(exc)}}, 2
     except json.JSONDecodeError:

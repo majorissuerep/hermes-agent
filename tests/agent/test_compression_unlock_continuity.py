@@ -43,11 +43,12 @@ def test_rotated_parent_and_native_child_can_still_manage_the_encrypted_home(tmp
         with delegated_child_context(delegated.session_id):
             env = hermes_subprocess_env()
         script = """
-from types import SimpleNamespace
-from hermes_cli.vault_gate import gate_startup
-from hermes_cli.config import read_raw_config
-gate_startup(SimpleNamespace(command='config'))
-print(read_raw_config()['agent']['max_turns'])
+from hermes_cli.management import execute
+from hermes_constants import get_hermes_home
+from hermes_security.vault import is_unlocked
+home = get_hermes_home()
+print(execute({'op': 'config.get', 'path': ['agent', 'max_turns']}, home)['value'])
+assert not is_unlocked(home), 'management client received a vault key'
 """
         read = subprocess.run([sys.executable, "-c", script], cwd=ROOT, env=env,
                               stdin=subprocess.DEVNULL, text=True, capture_output=True, timeout=20, check=False)

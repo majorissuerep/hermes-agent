@@ -57,6 +57,24 @@ def try_management(argv: list[str]) -> None:
     raise SystemExit(main(args))
 
 
+def try_session_proxy(argv: list[str]) -> None:
+    """An inherited operation grant forwards native work before any vault read."""
+    if not os.environ.get("HERMES_SESSION_VAULT") or os.environ.get("HERMES_VAULT_KEY_FD"):
+        return
+    from hermes_constants import get_hermes_home
+    from hermes_security.session_authority import _vault_home
+    from hermes_security.vault import is_unlocked
+    owner = _vault_home(get_hermes_home().resolve())
+    if owner is not None and is_unlocked(owner):
+        return  # a trusted native owner may import this CLI backend after consuming its FD
+    if (argv[:1] == ["manage"]
+            or len(argv) >= 3 and argv[0] in {"-p", "--profile"} and argv[2] == "manage"
+            or len(argv) >= 2 and argv[0].startswith("--profile=") and argv[1] == "manage"):
+        return  # JSON operations use their existing operation-specific dispatcher.
+    from hermes_cli.session_proxy import main
+    raise SystemExit(main(argv))
+
+
 def _read_text(path: str) -> str | None:
     """Read a small text file, or None when it is missing/unreadable."""
     try:

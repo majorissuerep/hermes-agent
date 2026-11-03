@@ -1,13 +1,7 @@
-"""An unlocked session lends its own vault authority to local Hermes commands.
-
-The passphrase is never retained. Children redeem an ephemeral local capability
-for the already-unlocked key, and verify it through the normal vault handoff.
-Closing the owning agent revokes the capability. No secret material is written to disk.
-"""
+"""Revocable operation grants for children; keys cross only trusted one-shot FDs."""
 from __future__ import annotations
 
 import atexit
-import base64
 import json
 import os
 from pathlib import Path
@@ -15,20 +9,30 @@ import secrets
 import socket
 import socketserver
 import stat
-import tempfile
 import threading
 
 from hermes_security.errors import VaultError, VaultLockedError
 
 ENV_NAME = "HERMES_SESSION_VAULT"
-_LIMIT = 8192
+_LIMIT = 1048576
 _lock = threading.RLock()
 _sessions: dict[tuple[str, str], SessionAuthority] = {}
 _adopted: dict[str, str] = {}
+_borrowed: set[Path] = set()
+_legacy_proofs: dict[str, bytes] = {}
 
 
 class SessionAuthorityError(RuntimeError):
     """A supplied session grant is invalid, revoked, or belongs to another home."""
+
+
+class LegacySessionAuthorityError(SessionAuthorityError):
+    """An old in-memory owner needs a normal restart or trusted updater takeover."""
+
+    def __init__(self):
+        super().__init__("The owning Hermes session runs an older authority protocol. Restart the owning session "
+                         "and resume its saved conversation, or finish its trusted update handoff; logging in again "
+                         "does not upgrade the running owner.")
 
 
 def _vault_home(home: Path) -> Path | None:
@@ -59,7 +63,8 @@ class SessionAuthority:
     def __init__(self, home: Path, session_id: str, vault_home: Path, *, parent=None, upstream=None, pipe=False) -> None:
         self.home, self.session_id, self.vault_home = home, session_id, vault_home
         self.parent, self.upstream = parent, upstream
-        self.token = secrets.token_urlsafe(32)
+        self.cwd = os.getcwd()
+        self.token = "hermes_session_v2_" + secrets.token_urlsafe(32)
         from agent.redact import register_vault_redaction_value
         register_vault_redaction_value(self.token)
         self.references = 1
@@ -78,8 +83,8 @@ class SessionAuthority:
     def _socket_server(self):
         address = ("127.0.0.1", 0)
         if os.name == "posix":
-            from hermes_constants import socket_safe_tmpdir
-            self.directory = tempfile.TemporaryDirectory(prefix="hermes-unlock-", dir=socket_safe_tmpdir())
+            from hermes_platform.ipc_paths import private_ipc_directory
+            self.directory = private_ipc_directory(prefix="hermes-unlock-")
             address = str(Path(self.directory.name) / "unlock.sock")
         try:
             self.server = _Server(address, _Handler)
@@ -100,25 +105,27 @@ class SessionAuthority:
                 or request.get("home") != str(self.home) or _sessions.get(identity) is not self):
             return {"error": "session unlock does not authorize this home"}
         try:
-            key = self.key()
+            from hermes_security.vault import is_unlocked
+            if not is_unlocked(self.vault_home):
+                raise VaultLockedError("The owning session is locked.")
+            if self.upstream is not None:
+                _check_grant(self.home, self.upstream)
         except (SessionAuthorityError, VaultError):
             return {"error": "the owning session is locked"}
-        return {"home": str(self.vault_home), "key": base64.b64encode(key).decode("ascii")}
+        if request.get("op") == "check":
+            return {"home": str(self.home), "live": True}
+        if request.get("op") == "manage":
+            from hermes_security.authority_operations import dispatch_management
+            return dispatch_management(self, request)
+        if request.get("op") in {"native.start", "native.poll", "native.cancel"}:
+            from hermes_security.authority_native import dispatch_native
+            return dispatch_native(self, request)
+        return {"error": "session grants authorize operations, never key export"}
 
     def is_live(self) -> bool:
         """A derived grant cannot outlive the exact authority that issued it."""
         return (_sessions.get((str(self.home), self.session_id)) is self
                 and (self.parent is None or self.parent.is_live()))
-
-    def key(self) -> bytes:
-        from hermes_security.vault import export_unlocked_key, is_unlocked
-        if not is_unlocked(self.vault_home):
-            raise VaultLockedError("The owning session is locked.")
-        if self.upstream is not None:
-            return _redeem(self.home, self.upstream)[1]
-        if self.parent is not None:
-            return self.parent.key()
-        return export_unlocked_key(self.vault_home)
 
     def environment(self, *, session_id: str | None = None) -> dict[str, str]:
         from hermes_security.pipe_authority import PipeServer
@@ -126,7 +133,7 @@ class SessionAuthority:
             endpoint = {"pipe": str(self.server.path)}
         else:
             endpoint = self._socket_endpoint()
-        return {ENV_NAME: json.dumps({**endpoint, "token": self.token,
+        return {ENV_NAME: json.dumps({**endpoint, "version": 2, "scope": "operations", "token": self.token,
                                       "home": str(self.home), "session_id": session_id or self.session_id})}
 
     def _socket_endpoint(self) -> dict:
@@ -148,6 +155,8 @@ class SessionAuthority:
         self._stop_server()
 
     def _stop_server(self) -> None:
+        from hermes_security.authority_native import close_native
+        close_native(self)
         self.server.shutdown()
         self.server.server_close()
         self.thread.join(timeout=2)
@@ -210,6 +219,8 @@ def forget_inherited_authority(home: Path | None = None) -> None:
         for selected in list(_adopted):
             if home is None or _vault_home(Path(selected)) == home:
                 del _adopted[selected]
+                _legacy_proofs.pop(selected, None)
+        _borrowed.difference_update({selected for selected in _borrowed if home is None or selected == home})
 
 
 def revoke_home_authorities(home: Path) -> None:
@@ -252,32 +263,57 @@ def apply_session_environment(env: dict[str, str]) -> None:
             env[ENV_NAME] = inherited
 
 
-def _redeem(home: Path, raw: str) -> tuple[Path, bytes]:
-    """Validate the owning process on every new redemption, including forwarded grants."""
+def operation_request(home: Path, raw: str, request: dict) -> dict:
+    """Send one operation, preserving exact profile/session identity."""
     try:
         grant = json.loads(raw)
         if (not isinstance(grant, dict) or grant.get("home") != str(home)
                 or not isinstance(grant.get("token"), str)
                 or not isinstance(grant.get("session_id"), str)):
             raise ValueError("invalid grant")
-        payload = _request_key(grant)
-        owner = _vault_home(home)
-        if not isinstance(payload, dict) or owner is None or payload.get("home") != str(owner):
-            raise ValueError("refused grant")
-        key = base64.b64decode(payload["key"], validate=True)
+        from hermes_security.authority_transport import request_operation
+        payload = request_operation(grant, request)
+        if isinstance(payload, dict) and "key" in payload and "version" not in grant:
+            raise LegacySessionAuthorityError()
+        if not isinstance(payload, dict) or "key" in payload or "error" in payload:
+            raise ValueError("refused operation")
     except (OSError, ValueError, KeyError, TypeError) as exc:
         raise SessionAuthorityError("Session unlock is unavailable or belongs to another profile; reopen the owning session.") from exc
-    return owner, key
+    return payload
+
+
+def _check_grant(home: Path, raw: str, *, trusted_key_proof: bytes | None = None) -> None:
+    """Legacy owners may only confirm a key independently received through a trusted FD."""
+    try:
+        grant = json.loads(raw)
+        if (not isinstance(grant, dict) or grant.get("home") != str(home)
+                or not isinstance(grant.get("token"), str) or not isinstance(grant.get("session_id"), str)):
+            raise ValueError("invalid grant")
+        from hermes_security.authority_transport import request_operation
+        payload = request_operation(grant, {"op": "check"})
+        if isinstance(payload, dict) and "key" in payload:
+            import base64
+            import hashlib
+            with _lock:
+                proof = trusted_key_proof or _legacy_proofs.get(str(home))
+            if "version" not in grant and proof is None:
+                raise LegacySessionAuthorityError()
+            if "version" in grant or proof is None:
+                raise ValueError("a versioned operation owner cannot return a key")
+            key = base64.b64decode(payload["key"], validate=True)
+            if (len(key) == 32 and payload.get("home") == str(_vault_home(home))
+                    and secrets.compare_digest(hashlib.sha256(key).digest(), proof)):
+                return  # Never import, return or expose this pre-update reply key.
+            raise ValueError("legacy owner did not confirm the trusted FD")
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        raise SessionAuthorityError("The owning session no longer authorizes this home.") from exc
+    if not isinstance(payload, dict) or payload.get("home") != str(home) or payload.get("live") is not True:
+        raise SessionAuthorityError("The owning session no longer authorizes this home.")
 
 
 def _request_key(grant: dict) -> dict:
-    if "pipe" in grant:
-        from hermes_security.pipe_authority import redeem
-        return redeem(grant)
-    with _connection(grant) as connection:
-        connection.sendall(json.dumps({k: grant[k] for k in ("token", "home", "session_id")}).encode() + b"\n")
-        with connection.makefile("rb") as reader:
-            return json.loads(reader.readline(_LIMIT + 1))
+    from hermes_security.authority_transport import request_operation
+    return request_operation(grant, {"op": "key"})
 
 
 def _connection(grant: dict) -> socket.socket:
@@ -309,18 +345,75 @@ def _connection(grant: dict) -> socket.socket:
 
 
 def adopt_session_authority() -> bool:
-    """Redeem the current home's grant without turning borrowed unlock into a new root."""
+    """An ordinary bearer never unlocks this process; validate existing provenance only."""
     raw = os.environ.get(ENV_NAME)
     if not raw:
         return False
     from hermes_constants import get_hermes_home
     home = get_hermes_home().resolve()
-    owner, key = _redeem(home, raw)
-    from hermes_security.vault import adopt_unlocked_key
-    adopt_unlocked_key(owner, key)
+    _check_grant(home, raw)
+    return False
+
+
+def record_inherited_authority(home: Path, raw: str | None = None, *, trusted_key: bytes | None = None) -> None:
+    """Record trusted FD custody even if its caller later strips the environment."""
+    home = Path(home).resolve()
+    owner = _vault_home(home)
+    if owner is None:
+        raise SessionAuthorityError("The inherited key does not name an initialized home.")
+    import hashlib
+    proof = hashlib.sha256(trusted_key).digest() if trusted_key is not None else None
+    if raw:
+        _check_grant(home, raw, trusted_key_proof=proof)
     with _lock:
-        _adopted[str(home)] = raw
-    return True
+        _borrowed.add(owner)
+        if raw:
+            _adopted[str(home)] = raw
+            if proof is not None and "version" not in json.loads(raw):
+                _legacy_proofs[str(home)] = proof
+
+
+def has_borrowed_authority(home: Path | str) -> bool:
+    owner = _vault_home(Path(home).resolve())
+    with _lock:
+        return owner is not None and owner in _borrowed
+
+
+def validate_inherited_authority(home: Path | str) -> None:
+    """Recheck a trusted child's upstream lifetime without transferring any key."""
+    owner = _vault_home(Path(home).resolve())
+    with _lock:
+        grants = [(Path(selected), raw) for selected, raw in _adopted.items()
+                  if _vault_home(Path(selected)) == owner]
+    for selected, raw in grants:
+        _check_grant(selected, raw)
+
+
+def inherited_grant(home: Path | str) -> str | None:
+    """Capture lineage inside a trusted FD, independent of mutable child env."""
+    from agent.session_context import get_session_env
+    selected = Path(home).resolve()
+    current = session_environment(selected, get_session_env("HERMES_SESSION_ID", ""))
+    if current:
+        return current[ENV_NAME]
+    with _lock:
+        local = {authority for (profile, _), authority in _sessions.items() if profile == str(selected)}
+        if len(local) == 1:
+            return next(iter(local)).environment()[ENV_NAME]
+        if len(local) > 1:
+            raise SessionAuthorityError("A trusted child requires its exact owning session context.")
+        raw = _adopted.get(str(selected))
+        if raw is None:
+            owner = _vault_home(selected)
+            raw = next((value for profile, value in _adopted.items() if _vault_home(Path(profile)) == owner), None)
+    if raw:
+        return raw
+    raw = os.environ.get(ENV_NAME)
+    if raw:
+        grant = json.loads(raw)
+        if isinstance(grant, dict) and grant.get("home") == str(selected):
+            return raw
+    return None
 
 
 def _close_sessions() -> None:

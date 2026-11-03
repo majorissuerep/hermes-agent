@@ -116,13 +116,18 @@ class InstalledPackage:
     binary: Path | None
 
 
-def installed_package(name: str, *, allow_outdated: bool = False) -> InstalledPackage | None:
-    """Read the selected PM entry without installing or changing its facts."""
+def installed_package(name: str, *, allow_outdated: bool = False,
+                      verify: bool = False) -> InstalledPackage | None:
+    """Read a selected entry; security checkers may require its recorded tree digest.
+
+    This never installs, repairs or changes facts. A requested verification
+    failure is a missing verified entry, not permission to use an ambient tool.
+    """
     package = get_package(name)
     if package.internal:
         raise ValueError(f"{name} is internal PM tooling, not an application package")
     target = current_target()
-    location = _installed_location(package, _lockfile(), target, allow_outdated=allow_outdated)
+    location = _installed_location(package, _lockfile(), target, verify=verify, allow_outdated=allow_outdated)
     if location is None:
         return None
     facts, store = location
@@ -296,7 +301,8 @@ def _entry_verified(package: Package, fact: dict, store: Store, target: str) -> 
     """Explicit installs re-check realized bytes; startup keeps its cheap facts check."""
     entry = store.entry(fact["entry"])
     try:
-        return not package.verify(entry, target) and fact.get("digest") == tree_digest(entry)
+        # A probe can execute the entry. Establish its bytes before invoking it.
+        return fact.get("digest") == tree_digest(entry) and not package.verify(entry, target)
     except OSError:
         return False
 

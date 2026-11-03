@@ -65,6 +65,7 @@ def clear_vault_redaction_values() -> None:
 
 
 _SESSION_GRANT_OBJECT_RE = re.compile(r"\{[^{}]{1,8192}\}")
+_SESSION_GRANT_TOKEN_RE = re.compile(r"hermes_session_v2_[A-Za-z0-9_-]{43}")
 
 
 def redact_session_grants(text: str) -> str:
@@ -72,7 +73,10 @@ def redact_session_grants(text: str) -> str:
 
     Executors may wrap terminal output in another JSON string. Decode at most
     that one wrapper; preserve unrelated token fields and all routing metadata.
+    Typed v2 capabilities remain recognizable after registry eviction and in
+    fresh executor processes, including when printed without their envelope.
     """
+    text = _SESSION_GRANT_TOKEN_RE.sub("«redacted-local-authority»", text)
     if "session_id" not in text or "token" not in text:
         return text
 

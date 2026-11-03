@@ -27,10 +27,12 @@ def _prepare(env: dict[str, str]):
     has_vault = any(vault_exists(candidate) for candidate in (home, *home.parents))
     if raw := env.get(ENV_NAME):
         from agent.session_context import get_session_env
+        from hermes_security.session_authority import _check_grant
         env.setdefault("HERMES_SESSION_ID", get_session_env("HERMES_SESSION_ID") or "")
         grant = json.loads(raw)
         if grant.get("home") != str(home) or grant.get("session_id") != env.get("HERMES_SESSION_ID"):
             raise RuntimeError("Kanban worker grant does not authorize its profile/session")
+        _check_grant(home, raw)
         # A live terminal's grant must remain revocable by that terminal.
         return None
     if not has_vault:
@@ -72,14 +74,28 @@ def spawn_worker(argv: list[str], *, env: dict[str, str], **kwargs) -> subproces
 
     env = dict(env)
     authority = _prepare(env)
+    from hermes_security.handoff import prepare_child_key
+    from hermes_security.session_authority import ENV_NAME
+    handoff = None
     ready = _ready_path(env) if authority is not None else None
     process = None
     fingerprint = UNVERIFIED_WORKER_FINGERPRINT
     try:
+        from agent.session_context import scoped_current_session_id
+        with scoped_current_session_id(env.get("HERMES_SESSION_ID")):
+            handoff = prepare_child_key(env["HERMES_HOME"], retain_session=authority is None)
+        if handoff is not None:
+            env.update(handoff[1])
+            kwargs["pass_fds"] = (*kwargs.get("pass_fds", ()), handoff[0])
+            if authority is not None:
+                env.pop(ENV_NAME, None)  # the finite dispatcher's real worker becomes the owner
         if ready is not None:
             ready.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
             ready.unlink(missing_ok=True)
         process = subprocess.Popen(argv, env=env, **kwargs)
+        if handoff is not None:
+            os.close(handoff[0])
+            handoff = None
         fingerprint = _process_fingerprint(process.pid) or UNVERIFIED_WORKER_FINGERPRINT
         if ready is not None:
             deadline = time.monotonic() + HANDOFF_ADOPTION_GRACE_SECONDS
@@ -103,6 +119,8 @@ def spawn_worker(argv: list[str], *, env: dict[str, str], **kwargs) -> subproces
             process.poll()
         raise
     finally:
+        if handoff is not None:
+            os.close(handoff[0])
         if authority is not None:
             authority.close()
         if ready is not None:

@@ -8,7 +8,10 @@ import subprocess
 from typing import Callable, Iterable
 
 from tools.environments.base_session_env import _SHELL_ENV_NAME_RE
-from tools.environments.local_env_policy import _is_hermes_internal_secret, _is_provider_env_blocklisted
+from tools.environments.local_env_policy import (
+    LOCAL_VAULT_AUTHORITY_ENV, _is_hermes_internal_secret, _is_provider_env_blocklisted,
+    strip_local_vault_authority,
+)
 
 
 def load_hermes_env_vars() -> dict[str, str]:
@@ -28,7 +31,8 @@ def resolve_passthrough_env(explicit_forward: Iterable[str] = (),
     Implicit passthrough (skill ``required_environment_variables`` + ``terminal.env_passthrough``)
     is filtered through the Hermes provider-credential blocklist and the dynamic internal-secret
     check; ``explicit_forward`` entries (docker_forward_env) are an operator opt-in that bypasses
-    both. Each value is the routed profile's secret when multiplex is active; a name the active
+    both for ordinary credentials. Local vault authority is never forwardable.
+    Each value is the routed profile's secret when multiplex is active; a name the active
     scope lacks is returned in the unset set so a shared sandbox cannot leak another profile's
     value.
     """
@@ -46,9 +50,11 @@ def resolve_passthrough_env(explicit_forward: Iterable[str] = (),
     implicit_forward = {k for k in passthrough_keys if not _is_hermes_internal_secret(k)}
     forward_keys = set(explicit_forward) | {
         k for k in implicit_forward if not _is_provider_env_blocklisted(k)}
+    local_authority = {key for key in forward_keys if key.upper() in LOCAL_VAULT_AUTHORITY_ENV}
+    forward_keys -= local_authority
     hermes_env = hermes_env_loader() if forward_keys else {}
     exec_env: dict[str, str] = {}
-    unset_names: set[str] = set()
+    unset_names: set[str] = local_authority
     for key in sorted(forward_keys):
         value = os.getenv(key) or hermes_env.get(key)
         if resolve_passthrough_value is not None:
@@ -68,10 +74,12 @@ def prepend_unset(cmd_string: str, names: Iterable[str]) -> str:
     return f"unset {' '.join(shlex.quote(n) for n in names)} 2>/dev/null || true\n{cmd_string}"
 
 
-def client_env_with(values: dict[str, str]) -> dict[str, str] | None:
+def client_env_with(values: dict[str, str]) -> dict[str, str]:
     """Env for the docker/ssh CLIENT subprocess: forwarded values travel here (owner-readable
-    /proc/*/environ) while the argv carries names only; ``None`` = inherit when nothing to add."""
-    return {**os.environ, **values} if values else None
+    /proc/*/environ) while argv carries names only. Always explicit: an empty
+    forwarding map must still strip local vault custody from the ambient env.
+    """
+    return strip_local_vault_authority({**os.environ, **values})
 
 
 def run_capture(cmd: list[str], *, timeout: float, check: bool = False, env: dict | None = None,

@@ -27,6 +27,7 @@ def test_v1_rotation_preserves_ciphertext_sqlcipher_master_and_key_slots(home):
     from hermes_security import sqlite
 
     owner = vault.get_vault(home)
+    owner_key = bytes(owner.master_key)  # locks wipe the live custody; compare a snapshot
     private, public = vault.generate_keypair()
     vault.add_key_slot(home, public_key_raw=public, unlocked_vault=owner)
     owner.write_bytes("config.yaml", b"model: preserved\n", purpose="config")
@@ -48,12 +49,12 @@ def test_v1_rotation_preserves_ciphertext_sqlcipher_master_and_key_slots(home):
     vault.clear_vault_cache()
     with pytest.raises(WrongMasterPasswordError):
         vault.unlock(home, "old synthetic password")
-    assert vault.unlock(home, "new synthetic password").master_key == owner.master_key
+    assert vault.unlock(home, "new synthetic password").master_key == owner_key
     db = sqlite.connect(f"file:{home / 'state.db'}?mode=ro", uri=True)
     assert db.execute("SELECT content FROM history").fetchall() == [("durable original history",)]
     db.close()
     vault.clear_vault_cache()
-    assert vault.unlock_with_private_key(home, private).master_key == owner.master_key
+    assert vault.unlock_with_private_key(home, private).master_key == owner_key
     assert vault.get_vault(home).read_bytes("config.yaml", purpose="config") == b"model: preserved\n"
 
 
@@ -61,6 +62,7 @@ def test_repeated_rotation_keeps_master_proof_and_prepared_key_fd_valid(home, mo
     from hermes_security.handoff import adopt_inherited_key, prepare_child_key
 
     owner = vault.get_vault(home)
+    owner_key = bytes(owner.master_key)  # locks wipe the live custody; compare a snapshot
     first, additions = prepare_child_key(home)
     try:
         change_passphrase(home, "second password")
@@ -72,11 +74,11 @@ def test_repeated_rotation_keeps_master_proof_and_prepared_key_fd_valid(home, mo
         monkeypatch.setenv("HERMES_VAULT_KEY_FD", additions["HERMES_VAULT_KEY_FD"])
         assert adopt_inherited_key()
         first = None  # adoption consumed and closed the descriptor
-        assert vault.get_vault(home).master_key == owner.master_key
+        assert vault.get_vault(home).master_key == owner_key
         vault.clear_vault_cache()
         with pytest.raises(WrongMasterPasswordError):
             vault.unlock(home, "second password")
-        assert vault.unlock(home, "third password").master_key == owner.master_key
+        assert vault.unlock(home, "third password").master_key == owner_key
     finally:
         if first is not None:
             os.close(first)
@@ -96,6 +98,7 @@ def test_rotated_backup_reopens_with_new_password_without_reencrypting(home, tmp
 @pytest.mark.parametrize("mutation", ["sealed", "nonce", "salt", "authentication", "kdf_n"])
 def test_tampered_wrap_or_unbounded_kdf_is_refused_by_password_key_and_writer(home, mutation):
     owner = vault.get_vault(home)
+    owner_key = bytes(owner.master_key)  # locks wipe the live custody; compare a snapshot
     change_passphrase(home, "rotated credential")
     path = home / ".hermes-vault"
     meta = json.loads(path.read_text())
@@ -113,7 +116,7 @@ def test_tampered_wrap_or_unbounded_kdf_is_refused_by_password_key_and_writer(ho
     assert path.read_bytes() == original
     vault.clear_vault_cache()
     with pytest.raises(VaultError):
-        vault.adopt_unlocked_key(home, owner.master_key)
+        vault.adopt_unlocked_key(home, owner_key)
     with pytest.raises(VaultError):
         vault.unlock(home, "rotated credential")
 
@@ -136,6 +139,7 @@ def test_failed_publication_retains_previous_password_and_metadata(home, monkeyp
 
 def test_rotation_and_key_slot_writers_do_not_lose_concurrent_updates(home):
     owner = vault.get_vault(home)
+    owner_key = bytes(owner.master_key)  # locks wipe the live custody; compare a snapshot
     pairs = [vault.generate_keypair() for _ in range(4)]
     ready = threading.Barrier(5)
 
@@ -155,7 +159,7 @@ def test_rotation_and_key_slot_writers_do_not_lose_concurrent_updates(home):
     assert len(meta["key_slots"]) == 4
     for private, _ in pairs:
         vault.clear_vault_cache()
-        assert vault.unlock_with_private_key(home, private).master_key == owner.master_key
+        assert vault.unlock_with_private_key(home, private).master_key == owner_key
     vault.remove_key_slot(home, index=0)
     refused = 0
     for private, _ in pairs:
@@ -166,7 +170,7 @@ def test_rotation_and_key_slot_writers_do_not_lose_concurrent_updates(home):
             refused += 1
     assert refused == 1  # concurrent additions have deliberately unspecified slot order
     vault.clear_vault_cache()
-    assert vault.unlock(home, "concurrent credential").master_key == owner.master_key
+    assert vault.unlock(home, "concurrent credential").master_key == owner_key
 
 
 def test_locked_wrong_owner_ancestor_and_symlink_targets_fail_closed(home, tmp_path):

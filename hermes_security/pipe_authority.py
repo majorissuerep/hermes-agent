@@ -13,18 +13,18 @@ from pathlib import Path
 import secrets
 import select
 import stat
-import tempfile
 import threading
 import time
 
-LIMIT = 4096
+LIMIT = 1048576
+CHUNK = 4096
 TIMEOUT = 5.0
 
 
 class PipeServer:
     def __init__(self, respond):
-        from hermes_constants import socket_safe_tmpdir
-        self.directory = tempfile.TemporaryDirectory(prefix="hermes-pipe-", dir=socket_safe_tmpdir())
+        from hermes_platform.ipc_paths import private_ipc_directory
+        self.directory = private_ipc_directory(prefix="hermes-pipe-")
         self.path = Path(self.directory.name)
         self.respond = respond
         self.stopped, self.done = threading.Event(), threading.Event()
@@ -43,7 +43,7 @@ class PipeServer:
             while not self.stopped.is_set():
                 if not select.select([self.fd], [], [], poll_interval)[0]:
                     continue
-                buffer += os.read(self.fd, LIMIT)
+                buffer += os.read(self.fd, CHUNK)
                 while b"\n" in buffer:
                     line, buffer = buffer.split(b"\n", 1)
                     if len(line) <= LIMIT:
@@ -69,7 +69,7 @@ class PipeServer:
             try:
                 if not _is_protected(fd, stat.S_IFIFO):
                     return  # a replaced node must never receive a credential frame
-                os.write(fd, payload)
+                _write_frame(fd, payload)
             finally:
                 os.close(fd)
         except (BrokenPipeError, BlockingIOError, FileNotFoundError):
@@ -104,7 +104,7 @@ def _open(directory: Path, name: str, kind: int) -> int:
     return fd
 
 
-def redeem(grant: dict) -> dict:
+def redeem(grant: dict, operation: dict | None = None) -> dict:
     """Serialize clients through a never-unlinked lock and correlate every response."""
     from contextlib import ExitStack
     from pm.filesystem import lock_fd
@@ -127,12 +127,26 @@ def redeem(grant: dict) -> dict:
         writer = _open(directory, "request", stat.S_IFIFO)
         resources.callback(os.close, writer)
         request_id = secrets.token_hex(16)
-        payload = json.dumps({k: grant[k] for k in ("token", "home", "session_id")} | {
+        payload = json.dumps({**(operation or {}), **{k: grant[k] for k in ("token", "home", "session_id")}} | {
             "request_id": request_id}).encode("utf-8") + b"\n"
         if len(payload) > LIMIT:
             raise ValueError("authority request is too large")
-        os.write(writer, payload)
+        _write_frame(writer, payload)
         return _read_response(reader, request_id)
+
+
+def _write_frame(writer: int, payload: bytes) -> None:
+    deadline = time.monotonic() + TIMEOUT
+    remaining = memoryview(payload)
+    while remaining:
+        wait = deadline - time.monotonic()
+        if wait <= 0 or not select.select([], [writer], [], max(0, wait))[1]:
+            raise TimeoutError("authority request unavailable")
+        try:
+            written = os.write(writer, remaining[:CHUNK])
+        except BlockingIOError:
+            continue
+        remaining = remaining[written:]
 
 
 def _read_response(reader: int, request_id: str) -> dict:
@@ -141,7 +155,7 @@ def _read_response(reader: int, request_id: str) -> dict:
         remaining = deadline - time.monotonic()
         if remaining <= 0 or not select.select([reader], [], [], max(0, remaining))[0]:
             raise TimeoutError("authority response unavailable")
-        buffer += os.read(reader, LIMIT)
+        buffer += os.read(reader, CHUNK)
         if len(buffer) > LIMIT:
             raise ValueError("authority response is too large")
         while b"\n" in buffer:

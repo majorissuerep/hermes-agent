@@ -648,7 +648,7 @@ def apply_database_pragmas(conn: sqlite3.Connection, *, db_label: str = "state.d
     """Apply optional performance and WAL-sizing PRAGMAs from ``config.yaml``.
 
     Journal mode is NOT handled here (owned by :func:`apply_wal_with_fallback`). ``database:`` keys: ``cache_size``
-    (negative = KiB, positive = pages), ``mmap_size`` (bytes, 0 = off), ``temp_store`` (0-3), ``wal_autocheckpoint``
+    (negative = KiB, positive = pages), ``mmap_size`` (bytes, 0 = off), ``temp_store`` (unencrypted databases only), ``wal_autocheckpoint``
     (pages), ``journal_size_limit`` (bytes), ``synchronous`` (unset leaves the compile-time default, which differs
     between bundled/distro/Homebrew builds). Best-effort: failures are ignored so DB init never breaks on a
     malformed section. Applied to ALL connection types: writer, read_only, WAL readers."""
@@ -664,6 +664,14 @@ def apply_database_pragmas(conn: sqlite3.Connection, *, db_label: str = "state.d
             value = int(str(raw_value).strip())
         except (TypeError, ValueError):
             logger.warning("%s: ignoring non-integer database.%s=%r", db_label, pragma_name, raw_value)
+            continue
+        if pragma_name == "temp_store" and conn.execute("PRAGMA cipher_version").fetchone():
+            # The SQLCipher factory enforces MEMORY before this policy runs. Legacy performance
+            # configuration must not undo it; ordinary external SQLite keeps its existing policy.
+            if value != 2:
+                logger.warning("%s: ignoring obsolete database.temp_store=%r for encrypted state; "
+                               "effective temporary storage is MEMORY (2). Remove this option from config; "
+                               "the saved configuration has not been changed.", db_label, raw_value)
             continue
         with contextlib.suppress(sqlite3.OperationalError):
             conn.execute(f"PRAGMA {pragma_name}={value}")

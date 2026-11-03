@@ -113,24 +113,79 @@ def _load_meta(home: Path) -> Optional[dict[str, Any]]:
     return meta
 
 
-class Vault:
-    """An unlocked vault for one Hermes home.  Plaintext exists only in this process."""
+def derive_purpose_key(master_key, purpose: str) -> bytes:
+    if not purpose or "\x00" in purpose:
+        raise ValueError("Vault purpose must be a non-empty text label")
+    derived = HKDF(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=None,
+        info=("hermes/vault/v1/" + purpose).encode("utf-8"),
+    ).derive(master_key)
+    return derived
 
-    def __init__(self, home: Path, master_key: bytes) -> None:
+
+class Vault:
+    """An unlocked vault for one Hermes home.  Plaintext exists only in this process.
+
+    The retained master key lives only in wipeable locked custody
+    (``hermes_security.protected_memory``); :meth:`wipe` (every lock and cache clear) zeroes it and
+    later key use raises :class:`VaultLockedError`. A wiped vault is never re-armed: a new unlock
+    publishes a new :class:`Vault`. Key snapshots, derived keys and plaintext are ordinary transient
+    Python objects.
+    """
+
+    def __init__(self, home: Path, master_key, *, borrowed: bool = False) -> None:
+        from hermes_security.protected_memory import KeyCustody
+
         self.home = Path(home).expanduser().resolve()
-        self.master_key = master_key
+        self._custody = KeyCustody(master_key)
+        self._borrowed = borrowed
+
+    @property
+    def master_key(self) -> bytes:
+        """An immutable snapshot of the retained key for one crypto operation.
+
+        Taken atomically against :meth:`wipe`: it is the real key or raises
+        :class:`VaultLockedError`. The snapshot itself is a transient copy outside custody.
+        """
+        self._require_live()
+        return self._custody.export_copy()
+
+    def _require_live(self) -> None:
+        """Recheck this borrower's lifetime, including callers holding a stale Vault reference."""
+        try:
+            if not self._custody.held:
+                raise VaultLockedError("The vault key was wiped by a lock")
+            if self._borrowed:
+                _require_live_authority(self.home)
+        except VaultLockedError:
+            _discard_cached_vault(self)
+            raise
+
+    def protection_status(self) -> dict[str, bool]:
+        """Local custody metadata for an already-authorized status request; exports no key.
+
+        This observation performs no upstream IPC. The caller authorizes access separately;
+        reading local metadata from an authority request must not recurse into that authority.
+        """
+        held = self._custody.held
+        return {"retained_key_locked": held, "retained_key_dontdump": held and self._custody.dontdump,
+                "wiped": not held}
+
+    def wipe(self) -> None:
+        self._custody.wipe()
+
+    def __repr__(self) -> str:
+        return f"<Vault home={str(self.home)!r} {self._custody!r}>"
+
+    def __reduce__(self):
+        raise TypeError("An unlocked vault cannot be pickled")
 
     # -- key derivation ----------------------------------------------------
 
     def derive_key(self, purpose: str) -> bytes:
-        if not purpose or "\x00" in purpose:
-            raise ValueError("Vault purpose must be a non-empty text label")
-        return HKDF(
-            algorithm=hashes.SHA256(),
-            length=32,
-            salt=None,
-            info=("hermes/vault/v1/" + purpose).encode("utf-8"),
-        ).derive(self.master_key)
+        return derive_purpose_key(self.master_key, purpose)
 
     # -- envelopes ----------------------------------------------------------
 
@@ -490,10 +545,8 @@ def unlock_with_private_key(home: Path | str, private_key_raw: bytes) -> Vault:
     meta = _load_meta(home_path)
     if meta is None:
         raise VaultNotInitializedError(f"No vault at {home_path}")
-    with _VAULT_LOCK:
-        cached = _VAULTS.get(home_path)
-        if cached is not None:
-            return cached
+    if (cached := _owner_cached(home_path)) is not None:
+        return cached
     slots = meta.get("key_slots") or []
     key_slots = [s for s in slots if isinstance(s, dict) and s.get("type") == "x25519"]
     if not key_slots:
@@ -510,23 +563,51 @@ def unlock_with_private_key(home: Path | str, private_key_raw: bytes) -> Vault:
         from hermes_security.passphrase import verify_master_key
 
         verify_master_key(meta, master_key)
-        vault = Vault(home=home_path, master_key=master_key)
-        with _VAULT_LOCK:
-            _VAULTS[home_path] = vault
-        return vault
+        return _publish_owner(home_path, master_key)
     raise last_error or WrongMasterPasswordError(
         "This private key does not open any slot of this vault"
     )
 
 
-def _zero(buf: bytearray | bytes) -> None:
-    if isinstance(buf, bytearray):
-        for i in range(len(buf)):
-            buf[i] = 0
+def _owner_cached(home_path: Path) -> Vault | None:
+    """A cached owner unlock is reused; a borrowed (FD/grant) one must be re-proven by the human."""
+
+    from hermes_security.session_authority import has_borrowed_authority
+
+    with _VAULT_LOCK:
+        cached = _VAULTS.get(home_path)
+    return None if cached is None or cached._borrowed or has_borrowed_authority(home_path) else cached
+
+
+def _publish_owner(home_path: Path, master_key) -> Vault:
+    """Cache a key proven by the human's own credential; it replaces borrowed provenance.
+
+    A borrowed cached vault is replaced, never promoted, so a concurrent revocation that wipes
+    the borrowed custody cannot reach the owner's new custody.
+    """
+
+    from hermes_security.session_authority import forget_inherited_authority, has_borrowed_authority
+
+    borrowed = has_borrowed_authority(home_path)
+    displaced = None
+    with _VAULT_LOCK:
+        cached = _VAULTS.get(home_path)
+        if cached is None or cached._borrowed or borrowed:
+            displaced = cached
+            cached = _VAULTS[home_path] = Vault(home=home_path, master_key=master_key)
+        elif not secrets.compare_digest(cached.master_key, master_key):
+            raise VaultIntegrityError("The cached vault key does not match this credential")
+    if displaced is not None:
+        displaced.wipe()
+    forget_inherited_authority(home_path)
+    return cached
 
 
 def unlock(home: Path | str, password: str | bytes) -> Vault:
-    """Verify the master password and cache the unlocked vault for this process."""
+    """Verify the master password and cache the unlocked vault for this process.
+
+    An explicit human unlock is owner authority even when this process first borrowed the key.
+    """
 
     home_path = Path(home).expanduser().resolve()
     meta = _load_meta(home_path)
@@ -534,17 +615,44 @@ def unlock(home: Path | str, password: str | bytes) -> Vault:
         raise VaultNotInitializedError(
             f"No vault at {home_path}; run 'hermes vault init' first"
         )
-    with _VAULT_LOCK:
-        cached = _VAULTS.get(home_path)
-        if cached is not None:
-            return cached
+    if (cached := _owner_cached(home_path)) is not None:
+        return cached
 
     from hermes_security.passphrase import unlock_master_key
 
-    root_key = unlock_master_key(meta, password)
-    vault = Vault(home=home_path, master_key=root_key)
+    return _publish_owner(home_path, unlock_master_key(meta, password))
+
+
+def _require_live_authority(home_path: Path) -> None:
+    """A borrowed key is usable only while its owning session still authorizes this home."""
+
+    from hermes_security.session_authority import SessionAuthorityError, validate_inherited_authority
+
+    try:
+        validate_inherited_authority(home_path)
+    except SessionAuthorityError as exc:
+        raise VaultLockedError(f"The session that lent the vault at {home_path} no longer authorizes it") from exc
+
+
+def _discard_cached_vault(vault: Vault) -> None:
+    """Wipe only this custody; never stop an authority server from its own request thread."""
     with _VAULT_LOCK:
-        _VAULTS[home_path] = vault
+        if _VAULTS.get(vault.home) is vault:
+            del _VAULTS[vault.home]
+    vault.wipe()
+
+
+def _cached_live(home_path: Path) -> Vault | None:
+    """The cached vault if its authority is live; a revoked borrowed key wipes its own custody.
+
+    Only this process's borrowed copy is wiped; the lending owner and sibling borrowers keep
+    their own custody, and a cache entry already replaced by an owner unlock stays untouched.
+    """
+    with _VAULT_LOCK:
+        vault = _VAULTS.get(home_path)
+    if vault is None:
+        return None
+    vault._require_live()
     return vault
 
 
@@ -557,11 +665,10 @@ def export_unlocked_key(home: Path | str) -> bytes:
     """The unlocked master key of *home*, for handing to a child process (``hermes_security.handoff``)."""
 
     home_path = Path(home).expanduser().resolve()
-    with _VAULT_LOCK:
-        vault = _VAULTS.get(home_path)
+    vault = _cached_live(home_path)
     if vault is None:
         raise VaultLockedError(f"The vault at {home_path} is not unlocked in this process")
-    return bytes(vault.master_key)
+    return vault.master_key
 
 
 def adopt_unlocked_key(home: Path | str, master_key: bytes) -> Vault:
@@ -574,13 +681,15 @@ def adopt_unlocked_key(home: Path | str, master_key: bytes) -> Vault:
         raise VaultNotInitializedError(f"No vault at {home_path}")
     from hermes_security.passphrase import verify_master_key
 
-    verify_master_key(meta, bytes(master_key))
-    vault = Vault(home=home_path, master_key=bytes(master_key))
+    verify_master_key(meta, master_key)
     with _VAULT_LOCK:
         if cached := _VAULTS.get(home_path):
-            if not secrets.compare_digest(cached.master_key, vault.master_key):
+            if not secrets.compare_digest(cached._custody.export_copy(), master_key):
                 raise VaultIntegrityError("The cached owner no longer matches the handed-over vault")
-        return _VAULTS.setdefault(home_path, vault)
+        else:
+            cached = _VAULTS[home_path] = Vault(home=home_path, master_key=master_key, borrowed=True)
+    cached._require_live()
+    return cached
 
 
 def _read_key_file(path: str) -> bytes:
@@ -619,8 +728,7 @@ def get_vault(home: Path | str | None = None, *, allow_env_unlock: bool = True) 
 
         home = get_hermes_home()
     home_path = Path(home).expanduser().resolve()
-    with _VAULT_LOCK:
-        vault = _VAULTS.get(home_path)
+    vault = _cached_live(home_path)
     if vault is None:
         if not vault_exists(home_path):
             raise VaultNotInitializedError(
@@ -645,8 +753,10 @@ def is_unlocked(home: Path | str | None = None) -> bool:
 
         home = get_hermes_home()
     home_path = Path(home).expanduser().resolve()
-    with _VAULT_LOCK:
-        return home_path in _VAULTS
+    try:
+        return _cached_live(home_path) is not None
+    except VaultLockedError:
+        return False
 
 
 def lock_now(home: Path | str | None = None) -> None:
@@ -658,7 +768,9 @@ def lock_now(home: Path | str | None = None) -> None:
         home = get_hermes_home()
     home_path = Path(home).expanduser().resolve()
     with _VAULT_LOCK:
-        _VAULTS.pop(home_path, None)
+        vault = _VAULTS.pop(home_path, None)
+    if vault is not None:
+        vault.wipe()
     from hermes_security.session_authority import forget_inherited_authority, revoke_home_authorities
     forget_inherited_authority(home_path)
     revoke_home_authorities(home_path)
@@ -668,7 +780,10 @@ def clear_vault_cache() -> None:
     """Forget every process-local unlocked key (tests, profile switches)."""
 
     with _VAULT_LOCK:
+        vaults = list(_VAULTS.values())
         _VAULTS.clear()
+    for vault in vaults:
+        vault.wipe()
     from hermes_security.session_authority import forget_inherited_authority
     forget_inherited_authority()
 

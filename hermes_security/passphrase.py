@@ -10,10 +10,14 @@ from pathlib import Path
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-from hermes_security.errors import VaultIntegrityError, WrongMasterPasswordError
+from hermes_security.errors import VaultIntegrityError, VaultLockedError, WrongMasterPasswordError
 
 _METADATA_VERSION = 2
 _WRAP_AAD = b"hermes-vault-passphrase-wrap-v2|"
+
+
+class BorrowedAuthorityError(VaultLockedError):
+    """Only the owning human may rotate the passphrase; a lent key or grant is not consent."""
 
 
 def _decode(value, size=None):
@@ -58,7 +62,7 @@ def authenticate_metadata(meta, key):
 
     result = {name: value for name, value in meta.items() if name != "authentication"}
     if result.get("version") == _METADATA_VERSION:
-        tag = hmac.digest(vault.Vault(Path("."), key).derive_key("metadata-auth"), _canonical(result), "sha256")
+        tag = hmac.digest(vault.derive_purpose_key(key, "metadata-auth"), _canonical(result), "sha256")
         result["authentication"] = vault._b64e(tag)
     return result
 
@@ -112,15 +116,20 @@ def unlock_master_key(meta, password):
 def change_passphrase(home: Path | str, new_password: str | bytes) -> None:
     """Rewrap an already-unlocked exact owner; data, child grants and key slots stay valid.
 
+    A key borrowed through an inherited FD or session grant is refused until the human unlocks
+    this process explicitly (``vault.unlock``), which makes it the owner.
     Historical metadata/backups and already-known keys cannot be revoked by changing a password.
     """
     from hermes_security import vault
+    from hermes_security.session_authority import has_borrowed_authority
     from hermes_security.vault_metadata import exact_home, writer
 
     if not isinstance(new_password, (str, bytes)) or not new_password:
         raise ValueError("A non-empty new passphrase is required")
     home = exact_home(home)
     unlocked = vault.get_vault(home, allow_env_unlock=False)
+    if has_borrowed_authority(home):
+        raise BorrowedAuthorityError("Changing the passphrase requires the owning human to unlock this process")
     with writer(home, unlocked) as transaction:
         meta = dict(transaction.meta)
         if meta["version"] == 1:

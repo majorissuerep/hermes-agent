@@ -1,11 +1,10 @@
-"""A path-scoped authorization server whose RFC 8414 metadata names its origin (#116233).
+"""Narrow issuer spelling compatibility through the real outgoing OAuth provider.
 
 Strava's MCP connector advertises ``authorization_servers: ["https://www.strava.com/mcp-issuer"]`` and
 serves ``/.well-known/oauth-authorization-server/mcp-issuer`` with ``issuer: "https://www.strava.com"``.
 The SDK's exact-string issuer check (RFC 8414 §3.3) rejected that document and discovery never completed.
-Hermes accepts exactly this shape — the document fetched from the well-known URL derived from the advertised
-identifier, naming that identifier's origin — through the real provider flow; every other mismatch is still
-rejected.
+Hermes accepts this shape through the real provider flow. A root issuer may also differ by one trailing slash
+(#132233), matching upstream 1dadda835d without normalizing path-scoped identifiers.
 """
 from __future__ import annotations
 
@@ -59,8 +58,8 @@ def _asm(issuer):
 class _StandIn:
     """Resource + authorization server behind one httpx MockTransport; ``issuer_doc`` maps ASM path -> document."""
 
-    def __init__(self, httpx, issuer_doc):
-        self.httpx, self.issuer_doc, self.hits = httpx, issuer_doc, []
+    def __init__(self, httpx, issuer_doc, advertised=ADVERTISED):
+        self.httpx, self.issuer_doc, self.advertised, self.hits = httpx, issuer_doc, advertised, []
 
     def __call__(self, request):
         url = str(request.url)
@@ -72,7 +71,7 @@ class _StandIn:
                 return j(200, {"ok": True})
             return j(401, {}, **{"WWW-Authenticate": 'Bearer resource_metadata="https://res.example/.well-known/oauth-protected-resource"'})
         if url == "https://res.example/.well-known/oauth-protected-resource":
-            return j(200, {"resource": RESOURCE, "authorization_servers": [ADVERTISED]})
+            return j(200, {"resource": RESOURCE, "authorization_servers": [self.advertised]})
         if url.startswith(AS_ORIGIN) and path in self.issuer_doc:
             return j(200, self.issuer_doc[path])
         if url == f"{AS_ORIGIN}/register":
@@ -83,7 +82,7 @@ class _StandIn:
         return j(404, {})
 
 
-async def _run_flow(tmp_path, monkeypatch, issuer_doc):
+async def _run_flow(tmp_path, monkeypatch, issuer_doc, advertised=ADVERTISED, iss=AS_ORIGIN):
     from mcp.shared.auth import OAuthClientMetadata
     from pydantic import AnyUrl
 
@@ -101,14 +100,14 @@ async def _run_flow(tmp_path, monkeypatch, issuer_doc):
         seen["state"] = parse_qs(urlsplit(url).query)["state"][0]
 
     async def callback():
-        return _authorization_code_result("code-1", seen["state"], iss=AS_ORIGIN)
+        return _authorization_code_result("code-1", seen["state"], iss=iss)
 
     storage = HermesTokenStorage("srv")
     provider = _HERMES_PROVIDER_CLS(
         server_name="srv", server_url=RESOURCE, storage=storage,
         client_metadata=OAuthClientMetadata(redirect_uris=[AnyUrl("http://127.0.0.1:1/cb")], client_name="Hermes Agent"),
         redirect_handler=redirect, callback_handler=callback)
-    standin = _StandIn(httpx, issuer_doc)
+    standin = _StandIn(httpx, issuer_doc, advertised)
     async with httpx.AsyncClient(auth=provider, transport=httpx.MockTransport(standin)) as client:
         response = await client.get(RESOURCE)
     return response, standin, seen, provider
@@ -139,3 +138,47 @@ async def test_other_issuer_shapes_are_still_rejected(tmp_path, monkeypatch, iss
     with pytest.raises((OAuthFlowError, OAuthRegistrationError)):
         await _run_flow(tmp_path, monkeypatch, issuer_doc)
     assert not (tmp_path / "mcp-tokens" / "srv.json").exists()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("advertised", "issuer"), [
+    pytest.param(f"{AS_ORIGIN}/", AS_ORIGIN, id="advertised-root-slash"),
+    pytest.param(AS_ORIGIN, f"{AS_ORIGIN}/", id="document-root-slash"),
+])
+async def test_root_issuer_trailing_slash_completes_the_encrypted_flow(tmp_path, monkeypatch, advertised, issuer):
+    root_doc = {"/.well-known/oauth-authorization-server": _asm(issuer)}
+    response, _, _, _ = await _run_flow(tmp_path, monkeypatch, root_doc, advertised=advertised, iss=issuer)
+
+    assert response.status_code == 200
+    client = tmp_path / "mcp-tokens" / "srv.client.json"
+    token = tmp_path / "mcp-tokens" / "srv.json"
+    assert client.read_bytes().startswith(b"HRMVAULT\x00") and token.read_bytes().startswith(b"HRMVAULT\x00")
+    assert json.loads(read_oauth_state(client))["issuer"] == advertised
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("advertised", "issuer", "document"), [
+    pytest.param(ADVERTISED, f"{ADVERTISED}/", PATH_DOC, id="path-scoped-slash"),
+    pytest.param(AS_ORIGIN, f"{AS_ORIGIN}//", "/.well-known/oauth-authorization-server", id="doubled-root-slash"),
+])
+async def test_non_root_slash_variants_stay_rejected(tmp_path, monkeypatch, advertised, issuer, document):
+    from mcp.client.auth.exceptions import OAuthFlowError
+
+    with pytest.raises(OAuthFlowError, match="issuer mismatch"):
+        await _run_flow(tmp_path, monkeypatch, {document: _asm(issuer)}, advertised=advertised, iss=issuer)
+    assert not (tmp_path / "mcp-tokens" / "srv.json").exists()
+
+
+@pytest.mark.asyncio
+async def test_equal_root_issuer_metadata_keeps_the_sdk_validation_path():
+    from tools.mcp_oauth_provider import HermesProviderMixin
+    from tools.mcp_tool import sdk_httpx
+
+    provider = HermesProviderMixin.__new__(HermesProviderMixin)
+    provider.context = SimpleNamespace(auth_server_url=f"{AS_ORIGIN}/", oauth_metadata=None)
+    httpx = sdk_httpx()
+    request = httpx.Request("GET", f"{AS_ORIGIN}/.well-known/oauth-authorization-server")
+    response = httpx.Response(200, json=_asm(f"{AS_ORIGIN}/"), request=request)
+
+    assert await provider._hermes_accept_origin_issued_metadata(response) is response
+    assert provider.context.oauth_metadata is None

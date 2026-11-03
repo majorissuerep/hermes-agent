@@ -9,6 +9,20 @@ from typing import Optional
 # Prefix a caller uses in ``extra_env`` to force a blocklisted var through.
 _HERMES_PROVIDER_ENV_FORCE_PREFIX = "_HERMES_FORCE_"
 
+# Local authority is never an outgoing credential, including explicit remote
+# passthrough. Terminal owners re-add only the current operation-scoped grant.
+LOCAL_VAULT_AUTHORITY_ENV = frozenset({
+    "HERMES_SESSION_VAULT", "HERMES_VAULT_KEY_FD", "HERMES_VAULT_PRIVATE_KEY", "HERMES_MASTER_PASSWORD",
+})
+
+
+def strip_local_vault_authority(env: dict[str, str]) -> dict[str, str]:
+    """Remove local custody before unrelated or outgoing child processes spawn."""
+    for key in tuple(env):
+        if key.upper() in LOCAL_VAULT_AUTHORITY_ENV:
+            env.pop(key)
+    return env
+
 # Hermes-managed AWS *inference* credentials for ``auth_type="aws_sdk"`` (Bedrock):
 # only the Bedrock bearer token, which no aws/terraform/boto3 toolchain uses. The
 # general AWS chain stays inheritable on purpose — the local terminal is the user's

@@ -18,14 +18,17 @@ def child(home, grant, action="read"):
     for name in ("HERMES_ALLOW_NO_VAULT", "HERMES_VAULT_PRIVATE_KEY", "HERMES_VAULT_KEY_FD", "HERMES_MASTER_PASSWORD"):
         env.pop(name, None)
     script = """
-from types import SimpleNamespace
-from hermes_cli.vault_gate import gate_startup
-from hermes_cli.config import read_raw_config, save_config
-gate_startup(SimpleNamespace(command='config'))
+from hermes_cli.management import execute
+from hermes_constants import get_hermes_home
+from hermes_security.vault import is_unlocked
 import json, sys
+home = get_hermes_home()
 if sys.argv[1] == 'write':
-    save_config({'agent': {'max_turns': 73}}, merge_existing=True)
-print(json.dumps(read_raw_config()))
+    revision = execute({'op': 'config.get'}, home)['revision']
+    execute({'op': 'config.set', 'path': ['agent', 'max_turns'], 'value': 73, 'revision': revision}, home)
+value = execute({'op': 'config.get'}, home)['value']
+assert not is_unlocked(home), 'ordinary operation client acquired a vault key'
+print(json.dumps(value))
 """
     return subprocess.run([sys.executable, "-c", script, action], check=False, cwd=ROOT, env=env,
                           stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=20)
@@ -159,6 +162,13 @@ finally:
 """
     env = dict(os.environ, **owner.environment())
     env.pop("HERMES_VAULT_KEY_FD", None)
+    if not key_handoff:
+        result = subprocess.run([sys.executable, "-c", script], env=env, cwd=ROOT,
+                                stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=20, check=False)
+        assert result.returncode != 0, "an arbitrary interpreter acquired the owner's vault key"
+        owner.close()
+        vault.clear_vault_cache()
+        return
     with ExitStack() as resources:
         descriptors = ()
         if key_handoff:
@@ -166,6 +176,7 @@ finally:
             fd, additions = prepare_child_key(home)
             resources.callback(os.close, fd)
             env.update(additions)
+            env.pop("HERMES_SESSION_VAULT", None)  # lineage travels in the trusted FD, not mutable child env
             descriptors = (fd,)
         process = resources.enter_context(subprocess.Popen(
             [sys.executable, "-c", script], env=env, cwd=ROOT, pass_fds=descriptors,

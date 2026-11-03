@@ -3,7 +3,9 @@
 Every SQLite database under the Hermes home is a SQLCipher database keyed
 with a vault-derived key bound to the database's path relative to its vault
 home.  Standard sqlite3 cannot open these files; there is no plaintext
-fallback and no bypass.
+fallback and no bypass.  SQLite temporaries (temp tables, sorter spill, VACUUM's
+scratch database) stay in memory, never in plaintext temp files, though swap can
+still page that memory out.
 """
 
 from __future__ import annotations
@@ -18,6 +20,7 @@ from hermes_security.vault import find_vault_home, get_vault
 
 _PURPOSE = "sqlcipher"
 _MODULE: Any = None
+_MEMORY_TEMPORARIES = "SELECT temp_store = 2 AND NOT sqlite_compileoption_used('TEMP_STORE=0') FROM pragma_temp_store"
 
 
 class SQLCipherUnavailableError(VaultError):
@@ -151,7 +154,27 @@ def connect(db_path: Path | str, *, purpose: str = _PURPOSE, key_path: Path | st
     except BaseException:
         conn.close()
         raise
+    try:
+        _keep_temporaries_in_memory(conn)
+    except BaseException:
+        conn.close()
+        raise
     return conn
+
+
+def _keep_temporaries_in_memory(conn) -> None:
+    """Select memory temporaries; refuse builds that would still write temp files.
+
+    Read back rather than trust the PRAGMA: a TEMP_STORE=0 build accepts the
+    setting but always uses files.
+    """
+
+    conn.execute("PRAGMA temp_store = MEMORY")
+    if conn.execute(_MEMORY_TEMPORARIES).fetchone() != (1,):
+        raise SQLCipherUnavailableError(
+            "This SQLCipher build cannot keep SQLite temporaries in memory; Hermes refuses "
+            "to spill encrypted state into plaintext temp files"
+        )
 
 
 def _materialize(db_path: Path | str) -> Path:

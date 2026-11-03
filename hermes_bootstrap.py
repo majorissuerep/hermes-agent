@@ -637,7 +637,12 @@ if not _pm_repair:
             try:
                 os.execv(str(_launch_python), _command)
             finally:
+                # Reached only when exec failed: the closed pipe's number may be reused by any
+                # later descriptor, so it must not stay advertised as the key FD.
                 if _key_handoff is not None:
+                    for _name, _value in _key_handoff[1].items():
+                        if os.environ.get(_name) == _value:
+                            del os.environ[_name]
                     os.close(_key_handoff[0])
     except Exception as exc:
         if isinstance(exc, PermissionError) and (message := install_state_permission_message(_root, exc)):

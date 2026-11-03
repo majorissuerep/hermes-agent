@@ -50,15 +50,18 @@ forge-specific scripts. Port relevant upstream changes in reviewable increments;
 a wholesale merge currently includes more than two million added lines and would
 cross removed product boundaries.
 
-Ordinary POSIX children redeem grants through private, owner-only Unix sockets.
+Ordinary POSIX children invoke operation-scoped grants through private,
+owner-only Unix sockets. These grants cannot export a vault key. Trusted native
+children use a separate one-shot key descriptor and retain their lending owner's
+revocation chain.
 The managed coding-agent runner uses private kernel FIFOs because a real Codex
 workspace sandbox rejected even Unix socket connections with networking disabled.
 The transport directory contains FIFO nodes, an empty lock inode and a
 credential-free command bound to the owning installation. Keys and requests remain
 in process memory and pipe buffers; client responses are correlated and bounded.
 Both ends validate the open descriptor's FIFO type, owner and private mode.
-A replaced response file, symlink, directory or shared FIFO is refused before a
-key frame is written, and repairing the node permits the next valid request.
+A replaced response file, symlink, directory or shared FIFO is refused before an
+authority response is written, and repairing the node permits the next valid request.
 The runner adds only this transport directory to Codex's writable paths. Profile
 writes outside the workspace require the caller's explicit `--add-dir` selection.
 
@@ -434,3 +437,37 @@ assertions are unchanged. The file limit, CLI limits and zero-retry policy are
 unchanged. A local four-worker run passed all ten cases, with a maximum cohort
 time of 91 seconds. Complete new-head CI remains required; this does not turn the
 failed run into acceptance evidence.
+
+
+## Revocation and protected-child acceptance follow-up
+
+Held-out checks reproduced four failures on the earlier source candidate:
+retained vault objects could write after local lock/cache clear, and a live
+trusted child could keep writing through retained or cached custody after its
+owner closed. The repaired custody rechecks borrowed lifetime, wipes on
+revocation and refuses stale handles. Human re-unlock creates independent owner
+custody. Encrypted SQLite temporary storage also refuses legacy file-backed
+settings, without rewriting the saved option.
+
+Native positive management tests run in a private Linux user/mount namespace
+with verified ramfs. The qualification helper checks an inherited parent
+namespace descriptor before any mount operation and requires zero skipped
+management, vendor callback and supervision cases. It changes no host mount or
+swap setting. A run without proven RAM may test refusal behavior, but skipped
+positive vendor cases do not qualify execution. macOS has no protected vendor
+scratch proof backend in this increment.
+
+That pass exposed an owner/client fixture mismatch: operation-only dispatch
+selects executors in the owner's environment, while an old fixture changed only
+the client's PATH. Fixtures now bind synthetic executors in the owner and use
+different rejecting client executors. The authority never accepts caller PATH
+as executable-selection authority. A separate owner-death case exposed retained
+RAM scratch after process cleanup; the supervisor now owns descriptor-pinned
+cleanup after all descendants end. Namespace refusal, replacement-directory
+preservation and descriptor closure have separate behavioral contracts.
+
+The auxiliary TTL test also raced its ten-millisecond real-time window during
+logging. Its replacement controls time and checks active state just before
+expiry, then full cache eviction exactly at the deadline. Failed earlier runs
+remain negative evidence. Final private/native qualification and source/public
+main equality are still required before completion.

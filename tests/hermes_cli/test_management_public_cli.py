@@ -169,7 +169,9 @@ def test_public_management_rotation_keeps_live_children_and_ciphertext(world):
     unchanged = {name: (world.home / name).read_bytes() for name in ("config.yaml", ".env", "state.db")}
     new_password = secrets.token_urlsafe(32)
     result, output = world.call({"op": "passphrase.change"}, secret=new_password)
-    assert result.returncode == 0, (output, result.stderr)
+    assert result.returncode != 0 and output["error"]["code"] == "consent_required", (output, result.stderr)
+    from hermes_security.passphrase import change_passphrase
+    change_passphrase(world.home, new_password)  # explicit owning-human action, never the borrowed child
     assert new_password not in result.stdout + result.stderr
     assert unchanged == {name: (world.home / name).read_bytes() for name in unchanged}
     assert world.get(["agent", "max_turns"])["value"] == 37
@@ -311,7 +313,7 @@ def test_stalled_secret_pipe_refuses_without_rotating_or_leaving_a_child(world):
         )
         output = json.loads(stdout)
         assert proc.returncode != 0 and output["version"] == 1 and output["ok"] is False, (output, stderr)
-        assert output["error"]["code"] == "secret_timeout", output
+        assert output["error"]["code"] == "consent_required", output
         assert secret not in stdout + stderr
         assert before == {name: (world.home / name).read_bytes() for name in names}
         with pytest.raises(ProcessLookupError):
@@ -348,7 +350,9 @@ def test_rotated_vault_public_backup_import_restores_config_and_history(world, t
 
     new_password = secrets.token_urlsafe(32)
     result, output = world.call({"op": "passphrase.change"}, secret=new_password)
-    assert result.returncode == 0, (output, result.stderr)
+    assert result.returncode != 0 and output["error"]["code"] == "consent_required", (output, result.stderr)
+    from hermes_security.passphrase import change_passphrase
+    change_passphrase(world.home, new_password)
     original = world.get()["value"]
     with SessionDB(world.home / "state.db") as db:
         history = db.get_messages("management-history")
@@ -366,3 +370,50 @@ def test_rotated_vault_public_backup_import_restores_config_and_history(world, t
         assert db._conn.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
     assert _fresh_unlock(world, world.password).returncode != 0
     assert _fresh_unlock(world, new_password).returncode == 0
+
+
+def test_operation_grant_preserves_large_public_native_output_and_rejects_execution_escapes(world):
+    from hermes_cli._launchers import runtime_command
+    from hermes_security.session_authority import ENV_NAME, operation_request
+
+    value = "synthetic-native-output-" + "x" * 24000
+    result, output = world.call({"op": "config.set", "path": ["skills", "config", "large"],
+                                "value": value, "revision": world.get()["revision"]})
+    assert result.returncode == 0, output
+    result = subprocess.run(runtime_command(ROOT, ["config", "get", "skills.config.large"]),
+                            cwd=ROOT, env=world.env, stdin=subprocess.DEVNULL,
+                            capture_output=True, text=True, timeout=60, check=False)
+    assert result.returncode == 0, world.diagnostic(result.stderr)
+    assert result.stdout.strip() == value
+    for arguments in (["pm", "run", "python", "-c", "print('escape')"], ["--run-module", "os"], [],
+                      ["chat", "-q", "synthetic", "--in", "/tmp"],
+                      ["cron", "create", "--script", "/tmp/arbitrary.py"]):
+        response = operation_request(world.home, world.env[ENV_NAME],
+                                     {"op": "native.start", "arguments": arguments})
+        assert response.get("ok") is False
+    result = subprocess.run(runtime_command(ROOT, ["config", "get", "--not-a-real-flag"]),
+                            cwd=ROOT, env=world.env, stdin=subprocess.DEVNULL,
+                            capture_output=True, text=True, timeout=60, check=False)
+    assert result.returncode != 0
+
+
+def test_trusted_fd_owner_can_import_the_cli_backend_after_handoff(world):
+    from hermes_security.handoff import prepare_child_key
+
+    fd, additions = prepare_child_key(world.home)
+    script = """
+import sys
+from hermes_security.handoff import adopt_inherited_key
+assert adopt_inherited_key()
+sys.argv = ['embedded-native-owner']
+import hermes_cli.main
+print('native-backend-imported')
+"""
+    try:
+        result = subprocess.run([sys.executable, "-c", script], env={**world.env, **additions}, cwd=ROOT,
+                                pass_fds=(fd,), stdin=subprocess.DEVNULL, capture_output=True,
+                                text=True, timeout=60, check=False)
+        assert result.returncode == 0, world.diagnostic(result.stderr)
+        assert "native-backend-imported" in result.stdout
+    finally:
+        os.close(fd)
