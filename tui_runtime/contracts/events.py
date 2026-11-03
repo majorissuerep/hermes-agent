@@ -214,6 +214,8 @@ class MessageCompletePayload(Payload):
     text: str | JsonValue = ""
     usage: Usage | None = None
     status: TurnStatus | None = None
+    #: A native owner still settling publishes ``session.info(running=False)`` before becoming idle.
+    running: bool | None = None
     reasoning: str | None = None
     warning: str | None = None
     response_previewed: bool | None = None
@@ -230,7 +232,8 @@ class MessageCompletePayload(Payload):
     persisted_turn: PersistedTurn | None = None
 
 
-event("message.complete", MessageCompletePayload, doc="The turn ended: final text, usage and outcome.")
+event("message.complete", MessageCompletePayload,
+      doc="Final text, usage and outcome; a running owner becomes idle on its settled session.info.")
 
 
 class StatusUpdatePayload(Payload):

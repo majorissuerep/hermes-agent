@@ -587,10 +587,8 @@ function applySessionInfo(payload: unknown, { appendMessage, setHistoryItems, se
 
   if (incoming.running === false) {
     turnController.clearStatusTimer()
-    // The authority settles the row before it publishes the final, so this snapshot
-    // can land a frame ahead of `message.complete`; the trail (tool rows, reasoning)
-    // stays parked for that final to archive instead of being dropped here.
-    turnController.idle({ keepTurnArchive: true })
+    // The final reply and idle snapshot can arrive in either order; retain its trail for the final.
+    turnController.recordSessionIdle()
     setStatus('ready')
   }
 
@@ -1648,7 +1646,7 @@ export function createGatewayEventHandler(ctx: GatewayEventHandlerContext): (ev:
           }
         }
 
-        setStatus('ready')
+        setStatus(statusFromBusy())
 
         if (ev.payload?.warning) {
           turnController.pushActivity(ev.payload.warning, 'warn')

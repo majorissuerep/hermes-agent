@@ -9,7 +9,9 @@ import threading
 
 import pytest
 
-from tests.tui_runtime.test_terminal_model_pty import ModelWire, ROOT, TerminalPTY, save_fixture_runtime_logs
+from tests.tui_runtime.test_terminal_model_pty import (
+    ModelWire, ROOT, TerminalPTY, _composer_ready, save_fixture_runtime_logs,
+)
 
 pytestmark = [pytest.mark.platforms("linux", "macos"), pytest.mark.live_system_guard_bypass]
 
@@ -71,15 +73,16 @@ def test_global_model_survives_independent_public_terminal_owner(tmp_path, monke
         terminals.append(first)
         first.until(lambda text: "─ ready │" in text and "❯" in text, "first public composer")
         first.submit(anchor)
-        first.until(lambda text: "fixture-reply-1" in text, "initial alpha request")
+        first.until(lambda text: "fixture-reply-1" in text and _composer_ready(first),
+                    "initial alpha turn settled")
         assert server.requests[-1]["model"] == "fixture-alpha"
         first.submit("/model fixture-beta --global --reasoning high")
         first.until(lambda text: "model → fixture-beta" in text, "global switch acknowledged")
+        assert "applies next turn" not in first.text(), "an idle global write must commit before acknowledgment"
         first.submit("/quit")
         first.until(lambda _text: first.process.poll() is not None, "first public owner exited")
         assert first.process.returncode == 0
         first.close()
-        terminals.remove(first)
         assert first.prompts == 1
         ciphertext = (home / "config.yaml").read_bytes()
         assert ciphertext != before and b"fixture-beta" not in ciphertext
@@ -89,12 +92,14 @@ def test_global_model_survives_independent_public_terminal_owner(tmp_path, monke
         assert config["model"]["default"] == "fixture-beta"
         assert config["agent"]["reasoning_effort"] == "high"
         vault.clear_vault_cache()
+        terminals.remove(first)
         second = TerminalPTY(env, password, tmp_path / "global-independent.log", argv=runtime_command(ROOT))
         terminals.append(second)
         second.until(lambda text: "─ ready │" in text and "❯" in text, "independent public composer")
         assert second.process.pid != first.process.pid and second.prompts == 1
         second.submit("new-owner-" + secrets.token_hex(12))
-        second.until(lambda text: "fixture-reply-2" in text, "persisted global route request")
+        second.until(lambda text: "fixture-reply-2" in text and _composer_ready(second),
+                     "persisted global route turn settled")
         assert len(server.requests) == 2
         assert server.requests[-1]["model"] == "fixture-beta"
         assert server.requests[-1].get("reasoning_effort") == "high"

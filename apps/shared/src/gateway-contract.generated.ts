@@ -3436,6 +3436,7 @@ export interface MessageCompletePayload {
   text?: string | unknown
   usage?: Usage | null
   status?: TurnStatus | null
+  running?: boolean | null
   reasoning?: string | null
   warning?: string | null
   response_previewed?: boolean | null
@@ -4337,7 +4338,7 @@ export interface BackendGatewayEventMap {
   error: ErrorPayload
   /** The account service wants a browser challenge cleared before the free-tier token exchange (broadcast); the desktop loads ``url`` in a hidden window. */
   'free_tier.challenge': FreeTierChallengePayload
-  /** The turn ended: final text, usage and outcome. */
+  /** Final text, usage and outcome; a running owner becomes idle on its settled session.info. */
   'message.complete': MessageCompletePayload
   /** One streamed chunk of the assistant reply (null text: segment boundary). */
   'message.delta': MessageDeltaPayload

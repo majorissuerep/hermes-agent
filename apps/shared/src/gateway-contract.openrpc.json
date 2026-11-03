@@ -14033,6 +14033,18 @@
             ],
             "default": null
           },
+          "running": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Running"
+          },
           "reasoning": {
             "anyOf": [
               {
@@ -30676,7 +30688,7 @@
     },
     {
       "name": "message.complete",
-      "summary": "The turn ended: final text, usage and outcome.",
+      "summary": "Final text, usage and outcome; a running owner becomes idle on its settled session.info.",
       "params": [
         {
           "name": "payload",

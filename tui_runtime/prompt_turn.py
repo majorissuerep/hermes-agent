@@ -837,7 +837,8 @@ def _complete_turn_payload(session: dict, st: _TurnRun, status_note: str | None,
         except Exception:
             _error_surface = None
     raw, status, last_reasoning = _turn_outcome(result, _error_surface)
-    payload = {"text": raw, "usage": _get_usage(agent), "status": status}
+    payload = {"text": raw, "usage": _get_usage(agent), "status": status,
+               "running": bool(session.get("running"))}
     if receipt := _persisted_turn_receipt(st, raw, status):
         payload["persisted_turn"] = receipt
     if last_reasoning:

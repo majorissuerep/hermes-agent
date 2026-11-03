@@ -292,6 +292,17 @@ one encrypted synthetic home and inherited one-shot key FDs, with independent
 ciphertext and replay/acknowledgment assertions. The task PR records whether the
 complete zero-retry run confirms both startup and completion contracts.
 
+The same run exposed a native readiness mismatch: the final reply reached the
+screen before the owner released its live-turn fence, while the UI already
+reported ready. A global model choice in that interval could receive the
+existing deferred acknowledgment, then be lost when the operator quit before
+another turn. The final reply now carries the owner's running state; the UI
+holds busy and pending notices until the authoritative idle snapshot. The public
+PTY contract waits for current composer readiness, rejects a deferred
+acknowledgment for its idle global write, then verifies ciphertext and an
+independent owner's actual model/reasoning request. Mid-turn picks keep their
+existing next-turn deferral.
+
 The private source is `unpossible/hermes-agent` on the existing Gitea service;
 the public mirror is `majorissuerep/hermes-agent` on GitHub. The sole GitHub
 entrypoint, `quality.yml`, requires the exact revision's latest verification

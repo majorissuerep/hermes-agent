@@ -286,14 +286,14 @@ class TurnController {
   }
   // ── Notice: turn-end flush (R3-C1 / R3-H4) ───────────────────────────
   //
-  // Invoked ONLY by the three real turn-end sites (recordMessageComplete,
-  // interruptTurn, recordError) — NEVER by idle()/reset(), which would leak
+  // Invoked by completed replies, their authoritative idle snapshot,
+  // interruptTurn and recordError — NEVER by idle()/reset(), which would leak
   // session A's notice into session B. Applies a pending NEW notice so it
   // appears now that FaceTicker has yielded; the TTL clock starts here, when
   // the notice first becomes visible. With no pending notice this is a
   // no-op, so a standing sticky notice REappears untouched after the turn.
   private flushPendingNotice() {
-    if (!this.pendingNotice) {
+    if (!this.pendingNotice || getUiState().busy) {
       return
     }
 
@@ -326,6 +326,7 @@ class TurnController {
   idle(
     opts: {
       keepTurnArchive?: boolean
+      keepBusy?: boolean
     } = {}
   ) {
     this.endReasoningPhase()
@@ -348,8 +349,12 @@ class TurnController {
       tools: [],
       turnTrail: []
     })
-    patchUiState({ busy: false, compacting: false })
+    patchUiState({ busy: opts.keepBusy === true, compacting: false })
     resetFlowOverlays()
+  }
+  recordSessionIdle() {
+    this.idle({ keepTurnArchive: true })
+    this.flushPendingNotice()
   }
   // `keepBusy` holds the session busy after interrupting so a queued message
   // drains on the gateway's real settle edge (message.complete, suppressed
@@ -712,7 +717,7 @@ class TurnController {
       void this.persistSpawnTree?.(finishedSubagents, sessionId)
     }
 
-    this.idle()
+    this.idle({ keepBusy: payload.running === true })
     this.clearReasoning()
     this.turnTools = []
     this.persistedToolLabels.clear()
@@ -720,8 +725,7 @@ class TurnController {
     this.interrupted = false
     this.sealedInterrupt = null
     patchTurnState({ activity: [], outcome: '' })
-    // Real turn end: surface any notice held back while busy. Done after
-    // idle() flips busy=false so applyNotice() reaches the visible slot.
+    // A settling owner keeps this notice pending until its authoritative idle snapshot.
     this.flushPendingNotice()
 
     return { finalMessages, finalText, interruptedReply, wasInterrupted }
