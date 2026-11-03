@@ -72,3 +72,15 @@ def test_fact_flow_retrieves_pages_and_validates_exact_passages(monkeypatch):
     fabricated["assumptions"][0]["evidence"][0]["quote"] = "A fabricated passage never present in the source."
     with pytest.raises(ValueError):
         _validate_review(data, fabricated, evidence, {})
+
+
+@pytest.mark.parametrize(("task", "answer"), [
+    ("Assume P " + "x" * 16_000, "P follows conditionally"),
+    ("Assume P", "P follows conditionally " + "x" * 16_000),
+], ids=["oversized-task", "oversized-answer"])
+def test_oversized_inputs_cannot_be_silently_truncated_before_review(monkeypatch, task, answer):
+    monkeypatch.setattr("agent.formal_logic_review._judge",
+                        lambda *args: pytest.fail("Oversized input must not reach a truncated review"))
+    result = review(SimpleNamespace(), checkpoint("given"), answer, task, {})
+    assert result["status"] == "assumptions_failed"
+    assert "16000" in result["error"]

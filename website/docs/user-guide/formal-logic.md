@@ -96,6 +96,8 @@ stakeholder question is necessary. Retrieved pages are untrusted evidence.
 Factual citations need exact supporting passages present in successfully
 extracted pages; invented URLs or quotations are refused.
 This review is a model assessment of evidence, separate from the kernel proof.
+The current task and proposed answer are each limited to 16,000 characters.
+Oversized inputs fail automatic review; their endings are never silently omitted.
 
 Failed logic and unavailable or unhealthy checkers return repair feedback
 automatically. They never qualify stakeholder questions. Unsupported public

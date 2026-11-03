@@ -62,6 +62,9 @@ def _judge(agent, payload: dict) -> dict:
 
 
 def review(agent, checkpoint: Checkpoint, answer: str, task: str, decisions: dict) -> dict:
+    if len(task) > 16_000 or len(answer) > 16_000:
+        return {"status": "assumptions_failed",
+                "error": "Formal review requires tasks and proposed answers of at most 16000 characters"}
     facts = [a for a in checkpoint.assumptions if a.kind == "fact"]
     if len(facts) > 4:
         return {"status": "assumptions_failed", "error": "Split checkpoints with more than four factual assumptions"}
@@ -70,7 +73,7 @@ def review(agent, checkpoint: Checkpoint, answer: str, task: str, decisions: dic
             return {"status": "assumptions_failed", "error": f"{assumption.id}: given quote is absent from the actual task"}
     try:
         evidence = {a.id: _fact_evidence(a) for a in facts}
-        payload = {"task": task[:16_000], "proposed_answer": answer[:16_000], "atoms": checkpoint.atoms,
+        payload = {"task": task, "proposed_answer": answer, "atoms": checkpoint.atoms,
                    "assumptions": [asdict(a) for a in checkpoint.assumptions],
                    "hypotheses": [asdict(h) for h in checkpoint.hypotheses],
                    "conclusion": checkpoint.conclusion, "retrieved_evidence": evidence}
