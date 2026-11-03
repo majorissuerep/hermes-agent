@@ -16,6 +16,8 @@ clone:
       home: /root
       depth: 256
       partial: false
+      # This fork has no LFS-managed files; avoid a redundant shared-volume scan.
+      lfs: false
       # Repository-only read authority stays valid through slow checkouts.
       use_ssh: true
       remote_ssh: ssh://git@gitea-ssh.gitea.svc.cluster.local:22/unpossible/hermes-agent.git

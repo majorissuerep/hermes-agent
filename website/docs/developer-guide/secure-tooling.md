@@ -400,6 +400,12 @@ failures invalidate that evidence; qualify a replacement before reapplying it.
 Kubernetes pressure taints, test deadlines, resource limits and required checks
 are retained. Worker selection grants no credential or network authority.
 
+Clone also disables the plugin's default LFS fetch/checkout: `git lfs ls-files`
+reported no managed files at the reviewed revision, while the actual clone spent
+minutes scanning the shared volume for LFS checkout. Ordinary Git checkout and
+the full verifier remain required. Adding LFS-managed assets requires reviewing
+this setting and qualifying their actual hydrated content.
+
 The aggregate GitHub gate retains native Linux/macOS tests, real terminal input,
 real SSH/Docker, installer protocol/stamp checks and Docker/shell lint. Full
 production cold installs and live-provider acceptance remain separate evidence.
