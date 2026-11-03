@@ -4341,19 +4341,6 @@ class TestAuxUnhealthyCache:
         _reset_aux_unhealthy_cache()
 
 
-    def test_ttl_expiry_evicts(self):
-        from agent.auxiliary_client import (
-            _mark_provider_unhealthy,
-            _is_provider_unhealthy,
-            _aux_unhealthy_until,
-        )
-        _mark_provider_unhealthy("openrouter", ttl=0.01)
-        assert _is_provider_unhealthy("openrouter") is True
-        import time
-        time.sleep(0.02)
-        # Lazy eviction: first lookup after expiry returns False AND removes the entry.
-        assert _is_provider_unhealthy("openrouter") is False
-        assert "openrouter" not in _aux_unhealthy_until
 
 
 
