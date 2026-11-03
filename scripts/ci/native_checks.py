@@ -9,6 +9,10 @@ import sys
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[2]
+FORMAL_FILES = [
+    "tests/e2e/core/formal_logic/test_native_checkpoints.py",
+    "tests/e2e/core/formal_logic/test_terminal_mode.py",
+]
 LINUX_FILES = [
     "tests/hermes_platform/test_private_ipc_directory.py",
     "tests/tui_runtime/test_terminal_model_pty.py",
@@ -72,6 +76,9 @@ def main() -> None:
         files = LINUX_FILES
     else:
         raise SystemExit("Native qualification requires a supported Linux or macOS host")
+    # macOS discovers every platform-marked file, including formal E2E cases.
+    # Their required compiler is installed by the dedicated fail-on-skip phase.
+    files = [path for path in files if path not in FORMAL_FILES]
     if not files:
         raise SystemExit("Native qualification must select tests")
     run("scripts/run_tests.sh", "--files", os.pathsep.join(files), "--file-retries", "0",
@@ -90,9 +97,7 @@ def main() -> None:
             [sys.executable, "scripts/ci/install_lean.py", "--directory", str(Path(temporary) / "toolchain")],
             cwd=ROOT, text=True, timeout=600).strip()
         logic_env = dict(env, PATH=str(Path(executable).parent) + os.pathsep + env["PATH"])
-        run("scripts/run_tests.sh", "--fail-on-skip", "--file-retries", "0",
-            "tests/e2e/core/formal_logic/test_native_checkpoints.py",
-            "tests/e2e/core/formal_logic/test_terminal_mode.py", env=logic_env)
+        run("scripts/run_tests.sh", "--fail-on-skip", "--file-retries", "0", *FORMAL_FILES, env=logic_env)
     run("git", "diff", "--exit-code", env=env)
     if subprocess.check_output(["git", "ls-files", "--others", "--exclude-standard"],
                                cwd=ROOT, text=True, timeout=30).strip():
