@@ -197,6 +197,10 @@ within the existing namespace limits; the temporary copy is removed on exit.
 Native SSH fixtures pin their generated host key in a private trust file through
 the real clients, and only replace a container bearing the same fixture ownership
 label. Repeated runs do not write test keys into the operator's SSH trust store.
+The root-run pod exposed six pre-existing container-path tests probing the real
+`/root/.hermes`. A disposable root container reproduces all six on the base;
+temporary mirror paths preserve their assertions without weakening the home-I/O
+guard or changing production safety code. The other root-path fixtures also pass.
 
 The private source is `unpossible/hermes-agent` on the existing Gitea service;
 the public mirror is `majorissuerep/hermes-agent` on GitHub. The sole GitHub
