@@ -194,7 +194,7 @@ def _transcribe_openai(
 def _transcribe_mistral(
     file_path: str, model_name: str, *, language: Optional[str] = None, prompt: Optional[str] = None
 ) -> dict[str, Any]:
-    """Transcribe with the ``mistralai`` SDK (``/v1/audio/transcriptions``); requires ``MISTRAL_API_KEY``."""
+    """Mistral transcription; ``prompt`` is one vocabulary/context-bias phrase, not instructions."""
     from tools.transcription_tools import _resolve_provider_key, _resolve_stt_language
     api_key = _resolve_provider_key("MISTRAL_API_KEY", "mistral")
     if not api_key:
@@ -205,9 +205,14 @@ def _transcribe_mistral(
         with Mistral(api_key=api_key) as client, open(file_path, "rb") as audio_file:
             # Language: hook override > stt.mistral.language > stt.language > env > auto.
             language = language or _resolve_stt_language("mistral")
+            hints = _sdk_prompt_kwargs(language, None)
+            if prompt:
+                # The native API accepts context_bias, not a free-form prompt.
+                # Keep the caller's complete phrase intact instead of splitting it.
+                hints["context_bias"] = [prompt]
             result = client.audio.transcriptions.complete(
                 model=model_name, file={"content": audio_file, "file_name": Path(file_path).name},
-                **_sdk_prompt_kwargs(language, prompt))
+                **hints)
         transcript_text = _extract_transcript_text(result)
         logger.info("Transcribed %s via Mistral API (%s, %d chars)",
                     Path(file_path).name, model_name, len(transcript_text))

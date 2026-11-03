@@ -4,7 +4,8 @@
 Covers:
 
 1. Fixture plugin returning a prompt → the backend call receives
-   ``initial_prompt`` (faster-whisper) / ``prompt`` (OpenAI, Groq, Mistral).
+   ``initial_prompt`` (faster-whisper) / ``prompt`` (OpenAI, Groq) /
+   ``context_bias`` vocabulary phrases (Mistral).
    The API boundary is stubbed — no live model is loaded or called.
 2. Two hooks → last-writer-wins per field, in registration order.
 3. Hook returning the read-only ``file_path`` field → dropped with a log.
@@ -156,8 +157,8 @@ class TestPromptThreading:
         _, kwargs = mock_client.audio.transcriptions.create.call_args
         assert kwargs["prompt"] == PROMPT
 
-    def test_prompt_reaches_mistral(self, monkeypatch, tmp_path):
-        """Unit-level: _transcribe_mistral forwards prompt to the SDK call."""
+    def test_prompt_reaches_mistral_context_bias(self, monkeypatch, tmp_path):
+        """The complete context hint reaches Mistral's native vocabulary-bias field."""
         audio = _make_audio(tmp_path)
         monkeypatch.setenv("MISTRAL_API_KEY", "mk-test")
         # Never attempt a lazy install in tests.
@@ -178,7 +179,8 @@ class TestPromptThreading:
 
         assert result["success"] is True
         _, kwargs = mock_client.audio.transcriptions.complete.call_args
-        assert kwargs["prompt"] == PROMPT
+        assert kwargs["context_bias"] == [PROMPT]
+        assert "prompt" not in kwargs
 
 
 # ---------------------------------------------------------------------------

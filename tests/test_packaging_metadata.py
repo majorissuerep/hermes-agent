@@ -1,6 +1,5 @@
 """Independent core/optional dependency and reviewed CVE policies."""
 import tomllib
-from datetime import datetime, timedelta
 from pathlib import Path
 
 from packaging.requirements import Requirement
@@ -54,31 +53,15 @@ def test_starlette_server_pins_and_lock_exclude_cve_2026_48710():
     assert versions and all(version >= floor for version in versions)
 
 
-def test_release_age_policy_allows_only_the_exact_upload_bounded_exception():
-    """Ordinary dependencies age fourteen days; the approved native ABI exception cannot float.
-
-    The one preserved release has an exact requirement and an upload-bounded cutoff,
-    never a blanket ``false`` exemption. Users install the already reviewed lock.
-    """
+def test_release_age_policy_applies_without_expired_package_exceptions():
+    """Every dependency ages fourteen days; the expired native ABI exception is removed."""
     manifest = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     uv = manifest["tool"]["uv"]
     lock = tomllib.loads((REPO_ROOT / "uv.lock").read_text(encoding="utf-8"))
     assert uv["exclude-newer"] == "14 days"
     assert lock["options"].get("exclude-newer-span") == "P14D"
-    approved = uv["exclude-newer-package"]
-    assert set(approved) == {"nemo-relay"}
-    locked = lock["options"]["exclude-newer-package"]
-    assert set(locked) == set(approved)
-    cutoff = datetime.fromisoformat(str(approved["nemo-relay"]))
-    assert datetime.fromisoformat(str(locked["nemo-relay"])) == cutoff
-    relay = next(row for row in lock["package"] if row["name"] == "nemo-relay")
-    requirement = next(req for req in map(Requirement, manifest["project"]["dependencies"])
-                       if req.name == relay["name"])
-    pins = list(requirement.specifier)
-    assert len(pins) == 1 and pins[0].operator == "==" and pins[0].version == relay["version"]
-    artifacts = [*relay.get("wheels", []), *([relay["sdist"]] if "sdist" in relay else [])]
-    last_upload = max(datetime.fromisoformat(row["upload-time"]) for row in artifacts)
-    assert last_upload <= cutoff < last_upload + timedelta(minutes=1)
+    assert not uv.get("exclude-newer-package")
+    assert not lock["options"].get("exclude-newer-package")
 
 
 def test_httpx2_pins_and_lock_exclude_ghsa_7mj9_2mp8_4m2p_family():

@@ -690,7 +690,9 @@ async def _drive_flow(provider, responder):
 async def test_concurrent_refresh_presents_single_use_token_exactly_once(tmp_path, monkeypatch):
     """Two providers on one token store: R1 is POSTed once, both end on the rotated pair."""
     from urllib.parse import parse_qs
+    from tools.mcp_tool import sdk_httpx
 
+    httpx = sdk_httpx()
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
     endpoint = "https://idp.example.com/oauth/token"
     a = _fenced_provider(tmp_path, monkeypatch, endpoint)
@@ -702,14 +704,14 @@ async def test_concurrent_refresh_presents_single_use_token_exactly_once(tmp_pat
 
     def responder(request):
         if request.method != "POST":
-            return _fake_response(200, str(request.url), b"{}")
+            return httpx.Response(200, json={}, request=request)
         refresh = parse_qs(request.content.decode())["refresh_token"][0]
         presented.append(refresh)
         if presented == ["R1"]:
-            body = json.dumps(_token("A2", "R2").model_dump(mode="json", exclude_none=True)).encode()
-            return _fake_response(200, endpoint, body)
+            return httpx.Response(200, json=_token("A2", "R2").model_dump(mode="json", exclude_none=True),
+                                  request=request)
         # A single-use provider rejects any second presentation.
-        return _fake_response(400, endpoint, b'{"error":"invalid_grant"}')
+        return httpx.Response(400, json={"error": "invalid_grant"}, request=request)
 
     await asyncio.gather(_drive_flow(a, responder), _drive_flow(b, responder))
 
@@ -757,7 +759,9 @@ async def test_refresh_adopts_expired_peer_pair_and_posts_its_refresh_token(tmp_
     token, because the POST we are about to build needs the new grant.
     """
     from urllib.parse import parse_qs
+    from tools.mcp_tool import sdk_httpx
 
+    httpx = sdk_httpx()
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
     endpoint = "https://idp.example.com/oauth/token"
     provider = _fenced_provider(tmp_path, monkeypatch, endpoint)
@@ -767,10 +771,10 @@ async def test_refresh_adopts_expired_peer_pair_and_posts_its_refresh_token(tmp_
 
     def responder(request):
         if request.method != "POST":
-            return _fake_response(200, str(request.url), b"{}")
+            return httpx.Response(200, json={}, request=request)
         presented.append(parse_qs(request.content.decode())["refresh_token"][0])
-        body = json.dumps(_token("A3", "R3").model_dump(mode="json", exclude_none=True)).encode()
-        return _fake_response(200, endpoint, body)
+        return httpx.Response(200, json=_token("A3", "R3").model_dump(mode="json", exclude_none=True),
+                              request=request)
 
     await _drive_flow(provider, responder)
 

@@ -179,6 +179,7 @@ class HermesProviderMixin:
             return response
 
         from mcp.shared.auth import OAuthMetadata
+        from mcp.client.auth.utils import issuers_match
         from pydantic import ValidationError
         try:
             metadata = OAuthMetadata.model_validate_json(await response.aread())
@@ -187,7 +188,8 @@ class HermesProviderMixin:
         advertised, issuer = self.context.auth_server_url, str(metadata.issuer)
         if metadata_issued_by_origin(metadata, advertised, response):
             relation = "is the origin of"
-        elif response.status_code == 200 and advertised and _root_issuer_slash_pair(issuer, advertised):
+        elif (response.status_code == 200 and advertised and issuer != advertised
+              and issuers_match(issuer, advertised)):
             relation = "differs only by the root trailing slash from"
         else:
             return response
@@ -527,19 +529,6 @@ def _metadata_issuer(context: Any) -> str | None:
     meta = getattr(context, "oauth_metadata", None)
     issuer = getattr(meta, "issuer", None) if meta is not None else None
     return (str(issuer).rstrip("/") or None) if issuer else None
-
-
-def _root_issuer_slash_pair(issuer: str, advertised: str) -> bool:
-    """MCP 2.0 lacks the later SDK's issuers_match; accept only one root slash.
-
-    Port of upstream 1dadda835d's narrow root-spelling rule, without changing
-    this fork's bounded SDK pin or stripping slashes from path identifiers.
-    """
-    short, long = sorted((issuer, advertised), key=len)
-    if long != short + "/":
-        return False
-    parts = urlsplit(short)
-    return not parts.path and not parts.query and not parts.fragment and parts.username is None
 
 
 def metadata_issued_by_origin(metadata: Any, auth_server_url: str | None, response: Any) -> bool:

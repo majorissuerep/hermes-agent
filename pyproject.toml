@@ -45,7 +45,7 @@ dependencies = [
   # user picks that backend. Smaller `dependencies` = smaller blast
   # radius for the next supply-chain attack.
   "openai==2.24.0; python_version >= '3.14'",
-  "certifi==2026.5.20; python_version >= '3.14'",
+  "certifi==2026.10.18; python_version >= '3.14'",  # PYSEC-2026-4320
   # TLS trust comes from the OS certificate store (agent/ssl_verify.py), so
   # a corporate/internal root installed on the machine just works. certifi
   # above stays a direct pin because httpx/requests/openai each depend on
@@ -93,10 +93,10 @@ dependencies = [
   # relying on another package to bring packaging in transitively.
   "packaging==26.0; python_version >= '3.14'",
   # Skills Hub (GitHub App JWT auth — optional, only needed for bot identity)
-  "PyJWT[crypto]==2.13.0; python_version >= '3.14'",  # PYSEC-2026-175/177/178/179
-  # urllib3 2.7.0 fixes GHSA-mf9v-mfxr-j63j (decompression-bomb bypass)
-  # and GHSA-qccp-gfcp-xxvc (header leak across origins).
-  "urllib3>=2.7.0,<3; python_version >= '3.14'",
+  "PyJWT[crypto]==2.15.0; python_version >= '3.14'",  # PYSEC-2026-4140..4152/4183, GHSA-pxh4-856f-4h89
+  # urllib3 2.8.0 fixes the streaming decompression and proxy TLS advisories
+  # PYSEC-2026-4175/4176/4177; 2.7.0 fixed GHSA-mf9v-mfxr-j63j and GHSA-qccp-gfcp-xxvc.
+  "urllib3>=2.8.0,<3; python_version >= '3.14'",
   # PyJWT[crypto] pulls cryptography in transitively. Pin it here as well, so
   # that the WeCom and Weixin crypto paths cannot fall below the patched
   # version. 50.0.0 is the floor: it fixes CVE-2026-69247, a Bleichenbacher
@@ -157,6 +157,8 @@ dependencies = [
   # libs required for the codecs we use, so it's safe to ship in the base
   # install rather than gating it behind an extra + a mid-session lazy install
   # (which deadlocked the CLI under prompt_toolkit — see #40490).
+  # Pillow 13.0.0 fixes the open 12.3.0 advisories, but browser-harness 0.1.13
+  # (its newest release) pins pillow==12.3.0 and fastembed 0.8.1 caps <13.
   "Pillow==12.3.0; python_version >= '3.14'",
   # HEIF/HEIC/AVIF decode for the vision tools. iPhone photos and screenshots
   # are HEIC (frequently mislabeled .jpg by upload pipelines); Pillow has no
@@ -327,7 +329,7 @@ pty = []
 # unaffected — the two distributions install side by side under different
 # module names.
 mcp = [
-  "mcp==2.0.0",
+  "mcp==2.2.0",
   "httpx2==2.12.0",
   "starlette==1.3.1",
 ] # starlette: CVE-2026-48710
@@ -335,7 +337,7 @@ mcp = [
 # wheel targets and intentionally unavailable on other platforms.
 nemo-relay = []
 computer-use = [
-  "mcp==2.0.0",
+  "mcp==2.2.0",
   "httpx2==2.12.0",
   "starlette==1.3.1",
 ] # starlette: CVE-2026-48710
@@ -343,18 +345,23 @@ computer-use = [
 # The `mistralai` PyPI project was quarantined 2026-05-12 after the malicious
 # 2.4.6 release (Mini Shai-Hulud worm); 2.4.6 was removed from PyPI and the
 # project is serving clean releases again (2.4.7 2026-05-25, 2.4.8 2026-05-28).
+# 2.10.1 (2026-09-15) requires opentelemetry-api>=1.33.1,<2 and
+# opentelemetry-semantic-conventions>=0.60b1 with no upper cap, unlike 2.4.8's
+# <0.61, so the otlp pins below can reach the fixed OpenTelemetry release.
 # Like other opt-in TTS/STT backends, this is lazy-installed via
 # pm (stt.mistral / tts.mistral) at first use — deliberately
 # NOT re-added to [all] so a future quarantined release can't break fresh
 # installs (see [all] policy comment below).
-mistral = ["mistralai==2.4.8"]
+mistral = ["mistralai==2.10.1"]
 # OTLP gateway monitoring export (optional). Provides the OpenTelemetry SDK +
 # OTLP/HTTP exporter for monitoring.gateway_health_export. Lazy-installed via
 # PM on first use; never a core dependency and deliberately
 # NOT in [all].
+# 1.45.1 fixes opentelemetry-api GHSA-xcq7-p3pf-p88h; the SDK pins the API to
+# 1.45.1 and semantic-conventions to 0.66b1 in the shared lock.
 otlp = [
-  "opentelemetry-sdk==1.39.1",
-  "opentelemetry-exporter-otlp-proto-http==1.39.1",
+  "opentelemetry-sdk==1.45.1",
+  "opentelemetry-exporter-otlp-proto-http==1.45.1",
 ]
 bedrock = ["boto3==1.42.89"]
 vertex = ["google-auth==2.55.1"]
@@ -420,13 +427,13 @@ dev = [
   "debugpy==1.8.20",
   "pytest==9.1.1",
   "pytest-asyncio==1.3.0",
-  "mcp==2.0.0",
+  "mcp==2.2.0",
   "httpx2==2.12.0",
   "starlette==1.3.1",
   "ty==0.0.82",
   "ruff==0.15.10",
-  "setuptools==83.0.0",
-] # starlette: CVE-2026-48710; setuptools: 83 (torch >=2.13 requires setuptools 83)
+  "setuptools==84.1.0",
+] # starlette: CVE-2026-48710; setuptools: 84.1.0 fixes GHSA-xmj3-9gf7-h52w (torch >=2.13 needs >=77.0.3)
 # Native launcher and provider-catalog E2E dependencies belong in the test
 # environment, not the core runtime. Keep the Anthropic SDK at the same
 # reviewed version as the optional runtime extra above.
@@ -439,7 +446,9 @@ test = [
 # PEP 517 isolated builds. Without wheel in
 # requires, the isolation sandbox only gets setuptools and the build
 # fails with ModuleNotFoundError: wheel.cli (#96488).
-requires = ["setuptools==83.0.0", "wheel"]
+# Keep the setuptools pin equal to scripts/termux/build_wheels.py, which stages
+# this exact wheel for the offline Termux app install.
+requires = ["setuptools==84.1.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project.scripts]
@@ -508,12 +517,6 @@ override-dependencies = [
 exclude-newer = "14 days"
 # Applied only when Hermes locks its own dependencies. Install workspaces
 # use the reviewed lock without requiring mirror upload timestamps.
-
-[tool.uv.exclude-newer-package]
-# Owner-approved preservation of the synced Relay ABI, not a floating exemption.
-# Includes only the exact 0.10.0 release's uploads. Remove after 2026-10-23 UTC,
-# when the entire release has completed the ordinary fourteen-day quarantine.
-nemo-relay = "2026-10-08T22:01:43Z"
 
 [tool.setuptools]
 # Root single-file modules are derived by setup.py at build time from the

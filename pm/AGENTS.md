@@ -28,9 +28,8 @@ may move a transitive core package within core's declared ranges
 Plugin `python_dependencies` follow the plugin's own policy. Teknium's rulings: "plugins dont have to abide by our 14 day rule … Only hermes'
 dependencies themselves have to"; dates are checked by us, not users.
 
-The owner approved one temporary exception to preserve the synced native ABI:
-`nemo-relay==0.10.0`, with an upload cutoff ending immediately after that release.
-Remove its timestamp override after 2026-10-23 UTC. No floating or blanket exemptions
-are authorized; every other dependency retains the fourteen-day rule. Generated
-installation workspaces strip both the global cutoff and this package-specific
-table, since release-age verification belongs to locking, not user installation.
+The temporary `nemo-relay==0.10.0` exception expired on 2026-10-23 UTC and has been
+removed after that release aged. All dependencies retain the fourteen-day rule;
+no floating or blanket exemptions are authorized. Generated installation
+workspaces strip release-age policy because it belongs to locking, not user
+installation. Do not restore the expired timestamp override.
