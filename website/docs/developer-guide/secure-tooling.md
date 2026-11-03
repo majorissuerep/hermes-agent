@@ -282,6 +282,16 @@ copying three large binaries for each case; their site-packages and checkout
 transitions remain isolated. The original file deadline and zero retries remain
 in force. These negative runs do not qualify the new candidate.
 
+A later full run exceeded the restart fixture's 15-second process guard before
+its first output. That guard included cold imports and durable initialization;
+the failure alone did not identify a runtime hang. The fixture now gives each
+fresh interpreter a bounded 60-second outer guard with slow-child stack capture.
+Its existing five-second operation window waits for actual completion publication
+instead of polling and exiting when the clock expires. All restart stages use
+one encrypted synthetic home and inherited one-shot key FDs, with independent
+ciphertext and replay/acknowledgment assertions. The task PR records whether the
+complete zero-retry run confirms both startup and completion contracts.
+
 The private source is `unpossible/hermes-agent` on the existing Gitea service;
 the public mirror is `majorissuerep/hermes-agent` on GitHub. The sole GitHub
 entrypoint, `quality.yml`, requires the exact revision's latest verification

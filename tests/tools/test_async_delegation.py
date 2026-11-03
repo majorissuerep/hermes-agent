@@ -496,29 +496,58 @@ def test_in_tool_stall_uses_higher_threshold(monkeypatch):
     assert evt["status"] == "completed"
 
 
-def test_real_process_restart_restores_owned_completion_once(tmp_path):
-    """Real-import E2E: the owning runtime, in a fresh interpreter, restores a prior process's
-    result exactly once. Importing the tools graph alone restores nothing (client fence)."""
+@pytest.fixture
+def encrypted_restart_probe(tmp_path):
+    """Fresh native processes own one encrypted home; cold startup has a separate budget."""
+    from hermes_security import vault
+    from tests.e2e.vault_home import run_unlocked, seal_fixture_home
+
     repo = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-    env = {**os.environ, "HERMES_HOME": str(tmp_path), "PYTHONPATH": repo}
+    home = tmp_path / "restart-home"
+    home.mkdir()
+    (home / "config.yaml").write_text("{}", encoding="utf-8")
+    seal_fixture_home(home)
+    env = {**os.environ, "HERMES_HOME": str(home), "PYTHONPATH": repo}
+    env.pop("HERMES_ALLOW_NO_VAULT", None)
+    bootstrap = (
+        "import faulthandler\n"
+        "faulthandler.dump_traceback_later(40)\n"
+        "from hermes_security.handoff import adopt_inherited_key\n"
+        "assert adopt_inherited_key(), 'restart probe requires its owning key FD'\n"
+    )
+
+    def run(script):
+        # The functional contract is completion/replay, not a 15-second cold-import SLA.
+        return run_unlocked([sys.executable, "-c", bootstrap + script], cwd=repo, env=env,
+                            text=True, capture_output=True, timeout=60, check=True)
+
+    try:
+        yield run, home
+    finally:
+        vault.lock_now(home)
+
+
+def test_real_process_restart_restores_owned_completion_once(encrypted_restart_probe):
+    """A fresh owning interpreter restores the encrypted prior result exactly once;
+    importing the tools graph alone restores nothing (client fence)."""
+    run, home = encrypted_restart_probe
     producer = r'''
-import time
 from tools import async_delegation as ad
+from tools.process_registry import process_registry
 r = ad.dispatch_async_delegation(
     goal="restart", context=None, toolsets=None, role="leaf", model="m",
     session_key="owner-session", parent_session_id="durable-parent",
     runner=lambda: {"status": "completed", "summary": "after restart"},
 )
-deadline = time.time() + 5
-while ad.active_count() and time.time() < deadline:
-    time.sleep(.01)
+event = process_registry.completion_queue.get(timeout=5)
+assert event["delegation_id"] == r["delegation_id"]
+assert event["status"] == "completed"
 print(r["delegation_id"])
 '''
-    first = subprocess.run(
-        [sys.executable, "-c", producer], cwd=repo, env=env,
-        text=True, capture_output=True, timeout=15, check=True,
-    )
+    first = run(producer)
     delegation_id = first.stdout.strip().splitlines()[-1]
+    header = (home / "state.db").read_bytes()[:16]
+    assert header and not header.startswith(b"SQLite format 3"), "ledger must stay encrypted"
 
     # The ledger replays on the first consumer, not at import (#123265).
     consumer = r'''
@@ -530,10 +559,7 @@ restore_undelivered_completions(process_registry.completion_queue)
 evt = process_registry.completion_queue.get_nowait()
 print(json.dumps(evt, sort_keys=True))
 '''
-    second = subprocess.run(
-        [sys.executable, "-c", consumer], cwd=repo, env=env,
-        text=True, capture_output=True, timeout=15, check=True,
-    )
+    second = run(consumer)
     evt = json.loads(second.stdout.strip().splitlines()[-1])
     assert evt["delegation_id"] == delegation_id
     assert evt["session_key"] == "owner-session"
@@ -544,14 +570,8 @@ print(json.dumps(evt, sort_keys=True))
 from tools import async_delegation as ad
 assert ad.mark_completion_delivered({delegation_id!r})
 '''
-    subprocess.run(
-        [sys.executable, "-c", acker], cwd=repo, env=env,
-        text=True, capture_output=True, timeout=15, check=True,
-    )
-    probe = subprocess.run(
-        [sys.executable, "-c", "from tools.process_registry import process_registry; process_registry.restore_completions(); print(process_registry.completion_queue.qsize())"],
-        cwd=repo, env=env, text=True, capture_output=True, timeout=15, check=True,
-    )
+    run(acker)
+    probe = run("from tools.process_registry import process_registry; process_registry.restore_completions(); print(process_registry.completion_queue.qsize())")
     assert probe.stdout.strip().splitlines()[-1] == "0"
 
 
