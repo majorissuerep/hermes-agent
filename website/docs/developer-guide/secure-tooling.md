@@ -422,3 +422,15 @@ production cold installs and live-provider acceptance remain separate evidence.
 Repository protection/visibility and public exposure decisions remain unchanged.
 Acceptance requires the final source revision's green verification and matching
 public-main readback; configuration alone is not a completed mirror run.
+
+
+Private run 26 completed 41,780 Python cases, but its ten-scenario device-login
+file exceeded the 600-second file budget after two cases and failed the run.
+Those scenarios now run in cohorts of one or two, with common wire/state oracles
+kept in one helper. Every scenario still creates its own encrypted PM home and
+uses the public CLI, real SDK and local HTTP fixture. Polling, refresh, issuer and
+resource validation, credential non-disclosure and failed-write preservation
+assertions are unchanged. The file limit, CLI limits and zero-retry policy are
+unchanged. A local four-worker run passed all ten cases, with a maximum cohort
+time of 91 seconds. Complete new-head CI remains required; this does not turn the
+failed run into acceptance evidence.

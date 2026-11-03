@@ -1,0 +1,35 @@
+"""Shared wire/state oracles; every scenario still owns a fresh encrypted PM home."""
+from pathlib import Path
+
+import pytest
+
+pytest.importorskip("mcp.client.auth.oauth2", reason="MCP SDK 1.26.0+ required for device-flow coverage")
+
+from evals.mcp_device_flow import DEVICE_GRANT, run_cli
+
+
+def assert_device_login_success(mode):
+    result = run_cli(Path(__file__).resolve().parents[2], mode)
+    assert result['token_persisted'], result
+    assert 'TEST-CODE' in result['output']
+    assert 'Authenticated' in result['output']
+    tokens = [row for row in result['wire'] if row['path'] == '/token']
+    polls = [row for row in tokens if row['data']['grant_type'] != 'refresh_token']
+    assert any(row['data']['grant_type'] == 'refresh_token' for row in tokens), result
+    assert 'Connected' in result['refresh_output'], result
+    assert all(row['data']['grant_type'] == DEVICE_GRANT for row in polls)
+    assert all(row['data']['resource'].endswith('/mcp') for row in polls)
+    if mode == 'success':
+        assert polls[2]['at'] - polls[1]['at'] >= 5
+    elif mode == 'preregistered':
+        assert not any(row['path'] == '/register' for row in result['wire'])
+
+
+def assert_device_login_failure(mode):
+    result = run_cli(Path(__file__).resolve().parents[2], mode)
+    assert 'unrecognized arguments' not in result['output'], result
+    assert result['state_preserved'], result
+    assert result['token_persisted'] == (mode == 'persistence'), result
+    assert 'Authentication failed' in result['output'], result
+    assert 'fixture-device-secret' not in result['output'], result
+    assert 'Authenticated' not in result['output'], result
