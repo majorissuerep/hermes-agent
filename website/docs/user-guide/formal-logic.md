@@ -50,8 +50,9 @@ The settings `agent.formal_logic.enabled`, `agent.formal_logic.lean_path` and
 to three automatic repair attempts and accepts values from one to eight.
 The mode uses the native Hermes conversation loop. A top-level
 Codex app-server runtime is refused because its internal human requests cannot
-be gated by this loop. Managed Codex/Claude children remain available; their
-outputs still require checkpoints in the owning conversation.
+be gated by this loop. Managed children follow the runner's
+[native OS and protected-workspace requirements](encrypted-state.md#local-coding-agents);
+their outputs still require checkpoints in the owning conversation.
 
 Instructions enter the new user-turn context; cached system prompts, tool
 schemas and earlier messages are preserved.
@@ -111,7 +112,9 @@ A failed repair budget or exhausted conversation budget returns an explicit
 unverified outcome. The native result's `formal_logic` receipt records the
 compiler version, checkpoint/source digests, obligation count, assumption review
 and acceptance flag. Conversation checkpoints, feedback and decisions use the
-existing encrypted transcript; generated Lean source is supplied through stdin.
+existing encrypted transcript; generated Lean source is supplied through stdin. Compiler version probes,
+canary checks and proofs share an empty working directory and receive no owner
+credentials or session grants.
 
 ## Research and qualification
 

@@ -66,9 +66,13 @@ def lean_source(checkpoint: Checkpoint) -> tuple[str, set[str]]:
     return "\n".join(lines) + "\n", expected
 
 
+def _environment() -> dict[str, str]:
+    return {key: os.environ[key] for key in ("PATH", "SystemRoot") if key in os.environ}
+
+
 def _invoke(executable: str, source: str, cwd: str) -> subprocess.CompletedProcess:
     # No shell, model-generated tactics, imports, plugins, files, or environment credentials.
-    environment = {k: os.environ[k] for k in ("PATH", "SystemRoot") if k in os.environ}
+    environment = _environment()
     return subprocess.run([executable, "--stdin", "--json", "-j1", "-M1024", "-t0"],
                           input=source, text=True, encoding="utf-8", capture_output=True,
                           cwd=cwd, env=environment, timeout=30, check=False)
@@ -93,11 +97,12 @@ def verify(checkpoint: Checkpoint, lean_path: str = "lean") -> dict:
     executable = command[0]
     source, expected = lean_source(checkpoint)
     try:
-        version = subprocess.run([executable, "--version"], stdin=subprocess.DEVNULL,
-                                 capture_output=True, text=True, encoding="utf-8", timeout=5, check=False)
-        if version.returncode or f"version {LEAN_VERSION}," not in version.stdout or LEAN_COMMIT not in version.stdout:
-            return {"status": "checker_unavailable", "error": "Lean version/commit differs from the pinned toolchain"}
         with tempfile.TemporaryDirectory(prefix="hermes-logic-") as cwd:
+            version = subprocess.run([executable, "--version"], stdin=subprocess.DEVNULL,
+                                     capture_output=True, text=True, encoding="utf-8", timeout=5,
+                                     cwd=cwd, env=_environment(), check=False)
+            if version.returncode or f"version {LEAN_VERSION}," not in version.stdout or LEAN_COMMIT not in version.stdout:
+                return {"status": "checker_unavailable", "error": "Lean version/commit differs from the pinned toolchain"}
             canary = _invoke(executable, "import Init\nexample : False := by decide\n", cwd)
             canary_rows = _messages(canary.stdout)
             if canary.returncode == 0 or not any(r.get("severity") == "error" for r in canary_rows):
