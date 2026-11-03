@@ -25,6 +25,20 @@ from tools.delegate_tool_results import (
 
 logger = logging.getLogger("tools.delegate_tool")  # log-record parity with the origin module
 
+
+def _reserve_child_transcript(child: Any) -> None:
+    """Publish identity in the owning SQLCipher DB without freezing first-turn state."""
+    database = getattr(child, "_session_db", None)
+    if database is None or child._persist_disabled:
+        return
+    try:
+        database.create_session(session_id=child.session_id, source="subagent",
+                                parent_session_id=child._parent_session_id)
+        child._session_db_reserved = True
+    except BaseException:
+        child.close()
+        raise
+
 def _num(value: Any, default: int = 0) -> int:
     """int() for counters that may be mocks/None on test doubles."""
     return int(value) if isinstance(value, (int, float)) else default

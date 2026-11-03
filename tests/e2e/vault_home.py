@@ -119,6 +119,16 @@ def prepare_fixture_runtime(home: Path, source: Path, *, extras: tuple[str, ...]
     _prepare_fixture_pm(home, source, extras)
 
 
+def prepare_fixture_cli(home: Path, source: Path, directory: Path) -> Path:
+    """Publish this fixture's real source command without borrowing a host launcher."""
+    from hermes_cli.runtime_launcher import write_cli
+
+    prepare_fixture_runtime(home, source)
+    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    with _fixture_pm_home(home):
+        return write_cli(directory, source)
+
+
 def prepare_fixture_tui(home: Path, source: Path) -> None:
     """Prepare PM tools and verify the canonical compiler's existing build receipt."""
     _prepare_fixture_pm(home, source, ("all",), tui=True)

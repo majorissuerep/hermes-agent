@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import os
 import subprocess
 import uuid
 
@@ -58,16 +59,17 @@ def run(home: Path, runner: str, arguments: list[str]) -> int:
     _authorize(home)
     from agent.session_context import scoped_current_session_id
     from hermes_security.session_authority import start_session_authority
-    from tools.environments.local import served_profile_child_env, _prepend_hermes_bin_dir
+    from tools.environments.local import served_profile_child_env
     authority = start_session_authority(home, "managed-" + uuid.uuid4().hex, pipe=True)
     if authority is None:
         raise ManagementError("locked", "the selected profile is not unlocked")
     try:
         with scoped_current_session_id(authority.session_id):
             env = served_profile_child_env(target_home=home)
-            env["PATH"] = _prepend_hermes_bin_dir(env.get("PATH", ""))
-            from tools.environments.local import _resolve_hermes_bin_dir
-            env["HERMES_MANAGEMENT_BIN"] = _resolve_hermes_bin_dir() or ""
+            from hermes_cli.runtime_launcher import write_cli
+            directory = write_cli(authority.server.path, Path(__file__).resolve().parents[1])
+            env["PATH"] = str(directory) + os.pathsep + env.get("PATH", "")
+            env["HERMES_MANAGEMENT_BIN"] = str(directory)
             shell_init = str(Path(__file__).resolve().parents[1] / "scripts" / "managed-agent-shell.sh")
             if env.get("BASH_ENV") != shell_init:
                 env["HERMES_PREVIOUS_BASH_ENV"] = env.get("BASH_ENV", "")

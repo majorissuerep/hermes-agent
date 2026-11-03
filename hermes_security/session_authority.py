@@ -2,7 +2,7 @@
 
 The passphrase is never retained. Children redeem an ephemeral local capability
 for the already-unlocked key, and verify it through the normal vault handoff.
-Closing the owning agent revokes the capability. Nothing is written to disk.
+Closing the owning agent revokes the capability. No secret material is written to disk.
 """
 from __future__ import annotations
 

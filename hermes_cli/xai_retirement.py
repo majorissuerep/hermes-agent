@@ -1,10 +1,11 @@
 """Detect xAI models retired on May 15, 2026 and migrate config.yaml references."""
 from __future__ import annotations
 
-import io
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
+
+from hermes_cli.config_transactions import transactional_config
 
 
 MIGRATION_GUIDE_URL = "https://docs.x.ai/developers/migration/may-15-retirement"
@@ -52,7 +53,7 @@ def _looks_like_xai(model_id: Optional[str]) -> bool:
 def find_retired_xai_refs(config: dict[str, Any]) -> list[RetirementIssue]:
     """Walk all model slots in a Hermes config and return retirement issues.
 
-    Slots scanned: ``principal.model``, ``auxiliary.<any>.model`` (introspective, covers future
+    Slots scanned: ``model.default``, legacy ``principal.model``, ``auxiliary.<any>.model`` (introspective, covers future
     aux slots), ``delegation.model``, ``tts.xai.model``, ``plugins.image_gen.xai.model``.
     """
     issues: list[RetirementIssue] = []
@@ -62,10 +63,13 @@ def find_retired_xai_refs(config: dict[str, Any]) -> list[RetirementIssue]:
     def _check(path: str, model: Any) -> None:
         entry = _RETIRED_MODELS.get(_normalize(model)) if _looks_like_xai(model) else None
         if entry is not None:
+            replacement = entry["replacement"]
+            if model.strip().lower().startswith(("x-ai/", "xai/")):
+                replacement = f"{model.strip().split('/', 1)[0]}/{replacement}"
             issues.append(RetirementIssue(
                 config_path=path,
                 current_model=model,
-                replacement=entry["replacement"],
+                replacement=replacement,
                 reasoning_effort=entry.get("reasoning_effort"),
                 note=entry.get("note")))
 
@@ -82,6 +86,9 @@ def find_retired_xai_refs(config: dict[str, Any]) -> list[RetirementIssue]:
         if section is not None:
             _check(".".join(path) + ".model", section.get("model"))
 
+    primary = _section("model")
+    if primary is not None:
+        _check("model.default", primary.get("default"))
     _check_section("principal")
     for slot_name, slot_cfg in (_section("auxiliary") or {}).items():
         if isinstance(slot_cfg, dict):
@@ -124,13 +131,13 @@ def _walk_to_parent(yaml_doc: Any, dotted_path: str) -> tuple[Any, str]:
     return node, leaf
 
 
+@transactional_config(path_arg=True)
 def apply_migration(
     config_path: Path, issues: list[RetirementIssue], backup: bool = True) -> ApplyResult:
     """Rewrite ``config_path`` in place (ruamel round-trip: comments, order, type literals kept).
 
     Unless ``backup=False`` a copy goes to ``backups/config/`` (reason ``pre-migrate-xai``).
     """
-    from ruamel.yaml import YAML  # local import — avoid hard dep at module load
     config_path = Path(config_path)
     if not config_path.exists():
         raise FileNotFoundError(config_path)
@@ -138,14 +145,8 @@ def apply_migration(
     if not issues:
         return unchanged
 
-    from hermes_yaml import ROUNDTRIP_YAML_WIDTH
-    yaml = YAML(typ="rt")
-    yaml.width = ROUNDTRIP_YAML_WIDTH
-    yaml.preserve_quotes = True
-    with config_path.open("r", encoding="utf-8-sig") as fh:
-        doc = yaml.load(fh)
-    if doc is None:
-        return unchanged
+    from hermes_cli.config import atomic_config_write, require_readable_config_before_write
+    doc = require_readable_config_before_write(config_path)
 
     resolved: list[RetirementIssue] = []
     for issue in issues:
@@ -153,6 +154,8 @@ def apply_migration(
             parent, leaf = _walk_to_parent(doc, issue.config_path)
         except KeyError:
             continue  # slot vanished between scan and apply
+        if parent.get(leaf) != issue.current_model:
+            continue  # the operator selected a different model after the preview
         parent[leaf] = issue.replacement
         if issue.reasoning_effort:
             parent["reasoning_effort"] = issue.reasoning_effort
@@ -165,15 +168,5 @@ def apply_migration(
         from hermes_cli.config_backups import backup_config
         backup_path = backup_config(config_path, "pre-migrate-xai")
 
-    from hermes_cli.config import require_readable_config_before_write
-    from utils import atomic_write_text
-    require_readable_config_before_write(config_path)
-    # Dump to a buffer, then atomic-write: ``open(path, "w")`` truncates before the dump runs, so a
-    # crash mid-write would leave config.yaml empty (and with ``--no-backup`` that is the only
-    # copy; the ``doc is None`` early return would then hide the damage). atomic_replace also keeps
-    # a symlinked config.yaml intact. preserve_mode keeps permission bits AND owner (managed NixOS
-    # 0640 / container installs; a root-run migration must not flip ownership).
-    buf = io.StringIO()
-    yaml.dump(doc, buf)
-    atomic_write_text(config_path, buf.getvalue(), preserve_mode=True)
+    atomic_config_write(config_path, doc)
     return ApplyResult(file_path=config_path, backup_path=backup_path, issues_resolved=resolved, config_changed=True)

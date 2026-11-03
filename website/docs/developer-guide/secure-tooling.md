@@ -53,7 +53,8 @@ cross removed product boundaries.
 Ordinary POSIX children redeem grants through private, owner-only Unix sockets.
 The managed coding-agent runner uses private kernel FIFOs because a real Codex
 workspace sandbox rejected even Unix socket connections with networking disabled.
-Only FIFO nodes and an empty lock inode exist on disk. Keys and requests remain
+The transport directory contains FIFO nodes, an empty lock inode and a
+credential-free command bound to the owning installation. Keys and requests remain
 in process memory and pipe buffers; client responses are correlated and bounded.
 The runner adds only this transport directory to Codex's writable paths. Profile
 writes outside the workspace require the caller's explicit `--add-dir` selection.
@@ -79,6 +80,14 @@ keeps its own routing. Codex receives the key through its documented per-run
 `CODEX_API_KEY` interface, rather than relying on `OPENAI_API_KEY` to override
 saved CLI authentication.
 
+Source/module launches also provide a private temporary Hermes command when no
+published installation launcher exists. This prevents a PM environment's console
+script or another ambient checkout from becoming the agent's self-call target.
+The command contains only executable/source locations, bootstraps the real owning
+PM selection, and disappears with its process or managed call. No grant or key is
+stored in the command. Native nested calls and vendor shell calls use this same
+installation-bound launcher implementation.
+
 Outgoing MCP stdio servers receive the owning profile path, with an explicit
 server override still honored. Their environment remains filtered and does not
 inherit vault grants, key FDs or passphrases. MCP diagnostics use the existing
@@ -99,6 +108,12 @@ Keep missing evidence pending. Retain failing receipts and preserve original
 homes and revision identities for rollback; never decrypt a home in place to
 make a test pass.
 
+The xAI model migration uses the existing encrypted, transactional config reader
+and atomic writer. It scans canonical primary and auxiliary model slots, retains
+provider namespaces, comments and unknown fields, and makes an encrypted backup.
+A locked/damaged config fails without changing bytes; an operator selection made
+after preview is retained rather than overwritten.
+
 ## Evidence and review
 
 The November 2 investigation retained these negative results: encrypted xAI
@@ -109,6 +124,14 @@ unregistered nested grants escaped output redaction. A lock/unlock cycle also
 revived old session tokens until permanent lock revocation was added. Behavioral regressions
 reproduced each failure before its corresponding fix. No plaintext fallback,
 global networking opt-in or permission bypass was used to resolve them.
+
+Fresh root-container checks also exposed an ambient-console-script self-call,
+plaintext xAI migration I/O, an unhandled pre-filter Python 3.11 tar API, and a
+sensitive-write approval gap for the real one-component `/root` home. Focused
+regressions retain the failures on the base. Older bootstrap Python uses a
+contained extractor that rejects escaping paths/links, special members, duplicate
+files and forward hard links; it strips archive ownership and privilege bits.
+Current Python continues to use its stdlib data filter.
 
 Live host evidence at `ea337ed0db3b24d3a29ee533d23c0e78e9ade192` used Linux
 6.6.114.1 WSL2 x86_64, Codex CLI 0.166.0 and Claude Code 2.1.316 with their own
@@ -169,6 +192,20 @@ tests execute actual tools from absolute and relative PATH entries. The larger
 upstream merge remains unaccepted.
 The profile-path port from `9d8efb3504d75810080bca994ed8a5a2bbf137c3` is adapted
 to the fork's encrypted MCP diagnostics and existing filtered environment.
+The refreshed November 3 inventory pins upstream
+`6059d35108afd0afc2455dbe5e6bdac999933d1e`. Its child-transcript reservation and
+first-turn initialization fixes (`13e0ce98012998a207932b2d1475162371053600` and
+`6059d35108afd0afc2455dbe5e6bdac999933d1e`) use this fork's native SQLCipher DB.
+Queued-child progress is relayed to the existing TUI event consumer only after
+reservation succeeds. A failed reservation closes the unpublished child and
+leaves the parent usable; first-turn prompt/config persistence still completes.
+
+The availability/prefix fixes from `9b839d815e`, `7aca8caeaf`, `b9e983665c` and
+`c49a94bee1` expire discovery memos with their profile-scoped verdicts. Live
+Tool Search can discover and invoke a recovered MCP tool while the conversation's
+schema bytes stay fixed. Pin restores in the same process preserve that boundary,
+including the synthesized bridge during an outage. Explicit reload retains its
+existing boundary. The ports keep the fork's session and sandbox filters.
 
 One Woodpecker quality flow invokes the shared verification command:
 PM-pinned bootstrap, blocking lint guards, lock consistency, canonical Python
@@ -182,9 +219,15 @@ dirty or replaced checkouts. The clone explicitly disables partial fetching,
 bounds history to 256 commits and fetches the target branch; a missing merge base
 fails closed. The first live run exposed that the clone plugin's default partial
 mode selected a shallow tree-filtered checkout despite depth 0. It was cancelled.
+
 A subsequent full-history fetch hit the service's HTTP 504 deadline. Neither run
 counts as qualification; bounded history retains the reviewed diff without an
 unbounded archive transfer through the ingress.
+The check process runs under a real child reaper, including when a test's parent
+is killed. A separate diagnostic pod with `sleep` as PID 1 retained dead zombies
+and could not qualify those process-disappearance contracts. Its negative results
+are retained. PM's verified download-cache output is forwarded as data to
+synthetic-home provisioning, without sharing profile state or unlock authority.
 The pinned clone image requires `home: /root` so its initial and secondary Git
 commands use the same credential file. Clone options must remain in `settings`:
 Woodpecker 3.13 excludes steps with an `environment` block from trusted-plugin
@@ -201,6 +244,11 @@ tests or enabling retries. Concurrent PM fixture environments reached about
 8 GiB limit. The storage limit leaves room for four workers within the existing
 20 GiB per-container ceiling, while its reservation
 remains 2 GiB. The temporary copy is removed on exit.
+The bounded in-house timeout is three hours so the complete Python, frontend and
+documentation checks fit together. The former two-hour setting projected too
+close to the full suite's measured runtime. Expensive management contracts are
+split by native management versus executor integration so neither file deadline
+hides the remaining cases; their assertions and zero-retry policy are unchanged.
 Native SSH fixtures pin their generated host key in a private trust file through
 the real clients, and only replace a container bearing the same fixture ownership
 label. Repeated runs do not write test keys into the operator's SSH trust store.

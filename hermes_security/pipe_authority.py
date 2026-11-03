@@ -1,8 +1,9 @@
 """Ephemeral kernel-pipe transport for local executors with networking disabled.
 
-The directory contains only FIFO nodes and an empty lock inode. Requests and keys
-exist in process memory and kernel buffers; no credential bytes are written to a
-regular file. The owning authority still authenticates the exact home/session.
+The transport uses FIFO nodes and an empty lock inode. An owning runner can also
+publish its credential-free CLI command here. Requests and keys exist in process
+memory and kernel buffers; no credential bytes are written to a regular file.
+The owning authority still authenticates the exact home/session.
 """
 from __future__ import annotations
 

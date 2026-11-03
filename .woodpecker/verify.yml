@@ -19,13 +19,13 @@ steps:
     image: docker.io/library/python@sha256:a8cf203c684b61fd2676ec5a17159cf68ed38ad471481e1f4ebc4679825250bd
     commands:
       - apt-get update
-      - apt-get install --no-install-recommends -y zsh
+      - apt-get install --no-install-recommends -y zsh tini
       - verification_root="$(mktemp -d)"
       - trap 'rm -rf -- "$verification_root"' EXIT
       - cp -a . "$verification_root/source"
       - cd "$verification_root/source"
       - export CI_WORKSPACE="$verification_root/source"
-      - python3 scripts/ci/verify.py
+      - tini -s -- python3 scripts/ci/verify.py
     environment:
       CI: "true"
       VITEST_MAX_WORKERS: "2"

@@ -187,24 +187,29 @@ class TestIdempotence:
 # ---------------------------------------------------------------------------
 
 class TestUnreadableExistingConfig:
-    def test_apply_refuses_to_overwrite_unreadable_config(self, trap_config: Path):
+    def test_apply_refuses_to_overwrite_unreadable_config(self, trap_config: Path, monkeypatch):
         """apply_migration must not clobber an existing config.yaml it can't
         read. It reads the file first (which raises on an unreadable file), and
         the require_readable_config_before_write guard before the write is a
         belt-and-suspenders backstop for the read-then-write window. Either way
         the original bytes must survive."""
-        import os
+        from hermes_security import io
 
         issues = find_retired_xai_refs(_parse(trap_config))
         assert issues  # sanity: trap_config has retired refs
         original = trap_config.read_bytes()
 
-        os.chmod(trap_config, 0o000)
-        try:
+        real_read = io.read_text
+
+        def unreadable(path, **kwargs):
+            if Path(path) == trap_config:
+                raise PermissionError("config read denied")
+            return real_read(path, **kwargs)
+
+        with monkeypatch.context() as denied:
+            denied.setattr(io, "read_text", unreadable)
             with pytest.raises((PermissionError, RuntimeError, OSError)):
                 apply_migration(trap_config, issues, backup=False)
-        finally:
-            os.chmod(trap_config, 0o644)
 
         assert trap_config.read_bytes() == original
 

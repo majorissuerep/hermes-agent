@@ -61,6 +61,10 @@ def setup(env: dict[str, str], directory: Path) -> None:
             env[key] = value
         for path in files["GITHUB_PATH"].read_text(encoding="utf-8").splitlines():
             env["PATH"] = path + os.pathsep + env["PATH"]
+        for line in files["GITHUB_OUTPUT"].read_text(encoding="utf-8").splitlines():
+            key, value = line.split("=", 1)
+            if key == "uv-cache-path":
+                env["UV_CACHE_DIR"] = value
     for name in files:
         env.pop(name)
 

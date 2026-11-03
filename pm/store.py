@@ -198,7 +198,11 @@ def extract_tar(archive: Path | IO[bytes], dest: Path) -> None:
     real_dest = os.path.realpath(dest)
     opened = tarfile.open(archive) if isinstance(archive, (str, os.PathLike)) else tarfile.open(fileobj=archive)
     with opened as tf:
-        tf.extractall(dest, filter=lambda member, path: _tar_filter(member, real_dest))
+        if hasattr(tarfile, "data_filter"):
+            tf.extractall(dest, filter=lambda member, path: _tar_filter(member, real_dest))
+        else:
+            from pm.legacy_tar import extract
+            extract(tf, Path(real_dest))
 
 
 def extract(archive: Path, dest: Path) -> None:

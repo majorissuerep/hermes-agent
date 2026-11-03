@@ -6,7 +6,7 @@ import shlex
 import pytest
 
 from tests.e2e.core.mcp_plugins._helpers import build_home, payload, provider, run_chat_q
-from tests.e2e.vault_home import connect_state, prepare_fixture_runtime
+from tests.e2e.vault_home import connect_state, prepare_fixture_cli
 from tests.fakes.fake_llm_provider import MODEL_ID, Text, ToolCall
 
 pytestmark = pytest.mark.platforms("posix")
@@ -14,6 +14,7 @@ pytestmark = pytest.mark.platforms("posix")
 
 def test_native_owner_calls_full_managed_chat_child_then_reads_its_own_state(tmp_path):
     from pathlib import Path
+    from agent.redact import redact_sensitive_text
 
     root = Path(__file__).resolve().parents[2]
     query = tmp_path / "inner-query.txt"
@@ -54,9 +55,12 @@ def test_native_owner_calls_full_managed_chat_child_then_reads_its_own_state(tmp
         home.update_config(lambda cfg: cfg["model"].update(api_mode="chat_completions"))
         if runtime := os.environ.get("HERMES_RUNTIME_DIR"):
             home.extra_env["HERMES_RUNTIME_DIR"] = runtime
-        prepare_fixture_runtime(home.hermes_home, root)
+        directory = prepare_fixture_cli(home.hermes_home, root, tmp_path / "fixture-cli")
+        home.extra_env["PATH"] = str(directory) + os.pathsep + os.environ.get("PATH", "")
         result = run_chat_q(home, "OUTER_NATIVE_OWNER: run the child and verify your own state afterward.", timeout=150)
-        diagnostic = (observed, result.stdout, result.stderr)
+        results = [redact_sensitive_text(str(m.get("content", "")), force=True) for r in server.main_requests()
+                   for m in r.get("messages", []) if m.get("role") == "tool"]
+        diagnostic = (observed, result.stdout, result.stderr, results)
         assert result.returncode == 0 and "NESTED_OWNER_VERIFIED" in result.stdout, diagnostic
         assert all(observed.values()), diagnostic
         assert len(server.main_requests()) == 5

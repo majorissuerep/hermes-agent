@@ -1,9 +1,32 @@
 """The shared verification plan fails open when the changed consumers are unknown."""
 import subprocess
+from pathlib import Path
 
 import pytest
 
 from scripts.ci.verify import plan
+
+
+def test_setup_forwards_the_verified_download_cache_as_data(tmp_path, monkeypatch):
+    from scripts.ci import verify
+
+    cache = str(tmp_path / "cache with spaces $(never-execute)")
+    phases = []
+
+    def provision(command, env):
+        phase = command[3]
+        phases.append(phase)
+        if phase == "install":
+            Path(env["GITHUB_OUTPUT"]).write_text("uv-cache-path=" + cache + "\n", encoding="utf-8")
+        if phase == "dependencies":
+            assert env["UV_CACHE_DIR"] == cache
+
+    monkeypatch.setattr(verify, "run", provision)
+    env = {"HERMES_HOME": str(tmp_path / "home"), "PATH": "/usr/bin"}
+    verify.setup(env, tmp_path)
+    assert phases == ["prepare", "install", "dependencies"]
+    assert env["UV_CACHE_DIR"] == cache
+    assert "GITHUB_OUTPUT" not in env
 
 
 @pytest.mark.parametrize("paths", [[".woodpecker/verify.yml"], ["scripts/ci/verify.py"], [], [".github/workflows/ci.yaml"]])
