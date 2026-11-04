@@ -11,15 +11,15 @@ def run(args, home) -> int:
     from hermes_cli.vault_cmd import gate_locked_vault
 
     gate_locked_vault(args, home)
+    if getattr(args, "outgoing_browser_profile", False) or getattr(args, "outgoing_browser_legacy", False):
+        from hermes_cli.browser_outgoing_repair import run as repair_outgoing
+        return repair_outgoing(home, legacy=getattr(args, "outgoing_browser_legacy", False))
     from hermes_security.migrate import repair_clobbered_state
     from hermes_cli.browser_recording_repair import recover_pending
     from hermes_state.runtime_ownership import OwnershipConflict, exclusive_maintenance
 
     try:
         with exclusive_maintenance([home]):
-            if getattr(args, "outgoing_browser_profile", False) or getattr(args, "outgoing_browser_legacy", False):
-                from hermes_cli.browser_outgoing_repair import run as repair_outgoing
-                return repair_outgoing(home, legacy=getattr(args, "outgoing_browser_legacy", False))
             source = getattr(args, "native_browser_state", None)
             if source:
                 from hermes_cli.browser_worker_repair import import_native_home

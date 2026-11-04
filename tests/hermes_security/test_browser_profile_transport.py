@@ -61,3 +61,26 @@ def test_invalid_transfer_is_rejected_before_any_member_is_used(capacity, tmp_pa
     with pytest.raises(ArchiveError):
         transport.unpack(encoded, target)
     assert list(target.iterdir()) == []
+
+
+@pytest.mark.parametrize('direction',['pack','unpack'])
+def test_transport_observes_cancellation_between_chunks_without_changing_original(capacity,tmp_path,direction):
+    source=tmp_path/'original';source.mkdir(mode=0o700)
+    original=b'synthetic-private-recovery-only|'*(128*1024)
+    (source/'Cookies').write_bytes(original)
+    encoded=io.BytesIO()
+    transport.pack(source,encoded)
+    before=encoded.getvalue()
+    target=tmp_path/'new-ram-copy';target.mkdir(mode=0o700)
+    outgoing=io.BytesIO()
+    def admitted():
+        copied=outgoing.tell() if direction=='pack' else ((target/'Cookies').stat().st_size if (target/'Cookies').exists() else 0)
+        if copied>=1024*1024:
+            raise RuntimeError('synthetic cancellation')
+    with pytest.raises(RuntimeError,match='synthetic cancellation'):
+        if direction=='pack':
+            transport.pack(source,outgoing,check_alive=admitted)
+        else:
+            encoded.seek(0)
+            transport.unpack(encoded,target,check_alive=admitted)
+    assert (source/'Cookies').read_bytes()==original and encoded.getvalue()==before

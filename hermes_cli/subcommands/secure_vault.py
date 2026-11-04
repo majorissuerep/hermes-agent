@@ -2,6 +2,13 @@
 
 from __future__ import annotations
 
+OUTGOING_REPAIR_ARGUMENTS = ("secure-vault", "repair", "--outgoing-browser-profile")
+
+
+def owner_repair_request(argv):
+    """The ONLY CLI spelling eligible for the existing owner-side UI adapter."""
+    return {"op": "browser.outgoing.repair"} if tuple(argv) == OUTGOING_REPAIR_ARGUMENTS else None
+
 
 def build_secure_vault_parser(subparsers) -> None:
     """Attach the fork's master-password vault subcommand.
@@ -36,7 +43,7 @@ def build_secure_vault_parser(subparsers) -> None:
     parser.add_argument("--output", help="export: new plaintext .tar outside every encrypted home (never overwritten)")
     parser.add_argument("--migration-backup", help="export: standalone encrypted migration rollback; requires its original credential")
     recovery = parser.add_mutually_exclusive_group()
-    recovery.add_argument("--outgoing-browser-profile", action="store_true",
+    recovery.add_argument(OUTGOING_REPAIR_ARGUMENTS[-1], action="store_true",
                           help="repair: explicitly connect to the selected original backend to settle a quiescent orphan; retains unknown/live state")
     recovery.add_argument("--outgoing-browser-legacy", action="store_true",
                           help="repair: explicitly seal the old selected target browser profile; refuses raw/cipher conflicts")

@@ -439,6 +439,9 @@ def _(rid, params: dict) -> dict:
     argv = params.get("argv", [])
     if not isinstance(argv, list) or not all(isinstance(x, str) for x in argv):
         return _err(rid, 4003, "argv must be list[str]")
+    from hermes_cli.subcommands.secure_vault import owner_repair_request
+    if owner_repair_request(argv) is not None:
+        return _cli_exec_outgoing_repair(rid, params)
     hint = _cli_exec_blocked(argv)
     if hint:
         return _ok(rid, {"blocked": True, "hint": hint, "code": -1, "output": ""})
@@ -451,6 +454,27 @@ def _(rid, params: dict) -> dict:
             "blocked": False, "code": r.returncode, "output": (_joined_output(r) or "(no output)")[:48_000]}),
         timeout_err=(5016, "cli.exec: timeout"), fail_code=5017,
         env=_compat.restore_ambient_pythonpath(hermes_subprocess_env(inherit_credentials=True)))
+
+
+@_profile_scoped_rpc(5017)
+def _cli_exec_outgoing_repair(rid, params):
+    """Explicit sessionless human maintenance through the same fixed management operation.
+
+    CliExecParams owns only a profile, not a chat/session identity. Model terminal
+    self-calls instead reach the existing SourceB native job route.
+    """
+    from hermes_cli.management import execute
+    from hermes_cli.subcommands.secure_vault import owner_repair_request
+    from hermes_constants import get_hermes_home
+    from hermes_security.operation_custody import OperationBudget
+    home = get_hermes_home()
+    budget = OperationBudget(home, timeout=min(max(int(params.get("timeout") or 240), 1), 600))
+    with budget.scope():
+        report = execute(owner_repair_request(params["argv"]), home)
+    lines = [*("✓ Verified encrypted outgoing browser checkpoint: " + path for path in report["saved"]),
+             *("✗ Outgoing browser state retained: " + reason for reason in report["retained"])]
+    return _ok(rid, {"blocked": False, "code": int(bool(report["retained"])),
+                     "output": "\n".join(lines)[:48000] or "No pending outgoing browser references"})
 
 
 @_rpc("command.resolve", 5012)

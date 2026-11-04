@@ -129,6 +129,8 @@ def recover(home: Path) -> dict:
 
     home = home.resolve()
     custody = SessionCustody.capture(home, resource=artifacts._bound_custody(home))
+    from hermes_security.operation_custody import guarded
+    custody = guarded(custody)
     report = {"saved": [], "retained": []}
     for digest, reference in state.references(home, custody):
         try:

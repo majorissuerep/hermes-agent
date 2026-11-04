@@ -28,7 +28,7 @@ def client(lease, argv, *, payload=None, input_source=None, output_sink=None, ma
                 raise OutgoingProfileError("Original backend cannot stream browser profiles; every copy retained")
             code, output, error = run_client(command, env=lease.client_env, timeout=TIMEOUT,
                                              payload=payload, input_source=input_source,
-                                             output_sink=output_sink, max_output=maximum)
+                                             output_sink=output_sink, max_output=maximum, check_alive=lease.custody.check)
         lease.custody.check()
         if code != 0:
             if b"protected browser continuity requires Python 3.11" in error or b"python3: not found" in error:
@@ -108,7 +108,7 @@ def download(lease, ram: Path, *, path=None, stale=False):
         spool.seek(0)
         restored = ram / "profile"
         restored.mkdir(mode=0o700)
-        summary = transport.unpack(spool, restored)
+        summary = transport.unpack(spool, restored, check_alive=lease.custody.check)
     return restored, summary, digest, maximum
 
 
@@ -126,7 +126,7 @@ def prepare_restore(lease, ram: Path):
                             digest=lease.digest, target=restored)
     spool = ram / "restore.tar"
     with spool.open("w+b") as output:
-        if transport.pack(restored, output) != summary:
+        if transport.pack(restored, output, check_alive=lease.custody.check) != summary:
             raise OutgoingProfileError("Authenticated browser restore staging changed; target retained")
         output.flush()
         output.seek(0)

@@ -8,10 +8,10 @@ from hermes_security.errors import VaultError
 
 
 def run(home, *, legacy: bool) -> int:
-    from tools import browser_outgoing_recovery as recovery
+    from hermes_cli.management_browser import perform
 
     try:
-        report = (recovery.migrate_legacy if legacy else recovery.recover)(home)
+        report = perform(home, legacy=legacy)
     except (RuntimeError, VaultError, OSError, ValueError) as exc:
         print(f"✗ Outgoing browser state retained ({type(exc).__name__}: {exc})")
         return 1

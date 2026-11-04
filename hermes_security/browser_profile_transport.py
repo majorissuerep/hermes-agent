@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-import shutil
 import stat
 import tarfile
 
@@ -62,11 +61,13 @@ def _kind(member: tarfile.TarInfo) -> int:
     return 0
 
 
-def _plan(archive: tarfile.TarFile):
+def _plan(archive: tarfile.TarFile, check_alive):
     policy = profiles._policy()
     names, excluded, admitted = set(), set(), []
     size = count = 0
     for member in archive:
+        if check_alive is not None:
+            check_alive()
         count += 1
         if count > policy.max_entries:
             raise tree_archive.ArchiveError("Outgoing profile tar exceeds its entry bound")
@@ -100,32 +101,37 @@ def _plan(archive: tarfile.TarFile):
     return admitted, size, count
 
 
-def unpack(source, target: Path) -> tree_archive.ArchiveSummary:
+def unpack(source, target: Path, *, check_alive=None) -> tree_archive.ArchiveSummary:
     """Validate a complete pinned RAM tar before extracting into a fresh owner-only RAM tree."""
     if not target.is_dir() or target.is_symlink() or list(target.iterdir()):
         raise tree_archive.ArchiveError("Outgoing profile restore requires a fresh empty RAM directory")
     with tarfile.open(fileobj=source, mode="r:") as archive:
-        admitted, size, count = _plan(archive)
+        admitted, size, count = _plan(archive, check_alive)
         require_capacity(target, size + count * _METADATA_ALLOWANCE)
         for relative, member in admitted:
+            if check_alive is not None:
+                check_alive()
             destination = target.joinpath(*relative.split("/"))
             destination.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
             if member.isdir():
                 destination.mkdir(mode=0o700, exist_ok=True)
             else:
-                _extract_file(archive, member, destination)
+                _extract_file(archive, member, destination, check_alive)
     return profiles.tree_digest(target)
 
 
-def _extract_file(archive, member, destination: Path) -> None:
+def _extract_file(archive, member, destination: Path, check_alive) -> None:
     descriptor = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
     with os.fdopen(descriptor, "wb") as output, archive.extractfile(member) as content:
-        shutil.copyfileobj(content, output, length=_CHUNK)
+        while block := content.read(_CHUNK):
+            if check_alive is not None:
+                check_alive()
+            output.write(block)
         if output.tell() != member.size:
             raise tree_archive.ArchiveError("Outgoing profile tar is incomplete")
 
 
-def pack(source: Path, target) -> tree_archive.ArchiveSummary:
+def pack(source: Path, target, *, check_alive=None) -> tree_archive.ArchiveSummary:
     """Stream only shared-policy entries from a pinned quiescent tree into the caller's RAM file."""
     policy = profiles._policy()
     before = profiles.tree_digest(source)
@@ -133,13 +139,25 @@ def pack(source: Path, target) -> tree_archive.ArchiveSummary:
     with tree_archive._source_directory(source, policy.label) as root:
         with tarfile.open(fileobj=target, mode="w|", format=tarfile.PAX_FORMAT) as archive:
             for relative, directory in tree_archive._iter_tree(root, policy):
-                _add(archive, root, relative, directory)
+                if check_alive is not None:
+                    check_alive()
+                _add(archive, root, relative, directory, check_alive)
     if profiles.tree_digest(source) != before:
         raise tree_archive.ArchiveError("Outgoing profile changed during transfer preparation; original state retained")
     return before
 
 
-def _add(archive, root, relative: str, directory: bool) -> None:
+class _CheckedReader:
+    def __init__(self, source, check):
+        self.source, self.check = source, check
+
+    def read(self, size):
+        if self.check is not None:
+            self.check()
+        return self.source.read(size)
+
+
+def _add(archive, root, relative: str, directory: bool, check_alive) -> None:
     member = tarfile.TarInfo(relative)
     member.mode = 0o700 if directory else 0o600
     if directory:
@@ -148,4 +166,4 @@ def _add(archive, root, relative: str, directory: bool) -> None:
     else:
         with tree_archive._source_file(root, "browser profile", relative) as (content, info):
             member.size = info.st_size
-            archive.addfile(member, content)
+            archive.addfile(member, _CheckedReader(content, check_alive))

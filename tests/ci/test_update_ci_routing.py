@@ -779,3 +779,11 @@ def test_run_tests_forwards_the_strict_switch():
 
 def test_pending_outgoing_profile_restore_fence_reaches_upgrade_lane():
     assert cc.classify(["tools/browser_outgoing_state.py"])["e2e_upgrade"]
+
+
+@pytest.mark.parametrize('dependency',[
+    'hermes_security/authority_owned_operations.py','hermes_security/operation_custody.py',
+    'hermes_cli/management_owned_jobs.py','hermes_cli/management_browser.py',
+])
+def test_owned_native_maintenance_dependencies_reach_upgrade_lane(dependency):
+    assert cc.classify([dependency])['e2e_upgrade']

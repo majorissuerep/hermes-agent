@@ -76,10 +76,12 @@ def _register(selector, child, payload: bytes) -> None:
                           channel)
 
 
-def _collect(child, streams: _Streams, timeout: float) -> int | None:
+def _collect(child, streams: _Streams, timeout: float, check_alive=None) -> int | None:
     deadline = time.monotonic() + timeout
     expired = False
     while child.poll() is None:
+        if check_alive is not None:
+            check_alive()
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             child.kill()
@@ -101,7 +103,7 @@ def _collect(child, streams: _Streams, timeout: float) -> int | None:
 
 def run_client(argv, *, env, payload: bytes | None = None, timeout: float,
                max_output: int = 64 * 1024 * 1024, input_source: BinaryIO | None = None,
-               output_sink: BinaryIO | None = None) -> tuple[int | None, bytes, bytes]:
+               output_sink: BinaryIO | None = None, check_alive=None) -> tuple[int | None, bytes, bytes]:
     """Return at this client's exit, using bounded pipes on Linux and macOS.
 
     ``None`` is the timeout result; output overflow raises without returning
@@ -114,6 +116,8 @@ def run_client(argv, *, env, payload: bytes | None = None, timeout: float,
         raise ValueError("Client capture needs positive timeout and output bounds")
     if input_source is not None and payload is not None:
         raise ValueError("Client capture accepts one input source")
+    if check_alive is not None:
+        check_alive()
     data = input_source.read(65536) if input_source is not None else payload or b""
     child = subprocess.Popen(
         argv, stdin=subprocess.PIPE if payload is not None or input_source is not None else subprocess.DEVNULL,
@@ -122,7 +126,7 @@ def run_client(argv, *, env, payload: bytes | None = None, timeout: float,
         with selectors.DefaultSelector() as selector:
             _register(selector, child, data)
             streams = _Streams(selector, max_output, memoryview(data), input_source, output_sink)
-            code = _collect(child, streams, timeout)
+            code = _collect(child, streams, timeout, check_alive)
             return code, bytes(streams.output["stdout"]), bytes(streams.output["stderr"])
     finally:
         if child.poll() is None:

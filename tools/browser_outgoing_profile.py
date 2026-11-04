@@ -213,6 +213,8 @@ def _new_lease(task_id, info, env, runtime, browser_cmd):
         raise state.OutgoingProfileError("This outgoing environment belongs to another original Hermes home")
     env._hermes_browser_backend = browser_terminal.terminal_backend()
     custody = SessionCustody.capture(home, resource=artifacts._bound_custody(home))
+    from hermes_security.operation_custody import guarded
+    custody = guarded(custody)
     lease = Lease(home, browser_terminal.terminal_backend(), env, runtime, custody, copy_context(),
                   {name: os.environ[name] for name in _CLIENT_ENV if name in os.environ},
                   task_id, info, browser_cmd, _cloud._get_browser_engine())

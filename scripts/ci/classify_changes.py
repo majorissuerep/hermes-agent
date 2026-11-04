@@ -211,6 +211,10 @@ _UPDATE_DEPENDENCIES = (
     "hermes_cli/backup_restore.py",
     "hermes_cli/backup_browser_profiles.py",  # current browser ciphertext in full recovery backups
     "tools/browser_outgoing_state.py",  # pre-import fence for unsaved outgoing browser RAM/references
+    "hermes_security/authority_owned_operations.py",  # fixed native owner dispatch during scoped management
+    "hermes_security/operation_custody.py",  # original-source/chunk cancellation in owned maintenance
+    "hermes_cli/management_owned_jobs.py",  # fixed maintenance in the existing native job lifecycle
+    "hermes_cli/management_browser.py",  # shared ownership admission for explicit browser recovery
     "hermes_cli/browser_profile_recovery.py",  # explicit orphan RAM checkpoint before restore
     "hermes_cli/relay_plugin_migrate.py",
     "hermes_cli/macos_tcc_anchor.py",
