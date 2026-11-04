@@ -9,6 +9,7 @@ import time
 from prompt_toolkit.utils import get_cwidth
 
 from agent.i18n import t
+from hermes_security.errors import VaultError
 from hermes_cli import cli_process_dock as procs
 from hermes_cli import cli_session_dock as session_rows
 
@@ -236,17 +237,29 @@ class SubagentMonitor:
         return '\n'.join(' ' + line for line in lines)
 
 
-def read_tail(path):
+def read_tail(path, *, store=None):
     if not path:
         return t('cli.subagents.transcript_unavailable')
     try:
-        with open(path, 'rb') as stream:
-            stream.seek(0, 2)
-            stream.seek(max(0, stream.tell() - 32768))
-            text = stream.read(32768).decode('utf-8', errors='replace')
+        from hermes_security.delegation_state import read_transcript
+
+        text = read_transcript(path, store=store)[-32768:].decode('utf-8', errors='replace')
         return ''.join(c for c in text if c.isprintable() or c in '\n\t')
-    except OSError:
+    except (OSError, ValueError, VaultError):
         return t('cli.subagents.transcript_unavailable')
+
+
+def _owned_transcript_store(row, parent):
+    from tools.delegate_tool_registry import _active_subagents, _active_subagents_lock, _owns_subagent_record
+
+    with _active_subagents_lock:
+        record = dict(_active_subagents.get(row.get('subagent_id'), {}))
+    try:
+        if record and _owns_subagent_record(record, parent):
+            return getattr(record.get('agent'), '_live_transcript_store', None)
+    except VaultError:
+        return None
+    return None
 
 
 def modal_prompt_active(cli):
@@ -301,7 +314,8 @@ def build_monitor_application(monitor, **kwargs):
         elif row.get('kind') == 'process':
             text = procs.process_tail(row['id'])
         else:
-            text = read_tail(row.get('live_transcript'))
+            store = _owned_transcript_store(row, getattr(monitor.cli, 'agent', None))
+            text = read_tail(row.get('live_transcript'), store=store) if store is not None else t('cli.subagents.transcript_unavailable')
         if text != tail.text:
             following = tail.buffer.cursor_position == len(tail.text)
             position = tail.buffer.cursor_position

@@ -165,26 +165,33 @@ _SUMMARY_HEADROOM_FRACTION = 0.5
 # already nearly full — below this we'd be truncating to noise.
 _MIN_SUMMARY_CHARS = 2000
 
-def _spill_summary_to_file(task_index: int, summary: str) -> Optional[str]:
-    """Write the full summary under ``cache/delegation`` (mounted read-only into remote backends via
-    ``credential_files._CACHE_DIRS``, so the parent's terminal/``read_file`` can page it on any backend). Absolute
-    path, or None on failure — the trimmed head+tail is still returned regardless."""
+_CAPTURE_CURRENT_STORE = object()
+
+
+def _spill_summary_to_file(task_index: int, summary: str, *, store=_CAPTURE_CURRENT_STORE) -> Optional[str]:
+    """Seal the full summary in the owning profile for authenticated ``read_file`` access.
+
+    Return its absolute host path, or None on failure; the bounded summary still survives.
+    """
+    if store is None:
+        return None  # An old batch without original custody must never acquire a later unlock.
     try:
         from hermes_constants import get_hermes_dir
+        from hermes_security.delegation_state import DelegationStore
         import datetime as _dt
-        cache_dir = get_hermes_dir("cache/delegation", "delegation_cache")
+        store = DelegationStore() if store is _CAPTURE_CURRENT_STORE else store
+        cache_dir = get_hermes_dir("cache/delegation", "delegation_cache", home=store.configured_home)
         cache_dir.mkdir(parents=True, exist_ok=True)
         path = cache_dir / f"subagent-summary-{task_index}-{_dt.datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.txt"
-        from tools.spill_safety import write_text_exclusive
-        # Exclusive symlink-refusing create; not private because cache/delegation is bind-mounted read-only into
-        # remote backends whose container UID must be able to read it.
-        write_text_exclusive(path, summary, private=False)
+        from hermes_security import artifacts
+
+        artifacts.write_bytes(path, summary.encode("utf-8"), home=store.configured_home, custody=store.custody)
         return str(path)
     except Exception as exc:
         logger.debug("Failed to spill subagent summary to file: %s", exc)
         return None
 
-def _trim_summary_with_footer(summary: str, cap: int, task_index: int) -> tuple[str, Optional[str]]:
+def _trim_summary_with_footer(summary: str, cap: int, task_index: int, *, store=_CAPTURE_CURRENT_STORE) -> tuple[str, Optional[str]]:
     """``(model_text, spill_path)`` for one over-budget summary: a ~75% head / ~25% tail window snapped to line
     boundaries (so the opening AND the closing outcomes/files-changed/issues both survive), the full text spilled
     to disk, and a footer giving the exact ``read_file offset=`` for the omitted middle."""
@@ -199,11 +206,7 @@ def _trim_summary_with_footer(summary: str, cap: int, task_index: int) -> tuple[
     if 0 <= nl < tail_budget * 0.5:
         tail = tail[nl + 1:]
 
-    spill_path = _spill_summary_to_file(task_index, summary)
-    if spill_path:
-        # Agent-visible path: the parent's read_file runs inside the active backend (#81984, #77015).
-        from tools.credential_files import to_agent_visible_cache_path
-        spill_path = to_agent_visible_cache_path(spill_path)
+    spill_path = _spill_summary_to_file(task_index, summary, store=store)
     footer_lines = [
         "", "─" * 8 + " [SUMMARY TRUNCATED] " + "─" * 8,
         f"Showing {len(head):,} chars (head) + {len(tail):,} chars (tail) "
@@ -263,7 +266,7 @@ def _parent_summary_char_budget(parent_agent, n_summaries: int) -> Optional[int]
         logger.debug("Summary budget computation failed", exc_info=True)
         return None
 
-def _apply_summary_budget(results: list[dict[str, Any]], parent_agent) -> None:
+def _apply_summary_budget(results: list[dict[str, Any]], parent_agent, *, store=_CAPTURE_CURRENT_STORE) -> None:
     """Trim subagent summaries in-place so a batch can't overflow the parent's context window (full text spilled to
     disk). Per-summary cap = MIN(dynamic headroom budget, static ``delegation.max_summary_chars`` ceiling; 0 =
     disabled); over-cap summaries become head+tail plus a pointer to the spill file."""
@@ -283,7 +286,7 @@ def _apply_summary_budget(results: list[dict[str, Any]], parent_agent) -> None:
         summary = entry["summary"]
         if len(summary) <= cap:
             continue
-        model_text, spill_path = _trim_summary_with_footer(summary, cap, entry.get("task_index", -1))
+        model_text, spill_path = _trim_summary_with_footer(summary, cap, entry.get("task_index", -1), store=store)
         entry["summary"] = model_text
         entry["summary_truncated"] = True
         if spill_path:
@@ -391,11 +394,11 @@ def _rollup_children_cost(parent_agent, children_cost_total: float) -> None:
 
 def _finalize_child_results(
     results: list[dict[str, Any]], task_list: list[dict[str, Any]], children: list[tuple[int, dict[str, Any], Any]],
-    parent_agent,
+    parent_agent, *, store=None,
 ) -> None:
     """Apply host-owned summary, memory, hook, and cost contracts once."""
     with _parent_finalization_lock(parent_agent):
-        _apply_summary_budget(results, parent_agent)
+        _apply_summary_budget(results, parent_agent, store=store)
         child_by_index = {index: child for index, _task, child in children}
         _notify_memory_manager(results, task_list, child_by_index, parent_agent)
         _rollup_children_cost(parent_agent, _fire_subagent_stop_hooks(results, child_by_index, parent_agent))
@@ -406,5 +409,6 @@ def _run_child_lifecycle(task_index: int, goal: str, child=None, parent_agent=No
     result = _run_single_child(task_index, goal, child, parent_agent)
     result.setdefault("task_index", task_index)
     task = {"goal": goal}
-    _finalize_child_results([result], [{"goal": ""} for _ in range(task_index)] + [task], [(task_index, task, child)], parent_agent)
+    _finalize_child_results([result], [{"goal": ""} for _ in range(task_index)] + [task], [(task_index, task, child)],
+                            parent_agent, store=getattr(child, "_live_transcript_store", None))
     return result

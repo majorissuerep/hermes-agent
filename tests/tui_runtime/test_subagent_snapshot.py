@@ -11,6 +11,12 @@ import pytest
 def runtime(monkeypatch):
     from tui_runtime import server
     from tools import async_delegation, delegate_tool_registry
+    from hermes_constants import get_hermes_home
+    from hermes_security import vault
+
+    monkeypatch.setattr(vault, "_SCRYPT_N", 1024)
+    vault.init_vault(get_hermes_home(), "synthetic subagent snapshot password")
+    vault.unlock(get_hermes_home(), "synthetic subagent snapshot password")
 
     transport = SimpleNamespace(write=lambda frame: True)
     owner = {"session_key": "parent", "history": [], "transport": transport}
@@ -34,6 +40,7 @@ def runtime(monkeypatch):
     for reg, snapshot in saved:
         reg.clear()
         reg.update(snapshot)
+    vault.clear_vault_cache()
 
 
 def test_snapshot_projects_only_this_sessions_runtime_records(runtime):
@@ -102,6 +109,7 @@ def test_live_tail_and_steer_share_exact_owner_and_end_with_child(runtime):
     child._pending_steer_lock = threading.Lock()
     writer = LiveTranscriptWriter("deleg-rpc", 0, "owned task")
     child._live_transcript_path = str(writer.path)
+    child._live_transcript_store = writer.store
     _register_child(child, None, "owned task", owner_session_id="ui-owner",
                          owner_transport=transport, owner_session_record=owner)
     try:
@@ -166,13 +174,17 @@ def test_replaced_transport_revokes_early_and_late_captured_children(runtime, tm
 
     server, owner, old, call = runtime
     new = SimpleNamespace(write=lambda frame: True)
-    transcript = tmp_path / "child.txt"
-    transcript.write_text("live child output")
+    from tools.delegation_live_log import LiveTranscriptWriter
+
+    writer = LiveTranscriptWriter("deleg_transport", 0, "owned task")
+    writer.event("assistant", "live child output")
+    transcript = writer.path
     steered, stopped = [], []
 
     def register(sid, captured):
         child = SimpleNamespace(_subagent_id=sid, _delegate_depth=1, model="test",
                                 _live_transcript_path=str(transcript),
+                                _live_transcript_store=writer.store,
                                 steer=lambda text: steered.append(text) or True,
                                 hard_interrupt=lambda text: stopped.append(text))
         _register_child(child, None, "owned", owner_session_id="ui-owner",
@@ -188,7 +200,7 @@ def test_replaced_transport_revokes_early_and_late_captured_children(runtime, tm
     assert steered == [] and stopped == []
     register("current", new)
     assert [row["subagent_id"] for row in call("subagent.list", via=new)["result"]["subagents"]] == ["current"]
-    assert call("subagent.tail", via=new, subagent_id="current")["result"]["text"] == "live child output"
+    assert "live child output" in call("subagent.tail", via=new, subagent_id="current")["result"]["text"]
     assert call("subagent.steer", via=new, subagent_id="current", text="current")["result"]["status"] == "queued"
     assert call("subagent.interrupt", via=new, subagent_id="current")["result"]["found"]
     assert steered == ["current"] and len(stopped) == 1

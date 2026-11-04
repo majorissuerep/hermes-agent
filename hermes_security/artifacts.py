@@ -132,15 +132,31 @@ def _wire_bound():
     return _MAX_BYTES + max(128, batches * frames._FRAME_OVERHEAD)
 
 
-def write_bytes(path, data: bytes, *, home=None, overwrite=False, purpose="state") -> Path:
+def _bound_custody(home, custody=None):
+    metadata = home / ".hermes-vault"
+    if not metadata.is_file() or metadata.is_symlink():
+        raise VaultLockedError("Private output requires this exact initialized profile")
+    custody = _Custody(home) if custody is None else custody
+    if custody.vault.home != home:
+        raise PermissionError("Private artifact custody belongs to a different profile")
+    custody.check()
+    return custody
+
+
+def write_bytes(path, data: bytes, *, home=None, overwrite=False, purpose="state", custody=None) -> Path:
     """Atomically publish ciphertext; binary browser artifacts use purpose ``state``."""
     if purpose != "state" or len(data) > _MAX_BYTES:
         raise ValueError("Unsupported private artifact purpose or size")
     selected, relative = _location(path, home)
-    custody = _Custody(selected)
+    custody = _bound_custody(selected, custody)
     encoded = (frames.encode_frames([data], vault=custody, purpose=terminal_frame_purpose(relative)) if _stream(relative)
                else custody.vault.encrypt(data, purpose="state", relpath=relative.as_posix(),
                                           authority=custody.authority))
+    return _publish(selected, relative, encoded, custody, overwrite=overwrite)
+
+
+def _publish(selected, relative, encoded, custody, *, overwrite=False):
+    """Publish already sealed bytes beneath a validated owning home and relative path."""
     with _parent(selected, relative, create=True) as parent:
         name = relative.name
         temporary = ".artifact-" + secrets.token_hex(16)
@@ -171,13 +187,7 @@ def write_bytes(path, data: bytes, *, home=None, overwrite=False, purpose="state
     return selected / relative
 
 
-def read_bytes(path, *, home=None, purpose="state") -> bytes:
-    """Authenticate an exact own-profile artifact, refusing incomplete or oversized files."""
-    if purpose != "state":
-        raise ValueError("Unsupported private artifact purpose")
-    selected, relative = _location(path, home)
-    custody = _Custody(selected)
-    wire_bound = _wire_bound()
+def _read_owned_bytes(selected, relative, wire_bound):
     with _parent(selected, relative) as parent:
         fd = os.open(relative.name, os.O_RDONLY | _NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
         with os.fdopen(fd, "rb") as source:
@@ -189,6 +199,17 @@ def read_bytes(path, *, home=None, purpose="state") -> bytes:
             raw = source.read(wire_bound + 1)
     if len(raw) > wire_bound:
         raise ValueError("Private artifact exceeds the supported read bound")
+    return raw
+
+
+def read_bytes(path, *, home=None, purpose="state", custody=None) -> bytes:
+    """Authenticate an exact own-profile artifact, refusing incomplete or oversized files."""
+    if purpose != "state":
+        raise ValueError("Unsupported private artifact purpose")
+    selected, relative = _location(path, home)
+    custody = _bound_custody(selected, custody)
+    wire_bound = _wire_bound()
+    raw = _read_owned_bytes(selected, relative, wire_bound)
     custody.check()
     if not _stream(relative):
         decoded = custody.vault.decrypt(raw, purpose="state", relpath=relative.as_posix(), authority=custody.authority)
@@ -211,7 +232,7 @@ class _TextSink:
         self.home, self.relative = _location(path, home)
         if not _stream(self.relative):
             raise ValueError("A private text sink requires the terminal-output root")
-        self.custody = _Custody(self.home)
+        self.custody = _bound_custody(self.home)
         self.pending = bytearray()
         self.total_bytes = 0
         with _parent(self.home, self.relative, create=True) as parent:

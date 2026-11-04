@@ -5,6 +5,7 @@ existing subagent.steer RPC rather than introducing a second steering runtime.
 """
 
 from .method_ctx import HandlerRegistry, bind_module
+from hermes_security.errors import VaultError
 
 _registry = HandlerRegistry()
 method = _registry.method
@@ -115,14 +116,14 @@ def _(rid, params):
     record = next((r for r in _owned_subagent_records(session_id, transport, owner)
                    if r.get("subagent_id") == subagent_id), None)
     path = getattr(record.get("agent"), "_live_transcript_path", None) if record else None
-    if not path:
+    store = getattr(record.get("agent"), "_live_transcript_store", None) if record else None
+    if not path or store is None:
         return _ok(rid, result)
     try:
-        with open(path, "rb") as stream:
-            size = stream.seek(0, 2)
-            stream.seek(max(0, size - _SUBAGENT_TAIL_BYTES))
-            text = stream.read(_SUBAGENT_TAIL_BYTES).decode("utf-8", errors="ignore")
-    except OSError:
+        raw = store.read_log(path)
+        size = len(raw)
+        text = raw[-_SUBAGENT_TAIL_BYTES:].decode("utf-8", errors="ignore")
+    except (OSError, ValueError, VaultError):
         # Creation/cleanup races are normal while a child starts or ends.
         return _ok(rid, result)
     return _ok(rid, {**result, "available": True, "text": text, "truncated": size > _SUBAGENT_TAIL_BYTES})

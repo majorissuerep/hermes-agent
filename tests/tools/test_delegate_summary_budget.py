@@ -44,7 +44,14 @@ def test_small_summaries_pass_through_untouched():
 def test_batch_overflow_trimmed_and_spilled_losslessly(monkeypatch):
     # Isolate spill directory to a temp HERMES_HOME.
     with tempfile.TemporaryDirectory() as td:
-        monkeypatch.setenv("HERMES_HOME", os.path.join(td, ".hermes"))
+        from pathlib import Path
+        from hermes_security import artifacts, vault
+
+        home = Path(td) / ".hermes"
+        monkeypatch.setenv("HERMES_HOME", str(home))
+        monkeypatch.setattr(vault, "_SCRYPT_N", 1024)
+        vault.init_vault(home, "synthetic summary budget password")
+        vault.unlock(home, "synthetic summary budget password")
         # Distinct head + tail markers so we can prove the tail survives.
         big = "HEAD_MARKER\n" + ("X" * 50_000) + "\nTAIL_MARKER"
         # Parent nearly full (120k/131k) → tiny headroom → aggressive trim.
@@ -62,8 +69,7 @@ def test_batch_overflow_trimmed_and_spilled_losslessly(monkeypatch):
             path = r.get("summary_full_path")
             assert path and os.path.exists(path)
             # The spill file holds the FULL original text — nothing is lost.
-            with open(path, encoding="utf-8") as fh:
-                assert fh.read() == big
+            assert artifacts.read_text(path, home=home) == big
             # The footer points the parent at the full version with an offset.
             assert "read_file" in r["summary"]
             assert "offset=" in r["summary"]

@@ -194,16 +194,19 @@ def _execute_and_aggregate(batch: _Batch, *, honor_parent_interrupt: bool = True
     else:
         _run_children_parallel(batch, results, honor_parent_interrupt=honor_parent_interrupt)
 
-    _finalize_child_results(results, batch.task_list, batch.children, batch.parent_agent)
+    live_store = next((writer.store for writer in batch.live_writers if writer is not None), None)
+    _finalize_child_results(results, batch.task_list, batch.children, batch.parent_agent, store=live_store)
     total_duration = round(time.monotonic() - batch.overall_start, 2)
     for entry in results:
         _idx = entry.get("task_index", -1)
         if isinstance(_idx, int) and 0 <= _idx < len(batch.live_writers) and batch.live_writers[_idx] is not None:
             with _quiet("Live transcript finalize failed", exc_info=True):
                 batch.live_writers[_idx].finalize(entry)
+            if batch.live_writers[_idx].error:
+                entry["live_transcript_error"] = batch.live_writers[_idx].error
             if _idx < len(batch.live_paths):
                 entry["live_transcript"] = batch.live_paths[_idx]
-    update_manifest_statuses(batch.live_deleg_id, results, home=batch.live_home)
+    update_manifest_statuses(batch.live_deleg_id, results, home=batch.live_home, store=live_store)
     finish_delegation_unit(batch.task_list, results, background=not honor_parent_interrupt)
 
     combined: dict[str, Any] = {"results": results, "total_duration_seconds": total_duration}
@@ -336,8 +339,8 @@ _BACKGROUND_NOTES = {
         "one early."
     ),
     "live_transcripts_hint": (
-        "Each subagent streams a human-readable transcript of its operations to the file listed above (append-only, "
-        "one per task). Read or `tail -f` these paths at any time to watch a child work while it runs."
+        "Each subagent retains an encrypted live transcript at the file listed above, one per task. "
+        "Use read_file on this exact owning-profile path, or /agents, for its authenticated live text."
     ),
 }
 

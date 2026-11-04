@@ -252,7 +252,6 @@ _CACHE_DIRS: list[tuple[str, str]] = [
     ("cache/videos", "video_cache"),
     ("cache/screenshots", "browser_screenshots"),
     ("cache/web", "web_cache"),
-    ("cache/delegation", "delegation_cache"),
     ("cache/spillover", "cache/spillover"),  # oversized tool results; host side is canonical
     # Unswept generated image/video deliverables (#126445) need their own mount/sync
     # entry or remote backends never see them. No legacy alias exists.

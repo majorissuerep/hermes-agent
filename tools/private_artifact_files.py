@@ -11,7 +11,7 @@ import time
 from agent.file_safety import get_model_read_block_error, get_nt_namespace_error
 from agent.redact import redact_sensitive_text
 from hermes_security import artifacts
-from hermes_security.artifact_paths import is_image_relative_path
+from hermes_security.artifact_paths import is_artifact_directory, is_artifact_relative_path, is_image_relative_path
 from tools.file_operations import IMAGE_EXTENSIONS, ShellFileOperations
 from tools.file_operations_common import ReadResult, SearchMatch, SearchResult
 
@@ -27,8 +27,18 @@ def _admit(path):
     block = get_model_read_block_error(str(candidate))
     if block:
         raise PermissionError(block)
+    selected, candidate = artifacts._binding(candidate)
     # Check scope even when a caller requests only filenames or a binary redirect.
-    artifacts._location(candidate / ".probe" if candidate.is_dir() else candidate)
+    if candidate.is_dir():
+        try:
+            relative = candidate.relative_to(selected)
+        except ValueError as exc:
+            raise PermissionError("Private artifact belongs to a different profile") from exc
+        if not is_artifact_directory(relative):
+            raise PermissionError("Not an admitted private output directory")
+        artifacts._bound_custody(selected)
+    else:
+        artifacts._location(candidate)
     return candidate
 
 
@@ -76,13 +86,15 @@ def _candidates(root, file_glob, order):
     if root.is_symlink():
         raise PermissionError("Private artifact symlinks are refused")
     paths = [root] if root.is_file() else root.rglob("*")
+    selected, _ = artifacts._binding(root)
     result = []
     for scanned, item in enumerate(paths):
         if scanned >= 10_000:
             raise ValueError("Private artifact search walk exceeded its bound; narrow the path")
         if item.is_symlink():
             raise PermissionError("Private artifact symlinks are refused")
-        if item.is_file() and (not file_glob or fnmatch.fnmatch(item.name, file_glob)
+        if item.is_file() and is_artifact_relative_path(item.relative_to(selected)) and (
+                              not file_glob or fnmatch.fnmatch(item.name, file_glob)
                                or fnmatch.fnmatch(str(item.relative_to(root)), file_glob)):
             result.append(item)
             if len(result) > _SCAN_FILES:

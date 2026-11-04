@@ -29,6 +29,28 @@ from tools.delegation_live_log import (
 )
 
 
+def _unlock_home(home):
+    from hermes_security import vault
+
+    vault.init_vault(home, "synthetic live transcript password")
+    vault.unlock(home, "synthetic live transcript password")
+
+
+@pytest.fixture(autouse=True)
+def encrypted_live_home(monkeypatch):
+    from hermes_constants import get_hermes_home
+    from hermes_security import vault
+
+    monkeypatch.setattr(vault, "_SCRYPT_N", 1024)
+    _unlock_home(get_hermes_home())
+    yield
+    vault.clear_vault_cache()
+
+
+def _manifest_text(path, home=None):
+    return json.dumps(dll.read_manifest(path, home=home))
+
+
 # ---------------------------------------------------------------------------
 # Writer unit tests
 # ---------------------------------------------------------------------------
@@ -37,7 +59,7 @@ from tools.delegation_live_log import (
 def test_writer_precreates_file_with_header():
     w = LiveTranscriptWriter("deleg_test1", 0, "do the thing", context="some ctx")
     assert w.path is not None and w.path.exists()
-    text = w.path.read_text(encoding="utf-8")
+    text = w.store.read_log(w.path).decode("utf-8")
     assert "Hermes subagent live transcript" in text
     assert "delegation: deleg_test1" in text
     assert "goal: do the thing" in text
@@ -55,14 +77,14 @@ def test_stream_deltas_buffer_and_flush_as_one_line():
     w.add_stream_delta("world, ")
     w.add_stream_delta("streaming.")
     # Not yet flushed
-    assert "Hello world" not in w.path.read_text(encoding="utf-8")
+    assert "Hello world" not in w.store.read_log(w.path).decode("utf-8")
     w.flush_stream()
-    text = w.path.read_text(encoding="utf-8")
+    text = w.store.read_log(w.path).decode("utf-8")
     assert "Hello world, streaming." in text
     # tool_start also flushes pending stream text first
     w.add_stream_delta("more text")
     w.tool_start("read_file", "foo.py")
-    text = w.path.read_text(encoding="utf-8")
+    text = w.store.read_log(w.path).decode("utf-8")
     assert text.index("more text") < text.index("-> read_file")
 
 
@@ -83,7 +105,7 @@ def test_observe_maps_child_callback_events_to_lines():
     w.observe("subagent.text", preview="streamed in parts")
     w.observe("subagent.complete", preview="short", status="completed",
               duration_seconds=3.2, summary="did the thing")
-    text = w.path.read_text(encoding="utf-8")
+    text = w.store.read_log(w.path).decode("utf-8")
     assert "kick off the goal" in text
     assert "first line of thinking" in text
     assert "deep reasoning text" in text
@@ -98,7 +120,7 @@ def test_finalize_records_budget_exhaustion_and_errors():
     w = LiveTranscriptWriter("deleg_final", 0, "g")
     w.finalize({"status": "failed", "exit_reason": "max_iterations",
                 "error": "Subagent did not produce a response."})
-    text = w.path.read_text(encoding="utf-8")
+    text = w.store.read_log(w.path).decode("utf-8")
     assert "end status=failed" in text
     assert "exit_reason=max_iterations" in text
     assert "iteration budget exhausted" in text
@@ -119,7 +141,7 @@ def test_wrap_progress_callback_tees_and_preserves_inner():
     cb("tool.started", "terminal", "echo hi", None)
     cb("_thinking", "pondering")
     assert seen == [("tool.started", "terminal"), ("_thinking", "pondering")]
-    text = w.path.read_text(encoding="utf-8")
+    text = w.store.read_log(w.path).decode("utf-8")
     assert "-> terminal(echo hi)" in text and "pondering" in text
     # _flush contract preserved
     cb._flush()
@@ -197,7 +219,7 @@ def test_tool_args_are_redacted_before_hitting_disk():
         f'curl -H "Authorization: Bearer {_BEARER}" https://api.internal',
         None,
     )
-    body = w.path.read_text(encoding="utf-8")
+    body = w.store.read_log(w.path).decode("utf-8")
     assert _BEARER not in body
     assert "terminal" in body, "redaction must not gut the operational detail"
 
@@ -212,7 +234,7 @@ def test_tool_results_are_redacted_before_hitting_disk():
         result=f"OPENAI_API_KEY={_ENV_KEY}\nAWS_SECRET_ACCESS_KEY={_AWS}",
         duration=0.4,
     )
-    body = w.path.read_text(encoding="utf-8")
+    body = w.store.read_log(w.path).decode("utf-8")
     assert _ENV_KEY not in body
     assert _AWS not in body
     assert "OPENAI_API_KEY" in body, "key NAMES stay — only the values are masked"
@@ -222,13 +244,13 @@ def test_streamed_assistant_text_is_redacted():
     w = LiveTranscriptWriter("deleg_redact_stream", 0, "g")
     w.observe("subagent.text", None, f"the key is {_ENV_KEY}")
     w.flush_stream()
-    assert _ENV_KEY not in w.path.read_text(encoding="utf-8")
+    assert _ENV_KEY not in w.store.read_log(w.path).decode("utf-8")
 
 
 def test_goal_header_is_redacted():
     """The header bypasses event(); a pasted key in the goal must not survive."""
     w = LiveTranscriptWriter("deleg_redact_goal", 0, f"deploy using {_BEARER}")
-    body = w.path.read_text(encoding="utf-8")
+    body = w.store.read_log(w.path).decode("utf-8")
     assert _BEARER not in body
     assert "deploy using" in body
 
@@ -245,9 +267,7 @@ def test_manifest_goal_is_redacted():
     )
 
     manifest = json.loads(
-        (live_transcript_root() / delegation_id / "manifest.json").read_text(
-            encoding="utf-8"
-        )
+        _manifest_text(live_transcript_root() / delegation_id / "manifest.json")
     )
     goal = manifest["tasks"][0]["goal"]
 
@@ -269,6 +289,7 @@ def test_explicit_home_pins_transcripts_across_raw_thread_boundary(tmp_path, mon
     session_home = tmp_path / "session-profile"
     process_home.mkdir()
     session_home.mkdir()
+    _unlock_home(session_home)
 
     monkeypatch.setenv("HERMES_HOME", str(process_home))
     token = set_hermes_home_override(session_home)
@@ -291,7 +312,7 @@ def test_explicit_home_pins_transcripts_across_raw_thread_boundary(tmp_path, mon
     for p in out["paths"]:
         assert Path(p).is_relative_to(expected_root), p
     deleg_dir = Path(out["paths"][0]).parent
-    manifest = json.loads((deleg_dir / "manifest.json").read_text(encoding="utf-8"))
+    manifest = json.loads(_manifest_text(deleg_dir / "manifest.json", home=session_home))
     assert manifest["task_count"] == 1
 
 
@@ -304,6 +325,7 @@ def test_manifest_update_uses_same_explicit_home(tmp_path, monkeypatch):
 
     home = tmp_path / "own-profile"
     home.mkdir()
+    _unlock_home(home)
 
     deleg_id, _writers, paths = create_live_transcripts(
         [{"goal": "pin me"}], home=home,
@@ -314,7 +336,7 @@ def test_manifest_update_uses_same_explicit_home(tmp_path, monkeypatch):
         home=home,
     )
     manifest = json.loads(
-        (Path(paths[0]).parent / "manifest.json").read_text(encoding="utf-8")
+        _manifest_text(Path(paths[0]).parent / "manifest.json", home=home)
     )
     assert manifest["tasks"][0]["status"] == "completed"
 
@@ -384,6 +406,7 @@ def test_prune_sweeps_the_pinned_root_not_ambient(tmp_path, monkeypatch):
     pinned_home = tmp_path / "pinned"
     ambient_home.mkdir()
     pinned_home.mkdir()
+    _unlock_home(pinned_home)
     monkeypatch.setenv("HERMES_HOME", str(ambient_home))
 
     stale_age = time.time() - (dll.LIVE_RETENTION_DAYS + 1) * 86400
@@ -411,9 +434,7 @@ def test_manifest_includes_model_and_provider():
     )
 
     manifest = json.loads(
-        (live_transcript_root() / delegation_id / "manifest.json").read_text(
-            encoding="utf-8"
-        )
+        _manifest_text(live_transcript_root() / delegation_id / "manifest.json")
     )
     assert manifest["model"] == "openrouter/gpt-4o"
     assert manifest["provider"] == "openrouter"
@@ -435,7 +456,8 @@ def test_no_file_in_the_dispatch_directory_carries_the_raw_key():
     assert "manifest.json" in written
     assert any(name.endswith(".log") for name in written)
     for path in directory.iterdir():
-        assert _BEARER not in path.read_text(encoding="utf-8"), (
+        text = _manifest_text(path) if path.name == "manifest.json" else dll.read_transcript(path).decode("utf-8")
+        assert _BEARER not in text, (
             f"{path.name} leaked the credential"
         )
 
@@ -443,7 +465,7 @@ def test_no_file_in_the_dispatch_directory_carries_the_raw_key():
 def test_thinking_text_is_redacted():
     w = LiveTranscriptWriter("deleg_redact_think", 0, "g")
     w.observe("_thinking", f"I should use {_ENV_KEY} here")
-    assert _ENV_KEY not in w.path.read_text(encoding="utf-8")
+    assert _ENV_KEY not in w.store.read_log(w.path).decode("utf-8")
 
 
 def test_redaction_covers_every_helper_via_the_event_chokepoint():
@@ -455,7 +477,7 @@ def test_redaction_covers_every_helper_via_the_event_chokepoint():
     w.tool_result("terminal", result=f"d {_ENV_KEY}")
     w.marker(f"e {_ENV_KEY}")
     w.finalize({"status": "error", "error": f"f {_ENV_KEY}"})
-    body = w.path.read_text(encoding="utf-8")
+    body = w.store.read_log(w.path).decode("utf-8")
     assert _ENV_KEY not in body, "a write path escaped the redactor"
 
 
@@ -464,7 +486,7 @@ def test_benign_transcript_content_is_untouched():
     w = LiveTranscriptWriter("deleg_redact_benign", 0, "refactor the parser")
     w.observe("tool.started", "read_file", "src/parser.py", None)
     w.observe("tool.completed", "read_file", None, None, result="def parse(x): ...", duration=1.5)
-    body = w.path.read_text(encoding="utf-8")
+    body = w.store.read_log(w.path).decode("utf-8")
     assert "src/parser.py" in body
     assert "def parse(x)" in body
     assert "refactor the parser" in body

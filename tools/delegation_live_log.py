@@ -1,16 +1,15 @@
 """Live, tail-able transcripts for delegated subagents.
 
-One append-only log per child under ``<hermes_home>/cache/delegation/live/
-<delegation_id>/task-<n>.log``, pre-created with a header at dispatch (so
-``tail -f`` attaches immediately); paths are returned from ``delegate_task``.
-``cache/delegation`` is mounted read-only into remote terminal backends, so
-every line written here must be credential-redacted. Never raises into the
-agent loop; append mode per write (close() is the flush); 7-day retention.
+One encrypted log per child under ``<hermes_home>/cache/delegation/live/
+<delegation_id>/task-<n>.log``, pre-created with a header at dispatch;
+paths are returned from ``delegate_task`` for authenticated live readers.
+The compact view is an encrypted state envelope, authenticated and atomically
+replaced on each event. Local authenticated readers expose the live text; raw
+files and remote backends receive no plaintext. Seven-day retention remains.
 """
 
 from __future__ import annotations
 
-import json
 import logging
 import shutil
 import threading
@@ -84,16 +83,12 @@ def _joined(*parts: str) -> str:
     return " ".join(filter(None, parts))
 
 
-def _dump_json(path: Path, payload: dict[str, Any]) -> None:
-    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
-
-
 class LiveTranscriptWriter:
     """Append-only event log for ONE subagent task. Best-effort: the first write
     failure flips ``_ok`` off and later calls become debug-logged no-ops."""
 
     def __init__(self, delegation_id: str, task_index: int, goal: str,
-                 context: Optional[str] = None, root: Optional[Path] = None):
+                 context: Optional[str] = None, root: Optional[Path] = None, store=None):
         self.delegation_id = delegation_id
         self.task_index = task_index
         self._ok = False
@@ -101,18 +96,22 @@ class LiveTranscriptWriter:
         self._stream_buf: list[str] = []
         self._stream_len = 0
         self.path: Optional[Path] = None
+        self.error: Optional[str] = None
         with _best_effort(f"init ({delegation_id} task {task_index})"):
+            from hermes_security.delegation_state import DelegationStore
+
+            self.store = store if store is not None else DelegationStore()
             goal_line = _one_line(goal, _KICKOFF_MAX)
             d = (root if root is not None else live_transcript_root()) / delegation_id
             d.mkdir(parents=True, exist_ok=True)
             path = d / f"task-{task_index}.log"
-            path.write_text(
+            self.store.create_log(path,
                 "=== Hermes subagent live transcript ===\n"
                 f"delegation: {delegation_id}   task: {task_index}\n"
                 f"goal: {_redact(goal_line)}\n"  # header bypasses event(), so redact here too
                 f"started: {time.strftime(_TIME_FMT)}\n"
-                "(append-only; streams while the subagent runs — tail -f me)\n"
-                + "=" * 40 + "\n", encoding="utf-8")
+                "(encrypted live view; read with the authenticated file tool or /agents)\n"
+                + "=" * 40 + "\n")
             self.path, self._ok = path, True
             self.event("user", "kickoff: " + goal_line
                        + (f" | context: {_one_line(context, _KICKOFF_MAX)}" if context else ""))
@@ -124,10 +123,11 @@ class LiveTranscriptWriter:
             return
         line = f"{time.strftime('%H:%M:%S')} {role:<9}| {_redact(text)}\n"
         try:
-            with self._lock, open(self.path, "a", encoding="utf-8") as fh:
-                fh.write(line)
+            with self._lock:
+                self.store.append_log(self.path, line)
         except Exception as exc:
             self._ok = False
+            self.error = f"Encrypted live transcript unavailable ({type(exc).__name__})"
             logger.debug("Live transcript write failed (%s): %s", self.path, exc)
 
     def _line(self, role: str, text: str, limit: int) -> None:
@@ -248,19 +248,22 @@ def create_live_transcripts(
     same resolved root, so pinned homes clean their own stale dirs.
     """
     n = len(task_list)
-    prune_stale_live_dirs(root=live_transcript_root(home))  # best-effort; never raises
     with _best_effort("creation"):
+        from hermes_security.delegation_state import DelegationStore
+
+        store = DelegationStore(home)
+        prune_stale_live_dirs(root=live_transcript_root(store.home))
         # Same id shape as async_delegation's so the dir name matches the handle.
         deleg_id = delegation_id or f"deleg_{uuid.uuid4().hex[:8]}"
         root = live_transcript_root(home)
         made = [LiveTranscriptWriter(deleg_id, i, str(t.get("goal", "")),
-                                     context=t.get("context") or context, root=root)
+                                     context=t.get("context") or context, root=root, store=store)
                 for i, t in enumerate(task_list)]
         writers: list[Optional[LiveTranscriptWriter]] = [w if w.path is not None else None for w in made]
         paths: list[str] = [str(w.path) for w in made if w.path is not None]
         if not paths:
             return None, [None] * n, []
-        _write_manifest(deleg_id, task_list, paths, model=model, provider=provider, home=home)
+        _write_manifest(deleg_id, task_list, paths, model=model, provider=provider, home=home, store=store)
         return deleg_id, writers, paths
     return None, [None] * n, []
 
@@ -271,14 +274,18 @@ def _manifest_path(delegation_id: str, home: Optional[Path] = None) -> Path:
 
 def _write_manifest(delegation_id: str, task_list: list[dict[str, Any]],
                     paths: list[str], model: Optional[str] = None,
-                    provider: Optional[str] = None, home: Optional[Path] = None) -> None:
+                    provider: Optional[str] = None, home: Optional[Path] = None, store=None) -> None:
     with _best_effort("manifest write"):
-        _dump_json(_manifest_path(delegation_id, home), {
+        if store is None:
+            from hermes_security.delegation_state import DelegationStore
+
+            store = DelegationStore(home)
+        store.write_manifest(_manifest_path(delegation_id, home), {
             "delegation_id": delegation_id, "started": time.strftime(_TIME_FMT),
             "task_count": len(task_list), "model": model, "provider": provider,
             "tasks": [{
                 "index": i,
-                # Same mounted dir as the .log files, so the goal needs the same redaction.
+                # Goals receive the same credential redaction as the encrypted live log.
                 "goal": _redact(str(t.get("goal", ""))[:500]),
                 "log": paths[i] if i < len(paths) else None,
                 "status": "running"} for i, t in enumerate(task_list)]})
@@ -286,22 +293,45 @@ def _write_manifest(delegation_id: str, task_list: list[dict[str, Any]],
 
 def update_manifest_statuses(delegation_id: Optional[str],
                              results: list[dict[str, Any]],
-                             home: Optional[Path] = None) -> None:
+                             home: Optional[Path] = None, store=None) -> None:
     """Best-effort per-task status update once the batch has aggregated."""
     if not delegation_id:
         return
     with _best_effort("manifest update"):
-        mp = _manifest_path(delegation_id, home)
-        manifest = json.loads(mp.read_text(encoding="utf-8-sig"))
-        by_index = {r.get("task_index"): r for r in results if isinstance(r, dict)}
-        for task in manifest.get("tasks", []):
-            r = by_index.get(task.get("index"))
-            if r is not None:
-                task["status"] = r.get("status", task.get("status"))
-                if r.get("exit_reason"):
-                    task["exit_reason"] = r["exit_reason"]
-        manifest["completed"] = time.strftime(_TIME_FMT)
-        _dump_json(mp, manifest)
+        if store is None:
+            from hermes_security.delegation_state import DelegationStore
+
+            store = DelegationStore(home)
+        mp = _manifest_path(delegation_id, store.home)
+        with store.manifest_lock:
+            _update_manifest(store, mp, results)
+
+
+def _update_manifest(store, path, results):
+    manifest = store.read_manifest(path)
+    by_index = {r.get("task_index"): r for r in results if isinstance(r, dict)}
+    for task in manifest.get("tasks", []):
+        r = by_index.get(task.get("index"))
+        if r is not None:
+            task["status"] = r.get("status", task.get("status"))
+            if r.get("exit_reason"):
+                task["exit_reason"] = r["exit_reason"]
+            if r.get("live_transcript_error"):
+                task["transcript_error"] = r["live_transcript_error"]
+    manifest["completed"] = time.strftime(_TIME_FMT)
+    store.write_manifest(path, manifest)
+
+
+def read_manifest(path, *, home=None):
+    from hermes_security.delegation_state import read_manifest as authenticated_manifest
+
+    return authenticated_manifest(path, home=home)
+
+
+def read_transcript(path, *, home=None):
+    from hermes_security.delegation_state import read_transcript as authenticated_transcript
+
+    return authenticated_transcript(path, home=home)
 
 
 def prune_stale_live_dirs(max_age_days: int = LIVE_RETENTION_DAYS, root: Optional[Path] = None) -> int:
