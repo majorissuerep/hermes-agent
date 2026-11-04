@@ -1,4 +1,4 @@
-"""One fixed outgoing repair consumer; public commands share its bounded domain locks."""
+"""Explicit browser maintenance consumers share bounded domain ownership and locks."""
 from __future__ import annotations
 
 
@@ -15,5 +15,11 @@ def perform(home, *, legacy=False):
 
 
 def worker_repair(home):
-    from hermes_cli.browser_worker_repair import repair_owned
+    try:
+        from hermes_cli.browser_worker_repair import repair_owned
+    except ModuleNotFoundError as exc:
+        if exc.name != "hermes_cli.browser_worker_repair":
+            raise
+        from hermes_cli.management_config import ManagementError
+        raise ManagementError("unavailable", "This owning process lacks browser worker repair; update the owning runtime") from exc
     return repair_owned(home)

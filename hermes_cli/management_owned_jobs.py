@@ -35,6 +35,10 @@ class OwnedManagementJob:
             with self.budget.scope():
                 report = execute({'op': self.operation}, self.home)
                 self.budget.check()
+                if (not isinstance(report, dict) or set(report) != {'saved', 'retained'}
+                        or any(not isinstance(report[key], list) or not all(isinstance(item, str) for item in report[key])
+                               for key in ('saved', 'retained'))):
+                    raise ValueError('fixed maintenance returned an invalid metadata report')
                 self.result = {'version': 1, 'ok': not bool(report['retained']), 'result': report}
                 if report['retained']:
                     self.result['error'] = {'code': 'state_refused', 'message': 'Private state was retained; inspect the result'}

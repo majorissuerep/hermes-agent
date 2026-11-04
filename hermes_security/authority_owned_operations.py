@@ -1,4 +1,4 @@
-"""ONE fixed native owner job, using the existing native start/poll/cancel registry."""
+"""Closed owner-maintenance operations in the existing native start/poll/cancel registry."""
 from __future__ import annotations
 
 import json

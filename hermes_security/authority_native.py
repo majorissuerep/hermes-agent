@@ -176,7 +176,7 @@ def close_native(authority):
             if not isinstance(child, OwnedManagementJob):
                 raise
             import logging
-            logging.getLogger(__name__).warning("Outgoing repair cancellation is pending; domain recovery references retained", exc_info=True)
+            logging.getLogger(__name__).warning("Owner maintenance cancellation is pending; domain recovery references retained", exc_info=True)
         if isinstance(child, OwnedManagementJob) and child.finished.is_set():
             with _lock:
                 for identity, (owner, current) in list(_jobs.items()):

@@ -104,3 +104,24 @@ def test_job_cancellation_reaps_effect_child_and_retains_domain_recovery(outgoin
         assert parent.is_live()
     finally:
         owner.close();parent.close()
+
+
+def test_missing_worker_consumer_returns_structured_refusal_without_mutation(outgoing,monkeypatch):
+    from hermes_security.authority_native import dispatch_native
+    owner=start_session_authority(outgoing.home,'missing-worker-B')
+    monkeypatch.setitem(sys.modules,'hermes_cli.browser_worker_repair',None)
+    before={p.relative_to(outgoing.home):p.read_bytes() for p in outgoing.home.rglob('*') if p.is_file()}
+    try:
+        started=_start(owner,{'op':'browser.worker.repair'});assert started['ok'] is True
+        chunks=[]
+        def complete():
+            reply=dispatch_native(owner,{'op':'native.poll','job':started['job']})
+            chunks.extend(reply['chunks'])
+            return reply if reply['done'] else None
+        result=wait_until(complete,timeout=10)
+        body=json.loads(b''.join(base64.b64decode(item['data']) for item in chunks))
+        assert result['returncode']==1 and body['ok'] is False and body['error']['code']=='state_refused'
+        assert {p.relative_to(outgoing.home):p.read_bytes() for p in outgoing.home.rglob('*') if p.is_file()}==before
+        assert owner.is_live()
+    finally:
+        owner.close()

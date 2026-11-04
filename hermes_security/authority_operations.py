@@ -13,7 +13,7 @@ def dispatch_management(authority, request: dict) -> dict:
     try:
         operation = _request(request.get("request"))
         if operation["op"] in {"browser.outgoing.repair", "browser.worker.repair"}:
-            raise ManagementError("invalid_request", "use the public 'hermes manage apply' native command for bounded outgoing repair")
+            raise ManagementError("invalid_request", "use the public 'hermes manage apply' native command for bounded owner maintenance")
         secret = None
         if operation["op"] == "passphrase.change":
             raise ManagementError("consent_required", "changing the passphrase requires the owning human's consent")
