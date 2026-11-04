@@ -98,6 +98,15 @@ def cmd_vault(args: Any) -> int:
             return 1
         from hermes_security import migrate as mig
 
+        if getattr(args, "key_only", False):
+            from hermes_cli.vault_key_creation import key_destination
+
+            try:
+                key_out = key_destination(home, getattr(args, "key_out", None))
+            except (ValueError, OSError) as error:
+                print(f"✗ Key-only creation refused: {error}", file=sys.stderr)
+                return 2
+
         # dry run first
         report = mig.migrate_home(home, "", dry_run=True)
         total = len(report.databases) + len(report.envelopes) + len(report.frame_streams)
@@ -114,47 +123,13 @@ def cmd_vault(args: Any) -> int:
                 print("Aborted; nothing was changed.")
                 return 1
         if getattr(args, "key_only", False):
-            # Fork policy: no passphrase may be created from/for a non-interactive
-            # context. The vault is sealed to a fresh X25519 public key; the private
-            # half goes to a 0600 file. That key file is the ONLY credential.
-            import secrets as _secrets
+            from hermes_cli.vault_key_creation import KeyOutputError, migrate_with_key_file
 
-            private_key, public_key = vault_mod.generate_keypair()
-            key_out = Path(getattr(args, "key_out", None) or (home / "vault.key")).expanduser()
-            if key_out.parent != Path(home):
-                key_out.parent.mkdir(parents=True, exist_ok=True)
-            key_out.write_bytes(vault_mod._b64e(private_key).encode("ascii"))
-            os.chmod(key_out, 0o600)
-            # Random one-time internal passphrase, discarded immediately: the scrypt
-            # slot keeps the vault readable by future add-key runs (a passphrase slot
-            # is metadata-only here); the durable credential is the key file.
-            one_time = _secrets.token_urlsafe(48)
-            print("→ Backing up and migrating (this can take a minute)...")
-            report = mig.migrate_home(home, one_time)
-            if not report.ok:
-                print("✗ Migration finished WITH FAILURES (backup kept):")
-                for failure in report.failures:
-                    print(f"    {failure}")
-                if report.backup_path:
-                    print(f"  Backup: {report.backup_path}")
-                return 1
             try:
-                vault_mod.add_key_slot(home, public_key_raw=public_key, password=one_time)
-            finally:
-                del one_time
-            leftovers = mig.scan_for_plaintext(home)
-            if leftovers:
-                print(f"✗ Plaintext remains after migration: {leftovers}")
-                print(f"  Backup: {report.backup_path}")
-                return 1
-            print(f"✓ Migration complete ({len(report.databases)} DBs, {len(report.envelopes)} files, {len(report.frame_streams)} streams)")
-            print(f"  Private key (ONLY credential, 0600): {key_out}")
-            print(f"  Unlock with: HERMES_VAULT_PRIVATE_KEY={key_out}")
-            if report.backup_path:
-                print(f"  Pre-migration backup: {report.backup_path}")
-                print("  Verify everything works, then delete it (it is PLAINTEXT).")
-            print("  LOSE THE KEY FILE = LOSE THE DATA. There is no recovery.")
-            return 0
+                return migrate_with_key_file(home, key_out)
+            except KeyOutputError as error:
+                print(f"✗ Key-only creation refused: {error}", file=sys.stderr)
+                return 2
         password = _prompt_new_password()
         print("→ Backing up and migrating (this can take a minute)...")
         report = mig.migrate_home(home, password)

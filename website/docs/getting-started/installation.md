@@ -58,6 +58,19 @@ For explicitly unattended local commands, see the private-key options in
 `hermes secure-vault keygen --help` and `hermes secure-vault add-key --help`;
 `HERMES_VAULT_PRIVATE_KEY` is a private-key **file path**, not a passphrase.
 
+For non-interactive first-time migration, `hermes secure-vault migrate --key-only`
+requires an explicit `--key-out /external/credential-directory/new.key`. Select
+protected credential storage outside every Hermes home; this is a deliberate
+persistent credential, distinct from temporary session authority. Hermes creates
+a new owner-only file and refuses existing files, links and in-home destinations.
+There is no implicit output path. Keep that credential available for later starts.
+
+If an older key-only migration put its key inside the encrypted home, leave the
+encrypted originals and pre-migration backup intact. The reported key may itself
+be encrypted and cannot bootstrap a new process. Use deliberate offline recovery
+from the retained original backup, keeping the recovered credential outside every
+Hermes home; do not rerun migration or delete the only recovery copy.
+
 ### Installer options
 
 ```sh
