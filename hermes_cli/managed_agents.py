@@ -140,7 +140,7 @@ def _command(runner: str, arguments: list[str]) -> list[str]:
 
 
 _SOURCE = Path(__file__).resolve().parents[1]
-_TEMP_NAMES = ("TMPDIR", "TMP", "TEMP")
+_TEMP_NAMES = ("TMPDIR", "TMP", "TEMP", "XDG_RUNTIME_DIR")
 
 
 def _borrowed_grant_only(home: Path) -> bool:

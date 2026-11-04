@@ -164,6 +164,8 @@ _UPDATE_DEPENDENCIES = (
     "hermes_platform/process_argv.py",
     "hermes_platform/child_processes.py",  # native updater custody and completion receipt ownership
     "hermes_security/handoff.py",
+    "hermes_security/protected_memory.py",
+    "hermes_security/install_handoff.py",
     "hermes_security/session_authority.py",
     "hermes_security/passphrase.py",  # wrapped credential readers and rotation metadata
     "hermes_security/vault_metadata.py",  # serialized key-slot/credential publication

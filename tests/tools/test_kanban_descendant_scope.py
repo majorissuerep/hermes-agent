@@ -15,6 +15,8 @@ from tools.environments.local import LocalEnvironment
 
 
 ROOT = Path(__file__).resolve().parents[2]
+# Every native child uses the synthetic encrypted home and scratch board below.
+pytestmark = pytest.mark.live_system_guard_bypass
 
 
 @pytest.fixture(autouse=True)
@@ -60,16 +62,23 @@ def test_terminal_descendants_cannot_mutate_even_after_task_is_removed(tmp_path,
         "import os, sys, json, subprocess\n"
         f"sys.path.insert(0, {str(ROOT)!r})\n"
         "from hermes_security.handoff import adopt_inherited_key\n"
-        "assert adopt_inherited_key(), 'trusted fixture child requires native session authority'\n"
+        "had_fd = bool(os.environ.get('HERMES_VAULT_KEY_FD'))\n"
+        "assert adopt_inherited_key() is had_fd, 'only trusted fixtures receive key custody'\n"
         "from tools import kanban_tools as kt\n"
+        "from hermes_cli._launchers import runtime_command\n"
         "from agent.delegation_context import is_dispatcher_owned_worker_context\n"
         f"own, foreign = {own!r}, {foreign!r}\n"
         "out = {'owner': is_dispatcher_owned_worker_context(), 'default': kt._default_task_id(None),"
         " 'db': os.getenv('HERMES_KANBAN_DB'), 'board': os.getenv('HERMES_KANBAN_BOARD')}\n"
-        "out['show'] = json.loads(kt._handle_show({'task_id':own}))\n"
+        "if had_fd or not os.environ.get('HERMES_SESSION_VAULT'):\n"
+        "    out['show'] = json.loads(kt._handle_show({'task_id':own}))\n"
+        "else:\n"
+        f"    p = subprocess.run(runtime_command(__import__('pathlib').Path({str(ROOT)!r}), ['kanban', 'show', own, '--json']), capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=45)\n"
+        "    assert p.returncode == 0, (p.stdout,p.stderr)\n"
+        "    out['show'] = json.loads(p.stdout)\n"
         "out['tools'] = [json.loads(kt._handle_complete({'task_id': t, 'summary':'must refuse'})) for t in (own,foreign)]\n"
         "os.environ.pop('HERMES_KANBAN_TASK', None)\n"
-        f"p = subprocess.run([sys.executable, '-m', 'hermes_cli.main', 'kanban', 'complete', foreign, '--result', 'must refuse'], cwd={str(ROOT)!r}, capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=45)\n"
+        f"p = subprocess.run(runtime_command(__import__('pathlib').Path({str(ROOT)!r}), ['kanban', 'complete', foreign, '--result', 'must refuse']), cwd={str(ROOT)!r}, capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=45)\n"
         "out['later_cli'] = {'rc': p.returncode, 'out':p.stdout, 'err':p.stderr}\n"
         "print('SCOPE_RESULT=' + json.dumps(out))\n"
     )
@@ -85,8 +94,9 @@ def test_terminal_descendants_cannot_mutate_even_after_task_is_removed(tmp_path,
     from tests.e2e.vault_home import run_unlocked
 
     command = f"{shlex.quote(sys.executable)} {shlex.quote(str(script))}"
-    outputs = [result.get("output", ""), run_inline_shell(command, tmp_path, 45),
-               _spawn(ShellHookSpec(event="session:start", command=command, timeout=45), "{}")['stdout']]
+    hook = _spawn(ShellHookSpec(event="session:start", command=command, timeout=45), "{}")
+    assert hook["returncode"] == 0, hook
+    outputs = [result.get("output", ""), run_inline_shell(command, tmp_path, 45), hook["stdout"]]
     child_envs = [
         _build_child_env(rpc_endpoint="fixture", rpc_token="fixture", tmpdir=str(tmp_path), child_python=sys.executable),
         _build_safe_env({"HERMES_HOME": os.environ["HERMES_HOME"]}),
@@ -98,10 +108,13 @@ def test_terminal_descendants_cannot_mutate_even_after_task_is_removed(tmp_path,
                             stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=45, check=False)
         assert proc.returncode == 0, proc.stderr
         outputs.append(proc.stdout)
-    for output in outputs:
+    for ingress, output in enumerate(outputs):
+        assert "SCOPE_RESULT=" in output, (ingress, output)
         row = json.loads(next(line.split("SCOPE_RESULT=", 1)[1] for line in output.splitlines() if "SCOPE_RESULT=" in line))
-        assert "task" in row["show"], row
-        assert row["show"]["task"]["id"] == own, row
+        if ingress == 2:  # configured shell hooks deliberately receive no vault authority
+            assert "locked" in row["show"].get("error", ""), row
+        else:
+            assert row["show"].get("task", {}).get("id") == own, row
         assert not row["owner"] and row["default"] is None, row
         assert row["db"] == str(tmp_path / "assigned.db") and row["board"] == "default"
         assert all("error" in value for value in row["tools"]), row
@@ -122,7 +135,7 @@ def test_worker_cli_cannot_use_foreign_task_to_drop_run_scope(tmp_path, monkeypa
         capture_output=True, text=True, timeout=45,
         check=False,
     )
-    assert proc.returncode != 0 and "worker is scoped to task" in proc.stderr, (proc.stdout, proc.stderr)
+    assert proc.returncode != 0 and "delegate_task child contexts cannot mutate" in proc.stderr, (proc.stdout, proc.stderr)
     assert kb.get_task(conn, foreign).status == "running"
     attachment = tmp_path / "note.txt"
     attachment.write_text("fixture")

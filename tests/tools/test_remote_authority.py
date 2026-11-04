@@ -8,7 +8,7 @@ import sys
 import pytest
 
 AUTHORITY = ("HERMES_SESSION_VAULT", "HERMES_VAULT_KEY_FD", "HERMES_VAULT_PRIVATE_KEY",
-             "HERMES_MASTER_PASSWORD")
+             "HERMES_MASTER_PASSWORD", "__HERMES_INSTALL_KEYS_FD")
 
 
 @pytest.mark.parametrize("factory", ["remote", "credential-helper"])

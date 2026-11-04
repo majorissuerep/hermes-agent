@@ -58,7 +58,8 @@ def envelope_operation(operation: str, path: str, payload: str, purpose: str) ->
 def adopt_keys() -> None:
     """Called after activating the selected interpreter, before state readers."""
     if not has_owner():
-        if os.environ.get("HERMES_VAULT_KEY_FD") or os.environ.get("HERMES_SESSION_VAULT"):
+        if (os.environ.get("HERMES_VAULT_KEY_FD") or os.environ.get("HERMES_SESSION_VAULT")
+                or os.environ.get("__HERMES_INSTALL_KEYS_FD")):
             from hermes_security.handoff import adopt_inherited_key
 
             adopt_inherited_key()

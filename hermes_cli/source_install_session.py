@@ -25,6 +25,7 @@ def run_install_session(command: list[str]) -> int:
     # Keep its temporary authority alive until every installer stage exits.
     prepare_owner()
     from hermes_security.session_authority import start_session_authority
+    from hermes_security.install_handoff import installer_keys
 
     session_id = "source-install-" + secrets.token_hex(16)
     authority = start_session_authority(home, session_id)
@@ -32,8 +33,8 @@ def run_install_session(command: list[str]) -> int:
         raise RuntimeError("encrypted install has no unlocked vault owner")
     env = {**os.environ, "HERMES_SESSION_ID": session_id, **authority.environment()}
     try:
-        with encrypted_install_log(home, env) as pass_fds:
-            return subprocess.call(command, env=env, timeout=7200, pass_fds=pass_fds)
+        with encrypted_install_log(home, env) as pass_fds, installer_keys(home, session_id, env) as key_fd:
+            return subprocess.call(command, env=env, timeout=7200, pass_fds=(*pass_fds, key_fd))
     finally:
         authority.close()
 

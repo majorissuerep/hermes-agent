@@ -7,8 +7,9 @@ import sys
 import pytest
 
 
-@pytest.mark.parametrize("grant", [True, False])
-def test_encrypted_worker_adoption_and_failure_cleanup(tmp_path, monkeypatch, grant):
+@pytest.mark.platforms("posix")
+@pytest.mark.parametrize("handoff", ["trusted-fd", "operation-grant", "none"])
+def test_encrypted_worker_adoption_and_failure_cleanup(tmp_path, monkeypatch, handoff):
     from cron import executions, jobs
     from hermes_security import vault
     from hermes_security.io import read_text, write_json
@@ -39,18 +40,26 @@ def test_encrypted_worker_adoption_and_failure_cleanup(tmp_path, monkeypatch, gr
         assert authority is not None
         env = {k: v for k, v in os.environ.items() if not k.startswith(("HERMES_", "_HERMES_"))}
         env.update(HERMES_HOME=str(home), HERMES_SESSION_ID=row["id"])
-        if grant:
+        if handoff != "none":
             env.update(session_environment(home, row["id"]))
+        descriptor = None
+        if handoff == "trusted-fd":
+            from hermes_security.handoff import prepare_child_key
+            descriptor, additions = prepare_child_key(home, retain_session=False)
+            env.update(additions)
+            authority.close()  # A durably dispatched native fire outlives its dispatcher.
         try:
             child = subprocess.run(
                 [sys.executable, "-c", "from pathlib import Path; import sys; from cron.scheduler import _run_external_worker_payload; sys.exit(0 if _run_external_worker_payload(Path(sys.argv[1]),Path(sys.argv[2])) else 7)", str(payload), str(ack)],
                 env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=30,
-                check=False,
+                check=False, **({"pass_fds": (descriptor,)} if descriptor is not None else {}),
             )
         finally:
+            if descriptor is not None:
+                os.close(descriptor)
             authority.close()
         assert not payload.exists()
-        if not grant:
+        if handoff != "trusted-fd":
             assert child.returncode == 7
             assert not ack.exists()
             assert not list(jobs.get_cron_output_dir().glob("*/*.md"))

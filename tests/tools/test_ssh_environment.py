@@ -119,13 +119,16 @@ class TestBuildSSHCommand:
         assert "https://next.example" not in remote_text and "from-dotenv" not in remote_text
         assert "sk-must-not-forward" not in remote_text
 
-    def test_run_bash_without_passthrough_inherits_env_unchanged(self, monkeypatch):
+    def test_run_bash_without_passthrough_strips_local_vault_authority(self, monkeypatch):
         from tools import env_passthrough
 
         monkeypatch.setattr(env_passthrough, "get_all_passthrough", lambda: frozenset())
         captured = self._capture_run_bash(monkeypatch, SSHEnvironment(host="h", user="u"))
         assert not any(a.startswith("SendEnv=") for a in captured["cmd"])
-        assert captured["env"] is None
+        from tools.environments.local_env_policy import LOCAL_VAULT_AUTHORITY_ENV
+        assert captured["env"] is not None
+        assert not (set(captured["env"]) & LOCAL_VAULT_AUTHORITY_ENV)
+        assert captured["env"].get("PATH") == os.environ.get("PATH")
 
 
 class TestControlSocketPath:

@@ -250,10 +250,12 @@ class _SlashWorker:
         # Prepend the Hermes venv bin dir and the user-local bin dir to PATH so slash_worker child processes
         # can resolve Hermes-managed CLIs (browser-use, uvx) even when the parent gateway was launched with
         # a minimal PATH (e.g. by the Desktop/Dashboard app). See #83845.
-        self.proc = subprocess.Popen(
-            argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-            encoding="utf-8", errors="replace", bufsize=1, cwd=os.getcwd(), env=env,
-            creationflags=windows_hide_flags(), start_new_session=True)
+        from hermes_security.handoff import native_child_key
+        with native_child_key(Path(env["HERMES_HOME"]), env, session_id=session_key) as key_options:
+            self.proc = subprocess.Popen(
+                argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                encoding="utf-8", errors="replace", bufsize=1, cwd=os.getcwd(), env=env,
+                creationflags=windows_hide_flags(), start_new_session=True, **key_options)
         threading.Thread(target=self._drain_stdout, daemon=True).start()
         threading.Thread(target=self._drain_stderr, daemon=True).start()
 

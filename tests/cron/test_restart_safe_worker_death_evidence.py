@@ -62,9 +62,9 @@ import json, os, sys, time
 from pathlib import Path
 import cron.scheduler as scheduler
 import cron.executions as executions
-from hermes_security.session_authority import adopt_session_authority
+from hermes_security.handoff import adopt_inherited_key
 from hermes_security.io import read_json
-adopt_session_authority()
+adopt_inherited_key()
 args = sys.argv
 payload = Path(args[args.index("--external-worker-file") + 1])
 ack = Path(args[args.index("--ack-file") + 1])

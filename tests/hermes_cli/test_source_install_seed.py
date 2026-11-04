@@ -32,6 +32,7 @@ def test_config_stage_seeds_only_missing_files_through_unlocked_owner(tmp_path, 
 source "$1/scripts/install.sh" --manifest --hermes-home "$2" --dir "$1"
 bootstrap_python() { boot_py="$seed_python"; }
 stage_config
+stage_config
 '''
     # Inject only the already provisioned test interpreter, not application I/O.
     command = ["bash", "-c", script, "installer-seed-test", str(ROOT), str(home), sys.executable]

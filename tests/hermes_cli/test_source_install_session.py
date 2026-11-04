@@ -8,6 +8,9 @@ import pytest
 
 from hermes_security import vault
 
+# Real native descendants remain within the synthetic encrypted home.
+pytestmark = pytest.mark.live_system_guard_bypass
+
 
 @pytest.mark.platforms("posix")
 @pytest.mark.parametrize("exit_code", [0, 7])
@@ -59,6 +62,6 @@ raise SystemExit(int(sys.argv[1]))
             cwd=Path(__file__).resolve().parents[2],
         )
         assert independent.returncode != 0
-        assert "session unlock is unavailable" in (independent.stdout + independent.stderr).casefold()
+        assert "session command refused" in (independent.stdout + independent.stderr).casefold()
     finally:
         vault.lock_now(home)

@@ -3374,15 +3374,10 @@ def _launch_external_cron_worker(job: dict) -> bool:
         try:
             stderr_fd = os.open(stderr_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
             try:
-                process = subprocess.Popen(
-                    dispatch.argv,
-                    cwd=str(repo_root),
-                    env=worker_env,
-                    stdin=subprocess.DEVNULL,
-                    stdout=subprocess.DEVNULL,
-                    stderr=stderr_fd,
-                    start_new_session=True,
-                    creationflags=windows_hide_flags(),
+                from cron.scheduler_worker_spawn import spawn_worker
+                process = spawn_worker(
+                    subprocess.Popen, dispatch.argv, cwd=str(repo_root), env=worker_env,
+                    stderr=stderr_fd, home=profile_home, creationflags=windows_hide_flags(),
                 )
             finally:
                 os.close(stderr_fd)
@@ -3506,9 +3501,9 @@ def _run_external_worker_payload(payload_path: Path, ack_path: Path) -> bool:
     unless that durable ownership transfer succeeds.
     """
     try:
-        from hermes_security.session_authority import adopt_session_authority
+        from hermes_security.handoff import adopt_inherited_key
         from hermes_security.io import read_json
-        adopt_session_authority()
+        adopt_inherited_key()
         payload = read_json(payload_path, purpose="state")
         job = payload["job"]
         profile_home = Path(payload["profile_home"]).resolve()

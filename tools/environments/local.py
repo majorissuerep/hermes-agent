@@ -604,14 +604,12 @@ _HERMES_BIN_DIR_IS_PAYLOAD = False
 
 def _source_hermes_bin_dir() -> str | None:
     """The active source installation, independent of the caller's ambient checkout."""
-    directory = Path(__file__).resolve().parents[2] / ".hermes" / "bin"
-    command = directory / ("hermes.exe" if _IS_WINDOWS else "hermes")
-    if command.is_file() and os.access(command, os.X_OK):
-        return str(directory)
     if not _IS_WINDOWS:
         from hermes_cli.runtime_launcher import owning_cli_dir
         return str(owning_cli_dir(Path(__file__).resolve().parents[2]))
-    return None
+    directory = Path(__file__).resolve().parents[2] / ".hermes" / "bin"
+    command = directory / "hermes.exe"
+    return str(directory) if command.is_file() and os.access(command, os.X_OK) else None
 
 
 def _resolve_hermes_bin_dir() -> str | None:
