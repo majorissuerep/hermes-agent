@@ -9,7 +9,9 @@ def test_remote_capture_reader_pins_only_the_allocated_single_link_file(tmp_path
     import subprocess
     from hermes_platform.remote_workspace import regular_file_read_argv
 
-    source, selected = tmp_path / "source", tmp_path / "capture"
+    capture_dir = tmp_path / "capture-files"
+    capture_dir.mkdir()
+    source, selected = capture_dir / "source", capture_dir / "capture"
     payload = b"synthetic recording binary\x00\xff"
     source.write_bytes(payload)
     if kind == "regular":
@@ -25,4 +27,4 @@ def test_remote_capture_reader_pins_only_the_allocated_single_link_file(tmp_path
     else:
         assert result.returncode != 0 and result.stdout == b""
         assert source.read_bytes() == payload
-    assert sorted(path.name for path in tmp_path.iterdir()) == (["capture"] if kind == "regular" else ["capture", "source"])
+    assert sorted(path.name for path in capture_dir.iterdir()) == (["capture"] if kind == "regular" else ["capture", "source"])

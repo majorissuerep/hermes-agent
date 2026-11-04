@@ -36,6 +36,9 @@ print(json.dumps({'name': lease.name, 'workspace': str(lease.workspace),
 """
 
 
+# The real launcher embeds its frozen updater-recovery closure. This native
+# integration runs only management/status/repair against the synthetic home.
+@pytest.mark.live_system_guard_bypass
 def test_public_repair_recovers_an_ended_recorder_without_reunlocking_parent(world, ram_runtime):
     from hermes_cli._launchers import runtime_command
     from hermes_security import artifacts
