@@ -27,6 +27,13 @@ class InstalledChecker:
 
 def installed_checker(requested: str = "lean", *, version: str = "4.35.0") -> InstalledChecker | None:
     """A legacy explicit path may name the selected PM binary; never trust PATH/elan or redirect it."""
+    try:
+        return _installed_checker(requested, version)
+    except (AttributeError, KeyError, TypeError, ValueError) as error:
+        raise RuntimeError("Recorded PM checker evidence is unreadable; inspect it with hermes pm doctor") from error
+
+
+def _installed_checker(requested: str, version: str) -> InstalledChecker | None:
     from pm import installed_package
     from pm.lock import Facts, Lockfile
     from pm.paths import lockfile_path

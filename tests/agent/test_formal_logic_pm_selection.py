@@ -125,3 +125,25 @@ print('Lean (version {LEAN_VERSION}, commit {LEAN_COMMIT})' if '--version' in sy
     result = verify(_checkpoint())
     assert result['status'] == 'checker_failed' and 'false canary' in result['error']
     assert result['checker']['invocations'] == 2
+
+
+@pytest.mark.parametrize(('field', 'value'), [('artifacts', None), ('entry', 42)])
+def test_malformed_pm_evidence_is_unknown_without_execution_or_metadata_replacement(tmp_path, monkeypatch, field, value):
+    from agent.formal_logic_lean import verify
+    from pm import paths
+
+    marker = tmp_path / 'no-probe'
+    install_checker(tmp_path, monkeypatch,
+        f'from pathlib import Path\nPath({str(marker)!r}).touch()\n' + _checker_body())
+    path = paths.facts_path()
+    evidence = json.loads(path.read_text())
+    evidence['packages']['lean'][field] = value
+    path.write_text(json.dumps(evidence))
+    before = path.read_bytes()
+
+    result = verify(_checkpoint())
+
+    assert result['status'] == 'checker_failed' and result['proof_status'] == 'unknown'
+    assert 'PM checker evidence' in result['error']
+    assert result['checker']['invocations'] == 0 and not marker.exists()
+    assert path.read_bytes() == before

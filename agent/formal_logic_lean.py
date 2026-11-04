@@ -87,7 +87,7 @@ def verify(checkpoint: Checkpoint, lean_path: str = "lean") -> dict:
     try:
         result = _verify(checkpoint, lean_path, attempt)
     except (OSError, subprocess.SubprocessError, RuntimeError, ValueError) as error:
-        result = {"status": "checker_failed", "error": str(error)[:1500]}
+        result = {"status": "checker_failed", "proof_status": "unknown", "error": str(error)[:1500]}
     return {**result, "checker": attempt, "elapsed_seconds": time.monotonic() - started}
 
 

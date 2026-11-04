@@ -209,7 +209,7 @@ def extract(archive: Path, dest: Path) -> None:
     shutil.rmtree(dest, ignore_errors=True)
     dest.mkdir(parents=True, exist_ok=True)
     name = archive.name.lower()
-    if name.endswith((".tar.gz", ".tgz", ".tar.xz", ".txz", ".tar.bz2")):
+    if name.endswith((".tar.gz", ".tgz", ".tar.xz", ".txz", ".tar.bz2", ".tar.zst")):
         extract_tar(archive, dest)
     elif name.endswith(".zip"):
         _extract_zip(archive, dest)
