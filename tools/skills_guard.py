@@ -787,13 +787,13 @@ def content_hash(skill_path: Path) -> str:
 def scan_skill_cached(skill_path: Path, source: str = "community", *, source_url: str = "",
                       cache_dir: Path | None = None) -> tuple[ScanResult, dict]:
     """Scan plus attestation dict; the cache (keyed by content digest + source identity) only serves exact
-    current content under the current scanner version."""
+    current content under the current scanner version and source trust policy."""
     digest = _content_digest(skill_path)
     cache_root = cache_dir or skill_path.parent / ".scan-cache"
     source_identity = hashlib.sha256(f"{source}\0{source_url}".encode()).hexdigest()[:16]
     cache_file = cache_root / f"{digest}-{source_identity}.json"
     expected = {"bundle_hash": f"sha256:{digest}", "scanner_version": SCANNER_VERSION, "source": source,
-                "source_url": source_url}
+                "source_url": source_url, "trust_level": _resolve_trust_level(source)}
     cached = None
     with suppress(OSError, json.JSONDecodeError):
         cached = json.loads(cache_file.read_text(encoding="utf-8-sig"))
