@@ -171,3 +171,31 @@ def test_native_provider_dispatch_cannot_borrow_a_later_unlock_to_save_old_work(
     assert vault.is_unlocked(home)
     # Fresh work after the new human unlock remains usable.
     assert artifacts.read_bytes(save()) == original
+
+
+@pytest.mark.parametrize("kind", ["image", "video"])
+def test_generated_result_keeps_original_session_while_sibling_stays_unlocked(home, kind):
+    from agent import provider_media
+    from agent.session_context import scoped_current_session_id
+    from hermes_security.session_authority import start_session_authority
+
+    first = start_session_authority(home, "generated-A")
+    sibling = start_session_authority(home, "generated-B")
+    raw = _png() if kind == "image" else b"synthetic-video-" + secrets.token_bytes(64)
+    media_kind = "images" if kind == "image" else "videos"
+    extension = "png" if kind == "image" else "mp4"
+    try:
+        with scoped_current_session_id("generated-A"):
+            with pytest.raises(VaultError):
+                with provider_media.generation_scope():
+                    first.close()  # the provider's delayed result arrives after its owner ended
+                    provider_media.save_bytes(media_kind, raw, prefix="session-test", extension=extension)
+        assert not list((home / "artifacts").rglob("*"))
+        with scoped_current_session_id("generated-B"):
+            with provider_media.generation_scope():
+                saved = provider_media.save_bytes(media_kind, raw, prefix="session-test", extension=extension)
+            assert artifacts.read_bytes(saved, home=home) == raw
+        assert vault.is_unlocked(home)
+    finally:
+        first.close()
+        sibling.close()

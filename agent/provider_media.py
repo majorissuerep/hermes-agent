@@ -44,10 +44,21 @@ def _output_custody(home=None):
     return selected, artifacts._bound_custody(selected)
 
 
+def _operation_custody(home=None):
+    """A new provider operation uses its own source; shared media readers keep resource custody."""
+    active = _GENERATION_CUSTODY.get()
+    if active is not None:
+        return _output_custody(home)
+    from hermes_security.session_custody import SessionCustody
+
+    selected, resource = _output_custody(home)
+    return selected, SessionCustody.capture(selected, resource=resource)
+
+
 @contextmanager
 def generation_scope():
     """Pin original custody before invoking a provider, including its later callbacks."""
-    active = _output_custody()
+    active = _operation_custody()
     token = _GENERATION_CUSTODY.set(active)
     try:
         yield
@@ -63,7 +74,7 @@ def cache_dir(kind: str) -> Path:
     home = get_hermes_home()
     path = _directory(home, kind)
     selected, relative = artifacts._location(path / ".location", home=home)
-    artifacts._bound_custody(selected)
+    _operation_custody(selected)
     with artifacts._parent(selected, relative, create=True):
         pass
     return path
@@ -89,14 +100,14 @@ def cache_path(kind: str, prefix: str, extension: str, *, home: Path | None = No
 
 def save_bytes(kind: str, raw: bytes, *, prefix: str, extension: str) -> Path:
     """Atomically retain the only copy as ciphertext; missing/locked stores refuse."""
-    home, custody = _output_custody()
+    home, custody = _operation_custody()
     path = cache_path(kind, prefix, extension, home=home)
     return artifacts.write_bytes(path, raw, home=home, custody=custody)
 
 
 def save_b64(kind: str, b64_data: str, *, prefix: str, extension: str) -> Path:
     """Decode base64 data into the cache and return the absolute path."""
-    home, custody = _output_custody()
+    home, custody = _operation_custody()
     path = cache_path(kind, prefix, extension, home=home)
     relative = artifacts._location(path, home=home)[1]
     maximum = artifacts._plaintext_bound(relative)
@@ -150,7 +161,7 @@ def save_url(
                 raise ValueError(f"{label} URL failed the SSRF safety check: {current_url}")
             client = create_ssrf_safe_client(timeout=timeout, follow_redirects=False)
         with client:
-            custody = _output_custody(home)[1] if custody is None else custody
+            custody = _operation_custody(home)[1] if custody is None else custody
             custody.check()
             with client.stream("GET", current_url, headers=hop_headers) as response:
                 if response.status_code in _REDIRECT_STATUS_CODES:
