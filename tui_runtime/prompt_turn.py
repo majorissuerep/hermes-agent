@@ -629,8 +629,12 @@ def _prepare_turn_input(sid: str, session: dict, st: _TurnRun, text: Any, images
         # model before the turn runs (#29923 review defect). Any config.yaml change is adopted on the NEXT
         # turn, after the finally-restore below.
         _apply_pending_model_switch(sid, session)
-        _sync_agent_model_with_config(sid, session)
-        _sync_agent_compression_with_config(sid, session)
+        # A pick made while the preceding turn settled creates its snapshot here,
+        # after run_body collected idle picks. This turn must own that restore too.
+        st.one_turn_restore = session.pop("one_turn_model_restore", None)
+        if not st.one_turn_restore:
+            _sync_agent_model_with_config(sid, session)
+            _sync_agent_compression_with_config(sid, session)
     _sync_agent_fallback_with_config(sid, session)  # chain added after the chat opened reaches this turn
     _adopt_out_of_band_turns(session)
     st.agent = agent = session["agent"]
