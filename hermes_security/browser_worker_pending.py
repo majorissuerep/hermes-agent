@@ -53,7 +53,8 @@ def _decode(raw, relative, custody):
     plain = custody.vault.decrypt(raw, purpose='state', relpath=Path(relative).as_posix(), authority=custody.authority)
     document = json.loads(plain)
     matched = (_LOCATOR if kind == 'locator' else _RECOVERY).fullmatch(Path(relative).name)
-    if (not isinstance(document, dict) or document.get('version') != 1 or document.get('digest') != matched[1]
+    if (not isinstance(document, dict) or type(document.get('version')) is not int
+            or document['version'] not in (1, 2) or document.get('digest') != matched[1]
             or not isinstance(document.get('identity'), dict)
             or archive.identity_digest(custody, document['identity']) != document['digest']):
         raise VaultIntegrityError('Browser WORKER metadata has invalid original identity')
@@ -86,6 +87,36 @@ def _validate(document, kind):
             raise VaultIntegrityError('Browser WORKER process metadata is invalid')
     if kind == 'recovery' and not isinstance(document.get('outcome'), str):
         raise VaultIntegrityError('Browser WORKER recovery history is incomplete')
+    retirement = document.get('retirement')
+    if (document['version'] == 2) != (retirement is not None):
+        raise VaultIntegrityError('Worker retirement requires its closed metadata version; every copy retained')
+    if retirement is not None:
+        _validate_retirement(document)
+
+
+def _validate_retirement(document):
+    intent = document['retirement']
+    expected = {document['path']}
+    external = document['identity'].get('external_tree')
+    if external is not None:
+        if not isinstance(external, str) or not Path(external).is_absolute():
+            raise VaultIntegrityError('Worker retirement has an invalid explicit path')
+        expected.add(external)
+    if (not isinstance(intent, dict) or not isinstance(intent.get('archive_sha256'), str)
+            or len(intent['archive_sha256']) != 64
+            or any(char not in '0123456789abcdef' for char in intent['archive_sha256'])
+            or not isinstance(intent.get('targets'), list) or len(intent['targets']) != len(expected)):
+        raise VaultIntegrityError('Worker retirement intent is incomplete; every copy retained')
+    seen = set()
+    for target in intent['targets']:
+        if (not isinstance(target, dict) or not isinstance(target.get('path'), str) or target['path'] not in expected
+                or not Path(target['path']).is_absolute() or not _inode(target.get('inode'))):
+            raise VaultIntegrityError('Worker retirement target is outside its authenticated resource')
+        if target['path'] == document['path'] and target['inode'] != document['root_inode']:
+            raise VaultIntegrityError('Worker retirement root changed its original identity')
+        seen.add(target['path'])
+    if seen != expected:
+        raise VaultIntegrityError('Worker retirement targets are incomplete')
 
 
 def read(home, relative, *, custody):
@@ -122,6 +153,9 @@ def write(home, relative, document, *, custody, overwrite=True):
 def sync(resource, call):
     from hermes_platform.runtime_health import current_instantiation_epoch
 
+    previous = read_optional(resource.home, resource.digest, custody=call)
+    if previous is not None and previous.get('retirement') is not None:
+        raise VaultIntegrityError('Verified worker retirement is pending; use browser.worker.repair')
     records = {}
     for kind in ('claims', 'processes'):
         records[kind] = [resource.read_record(path) for path in sorted((resource.path/kind).iterdir())]
@@ -176,6 +210,10 @@ def recover_missing(home, *, custody):
     resolved, retained = [], []
     for reference in paths(home):
         document = read(home, reference.relative_to(home), custody=custody)
+        if document.get('retirement') is not None:
+            retained.append(f'{reference}: verified worker retirement is pending; run browser.worker.repair. '
+                            'Original target locations and checkpoint retained.')
+            continue
         if not root_missing(document):
             continue
         records = [*document['owners'], *document['processes']]
