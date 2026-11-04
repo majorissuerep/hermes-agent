@@ -11,10 +11,22 @@ Git's index so a generated archive cannot enter a build after checkout.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import os
 from pathlib import Path
 
 _PROFILE_ARCHIVE_SUFFIXES = (".tar.gz", ".tgz")
+# Reviewed, reproducible dependency source inputs, never profile exports. Both
+# path AND complete content hash are required; a changed archive stays forbidden.
+_REVIEWED_DEPENDENCY_ARCHIVES = {'pm/compatibility/browser_harness-0.1.13+hermes.2.tar.gz': 'b5d6a0079ba4b5a48fd0313251c7788482cae5926731ffbc69e81e405a03b41c',
+ 'pm/compatibility/fastembed-0.8.1+hermes.2.tar.gz': 'fa950676a37261e71a1adb8418ae3e794fcf7eef93829de3a110d1ee0332c5bb'}
+
+
+def _is_reviewed_dependency_archive(path: Path, relative: Path) -> bool:
+    digest = _REVIEWED_DEPENDENCY_ARCHIVES.get(relative.as_posix())
+    return bool(digest and path.is_file() and not path.is_symlink()
+                and hashlib.sha256(path.read_bytes()).hexdigest() == digest)
+
 
 
 def find_forbidden_profile_archives(root: Path) -> list[Path]:
@@ -32,7 +44,10 @@ def find_forbidden_profile_archives(root: Path) -> list[Path]:
         ]
         for name in (*dirnames, *filenames):
             if name.casefold().endswith(_PROFILE_ARCHIVE_SUFFIXES):
-                offenders.append((Path(directory) / name).relative_to(root))
+                path = Path(directory) / name
+                relative = path.relative_to(root)
+                if not _is_reviewed_dependency_archive(path, relative):
+                    offenders.append(relative)
 
     return sorted(offenders, key=lambda path: path.as_posix().casefold())
 

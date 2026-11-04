@@ -1,0 +1,113 @@
+{
+  "format": 1,
+  "purpose": "Maintained first-party packaging backports of aged upstream sources for Pillow 13; no upstream runtime code changes. Local versions and real installed Requires-Dist record the patches.",
+  "pillow": {
+    "version": "13.0.0",
+    "upload_time": "2026-10-16T22:15:24Z",
+    "metadata_url": "https://pypi.org/pypi/Pillow/13.0.0/json"
+  },
+  "poetry_core": {
+    "version": "2.5.0",
+    "upload_time": "2026-09-19T17:47:08.728607Z"
+  },
+  "packages": [
+    {
+      "name": "browser-harness",
+      "version": "0.1.13",
+      "source_url": "https://files.pythonhosted.org/packages/7f/fe/59ab493e7cf76731a7f5aabae3821eea6ea82a628c14c30e7aed48adc362/browser_harness-0.1.13.tar.gz",
+      "sha256": "284dc547a042c309feafd9a9f4a74b2a8651b7963ea3ac6cb2f2d64889f6a8f3",
+      "upload_time": "2026-09-04T02:53:23.133077Z",
+      "filename": "browser_harness-0.1.13.tar.gz",
+      "local_version": "0.1.13+hermes.2",
+      "output": "browser_harness-0.1.13+hermes.2.tar.gz",
+      "replacements": {
+        "pyproject.toml": [
+          [
+            "version = \"0.1.13\"",
+            "version = \"0.1.13+hermes.2\"",
+            1
+          ],
+          [
+            "pillow==12.3.0",
+            "pillow==13.0.0",
+            1
+          ]
+        ],
+        "PKG-INFO": [
+          [
+            "Version: 0.1.13\n",
+            "Version: 0.1.13+hermes.2\n",
+            1
+          ],
+          [
+            "pillow==12.3.0",
+            "pillow==13.0.0",
+            1
+          ]
+        ],
+        "src/browser_harness.egg-info/PKG-INFO": [
+          [
+            "Version: 0.1.13\n",
+            "Version: 0.1.13+hermes.2\n",
+            1
+          ],
+          [
+            "pillow==12.3.0",
+            "pillow==13.0.0",
+            1
+          ]
+        ],
+        "src/browser_harness.egg-info/requires.txt": [
+          [
+            "pillow==12.3.0",
+            "pillow==13.0.0",
+            1
+          ]
+        ]
+      },
+      "output_sha256": "b5d6a0079ba4b5a48fd0313251c7788482cae5926731ffbc69e81e405a03b41c"
+    },
+    {
+      "name": "fastembed",
+      "version": "0.8.1",
+      "source_url": "https://files.pythonhosted.org/packages/ae/84/09d221078b6e2e2169fab52506dc2e0a6c7a9a4f0699000e9b9df55b42b2/fastembed-0.8.1.tar.gz",
+      "sha256": "ad815f14873dce918f755a99f16929a1384775f91ca8a14645993a165b5f65ba",
+      "upload_time": "2026-09-22T20:01:24.201290Z",
+      "filename": "fastembed-0.8.1.tar.gz",
+      "local_version": "0.8.1+hermes.2",
+      "output": "fastembed-0.8.1+hermes.2.tar.gz",
+      "replacements": {
+        "pyproject.toml": [
+          [
+            "version = \"0.8.1\"",
+            "version = \"0.8.1+hermes.2\"",
+            1
+          ],
+          [
+            ",<13.0\"",
+            ",<14.0\"",
+            3
+          ],
+          [
+            "requires = [\"poetry-core\"]",
+            "requires = [\"poetry-core==2.5.0\"]",
+            1
+          ]
+        ],
+        "PKG-INFO": [
+          [
+            "Version: 0.8.1\n",
+            "Version: 0.8.1+hermes.2\n",
+            1
+          ],
+          [
+            ",<13.0)",
+            ",<14.0)",
+            3
+          ]
+        ]
+      },
+      "output_sha256": "fa950676a37261e71a1adb8418ae3e794fcf7eef93829de3a110d1ee0332c5bb"
+    }
+  ]
+}
