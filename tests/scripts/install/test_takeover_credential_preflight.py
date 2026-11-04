@@ -78,7 +78,7 @@ def test_migration_preserves_explicit_path_terminal_and_existing_vault(tmp_path,
     env["PROBE_ARGUMENTS"] = str(log)
     launcher = Path(env["HOME"]) / ".local" / "bin" / "hermes"
     launcher.parent.mkdir(parents=True)
-    launcher.write_text('#!/bin/bash\nprintf "%s\\0" "$@" > "$PROBE_ARGUMENTS"\n')
+    launcher.write_text('#!/usr/bin/env bash\nprintf "%s\\0" "$@" > "$PROBE_ARGUMENTS"\n')
     launcher.chmod(0o700)
     if mode == "explicit-path":
         env["HERMES_VAULT_KEY_OUT"] = str(tmp_path / "external-new.key")
