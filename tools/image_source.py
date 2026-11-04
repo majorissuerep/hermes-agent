@@ -2,6 +2,7 @@
 
 Everything funnels through :func:`resolve_image_source` so size and magic-byte checks run
 exactly once. Images are the default; video callers opt in via ``permitted=("video",)``.
+Every origin resolves to in-memory bytes: no source is copied to a plaintext temp file.
 Security (GHSA-gpxw-6wxv-w3qq): under a non-local backend vision is confined like the file
 tools — host-read only inside a media cache (bind-mounted into the sandbox), anything else is
 exec-read *inside the sandbox*, so ``vision_analyze('/etc/passwd')`` never reads the host.
@@ -149,18 +150,13 @@ def _http_block_reason(url: str) -> Optional[str]:
 
 
 async def _download_to_bytes(url: str) -> bytes:
-    import tempfile
+    """Stream into memory: a downloaded (possibly private) image never lands in a temp file."""
     from tools.vision_tools import _download_image
-    with tempfile.NamedTemporaryFile(suffix=".img", delete=False) as tf:
-        tmp = Path(tf.name)
     try:
         # Enforces the 50MB stream cap, redirect SSRF guard, and website policy.
-        await _download_image(url, tmp)
-        return await asyncio.to_thread(tmp.read_bytes)
+        return await _download_image(url)
     except PermissionError as exc:  # website policy block
         raise SourceUnsafe(str(exc), src=url, origin="http")
-    finally:
-        tmp.unlink(missing_ok=True)
 
 
 def _is_local_terminal_backend() -> bool:

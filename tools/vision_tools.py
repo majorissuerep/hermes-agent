@@ -8,14 +8,11 @@ model (multimodal tool-result envelope) or are described by the auxiliary vision
 
 import base64
 import asyncio
-import contextlib
-import contextvars
 import json
 from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 import logging
 import os
-import uuid
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, NamedTuple, Optional
 from urllib.parse import urlparse
@@ -35,7 +32,6 @@ def _load_auxiliary_client() -> None:
         extract_content_or_reasoning = extract_content_or_reasoning or _aux.extract_content_or_reasoning
 
 
-from hermes_constants import get_hermes_dir
 from tools.debug_helpers import DebugSession
 from tools.website_policy import check_website_access
 from tools.vision_tools_history_budget import (
@@ -49,8 +45,11 @@ from tools.vision_tools_history_budget import (
 from tools.vision_tools_image_prep import (
     _VISION_MAX_VALIDATED_AGGREGATE_PIXELS,
     _VISION_MAX_VALIDATED_FRAME_COUNT,
+    ImageInput,
     _crop_image_region,
     _determine_mime_type,
+    _fallback_mime,
+    _image_bytes,
     _image_exceeds_dimension,
     _normalize_to_supported_image,
     _validate_raster_image_decodable)
@@ -151,127 +150,6 @@ _DOWNLOAD_USER_AGENT = (
 )
 
 
-def _managed_install() -> bool:
-    """True when a package manager (NixOS) owns this install's modes.
-
-    Mirrors the check ``hermes_cli.config._secure_dir`` makes internally, read
-    here so the *creation* mode honours the same carve-out as reconciliation.
-    Import is local and failure means "not managed": an unimportable config
-    module is the single-user source-install case, where 0700 is correct.
-    """
-    try:
-        from hermes_cli.config import is_managed
-
-        return bool(is_managed())
-    except Exception:  # pragma: no cover - defensive
-        return False
-
-
-# Set only while an owned encrypted media source is being prepared: every ``cache/vision``
-# temp (decrypted copy, normalized/cropped derivative) then lives in that RAM workspace instead.
-_OWNED_MEDIA_STAGING: contextvars.ContextVar[Optional[Path]] = contextvars.ContextVar(
-    "vision_owned_media_staging", default=None)
-
-
-@contextlib.contextmanager
-def _owned_media_staging(image_url: str):
-    """Stage decrypted owned media in a proven RAM workspace; other sources keep ``cache/vision``."""
-    from tools.browser_media_custody import owned_media_path, protected_media_workspace
-    if owned_media_path(image_url) is None:
-        yield
-        return
-    with protected_media_workspace("vision-media") as workspace:
-        token = _OWNED_MEDIA_STAGING.set(workspace)
-        try:
-            yield
-        finally:
-            _OWNED_MEDIA_STAGING.reset(token)
-
-
-def _secure_cache_dir(new_subpath: str, old_name: str) -> Path:
-    """Resolve a Hermes media-cache dir, creating it owner-only (0700).
-
-    A downloaded image or video is as sensitive as whatever the user pointed
-    the agent at — a private attachment, an internal screenshot, a document
-    scan. Created with a bare ``mkdir(parents=True, exist_ok=True)`` these
-    inherited the umask and landed 0755, readable by every other local
-    account. ``HERMES_HOME`` is 0700 by default so default-config exposure is
-    narrow; the concrete scenario is the documented ``HERMES_HOME_MODE=0701``
-    hatch (letting nginx/caddy traverse to a served subdirectory), where a
-    0755 child really is world-readable.
-
-    The mode is passed to ``mkdir`` so it is set *at creation*, leaving no
-    window where the directory sits world-readable before a follow-up chmod.
-    Policy is then reconciled through ``hermes_cli.config._secure_dir`` — the
-    house helper — rather than a hand-rolled chmod, which is what keeps this
-    correct off a single-user desktop: managed/NixOS installs are skipped,
-    ``HERMES_HOME_MODE`` stays honoured, and ``HERMES_UID``/``HERMES_GID``
-    ownership is applied so a root-created dir does not lock out uid-mapped
-    Docker workers (#34107).
-
-    The managed/NixOS carve-out applies to **creation as well as
-    reconciliation**. ``cache/vision`` and ``cache/video`` are not among the
-    directories the NixOS module's ``systemd.tmpfiles`` rules pre-create, so
-    they are made lazily at runtime; a hardcoded 0700 here would be the only
-    thing setting their mode and would silently override a design that pins
-    ``stateDir/.hermes`` to ``2770`` and runs the gateway with ``UMask =
-    "0007"`` so "interactive users in the hermes group can read/write"
-    gateway-created state. On such a host the gateway and a hostUsers CLI
-    share one ``$HERMES_HOME``, so a 0700 cache created by whichever ran
-    first makes vision fail with EACCES for the other. Skipping the explicit
-    mode there lets the inherited setgid + umask land 2770, matching
-    ``ensure_hermes_home``'s managed branch and its ``logs/curator``
-    lazy-mkdir precedent.
-
-    Running it unconditionally also heals a directory an older Hermes left at
-    0755. That retroactive tighten is safe *here* because this is
-    Hermes-private scratch that the same user re-reads in the same call —
-    there is no user-shared content to strand. Note ``parents=True`` applies
-    the mode to the leaf only, so an intermediate ``cache/`` keeps its default
-    mode; it is shared with other subsystems and holds only directory names.
-    """
-    staged = _OWNED_MEDIA_STAGING.get()
-    if staged is not None and new_subpath == "cache/vision":
-        return staged
-    cache_dir = get_hermes_dir(new_subpath, old_name)
-    if _managed_install():
-        # Managed mode: the NixOS-configured umask/setgid owns the mode, and
-        # _secure_dir would no-op here anyway.
-        cache_dir.mkdir(parents=True, exist_ok=True)
-        return cache_dir
-    # mode= is honored only for the leaf and is not further masked by umask
-    # for the bits we care about; _secure_dir reconciles anything unusual.
-    cache_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-    try:
-        from hermes_cli.config import _secure_dir
-
-        _secure_dir(cache_dir)
-    except Exception as exc:  # pragma: no cover - defensive
-        logger.debug("vision: cache dir chmod skipped: %s", exc)
-    return cache_dir
-
-
-def _write_private_bytes(path: Path, data: bytes) -> None:
-    """Write ``data`` to ``path`` with owner-only (0600) permissions.
-
-    ``Path.write_bytes`` lands 0644 under a default umask. The enclosing cache
-    dir is 0700, so this matters only under ``HERMES_HOME_MODE=0701`` — but
-    ``tools.computer_use.tool`` already writes private captures into this
-    very directory, and one directory with two file-mode conventions is the
-    kind of inconsistency that rots. POSIX mode bits are advisory on Windows
-    (``os.chmod`` there only toggles the read-only flag), so on an ``os.open``
-    failure this degrades to a plain write rather than failing the download.
-    """
-    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
-    try:
-        fd = os.open(str(path), flags, 0o600)
-    except OSError:
-        path.write_bytes(data)
-        return
-    with os.fdopen(fd, "wb") as handle:
-        handle.write(data)
-
-
 async def _ssrf_redirect_guard(response):
     """Re-validate each redirect target (a public URL 302ing to 169.254.169.254 would otherwise
     bypass the pre-flight check). Async because httpx.AsyncClient awaits hooks."""
@@ -281,65 +159,53 @@ async def _ssrf_redirect_guard(response):
         raise ValueError(f"Blocked redirect to private/internal address: {redirect_url}")
 
 
-async def _download_media(
-    url: str, destination: Path, max_retries: int, *,
-    media_label: str, accept: str, max_bytes: int, timeout: float, retry_all: bool) -> Path:
-    """SSRF-safe streaming download with exponential backoff (2s/4s/8s). ``retry_all=False`` (images)
-    retries only :func:`_is_retryable_download_error` errors — a 404/403 never succeeds on retry."""
-    from utils import atomic_replace
+async def _stream_media(
+    url: str, *, media_label: str, accept: str, max_bytes: int, timeout: float) -> bytes:
+    """One SSRF-safe streaming GET into memory: website policy on the request and the final URL,
+    per-redirect SSRF guard, Content-Length early reject, authoritative streaming byte cap."""
     from tools.url_safety import create_ssrf_safe_async_client
-    destination.parent.mkdir(parents=True, exist_ok=True)
+    blocked = check_website_access(url)
+    if blocked:
+        raise PermissionError(blocked["message"])
+    # follow_redirects for CDNs; the client validates DNS at connect
+    # time and the hook re-validates each redirect target.
+    async with create_ssrf_safe_async_client(
+        timeout=timeout, follow_redirects=True, event_hooks={"response": [_ssrf_redirect_guard]},
+    ) as client, client.stream(
+        "GET", url, headers={"User-Agent": _DOWNLOAD_USER_AGENT, "Accept": accept},
+    ) as response:
+        response.raise_for_status()
+        # Content-Length gives an early reject but servers can omit or lie,
+        # so the streaming cap below is authoritative.
+        cl = response.headers.get("content-length")
+        try:
+            declared_size = int(cl) if cl else None
+        except ValueError:
+            declared_size = None
+        if declared_size is not None and declared_size > max_bytes:
+            raise ValueError(f"{media_label} too large ({declared_size} bytes, max {max_bytes})")
+        blocked = check_website_access(str(response.url))
+        if blocked:
+            raise PermissionError(blocked["message"])
+        # Private media stays in memory: no partial or completed download is ever written to disk.
+        body = bytearray()
+        async for chunk in response.aiter_bytes():
+            if len(body) + len(chunk) > max_bytes:
+                raise ValueError(f"{media_label} too large ({len(body) + len(chunk)} bytes, max {max_bytes})")
+            body += chunk
+        return bytes(body)
+
+
+async def _download_media(
+    url: str, max_retries: int, *,
+    media_label: str, accept: str, max_bytes: int, timeout: float, retry_all: bool) -> bytes:
+    """:func:`_stream_media` with exponential backoff (2s/4s/8s). ``retry_all=False`` (images)
+    retries only :func:`_is_retryable_download_error` errors — a 404/403 never succeeds on retry."""
     last_error = None
     for attempt in range(max_retries):
         try:
-            blocked = check_website_access(url)
-            if blocked:
-                raise PermissionError(blocked["message"])
-
-            # follow_redirects for CDNs; the client validates DNS at connect
-            # time and the hook re-validates each redirect target.
-            async with create_ssrf_safe_async_client(
-                timeout=timeout, follow_redirects=True, event_hooks={"response": [_ssrf_redirect_guard]},
-            ) as client, client.stream(
-                "GET", url, headers={"User-Agent": _DOWNLOAD_USER_AGENT, "Accept": accept},
-            ) as response:
-                response.raise_for_status()
-
-                # Content-Length gives an early reject but servers can omit or lie,
-                # so the streaming cap below is authoritative.
-                cl = response.headers.get("content-length")
-                try:
-                    declared_size = int(cl) if cl else None
-                except ValueError:
-                    declared_size = None
-                if declared_size is not None and declared_size > max_bytes:
-                    raise ValueError(f"{media_label} too large ({declared_size} bytes, max {max_bytes})")
-                blocked = check_website_access(str(response.url))
-                if blocked:
-                    raise PermissionError(blocked["message"])
-
-                # Stream to a temp file, atomically moved onto destination on success.
-                tmp_destination = destination.with_name(f".{destination.name}.{uuid.uuid4().hex}.tmp")
-                bytes_written = 0
-                try:
-                    with tmp_destination.open("wb") as f:
-                        async for chunk in response.aiter_bytes():
-                            if not chunk:
-                                continue
-                            bytes_written += len(chunk)
-                            if bytes_written > max_bytes:
-                                raise ValueError(
-                                    f"{media_label} too large ({bytes_written} bytes, max {max_bytes})"
-                                )
-                            f.write(chunk)
-                    atomic_replace(tmp_destination, destination)
-                except Exception:
-                    try:
-                        tmp_destination.unlink(missing_ok=True)
-                    except OSError:
-                        logger.debug("Could not delete partial download: %s", tmp_destination, exc_info=True)
-                    raise
-            return destination
+            return await _stream_media(
+                url, media_label=media_label, accept=accept, max_bytes=max_bytes, timeout=timeout)
         except Exception as e:
             last_error = e
             if attempt >= max_retries - 1 or (not retry_all and not _is_retryable_download_error(e)):
@@ -361,18 +227,18 @@ async def _download_media(
         f"_download_{media_label.lower()} exited retry loop without attempting (max_retries={max_retries})")
 
 
-async def _download_image(image_url: str, destination: Path, max_retries: int = 3) -> Path:
-    """Download an image with SSRF protection and error-class-aware retry."""
+async def _download_image(image_url: str, max_retries: int = 3) -> bytes:
+    """Download an image into memory with SSRF protection and error-class-aware retry."""
     return await _download_media(
-        image_url, destination, max_retries,
+        image_url, max_retries,
         media_label="Image", accept="image/*,*/*;q=0.8",
         max_bytes=_VISION_MAX_DOWNLOAD_BYTES, timeout=_VISION_DOWNLOAD_TIMEOUT, retry_all=False)
 
 
-def _image_to_base64_data_url(image_path: Path, mime_type: Optional[str] = None) -> str:
-    """``data:<mime>;base64,...`` for a file (MIME from extension when not given)."""
-    mime = mime_type or _determine_mime_type(image_path)
-    return f"data:{mime};base64,{base64.b64encode(image_path.read_bytes()).decode('ascii')}"
+def _image_to_base64_data_url(image: ImageInput, mime_type: Optional[str] = None) -> str:
+    """``data:<mime>;base64,...`` for a file or in-memory bytes (MIME from the extension when not given)."""
+    mime = mime_type or _fallback_mime(image)
+    return f"data:{mime};base64,{base64.b64encode(_image_bytes(image)).decode('ascii')}"
 
 
 # Absolute hard ceiling for vision payloads (20 MB): no major provider accepts more.
@@ -445,7 +311,7 @@ def _import_pillow_for_resize():
     return Image
 
 
-def _resize_image_for_vision(image_path: Path, mime_type: Optional[str] = None,
+def _resize_image_for_vision(image: ImageInput, mime_type: Optional[str] = None,
                               max_base64_bytes: int = _RESIZE_TARGET_BYTES,
                               max_dimension: Optional[int] = None,
                               scale_out: Optional[dict] = None,
@@ -464,19 +330,22 @@ def _resize_image_for_vision(image_path: Path, mime_type: Optional[str] = None,
     MB byte cap. force_jpeg: Re-encode as JPEG even for PNG input when a resize is needed. History-reuse
     embeds (#92699) opt in so a text-heavy screenshot keeps its readable resolution and shrinks via JPEG
     quality instead. Images already under both caps are returned unchanged (still PNG).
+    ``image`` is a caller-owned path or in-memory bytes; the resize itself never writes a file.
     """
-    file_size = image_path.stat().st_size
+    data = _image_bytes(image)
+    mime_type = mime_type or _fallback_mime(image)
+    file_size = len(data)
     estimated_b64 = (file_size * 4) // 3 + 100  # base64 ~4/3 + data URL header
     data_url = None
     if estimated_b64 <= max_base64_bytes and not (
-        max_dimension is not None and _image_exceeds_dimension(image_path, max_dimension)
+        max_dimension is not None and _image_exceeds_dimension(data, max_dimension)
     ):
-        data_url = _image_to_base64_data_url(image_path, mime_type=mime_type)
+        data_url = _image_to_base64_data_url(data, mime_type=mime_type)
         if len(data_url) <= max_base64_bytes:
             return data_url
 
     def _raw() -> str:
-        return data_url or _image_to_base64_data_url(image_path, mime_type=mime_type)
+        return data_url or _image_to_base64_data_url(data, mime_type=mime_type)
     Image = _import_pillow_for_resize()
     if Image is None:
         logger.info("Pillow not installed — cannot auto-resize oversized image")
@@ -485,10 +354,10 @@ def _resize_image_for_vision(image_path: Path, mime_type: Optional[str] = None,
                 file_size / (1024 * 1024), estimated_b64 / (1024 * 1024),
                 max_base64_bytes / (1024 * 1024), max_dimension)
     # JPEG for photos (smaller), PNG for transparency — unless force_jpeg.
-    is_png = (mime_type or _determine_mime_type(image_path)) == "image/png" and not force_jpeg
+    is_png = mime_type == "image/png" and not force_jpeg
     pil_format, out_mime = ("PNG", "image/png") if is_png else ("JPEG", "image/jpeg")
     try:
-        img = Image.open(image_path)
+        img = Image.open(BytesIO(data))
     except Exception as exc:
         logger.info("Pillow cannot open image for resizing: %s", exc)
         return _raw()
@@ -640,21 +509,13 @@ def _build_native_vision_tool_result(
         "meta": {"image_url": image_url[:200], "size_bytes": image_size_bytes, "native_vision": True}}
 
 
-def _unlink_quietly(path: Optional[Path]) -> None:
-    if path is not None:
-        try:
-            path.unlink(missing_ok=True)
-        except Exception:
-            pass
-
-
 class _ImagePrepError(ValueError):
     """Raised by :func:`_prepare_image`; the message is user-facing."""
 
 
 class _PreparedImage(NamedTuple):
-    """Temp image ready to encode; ``path`` is owned by the caller (delete it)."""
-    path: Path
+    """Image bytes ready to encode. Held in memory only — never written to a file."""
+    data: bytes
     mime: Optional[str]
     size_bytes: int
     crop_offset: dict
@@ -663,44 +524,34 @@ class _PreparedImage(NamedTuple):
 async def _prepare_image(
     image_url: str, task_id: Optional[str], region: Optional[list], *, validate_decode: bool,
 ) -> _PreparedImage:
-    """Resolve → materialize → normalize → (validate) → (crop). Raises ``_ImagePrepError``.
+    """Resolve → normalize → (validate) → (crop), all in memory. Raises ``_ImagePrepError``.
     Unsupported formats (SVG, BMP) become PNG BEFORE encoding — an unsupported media_type baked
     into immutable history would 400 on every resume. The crop runs BEFORE any downscale so the
-    region keeps the full resolution budget. On error no temp file is left."""
+    region keeps the full resolution budget. No plaintext copy of the image reaches disk; the
+    user's source file is only read."""
     from tools.image_source import ImageResolutionError, ResolveContext, resolve_image_source
     try:
         resolved = await resolve_image_source(image_url, ResolveContext(task_id=task_id))
     except ImageResolutionError as exc:
         raise _ImagePrepError(str(exc)) from exc
-    temp_dir = _secure_cache_dir("cache/vision", "temp_vision_images")
-    path = temp_dir / f"temp_image_{uuid.uuid4()}.img"
-    await asyncio.to_thread(_write_private_bytes, path, resolved.data)
-    mime, size_bytes, crop_offset = resolved.mime, len(resolved.data), {}
-    try:
-        normalized_path, mime, norm_err = await asyncio.to_thread(_normalize_to_supported_image, path, mime)
-        if norm_err or normalized_path is None:
-            raise _ImagePrepError(norm_err or "Image normalization failed.")
-        if normalized_path != path:
-            _unlink_quietly(path)
-            path = normalized_path
-            size_bytes = path.stat().st_size
-        if validate_decode:
-            decode_error = await _run_encode_on_cpu_executor(
-                _validate_raster_image_decodable, path,
-                _VISION_MAX_VALIDATED_FRAME_COUNT, _VISION_MAX_VALIDATED_AGGREGATE_PIXELS)
-            if decode_error:
-                raise _ImagePrepError(decode_error)
-        if region is not None:
-            cropped_path, cropped_mime, crop_err = await asyncio.to_thread(
-                _crop_image_region, path, region, offset_out=crop_offset)
-            if crop_err or cropped_path is None:
-                raise _ImagePrepError(crop_err or "Region crop failed.")
-            _unlink_quietly(path)
-            path, mime, size_bytes = cropped_path, cropped_mime, cropped_path.stat().st_size
-    except BaseException:
-        _unlink_quietly(path)
-        raise
-    return _PreparedImage(path, mime, size_bytes, crop_offset)
+    # to_thread copies this context, so an SVG fallback resolves this profile's protected workspace.
+    data, mime, norm_err = await asyncio.to_thread(_normalize_to_supported_image, resolved.data, resolved.mime)
+    if norm_err or data is None:
+        raise _ImagePrepError(norm_err or "Image normalization failed.")
+    if validate_decode:
+        decode_error = await _run_encode_on_cpu_executor(
+            _validate_raster_image_decodable, data,
+            _VISION_MAX_VALIDATED_FRAME_COUNT, _VISION_MAX_VALIDATED_AGGREGATE_PIXELS)
+        if decode_error:
+            raise _ImagePrepError(decode_error)
+    crop_offset: dict = {}
+    if region is not None:
+        cropped, cropped_mime, crop_err = await asyncio.to_thread(
+            _crop_image_region, data, region, offset_out=crop_offset)
+        if crop_err or cropped is None:
+            raise _ImagePrepError(crop_err or "Region crop failed.")
+        data, mime = cropped, cropped_mime
+    return _PreparedImage(data, mime, len(data), crop_offset)
 
 
 def _too_large_message(image_data_url: str) -> str:
@@ -713,7 +564,7 @@ def _too_large_message(image_data_url: str) -> str:
 async def _resize_prepared(prepared: _PreparedImage, scale_info: dict, **kwargs) -> str:
     """Run :func:`_resize_image_for_vision` on the CPU executor for a prepared image."""
     return await _run_encode_on_cpu_executor(
-        _resize_image_for_vision, prepared.path, mime_type=prepared.mime, scale_out=scale_info, **kwargs,
+        _resize_image_for_vision, prepared.data, mime_type=prepared.mime, scale_out=scale_info, **kwargs,
     )
 
 
@@ -732,36 +583,33 @@ async def _vision_analyze_native(
     if refusal is not None:
         return refusal
     reserved = _resolve_repeat_cap() > 0
-    prepared: Optional[_PreparedImage] = None
     embedded = False
     try:
         from tools.interrupt import is_interrupted
         if is_interrupted():
             return tool_error("Interrupted", success=False)
-        # Owned encrypted media decrypts only into a proven RAM workspace, gone after encoding.
-        with _owned_media_staging(image_url):
-            try:
-                prepared = await _prepare_image(image_url, task_id, region, validate_decode=True)
-            except _ImagePrepError as exc:
-                return tool_error(str(exc), success=False)
-            image_data_url = await _run_encode_on_cpu_executor(
-                _image_to_base64_data_url, prepared.path, mime_type=prepared.mime)
-            # Proactive embed cap: this image is re-sent on every later turn, so resize DOWN to the
-            # history-reuse target whenever the byte or long-edge cap is exceeded, not just at 20 MB.
-            _scale_info: dict = {}
-            # Anthropic still rejects >5 MB / >8000px with a non-retryable 400, but those are one-shot viewing
-            # limits — history embeds are sized smaller so repeated vision_analyze turns don't blow the context
-            # (#92699).
-            embed_target_bytes = _resolve_embed_target_bytes()
-            _over_dims = await _run_encode_on_cpu_executor(
-                _image_exceeds_dimension, prepared.path, _EMBED_MAX_DIMENSION)
-            if len(image_data_url) > embed_target_bytes or _over_dims:
-                image_data_url = await _resize_prepared(
-                    prepared, _scale_info,
-                    max_base64_bytes=embed_target_bytes, max_dimension=_EMBED_MAX_DIMENSION, force_jpeg=True)
-                # Reject rather than embed a session-wedging payload.
-                if len(image_data_url) > _MAX_BASE64_BYTES:
-                    return tool_error(_too_large_message(image_data_url), success=False)
+        try:
+            prepared = await _prepare_image(image_url, task_id, region, validate_decode=True)
+        except _ImagePrepError as exc:
+            return tool_error(str(exc), success=False)
+        image_data_url = await _run_encode_on_cpu_executor(
+            _image_to_base64_data_url, prepared.data, mime_type=prepared.mime)
+        # Proactive embed cap: this image is re-sent on every later turn, so resize DOWN to the
+        # history-reuse target whenever the byte or long-edge cap is exceeded, not just at 20 MB.
+        _scale_info: dict = {}
+        # Anthropic still rejects >5 MB / >8000px with a non-retryable 400, but those are one-shot viewing
+        # limits — history embeds are sized smaller so repeated vision_analyze turns don't blow the context
+        # (#92699).
+        embed_target_bytes = _resolve_embed_target_bytes()
+        _over_dims = await _run_encode_on_cpu_executor(
+            _image_exceeds_dimension, prepared.data, _EMBED_MAX_DIMENSION)
+        if len(image_data_url) > embed_target_bytes or _over_dims:
+            image_data_url = await _resize_prepared(
+                prepared, _scale_info,
+                max_base64_bytes=embed_target_bytes, max_dimension=_EMBED_MAX_DIMENSION, force_jpeg=True)
+            # Reject rather than embed a session-wedging payload.
+            if len(image_data_url) > _MAX_BASE64_BYTES:
+                return tool_error(_too_large_message(image_data_url), success=False)
         embedded = True
         if not reserved:
             _record_embed(image_url)
@@ -775,9 +623,6 @@ async def _vision_analyze_native(
     finally:
         if reserved and not embedded:
             _release_embed(image_url)
-        # Only delete temp files we created — never user-provided paths.
-        if prepared is not None:
-            _unlink_quietly(prepared.path)
 
 
 def _aux_call_kwargs(messages: list, model: Optional[str], default_timeout: float, *,
@@ -859,18 +704,17 @@ async def _call_vision_llm(call_kwargs: dict, empty_log: str, response=None):
 
 async def _run_analysis(
     kind: str, source: str, user_prompt: str, model: Optional[str],
-    stage: Callable[[str, dict, list], Awaitable[tuple]]) -> str:
+    stage: Callable[[str, dict], Awaitable[tuple]]) -> str:
     """Aux-LLM analysis skeleton for image/video: interrupt check → ``stage`` → JSON result.
 
-    ``stage(user_prompt, debug_call_data, temp_paths)`` returns ``(analysis, scale_note)``; temp
-    files it appends to ``temp_paths`` are deleted in ``finally``. Returns JSON
-    ``{"success": bool, "analysis": str}`` (``analysis`` carries the error explanation on failure).
+    ``stage(user_prompt, debug_call_data)`` returns ``(analysis, scale_note)``; media stays in
+    memory, so there is nothing to clean up. Returns JSON ``{"success": bool, "analysis": str}``
+    (``analysis`` carries the error explanation on failure).
     """
     tool_name, rules = _ANALYSIS_KINDS[kind]
     if not isinstance(user_prompt, str):
         user_prompt = str(user_prompt) if user_prompt is not None else ""
     debug_call_data = _debug_call_data(kind, source, user_prompt, model)
-    temp_paths: list = []
 
     def finish(result: dict) -> str:
         _debug.log_call(tool_name, debug_call_data)
@@ -883,7 +727,7 @@ async def _run_analysis(
             return tool_error("Interrupted", success=False)
         logger.info("Analyzing %s: %s", kind, source[:60])
         logger.info("User prompt: %s", user_prompt[:100])
-        analysis, scale_note = await stage(user_prompt, debug_call_data, temp_paths)
+        analysis, scale_note = await stage(user_prompt, debug_call_data)
         analysis_length = len(analysis) if analysis else 0
         logger.info("%s analysis completed (%s characters)", kind.capitalize(), analysis_length)
         analysis = analysis or f"There was a problem with the request and the {kind} could not be analyzed."
@@ -902,33 +746,20 @@ async def _run_analysis(
         analysis = template.format(e=e, model=model)
         debug_call_data["error"] = error_msg
         return finish({"success": False, "error": error_msg, "analysis": analysis})
-    finally:
-        for path in temp_paths:
-            if path and path.exists():
-                try:
-                    path.unlink()
-                    logger.debug("Cleaned up temporary %s file", kind)
-                except Exception as cleanup_error:
-                    logger.warning("Could not delete temporary file: %s", cleanup_error, exc_info=True)
 
 
 async def vision_analyze_tool(
     image_url: str, user_prompt: str, model: str | None = None,
     task_id: Optional[str] = None, region: Optional[list] = None) -> str:
     """Describe an image (URL, local path, data: URL) with the auxiliary vision LLM. ``user_prompt``
-    is pre-formatted by the caller. Temp images live under $HERMES_HOME/cache/vision/."""
-    async def stage(prompt: str, debug_call_data: dict, temp_paths: list) -> tuple:
-        with _owned_media_staging(image_url):  # owned encrypted media: RAM-only staging
-            return await _stage_image(prompt, debug_call_data, temp_paths)
-
-    async def _stage_image(prompt: str, debug_call_data: dict, temp_paths: list) -> tuple:
+    is pre-formatted by the caller. The image is prepared in memory; no plaintext copy is written."""
+    async def stage(prompt: str, debug_call_data: dict) -> tuple:
         prepared = await _prepare_image(image_url, task_id, region, validate_decode=False)
-        temp_paths.append(prepared.path)
         logger.info("Image ready (%.1f KB)", prepared.size_bytes / 1024)
         # Send at full resolution first; on a size rejection, downscale and retry.
         logger.info("Converting image to base64...")
         image_data_url = await _run_encode_on_cpu_executor(
-            _image_to_base64_data_url, prepared.path, mime_type=prepared.mime)
+            _image_to_base64_data_url, prepared.data, mime_type=prepared.mime)
         logger.info("Image converted to base64 (%.1f KB)", len(image_data_url) / 1024)
         _scale_info: dict = {}
         if len(image_data_url) > _MAX_BASE64_BYTES:
@@ -1093,77 +924,70 @@ def _unsupported_video_format(suffix: str) -> str:
     return f"Unsupported video format: '{suffix}'. Supported: {', '.join(sorted(_VIDEO_MIME_TYPES.keys()))}"
 
 
-def _video_to_base64_data_url(video_path: Path, mime_type: Optional[str] = None) -> str:
-    mime = mime_type or _detect_video_mime_type(video_path) or "video/mp4"
-    return f"data:{mime};base64,{base64.b64encode(video_path.read_bytes()).decode('ascii')}"
+class _VideoPayload(NamedTuple):
+    """Video bytes held in memory for one request, with the MIME derived from the source name."""
+    data: bytes
+    mime: str
 
 
-async def _materialize_video(video_url: str, task_id: Optional[str], temp_paths: list) -> Path:
-    """Local video path for a terminal-backend path, local file, or HTTP(S) URL. Only files created
-    here are appended to ``temp_paths`` — never user-provided paths. Terminal-backend reads use the
-    shared media resolver with ``permitted=("video",)`` — the exact pipeline vision_analyze uses
-    (media-cache host reads, bounded in-sandbox exec-read, credential-read guard, 50MB cap)."""
+def _video_mime_or_raise(name: str) -> str:
+    suffix = Path(name).suffix.lower()
+    mime = _VIDEO_MIME_TYPES.get(suffix)
+    if mime is None:
+        raise ValueError(_unsupported_video_format(suffix))
+    return mime
+
+
+async def _load_video(video_url: str, task_id: Optional[str]) -> _VideoPayload:
+    """Video bytes for a terminal-backend path, local file, or HTTP(S) URL — in memory, so no
+    plaintext copy is ever written, and the user's own file is only read. Terminal-backend reads
+    use the shared media resolver with ``permitted=("video",)`` — the exact pipeline vision_analyze
+    uses (media-cache host reads, bounded in-sandbox exec-read, credential-read guard, 50MB cap)."""
     from tools.image_source import (
         ImageResolutionError, ResolveContext, _is_local_terminal_backend, resolve_image_source,
     )
     source = video_url.removeprefix("file://")
-    local_path = Path(os.path.expanduser(source))
+    local_path = Path(await asyncio.to_thread(os.path.expanduser, source))
     lowered = (video_url or "").strip().lower()
     path_like = bool(lowered) and not lowered.startswith(("http://", "https://", "data:"))
     if not _is_local_terminal_backend() and path_like:
         logger.info("Reading video source via terminal backend: %s", video_url)
-        suffix = Path(source).suffix.lower()
-        if suffix not in _VIDEO_MIME_TYPES:
-            raise ValueError(_unsupported_video_format(suffix))
+        mime = _video_mime_or_raise(source)
         try:
             resolved = await resolve_image_source(
                 video_url, ResolveContext(task_id=task_id), permitted=("video",))
         except ImageResolutionError as exc:
             raise ValueError(f"Could not read video from terminal backend: {exc}") from exc
-        temp_dir = _secure_cache_dir("cache/video", "temp_video_files")
-        path = temp_dir / f"terminal_video_{uuid.uuid4()}{suffix}"
-        _write_private_bytes(path, resolved.data)
-        temp_paths.append(path)
-        return path
-    if local_path.is_file():
+        return _VideoPayload(resolved.data, mime)
+    if await asyncio.to_thread(local_path.is_file):
         from agent.file_safety import raise_if_model_read_blocked
         raise_if_model_read_blocked(str(local_path))
+        mime = _video_mime_or_raise(local_path.name)
         logger.info("Using local video file: %s", video_url)
-        return local_path
+        return _VideoPayload(await asyncio.to_thread(local_path.read_bytes), mime)
     if await _validate_image_url_async(video_url):
         blocked = check_website_access(video_url)
         if blocked:
             raise PermissionError(blocked["message"])
-        # Hardened here rather than inside _download_media: that helper takes
-        # a caller-supplied destination (tools/image_source.py hands its
-        # sibling a /tmp NamedTemporaryFile it owns the mode of), and
-        # chmod-ing an arbitrary caller's parent to 0700 would be a
-        # destructive side effect on a path Hermes does not own.
-        temp_dir = _secure_cache_dir("cache/video", "temp_video_files")
-        path = temp_dir / f"temp_video_{uuid.uuid4()}.mp4"
-        temp_paths.append(path)
         # Video downloads retry every failure class (legacy behavior).
-        await _download_media(
-            video_url, path, 3, media_label="Video", accept="video/*,*/*;q=0.8",
+        data = await _download_media(
+            video_url, 3, media_label="Video", accept="video/*,*/*;q=0.8",
             max_bytes=_MAX_VIDEO_BASE64_BYTES, timeout=60.0, retry_all=True)
-        return path
+        return _VideoPayload(data, "video/mp4")
     raise ValueError("Invalid video source. Provide an HTTP/HTTPS URL or a valid local file path.")
 
 
 async def video_analyze_tool(
     video_url: str, user_prompt: str, model: str | None = None, task_id: Optional[str] = None) -> str:
     """Analyze a video via multimodal LLM. Returns JSON {success, analysis}."""
-    async def stage(prompt: str, debug_call_data: dict, temp_paths: list) -> tuple:
-        temp_video_path = await _materialize_video(video_url, task_id, temp_paths)
-        video_size_bytes = temp_video_path.stat().st_size
+    async def stage(prompt: str, debug_call_data: dict) -> tuple:
+        video = await _load_video(video_url, task_id)
+        video_size_bytes = len(video.data)
         video_size_mb = video_size_bytes / (1024 * 1024)
         logger.info("Video ready (%.1f MB)", video_size_mb)
-        detected_mime = _detect_video_mime_type(temp_video_path)
-        if not detected_mime:
-            raise ValueError(_unsupported_video_format(temp_video_path.suffix))
         if video_size_bytes > _VIDEO_SIZE_WARN_BYTES:
             logger.warning("Video is %.1f MB — may be slow or rejected", video_size_mb)
-        video_data_url = _video_to_base64_data_url(temp_video_path, mime_type=detected_mime)
+        video_data_url = f"data:{video.mime};base64,{base64.b64encode(video.data).decode('ascii')}"
         if len(video_data_url) > _MAX_VIDEO_BASE64_BYTES:
             raise ValueError(
                 f"Video too large for API: base64 payload is {len(video_data_url) / (1024 * 1024):.1f} MB "

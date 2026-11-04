@@ -3,9 +3,10 @@
 Private page pixels are profile runtime output, not a regenerable cache. A browser writes its
 capture into a proven RAM-only protected workspace; the capture is sealed with the shared
 encrypted artifact writer (``hermes_security.artifacts``) before any analysis, and analysis reads
-the RAM copy. Later image consumers decrypt an own-profile browser artifact into memory, and
-path-based image preparation stages it in a fresh protected workspace. Nothing here writes
-plaintext pixels to persistent storage, and nothing falls back when RAM or the vault is missing.
+the RAM copy. Later image consumers decrypt an own-profile browser artifact into memory and
+prepare it there; file-based tools that need a real path (SVG rasterizer fallbacks) get a fresh
+protected workspace. Nothing here writes plaintext pixels to persistent storage, and nothing falls
+back when RAM or the vault is missing.
 
 Legacy plaintext captures under ``cache/screenshots`` and ``browser_screenshots`` are left in
 place for the owner's migration; they are neither rewritten nor pruned here.
@@ -47,7 +48,7 @@ def protected_media_workspace(purpose: str) -> Iterator[Path]:
             workspace = stack.enter_context(protected_workspace(purpose, prove=_prove))
         except ProtectedWorkspaceUnavailable as exc:
             raise MediaCustodyError(
-                f"Private browser media needs a proven RAM-only protected workspace ({exc}). "
+                f"Private media needs a proven RAM-only protected workspace ({exc}). "
                 "Set security.protected_work_dir to an owner-only ramfs directory (or use a RAM-only "
                 "XDG_RUNTIME_DIR with no active swap) and retry."
             ) from exc

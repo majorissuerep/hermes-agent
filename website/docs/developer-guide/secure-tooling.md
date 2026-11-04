@@ -167,6 +167,16 @@ plaintext viewing file. Vision tools still receive the image pixels. Private
 `MEDIA:` references provide that slash-command hint instead of an external link
 to ciphertext. General configuration and credentials are outside this reader.
 
+`vision_analyze` and `video_analyze` prepare ordinary media in process memory.
+HTTP downloads, data URLs, local or sandbox reads, format normalization,
+region crops and resizes create no plaintext file under the profile or the
+system temp directory. The user's source file is only read. SVG rendering uses
+cairosvg in memory when installed. Its file-based fallbacks (svglib,
+rsvg-convert, inkscape) run only in a proven RAM-only protected workspace.
+Without one, the tool returns setup guidance, and history replay sends the
+existing text placeholder for the SVG. Raster images keep working on every
+host. In-memory preparation is not encrypted process memory.
+
 Delegation keeps its existing `cache/delegation` layout, including populated
 legacy `delegation_cache` homes. Task live views and full summary spills can be
 read through the authenticated file tool. `/agents` and the terminal subagent

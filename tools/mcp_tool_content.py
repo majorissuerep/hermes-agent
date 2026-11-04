@@ -135,6 +135,7 @@ def _mcp_native_image_part(path: str) -> Optional[tuple[dict[str, Any], Optional
     result is re-sent each later turn: ``vision.embed_target_bytes``, 1568 px long edge, JPEG) and normalized
     to a provider-accepted format (BMP and friends → PNG). None when the file cannot be embedded safely. The
     note maps embedded coordinates back to the original image (a screenshot's pixels are the screen's)."""
+    from io import BytesIO
     from pathlib import Path
     from PIL import Image
     from tools.vision_tools import (_EMBED_MAX_DIMENSION, _MAX_BASE64_BYTES, _build_scale_note,
@@ -142,27 +143,24 @@ def _mcp_native_image_part(path: str) -> Optional[tuple[dict[str, Any], Optional
     from tools.vision_tools_history_budget import resolve_embed_target_bytes
     from tools.vision_tools_image_prep import (_detect_image_mime_type_from_bytes, _normalize_to_supported_image,
                                                _validate_raster_image_decodable)
-    src = Path(path)
-    mime = _detect_image_mime_type_from_bytes(src.read_bytes())
+    raw = Path(path).read_bytes()
+    mime = _detect_image_mime_type_from_bytes(raw)
     if not mime:
         return None
-    normalized, mime, err = _normalize_to_supported_image(src, mime)
+    # Normalized in memory: a converted copy (BMP and friends → PNG) is never written next to the cache.
+    normalized, mime, err = _normalize_to_supported_image(raw, mime)
     if err or normalized is None:
         return None
     scale: dict[str, int] = {}
     target = min(resolve_embed_target_bytes(), _MAX_BASE64_BYTES)
-    try:
-        # A valid header over a truncated pixel stream passes the sniff and the cache; one undecodable
-        # part makes the provider reject the whole request, so decode every frame first (as vision_analyze).
-        if _validate_raster_image_decodable(normalized):
-            return None
-        with Image.open(normalized) as image:
-            dims = image.size
-        url = _resize_image_for_vision(normalized, mime_type=mime, max_base64_bytes=target,
-                                       max_dimension=_EMBED_MAX_DIMENSION, force_jpeg=True, scale_out=scale)
-    finally:
-        if normalized != src:
-            normalized.unlink(missing_ok=True)
+    # A valid header over a truncated pixel stream passes the sniff and the cache; one undecodable
+    # part makes the provider reject the whole request, so decode every frame first (as vision_analyze).
+    if _validate_raster_image_decodable(normalized):
+        return None
+    with Image.open(BytesIO(normalized)) as image:
+        dims = image.size
+    url = _resize_image_for_vision(normalized, mime_type=mime, max_base64_bytes=target,
+                                   max_dimension=_EMBED_MAX_DIMENSION, force_jpeg=True, scale_out=scale)
     # The resizer is best-effort on both caps (a 64 px short-edge floor keeps a 60000x64 strip at 60000 px; the
     # quality ladder can bottom out above a low vision.embed_target_bytes). The part is re-sent every later turn,
     # so attach only what fits both; the MEDIA: path still carries the rest (vision_analyze can read it).
