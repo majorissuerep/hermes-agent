@@ -6,6 +6,7 @@ import subprocess
 import sys
 
 import pytest
+from tests.e2e.vault_home import run_unlocked, seal_fixture_home
 
 
 @pytest.mark.parametrize("split,missing_writer", [(False, False), (True, False), (True, True)])
@@ -16,6 +17,7 @@ def test_unfinished_delegation_recovery_keeps_transcript_locator(tmp_path, split
            "REPRO_HANDLE": str(handle_path), "REPRO_SPLIT": str(int(split)),
            "REPRO_MISSING": str(int(missing_writer))}
     (tmp_path / 'config.yaml').write_text('delegation:\n  independent_completions: true\n', encoding='utf-8')
+    seal_fixture_home(tmp_path)
     # The owner's git state comes from a throwaway repo: a CI checkout carries a repo-local
     # includeIf credential include, on which internal git deliberately refuses to run.
     owner = tmp_path / "owner"
@@ -28,6 +30,8 @@ def test_unfinished_delegation_recovery_keeps_transcript_locator(tmp_path, split
 import json, os, threading
 from pathlib import Path
 from unittest.mock import MagicMock
+from hermes_security.handoff import adopt_inherited_key
+assert adopt_inherited_key()
 import tools.delegate_tool as dt
 parent = MagicMock()
 parent._delegate_depth = 0
@@ -65,14 +69,16 @@ assert started.wait(10), "child did not start"
 Path(os.environ["REPRO_HANDLE"]).write_text(json.dumps(handle), encoding="utf-8")
 os._exit(0)
 '''
-    first = subprocess.run([sys.executable, "-c", producer], cwd=owner, env=env,
-                           text=True, capture_output=True, timeout=30, check=False)
+    first = run_unlocked([sys.executable, "-c", producer], cwd=owner, env=env,
+                         text=True, capture_output=True, timeout=30, check=False)
     assert first.returncode == 0, first.stdout + first.stderr
     handle = json.loads(handle_path.read_text(encoding="utf-8"))
     transcripts = handle["live_transcripts"]
     assert all(Path(path).is_file() for path in transcripts)
     consumer = r'''
 import json, queue
+from hermes_security.handoff import adopt_inherited_key
+assert adopt_inherited_key()
 from tools import async_delegation as ad
 from tools.process_registry import format_process_notification
 q = queue.Queue()
@@ -80,8 +86,8 @@ count = ad.restore_undelivered_completions(q)
 events = [q.get_nowait() for _ in range(count)]
 print(json.dumps([{"event": event, "message": format_process_notification(event)} for event in events]))
 '''
-    second = subprocess.run([sys.executable, "-c", consumer], cwd=repo, env=env,
-                            text=True, capture_output=True, timeout=20, check=False)
+    second = run_unlocked([sys.executable, "-c", consumer], cwd=repo, env=env,
+                          text=True, capture_output=True, timeout=20, check=False)
     assert second.returncode == 0, second.stdout + second.stderr
     restored = json.loads(second.stdout.strip().splitlines()[-1])
     assert len(restored) == (2 if split else 1)
