@@ -537,8 +537,11 @@ def _extract_member_atomically(
         # sticky bit is kept — it is inert on a regular file.
         mode &= ~(stat.S_ISUID | stat.S_ISGID)
 
-    # Truncate the stem: mkstemp adds ~16 characters, and a member already near
-    # NAME_MAX would otherwise fail here on a write that used to succeed.
+    from hermes_cli.backup_browser_profiles import restore_mode
+
+    mode = restore_mode(target, mode)
+
+    # Truncate the stem: mkstemp adds ~16 characters; stay below NAME_MAX.
     fd, tmp_name = mkstemp_beside(target, prefix=f".{target.name[:80]}.", suffix=".partial")
     try:
         with os.fdopen(fd, "wb") as dst:

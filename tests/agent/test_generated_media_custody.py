@@ -126,7 +126,7 @@ def test_generated_image_rpc_and_remote_reference_keep_the_original_pixels(home,
 def test_generated_video_limit_preserves_its_existing_200mib_domain(home, monkeypatch):
     from agent.video_gen_provider import save_bytes_video
 
-    monkeypatch.setattr(artifacts, "_MAX_GENERATED_VIDEO_BYTES", 80)
+    monkeypatch.setattr(artifacts, "_MAX_VIDEO_BYTES", 80)
     monkeypatch.setattr(artifacts, "_MAX_MEDIA_BYTES", 40)
     original = secrets.token_bytes(80)
     path = save_bytes_video(original)

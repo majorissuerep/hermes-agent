@@ -251,8 +251,17 @@ plaintext:
   macOS until a provable RAM location is supported there. A `/browser connect` to a browser you
   start yourself (below) is unaffected.
 
-Owned browser profiles are excluded from `hermes backup`, profile exports and plaintext
-`hermes secure-vault export`, like every other copied cookie store.
+Full `hermes backup` and pre-update full backups retain current encrypted browser archives
+byte for byte. A locked backup copies them as opaque state; import authenticates them with
+the original profile's vault before publishing. Raw legacy profiles and interrupted archive
+stages are excluded. Profile distributions and plaintext `hermes secure-vault export` still
+exclude browser credentials.
+
+Quick snapshots cover the documented critical configuration and database files; they do not
+include browser archives. Use a full backup for browser recovery. Import refuses while an owned
+RAM copy exists, so that copy cannot overwrite restored state later. Close the browser and its
+Hermes session, run `hermes secure-vault repair` to save and retire a quiescent RAM copy, then
+retry import. A live browser, unverifiable copy, or failed save is retained and reported.
 
 :::note A running browser can block the login/autofill databases
 On Windows a running Chrome/Edge/Brave holds its cookie and login databases with
@@ -902,7 +911,7 @@ browser:
   record_sessions: true  # default: false
 ```
 
-When enabled, recording starts automatically on the first `browser_navigate` and saves to `~/.hermes/browser_recordings/` when the session closes. Works in both local and cloud (Browserbase) modes. Recordings older than 72 hours are automatically cleaned up.
+When enabled, recording starts automatically on the first `browser_navigate`. While recording, the video exists only in a proven RAM-only protected workspace (or, for a browser in the selected outgoing terminal backend, in that backend's proven RAM runtime); recording is refused rather than written to disk when no such directory exists. When the session closes the complete video (up to 200 MiB) is stored encrypted at `<HERMES_HOME>/artifacts/media/videos/browser_recording_<timestamp>_<id>.webm` and the RAM copy is removed. If the profile vault is locked or the write fails, the video is not reported as saved: it stays in RAM and closing the session again retries with the original unlock. Encrypted recordings older than 72 hours are cleaned up. Plaintext recordings from older builds in `browser_recordings/` are left untouched. Recover recordings with `hermes secure-vault export`.
 
 ## Headed Mode (Visible Browser Window)
 

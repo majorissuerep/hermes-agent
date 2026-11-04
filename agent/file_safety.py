@@ -255,10 +255,27 @@ _HERMES_PROTECTED_SUBPATHS = ("state.db", "sessions", "mcp-tokens", "pairing", "
 # this owned name prefix (``hermes_cli.browser_profile_store``), including their staging and lock
 # siblings. Their cookies/logins are as secret as the encrypted archives they are restored from.
 _OWNED_BROWSER_PROFILE_PREFIX = "hermes-browser-profile-"
+# Browser recordings (``tools.browser_recording_pending``) keep their only plaintext video in the
+# same protected RAM base until it is sealed, and an unsaved one waits there for explicit repair.
+_OWNED_BROWSER_RECORDING_PREFIX = "hermes-browser-recording-"
 
 
-def _in_owned_browser_profile(resolved: str | Path) -> bool:
-    return any(part.startswith(_OWNED_BROWSER_PROFILE_PREFIX) for part in Path(resolved).parts)
+def _owned_browser_ram_kind(resolved: str | Path) -> Optional[str]:
+    """``'profile'`` / ``'recording'`` when ``resolved`` lies in an owned browser RAM directory."""
+    for part in Path(resolved).parts:
+        if part.startswith(_OWNED_BROWSER_PROFILE_PREFIX):
+            return "profile"
+        if part.startswith(_OWNED_BROWSER_RECORDING_PREFIX):
+            return "recording"
+    return None
+
+
+_OWNED_BROWSER_RAM_READ_REASONS = {
+    "profile": "is inside an active Hermes browser profile (cookies/logins held in protected RAM) "
+               "and cannot be read directly.",
+    "recording": "is inside a Hermes browser recording held in protected RAM (unsealed page video) "
+                 "and cannot be read directly; 'hermes secure-vault repair' saves an unsaved one encrypted.",
+}
 
 
 def _classify_write_denial(path: str, *, entry: bool = False) -> Optional[str]:
@@ -308,7 +325,7 @@ def _classify_resolved_write_denial(homes: set[str], resolved: str) -> Optional[
             with suppress(Exception):
                 if _is_under(resolved, os.path.realpath(os.path.join(str(base), sub))):
                     return "credential"
-    if _in_owned_browser_profile(resolved):
+    if _owned_browser_ram_kind(resolved):
         return "credential"
 
     safe_roots = get_safe_write_roots()
@@ -423,9 +440,9 @@ def get_read_block_error(path: str) -> Optional[str]:
                     break
             if reason:
                 break
-        if reason is None and _in_owned_browser_profile(resolved):
-            reason = ("is inside an active Hermes browser profile (cookies/logins held in protected RAM) "
-                      "and cannot be read directly." + _DID_SUFFIX)
+        ram_kind = _owned_browser_ram_kind(resolved) if reason is None else None
+        if ram_kind:
+            reason = _OWNED_BROWSER_RAM_READ_REASONS[ram_kind] + _DID_SUFFIX
         if reason is None and resolved.name.lower() in _BLOCKED_PROJECT_ENV_BASENAMES:
             reason = (
                 "is a secret-bearing environment file and cannot be read to prevent credential "

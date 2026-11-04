@@ -5,6 +5,7 @@ import fnmatch
 import json
 import os
 from pathlib import Path
+import stat
 import subprocess
 import time
 
@@ -18,6 +19,8 @@ from tools.file_operations_common import ReadResult, SearchMatch, SearchResult
 _SOURCE = "profile-owned private artifact (host; not the task execution backend)"
 _SCAN_BYTES = 64 * 1024 * 1024
 _SCAN_FILES = 1000
+_VIDEO_RECOVERY = ("Private video is binary. Authenticate and recover it explicitly: hermes secure-vault export "
+                   "--output /outside-home/recovery.tar (whole-profile plaintext archive).")
 
 
 def _admit(path):
@@ -42,6 +45,23 @@ def _admit(path):
     return candidate
 
 
+def _require_video_file(candidate):
+    """Check owner, existence and original custody; metadata alone cannot authenticate video content."""
+    home, relative = artifacts._location(candidate)
+    custody = artifacts._bound_custody(home)
+    with artifacts._parent(home, relative) as parent:
+        fd = os.open(relative.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
+        try:
+            info = os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_nlink != 1:
+                raise PermissionError("Private video must be an owned single-link regular file")
+            if info.st_size > artifacts._wire_bound(relative):
+                raise ValueError("Private video exceeds its bounded storage format")
+            custody.check()
+        finally:
+            os.close(fd)
+
+
 def read_file(path, offset, limit, max_chars):
     """None means ordinary backend file; recognized artifact failures never fall back."""
     nt_error = get_nt_namespace_error(path, verb="Read")
@@ -52,8 +72,11 @@ def read_file(path, offset, limit, max_chars):
     candidate = _admit(path)
     if candidate is None:
         return None
-    raw = artifacts.read_bytes(candidate)
     relative = artifacts._location(candidate)[1]
+    if media_kind(relative) == "videos":  # never decrypt up to 200 MiB only to refuse it as text
+        _require_video_file(candidate)
+        return json.dumps({**ReadResult(is_binary=True, error=_VIDEO_RECOVERY).to_dict(), "source": _SOURCE})
+    raw = artifacts.read_bytes(candidate)
     extracted = False
     if candidate.suffix.lower() in IMAGE_EXTENSIONS:
         result = ShellFileOperations._image_redirect_result(len(raw)).to_dict()

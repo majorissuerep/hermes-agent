@@ -127,6 +127,11 @@ def repair_clobbered_state(home: Path | str) -> dict:
     from hermes_cli.browser_profile_repair import convert_legacy_browser_profiles
 
     browser = convert_legacy_browser_profiles(home_path)
+    from hermes_cli.browser_profile_recovery import recover_quiescent_profiles
+
+    recovered = recover_quiescent_profiles(home_path)
+    for key in ("archived", "retained"):
+        browser[key].extend(recovered[key])
     report["browser_archived"], report["browser_retained"] = browser["archived"], browser["retained"]
     return report
 

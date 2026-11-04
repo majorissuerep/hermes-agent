@@ -21,6 +21,7 @@ from tools import browser_tool_cloud as _cloud
 from tools import browser_tool_session as _session
 from tools import browser_tool_install as _install
 from tools import browser_tool_real_profile as _real_profile
+from tools import browser_recording as _recording
 
 
 def _session_expiry_timestamp(session_info: dict[str, Any]) -> Optional[float]:
@@ -104,7 +105,7 @@ def _emergency_cleanup_all_sessions():
                 _bt._session_last_activity.clear()
                 _bt._session_owner_homes.clear()
                 _bt._cleanup_failures.clear()
-                _bt._recording_sessions.clear()
+    _best_effort("Unsaved browser recording report", _recording.report_unsaved)
     # Lightpanda servers we spawned that fell out of ``_active_sessions``.
     _best_effort("Lightpanda cleanup on exit", _stop_all_lightpanda)
     # The debug browser (/browser connect) is the user's to close; save it only if already closed.
@@ -585,17 +586,6 @@ def _cleanup_old_screenshots(screenshots_dir, max_age_hours=24):
     _unlink_older_than(screenshots_dir, "browser_screenshot_*.png", max_age_hours, "screenshot")
 
 
-def _cleanup_old_recordings(max_age_hours=72):
-    """Prune old browser recordings."""
-    try:
-        recordings_dir = get_hermes_home() / "browser_recordings"
-    except Exception as e:
-        _bt.logger.debug("Recording cleanup error (non-critical): %s", e)
-        return
-    if recordings_dir.exists():
-        _unlink_older_than(recordings_dir, "session_*.webm", max_age_hours, "recording")
-
-
 def _drop_last_active_binding(task_id: str) -> None:
     """Drop stale last-active ownership after cleaning ``task_id``: a bare task always, a
     sidecar only if it was still the recorded owner (a later click must not resurrect a
@@ -678,7 +668,7 @@ def _force_reap_browser_session(task_id: str) -> None:
     with _bt._cleanup_lock:
         session_info = _bt._active_sessions.get(task_id)
         _bt._session_last_activity.pop(task_id, None)
-        _bt._recording_sessions.discard(task_id)
+    _recording.abandon(task_id)
     if session_info:
         _release_session_resources(task_id, session_info)
     _drop_last_active_binding(task_id)
@@ -706,10 +696,11 @@ def _cleanup_single_browser_session(task_id: str) -> None:
 
     if not session_info:
         _bt.logger.debug("No active session found for task_id: %s", task_id)
+        _recording.retry_seal(task_id)  # a recording whose browser is gone may still await sealing
         return
 
     _bt.logger.debug("Found session for task %s: bb_session_id=%s", task_id, session_info.get("bb_session_id", "unknown"))
-    _bt._maybe_stop_recording(task_id)  # saves the file before close
+    _recording.stop(task_id)  # seals the completed video before close
 
     # Lightpanda sessions have no daemon to ``close``; an expired cloud CDP URL cannot
     # accept one and would make _get_session_info() renew the session mid-cleanup.
@@ -738,6 +729,7 @@ def cleanup_all_browsers() -> None:
         task_ids = list(_bt._active_sessions.keys())
     for task_id in task_ids:
         cleanup_browser(task_id)
+    _recording.retry_pending()
 
     try:  # tear down CDP supervisors so background threads exit
         from tools.browser_supervisor import SUPERVISOR_REGISTRY  # type: ignore[import-not-found]

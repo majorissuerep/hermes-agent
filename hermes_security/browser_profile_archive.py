@@ -540,19 +540,34 @@ class _Replay:
 def _replay_from(parent: int, name: str, keyed: _PurposeKey, purpose: str, replay: _Replay) -> ArchiveSummary:
     fd = os.open(name, os.O_RDONLY | _NOFOLLOW | _CLOEXEC | getattr(os, "O_NONBLOCK", 0), dir_fd=parent)
     with os.fdopen(fd, "rb", buffering=_CHUNK) as handle:
-        info = os.fstat(handle.fileno())
-        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
-            raise PermissionError("A browser profile archive must be an owner-only regular file")
-        if info.st_size > _wire_bound():
-            raise ArchiveError("The browser profile archive exceeds its supported bound")
-        try:
-            for kind, body in _iter_records(handle, keyed, purpose):
-                replay.feed(kind, body)
-        finally:
-            replay.close()
+        return _replay_handle(handle, keyed, purpose, replay)
+
+
+def _replay_handle(handle, keyed: _PurposeKey, purpose: str, replay: _Replay) -> ArchiveSummary:
+    info = os.fstat(handle.fileno())
+    if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
+        raise PermissionError("A browser profile archive must be an owner-only regular file")
+    if info.st_size > _wire_bound():
+        raise ArchiveError("The browser profile archive exceeds its supported bound")
+    try:
+        for kind, body in _iter_records(handle, keyed, purpose):
+            replay.feed(kind, body)
+    finally:
+        replay.close()
     if replay.summary is None:
         raise ArchiveError("The browser profile archive is incomplete")
     return replay.summary
+
+
+def authenticate_ciphertext(handle, relative, *, custody) -> ArchiveSummary:
+    """Authenticate an opened backup/staged archive for its logical destination; restore no plaintext."""
+    relative = PurePosixPath(relative)
+    if browser_state_kind(relative) != "archive":
+        raise PermissionError("Not an owned browser profile archive path")
+    purpose = archive_purpose(relative)
+    summary = _replay_handle(handle, _PurposeKey(custody, purpose), purpose, _Replay(None, None, None))
+    custody.check()
+    return summary
 
 
 def replay_archive(home: Path, relative, *, custody, slot: str | None = None, digest: str | None = None,

@@ -13,7 +13,7 @@ import stat
 
 from hermes_security import frames
 from hermes_security.artifact_paths import (
-    ARTIFACT_ROOTS, generated_kind, is_artifact_relative_path, is_legacy_browser_snapshot_path,
+    ARTIFACT_ROOTS, is_artifact_directory, is_artifact_relative_path, is_legacy_browser_snapshot_path,
     legacy_media_codec, media_kind, terminal_frame_purpose,
 )
 from hermes_security.errors import VaultLockedError
@@ -21,7 +21,7 @@ from hermes_security.errors import VaultLockedError
 _ROOTS = ARTIFACT_ROOTS
 _MAX_BYTES = 64 * 1024 * 1024
 _MAX_MEDIA_BYTES = 128 * 1024 * 1024
-_MAX_GENERATED_VIDEO_BYTES = 200 * 1024 * 1024
+_MAX_VIDEO_BYTES = 200 * 1024 * 1024  # generated/recorded video product bound
 _NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 
 
@@ -41,15 +41,20 @@ def _binding(path, home=None):
 def is_artifact_path(path, *, home=None) -> bool:
     """Recognize explicit reserved roots, including foreign ones to refuse safely."""
     selected, candidate = _binding(path, home)
-    if candidate.is_relative_to(selected) and (
-            is_legacy_browser_snapshot_path(candidate.relative_to(selected)) or media_kind(candidate.relative_to(selected))):
+    if candidate.is_relative_to(selected) and _reserved(candidate.relative_to(selected)):
         return True
     if any(candidate == selected.joinpath(*root) or selected.joinpath(*root) in candidate.parents
            for root in _ROOTS):
         return True
     # A foreign vaulted home cannot become ordinary host/remote file access.
     return any((parent / ".hermes-vault").is_file()
-               and is_artifact_relative_path(candidate.relative_to(parent)) for parent in candidate.parents)
+               and _reserved(candidate.relative_to(parent)) for parent in candidate.parents)
+
+
+def _reserved(relative) -> bool:
+    """Recognize the reserved video namespace even when the reader must refuse its filename."""
+    return (is_artifact_relative_path(relative) or is_artifact_directory(relative)
+            or Path(relative).parts[:3] == ("artifacts", "media", "videos"))
 
 
 def _location(path, home=None):
@@ -139,9 +144,10 @@ def _stream(relative):
 
 
 def _plaintext_bound(relative):
-    if generated_kind(relative) == "videos":
-        return _MAX_GENERATED_VIDEO_BYTES
-    return _MAX_MEDIA_BYTES if media_kind(relative) else _MAX_BYTES
+    kind = media_kind(relative)
+    if kind == "videos":
+        return _MAX_VIDEO_BYTES
+    return _MAX_MEDIA_BYTES if kind else _MAX_BYTES
 
 
 def _wire_bound(relative):

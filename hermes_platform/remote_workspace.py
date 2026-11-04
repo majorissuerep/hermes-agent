@@ -205,3 +205,25 @@ def acquire(run: Runner, name: str, children: Sequence[str], *, candidates: Sequ
 def validate(run: Runner, root: str, children: Sequence[str]) -> ProtectedTargetDir:
     """Re-prove the same existing paths and current mount/swap facts without changing them."""
     return _directory_report(run, "verify", root, children)
+
+
+_READ_REGULAR_FILE = ('set -eu; p=$1; limit=$2; [ ! -L "$p" ] && [ -f "$p" ] || exit 98; '
+                 '[ "$(stat -c %u:%h -- "$p")" = "$(id -u):1" ] || exit 98; '
+                 '[ "$(stat -c %s -- "$p")" -le "$limit" ] || exit 99; '
+                 'before=$(stat -c "%d:%i:%u:%h:%s:%y:%z" -- "$p"); exec 3<"$p"; '
+                 '[ "$before" = "$(stat -Lc "%d:%i:%u:%h:%s:%y:%z" /proc/$$/fd/3)" ] || exit 98; '
+                 'head -c "$((limit + 1))" <&3; '
+                 '[ "$before" = "$(stat -Lc "%d:%i:%u:%h:%s:%y:%z" /proc/$$/fd/3)" ] || exit 98')
+
+
+def regular_file_read_argv(path: str, *, max_bytes: int) -> list[str]:
+    """Bounded binary read on a Linux target, pinning its owned single-link file before output.
+
+    The caller must validate its protected runtime and capture bytes through anonymous pipes.
+    This command never follows a changed pathname after its file descriptor is pinned.
+    """
+    if not isinstance(path, str) or not posixpath.isabs(path) or "\x00" in path:
+        raise ValueError("A protected target file needs an absolute path")
+    if not isinstance(max_bytes, int) or isinstance(max_bytes, bool) or max_bytes <= 0:
+        raise ValueError("A protected target file needs a positive read bound")
+    return ["sh", "-c", _READ_REGULAR_FILE, "hermes-private-file-read", path, str(max_bytes)]

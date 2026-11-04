@@ -81,6 +81,8 @@ def is_artifact_directory(relative) -> bool:
     parts = Path(relative).parts
     if ".." in parts:
         return False
+    if parts in {("artifacts", "media", "videos"), ("browser_recordings",)}:
+        return True
     if parts[:3] in {("artifacts", "generated", "pet-store"), ("artifacts", "generated", "pet-drafts")}:
         return len(parts) == 3 or (len(parts) == 4 and re.fullmatch(r"[0-9a-f]{12}|[0-9a-f]{32}", parts[3]) is not None)
     delegated = _delegation_parts(relative)
@@ -93,6 +95,9 @@ def is_image_relative_path(relative) -> bool:
     return _under(relative, IMAGE_ROOTS) or media_kind(relative) == "images"
 
 
+_VIDEO_NAMES = (re.compile(r"browser_recording_\d{8}T\d{6}Z_[0-9a-f]{32}\.webm"),)  # browser.record_sessions
+
+
 def media_kind(relative) -> str | None:
     generated = generated_kind(relative)
     if generated:
@@ -100,7 +105,12 @@ def media_kind(relative) -> str | None:
     parts = Path(relative).parts
     if ".." in parts:
         return None
+    if (len(parts) == 2 and parts[0] == "browser_recordings"
+            and re.fullmatch(r"session_\d{8}_\d{6}_[^/\x00]{0,16}\.webm", parts[1])):
+        return "videos"
     if len(parts) == 4 and parts[:2] == ("artifacts", "media"):
+        if parts[2] == "videos":
+            return "videos" if any(name.fullmatch(parts[3]) for name in _VIDEO_NAMES) else None
         return parts[2] if parts[2] in {"images", "audio", "documents"} else None
     if _legacy_tui_image(relative):
         return "images"

@@ -846,6 +846,20 @@ def _dispatch_browser_command(
     return engine, result
 
 
+def _run_recording_command(task_id: str, session_info: dict[str, Any], browser_cmd: str,
+                           engine: str, args: list[str]) -> dict[str, Any]:
+    """Record in the captured session once; never renew, recycle, fallback or replay it."""
+    with _bt._cleanup_lock:
+        current = _bt._active_sessions.get(task_id)
+    if current is not session_info or _lifecycle._session_has_expired(session_info):
+        return {"success": False, "error": "The original browser session is no longer active"}
+    if _local_backend_process_dead(session_info):
+        return {"success": False, "error": "The original browser process has ended"}
+    _, result = _dispatch_browser_command(task_id, session_info, browser_cmd, "record", args,
+                                         _bt._safe_command_timeout(), engine)
+    return result
+
+
 def _run_browser_command(
     task_id: str,
     command: str,

@@ -2,11 +2,29 @@
 from __future__ import annotations
 
 import hashlib
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
+
+_BOUND_EXECUTION: ContextVar[_BrowserExecution | None] = ContextVar("browser_execution", default=None)
+
+
+def _bound_execution():
+    selected = _BOUND_EXECUTION.get()
+    if selected is not None:
+        from hermes_constants import get_hermes_home
+
+        if get_hermes_home().resolve() != selected.home:
+            raise RuntimeError("The captured browser execution belongs to a different profile")
+    return selected
 
 
 def terminal_backend() -> str:
+    selected = _bound_execution()
+    if selected is not None:
+        return selected.backend
     from tools.terminal_tool import _get_env_config
     return str(_get_env_config().get("env_type") or "local").strip().lower()
 
@@ -17,6 +35,12 @@ def browser_in_terminal() -> bool:
 
 def terminal_environment(*, create: bool = True) -> Any:
     """Acquire the selected sandbox; never substitute the native host."""
+    selected = _bound_execution()
+    if selected is not None:
+        if selected.env is None:
+            raise RuntimeError("The captured browser execution is native, not an outgoing terminal")
+        _validate_captured_runtime(selected)
+        return selected.env
     backend = terminal_backend()
     if backend not in {"docker", "ssh", "singularity"}:
         raise RuntimeError(f"terminal backend {backend!r} cannot host browser commands; configure an explicit outgoing CDP endpoint instead")
@@ -52,6 +76,49 @@ class BrowserRuntime:
                 self.root, self.profile, self.captures, self.sockets, self.tmp, *argv]
 
 
+@dataclass(frozen=True)
+class _BrowserExecution:
+    home: Path
+    backend: str
+    env: Any
+    runtime: BrowserRuntime | None
+
+
+def _validate_captured_runtime(selected: _BrowserExecution) -> None:
+    from hermes_platform import remote_workspace
+    from tools.environments import streams
+
+    if selected.runtime is None:
+        raise RuntimeError("The captured outgoing browser has no protected runtime")
+
+    def run(argv, *, timeout):
+        return streams.run_in(selected.env, argv, timeout=timeout)
+
+    try:
+        remote_workspace.validate(run, selected.runtime.root, _RUNTIME_PARTS)
+    except remote_workspace.ProtectedTargetUnavailable as exc:
+        raise RuntimeError(f"The original browser runtime is unavailable; it was not recreated: {exc}") from exc
+
+
+@contextmanager
+def captured_execution(home: Path, backend: str, env: Any, runtime: BrowserRuntime | None):
+    """Run a recording callback in its original execution target; never acquire a replacement."""
+    home = Path(home).resolve()
+    if backend not in {"local", "docker", "ssh", "singularity"}:
+        raise RuntimeError("The captured browser execution backend is unsupported")
+    if ((backend == "local" and (env is not None or runtime is not None))
+            or (backend != "local" and (env is None or runtime is None))):
+        raise RuntimeError("The captured browser execution target is inconsistent")
+    token = _BOUND_EXECUTION.set(_BrowserExecution(home, backend, env, runtime))
+    try:
+        selected = _bound_execution()
+        if env is not None:
+            _validate_captured_runtime(selected)
+        yield
+    finally:
+        _BOUND_EXECUTION.reset(token)
+
+
 _RUNTIME_PARTS = ("profile", "captures", "sockets", "tmp")
 RUNTIME_MISSING_EXIT = 97
 RUNTIME_MISSING_MESSAGE = "hermes: the protected browser runtime is missing"
@@ -78,6 +145,12 @@ def browser_runtime(env: Any) -> BrowserRuntime:
     continuity across sessions; nothing is written to the target's disk. Raises an actionable
     ``RuntimeError`` naming the selected backend when no such directory can be proven.
     """
+    selected = _bound_execution()
+    if selected is not None:
+        if selected.env is not env or selected.runtime is None:
+            raise RuntimeError("A browser callback cannot substitute its captured execution target")
+        _validate_captured_runtime(selected)
+        return selected.runtime
     scope = _profile_scope()
     cache = getattr(env, "_hermes_browser_runtimes", None)
     if cache is None:

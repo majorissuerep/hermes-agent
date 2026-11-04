@@ -696,7 +696,7 @@ class TestLightpandaSessionLifecycle:
         self._seed()
         stopped = []
         monkeypatch.setattr("tools.browser_lightpanda.stop_lightpanda", stopped.append)
-        with patch("tools.browser_tool._maybe_stop_recording"), \
+        with patch("tools.browser_recording.stop"), \
              patch("tools.browser_tool_session._run_browser_command") as run, \
              patch("tools.browser_tool.os.path.exists", return_value=False):
             bt_lifecycle.cleanup_browser("task-1")
