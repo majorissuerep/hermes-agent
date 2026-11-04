@@ -14,6 +14,8 @@ import pytest
 
 from tests.tools._protected_backend import ACTIVE_SWAP, FakeBackend
 
+pytest_plugins = ["tests.hermes_cli.test_managed_agents_public_cli"]
+
 
 @pytest.fixture
 def transport(monkeypatch):
@@ -106,13 +108,12 @@ def test_real_probe_reaches_the_same_verdict_as_the_host_proof(monkeypatch, tmp_
 
 
 @pytest.mark.platforms("linux")
-def test_real_probe_never_provisions_through_a_planted_link(monkeypatch):
-    from hermes_platform.memory_protection import per_user_runtime_dir, ram_only_directory_proof
+def test_real_probe_never_provisions_through_a_planted_link(monkeypatch, ram_runtime):
+    from hermes_platform.memory_protection import ram_only_directory_proof
     from hermes_platform import remote_workspace as protected_scratch
 
-    base = per_user_runtime_dir()
-    if base is None or not ram_only_directory_proof(base).proven:
-        pytest.skip("needs a proven RAM-only XDG_RUNTIME_DIR; not qualification of the positive case")
+    base = ram_runtime
+    assert ram_only_directory_proof(base).proven
     run = _local_transport(monkeypatch)
     decoy = Path(base) / f"hermes-decoy-{os.getpid()}"
     link = Path(base) / f"hermes-linked-{os.getpid()}"
