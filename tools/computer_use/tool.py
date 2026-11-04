@@ -20,7 +20,9 @@ from types import SimpleNamespace
 from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
 
 from tools.computer_use.backend import ActionResult, CaptureResult, ComputerUseBackend, UIElement, image_dimensions_from_bytes
-from tools.computer_use.private_media import NOT_NEEDED, Retained, retain_element_tree, retain_screenshot
+from tools.computer_use.private_media import (
+    NOT_NEEDED, Retained, capture_home, capture_scope, retain_element_tree, retain_screenshot,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -312,6 +314,7 @@ class _NoopBackend(ComputerUseBackend):  # pragma: no cover
     focus_app = _noop_stub("focus_app", "app", "raise_window")
 
 # ── Dispatch ────────────────────────────────────────────────────────────────
+@capture_scope()
 def handle_computer_use(args: dict[str, Any], **kwargs) -> Any:
     """Main entry point (tools.registry): a JSON string (text-only) or a dict marked `_multimodal`. Order: hard
     blocks (_reject_unsafe) -> approval scopes (destructive action, then 'bring_to_front' — persistent focus is a
@@ -611,8 +614,7 @@ def _capture_view(cap: CaptureResult, max_elements: int) -> SimpleNamespace:
     # The driver's own AX walk may have stopped at the ``max_elements`` the backend sent: then the spill file is
     # NOT the full tree, and the hint must not promise one.
     ax_capped = len(cap.elements) >= cap.ax_max_elements > 0
-    from hermes_constants import get_hermes_home
-    home = get_hermes_home()  # the owning profile of this call, bound once for both retained copies
+    home = capture_home()
     tree = _spill_elements_to_file(cap, home) if lost_detail else NOT_NEEDED
     shot = _persist_capture_image(cap, home) if has_image else NOT_NEEDED
     return SimpleNamespace(cap=cap, visible=visible, total=len(cap.elements), width=width, height=height,

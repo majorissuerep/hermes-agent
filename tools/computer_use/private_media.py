@@ -21,10 +21,11 @@ import os
 import re
 import stat
 import uuid
+from contextvars import ContextVar
 from pathlib import Path
 from typing import NamedTuple, Optional
 
-from hermes_security.errors import VaultError
+from hermes_security.errors import VaultError, VaultLockedError
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,51 @@ class Retained(NamedTuple):
 
 
 NOT_NEEDED = Retained()
+_CAPTURE_OWNER: ContextVar[tuple | None] = ContextVar("computer_use_capture_owner", default=None)
+
+
+@contextlib.contextmanager
+def capture_scope():
+    """Capture retention authority before backend startup, approvals and delayed capture work.
+
+    An unavailable owner still permits in-memory desktop control; retained copies refuse
+    using this captured result rather than borrowing a later unlock or sibling session.
+    """
+    from hermes_constants import get_hermes_home
+    from hermes_security.session_custody import SessionCustody
+
+    home = get_hermes_home().resolve()
+    try:
+        owner = (home, SessionCustody.capture(home), None)
+    except (VaultError, OSError, ValueError) as exc:
+        owner = (home, None, f"{type(exc).__name__}: {exc}")
+    token = _CAPTURE_OWNER.set(owner)
+    try:
+        yield
+    finally:
+        _CAPTURE_OWNER.reset(token)
+
+
+def capture_home() -> Path:
+    """Return the original retention home without changing backend/approval cache keys."""
+    from hermes_constants import get_hermes_home
+
+    owner = _CAPTURE_OWNER.get()
+    return owner[0] if owner is not None else get_hermes_home().resolve()
+
+
+def _retention_custody(home: Path):
+    from hermes_security.session_custody import SessionCustody
+
+    owner = _CAPTURE_OWNER.get()
+    if owner is None:
+        return SessionCustody.capture(home)
+    if home.resolve() != owner[0]:
+        raise PermissionError("Capture retention belongs to a different profile")
+    if owner[1] is None:
+        raise VaultLockedError(owner[2])
+    owner[1].check()
+    return owner[1]
 
 
 def retain_screenshot(home: Path, data: bytes, extension: str) -> Retained:
@@ -61,25 +107,28 @@ def _retain(home: Path, family, extension: str, data: bytes) -> Retained:
     directory, prefix, _ = family
     relative = Path(*directory, f"{prefix}{uuid.uuid4().hex}{extension}")
     try:
-        path = artifacts.write_bytes(Path(home) / relative, data, home=home)
+        custody = _retention_custody(Path(home))
+        path = artifacts.write_bytes(Path(home) / relative, data, home=home, custody=custody)
     except (VaultError, OSError, ValueError) as exc:
         logger.warning("computer_use: %s copy not retained: %s", prefix.rstrip("_"), exc)
         return Retained(unavailable=f"{type(exc).__name__}: {exc}")
-    _prune(path.parents[len(directory)], relative, family[2])
+    _prune(path.parents[len(directory)], relative, family[2], custody)
     return Retained(path=str(path))
 
 
-def _prune(selected: Path, relative: Path, family_name: re.Pattern) -> None:
+def _prune(selected: Path, relative: Path, family_name: re.Pattern, custody) -> None:
     """Keep the new copy plus the newest older ones; unlink only owned regular files by exact name."""
     from hermes_security.artifacts import _parent
 
     try:
+        custody.check()
         with _parent(selected, relative) as parent:
             older = [name for _, name in _owned_copies(parent, family_name) if name != relative.name]
             for name in older[:max(0, len(older) - (RETAINED_PER_FAMILY - 1))]:
+                custody.check()
                 with contextlib.suppress(FileNotFoundError):
                     os.unlink(name, dir_fd=parent)
-    except OSError as exc:
+    except (VaultError, OSError) as exc:
         logger.warning("computer_use: retention of %s not enforced for this capture: %s",
                        relative.parent.as_posix(), exc)
 
