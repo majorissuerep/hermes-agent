@@ -42,6 +42,7 @@ server.run(transport="stdio")
 def test_real_stdio_result_keeps_original_session_and_fresh_sibling_connection_works(
         home, tmp_path, monkeypatch, change):
     from agent.session_context import scoped_current_session_id
+    from agent.secret_scope import build_profile_secret_scope, reset_secret_scope, set_secret_scope
     from hermes_security.session_authority import start_session_authority
     from tools.mcp_tool_discovery import register_mcp_servers
     from tools.mcp_tool_lifecycle import shutdown_mcp_servers
@@ -80,12 +81,21 @@ def test_real_stdio_result_keeps_original_session_and_fresh_sibling_connection_w
     canary = secrets.token_hex(24)
 
     def invoke(session_id, revoke_url):
-        with scoped_current_session_id(session_id), session_tool_scope(session_id):
-            register_mcp_servers(config)
-            name = mcp_prefixed_tool_name("operation-media", "capture")
-            assert registry.get_entry(name) is not None
-            result = registry.dispatch(name, {"canary": canary, "revoke_url": revoke_url})
-            return json.loads(result["text_summary"] if isinstance(result, dict) else result)
+        from tools.mcp_tool_discovery import _owner_scope_home
+
+        # The tool overlay is a request ID, not a profile path. Native callers
+        # bind the owning profile separately before discovery and dispatch.
+        token = set_secret_scope(build_profile_secret_scope(home), profile_home=str(home))
+        try:
+            with scoped_current_session_id(session_id), session_tool_scope(session_id):
+                assert _owner_scope_home().resolve() == home.resolve()
+                register_mcp_servers(config)
+                name = mcp_prefixed_tool_name("operation-media", "capture")
+                assert registry.get_entry(name) is not None
+                result = registry.dispatch(name, {"canary": canary, "revoke_url": revoke_url})
+                return json.loads(result["text_summary"] if isinstance(result, dict) else result)
+        finally:
+            reset_secret_scope(token)
 
     try:
         result = invoke(first_id, f"http://127.0.0.1:{callback.server_port}/revoke")
