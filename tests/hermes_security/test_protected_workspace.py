@@ -61,6 +61,17 @@ def test_proven_workspace_is_owner_only_and_removed(base: Path) -> None:
     assert list(base.iterdir()) == []
 
 
+@pytest.mark.platforms("posix")
+def test_sgid_base_keeps_its_mode_and_creates_an_owner_only_workspace(base: Path) -> None:
+    """Native mode inheritance is real here; the RAM proof remains a labelled unit seam."""
+    base.chmod(0o2700)
+    with protected_workspace("group-runtime", base=base, prove=_always_proven) as workspace:
+        _assert_owner_only_workspace(workspace, base, "group-runtime")
+        assert stat.S_IMODE(base.stat().st_mode) == 0o2700
+        (workspace / "private.txt").write_text("synthetic protected content", encoding="utf-8")
+    assert list(base.iterdir()) == []
+
+
 def test_workspace_is_removed_when_the_body_raises(base: Path) -> None:
     with pytest.raises(LookupError):
         with protected_workspace("vendor-cli", base=base, prove=_always_proven) as workspace:
