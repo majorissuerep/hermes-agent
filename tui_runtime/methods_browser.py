@@ -162,6 +162,9 @@ def _browser_connect(rid, params: dict) -> dict:
 
 
 def _browser_disconnect(rid) -> dict:
+    from hermes_constants import get_hermes_home
+    from hermes_cli.browser_profile_store import settle
+
     # Reap, drop the override, reap again — same swap window as ``_browser_connect``.
     def reap() -> None:
         with contextlib.suppress(Exception):
@@ -171,7 +174,14 @@ def _browser_disconnect(rid) -> dict:
     reap()
     os.environ.pop("BROWSER_CDP_URL", None)
     reap()
-    return _ok(rid, {"connected": False})
+    # Debug-browser launch does not start the browser-tool janitor. Disconnect is an explicit
+    # quiescent boundary too; settle only original leases of this selected profile, never acquire
+    # fresh authority or stop a browser that is still using its RAM copy.
+    outcomes = settle(home=get_hermes_home())
+    messages = [f"Owned browser profile {slot}: {state}; any unsaved copy remains in protected RAM."
+                for slot, state in outcomes.items()
+                if state not in {"saved", "absent", "discarded", "superseded"}]
+    return _ok(rid, {"connected": False, **({"messages": messages} if messages else {})})
 
 
 def register(server) -> None:

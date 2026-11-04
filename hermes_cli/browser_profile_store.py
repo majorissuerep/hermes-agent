@@ -523,10 +523,12 @@ def _settle_lease(lease: _Lease) -> str:
         return "saved"
 
 
-def settle(slot_prefix: str = "") -> dict[str, str]:
-    """Save and retire every quiescent copy this process prepared (optionally one slot family)."""
+def settle(slot_prefix: str = "", *, home: Path | None = None) -> dict[str, str]:
+    """Save original leases for quiescent copies, optionally restricted to one exact home."""
+    selected_home = Path(home).expanduser().resolve() if home is not None else None
     with _LEASES_LOCK:
-        leases = [lease for (_home, slot), lease in _LEASES.items() if slot.startswith(slot_prefix)]
+        leases = [lease for (owner, slot), lease in _LEASES.items()
+                  if slot.startswith(slot_prefix) and (selected_home is None or owner == selected_home)]
     outcome = {}
     for lease in leases:
         try:
