@@ -201,7 +201,10 @@ def _handle_video_generate(args: dict[str, Any], **_kw: Any) -> str:
             error=error, error_type=error_type,
             provider=getattr(provider, "name", ""), model=model or "", prompt=prompt))
     try:
-        result = provider.generate(prompt=prompt, **kwargs)
+        from agent.provider_media import generation_scope
+
+        with generation_scope():
+            result = provider.generate(prompt=prompt, **kwargs)
     except TypeError as exc:
         # An un-widened provider signature is a plugin bug, not a caller error.
         logger.warning("video_gen provider '%s' rejected kwargs (signature too narrow): %s", pname, exc)

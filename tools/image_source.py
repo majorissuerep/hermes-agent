@@ -96,7 +96,12 @@ async def _resolve_owned_media(src: str, permitted: tuple) -> Optional[ResolvedI
     if path is None:
         return None
     try:
-        data = await asyncio.to_thread(read_owned_media, path)
+        from hermes_security import artifacts
+        from hermes_security.artifact_paths import generated_kind
+
+        relative = artifacts._location(path)[1]
+        reader = artifacts.read_bytes if generated_kind(relative) == "videos" else read_owned_media
+        data = await asyncio.to_thread(reader, path)
     except FileNotFoundError:
         raise SourceNotFound(f"media file not found: '{path}'", src=src, origin="artifact") from None
     except (VaultError, OSError, ValueError) as exc:

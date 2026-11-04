@@ -59,9 +59,9 @@ def read_file(path, offset, limit, max_chars):
         result = ShellFileOperations._image_redirect_result(len(raw)).to_dict()
     elif is_image_relative_path(relative):
         result = ReadResult(is_binary=True, error="Private browser artifact is binary; use vision_analyze.").to_dict()
-    elif media_kind(relative) == "audio":
+    elif media_kind(relative) in {"audio", "videos"}:
         result = ReadResult(is_binary=True, file_size=len(raw),
-                            error="Encrypted audio retained. Explicit offline recovery: hermes secure-vault export "
+                            error="Encrypted media retained. Explicit offline recovery: hermes secure-vault export "
                                   "--output /outside-home/recovery.tar (whole-profile plaintext archive).").to_dict()
     else:
         from tools.tool_output_limits import get_max_line_length

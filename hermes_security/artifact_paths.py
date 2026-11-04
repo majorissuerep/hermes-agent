@@ -17,6 +17,7 @@ PRIVATE_CACHE_ROOTS = (*_OUTPUT_CACHE_ROOTS, *_DELEGATION_ROOTS)
 LEGACY_ROOTS = (*PRIVATE_CACHE_ROOTS, ("browser_screenshots",))
 ARTIFACT_ROOTS = (("artifacts", "terminal-output"), ("artifacts", "tool-results"),
                   ("artifacts", "browser"), ("artifacts", "browser-snapshots"),
+                  ("artifacts", "generated", "images"), ("artifacts", "generated", "videos"),
                   ("artifacts", "media", "images"),
                   ("artifacts", "media", "audio"), ("artifacts", "media", "documents"),
                   *_OUTPUT_CACHE_ROOTS, ("browser_screenshots",), *_DELEGATION_ROOTS)
@@ -85,12 +86,29 @@ def is_image_relative_path(relative) -> bool:
 
 
 def media_kind(relative) -> str | None:
+    generated = generated_kind(relative)
+    if generated:
+        return generated
     parts = Path(relative).parts
     if ".." not in parts and len(parts) == 4 and parts[:2] == ("artifacts", "media"):
         return parts[2] if parts[2] in {"images", "audio", "documents"} else None
     family = _LEGACY_MEDIA.get(parts[:-1]) if ".." not in parts else None
     if family and re.fullmatch(family[1] + r"_[a-f0-9]{32}\.[A-Za-z0-9]{1,12}", parts[-1]):
         return family[0]
+    return None
+
+
+def generated_kind(relative) -> str | None:
+    """Provider deliverables, including the precise historical only-copy family."""
+    path = Path(relative)
+    parts = path.parts
+    if ".." in parts or len(parts) != 4 or parts[2] not in {"images", "videos"}:
+        return None
+    if parts[:2] == ("artifacts", "generated"):
+        return parts[2]
+    if (parts[:2] == ("cache", "generated")
+            and re.fullmatch(r"[A-Za-z0-9_.-]+_\d{8}_\d{6}_[0-9a-f]{8}\.[A-Za-z0-9]{1,12}", path.name)):
+        return parts[2]
     return None
 
 
@@ -129,4 +147,6 @@ def is_private_cache_branch(relative) -> bool:
     parts = Path(relative).parts
     return (parts == ("cache",) or _under(relative, PRIVATE_CACHE_ROOTS) or parts in PRIVATE_CACHE_ROOTS
             or parts in _SNAPSHOT_CACHE_ROOTS or is_legacy_browser_snapshot_path(relative)
-            or parts in _LEGACY_MEDIA or media_kind(relative) is not None)
+            or parts in _LEGACY_MEDIA or parts in {("cache", "generated"), ("cache", "generated", "images"),
+                                                 ("cache", "generated", "videos")}
+            or media_kind(relative) is not None)

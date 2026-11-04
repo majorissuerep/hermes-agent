@@ -86,7 +86,12 @@ def http_server(tmp_path, monkeypatch):
     monkeypatch.setenv("HERMES_ALLOW_PRIVATE_URLS", "1")
     from tools import url_safety
     url_safety._reset_allow_private_cache()
-    (tmp_path / ".hermes").mkdir()
+    from hermes_security import vault
+    home = tmp_path / ".hermes"
+    home.mkdir()
+    monkeypatch.setattr(vault, "_SCRYPT_N", 1024)
+    vault.init_vault(home, "synthetic URL image password")
+    vault.unlock(home, "synthetic URL image password")
 
     # Force the constants/image cache helpers to re-read HERMES_HOME.
     import sys
@@ -100,6 +105,7 @@ def http_server(tmp_path, monkeypatch):
     thread.start()
     yield f"http://127.0.0.1:{port}", httpd
     httpd.shutdown()
+    vault.clear_vault_cache()
     monkeypatch.delenv("HERMES_ALLOW_PRIVATE_URLS", raising=False)
     url_safety._reset_allow_private_cache()
 
@@ -112,11 +118,13 @@ class TestSaveUrlImage:
         path = save_url_image(f"{base}/image.png", prefix="xai_test")
 
         assert path.exists()
-        assert path.read_bytes() == PNG_1PX
+        assert path.read_bytes().startswith(b"HRMVAULT\x00")
+        from hermes_security.artifacts import read_bytes
+        assert read_bytes(path) == PNG_1PX
         # Durable generated-media dir: under HERMES_HOME but OUTSIDE the swept
         # inbound caches — gateway cleanup must never delete the only copy of a
         # generated deliverable (#126445).
-        assert os.path.join("cache", "generated", "images") in str(path)
+        assert os.path.join("artifacts", "generated", "images") in str(path)
         assert path.suffix == ".png"
 
     def test_404_raises(self, http_server):

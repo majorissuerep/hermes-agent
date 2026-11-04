@@ -339,6 +339,13 @@ def _postprocess_image_generate_result(raw: str, task_id: str | None = None) -> 
     image = payload.get("image")
     if not isinstance(image, str) or not _looks_like_absolute_file_path(image):
         return raw
+    from hermes_security.artifacts import is_artifact_path
+
+    if is_artifact_path(image):
+        payload["artifact_access"] = (
+            "Encrypted output is retained by the owning profile; use vision_analyze or read_file on this reference. "
+            "It is not automatically copied to the terminal backend.")
+        return json.dumps(payload, ensure_ascii=False)
     env = _active_terminal_env(task_id)
     cache_base = _agent_cache_base_for_env(env)
     if not cache_base:
@@ -664,7 +671,10 @@ def _dispatch_to_plugin_provider(
     try:
         _add_provider_kwargs(kwargs, image_url, reference_image_urls, upscale,
                              model=_read_configured_image_model(), controls=_declared_controls(provider, controls))
-        result = provider.generate(**kwargs)
+        from agent.provider_media import generation_scope
+
+        with generation_scope():
+            result = provider.generate(**kwargs)
     except Exception as exc:
         # A TypeError from generate() predating image_url support (third-party plugin not yet
         # updated): text-to-image keeps working; surface a clear note when an edit was requested.
@@ -734,7 +744,10 @@ def _maybe_route_managed_model(
     try:
         _add_provider_kwargs(kwargs, image_url, reference_image_urls, upscale,
                              controls=_declared_controls(provider, controls))
-        result = provider.generate(**kwargs)
+        from agent.provider_media import generation_scope
+
+        with generation_scope():
+            result = provider.generate(**kwargs)
     except Exception as exc:
         logger.warning("Managed %s routing failed: %s", plugin_name, exc)
         return _provider_error(f"Managed {provider.display_name} generation error: {exc}", "provider_exception")
@@ -749,12 +762,14 @@ def _confine_source_images(image_url, reference_image_urls, task_id, *, permitte
     through; local backend is a no-op. Returns ``(image_url, reference_image_urls, error_json_or_None)``.
     """
     from tools.terminal_scope import terminal_env
-    if (terminal_env("TERMINAL_ENV") or "local").strip().lower() in ("", "local"):
-        return image_url, reference_image_urls, None
+    local = (terminal_env("TERMINAL_ENV") or "local").strip().lower() in ("", "local")
     from model_tools import _run_async
+    from tools.browser_media_custody import owned_media_path
     from tools.image_source import ImageResolutionError, resolve_local_source_to_data_url
 
     def resolve(ref):
+        if local and owned_media_path(ref) is None:
+            return ref
         return _run_async(resolve_local_source_to_data_url(ref, task_id, permitted=permitted))
     try:
         if isinstance(image_url, str) and image_url.strip():

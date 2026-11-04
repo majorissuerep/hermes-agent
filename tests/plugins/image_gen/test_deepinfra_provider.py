@@ -14,6 +14,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from hermes_security import vault
+
 import plugins.image_gen.deepinfra as deepinfra_plugin
 
 # 1×1 transparent PNG — valid bytes for save_b64_image()
@@ -31,10 +33,14 @@ def _b64_png() -> str:
 @pytest.fixture(autouse=True)
 def _isolation(tmp_path, monkeypatch):
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    monkeypatch.setattr(vault, "_SCRYPT_N", 1024)
+    vault.init_vault(tmp_path, "synthetic image provider password")
+    vault.unlock(tmp_path, "synthetic image provider password")
     import hermes_cli.models as _models_mod
     monkeypatch.setattr(_models_mod, "_deepinfra_catalog_cache", {})
     monkeypatch.setenv("DEEPINFRA_API_KEY", "test-key")
     yield
+    vault.clear_vault_cache()
 
 def test_list_models_filters_by_image_gen_tag(monkeypatch):
     """Plugin-side wiring: list_models() returns only ``image-gen``-tagged

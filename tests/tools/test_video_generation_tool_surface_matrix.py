@@ -33,6 +33,9 @@ def _reset_registry():
 @pytest.fixture
 def matrix_env(tmp_path, monkeypatch):
     """Set up HERMES_HOME, stub fal_client + httpx, force plugin discovery."""
+    from hermes_security import vault
+
+    monkeypatch.setattr(vault, "_SCRYPT_N", 1024)
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
     monkeypatch.setenv("FAL_KEY", "test-key")
     monkeypatch.setenv("XAI_API_KEY", "test-key")
@@ -117,7 +120,10 @@ def matrix_env(tmp_path, monkeypatch):
 
 def _invoke_tool(home, cfg: dict, args: dict, tool_name: str = "video_generate") -> dict:
     """Write config, invoke the registered tool handler, return parsed JSON."""
+    from tests.e2e.vault_home import seal_fixture_home
+
     (home / "config.yaml").write_text(yaml.safe_dump(cfg))
+    seal_fixture_home(home)
     import hermes_cli.config as cfg_mod
     if hasattr(cfg_mod, "_invalidate_load_config_cache"):
         cfg_mod._invalidate_load_config_cache()

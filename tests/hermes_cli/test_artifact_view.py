@@ -108,7 +108,7 @@ def test_borrowed_view_grammar_does_not_expand_execution_or_export(arguments):
         validate_native_arguments(arguments)
 
 
-@pytest.mark.parametrize("family", ["artifacts/browser", "artifacts/media/images"])
+@pytest.mark.parametrize("family", ["artifacts/browser", "artifacts/media/images", "artifacts/generated/images"])
 def test_public_v2_cli_and_real_slash_worker_preview_encrypted_image(world, family):
     from hermes_cli._launchers import runtime_command
     from tui_runtime import server

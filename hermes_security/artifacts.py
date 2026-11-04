@@ -13,7 +13,7 @@ import stat
 
 from hermes_security import frames
 from hermes_security.artifact_paths import (
-    ARTIFACT_ROOTS, is_artifact_relative_path, is_legacy_browser_snapshot_path,
+    ARTIFACT_ROOTS, generated_kind, is_artifact_relative_path, is_legacy_browser_snapshot_path,
     legacy_media_codec, media_kind, terminal_frame_purpose,
 )
 from hermes_security.errors import VaultLockedError
@@ -21,6 +21,7 @@ from hermes_security.errors import VaultLockedError
 _ROOTS = ARTIFACT_ROOTS
 _MAX_BYTES = 64 * 1024 * 1024
 _MAX_MEDIA_BYTES = 128 * 1024 * 1024
+_MAX_GENERATED_VIDEO_BYTES = 200 * 1024 * 1024
 _NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 
 
@@ -138,6 +139,8 @@ def _stream(relative):
 
 
 def _plaintext_bound(relative):
+    if generated_kind(relative) == "videos":
+        return _MAX_GENERATED_VIDEO_BYTES
     return _MAX_MEDIA_BYTES if media_kind(relative) else _MAX_BYTES
 
 

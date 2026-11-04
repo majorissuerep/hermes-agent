@@ -80,7 +80,7 @@ _GENERATED_IMAGE_KIND = f"{provider_media.GENERATED_SUBDIR}/images"
 
 
 def save_b64_image(b64_data: str, *, prefix: str = "image", extension: str = "png") -> Path:
-    """Decode base64 image data into ``$HERMES_HOME/cache/generated/images/``; return the path."""
+    """Retain base64 output in this profile's durable encrypted image artifacts."""
     return provider_media.save_b64(_GENERATED_IMAGE_KIND, b64_data, prefix=prefix, extension=extension)
 
 
@@ -92,7 +92,7 @@ _URL_IMAGE_CONTENT_TYPES = {
 def save_url_image(
     url: str, *, prefix: str = "image", timeout: float = 60.0, max_bytes: int = 25 * 1024 * 1024,
 ) -> Path:
-    """Download an (often ephemeral) image URL into ``$HERMES_HOME/cache/generated/images/``. Raises on
+    """Download an (often ephemeral) image URL into durable encrypted artifacts. Raises on
     network / HTTP / oversize / empty errors so callers can fall back to the bare URL."""
     return provider_media.save_url(
         _GENERATED_IMAGE_KIND, url, prefix=prefix, timeout=timeout, max_bytes=max_bytes,
