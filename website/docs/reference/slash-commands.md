@@ -144,6 +144,7 @@ Type `/` in the CLI to open the autocomplete menu. Built-in commands are case-in
 | `/paste` | Attach a clipboard image |
 | `/copy [number]` | Copy the last assistant response to clipboard (or the Nth-from-last with a number). CLI-only. |
 | `/image <path>` | Attach a local image file for your next prompt. |
+| `/artifacts view <path> [--cols N] [--rows N]` | Inspect an encrypted browser capture from the owning profile as a bounded grayscale text preview, without creating a plaintext viewing file. The encrypted original remains available to vision tools. Output defaults to 80 columns and 32 rows; limits are 120 columns and 60 rows. The terminal equivalent is `hermes artifacts view <path>`. |
 | `/debug` | Upload debug report (system info + logs) and get shareable links. Also available in messaging. |
 | `/update` | Update Hermes Agent to the latest version. |
 | `/profile` | Show active profile name and home directory |
