@@ -67,6 +67,29 @@ def process_record_is_live(record: Any) -> bool:
         return False
 
 
+def process_record_is_dead(record: Any) -> bool:
+    """Known absence of this exact PID/start identity; unreadable identity stays unknown.
+
+    Cleanup of retained private state needs stronger evidence than ``not live``. Never treat
+    access denial, missing fingerprints or malformed metadata as permission to remove it.
+    """
+    if not isinstance(record, dict):
+        return False
+    pid, started = record.get("pid"), record.get("start_time")
+    if type(pid) is not int or pid <= 0 or type(started) is not int or started <= 0:
+        return False
+    try:
+        process = psutil.Process(pid)
+        if process.status() == psutil.STATUS_ZOMBIE:
+            return True
+        current = get_process_start_time(pid)
+        return current is not None and not process_start_times_agree(current, started)
+    except psutil.NoSuchProcess:
+        return True
+    except (psutil.AccessDenied, OSError):
+        return False
+
+
 def process_start_times_agree(current: Any, *recorded: Any) -> bool:
     """Strict identity guard for destructive operations; malformed inputs raise."""
     current = float(current)

@@ -30,6 +30,9 @@ def owned_profile_env(tmp_path: Path, monkeypatch, *, proven: bool = True,
     home.mkdir()
     ram = tmp_path / "ram"
     ram.mkdir(mode=0o700)
+    user = tmp_path / "browser-user-home"
+    user.mkdir(mode=0o700)
+    monkeypatch.setenv("HOME", str(user))
     monkeypatch.setenv("HERMES_HOME", str(home))
     monkeypatch.setenv("XDG_RUNTIME_DIR", str(ram))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-config"))
@@ -40,6 +43,9 @@ def owned_profile_env(tmp_path: Path, monkeypatch, *, proven: bool = True,
     proof = RamProof(proven, "ramfs" if proven else "ext4", "synthetic unit proof")
     monkeypatch.setattr("hermes_cli.browser_profile_store._prove", lambda _path: proof)
     monkeypatch.setattr("hermes_cli.browser_profile_store._capacity", lambda _path, **_kwargs: CapacityBudget(
+        8 * 1024**3, "synthetic unit budget; native admission is qualified separately"))
+    monkeypatch.setattr("hermes_cli.browser_worker_store._prove", lambda _path: proof)
+    monkeypatch.setattr("hermes_cli.browser_worker_store._capacity", lambda _path, **_kwargs: CapacityBudget(
         8 * 1024**3, "synthetic unit budget; native admission is qualified separately"))
     return home, ram
 

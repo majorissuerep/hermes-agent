@@ -249,12 +249,13 @@ def build_write_approval_paths(home: str) -> set[str]:
 # Control files (auth.json, config.yaml, webhook_subscriptions.json) are
 # deliberately NOT here (#45947): read-denied, but the user may ask to edit them.
 _HERMES_PROTECTED_SUBPATHS = ("state.db", "sessions", "mcp-tokens", "pairing", "vault", "browser-profile",
-                              "chrome-debug")
+                              "chrome-debug", "browser-worker")
 
 # Active owned browser profiles live in the protected RAM workspace (outside HERMES_HOME) under
 # this owned name prefix (``hermes_cli.browser_profile_store``), including their staging and lock
 # siblings. Their cookies/logins are as secret as the encrypted archives they are restored from.
 _OWNED_BROWSER_PROFILE_PREFIX = "hermes-browser-profile-"
+_OWNED_BROWSER_WORKER_PREFIX = "hermes-browser-worker-"
 # Browser recordings (``tools.browser_recording_pending``) keep their only plaintext video in the
 # same protected RAM base until it is sealed, and an unsaved one waits there for explicit repair.
 _OWNED_BROWSER_RECORDING_PREFIX = "hermes-browser-recording-"
@@ -265,12 +266,16 @@ def _owned_browser_ram_kind(resolved: str | Path) -> Optional[str]:
     for part in Path(resolved).parts:
         if part.startswith(_OWNED_BROWSER_PROFILE_PREFIX):
             return "profile"
+        if part.startswith(_OWNED_BROWSER_WORKER_PREFIX):
+            return "worker"
         if part.startswith(_OWNED_BROWSER_RECORDING_PREFIX):
             return "recording"
     return None
 
 
 _OWNED_BROWSER_RAM_READ_REASONS = {
+    "worker": "is inside private browser configuration/workspace state held in protected RAM "
+              "and cannot be read directly.",
     "profile": "is inside an active Hermes browser profile (cookies/logins held in protected RAM) "
                "and cannot be read directly.",
     "recording": "is inside a Hermes browser recording held in protected RAM (unsealed page video) "
@@ -383,6 +388,9 @@ _CREDENTIAL_FILE_NAMES = (
 # the directory itself, message for a file inside). browser-profile/ is a copy
 # of the user's Cookies / Login Data — the same credential class as auth.json.
 _READ_DENIED_DIRS = (
+    ("browser-worker",
+     "is the private browser configuration/workspace store and cannot be read directly.",
+     "is inside the private browser configuration/workspace store and cannot be read directly."),
     ("mcp-tokens",
      "is the Hermes MCP token directory and cannot be read directly.",
      "is a Hermes MCP token file and cannot be read directly."),

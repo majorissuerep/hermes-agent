@@ -36,6 +36,11 @@ def build_secure_vault_parser(subparsers) -> None:
     parser.add_argument("--output", help="export: new plaintext .tar outside every encrypted home (never overwritten)")
     parser.add_argument("--migration-backup", help="export: standalone encrypted migration rollback; requires its original credential")
     parser.add_argument(
+        "--native-browser-state", metavar="DIRECTORY",
+        help="repair: explicitly move an owned .agent-browser directory into verified encrypted browser state; "
+             "retire the original only after full verification, retaining an encrypted recovery snapshot",
+    )
+    parser.add_argument(
         "--key-only", action="store_true",
         help="migrate: non-interactive creation for daemons/scripts — generate an X25519 pair, "
         "seal the vault to the PUBLIC half, write the private key to a NEW explicit external --key-out (0600). "
@@ -60,6 +65,8 @@ def build_secure_vault_parser(subparsers) -> None:
     )
 
     def _run(args):
+        if args.native_browser_state and args.vault_command != "repair":
+            parser.error("--native-browser-state requires secure-vault repair")
         from hermes_cli.vault_cmd import cmd_vault
         from hermes_cli.vault_export import export_command
 

@@ -10,6 +10,7 @@ import zipfile
 from pathlib import Path
 
 from hermes_security import browser_profile_archive as archive
+from hermes_security import browser_worker_archive as workers
 from hermes_security.errors import VaultError
 
 def browser_relative(relative) -> Path | None:
@@ -17,14 +18,15 @@ def browser_relative(relative) -> Path | None:
     parts = Path(relative).parts
     if len(parts) > 2 and parts[0] == "profiles":
         parts = parts[2:]
-    if parts and parts[0] in {archive.ARCHIVE_ROOT, archive.LEGACY_DEBUG_ROOT}:
+    if parts and parts[0] in {archive.ARCHIVE_ROOT, archive.LEGACY_DEBUG_ROOT, workers.ARCHIVE_ROOT}:
         return Path(*parts)
     return None
 
 
 def current_archive(relative) -> bool:
     inner = browser_relative(relative)
-    return bool(inner is not None and archive.browser_state_kind(inner) == "archive"
+    return bool(inner is not None and (archive.browser_state_kind(inner) == "archive"
+                                      or workers.worker_state_kind(inner) in {"archive", "recovery"})
                 and not inner.name.startswith(".stage-"))
 
 
@@ -38,7 +40,9 @@ def current_entries(home: Path, relative_parent: Path):
     if parts and not (len(parts) == 2 and parts[0] == "profiles"):
         return
     owner = home / relative_parent
-    for path in archive.archive_paths(owner):
+    from hermes_security.browser_worker_pending import paths
+
+    for path in [*archive.archive_paths(owner), *workers.archive_paths(owner), *paths(owner, kind='recovery')]:
         if current_archive(path.relative_to(owner)):
             yield path, path.relative_to(home)
 
@@ -61,7 +65,8 @@ def write_ciphertext(zf, path: Path, relative) -> str | None:
     from hermes_security.artifacts import _parent
     from hermes_security.vault import is_unlocked
 
-    home, inner = path.parent.parent, Path(archive.ARCHIVE_ROOT) / path.name
+    home, inner = path.parent.parent, Path(path.parent.name) / path.name
+    codec = workers if inner.parts[0] == workers.ARCHIVE_ROOT else archive
     with _parent(home, inner) as parent:
         fd = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK, dir_fd=parent)
         with os.fdopen(fd, "rb") as handle:
@@ -73,7 +78,7 @@ def write_ciphertext(zf, path: Path, relative) -> str | None:
             if is_unlocked(home):
                 try:
                     authenticated = _DigestReader(handle)
-                    archive.authenticate_ciphertext(authenticated, inner, custody=archive.capture_custody(home))
+                    codec.authenticate_ciphertext(authenticated, inner, custody=codec.capture_custody(home))
                     verified_digest = authenticated.digest.digest()
                 except (VaultError, OSError, ValueError) as exc:
                     warning = f"Browser archive copied unchanged but authentication failed ({type(exc).__name__})"
@@ -104,7 +109,8 @@ def prepare_import(staged: Path, target: Path, home: Path) -> bool:
         raise OSError("Legacy/interrupted browser state must be repaired in its original home before backup")
     if target.parent.parent != home:
         raise OSError("Browser archives require their own initialized profile, never an ancestor vault")
-    custody = archive.capture_custody(home)
+    codec = workers if relative.parts[0] == workers.ARCHIVE_ROOT else archive
+    custody = codec.capture_custody(home)
     fd = os.open(staged, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK)
     with os.fdopen(fd, "rb") as handle:
         if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
@@ -112,7 +118,7 @@ def prepare_import(staged: Path, target: Path, home: Path) -> bool:
         # The private import stage was created by mkstemp. Only its mode changes,
         # never the ciphertext; final publication must retain this secret mode.
         os.fchmod(handle.fileno(), 0o600)
-        archive.authenticate_ciphertext(handle, relative, custody=custody)
+        codec.authenticate_ciphertext(handle, relative, custody=custody)
     from hermes_security.artifacts import _parent
 
     with _parent(home, relative, create=True) as parent:
@@ -121,7 +127,7 @@ def prepare_import(staged: Path, target: Path, home: Path) -> bool:
 
 
 def restore_mode(target: Path, mode):
-    return 0o600 if current_archive(Path(archive.ARCHIVE_ROOT) / target.name) and target.parent.name == archive.ARCHIVE_ROOT else mode
+    return 0o600 if current_archive(Path(target.parent.name) / target.name) else mode
 
 
 @contextlib.contextmanager
@@ -151,13 +157,33 @@ def restore_guard(home: Path, relative_members):
     from hermes_state.runtime_ownership import OwnershipConflict
 
     owners = set()
+    worker_owners = set()
     for relative in relative_members:
+        parts = Path(relative).parts
+        if parts:
+            candidate = home.joinpath(*parts[:2]) if parts[0] == "profiles" and len(parts) > 2 else home
+            from hermes_security.browser_worker_pending import paths
+
+            if paths(candidate):
+                owners.add(candidate)
+                worker_owners.add(candidate)
         if current_archive(relative):
-            parts = Path(relative).parts
-            owners.add(home.joinpath(*parts[:2]) if parts[0] == "profiles" else home)
+            owner = home.joinpath(*parts[:2]) if parts[0] == "profiles" else home
+            owners.add(owner)
+            if browser_relative(relative).parts[0] == workers.ARCHIVE_ROOT:
+                worker_owners.add(owner)
     with contextlib.ExitStack() as stack:
         try:
             for owner in sorted(owners):
+                if owner in worker_owners:
+                    from hermes_cli import browser_worker_store
+
+                    with selected_home(owner):
+                        for worker in browser_worker_store.resources_in_ram(owner):
+                            stack.enter_context(browser_worker_store._lock(worker.lock_path, wait=0))
+                            raise OwnershipConflict(
+                                'Private browser state still exists in RAM. Close its owners and run '
+                                'hermes secure-vault repair before import. No backup members were restored.')
                 for profile in profiles(owner):
                     stack.enter_context(store._profile_lock(profile, wait=0.0))
                     if os.path.lexists(profile.path):

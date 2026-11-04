@@ -103,6 +103,44 @@ Missing config/secrets files receive encrypted, empty defaults after the unlock;
 existing files are never replaced. Defaults cannot reconstruct deleted values:
 restore their original settings and credentials from a retained backup.
 
+### Private native browser state
+
+Native agent-browser uses an owned RAM workspace for its HOME, temporary Chromium
+profiles, caches, logs and private IPC. Its configuration, auth and explicitly saved
+session state are checkpointed into encrypted `browser-worker/` archives. The default
+Chromium profile remains ephemeral; it stays in RAM until that browser exits.
+This path requires the Linux RAM proof described above. An unavailable proof, locked
+vault or damaged archive refuses the browser instead of using persistent scratch or
+an empty replacement. The presence of a `CI` marker alone never authorizes disabling
+Chromium's sandbox; explicit browser flags retain their existing meaning.
+
+An existing `.agent-browser` directory is preserved and requires a deliberate import.
+Close its browsers and Hermes sessions, select the owning profile, and run:
+
+```sh
+hermes secure-vault repair --native-browser-state /path/to/original/.agent-browser
+```
+
+Repair keeps an encrypted snapshot of that original directory, restores and compares
+the complete state in RAM, and publishes its new encrypted archive before retiring
+the old directory. It refuses live or foreign sources and existing destination state
+that would require a merge. Deleting the old directory does not securely erase old
+SSD blocks. Retain the reported recovery archive and its original vault credential.
+
+Every queued browser operation retains its original session authority. A later unlock
+or live sibling cannot revive it; a fresh sibling operation can use shared profile
+configuration. A failed checkpoint retains both the latest RAM state and the previous
+archive. After closing all owners, `hermes secure-vault repair` saves and retires
+quiescent worker RAM state. A live or unknown process identity prevents retirement.
+Encrypted pending references identify the original RAM location even if the configured
+workspace changes. If RAM is truly missing, explicit repair authenticates the last
+checkpoint and records the missing-copy history before allowing that checkpoint to be
+used again. It requires known-dead owners or a verified changed machine incarnation,
+reports that uncheckpointed changes are unverifiable, and keeps the original archive.
+Full ZIP backups retain worker ciphertext; ordinary plaintext export excludes this
+credential-bearing domain. RAM filesystem proof does not cover Python heap swap or
+the confidentiality of a hypervisor's memory.
+
 ## Restore a retained backup
 
 Quick snapshots and full ZIP backups created before enabling encryption remain

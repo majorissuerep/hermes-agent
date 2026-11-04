@@ -77,7 +77,7 @@ def _agent_browser_session_cmd(session_name: str, *cmd: str, log_label: str) -> 
         return None
     try:
         return _capture_agent_browser_cli(
-            [*_session._agent_browser_argv(browser_cmd), "--session", session_name, *cmd],
+            [*_session._agent_browser_argv(browser_cmd), "--session", session_name, "--json", *cmd],
             timeout=15, tag=f"rp-{log_label.replace(' ', '-')}",
         )
     except (subprocess.SubprocessError, OSError) as e:

@@ -264,7 +264,7 @@ class TestRealProfileCdpLaunch:
         assert err and "already being prepared" in err
 
 
-    def test_launch_is_headless_and_agent_browser_attaches(self, tmp_path):
+    def test_launch_is_headless_and_agent_browser_attaches(self, tmp_path, owned):
         """Real-profile browsing runs headless (no focus-stealing window).
 
         Two argv paths are checked:
@@ -324,8 +324,8 @@ class TestRealProfileCdpLaunch:
         # #100855: the attach daemon lives in a reaper-visible socket dir claimed by this
         # process, and never self-terminates (Chrome is ours, not the daemon's).
         socket_dir = captured["env"]["AGENT_BROWSER_SOCKET_DIR"]
-        assert socket_dir == str(tmp_path / f"agent-browser-{bt._REAL_PROFILE_SESSION}")
-        assert (tmp_path / f"agent-browser-{bt._REAL_PROFILE_SESSION}" / f"{bt._REAL_PROFILE_SESSION}.owner_pid").read_text() == str(os.getpid())
+        assert Path(socket_dir).is_relative_to(owned[1])
+        assert (Path(socket_dir) / f"{bt._REAL_PROFILE_SESSION}.owner_pid").read_text() == str(os.getpid())
         assert "AGENT_BROWSER_IDLE_TIMEOUT_MS" not in captured["env"]
         self._reset()
 

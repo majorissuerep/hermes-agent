@@ -79,7 +79,9 @@ def windows_headless_browser_options(browser_env: dict[str, str],
         is_windows = os.name == "nt"
     if not is_windows or "AGENT_BROWSER_HEADED" in browser_env:
         return browser_env
-    return {**browser_env, "AGENT_BROWSER_HEADED": "false"}
+    result = browser_env.copy()
+    result["AGENT_BROWSER_HEADED"] = "false"
+    return result
 
 
 def _format_browser_timeout_error(
@@ -145,8 +147,13 @@ def _prepare_session_socket_dir(session_name: str) -> str:
     """Create the per-session socket dir (parallel workers must not share one) and claim it
     with our PID BEFORE first use — another hermes process's orphan reaper rmtree's any
     ownerless agent-browser-* dir in the shared tmpdir."""
-    socket_dir = os.path.join(_bt._socket_safe_tmpdir(), f"agent-browser-{session_name}")
-    os.makedirs(socket_dir, mode=0o700, exist_ok=True)
+    from tools import browser_terminal as terminal
+    if terminal.browser_in_terminal():
+        socket_dir = os.path.join(_bt._socket_safe_tmpdir(), f"agent-browser-{session_name}")
+        os.makedirs(socket_dir, mode=0o700, exist_ok=True)
+    else:
+        from tools.browser_native_runtime import socket_directory
+        socket_dir = socket_directory(session_name)
     _lifecycle._write_owner_pid(socket_dir, session_name)
     return socket_dir
 
@@ -171,7 +178,11 @@ def _agent_browser_command_env(socket_dir: str) -> dict[str, str]:
     env["AGENT_BROWSER_SOCKET_DIR"] = socket_dir
     if "AGENT_BROWSER_IDLE_TIMEOUT_MS" not in env:
         env["AGENT_BROWSER_IDLE_TIMEOUT_MS"] = str(_daemon_idle_timeout_seconds() * 1000)
-    return env
+    from tools import browser_terminal as terminal
+    if terminal.browser_in_terminal():
+        return env
+    from tools.browser_native_runtime import environment
+    return environment(env, socket_dir)
 
 
 
@@ -640,8 +651,11 @@ def _run_agent_browser_client(argv: list[str], env: dict[str, str], stdin_payloa
     client's own exit, and a timeout (``None`` code) kills only the client. Exceeding the
     output bound raises ``ClientOutputLimit`` rather than returning partial JSON."""
     from hermes_platform.client_capture import run_client
+    from tools.browser_native_runtime import client_guard, completed_client
 
-    code, stdout, stderr = run_client(argv, env=env, payload=stdin_payload, timeout=timeout)
+    with client_guard(env, argv) as guarded:
+        code, stdout, stderr = run_client(argv, env=guarded, payload=stdin_payload, timeout=timeout)
+        completed_client(guarded, argv, code, stdout)
     return code, stdout.decode("utf-8-sig", "replace"), stderr.decode("utf-8-sig", "replace")
 
 

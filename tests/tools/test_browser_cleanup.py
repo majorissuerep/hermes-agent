@@ -72,10 +72,14 @@ class TestBrowserCleanup:
         browser_tool._session_last_activity["task-1"] = 1.0
         browser_tool._session_last_activity["task-2"] = 2.0
 
-        with patch("tools.browser_tool_lifecycle.cleanup_all_browsers") as mock_cleanup_all:
+        with (
+            patch("tools.browser_recording.stop"),
+            patch("tools.browser_tool_session._run_browser_command", return_value={"success":True}) as close,
+            patch("tools.browser_tool.os.path.exists", return_value=False),
+        ):
             bt_lifecycle._emergency_cleanup_all_sessions()
 
-        mock_cleanup_all.assert_called_once_with()
+        assert {call.args[:2] for call in close.call_args_list} == {('task-1', 'close'), ('task-2', 'close')}
         assert browser_tool._active_sessions == {}
         assert browser_tool._session_last_activity == {}
         assert browser_tool._cleanup_done is True

@@ -1,5 +1,6 @@
 """Process identity guards use live, test-owned child processes on the native host."""
 
+import os
 import subprocess
 import sys
 
@@ -43,3 +44,25 @@ def test_force_kill_requires_an_identity_even_for_a_test_owned_process():
         if child.poll() is None:
             child.kill()
         child.wait(timeout=10)
+
+
+def test_retained_state_cleanup_requires_known_death_of_exact_child_identity():
+    import subprocess
+    import sys
+    from hermes_platform.processes import get_process_start_time, process_record_is_dead
+
+    assert not process_record_is_dead({'pid':os.getpid(), 'start_time':None})
+    assert not process_record_is_dead({'pid':-1, 'start_time':1})
+    with subprocess.Popen([sys.executable, '-c', 'import sys; sys.stdin.read(1)'],
+                          stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) as child:
+        try:
+            started = get_process_start_time(child.pid)
+            assert started is not None
+            record = {'pid':child.pid, 'start_time':started}
+            assert not process_record_is_dead(record)
+            child.communicate(b'x', timeout=10)
+            assert process_record_is_dead(record)
+        finally:
+            if child.poll() is None:
+                child.kill()
+                child.wait(timeout=5)

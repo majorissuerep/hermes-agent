@@ -16,6 +16,10 @@ from tools import browser_tool_session as session
 
 @pytest.fixture
 def browser_store(tmp_path, monkeypatch):
+    from hermes_security import vault
+    from hermes_platform.memory_protection import RamProof
+    from hermes_platform.memory_capacity import CapacityBudget
+
     home = tmp_path / "home with spaces"
     home.mkdir()
     store = home / "tools"
@@ -30,6 +34,15 @@ def browser_store(tmp_path, monkeypatch):
     monkeypatch.delenv("PLAYWRIGHT_BROWSERS_PATH", raising=False)
     monkeypatch.delenv("TERMUX_VERSION", raising=False)
     monkeypatch.setattr(bt, "_chromium_autoinstall_attempted", False)
+    ram = tmp_path / "native-browser-ram"
+    ram.mkdir(mode=0o700)
+    ram.chmod(0o700)
+    monkeypatch.setattr(vault, "_SCRYPT_N", 1024)
+    vault.init_vault(home, "synthetic PM browser state password")
+    vault.unlock(home, "synthetic PM browser state password")
+    monkeypatch.setattr("hermes_security.protected_workspace.protected_workspace_base", lambda: ram)
+    monkeypatch.setattr("hermes_cli.browser_worker_store._prove", lambda _path: RamProof(True, "ramfs", "unit RAM seam"))
+    monkeypatch.setattr("hermes_cli.browser_worker_store._capacity", lambda *_a, **_k: CapacityBudget(8*1024**3, "unit budget"))
     lock = pm.Lockfile(paths.lockfile_path())
     target = pm.current_target()
 
@@ -54,7 +67,8 @@ def browser_store(tmp_path, monkeypatch):
         assert installed is not None and installed.binary == binary
         return binary
 
-    return home, store, publish
+    yield home, store, publish
+    vault.clear_vault_cache()
 
 
 def test_unrecorded_playwright_cache_is_not_a_pm_browser(browser_store):
@@ -190,7 +204,8 @@ def test_external_chromium_override_survives_pm_composition(browser_store, monke
     override.write_bytes(b"external")
     monkeypatch.setenv("AGENT_BROWSER_EXECUTABLE_PATH", str(override))
     assert install._chromium_installed()
-    assert session._agent_browser_command_env(str(tmp_path))["AGENT_BROWSER_EXECUTABLE_PATH"] == str(override)
+    socket = session._prepare_session_socket_dir("explicit-chromium")
+    assert session._agent_browser_command_env(socket)["AGENT_BROWSER_EXECUTABLE_PATH"] == str(override)
 
 
 def test_restricted_path_discovers_external_browser_without_execution(browser_store, monkeypatch, tmp_path):
@@ -241,8 +256,7 @@ print(json.dumps({"argv": sys.argv, "env": dict(os.environ)}))
     monkeypatch.setenv("OPENAI_API_KEY", "must-not-reach-browser")
     monkeypatch.setenv("BROWSERBASE_API_KEY", "browser-provider-key")
     before = dict(os.environ)
-    socket_dir = tmp_path / "session"
-    socket_dir.mkdir()
+    socket_dir = Path(session._prepare_session_socket_dir("pm-environment"))
     command = install._find_agent_browser(validate=False)
     env = session._agent_browser_command_env(str(socket_dir))
     code, output, error = session._run_agent_browser_client([command, "--json", "get", "url"], env, None, 10)
@@ -362,7 +376,7 @@ def test_browser_consumer_ci_marker_cannot_disable_vendor_sandbox(browser_store,
     monkeypatch.setenv('AGENT_BROWSER_ARGS', '--window-size=1000,700')
     monkeypatch.setenv('AGENT_BROWSER_CHROME_FLAGS', '--force-color-profile=srgb')
     original = dict(os.environ)
-    env = session._agent_browser_command_env(str(tmp_path/'socket'))
+    env = session._agent_browser_command_env(session._prepare_session_socket_dir('ci-environment'))
     assert 'CI' not in env
     assert env['AGENT_BROWSER_ARGS'] == original['AGENT_BROWSER_ARGS']
     assert env['AGENT_BROWSER_CHROME_FLAGS'] == original['AGENT_BROWSER_CHROME_FLAGS']

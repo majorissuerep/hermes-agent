@@ -177,6 +177,10 @@ _UPDATE_DEPENDENCIES = (
     "hermes_security/artifact_paths.py",  # private state classification during update migration
     "hermes_security/artifacts.py",  # authenticated private output recovery
     "hermes_security/browser_profile_archive.py",  # verified browser archive repair during migration
+    "hermes_security/browser_worker_archive.py",  # typed private browser configuration/workspace recovery
+    "hermes_cli/browser_worker_store.py",  # quiescent private browser state during explicit repair
+    "hermes_cli/browser_worker_repair.py",  # explicit legacy native browser-state import
+    "hermes_security/browser_worker_pending.py",  # authenticated retained-RAM recovery references
     "hermes_security/tree_archive.py",  # shared verified tree grammar used by browser archive repair
     "hermes_cli/browser_profile_repair.py",  # explicit legacy browser conversion during update repair
     "hermes_security/delegation_repair.py",  # legacy delegation conversion during repair

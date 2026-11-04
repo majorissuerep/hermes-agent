@@ -14,6 +14,15 @@ from tools import browser_tool_cdp as bt_cdp
 
 
 @pytest.fixture
+def native_browser_config(tmp_path, monkeypatch):
+    """Owned native config with the shared labelled unit RAM proof; no browser is launched."""
+    from tests.hermes_cli.browser_profile_env import owned_profile_env, reset_owned_profiles
+
+    yield owned_profile_env(tmp_path, monkeypatch)
+    reset_owned_profiles()
+
+
+@pytest.fixture
 def private_browser_media(tmp_path, monkeypatch):
     """Unlocked vault home + labelled unit RAM-proof seam: browser captures are sealed artifacts."""
     from hermes_platform.memory_protection import RamProof
@@ -181,7 +190,7 @@ class TestChromeFallback:
     """Chrome fallback must hand off from Lightpanda without leaking engine policy."""
 
 
-    def test_chrome_fallback_injects_required_sandbox_args(self, tmp_path):
+    def test_chrome_fallback_injects_required_sandbox_args(self, tmp_path, native_browser_config):
 
         captured_envs = []
 
@@ -314,7 +323,7 @@ class TestEngineOverride:
     @patch("tools.browser_tool_cdp._get_cdp_override", return_value="")
     @patch("tools.browser_tool._is_camofox_mode", return_value=False)
     def test_override_prevents_engine_injection(
-        self, _camofox, _cdp, _cloud, _chromium, _local, _find, _session
+        self, _camofox, _cdp, _cloud, _chromium, _local, _find, _session, native_browser_config
     ):
         """When _engine_override='auto', --engine flag is NOT injected."""
         import tools.browser_tool as bt
@@ -349,7 +358,7 @@ class TestEngineOverride:
     @patch("tools.browser_tool_cdp._get_cdp_override", return_value="")
     @patch("tools.browser_tool._is_camofox_mode", return_value=False)
     def test_no_override_uses_cached_engine(
-        self, _camofox, _cdp, _cloud, _chromium, _local, _find, _session
+        self, _camofox, _cdp, _cloud, _chromium, _local, _find, _session, native_browser_config
     ):
         """Lightpanda gets neither auto-injected nor inherited Chrome arguments."""
         import tools.browser_tool as bt
@@ -392,7 +401,7 @@ class TestEngineOverride:
             assert "AGENT_BROWSER_ARGS" not in environment
             assert "AGENT_BROWSER_CHROME_FLAGS" not in environment
 
-    def test_hybrid_local_sidecar_injects_engine_even_with_cloud_provider(self):
+    def test_hybrid_local_sidecar_injects_engine_even_with_cloud_provider(self, native_browser_config):
         """A task::local sidecar is local even when global cloud config exists."""
         import tools.browser_tool as bt
 

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import os
 import re
 from pathlib import Path, PurePosixPath
 
@@ -55,6 +56,34 @@ def archive_relative(digest: str) -> PurePosixPath:
     return PurePosixPath(ARCHIVE_ROOT, digest + ARCHIVE_SUFFIX)
 
 
+def worker_state_kind(relative) -> str | None:
+    parts = PurePosixPath(Path(relative).as_posix()).parts
+    if not parts or parts[0] != ARCHIVE_ROOT:
+        return None
+    if len(parts) == 2:
+        from hermes_security.browser_worker_pending import metadata_kind
+
+        metadata = metadata_kind(relative)
+        if metadata is not None:
+            return metadata
+        if parts[1].endswith(ARCHIVE_SUFFIX) and _DIGEST.fullmatch(parts[1][:-len(ARCHIVE_SUFFIX)]):
+            return "archive"
+        if parts[1].startswith(".stage-"):
+            return "stage"
+    return "legacy"
+
+
+def archive_paths(home: Path) -> list[Path]:
+    root = Path(home) / ARCHIVE_ROOT
+    try:
+        entries = sorted(os.scandir(root), key=lambda entry: entry.name)
+    except (FileNotFoundError, NotADirectoryError):
+        return []
+    return [root / entry.name for entry in entries
+            if worker_state_kind(Path(ARCHIVE_ROOT, entry.name)) == "archive"
+            and entry.is_file(follow_symlinks=False)]
+
+
 def capture_custody(home: Path):
     """The current request's original unlock lineage for exactly this initialized home."""
     from hermes_security.artifacts import _bound_custody
@@ -68,6 +97,12 @@ def _named(relative, digest: str) -> PurePosixPath:
     if relative != archive_relative(digest):
         raise PermissionError("Not this identity's owned browser worker archive path")
     return relative
+
+
+def _digest(relative) -> str:
+    if worker_state_kind(relative) != "archive":
+        raise PermissionError("Not an owned browser worker archive path")
+    return Path(relative).stem
 
 
 def _admitted(home: Path, relative, *, custody, digest: str) -> tuple[Path, PurePosixPath]:
@@ -97,15 +132,28 @@ def write_archive(home: Path, relative, source: Path, *, custody, identity: dict
                                       policy=_policy(), slot=SLOT, identity=identity, digest=digest)
 
 
-def replay_archive(home: Path, relative, *, custody, digest: str,
+def replay_archive(home: Path, relative, *, custody, digest: str | None = None,
                    target: Path | None = None) -> tree_archive.ArchiveSummary:
     """Authenticate this identity's worker archive end to end; with ``target`` restore into it.
 
     The caller publishes ``target`` only after this returns; a corrupt or foreign archive raises.
     """
+    digest = _digest(relative) if digest is None else digest
     home, relative = _admitted(home, relative, custody=custody, digest=digest)
     return tree_archive.replay_archive(home, relative, custody=custody, purpose=_purpose(relative),
                                        policy=_policy(), slot=SLOT, digest=digest, target=target)
+
+
+def authenticate_ciphertext(handle, relative, *, custody) -> tree_archive.ArchiveSummary:
+    """Authenticate an opened opaque backup/import with this exact worker name and header."""
+    if worker_state_kind(relative) == 'recovery':
+        from hermes_security.browser_worker_pending import authenticate_handle
+
+        return authenticate_handle(handle, relative, custody=custody)
+    digest = _digest(relative)
+    _home, relative = _admitted(custody.vault.home, relative, custody=custody, digest=digest)
+    return tree_archive.authenticate_ciphertext(handle, custody=custody, purpose=_purpose(relative),
+                                                 policy=_policy(), slot=SLOT, digest=digest)
 
 
 def archive_ciphertext_size(home: Path, relative, *, digest: str) -> int | None:

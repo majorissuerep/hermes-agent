@@ -493,9 +493,10 @@ def _replay_handle(handle, keyed: _PurposeKey, purpose: str, replay: _Replay) ->
     return replay.summary
 
 
-def authenticate_ciphertext(handle, *, custody, purpose: str, policy: TreePolicy) -> ArchiveSummary:
+def authenticate_ciphertext(handle, *, custody, purpose: str, policy: TreePolicy,
+                            slot: str | None = None, digest: str | None = None) -> ArchiveSummary:
     """Authenticate a caller-owned opened archive completely; restore no plaintext or close its FD."""
-    summary = _replay_handle(handle, _PurposeKey(custody, purpose), purpose, _Replay(policy, None, None, None))
+    summary = _replay_handle(handle, _PurposeKey(custody, purpose), purpose, _Replay(policy, slot, digest, None))
     custody.check()
     return summary
 

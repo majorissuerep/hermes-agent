@@ -651,12 +651,13 @@ def _purpose_for(rel: Path) -> str:
 def _browser_relative(relative: Path | None) -> Path | None:
     """Home-relative browser-profile path, also inside a named profile (``profiles/<name>/…``)."""
     from hermes_security.browser_profile_archive import browser_state_kind
+    from hermes_security.browser_worker_archive import worker_state_kind
 
     if relative is None:
         return None
     parts = Path(relative).parts
     candidate = Path(*parts[2:]) if len(parts) > 2 and parts[0] == "profiles" else Path(relative)
-    return candidate if browser_state_kind(candidate) else None
+    return candidate if browser_state_kind(candidate) or worker_state_kind(candidate) else None
 
 
 def _classify(path: Path, relative: Path | None = None) -> str:
@@ -736,11 +737,24 @@ def _browser_offender(path: Path, rel: Path) -> str | None:
     whole profile directory, while damaged archives keep their exact path.
     """
     from hermes_security import browser_profile_archive as archive
+    from hermes_security import browser_worker_archive as workers
 
     inner = _browser_relative(rel)
-    kind = archive.browser_state_kind(inner)
+    if workers.worker_state_kind(inner):
+        archive, kind = workers, workers.worker_state_kind(inner)
+    else:
+        kind = archive.browser_state_kind(inner)
     if kind == "stage":
         return rel.as_posix()  # A filename cannot authenticate an interrupted publication.
+    if kind in {'locator', 'recovery'}:
+        from hermes_security.browser_worker_pending import read
+
+        try:
+            owner = path.parent.parent
+            read(owner, inner, custody=workers.capture_custody(owner))
+            return None
+        except (OSError, ValueError, vault_errors.VaultError):
+            return rel.as_posix()
     if kind == "archive":
         owner = vault_mod.find_vault_home(path)
         try:
