@@ -44,6 +44,11 @@ def test_truncation_footers_keep_public_sandbox_and_private_owner_paths(tmp_path
             assert body in artifacts.read_text(stored, home=home)
             from tools.file_tools import read_file_tool
             assert json.loads(read_file_tool(path, offset=1, limit=1))["content"] == "1|row 0"
+            encrypted = stored.read_bytes()
+            recovered = json.loads(read_file_tool(path, offset=2501, limit=2))
+            assert recovered["content"] == "2501|row 2500\n2502|row 2501"
+            assert "host" in recovered["source"]
+            assert stored.read_bytes() == encrypted
 
 
 def test_local_backend_footer_keeps_the_host_path(tmp_path, monkeypatch):

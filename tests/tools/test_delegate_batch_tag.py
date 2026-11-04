@@ -5,6 +5,7 @@ batches print ``[n/N]`` completion lines to the same console. Without a
 batch tag ``✓ [3/3]`` and ``✓ [3/9]`` are indistinguishable. Every progress
 surface carries a human-readable ``set N`` ordinal (not a raw id slice).
 """
+import json
 import types
 
 import pytest
@@ -113,6 +114,8 @@ def test_batch_completion_lines_are_attributable_across_two_batches(monkeypatch,
             parent_agent=parent,
         )
         assert "error" not in str(res)[:20], res
+        results = json.loads(res)["results"]
+        assert len(results) == n and all(result["status"] == "completed" for result in results), res
     headers = [re.match(r"\s*🔀 \[(set \d+)\] delegating (\d+) tasks", l) for l in lines]
     headers = [m for m in headers if m]
     assert [(m.group(1), int(m.group(2))) for m in headers] == [("set 1", 3), ("set 2", 9)]

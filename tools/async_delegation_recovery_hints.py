@@ -16,7 +16,6 @@ import subprocess
 from typing import Dict, Optional
 
 from hermes_cli._subprocess_compat import harden_git_argv, noninteractive_repo_git_env
-from hermes_security.delegation_state import read_transcript
 from hermes_security.errors import VaultError
 
 TAIL_LINES = 20
@@ -26,7 +25,11 @@ _GIT_TIMEOUT_S = 5
 
 def transcript_tail(path: str, *, lines: int = TAIL_LINES, chars: int = TAIL_CHARS) -> Optional[str]:
     """Last ``lines`` lines (at most ``chars`` characters) of a live transcript; None when unreadable."""
+    if lines <= 0 or chars <= 0:
+        return None
     try:
+        from hermes_security.delegation_state import read_transcript
+
         # Authenticate through the exact owning profile. A raw file tail is
         # ciphertext, and must never become a fallback view of unrelated files.
         # The existing private-artifact read cap bounds authentication work.
@@ -35,7 +38,7 @@ def transcript_tail(path: str, *, lines: int = TAIL_LINES, chars: int = TAIL_CHA
         return None
     tail = "\n".join(raw.splitlines()[-lines:]).strip()
     if len(tail) > chars:
-        tail = "…" + tail[-chars:]
+        tail = "…" + tail[-(chars - 1):] if chars > 1 else "…"
     return tail or None
 
 

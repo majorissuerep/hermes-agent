@@ -22,9 +22,8 @@ FORK_HTTPS="https://github.com/majorissuerep/hermes-agent.git"
 # updates track majorissuerep/hermes-agent.
 FORK_SRC="${FORK_SRC:-$FORK_SSH}"
 HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
-SCRATCH_DIR="${TMPDIR:-$HERMES_HOME/cache/scratch}"
-mkdir -p "$SCRATCH_DIR"
-chmod 700 "$SCRATCH_DIR"
+SCRATCH_ROOT="${TMPDIR:-$HERMES_HOME/cache/scratch}"
+SCRATCH_DIR=""
 INSTALL_DIR="$HERMES_HOME/hermes-agent"
 LAUNCHER="$HOME/.local/bin/hermes"
 STAMP="$(date +%Y%m%d-%H%M%S)"
@@ -35,6 +34,19 @@ say() { [[ $QUIET -eq 1 ]] || echo "$@"; }
 die() { echo "✗ $*" >&2; exit 1; }
 
 command -v git >/dev/null || die "git not found"
+
+# New headless homes need an intentionally selected persistent credential path.
+# The CLI performs the canonical outside-home and exclusive-file validation.
+require_headless_key_output() {
+    [[ -n "${HERMES_VAULT_KEY_OUT:-}" ]] || die \
+        "new headless migration requires HERMES_VAULT_KEY_OUT naming a NEW external credential file; set the path or run from a terminal"
+}
+
+preflight_migration_credential() {
+    [[ -f "$HERMES_HOME/.hermes-vault" ]] && return 0
+    _tty_available && return 0
+    require_headless_key_output
+}
 
 # ── 1. Refuse live owners; never stop services or signal other processes ─────
 require_quiescent_home() {
@@ -257,19 +269,20 @@ migrate_state() {
     # non-interactive context (curl|bash has no TTY trust boundary for a
     # passphrase; env vars leak via /proc/environ, children, EnvironmentFiles).
     # Non-interactive installs create a KEY-ONLY vault: the private key file
-    # (0600) is the sole credential. A human can later add a passphrase slot
-    # interactively ('hermes secure-vault migrate' offers it on a TTY).
+    # (0600) is the sole credential and must be deliberately retained outside
+    # the home; no passphrase is created for the caller.
     if _tty_available; then
         "$LAUNCHER" secure-vault migrate --yes
     else
-        KEY_OUT="${HERMES_VAULT_KEY_OUT:-$HERMES_HOME/vault.key}"
-        if ! "$LAUNCHER" secure-vault migrate --yes --key-only --key-out "$KEY_OUT"; then
+        require_headless_key_output
+        local key_out="$HERMES_VAULT_KEY_OUT"
+        if ! "$LAUNCHER" secure-vault migrate --yes --key-only --key-out "$key_out"; then
             die "key-only migration failed — run 'hermes secure-vault migrate' interactively"
         fi
         say ""
-        say "✓ Vault created. Private key (ONLY credential): $KEY_OUT"
-        say "  Daemons: HERMES_VAULT_PRIVATE_KEY=$KEY_OUT (a PATH, never a passphrase)"
-        say "  Interactive passphrase slot: hermes secure-vault add-key later, from a terminal"
+        say "✓ Vault created. External private key (ONLY credential): $key_out"
+        say "  Daemons: HERMES_VAULT_PRIVATE_KEY=$key_out (a PATH, never a passphrase)"
+        say "  Retain this credential for later starts; preserve the recovery backup until verified."
     fi
 }
 
@@ -279,7 +292,12 @@ _tty_available() {
 }
 
 main() {
+    preflight_migration_credential
     require_quiescent_home
+    mkdir -p "$SCRATCH_ROOT"
+    SCRATCH_DIR="$(mktemp -d "$SCRATCH_ROOT/hermes-takeover.XXXXXXXX")"
+    chmod 700 "$SCRATCH_DIR"
+    trap 'rm -rf -- "$SCRATCH_DIR"' EXIT
     swap_source
     build_venv
     install_launcher

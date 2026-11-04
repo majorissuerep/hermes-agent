@@ -9,6 +9,8 @@ import pytest
 
 from tests.e2e.vault_home import run_unlocked, seal_fixture_home
 
+pytestmark = pytest.mark.platforms("posix")
+
 
 @pytest.mark.parametrize("split,missing_writer", [(False, False), (True, False), (True, True)])
 def test_unfinished_delegation_recovery_keeps_transcript_locator(tmp_path, split, missing_writer):

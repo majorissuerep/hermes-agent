@@ -20,6 +20,20 @@ import base64
 import json
 from types import SimpleNamespace
 
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def sealed_media_home(tmp_path, monkeypatch):
+    from hermes_security import vault
+
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    monkeypatch.setattr(vault, "_SCRYPT_N", 1024)
+    vault.init_vault(tmp_path, "synthetic MCP media password")
+    vault.unlock(tmp_path, "synthetic MCP media password")
+    yield
+    vault.clear_vault_cache()
+
 
 def _png_bytes():
     """Return a minimal valid PNG byte sequence.
@@ -182,8 +196,6 @@ class TestNativeImageAttach:
         is its own part, so it stays next to the resized screenshot (else the model clicks the wrong pixel)."""
         from agent.tool_executor import _persist_multimodal_text_parts
         from tools.budget_config import BudgetConfig
-        from tests.e2e.vault_home import seal_fixture_home
-        seal_fixture_home(tmp_path)
         out = self._call(monkeypatch, tmp_path, {})
         first_text = next(p for p in out["content"] if p.get("type") == "text")
         first_text["text"] = first_text["text"].replace("snapshot", "snapshot" + "x" * 200_000, 1)
