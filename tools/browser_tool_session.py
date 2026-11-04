@@ -160,6 +160,9 @@ def _agent_browser_command_env(socket_dir: str) -> dict[str, str]:
     env = _bt._build_browser_env()
     env["PATH"] = _install._merge_browser_path(env.get("PATH", ""))
     env = env_for("agent-browser", base_env=env)
+    # Rust 0.26 treats any CI value as permission to disable Chromium's sandbox.
+    # Host capability checks and explicit browser flags govern that choice here.
+    env.pop("CI", None)
     from hermes_cli.browser_runtime import chromium_executable
 
     executable = chromium_executable()

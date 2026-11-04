@@ -352,3 +352,18 @@ def test_browser_readiness_ignores_ambient_chromium(browser_store, monkeypatch, 
     assert install.check_browser_requirements() is (backend != "local")
     publish("chromium")
     assert install.check_browser_requirements()
+
+@pytest.mark.parametrize('ci_marker', ['true', 'false', ''])
+def test_browser_consumer_ci_marker_cannot_disable_vendor_sandbox(browser_store, monkeypatch, tmp_path, ci_marker):
+    _, _, publish = browser_store
+    publish('agent-browser')
+    publish('chromium')
+    monkeypatch.setenv('CI', ci_marker)
+    monkeypatch.setenv('AGENT_BROWSER_ARGS', '--window-size=1000,700')
+    monkeypatch.setenv('AGENT_BROWSER_CHROME_FLAGS', '--force-color-profile=srgb')
+    original = dict(os.environ)
+    env = session._agent_browser_command_env(str(tmp_path/'socket'))
+    assert 'CI' not in env
+    assert env['AGENT_BROWSER_ARGS'] == original['AGENT_BROWSER_ARGS']
+    assert env['AGENT_BROWSER_CHROME_FLAGS'] == original['AGENT_BROWSER_CHROME_FLAGS']
+    assert dict(os.environ) == original
