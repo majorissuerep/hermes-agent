@@ -99,7 +99,7 @@ def cmd_vault(args: Any) -> int:
         from hermes_security import migrate as mig
 
         if getattr(args, "key_only", False):
-            from hermes_cli.vault_key_creation import key_destination
+            from hermes_cli.vault_key_policy import key_destination
 
             try:
                 key_out = key_destination(home, getattr(args, "key_out", None))

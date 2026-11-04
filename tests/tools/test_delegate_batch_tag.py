@@ -83,13 +83,14 @@ def test_child_tree_lines_and_relayed_events_carry_batch_tag():
 def test_batch_completion_lines_are_attributable_across_two_batches(monkeypatch, tmp_path):
     """Two interleaved batches: every ✓ line names its own ``set N``."""
     monkeypatch.setenv("HERMES_HOME", str(tmp_path / ".hermes"))
-    (tmp_path / ".hermes").mkdir()
+    home = tmp_path / ".hermes"
+    home.mkdir()
     from tests.e2e.vault_home import seal_fixture_home
-
-    seal_fixture_home(tmp_path / ".hermes")
+    seal_fixture_home(home)
     lines = []
     parent = types.SimpleNamespace(
         session_id="root", model="m", tool_progress_callback=None, _delegate_spinner=None,
+        _session_db=types.SimpleNamespace(db_path=home / "state.db"),
         _safe_print=lambda line: lines.append(line),
     )
     monkeypatch.setattr(

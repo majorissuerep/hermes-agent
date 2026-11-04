@@ -296,7 +296,7 @@ main() {
     require_quiescent_home
     mkdir -p "$SCRATCH_ROOT"
     SCRATCH_DIR="$(mktemp -d "$SCRATCH_ROOT/hermes-takeover.XXXXXXXX")"
-    chmod 700 "$SCRATCH_DIR"
+    chmod u=rwx,go=,a-s,a-t "$SCRATCH_DIR"
     trap 'rm -rf -- "$SCRATCH_DIR"' EXIT
     swap_source
     build_venv

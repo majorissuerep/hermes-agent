@@ -11,21 +11,6 @@ class KeyOutputError(ValueError):
     """The requested credential could not be privately published before migration."""
 
 
-def key_destination(home: Path, output: str | None) -> Path:
-    """Admission precedes backup, key generation and all migration writes."""
-    from hermes_security.io import _home_for
-
-    if not output:
-        raise ValueError("--key-only requires --key-out naming a NEW file outside the Hermes home")
-    requested = Path(output).expanduser().absolute()
-    if requested.is_symlink() or requested.exists():
-        raise ValueError("--key-out must name a new file; existing files and links are never overwritten")
-    target = requested.resolve(strict=False)
-    if target.is_relative_to(Path(home).expanduser().resolve(strict=False)) or _home_for(target) is not None:
-        raise ValueError("--key-out must be outside this home and every encrypted Hermes home")
-    return target
-
-
 def _sync_directory(directory: Path) -> None:
     descriptor = os.open(directory, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
     try:
@@ -59,6 +44,7 @@ def _write_new_credential(path: Path, data: bytes) -> None:
 def migrate_with_key_file(home: Path, output: Path) -> int:
     """Keep the historical external-key mode, with an explicit exclusive output."""
     from hermes_security import migrate, vault
+    from hermes_cli.vault_key_policy import key_destination
 
     private_key, public_key = vault.generate_keypair()
     try:

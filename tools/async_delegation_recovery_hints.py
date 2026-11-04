@@ -28,8 +28,11 @@ def transcript_tail(path: str, *, lines: int = TAIL_LINES, chars: int = TAIL_CHA
     if lines <= 0 or chars <= 0:
         return None
     try:
-        from tools.delegation_live_log import read_transcript
+        from hermes_security.delegation_state import read_transcript
 
+        # Authenticate through the exact owning profile. A raw file tail is
+        # ciphertext, and must never become a fallback view of unrelated files.
+        # The existing private-artifact read cap bounds authentication work.
         raw = read_transcript(path).decode("utf-8", errors="replace")
     except (OSError, ValueError, VaultError):
         return None

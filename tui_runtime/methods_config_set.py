@@ -88,10 +88,13 @@ def _stash_pending_model_switch(rid, key, value, session, confirmed, parsed):
         pending_warning = _pending_switch_selection_warning(pending_model, guard_provider, agent)
         if pending_warning is not None:
             return _cfgset_model_ok(rid, key, pending_model, pending_warning, pending_warning, deferred=False)
+    from hermes_constants import parse_reasoning_effort
+    reasoning = parse_reasoning_effort(getattr(parsed, "reasoning_effort", ""))
     # display_*: _session_info shows the user's pick while pending, not the live old model.
     session["pending_model_switch"] = {
         "raw": value, "confirm_expensive_model": confirmed,
-        "display_model": pending_model, "display_provider": pending_provider}
+        "display_model": pending_model, "display_provider": pending_provider,
+        **({"display_reasoning_config": reasoning} if reasoning is not None else {})}
     return _cfgset_model_ok(rid, key, pending_model, deferred=True)
 
 

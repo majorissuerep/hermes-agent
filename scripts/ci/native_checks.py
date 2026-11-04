@@ -17,6 +17,7 @@ LINUX_FILES = [
     "tests/tui_runtime/test_terminal_session_naming_pty.py",
     "tests/tui_runtime/test_terminal_pty_custody.py",
     "tests/hermes_cli/test_update_finish.py",
+    "tests/hermes_cli/test_key_only_startup_admission.py",
     "tests/tools/test_terminal_management_launcher.py",
     "tests/e2e/test_fixture_download_cache.py",
 ]

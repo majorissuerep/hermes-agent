@@ -1,7 +1,11 @@
-"""Public caches map to the task backend; private outputs use authenticated host file tools."""
+"""Public cache footers use sandbox paths; private outputs keep owner-local reads.
 
-import json
+The native read_file gate decrypts private delegation output before dispatching
+ordinary paths to an outgoing terminal backend. No vault authority is forwarded.
+"""
+
 import os
+import json
 import re
 import pytest
 from pathlib import Path
@@ -9,6 +13,8 @@ from pathlib import Path
 from tools import browser_tool_snapshot
 from tools import delegate_tool_results
 from tools import web_tools_truncate
+from hermes_security import artifacts
+from tests.e2e.vault_home import seal_fixture_home
 
 
 @pytest.fixture
@@ -53,8 +59,10 @@ def test_truncation_footers_render_public_cache_and_private_recovery_paths(owner
     assert os.path.exists(path)
     encrypted = Path(path).read_bytes()
     assert encrypted.startswith(b"HRMVAULT\x00") and body.encode() not in encrypted
+    assert body in artifacts.read_text(Path(path), home=home)
     from tools.file_tools import read_file_tool
 
+    assert json.loads(read_file_tool(path, offset=1, limit=1))["content"] == "1|row 0"
     recovered = json.loads(read_file_tool(path, offset=2501, limit=2))
     assert recovered["content"] == "2501|row 2500\n2502|row 2501"
     assert "host" in recovered["source"]
@@ -64,6 +72,8 @@ def test_truncation_footers_render_public_cache_and_private_recovery_paths(owner
 def test_local_backend_footer_keeps_the_host_path(tmp_path, monkeypatch):
     home = tmp_path / ".hermes"
     monkeypatch.setenv("HERMES_HOME", str(home))
+    home.mkdir()
+    seal_fixture_home(home)
     monkeypatch.setenv("TERMINAL_ENV", "local")
     body = "\n".join(f"row {i}" for i in range(5000))
     out, _ = web_tools_truncate._truncate_with_footer(body, "https://example.com/doc", 3000)

@@ -66,7 +66,8 @@ def profile_arguments(home: Path, arguments):
         profile, arguments = arguments[0].split("=", 1)[1], arguments[1:]
     else:
         return arguments
-    from hermes_cli.profiles import normalize_profile_name, validate_profile_name, profile_root_for_env_home
+    from hermes_cli.profiles import normalize_profile_name, validate_profile_name
+    from hermes_cli._profile_selection import profile_root_for_env_home
     from hermes_constants import named_profile_is_live
     canon = normalize_profile_name(profile)
     validate_profile_name(canon)
