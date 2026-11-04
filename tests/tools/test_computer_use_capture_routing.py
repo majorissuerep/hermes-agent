@@ -13,7 +13,7 @@ deterministic stubs for:
 * ``_native_tool_result_images`` (the shared policy decision)
 * ``_run_async`` (sync->async bridge)
 * ``vision_analyze_tool`` (the aux LLM call)
-* ``hermes_constants.get_hermes_dir`` (cache path)
+* ``hermes_constants.get_hermes_dir`` (a cache path that must stay empty)
 
 …so the full code path is covered without a live cua-driver, a real
 auxiliary client, or network access.
@@ -172,11 +172,12 @@ class TestCaptureResponseRoutedToAuxVision:
         assert len(body["elements"]) == 2
 
         assert captured_calls.get("called") is True
-        # vision_analyze_tool was invoked with a path under the patched cache
-        # and a non-empty prompt.
+        # vision_analyze_tool received the capture's pixels as an in-memory
+        # data: URL; nothing was staged in the (patched) cache directory.
         args, _kwargs = fake_vat.call_args
-        path_arg, prompt_arg = args[0], args[1]
-        assert str(tmp_cache_dir) in path_arg
+        source_arg, prompt_arg = args[0], args[1]
+        assert source_arg == f"data:image/png;base64,{_PNG_B64}"
+        assert list(tmp_cache_dir.iterdir()) == []
         # AX summary is included so the aux model can ground its description
         # against the same set-of-mark index the agent will see.
         assert "Sign in" in prompt_arg

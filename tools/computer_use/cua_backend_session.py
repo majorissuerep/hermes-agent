@@ -438,17 +438,27 @@ class _CuaDriverSession:
         """Fallback transport: ``cua-driver call <tool> <json>`` subprocess. The MCP stdio bridge can persistently
         fail heavy calls (``get_window_state``) with EAGAIN while the plain CLI, on its own daemon socket, keeps
         working. Output is remapped to the ``_extract_tool_result`` shape. ``get_window_state`` routes its
-        screenshot to a temp file (``screenshot_out_file``) so the daemon returns a tiny JSON body, not the
-        multi-megabyte base64 blob that congests the socket; ``_cli_result`` reads it back."""
-        import tempfile as _tempfile
+        screenshot to a file (``screenshot_out_file``) so the daemon returns a tiny JSON body, not the
+        multi-megabyte base64 blob that congests the socket; ``_cli_result`` reads it back. That file lives only in
+        a fresh proven RAM-only protected workspace, removed on success and failure alike. Without such a
+        workspace the fallback refuses: no system-temp or cache staging, and no heavy inline retry."""
+        if name != "get_window_state" or "screenshot_out_file" in args:
+            return self._run_cli(name, dict(args), timeout, None)
+        from tools.browser_media_custody import MediaCustodyError, protected_media_workspace
+
+        try:
+            with protected_media_workspace("cua-capture") as workspace:
+                shot_file = str(workspace / "window_state.png")
+                return self._run_cli(name, {**args, "screenshot_out_file": shot_file}, timeout, shot_file)
+        except MediaCustodyError as exc:
+            raise RuntimeError(f"cua-driver CLI fallback for {name} refused: {exc}") from exc
+
+    def _run_cli(self, name: str, call_args: dict[str, Any], timeout: float,
+                 shot_file: Optional[str]) -> dict[str, Any]:
+        """One ``cua-driver call`` through the selected native backend (embedded daemon socket when present)."""
         from tools.computer_use import cua_backend as _cb
         from tools.environments.local import _sanitize_subprocess_env
 
-        call_args, shot_file = dict(args), None
-        if name == "get_window_state" and "screenshot_out_file" not in call_args:
-            fd, shot_file = _tempfile.mkstemp(prefix="cua_shot_", suffix=".png")
-            os.close(fd)
-            call_args["screenshot_out_file"] = shot_file
         driver_command = _driver.resolve_cua_driver_cmd()
         if not driver_command:
             raise RuntimeError(_driver.cua_driver_install_hint())
@@ -458,12 +468,7 @@ class _CuaDriverSession:
             driver_command, child_env = daemon.proxy_invocation()[0], daemon.child_env()
             socket_args = ["--socket", daemon.socket_path]
         cmd = [driver_command, "call", name, json.dumps(call_args), *socket_args]
-        try:
-            return _cli_result(_cli_run_json(cmd, _sanitize_subprocess_env(child_env), name, timeout), shot_file)
-        finally:
-            if shot_file and os.path.exists(shot_file):
-                with contextlib.suppress(OSError):
-                    os.remove(shot_file)
+        return _cli_result(_cli_run_json(cmd, _sanitize_subprocess_env(child_env), name, timeout), shot_file)
 
     def call_tool(self, name: str, args: dict[str, Any], timeout: float = 30.0) -> dict[str, Any]:
         if name not in self._LIFECYCLE_CALLS:

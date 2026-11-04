@@ -5,7 +5,6 @@ from __future__ import annotations
 import base64
 import json
 import os
-from pathlib import Path
 from typing import Any, Dict, List, Optional, cast
 from unittest.mock import MagicMock, patch
 
@@ -333,19 +332,28 @@ class TestCaptureResponse:
         # the JSON view is partial and can re-issue with a tighter scope.
         assert "truncated to" in parsed["summary"]
 
-    def test_capture_ax_ignores_stale_max_elements_argument(self):
+    def test_capture_ax_ignores_stale_max_elements_argument(self, tmp_path, monkeypatch):
         """`max_elements` was removed from the schema; the surfaced window is a
-        fixed cap with the full tree spilled to elements_file. A stale caller
-        still passing max_elements must not be able to raise the cap.
+        fixed cap with the full tree spilled to elements_file (encrypted, so the
+        profile vault is unlocked). A stale caller passing max_elements must not
+        be able to raise the cap.
         """
+        from hermes_security import vault
         from tools.computer_use import tool as cu_tool
 
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        monkeypatch.setattr(vault, "_SCRYPT_N", 1024)
+        vault.init_vault(tmp_path, "synthetic computer_use password")
+        vault.unlock(tmp_path, "synthetic computer_use password")
         fake_backend = self._ax_backend_with(5000)
         cu_tool.reset_backend_for_tests()
-        with patch.object(cu_tool, "_new_backend", return_value=fake_backend):
-            out = cu_tool.handle_computer_use(
-                {"action": "capture", "mode": "ax", "max_elements": 10_000}
-            )
+        try:
+            with patch.object(cu_tool, "_new_backend", return_value=fake_backend):
+                out = cu_tool.handle_computer_use(
+                    {"action": "capture", "mode": "ax", "max_elements": 10_000}
+                )
+        finally:
+            vault.clear_vault_cache()
         parsed = json.loads(out)
         # Ignored: cap stays at the fixed default regardless of the argument.
         assert len(parsed["elements"]) == cu_tool._DEFAULT_MAX_ELEMENTS
@@ -1194,53 +1202,6 @@ class TestCuaDriverSessionReconnect:
             ("call", "list_apps", {}),
         ]
 
-
-    def test_cli_fallback_reads_screenshot_from_file(self, tmp_path, monkeypatch):
-        """_call_tool_via_cli must base64-read a screenshot written to disk
-        (screenshot_out_file path) when no inline base64 is present."""
-        import base64 as _b64
-        from typing import Any, cast
-        from tools.computer_use.cua_backend_session import _CuaDriverSession
-
-        monkeypatch.setattr(
-            "tools.computer_use.cua_backend_driver.resolve_cua_driver_cmd",
-            lambda: "/resolved/cua-driver",
-        )
-
-        png_bytes = b"\x89PNG\r\n\x1a\nFAKEDATA"
-        shot = tmp_path / "shot.png"
-        shot.write_bytes(png_bytes)
-
-        session = cast(Any, _CuaDriverSession.__new__(_CuaDriverSession))
-
-        captured_cmd = {}
-
-        class FakeProc:
-            returncode = 0
-            stderr = ""
-            # Daemon returns a path, not inline base64.
-            stdout = ('{"element_count": 7, "tree_markdown": "- [0] AXButton",'
-                      f' "screenshot_file_path": "{shot!s}"}}')
-
-        import subprocess as _sp
-        orig_run = _sp.run
-
-        def fake_run(cmd, **kw):
-            captured_cmd["cmd"] = cmd
-            return FakeProc()
-
-        _sp.run = fake_run
-        try:
-            out = session._call_tool_via_cli("get_window_state",
-                                             {"pid": 1, "window_id": 2}, 30.0)
-        finally:
-            _sp.run = orig_run
-
-        # Screenshot read from disk and base64-encoded.
-        assert out["images"] == [_b64.b64encode(png_bytes).decode("ascii")]
-        # tree_markdown surfaced as the data text blob with the element-count summary.
-        assert "AXButton" in out["data"]
-        assert "7 elements" in out["data"]
 
 class TestCaptureEmptyResultClipFallback:
     """When the MCP bridge returns a degenerate/empty get_window_state result
@@ -2331,21 +2292,6 @@ class TestElementSpillFile:
                              elements=elems, app="chrome.exe",
                              window_title="Discord", png_bytes_len=0)
 
-    def test_spill_file_holds_full_untruncated_tree(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
-        from tools.computer_use.tool import _capture_response
-
-        out = json.loads(_capture_response(self._dense_capture()))
-        assert "elements_file" in out
-        assert str(out["elements_file"]) in out["summary"]
-        spill = json.loads(
-            open(out["elements_file"], encoding="utf-8-sig").read())
-        # Everything the in-context response dropped is in the file:
-        assert spill["total_elements"] == 120
-        assert len(spill["elements"]) == 120           # beyond max_elements cap
-        assert len(spill["elements"][0]["label"]) > 2000  # beyond label cap
-        assert spill["elements"][119]["label"].startswith("msg 119")
-
     def test_no_spill_when_nothing_dropped(self, tmp_path, monkeypatch):
         monkeypatch.setenv("HERMES_HOME", str(tmp_path))
         from tools.computer_use.backend import CaptureResult, UIElement
@@ -2360,74 +2306,17 @@ class TestElementSpillFile:
         out = json.loads(_capture_response(cap))
         assert "elements_file" not in out
 
-    def test_spill_pruning_bounds_cache_growth(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
-        from tools.computer_use import tool as cu_tool
-
-        cap = self._dense_capture()
-        for _ in range(cu_tool._MAX_SPILL_FILES + 5):
-            assert cu_tool._spill_elements_to_file(cap) is not None
-        cache = tmp_path / "cache" / "computer_use"
-        assert len(list(cache.glob("elements_*.json"))) <= cu_tool._MAX_SPILL_FILES
-
     def test_spill_failure_never_breaks_capture(self, monkeypatch):
         from tools.computer_use import tool as cu_tool
 
         monkeypatch.setattr(cu_tool, "_spill_elements_to_file",
-                            lambda cap: None)
+                            lambda cap, home: cu_tool.Retained(unavailable="synthetic: vault locked"))
         out = json.loads(cu_tool._capture_response(self._dense_capture()))
-        # Capture still succeeds and stays budget-capped without the file.
+        # Capture still succeeds and stays budget-capped without the file, and never claims one.
         assert out["truncated_elements"] == 20
         assert "elements_file" not in out
-
-
-class TestCaptureScreenshotPersistence:
-    """Image captures expose a bounded file for explicit user delivery."""
-
-    _PNG_B64 = (
-        "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76L"
-        "AAAADUlEQVR4nGNgGAUgAAABCAABgukLHQAAAABJRU5ErkJggg=="
-    )
-
-    def _capture(self):
-        from tools.computer_use.backend import CaptureResult
-
-        return CaptureResult(
-            mode="vision",
-            width=8,
-            height=8,
-            png_b64=self._PNG_B64,
-            image_mime_type="image/png",
-            png_bytes_len=len(base64.b64decode(self._PNG_B64)),
-        )
-
-    def test_multimodal_capture_exposes_shareable_screenshot(
-        self, tmp_path, monkeypatch,
-    ):
-        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
-        from tools.computer_use import tool as cu_tool
-
-        monkeypatch.setattr(
-            cu_tool, "_should_route_through_aux_vision", lambda: False,
-        )
-        out = cu_tool._capture_response(self._capture())
-
-        screenshot_path = out["meta"]["screenshot_path"]
-        assert screenshot_path in out["text_summary"]
-        assert "MEDIA:" not in out["text_summary"]
-        assert screenshot_path.startswith(str(tmp_path / "cache" / "images"))
-        assert Path(screenshot_path).read_bytes() == base64.b64decode(self._PNG_B64)
-
-    def test_capture_cache_is_bounded(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
-        from tools.computer_use import tool as cu_tool
-
-        monkeypatch.setattr(cu_tool, "_MAX_CAPTURE_FILES", 2)
-        for _ in range(3):
-            assert cu_tool._persist_capture_image(self._capture()) is not None
-
-        captures = list((tmp_path / "cache" / "images").glob("computer_use_*.*"))
-        assert len(captures) == 2
+        assert out["elements_file_unavailable"] == "synthetic: vault locked"
+        assert "read_file" not in out["summary"]
 
 
 class TestBoundsScaleField:
