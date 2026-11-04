@@ -41,10 +41,10 @@ def retention_scope(owner=None):
         _RETENTION_OWNER.reset(token)
 
 
-def output_custody():
+def output_custody(owner=None):
     from hermes_security.errors import VaultLockedError
 
-    home, custody, unavailable = retention_owner()
+    home, custody, unavailable = retention_owner() if owner is None else owner
     if custody is None:
         raise VaultLockedError(unavailable)
     custody.check()

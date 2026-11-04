@@ -182,7 +182,33 @@ def _mcp_native_image_part(path: str) -> Optional[tuple[dict[str, Any], Optional
         return None
     if len(url) > target:
         return None
-    return {"type": "image_url", "image_url": {"url": url}}, _build_scale_note(scale or None, None)
+    note = _build_scale_note(scale or None, None)
+    if owned is not None:
+        custody.check()
+    return {"type": "image_url", "image_url": {"url": url}}, note
+
+
+def _attachment_custody_live(owner, paths) -> bool:
+    from hermes_security.artifacts import is_artifact_path
+    from hermes_security.errors import VaultError
+    from tools.media_cache import output_custody
+
+    try:
+        if any(is_artifact_path(path, home=owner[0]) for path in paths):
+            output_custody(owner)
+        return True
+    except (VaultError, OSError, ValueError):
+        logger.debug("MCP native attachment's original custody ended", exc_info=True)
+        return False
+
+
+def _finished_native_image(path, job, owner):
+    try:
+        ready = job.result()
+        return ready if _attachment_custody_live(owner, [path]) else None
+    except Exception:
+        logger.debug("MCP native image prep failed for %s", path, exc_info=True)
+        return None
 
 
 def _mcp_result_with_native_images(text: str, image_paths: list[str]) -> Any:
@@ -197,12 +223,13 @@ def _mcp_result_with_native_images(text: str, image_paths: list[str]) -> Any:
         import contextvars
         from tools.vision_tools import _should_use_native_vision_fast_path, _vision_cpu_executor
         from tools.vision_tools_history_budget import repeat_refusal
+        from tools.media_cache import retention_owner
         if not _should_use_native_vision_fast_path():
             return text
     except Exception:  # deliberate boundary: the MEDIA: paths already carry the images, so any failure keeps the text
         logger.debug("MCP native image gate failed, keeping MEDIA: paths", exc_info=True)
         return text
-    attached, notes = [], ""
+    attached, notes, owner = [], "", retention_owner()
     candidates = image_paths[:_MCP_NATIVE_IMAGE_CANDIDATES]
     # Prepare in waves sized to the free slots, so a damaged or already-in-context image hands its slot to the
     # next one instead of hiding it. Decode/resize runs on the bounded vision pool (a parallel tool batch of
@@ -213,11 +240,7 @@ def _mcp_result_with_native_images(text: str, image_paths: list[str]) -> Any:
         wave, candidates = candidates[:_MCP_NATIVE_IMAGE_MAX - len(attached)], candidates[_MCP_NATIVE_IMAGE_MAX - len(attached):]
         jobs = [(p, _vision_cpu_executor.submit(contextvars.copy_context().run, _mcp_native_image_part, p)) for p in wave]
         for path, job in jobs:
-            try:
-                ready = job.result()
-            except Exception:  # one bad file keeps its MEDIA: path; the others still attach
-                logger.debug("MCP native image prep failed for %s", path, exc_info=True)
-                continue
+            ready = _finished_native_image(path, job, owner)
             if not ready:
                 continue
             part, note = ready
@@ -242,6 +265,8 @@ def _mcp_result_with_native_images(text: str, image_paths: list[str]) -> Any:
     # The header and the scale notes are their own short part: an oversized tool text gets spilled to a file and
     # replaced by its head, and the coordinate map must survive that next to the resized screenshot it describes.
     header = "The image(s) from this call are attached — inspect them with your native vision."
+    if not _attachment_custody_live(owner, image_paths[:_MCP_NATIVE_IMAGE_CANDIDATES]):
+        return text
     return {"_multimodal": True,
             "content": [{"type": "text", "text": text}, {"type": "text", "text": header + notes}, *attached],
             "text_summary": text}
