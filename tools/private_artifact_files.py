@@ -11,7 +11,7 @@ import time
 from agent.file_safety import get_model_read_block_error, get_nt_namespace_error
 from agent.redact import redact_sensitive_text
 from hermes_security import artifacts
-from hermes_security.artifact_paths import is_artifact_directory, is_artifact_relative_path, is_image_relative_path
+from hermes_security.artifact_paths import is_artifact_directory, is_artifact_relative_path, is_image_relative_path, media_kind
 from tools.file_operations import IMAGE_EXTENSIONS, ShellFileOperations
 from tools.file_operations_common import ReadResult, SearchMatch, SearchResult
 
@@ -53,14 +53,25 @@ def read_file(path, offset, limit, max_chars):
     if candidate is None:
         return None
     raw = artifacts.read_bytes(candidate)
+    relative = artifacts._location(candidate)[1]
+    extracted = False
     if candidate.suffix.lower() in IMAGE_EXTENSIONS:
         result = ShellFileOperations._image_redirect_result(len(raw)).to_dict()
-    elif is_image_relative_path(artifacts._location(candidate)[1]):
+    elif is_image_relative_path(relative):
         result = ReadResult(is_binary=True, error="Private browser artifact is binary; use vision_analyze.").to_dict()
+    elif media_kind(relative) == "audio":
+        result = ReadResult(is_binary=True, file_size=len(raw),
+                            error="Encrypted audio retained. Explicit offline recovery: hermes secure-vault export "
+                                  "--output /outside-home/recovery.tar (whole-profile plaintext archive).").to_dict()
     else:
         from tools.tool_output_limits import get_max_line_length
 
-        lines = raw.decode("utf-8-sig", errors="replace").splitlines()
+        text, extracted = _document_text(candidate, relative, raw)
+        if text is None:
+            return json.dumps({**ReadResult(is_binary=True, file_size=len(raw),
+                               error="Encrypted binary document retained; no text extractor supports this format.").to_dict(),
+                               "source": _SOURCE})
+        lines = text.splitlines()
         selected = lines[offset - 1:offset - 1 + limit]
         line_cap = get_max_line_length()
         rendered, used, clipped = [], 0, False
@@ -79,7 +90,29 @@ def read_file(path, offset, limit, max_chars):
         if result["truncated"]:
             result.update(next_offset=end + 1, hint=f"Use offset={end + 1} to continue reading.")
     result["source"] = _SOURCE
+    if extracted:
+        result["extracted_document"] = True
     return json.dumps(result, ensure_ascii=False)
+
+
+def _document_text(candidate, relative, raw):
+    if media_kind(relative) != "documents":
+        return raw.decode("utf-8-sig", errors="replace"), False
+    from tools.read_extract import ANYDOC_EXTENSIONS, EXTRACTABLE_EXTENSIONS
+
+    if candidate.suffix.lower() in ANYDOC_EXTENSIONS | EXTRACTABLE_EXTENSIONS:
+        from tools.media_artifacts import extract_document
+        from tools.read_extract import ExtractionError
+
+        try:
+            return extract_document(raw, str(candidate)), True
+        except ExtractionError as exc:
+            raise ValueError(f"Private document extraction unavailable: {exc}") from exc
+    try:
+        text = raw.decode("utf-8-sig")
+        return (None if "\x00" in text else text), False
+    except UnicodeDecodeError:
+        return None, False
 
 
 def _candidates(root, file_glob, order):

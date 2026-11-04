@@ -616,6 +616,10 @@ def os_replace(src: Path, dst: Path) -> None:
 
 
 def _purpose_for(rel: Path) -> str:
+    from hermes_security.artifact_paths import media_kind
+
+    if media_kind(rel):
+        return "state"
     if is_delegation_manifest_path(rel):
         return "delegation-manifest:v1"
     name = rel.name
@@ -640,6 +644,10 @@ def _purpose_for(rel: Path) -> str:
 
 
 def _classify(path: Path, relative: Path | None = None) -> str:
+    from hermes_security.artifact_paths import media_kind
+
+    if media_kind(relative if relative is not None else path):
+        return "envelope"
     if is_delegation_log_path(relative if relative is not None else path):
         return "envelope"
     # DB sidecars are consumed by the parent DB's migration (checkpointed and

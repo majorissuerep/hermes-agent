@@ -179,6 +179,19 @@ describe('INLINE_RE inline math', () => {
 })
 
 describe('protocol sentinels', () => {
+  it('offers explicit offline audio recovery and authenticated document reads', () => {
+    const audio = '/home/test/.hermes/artifacts/media/audio/audio.ogg'
+    const document = '/home/test/.hermes/artifacts/media/documents/doc.pdf'
+    const rendered = renderAnsi(React.createElement(Md, { t: DEFAULT_THEME, text: `MEDIA:${audio}\nMEDIA:${document}` }))
+    const text = stripAnsi(rendered).replace(/\s+/g, ' ')
+
+    expect(text).toContain('hermes secure-vault export --output /outside-home/recovery.tar')
+    expect(text).toContain('whole-profile plaintext archive')
+    expect(text).toContain('read_file')
+    expect(rendered).not.toContain('file://')
+    expect(text).not.toContain('configured transcription consumer')
+  })
+
   it('offers private image selfservice without a ciphertext file hyperlink', () => {
     const path = '/home/test/.hermes/artifacts/browser/screenshots/private.png'
     const rendered = renderAnsi(React.createElement(Md, { t: DEFAULT_THEME, text: `MEDIA:${path}` }))

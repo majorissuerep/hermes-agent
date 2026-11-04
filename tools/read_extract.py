@@ -102,7 +102,9 @@ def _check_size(size: int, limit: int) -> None:
 @contextlib.contextmanager
 def _temp_copy(data: bytes, suffix: str) -> Iterator[str]:
     """Materialize backend bytes in a private host temp file; removed even when parsing fails."""
-    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as fh:
+    from tools.media_artifacts import temporary_directory_options
+
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False, **temporary_directory_options()) as fh:
         fh.write(data)
     try:
         yield fh.name

@@ -4,7 +4,7 @@ import { Fragment, memo, type ReactNode, useMemo } from 'react'
 import { ensureEmojiPresentation } from '../lib/emoji.js'
 import { normalizeExternalUrl } from '../lib/externalLink.js'
 import { BOX_CLOSE, BOX_OPEN, texToUnicode } from '../lib/mathUnicode.js'
-import { privateImagePreviewCommand, quotedPrivateMediaPath } from '../lib/privateMedia.js'
+import { privateImagePreviewCommand, privateMediaKind, quotedPrivateMediaPath } from '../lib/privateMedia.js'
 import { highlightLine, isHighlightable } from '../lib/syntax.js'
 import type { Theme } from '../theme.js'
 
@@ -98,6 +98,23 @@ function MediaReference({ path, theme }: { path: string; theme: Theme }) {
       <Box flexDirection="column">
         <Text color={theme.color.muted}>Encrypted image: {path}</Text>
         <Text color={theme.color.accent}>Bounded preview: {command}</Text>
+      </Box>
+    )
+  }
+
+  const privateKind = privateMediaKind(path)
+
+  if (privateKind) {
+    return (
+      <Box flexDirection="column">
+        <Text color={theme.color.muted}>
+          Encrypted {privateKind}: {path}
+        </Text>
+        <Text color={theme.color.muted}>
+          {privateKind === 'audio'
+            ? 'Explicit offline recovery: hermes secure-vault export --output /outside-home/recovery.tar (whole-profile plaintext archive).'
+            : 'Original retained; use read_file for authenticated document access.'}
+        </Text>
       </Box>
     )
   }

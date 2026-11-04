@@ -78,7 +78,7 @@ def _decode_block_b64(data, what: str, label: str, *, cap_what: Optional[str] = 
     if cap_what and len(data) > _MCP_RESOURCE_MAX_B64_CHARS:
         return None, f"[MCP {cap_what} too large to cache: ~{len(data) * 3 // 4} bytes{cap_suffix}]"
     try:
-        raw_bytes = base64.b64decode(data)
+        raw_bytes = base64.b64decode(data, validate=True)
     except (TypeError, ValueError) as exc:
         logger.warning("MCP %s decode failed (%s): %s", what, label, exc)
         return None, decode_fail
@@ -89,40 +89,46 @@ def _decode_block_b64(data, what: str, label: str, *, cap_what: Optional[str] = 
 
 def _write_block_cache(writer: str, what: str, skip_label: str, *args,
                        unavailable: str = "", failed: str = "", **kwargs) -> tuple[Optional[str], str]:
-    """Call ``gateway.platforms.base.<writer>(*args, **kwargs)``: ``(path, "")`` or ``(None,
-    marker)``. Fail-open so one bad block never kills the tool result: gateway deps missing
-    (cron without gateway) → ``unavailable``; any other cache error → warning + ``failed``."""
+    """Retain one block encrypted, or report its failure without a plaintext fallback.
+
+    Other content blocks remain usable; a failed private block is never silently dropped.
+    """
     try:
         from tools import media_cache as _base
         return getattr(_base, writer)(*args, **kwargs), ""
     except ImportError:
         logger.debug("MCP %s caching skipped — media cache unavailable", skip_label)
-        return None, unavailable
+        return None, unavailable or f"[MCP {what} unavailable: encrypted media storage unavailable]"
     except Exception as exc:
         logger.warning("MCP %s cache failed: %s", what, exc)
-        return None, failed
+        return None, failed or f"[MCP {what} could not be retained in encrypted media storage]"
 
 
 _WAV_MIME_EXT = {"audio/wav": ".wav", "audio/x-wav": ".wav", "audio/wave": ".wav"}
 
 
 def _cache_mcp_media_block(block, kind: str, writer: str, ext_for, *, cap_what: Optional[str] = None) -> str:
-    """Cache an image/audio block and return a ``MEDIA:<path>`` tag. "" (logging, not raising)
-    when the block isn't ``kind`` media, the base64 is malformed, or the cache rejects the
-    bytes: the caller falls through to any text blocks."""
+    """Return a media reference or visible refusal; empty means another block kind."""
     data = getattr(block, "data", None)
     mime = _base_mime(mcp_field(block, "mime_type", "mimeType"))
-    if data is None or not mime.startswith(f"{kind}/"):
-        return ""
-    raw_bytes, err = _decode_block_b64(data, f"{kind} block", mime, cap_what=cap_what)
+    if not mime.startswith(f"{kind}/"):
+        return f"[MCP {kind} block has an invalid media type]" if getattr(block, "type", "") == kind else ""
+    if data is None:
+        return f"[MCP {kind} block has no media payload]"
+    if kind == "image" and len(data) > (128 * 1024 * 1024 * 4 // 3 + 4):
+        return "[MCP image block exceeds the 128 MiB media limit]"
+    raw_bytes, err = _decode_block_b64(data, f"{kind} block", mime, cap_what=cap_what,
+                                    decode_fail=f"[MCP {kind} block could not be decoded]")
     if raw_bytes is None:
         return err
+    if kind == "image" and len(raw_bytes) > 128 * 1024 * 1024:
+        return "[MCP image block exceeds the 128 MiB media limit]"
     path, err = _write_block_cache(writer, f"{kind} block", kind, raw_bytes, ext=ext_for(mime))
     return err if path is None else f"MEDIA:{path}"
 
 
 def _cache_mcp_image_block(block) -> str:
-    """Cache an ``ImageContent`` block and return a ``MEDIA:<path>`` tag ("" on any failure)."""
+    """Retain an ImageContent block or return a visible storage/decode failure."""
     return _cache_mcp_media_block(block, "image", "cache_image_from_bytes", _mcp_image_extension_for_mime_type)
 
 
@@ -143,7 +149,10 @@ def _mcp_native_image_part(path: str) -> Optional[tuple[dict[str, Any], Optional
     from tools.vision_tools_history_budget import resolve_embed_target_bytes
     from tools.vision_tools_image_prep import (_detect_image_mime_type_from_bytes, _normalize_to_supported_image,
                                                _validate_raster_image_decodable)
-    raw = Path(path).read_bytes()
+    from tools.browser_media_custody import owned_media_path, read_owned_media
+
+    owned = owned_media_path(path)
+    raw = read_owned_media(owned) if owned is not None else Path(path).read_bytes()
     mime = _detect_image_mime_type_from_bytes(raw)
     if not mime:
         return None
@@ -234,7 +243,7 @@ def _mcp_result_with_native_images(text: str, image_paths: list[str]) -> Any:
 
 
 def _cache_mcp_audio_block(block) -> str:
-    """Cache an ``AudioContent`` block and return a ``MEDIA:<path>`` tag ("" on any failure)."""
+    """Retain an AudioContent block or return a visible storage/decode failure."""
     return _cache_mcp_media_block(
         block, "audio", "cache_audio_from_bytes",
         lambda mime: _WAV_MIME_EXT.get(mime) or mimetypes.guess_extension(mime) or ".ogg",
@@ -321,10 +330,20 @@ def _render_mcp_resource_block(block, server_name: str = "") -> str:
     if raw_bytes is None:
         return err
     kind = mime or "unknown type"
+    writer, arguments = _resource_cache_writer(raw_bytes, uri, mime)
     path, err = _write_block_cache(
-        "cache_document_from_bytes", "embedded resource", "resource", raw_bytes, _mcp_resource_filename(uri, mime),
+        writer, "embedded resource", "resource", *arguments,
         unavailable=f"[MCP embedded resource received ({len(raw_bytes)} bytes, {kind}) but document cache unavailable in this process]",
         failed=f"[MCP embedded resource could not be cached: {mime or uri}]")
     if path is None:
         return err
-    return f"[MCP resource saved to {path} ({kind}, {len(raw_bytes)} bytes) — read it with read_file or terminal tools]"
+    return f"[MCP resource saved to {path} ({kind}, {len(raw_bytes)} bytes) — read it with read_file (authenticated owner-profile access)]"
+
+
+def _resource_cache_writer(raw_bytes, uri, mime):
+    normalized = _base_mime(mime)
+    if normalized.startswith("image/"):
+        return "cache_image_from_bytes", (raw_bytes, _mcp_image_extension_for_mime_type(normalized))
+    if normalized.startswith("audio/"):
+        return "cache_audio_from_bytes", (raw_bytes, _WAV_MIME_EXT.get(normalized) or mimetypes.guess_extension(normalized) or ".ogg")
+    return "cache_document_from_bytes", (raw_bytes, _mcp_resource_filename(uri, mime))
