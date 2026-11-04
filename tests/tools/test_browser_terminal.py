@@ -192,6 +192,7 @@ def test_cached_runtime_rechecks_mount_and_permissions_without_replacing_profile
 def test_runtime_guard_refuses_a_missing_or_replaced_runtime_directory(tmp_path):
     from tools.browser_terminal import BrowserRuntime, runtime_missing
 
+    tmp_path.chmod(0o700)  # this owned runtime root can inherit SGID too
     parts = [tmp_path / name for name in ("profile", "captures", "sockets", "tmp")]
     for part in parts:
         part.mkdir(mode=0o700)

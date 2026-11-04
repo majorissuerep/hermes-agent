@@ -401,13 +401,9 @@ class TestEngineOverride:
         captured_cmds = []
         mock_provider = MagicMock()
 
-        mock_proc = MagicMock()
-        mock_proc.wait.return_value = None
-        mock_proc.returncode = 0
-
-        def capture_popen(cmd, **kwargs):
+        def capture_client(cmd, env, stdin_payload, timeout):
             captured_cmds.append(cmd)
-            return mock_proc
+            return 0, mock_stdout, ""
 
         mock_stdout = json.dumps({
             "success": True,
@@ -420,15 +416,7 @@ class TestEngineOverride:
              patch("tools.browser_tool_cloud._get_cloud_provider", return_value=mock_provider), \
              patch("tools.browser_tool_cdp._get_cdp_override", return_value=""), \
              patch("tools.browser_tool._is_camofox_mode", return_value=False), \
-             patch("subprocess.Popen", side_effect=capture_popen), \
-             patch("os.open", return_value=99), \
-             patch("os.close"), \
-             patch("os.unlink"), \
-             patch("os.makedirs"), \
-             patch("builtins.open", MagicMock(return_value=MagicMock(
-                 __enter__=MagicMock(return_value=MagicMock(read=MagicMock(return_value=mock_stdout))),
-                 __exit__=MagicMock(return_value=False),
-             ))), \
+             patch.object(bt_session, "_run_agent_browser_client", side_effect=capture_client), \
              patch("tools.interrupt.is_interrupted", return_value=False), \
              patch("tools.browser_tool_lifecycle._write_owner_pid"):
             bt_session._run_browser_command("task::local", "snapshot", [])
