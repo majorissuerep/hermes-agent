@@ -52,14 +52,16 @@
     "nanoid@^3": "3.3.18",
     "nanoid@^6": "6.0.0",
     "js-yaml@^4": "4.3.2",
-    "undici@^6": "6.29.0",
+    "undici@^6": "6.29.1",
     "undici@^7": "7.30.0",
-    "postcss": "8.5.23",
+    "postcss": "8.5.26",
     "tar": "7.5.22",
     "source-map-js": "1.2.2",
     "yaml": "2.9.1",
-    "vitest": "4.1.11",
-    "@vitest/mocker": "4.1.11"
+    "vite": "8.2.4",
+    "rolldown": "1.2.4",
+    "vitest": "4.1.12",
+    "@vitest/mocker": "4.1.12"
   },
   "engines": {
     "node": "^22.22.0 || ^24.11.0 || >=26.0.0",

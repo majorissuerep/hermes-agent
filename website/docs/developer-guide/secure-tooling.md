@@ -251,7 +251,7 @@ removal were checked through separate observations. Codex used `workspace-write`
 disabled. Claude used narrowly selected Bash permissions. These are CLI integration
 receipts, not current-candidate, cold-install or every-provider qualification.
 
-Native Linux protocol evidence includes the real public finite-chat/delegation
+Earlier native Linux protocol evidence includes the real public finite-chat/delegation
 path, a managed Hermes chat subprocess, encrypted SQLCipher history, two native
 children calling the management CLI,
 real PTY keyboard/transcript round trips and Docker source transport with no host
@@ -259,7 +259,8 @@ mounts or inherited model credential. The host's native macOS coverage is pendin
 A full native owner also launches a managed Hermes chat child, which reads the
 owning encrypted configuration; after its exit the parent reads that same state.
 Five provider requests and two SQLCipher sessions separately establish this
-round trip. Synthetic profiles must first receive a real PM dependency selection.
+round trip on that earlier revision; current-candidate chat/delegation acceptance
+requires its own isolated replay. Synthetic profiles must first receive a real PM dependency selection.
 The public MCP stdio scenarios completed four checks; seven pre-existing expected
 failures for unsupported image results and empty metadata remain unqualified.
 Separate real-SDK regressions verify owning/explicit child homes, filtered unlock
@@ -277,6 +278,15 @@ OpenTelemetry using releases older than the existing 14-day quarantine, without
 metadata overrides or quarantine exceptions. A fresh PM environment passes its
 dependency-consistency check; this remains a failing security audit. Pillow 13's
 fixes are blocked by the declared browser-harness and fastembed constraints.
+A November 4 audit of the unchanged baseline Node lock found 17 affected package
+nodes (three high and 14 moderate). An aged, compatible refresh of Undici,
+Vitest/Vite and Zod reduces that result to 12 moderate nodes and zero high or
+critical nodes. Every new resolved identity was at least 14 days old. A fresh
+install, complete dependency-tree validation and all workspace checks passed
+locally. The remaining Minimatch/ESLint development-chain findings require a
+major-version compatibility review, and the currently identified fix is still
+inside the age window. This remains an incomplete security audit; separate
+website and retired-surface lockfiles were outside this Node audit.
 Do not weaken owner-only directory permissions to satisfy a scanner's incorrect
 recommendation to replace mode 0700 with 0644.
 
@@ -726,7 +736,8 @@ login, macOS or exact merged-revision acceptance.
 | **P0 HOST-01: transient-memory admission** | Establish swap, hibernation and crash-storage protection for each supported protected host; report unknown evidence honestly. Retained-key locking and RAM-only files do not protect every Python, crypto or SQLCipher buffer. | Operator supplies host guarantees or a native deployment proves the required posture. A non-author tests refusal and recovery. Full protected-workflow acceptance remains pending while admission is unevaluated. No implicit host setting changes. |
 | **P0 DEP-01: Pillow advisory closure (external blocker)** | Upstream browser-harness and fastembed metadata currently prevent installing the aged fixed Pillow through normal consistency checks. | Dependency owner tracks compatible upstream releases and rechecks at the next eligible release/quarantine boundary; then fresh PM lock/environment, applicable advisory closure and real browser/image consumers. Preserve the 14-day quarantine and all existing tooling; do not force incompatible metadata. |
 | **P0 DEP-00: qualify the aged refresh** | Land the separately prepared security dependency and SDK refresh after its exact-head checks. Local audit reduces 65 advisories in seven packages to the 39 Pillow advisories recorded above. | Integration owner; fresh PM environment, actual SDK protocol checks, full required gates and independent fresh-main consumers. Local test counts alone do not establish publication. |
-| **P0 INT-02: reconcile the native follow-ups** | Include read-only Codex management, profile API routing and cached-login preservation, sticky-profile authority binding, and every concrete remote-client spawn boundary in the final integration candidate. | Integration owner; exact-head private/native checks followed by independent fresh-main CLI and ciphertext checks. A partial author test run cannot qualify the milestone. |
+| **P0 DEP-02: qualify Node fixes and close the remaining chain** | Qualify the aged high-severity fixes and their compatible lock, then resolve the 12 remaining Minimatch/ESLint development-chain findings when the fixed version clears quarantine and its major-version parents are compatible. | Dependency owner; fresh install, dependency-tree validation, complete workspace and real terminal checks, then non-author fresh-main replay. Retain the baseline audit and rejected young resolution as evidence; no incompatible metadata or age-policy exception. |
+| **P0 INT-02: reconcile the native follow-ups** | Include read-only Codex management, profile API routing and cached-login preservation, sticky-profile authority binding, and every concrete remote-client spawn boundary. Exercise real native managed chat and delegated AIAgent conversations with terminal CLI self-calls as well as configuration-only commands. | Integration owner; exact-head private/native checks followed by independent fresh-main CLI, observed model/tool requests, encrypted parent/child history and ciphertext checks. Diagnose failed or incomplete probes before accepting this milestone. A partial author test run cannot qualify it. |
 | **P1 NATIVE-02: remaining host and lifecycle evidence** | Qualify protected workspaces, native cancellation/reaping, install/update/restore and logged-in vendor routes on each supported native host. | Non-author host owner. Keep Linux protocol, macOS, synthetic API login and real account evidence distinct; unavailable dedicated credentials remain pending. |
 | **P1 UPSTREAM-02: refresh the reviewed input** | Review newer upstream changes against the pinned input and port only concrete consumers within this fork's encrypted local scope. | Integration owner records the fetched revision, port/defer decision and encrypted behavior proof. A newer upstream HEAD alone neither qualifies a port nor authorizes removed services. |
 | **P1 HARNESS-02: one coherent formal contract** | Preserve the authorized opt-in consumer and hold the separate Goal controller. Reuse verified PM tool identity, source/review identities, protected scratch, conditional status and aggregate attempt/cost receipts through one checker boundary. | Harness owner; compare existing consumers and failure contracts, then merge only a fully qualified bounded increment. A future default hidden controller requires a concrete consumer; opt-in checkpoint visibility is not evidence that this preference has been fulfilled. |
