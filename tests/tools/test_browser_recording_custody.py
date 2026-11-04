@@ -13,6 +13,7 @@ import pytest
 
 from tools import browser_recording as rec_mod
 from tools.browser_terminal import BrowserRuntime
+from hermes_platform.remote_identity import RuntimeIdentity
 
 PASSWORD = "synthetic recording test password"
 VIDEO = b"\x1a\x45\xdf\xa3" + b"synthetic-webm-frames" * 64
@@ -245,14 +246,14 @@ def test_outgoing_recording_uses_backend_ram_and_retires_only_allocated_capture(
     home, ram = owner
     env = FakeOutgoing()
     runtime = BrowserRuntime("/run/user/1000/hb", "/run/user/1000/hb/profile", "/run/user/1000/hb/captures",
-                             "/run/user/1000/hb/sockets", "/run/user/1000/hb/tmp")
+                             "/run/user/1000/hb/sockets", "/run/user/1000/hb/tmp", generation=RuntimeIdentity("unit-generation", (("/unit-declared-path", "1000:700:1:1"),)))
     monkeypatch.setattr("tools.terminal_tool._get_env_config", lambda: {"env_type": "ssh"})
     monkeypatch.setattr("tools.browser_terminal.terminal_environment", lambda create=True: env)
     monkeypatch.setattr("tools.browser_terminal.browser_runtime", lambda _env: runtime)
     import subprocess
-    monkeypatch.setattr("hermes_platform.remote_workspace.validate", lambda *args: None)
+    monkeypatch.setattr("hermes_platform.remote_workspace.validate", lambda *args, **kwargs: None)
     monkeypatch.setattr("tools.environments.streams.run_in",
-                        lambda _env, argv, timeout=None: (env.removed.append(argv[3:])
+                        lambda _env, argv, timeout=None, **kwargs: (env.removed.append(argv[-1:])
                                                         or subprocess.CompletedProcess(argv, 0)))
     monkeypatch.setattr(rec_mod, "_fetch_capture_bytes", lambda selected: env.files[selected.capture])
     browser = FakeBrowser(foreign=Path("/home/victim/secret.webm"), writes_local=False)

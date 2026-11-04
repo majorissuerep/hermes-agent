@@ -79,7 +79,7 @@ def test_failed_selected_terminal_command_has_no_host_fallback(monkeypatch, sele
 
     backend = selected(FakeBackend([("/tmp", "tmpfs", "rw,noswap")]))
     exported = []
-    def refusing_backend(target, command, *, child_env, interactive):
+    def refusing_backend(target, command, *, child_env, interactive, expected_prefix):
         assert target is backend and command[-1] == "snapshot"
         exported.append(child_env)
     monkeypatch.setattr(streams, "remote_command", refusing_backend)
@@ -97,7 +97,7 @@ def test_sandbox_browser_state_lives_in_the_backends_proven_ram(monkeypatch, sel
     backend = selected(FakeBackend([("/tmp", "tmpfs", "rw,noswap")]))
     wrapped = []
     monkeypatch.setattr(streams, "remote_command",
-                        lambda target, command, *, child_env, interactive: wrapped.append(child_env) or ["client"])
+                        lambda target, command, *, child_env, interactive, expected_prefix: wrapped.append(child_env) or ["client"])
     argv, client_env = session._sandbox_wrap(["agent-browser", "--session", "s", "snapshot"], dict(_HOST_ENV), "/h")
     remote = wrapped[0]
     root = backend.probes("provision")[0][8]
@@ -158,7 +158,7 @@ def test_a_vanished_backend_runtime_requires_recovery_without_replaying_the_comm
     from tools.environments import streams
 
     backend = selected(FakeBackend([("/tmp", "tmpfs", "rw,noswap")]))
-    monkeypatch.setattr(streams, "remote_command", lambda _e, argv, *, child_env, interactive: ["client", *argv])
+    monkeypatch.setattr(streams, "remote_command", lambda _e, argv, *, child_env, interactive, expected_prefix: ["client", *argv])
     clients = []
     def failed_client(argv, *_args):
         clients.append(argv)
@@ -191,13 +191,16 @@ def test_cached_runtime_rechecks_mount_and_permissions_without_replacing_profile
 @pytest.mark.platforms("linux")
 def test_runtime_guard_refuses_a_missing_or_replaced_runtime_directory(tmp_path):
     from tools.browser_terminal import BrowserRuntime, runtime_missing
+    from hermes_platform.remote_identity import capture
 
     tmp_path.chmod(0o700)  # this owned runtime root can inherit SGID too
     parts = [tmp_path / name for name in ("profile", "captures", "sockets", "tmp")]
     for part in parts:
         part.mkdir(mode=0o700)
         part.chmod(0o700)  # owned fixture: mkdir can inherit SGID from the runner's parent
-    runtime = BrowserRuntime(str(tmp_path), *map(str, parts))
+    paths = [str(tmp_path), *map(str, parts)]
+    generation = capture(lambda argv, **kwargs: subprocess.run(argv, capture_output=True, check=False, **kwargs), paths)
+    runtime = BrowserRuntime(*paths, generation=generation)
     ran = subprocess.run(runtime.guarded(["printf", "ran"]), capture_output=True, text=True, timeout=30, check=False)
     assert (ran.returncode, ran.stdout) == (0, "ran")
     parts[0].rmdir()

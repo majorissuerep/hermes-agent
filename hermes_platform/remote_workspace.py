@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from typing import Callable, Sequence
 
 from hermes_platform.memory_protection import RamProof, parse_swaps, prove_ram_only
+from hermes_platform.remote_identity import RuntimeChanged, RuntimeIdentity, capture
 
 MOUNTINFO_LIMIT = 512 * 1024
 SWAPS_LIMIT = 64 * 1024
@@ -74,6 +75,7 @@ class ProtectedTargetDir:
     root: str
     children: dict[str, str]
     proof: RamProof
+    identity: RuntimeIdentity
 
 
 @dataclass
@@ -172,7 +174,11 @@ def _directory_report(run: Runner, mode: str, root: str, children: Sequence[str]
         if not proof.proven:
             raise ProtectedTargetUnavailable(f"{expected}: {proof.reason}")
         paths[child] = physical
-    return ProtectedTargetDir(root, {child: paths[child] for child in children}, _prove(report, root))
+    try:
+        identity = capture(run, [paths[child] for child in ("", *children)])
+    except RuntimeChanged as exc:
+        raise ProtectedTargetUnavailable(str(exc)) from exc
+    return ProtectedTargetDir(root, {child: paths[child] for child in children}, _prove(report, root), identity)
 
 
 def acquire(run: Runner, name: str, children: Sequence[str], *, candidates: Sequence[str] = ()) -> ProtectedTargetDir:
@@ -202,9 +208,13 @@ def acquire(run: Runner, name: str, children: Sequence[str], *, candidates: Sequ
     raise ProtectedTargetUnavailable("; ".join(refusals) or "no candidate directory exists")
 
 
-def validate(run: Runner, root: str, children: Sequence[str]) -> ProtectedTargetDir:
+def validate(run: Runner, root: str, children: Sequence[str], *,
+             expected_identity: RuntimeIdentity | None = None) -> ProtectedTargetDir:
     """Re-prove the same existing paths and current mount/swap facts without changing them."""
-    return _directory_report(run, "verify", root, children)
+    found = _directory_report(run, "verify", root, children)
+    if expected_identity is not None and found.identity != expected_identity:
+        raise RuntimeChanged("the original protected target generation or directory changed")
+    return found
 
 
 _READ_REGULAR_FILE = ('set -eu; p=$1; limit=$2; [ ! -L "$p" ] && [ -f "$p" ] || exit 98; '

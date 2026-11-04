@@ -24,6 +24,8 @@ class FakeBackend:
         self.files: dict[str, bytes] = {}
         self.calls: list[list[str]] = []
         self.exported: list[dict] = []
+        self.epoch = f"00000000-0000-0000-0000-000000000000:{id(self)}:1:1"
+        self.native_ids: dict[str, str] = {}
 
     def get_temp_dir(self) -> str:
         return self.temp
@@ -41,6 +43,21 @@ class FakeBackend:
         self.exported.append(dict(child_env or {}))
         if argv[:2] == ["sh", "-c"] and argv[3:4] == ["hermes-protected-scratch"]:
             return subprocess.CompletedProcess(argv, 0, self._report(argv), b"")
+        if argv[:2] == ["sh", "-c"] and argv[3:4] == ["hermes-runtime-identity"]:
+            fields = [self.epoch]
+            for path in argv[4:]:
+                if path not in self.dirs or path in self.links or self.dirs[path] != f"{self.uid}:700":
+                    return subprocess.CompletedProcess(argv, 1, b"", b"")
+                native = self.native_ids.setdefault(path, f"{id(self)}:{len(self.native_ids) + 1}")
+                fields.append(f"{self.dirs[path]}:{native}")
+            return subprocess.CompletedProcess(argv, 0, ("\0".join(fields) + "\0").encode(), b"")
+        if argv[:2] == ["sh", "-c"] and argv[3:4] == ["hermes-browser-guard"]:
+            count = int(argv[5])
+            expected = dict(zip(argv[6:6 + 2 * count:2], argv[7:6 + 2 * count:2]))
+            actual = {p: f"{self.dirs.get(p, '')}:{self.native_ids.get(p, '')}" for p in expected}
+            if argv[4] != self.epoch or actual != expected or any(p in self.links for p in expected):
+                return subprocess.CompletedProcess(argv, 97, b"", b"hermes: the protected browser runtime is missing or changed")
+            return self.run_in(env, argv[6 + 2 * count:], **_kwargs)
         if argv[:3] == ["rm", "-f", "--"]:
             for path in argv[3:]:
                 self.files.pop(path, None)

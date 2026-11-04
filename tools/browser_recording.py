@@ -168,7 +168,8 @@ def _command(rec: _Recording, args: list[str]):
 def _remove_backend_capture(rec: _Recording) -> None:
     from tools.environments import streams
 
-    result = streams.run_in(rec.env, ["rm", "-f", "--", rec.capture], timeout=15)
+    result = streams.run_in(rec.env, rec.runtime.guarded(["rm", "-f", "--", rec.capture]), timeout=15,
+                            expected_prefix=rec.runtime.client_identity)
     if result.returncode:
         raise RecordingError("The outgoing RAM recording could not be removed after encrypted publication")
 
@@ -271,7 +272,8 @@ def _fetch_capture_bytes(rec: _Recording) -> bytes:
 
     limit = _max_video_bytes()
     argv = rec.runtime.guarded(regular_file_read_argv(rec.capture, max_bytes=limit))
-    command = streams.remote_command(rec.env, argv, interactive=False)
+    command = streams.remote_command(rec.env, argv, interactive=False,
+                                     expected_prefix=rec.runtime.client_identity)
     if command is None:
         raise RecordingError("The original backend cannot stream its recording")
     code, data, _stderr = run_client(command, env=rec.client_env, timeout=120, max_output=limit + 65536)

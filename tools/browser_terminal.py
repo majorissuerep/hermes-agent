@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from hermes_platform.remote_identity import RuntimeChanged, RuntimeIdentity, guarded_argv
+
 _BOUND_EXECUTION: ContextVar[_BrowserExecution | None] = ContextVar("browser_execution", default=None)
 
 
@@ -66,14 +68,15 @@ class BrowserRuntime:
     captures: str
     sockets: str
     tmp: str
+    client_identity: tuple[str, ...] = ()
+    generation: RuntimeIdentity | None = None
 
     def guarded(self, argv: list[str]) -> list[str]:
         """``argv`` preceded by a check that every runtime directory is still ours and not a link.
 
         A recreated container or rebooted target loses the RAM directory; the guard refuses
         (exit ``RUNTIME_MISSING_EXIT``) instead of letting the browser recreate it unproven."""
-        return ["sh", "-c", _GUARD, "hermes-browser-guard",
-                self.root, self.profile, self.captures, self.sockets, self.tmp, *argv]
+        return guarded_argv(self.generation, argv)
 
 
 @dataclass(frozen=True)
@@ -90,13 +93,17 @@ def _validate_captured_runtime(selected: _BrowserExecution) -> None:
 
     if selected.runtime is None:
         raise RuntimeError("The captured outgoing browser has no protected runtime")
+    _check_client(selected.env, selected.runtime)
 
     def run(argv, *, timeout):
-        return streams.run_in(selected.env, argv, timeout=timeout)
+        return streams.run_in(selected.env, argv, timeout=timeout,
+                              expected_prefix=selected.runtime.client_identity)
 
     try:
-        remote_workspace.validate(run, selected.runtime.root, _RUNTIME_PARTS)
-    except remote_workspace.ProtectedTargetUnavailable as exc:
+        remote_workspace.validate(run, selected.runtime.root, _RUNTIME_PARTS,
+                                  expected_identity=selected.runtime.generation)
+        _check_client(selected.env, selected.runtime)
+    except (remote_workspace.ProtectedTargetUnavailable, RuntimeChanged) as exc:
         raise RuntimeError(f"The original browser runtime is unavailable; it was not recreated: {exc}") from exc
 
 
@@ -122,9 +129,16 @@ def captured_execution(home: Path, backend: str, env: Any, runtime: BrowserRunti
 _RUNTIME_PARTS = ("profile", "captures", "sockets", "tmp")
 RUNTIME_MISSING_EXIT = 97
 RUNTIME_MISSING_MESSAGE = "hermes: the protected browser runtime is missing"
-_GUARD = ('u=$(id -u); for p in "$1" "$2" "$3" "$4" "$5"; do '
-          'if [ -L "$p" ] || [ ! -d "$p" ] || [ "$(stat -c %u:%a "$p" 2>/dev/null)" != "$u:700" ]; then '
-          f'echo "{RUNTIME_MISSING_MESSAGE}" >&2; exit {RUNTIME_MISSING_EXIT}; fi; done; shift 5; exec "$@"')
+
+
+def _client_identity(env: Any) -> tuple[str, ...]:
+    from tools.environments import streams
+    return tuple(streams.exec_prefix(env, interactive=False) or ())
+
+
+def _check_client(env: Any, runtime: BrowserRuntime) -> None:
+    if runtime.generation is None or runtime.client_identity != _client_identity(env):
+        raise RuntimeChanged("The original browser execution target changed; it was not recreated")
 
 
 def backend_identity(env: Any) -> str:
@@ -159,15 +173,27 @@ def browser_runtime(env: Any) -> BrowserRuntime:
     from tools.environments import streams
 
     def run(argv, *, timeout):
-        return streams.run_in(env, argv, timeout=timeout)
+        return streams.run_in(env, argv, timeout=timeout, expected_prefix=client)
 
     temp = env.get_temp_dir()
     try:
-        if scope in cache:
+        client = _client_identity(env)
+        if scope in cache and cache[scope].client_identity == client:
             runtime = cache[scope]
-            remote_workspace.validate(run, runtime.root, _RUNTIME_PARTS)
-            return runtime
+            try:
+                _check_client(env, runtime)
+                remote_workspace.validate(run, runtime.root, _RUNTIME_PARTS,
+                                          expected_identity=runtime.generation)
+            except RuntimeChanged:
+                # Only a NEW unbound request may acquire a new immutable generation. Old
+                # callbacks keep their original runtime object and never reach acquisition.
+                runtime = None
+            else:
+                _check_client(env, runtime)
+                return runtime
         found = remote_workspace.acquire(run, f"hermes-browser-{scope}", _RUNTIME_PARTS, candidates=(temp,))
+        if client != _client_identity(env):
+            raise RuntimeChanged("The selected browser target changed during acquisition")
     except remote_workspace.ProtectedTargetUnavailable as exc:
         raise RuntimeError(
             f"The {backend_identity(env)} has no proven RAM-only directory for private browser "
@@ -175,7 +201,8 @@ def browser_runtime(env: Any) -> BrowserRuntime:
             f"option, at $XDG_RUNTIME_DIR or {temp} inside that backend, or run it where no swap is "
             "active, then retry. Hermes does not change mounts or swap settings."
         ) from exc
-    runtime = cache[scope] = BrowserRuntime(found.root, **found.children)
+    runtime = cache[scope] = BrowserRuntime(found.root, **found.children,
+                                          client_identity=client, generation=found.identity)
     return runtime
 
 

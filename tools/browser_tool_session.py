@@ -482,7 +482,8 @@ def _sandbox_close_daemon(session_name: str) -> None:
         env = terminal.terminal_environment(create=False)
         runtime = terminal.browser_runtime(env)
         streams.run_in(env, runtime.guarded([_SANDBOX_AGENT_BROWSER, "--session", session_name, "close"]),
-                       child_env={"AGENT_BROWSER_SOCKET_DIR": runtime.sockets}, timeout=15)
+                       child_env={"AGENT_BROWSER_SOCKET_DIR": runtime.sockets}, timeout=15,
+                       expected_prefix=runtime.client_identity)
     except (RuntimeError, OSError, subprocess.SubprocessError) as exc:
         _bt.logger.debug("sandbox browser close for %s failed: %s", session_name, exc)
 
@@ -519,7 +520,8 @@ def settle_sandbox_capture(expected: str, reported: Any, local_dest: Path, *, fe
     from tools.environments import streams
     try:
         env = terminal.terminal_environment(create=False)
-        captures = terminal.browser_runtime(env).captures
+        runtime = terminal.browser_runtime(env)
+        captures = runtime.captures
     except RuntimeError as exc:
         _bt.logger.warning("could not settle the sandbox screenshot %s: %s", expected, exc)
         return
@@ -531,7 +533,8 @@ def settle_sandbox_capture(expected: str, reported: Any, local_dest: Path, *, fe
         _bt.logger.warning("could not fetch the sandbox screenshot %s: %s", source, exc)
     finally:
         try:
-            streams.run_in(env, ["rm", "-f", "--", *sorted({expected, source})], timeout=15)
+            streams.run_in(env, runtime.guarded(["rm", "-f", "--", *sorted({expected, source})]), timeout=15,
+                           expected_prefix=runtime.client_identity)
         except (RuntimeError, OSError, subprocess.SubprocessError) as exc:
             _bt.logger.warning("could not remove the sandbox screenshot %s: %s", source, exc)
 
@@ -618,7 +621,8 @@ def _sandbox_wrap(cmd_parts: list[str], browser_env: dict[str, str], task_socket
                       TMPDIR=runtime.tmp, AGENT_BROWSER_ARGS=",".join(CHROMIUM_SANDBOX_BYPASS_ARGS))
     tail = cmd_parts[len(_agent_browser_argv(cmd_parts[0])):]
     wrapped = streams.remote_command(env, runtime.guarded([_SANDBOX_AGENT_BROWSER, *tail]),
-                                     child_env=remote_env, interactive=True)
+                                     child_env=remote_env, interactive=True,
+                                     expected_prefix=runtime.client_identity)
     if wrapped is None:
         raise RuntimeError(f"{type(env).__name__} cannot host browser commands")
     return wrapped, {"PATH": browser_env.get("PATH", os.environ.get("PATH", "")), "HOME": os.environ.get("HOME", "")}

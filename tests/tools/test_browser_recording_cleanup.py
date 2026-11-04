@@ -11,6 +11,7 @@ from hermes_security import artifacts, protected_workspace, vault
 from tools import browser_recording as recording
 from tools import browser_recording_pending as pending
 from tools.browser_terminal import BrowserRuntime
+from hermes_platform.remote_identity import RuntimeIdentity
 from tests.tools.test_browser_recording_custody import (
     PASSWORD, FakeBrowser, FakeOutgoing, _bind_browser,
 )
@@ -88,11 +89,11 @@ def test_outgoing_fetch_failure_does_not_claim_an_unconfirmed_local_copy(owner, 
     _home, _ram = owner
     env = FakeOutgoing()
     runtime = BrowserRuntime('/run/owned', '/run/owned/profile', '/run/owned/captures',
-                             '/run/owned/sockets', '/run/owned/tmp')
+                             '/run/owned/sockets', '/run/owned/tmp', generation=RuntimeIdentity("unit-generation", (("/unit-declared-path", "1000:700:1:1"),)))
     monkeypatch.setattr('tools.terminal_tool._get_env_config', lambda: {'env_type': 'ssh'})
     monkeypatch.setattr('tools.browser_terminal.terminal_environment', lambda create=True: env)
     monkeypatch.setattr('tools.browser_terminal.browser_runtime', lambda _env: runtime)
-    monkeypatch.setattr('hermes_platform.remote_workspace.validate', lambda *args: None)
+    monkeypatch.setattr('hermes_platform.remote_workspace.validate', lambda *args, **kwargs: None)
     browser = FakeBrowser(writes_local=False)
     _bind_browser(monkeypatch, browser)
 

@@ -34,8 +34,11 @@ def test_captured_terminal_never_acquires_a_replacement_or_crosses_profiles(tmp_
     env = object()
     runtime = terminal.BrowserRuntime("/run/original", "/run/original/profile", "/run/original/captures",
                                       "/run/original/sockets", "/run/original/tmp")
+    from dataclasses import replace
+    from hermes_platform.remote_identity import RuntimeIdentity
+    runtime = replace(runtime, generation=RuntimeIdentity("unit-generation", ()))
     checked = []
-    monkeypatch.setattr("hermes_platform.remote_workspace.validate", lambda run, root, parts: checked.append(root))
+    monkeypatch.setattr("hermes_platform.remote_workspace.validate", lambda run, root, parts, **kwargs: checked.append(root))
     monkeypatch.setattr("hermes_platform.remote_workspace.acquire", lambda *a, **kw: pytest.fail("must not acquire"))
     monkeypatch.setattr("tools.terminal_tool._get_env_config", lambda: {"env_type": "docker"})
     owner = set_hermes_home_override(first)
