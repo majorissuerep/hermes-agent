@@ -154,6 +154,10 @@ def test_capture_retains_encrypted_originals_reopened_by_existing_readers(home, 
     assert _pixels(native["content"][1]["image_url"]["url"]) == {PIXEL}
     read = json.loads(file_tools.read_file_tool(str(tree), task_id="cua-private"))
     assert not read.get("error") and _label(0) in read["content"]
+    found = json.loads(file_tools.search_tool("message 119", path=str(tree), task_id="cua-private-search"))
+    assert not found.get("error") and found["matches"]
+    assert any("message 119" in row["content"] for row in found["matches"])
+    assert _plaintext(home) == []
 
 
 def test_aux_vision_receives_capture_pixels_in_memory_without_staging(home, monkeypatch):
@@ -262,6 +266,35 @@ def test_cli_window_state_refuses_without_proven_ram_and_spawns_nothing(home, ra
     assert "active swap" in str(refused.value) and spawned == []
     session._call_tool_via_cli("list_windows", {}, 10.0)  # other CLI calls are unchanged
     assert spawned == [{}]
+
+
+@pytest.mark.platforms("posix")
+@pytest.mark.require_symlinks
+@pytest.mark.parametrize("replacement", ["reported-outside", "symlink", "hardlink"])
+def test_cli_capture_never_reads_a_driver_selected_outside_file(home, ram, tmp_path, monkeypatch, replacement):
+    outside = tmp_path / "outside.png"
+    outside.write_bytes(SHOT)
+    before = outside.read_bytes()
+
+    def run(cmd, **_kw):
+        target = Path(json.loads(cmd[3])["screenshot_out_file"])
+        reported = str(target)
+        if replacement == "reported-outside":
+            reported = str(outside)
+        else:
+            target.unlink()
+            if replacement == "symlink":
+                target.symlink_to(outside)
+            else:
+                os.link(outside, target)
+        return SimpleNamespace(returncode=0, stderr="", stdout=json.dumps({"screenshot_file_path": reported}))
+
+    session = _driver_cli(monkeypatch, run)
+    with pytest.raises((RuntimeError, OSError)):
+        session._call_tool_via_cli("get_window_state", {"pid": 1, "window_id": 2,
+                                                       "screenshot_out_file": str(outside)}, 30.0)
+    assert outside.read_bytes() == before
+    assert list(ram.iterdir()) == []
 
 
 @pytest.mark.platforms("linux")

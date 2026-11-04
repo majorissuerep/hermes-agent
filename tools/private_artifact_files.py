@@ -167,21 +167,43 @@ def _matching_lines(text, pattern, context, fetch, timeout):
     return matches
 
 
+def _search_text(candidate, relative, raw):
+    if media_kind(relative) != "documents":
+        return raw
+    text, _ = _document_text(candidate, relative, raw)
+    return text.encode("utf-8") if text is not None else None
+
+
+def _search_payload(candidate, remaining, deadline):
+    relative = artifacts._location(candidate)[1]
+    kind = media_kind(relative)
+    if (is_image_relative_path(relative) or kind == "audio"
+            or (candidate.suffix not in {".txt", ".log"} and kind != "documents")):
+        return None
+    if block := get_model_read_block_error(str(candidate)):
+        raise PermissionError(block)
+    raw = artifacts.read_bytes(candidate)
+    if len(raw) > remaining or time.monotonic() >= deadline:
+        raise ValueError("Private artifact search exceeded its byte/time bound; narrow the path")
+    payload = _search_text(candidate, relative, raw)
+    if payload is None:
+        return None
+    timeout = min(15, deadline - time.monotonic())
+    used = max(len(raw), len(payload))
+    if used > remaining or timeout <= 0:
+        raise ValueError("Private document search exceeded its byte/time bound; narrow the path")
+    return payload, timeout, used
+
+
 def _search_content(candidates, pattern, limit, offset, output_mode, context):
     result = SearchResult()
     budget, hits, deadline = 0, [], time.monotonic() + 30
     for candidate in candidates:
-        relative = artifacts._location(candidate)[1]
-        if candidate.suffix not in {".txt", ".log"} or is_image_relative_path(relative):
+        prepared = _search_payload(candidate, _SCAN_BYTES - budget, deadline)
+        if prepared is None:
             continue
-        block = get_model_read_block_error(str(candidate))
-        if block:
-            raise PermissionError(block)
-        raw = artifacts.read_bytes(candidate)
-        budget += len(raw)
-        timeout = min(15, deadline - time.monotonic())
-        if budget > _SCAN_BYTES or timeout <= 0:
-            raise ValueError("Private artifact search exceeded its byte/time bound; narrow the path")
+        raw, timeout, used = prepared
+        budget += used
         if output_mode != "content":
             proc = _run_rg(raw, pattern, ["--count"], timeout)
             count = int(proc.stdout.strip() or b"0")

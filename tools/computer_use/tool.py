@@ -633,7 +633,7 @@ def _capture_summary_lines(v: SimpleNamespace) -> list[str]:
                                       "it exists only in this response"),
         v.cap.note,
         v.elements_file and (f"{'' if v.ax_capped else 'full '}element tree with untruncated labels "
-                             f"saved to {v.elements_file} (encrypted) — read_file it if you need dropped label "
+                             f"saved to {v.elements_file} (encrypted) — read_file/search_files it if you need dropped label "
                              "text or elements beyond the cap"),
         v.elements_unavailable and (f"full element tree not retained ({v.elements_unavailable}); only the "
                                     "capped list below is available"),
@@ -709,7 +709,7 @@ def _capture_response(cap: CaptureResult, max_elements: int = _DEFAULT_MAX_ELEME
         extra = {"vision_unavailable": True}
     if v.truncated:  # text paths carry the `elements` array, so the truncation note applies
         lines.append(f"  (response truncated to {len(v.visible)} of {v.total} elements; "
-                     + ("the full tree is in elements_file — read_file it, or " if v.elements_file else "")
+                     + ("the full tree is in elements_file — read_file/search_files it, or " if v.elements_file else "")
                      + "pass app= to narrow scope)")
     return _text_capture_payload(v, "\n".join(lines), extra)
 
