@@ -11,6 +11,7 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[2]
 LINUX_FILES = [
     "tests/tui_runtime/test_terminal_model_pty.py",
+    "tests/tui_runtime/test_terminal_artifact_preview_pty.py",
     "tests/tui_runtime/test_terminal_global_model_pty.py",
     "tests/tui_runtime/test_terminal_session_naming_pty.py",
     "tests/tui_runtime/test_terminal_pty_custody.py",
