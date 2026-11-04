@@ -187,60 +187,16 @@ class TestErrorLoggingExcInfo:
             mock_client.stream.side_effect = ConnectionError("network down")
             mock_client_cls.return_value = mock_client
 
-            dest = tmp_path / "image.jpg"
             with (
                 caplog.at_level(logging.ERROR, logger="tools.vision_tools"),
                 pytest.raises(ConnectionError),
             ):
-                await _download_image(
-                    "https://example.com/img.jpg", dest, max_retries=1
-                )
+                await _download_image("https://example.com/img.jpg", max_retries=1)
 
             # Should have logged with exc_info (traceback present)
             error_records = [r for r in caplog.records if r.levelno >= logging.ERROR]
             assert len(error_records) >= 1
             assert error_records[0].exc_info is not None
-
-    @pytest.mark.asyncio
-    async def test_cleanup_error_logs_exc_info(self, tmp_path, caplog):
-        """Temp file cleanup failure should log warning with exc_info."""
-        # A data: URL resolves to bytes without any network, materializes to a
-        # vision temp file, then the analysis runs — exercising the temp-cleanup
-        # path in the finally block. A tiny valid JPEG (magic bytes) passes the
-        # resolver's magic-byte sniff.
-        jpeg_b64 = base64.b64encode(b"\xff\xd8\xff" + b"\x00" * 32).decode("ascii")
-        data_url = f"data:image/jpeg;base64,{jpeg_b64}"
-
-        with (
-            patch(
-                "tools.vision_tools._image_to_base64_data_url",
-                return_value="data:image/jpeg;base64,abc",
-            ),
-            caplog.at_level(logging.WARNING, logger="tools.vision_tools"),
-        ):
-            mock_response = MagicMock()
-            mock_choice = MagicMock()
-            mock_choice.message.content = "A test image description"
-            mock_response.choices = [mock_choice]
-
-            with (
-                patch("tools.vision_tools.async_call_llm", new_callable=AsyncMock, return_value=mock_response),
-            ):
-                # Make unlink fail to trigger the cleanup warning.
-                def failing_unlink(self, *args, **kwargs):
-                    raise PermissionError("no permission")
-
-                with patch.object(Path, "unlink", failing_unlink):
-                    await vision_analyze_tool(data_url, "describe", "test/model")
-
-            warning_records = [
-                r
-                for r in caplog.records
-                if r.levelno == logging.WARNING
-                and "temporary file" in r.getMessage().lower()
-            ]
-            assert len(warning_records) >= 1
-            assert warning_records[0].exc_info is not None
 
 
 class TestVisionConfig:
@@ -409,15 +365,11 @@ class TestVisionSafetyGuards:
             mock_client.stream.return_value = _FakeAsyncStream(_FakeStreamResponse())
             mock_client_cls.return_value = mock_client
 
-            await _download_image(
-                "https://allowed.test/cat.png", tmp_path / "cat.png", max_retries=1
-            )
-
-        assert not (tmp_path / "cat.png").exists()
+            await _download_image("https://allowed.test/cat.png", max_retries=1)
 
     @pytest.mark.asyncio
     async def test_download_enforces_size_cap_while_streaming(self, tmp_path):
-        """Streaming download rejects oversize payloads chunk-by-chunk and cleans up."""
+        """Streaming download rejects oversize payloads chunk-by-chunk."""
         from tools.vision_tools import _download_image
 
         class _FakeStreamResponse:
@@ -453,12 +405,7 @@ class TestVisionSafetyGuards:
             mock_client.stream.return_value = _FakeAsyncStream(_FakeStreamResponse())
             mock_client_cls.return_value = mock_client
 
-            await _download_image(
-                "https://example.com/big.png", tmp_path / "big.png", max_retries=1
-            )
-
-        assert not (tmp_path / "big.png").exists()
-        assert not list(tmp_path.glob(".big.png.*.tmp"))
+            await _download_image("https://example.com/big.png", max_retries=1)
 
     @pytest.mark.asyncio
     async def test_download_ignores_malformed_content_length(self, tmp_path):
@@ -466,7 +413,6 @@ class TestVisionSafetyGuards:
         from tools.vision_tools import _download_image
 
         body = VALID_PNG + b"\x00" * 16
-        dest = tmp_path / "cat.png"
 
         class _FakeStreamResponse:
             url = "https://example.com/cat.png"
@@ -499,9 +445,7 @@ class TestVisionSafetyGuards:
             mock_client.stream.return_value = _FakeAsyncStream(_FakeStreamResponse())
             mock_client_cls.return_value = mock_client
 
-            await _download_image("https://example.com/cat.png", dest, max_retries=1)
-
-        assert dest.read_bytes() == body
+            assert await _download_image("https://example.com/cat.png", max_retries=1) == body
 
 
 # ---------------------------------------------------------------------------
@@ -639,8 +583,8 @@ class TestBase64SizeLimit:
         # isolates the pre-flight size REJECTION, not the resize recovery.
         with patch("tools.vision_tools._MAX_BASE64_BYTES", 1000), \
              patch("tools.vision_tools._resize_image_for_vision",
-                   side_effect=lambda p, *a, **k: "data:image/png;base64," +
-                   base64.b64encode(Path(p).read_bytes()).decode("ascii")), \
+                   side_effect=lambda data, *a, **k: "data:image/png;base64," +
+                   base64.b64encode(data).decode("ascii")), \
              patch("tools.vision_tools.async_call_llm", new_callable=AsyncMock) as mock_llm:
             result = json.loads(await vision_analyze_tool(str(img), "describe this"))
 
@@ -965,9 +909,7 @@ class TestDownloadRetryClassification:
             patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep,
             pytest.raises(httpx.HTTPStatusError),
         ):
-            await _download_image(
-                "https://example.com/flaky.jpg", tmp_path / "y.jpg", max_retries=3
-            )
+            await _download_image("https://example.com/flaky.jpg", max_retries=3)
         # All three attempts used, two backoff sleeps between them.
         assert mock_client.stream.call_count == 3
         assert mock_sleep.await_count == 2

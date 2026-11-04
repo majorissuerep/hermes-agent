@@ -4,9 +4,10 @@
 Local Storage). A bare ``os.makedirs`` inherited the umask and landed 0755, so on the
 documented ``HERMES_HOME_MODE=0701`` web-server hatch every other local account could
 read those stores (#77579 / #77486). The same held for the lazily-created media caches
-that hold user content — vision/computer-use captures and downloaded media. These tests pin the creation contract: 0700 dirs at creation time, a 0600 launch
-stderr log, and 0600 media files, with managed (NixOS) installs deliberately left to
-the configured umask/setgid.
+that hold user content — computer-use captures. (vision_analyze/video_analyze no longer
+write media caches at all: they prepare in memory.) These tests pin the creation contract:
+0700 dirs at creation time, a 0600 launch stderr log, and 0600 media files, with managed
+(NixOS) installs deliberately left to the configured umask/setgid.
 """
 import os
 import stat
@@ -15,7 +16,6 @@ import pytest
 
 import hermes_cli.browser_connect as bc
 import tools.computer_use.tool as cu
-import tools.vision_tools as vt
 
 
 def _mode(path) -> int:
@@ -104,31 +104,6 @@ def test_legacy_launch_stderr_log_reconciles_on_bare_hosts(tmp_path, monkeypatch
         handle.write(b"again")
     assert _mode(log) == 0o600
     assert log.read_bytes() == b"again"
-
-
-def test_vision_media_cache_dirs_created_owner_only(tmp_path, monkeypatch):
-    """cache/vision and cache/video land 0700 at creation, and a legacy 0755 dir is
-    healed (PR #77579's media-cache half)."""
-    home = tmp_path / "hh"
-    _no_managed(monkeypatch, home)
-    monkeypatch.setattr(vt, "get_hermes_dir", lambda new, old: home / new)
-    for sub in ("cache/vision", "cache/video"):
-        assert _mode(vt._secure_cache_dir(sub, "legacy")) == 0o700
-    legacy = home / "cache" / "vision"
-    os.chmod(legacy, 0o755)
-    monkeypatch.setenv("HERMES_HOME_MODE", "0700")
-    assert _mode(vt._secure_cache_dir("cache/vision", "legacy")) == 0o700
-
-
-def test_vision_media_cache_files_owner_only(tmp_path, monkeypatch):
-    """Media bytes written into the hardened cache land 0600, not the umask default."""
-    home = tmp_path / "hh"
-    _no_managed(monkeypatch, home)
-    monkeypatch.setattr(vt, "get_hermes_dir", lambda new, old: home / new)
-    path = vt._secure_cache_dir("cache/vision", "legacy") / "capture.png"
-    vt._write_private_bytes(path, b"screen contents")
-    assert path.read_bytes() == b"screen contents"
-    assert _mode(path) == 0o600
 
 
 def test_computer_use_cache_files_owner_only(tmp_path, monkeypatch):
