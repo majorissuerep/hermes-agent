@@ -63,6 +63,17 @@ def state(agent) -> FormalState | None:
     return existing if isinstance(existing, FormalState) else None
 
 
+def _interruption_feedback(agent, current: FormalState) -> str | None:
+    if not getattr(agent, "_interrupt_requested", False):
+        return None
+    current.approved, current.pending = False, {}
+    current.finalized, current.accepted_response = False, ""
+    current.status = "interrupted"
+    current.last_receipt = {"status": "interrupted"}
+    return json.dumps({"formal_logic": current.last_receipt, "pending_stakeholder_questions": [],
+                       "instruction": "Turn interrupted. Request no automatic repair or stakeholder input."})
+
+
 def begin_turn(agent, user_message: Any) -> str:
     if not hasattr(agent, "_formal_logic_initialized"):
         from hermes_cli.config import load_config_readonly
@@ -94,6 +105,8 @@ def check_candidate(agent, content: str) -> tuple[bool, str]:
         return True, content
     current.approved, current.pending = False, {}
     current.finalized, current.accepted_response = False, ""
+    if (feedback := _interruption_feedback(agent, current)) is not None:
+        return False, feedback
     try:
         blocks = list(_BLOCK.finditer(content or ""))
         if len(blocks) != 1 or len(content) > 80_000:
@@ -107,6 +120,8 @@ def check_candidate(agent, content: str) -> tuple[bool, str]:
             receipt = verify(checkpoint, current.lean_path)
             if receipt["status"] == "logic_verified":
                 current.cache[checkpoint.digest] = receipt
+        if (feedback := _interruption_feedback(agent, current)) is not None:
+            return False, feedback
         if receipt["status"] == "logic_verified":
             assessed = review(agent, checkpoint, answer, current.task, current.decisions)
             current.pending = assessed.pop("pending", {})
@@ -114,6 +129,8 @@ def check_candidate(agent, content: str) -> tuple[bool, str]:
         current.last_receipt = receipt
     except LogicFormatError as error:
         receipt = current.last_receipt = {"status": "format_failed", "error": str(error)}
+    if (feedback := _interruption_feedback(agent, current)) is not None:
+        return False, feedback
     current.status = receipt["status"]
     if current.status == "reviewed":
         current.approved = True
@@ -133,6 +150,8 @@ def gate_final(agent, final_msg: dict, final_response: str, messages: list) -> t
     if current is None:
         return None
     accepted, text = check_candidate(agent, final_response)
+    if _interruption_feedback(agent, current) is not None:
+        return False, _FAILURE + " Status: interrupted."
     if accepted:
         current.finalized, current.accepted_response = True, text
         set_checked_message(final_msg, text)
@@ -174,6 +193,8 @@ def before_tool(agent, name: str, arguments: dict) -> str | None:
     if current is None:
         return None
     current.finalized, current.accepted_response = False, ""
+    if _interruption_feedback(agent, current) is not None:
+        return "Turn interrupted; formal review cannot invoke further tools."
     if name == "tool_call":
         for call in arguments.get("calls", []):
             nested = call.get("name", "") if isinstance(call, dict) else ""
