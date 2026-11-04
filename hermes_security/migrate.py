@@ -141,6 +141,7 @@ def _harden_private_artifact(home: Path, relative: Path) -> None:
 
 
 def _frame_purpose(path: Path) -> str:
+    path = path.resolve() if path.is_absolute() else path
     relative = path.relative_to(vault_mod.find_vault_home(path)) if path.is_absolute() else path
     return terminal_frame_purpose(relative) or ("log" if path.suffix == ".log" else "transcript")
 

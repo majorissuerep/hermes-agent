@@ -118,3 +118,33 @@ def test_initial_migration_binds_terminal_frames_to_final_path(tmp_path, monkeyp
         assert scan_for_plaintext(home) == []
     finally:
         vault.clear_vault_cache()
+
+
+@pytest.mark.platforms("posix")
+@pytest.mark.require_symlinks
+def test_alias_frame_scope_recovers_original_and_rejects_transplanted_ciphertext(tmp_path, monkeypatch):
+    from hermes_security.migrate import _frame_purpose
+
+    home, alias = tmp_path / "physical-owner", tmp_path / "logical-home"
+    home.mkdir()
+    alias.symlink_to(home, target_is_directory=True)
+    monkeypatch.setenv("HERMES_HOME", str(alias))
+    monkeypatch.setattr(vault, "_SCRYPT_N", 1024)
+    vault.init_vault(home, "synthetic alias frame password")
+    vault.unlock(home, "synthetic alias frame password")
+    relative = Path("artifacts/terminal-output/original.log")
+    message = b"synthetic private alias frame\ncomplete tail"
+    try:
+        original = artifacts.write_bytes(home / relative, message, home=home)
+        ciphertext = original.read_bytes()
+        assert b"".join(frames.read_frames(alias / relative, purpose=_frame_purpose(alias / relative))) == message
+        assert _frame_purpose(relative) == _frame_purpose(home / relative)
+        copied = original.with_name("different-artifact.log")
+        copied.write_bytes(ciphertext)
+        copied.chmod(0o600)
+        with pytest.raises(VaultError):
+            list(frames.read_frames(copied, purpose=_frame_purpose(alias / copied.relative_to(home))))
+        assert original.read_bytes() == ciphertext
+        assert artifacts.read_bytes(original, home=home) == message
+    finally:
+        vault.clear_vault_cache()
