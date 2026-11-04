@@ -168,6 +168,10 @@ _UPDATE_DEPENDENCIES = (
     "hermes_security/passphrase.py",  # wrapped credential readers and rotation metadata
     "hermes_security/vault_metadata.py",  # serialized key-slot/credential publication
     "hermes_security/protected_memory.py",  # vault key custody on every encrypted update
+    "hermes_security/artifact_paths.py",  # private state classification during update migration
+    "hermes_security/artifacts.py",  # authenticated private output recovery
+    "hermes_security/delegation_repair.py",  # legacy delegation conversion during repair
+    "hermes_security/sqlite_custody.py",  # encrypted database lineage on every update
     "hermes_platform/memory_protection.py",  # native backing proof used by key custody
     "hermes_platform/managed_supervision.py",  # encrypted installer owner and stage lifetime
     "hermes_platform/owned_cleanup.py",  # supervisor-owned cleanup descriptors
