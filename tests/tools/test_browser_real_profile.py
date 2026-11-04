@@ -884,19 +884,17 @@ class TestReviewRound3:
         assert not (copy / "Profile 6").exists()
 
     # ── ③ consent-off deletes the snapshot store ──
-    def test_cleanup_removes_store(self, tmp_path, monkeypatch):
+    def test_cleanup_removes_store(self, owned):
         import hermes_cli.browser_connect as bc
-        home = tmp_path / "hh"
-        monkeypatch.setenv("HERMES_HOME", str(home))
+        home, _ram = owned
         store = home / "browser-profile" / "chrome" / "Default"
         store.mkdir(parents=True)
         (store / "Cookies").write_text("secret")
         bc.cleanup_real_profile_snapshots()
         assert not (home / "browser-profile").exists()
 
-    def test_cleanup_idempotent_when_absent(self, tmp_path, monkeypatch):
+    def test_cleanup_idempotent_when_absent(self, owned):
         import hermes_cli.browser_connect as bc
-        monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hh"))
         assert bc.cleanup_real_profile_snapshots() == {"removed": [], "retained": []}
 
     # ── Windows lock probe (unit; the live share-lock is proven in the

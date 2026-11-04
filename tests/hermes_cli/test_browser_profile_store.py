@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import socket
+import stat
 from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
@@ -62,12 +63,22 @@ def test_consent_cleanup_retains_archive_when_a_profile_lock_is_unavailable(env,
     assert any("profile lock unavailable; repeat cleanup" in item for item in report["retained"])
 
 
-def test_replaced_ram_directory_cannot_reuse_a_copied_lease_binding(env):
+@pytest.mark.parametrize("parent_mode", [None, pytest.param(0o2700, marks=pytest.mark.platforms("linux"),
+                                                        id="setgid-parent")])
+def test_replaced_ram_directory_cannot_reuse_a_copied_lease_binding(env, parent_mode):
     home, _ram = env
+    if parent_mode is not None:
+        os.chown(_ram, -1, os.getegid())  # native SGID inheritance with the fixture's own group
+        _ram.chmod(parent_mode)
+        assert stat.S_IMODE(_ram.stat().st_mode) == parent_mode
     _profile, path = _session(REAL, IDENTITY_A, "original-cookie")
     original = path.with_name(path.name + ".retained")
     path.rename(original)
     path.mkdir(mode=0o700)
+    if parent_mode is not None:
+        assert stat.S_IMODE(path.stat().st_mode) == 0o2700
+    path.chmod(0o700)  # explicit replacement precondition: mkdir inherits an operator parent's SGID
+    assert stat.S_IMODE(path.stat().st_mode) == 0o700
     binding = archive.RUNTIME_BINDING_NAME
     (path / binding).write_bytes((original / binding).read_bytes())
     cookie_db(path / "Default" / "Network" / "Cookies", "replacement-cookie")
@@ -77,6 +88,8 @@ def test_replaced_ram_directory_cannot_reuse_a_copied_lease_binding(env):
     assert archive.archive_paths(home) == []
     assert cookie_db(original / "Default" / "Network" / "Cookies") == "original-cookie"
     assert cookie_db(path / "Default" / "Network" / "Cookies") == "replacement-cookie"
+    if parent_mode is not None:
+        assert stat.S_IMODE(_ram.stat().st_mode) == parent_mode
 
 
 @pytest.fixture
