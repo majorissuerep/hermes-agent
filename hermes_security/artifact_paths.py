@@ -26,6 +26,12 @@ _TERMINAL_ROOTS = (("artifacts", "terminal-output"), ("cache", "terminal-output"
 _LEGACY_MEDIA = {("cache", "images"): ("images", "img"), ("image_cache",): ("images", "img"),
                  ("cache", "audio"): ("audio", "audio"), ("audio_cache",): ("audio", "audio"),
                  ("cache", "documents"): ("documents", "doc"), ("document_cache",): ("documents", "doc")}
+# computer_use's own retained outputs from older builds, by exact producer name only: other producers'
+# files in these shared caches stay outside private policy.
+_CUA_SHOT, _CUA_TREE = r"computer_use_[a-f0-9]{32}\.(?:png|jpe?g|webp)", r"elements_[a-f0-9]{32}\.json"
+_LEGACY_COMPUTER_USE = {("cache", "images"): ("images", _CUA_SHOT), ("image_cache",): ("images", _CUA_SHOT),
+                        ("cache", "computer_use"): ("documents", _CUA_TREE),
+                        ("computer_use_cache",): ("documents", _CUA_TREE)}
 
 
 def _under(relative, roots) -> bool:
@@ -86,14 +92,17 @@ def is_image_relative_path(relative) -> bool:
 
 def media_kind(relative) -> str | None:
     parts = Path(relative).parts
-    if ".." not in parts and len(parts) == 4 and parts[:2] == ("artifacts", "media"):
+    if ".." in parts:
+        return None
+    if len(parts) == 4 and parts[:2] == ("artifacts", "media"):
         return parts[2] if parts[2] in {"images", "audio", "documents"} else None
     if _legacy_tui_image(relative):
         return "images"
-    family = _LEGACY_MEDIA.get(parts[:-1]) if ".." not in parts else None
+    family = _LEGACY_MEDIA.get(parts[:-1])
     if family and re.fullmatch(family[1] + r"_[a-f0-9]{32}\.[A-Za-z0-9]{1,12}", parts[-1]):
         return family[0]
-    return None
+    producer = _LEGACY_COMPUTER_USE.get(parts[:-1])
+    return producer[0] if producer and re.fullmatch(producer[1], parts[-1]) else None
 
 
 def _legacy_tui_image(relative) -> bool:
@@ -145,4 +154,4 @@ def is_private_cache_branch(relative) -> bool:
     parts = Path(relative).parts
     return (parts == ("cache",) or _under(relative, PRIVATE_CACHE_ROOTS) or parts in PRIVATE_CACHE_ROOTS
             or parts in _SNAPSHOT_CACHE_ROOTS or is_legacy_browser_snapshot_path(relative)
-            or parts in _LEGACY_MEDIA or media_kind(relative) is not None)
+            or parts in _LEGACY_MEDIA or parts in _LEGACY_COMPUTER_USE or media_kind(relative) is not None)

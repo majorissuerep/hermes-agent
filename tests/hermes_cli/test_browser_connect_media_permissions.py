@@ -3,11 +3,11 @@
 ``$HERMES_HOME/chrome-debug`` is a real Chromium user-data dir (Cookies, Login Data,
 Local Storage). A bare ``os.makedirs`` inherited the umask and landed 0755, so on the
 documented ``HERMES_HOME_MODE=0701`` web-server hatch every other local account could
-read those stores (#77579 / #77486). The same held for the lazily-created media caches
-that hold user content — computer-use captures. (vision_analyze/video_analyze no longer
-write media caches at all: they prepare in memory.) These tests pin the creation contract:
-0700 dirs at creation time, a 0600 launch stderr log, and 0600 media files, with managed
-(NixOS) installs deliberately left to the configured umask/setgid.
+read those stores (#77579 / #77486). (Media no longer lands in such caches: vision/video
+prepare in memory, and computer-use captures are encrypted profile artifacts — see
+tests/tools/test_computer_use_private_media.py.) These tests pin the creation contract:
+0700 dirs at creation time and a 0600 launch stderr log, with managed (NixOS) installs
+deliberately left to the configured umask/setgid.
 """
 import os
 import stat
@@ -15,7 +15,6 @@ import stat
 import pytest
 
 import hermes_cli.browser_connect as bc
-import tools.computer_use.tool as cu
 
 
 def _mode(path) -> int:
@@ -104,22 +103,3 @@ def test_legacy_launch_stderr_log_reconciles_on_bare_hosts(tmp_path, monkeypatch
         handle.write(b"again")
     assert _mode(log) == 0o600
     assert log.read_bytes() == b"again"
-
-
-def test_computer_use_cache_files_owner_only(tmp_path, monkeypatch):
-    """computer_use's capture caches (screenshots, vision temps) are created 0700 and
-    the capture bytes land 0600 — a capture is as sensitive as the screen it came
-    from."""
-    import hermes_constants
-
-    home = tmp_path / "hh"
-    _no_managed(monkeypatch, home)
-    # computer_use resolves the cache dir through the lazily-imported
-    # hermes_constants.get_hermes_dir (see _cache_file), so patch it there —
-    # the module attribute the import binds to, not the consumer module.
-    monkeypatch.setattr(hermes_constants, "get_hermes_dir", lambda new, old: home / new)
-    path = cu._cache_file("cache/vision", "temp_vision_images", "capture.png")
-    cu._write_private_bytes(path, b"frame")
-    assert path.read_bytes() == b"frame"
-    assert _mode(path.parent) == 0o700
-    assert _mode(path) == 0o600

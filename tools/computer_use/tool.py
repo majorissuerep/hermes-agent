@@ -11,17 +11,16 @@ import contextlib
 import hashlib
 import json
 import logging
-import os
 import re
 import sys
 import threading
-import uuid
 from collections import namedtuple
 from functools import partial
 from types import SimpleNamespace
 from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
 
 from tools.computer_use.backend import ActionResult, CaptureResult, ComputerUseBackend, UIElement, image_dimensions_from_bytes
+from tools.computer_use.private_media import NOT_NEEDED, Retained, retain_element_tree, retain_screenshot
 
 logger = logging.getLogger(__name__)
 
@@ -547,8 +546,6 @@ _MIN_PROVIDER_IMAGE_DIMENSION = 8
 # Some AX trees (Discord/Slack via UIA, Electron chat clients) expose ENTIRE message bodies as labels; uncapped
 # they blew the tool-result budget and leaked private chat text. Labels identify a control, not text extraction.
 _MAX_ELEMENT_LABEL_CHARS = 120
-# Bounded cache trails: every dense capture can spill, and CLI-only sessions never run the gateway's media cleanup.
-_MAX_SPILL_FILES = _MAX_CAPTURE_FILES = 20
 
 def _capture_image_format(cap: CaptureResult) -> tuple[str, str]:
     # (MIME, file extension): cua-driver's explicit MIME type, else sniff the base64 prefix (JPEG starts with /9j/,
@@ -614,11 +611,15 @@ def _capture_view(cap: CaptureResult, max_elements: int) -> SimpleNamespace:
     # The driver's own AX walk may have stopped at the ``max_elements`` the backend sent: then the spill file is
     # NOT the full tree, and the hint must not promise one.
     ax_capped = len(cap.elements) >= cap.ax_max_elements > 0
+    from hermes_constants import get_hermes_home
+    home = get_hermes_home()  # the owning profile of this call, bound once for both retained copies
+    tree = _spill_elements_to_file(cap, home) if lost_detail else NOT_NEEDED
+    shot = _persist_capture_image(cap, home) if has_image else NOT_NEEDED
     return SimpleNamespace(cap=cap, visible=visible, total=len(cap.elements), width=width, height=height,
                            truncated=len(cap.elements) - len(visible), bounds_scale=scale, bounds_note=note,
                            ax_capped=cap.ax_max_elements if ax_capped else 0,
-                           elements_file=_spill_elements_to_file(cap) if lost_detail else None,
-                           screenshot_path=_persist_capture_image(cap) if has_image else None,
+                           elements_file=tree.path, elements_unavailable=tree.unavailable,
+                           screenshot_path=shot.path, screenshot_unavailable=shot.unavailable,
                            dims_omitted=dims if too_small else None, has_image=has_image)
 
 def _capture_summary_lines(v: SimpleNamespace) -> list[str]:
@@ -627,11 +628,15 @@ def _capture_summary_lines(v: SimpleNamespace) -> list[str]:
     notes = (
         v.bounds_note and v.bounds_note + (f"; estimated scale ~{v.bounds_scale}x (screenshot position x "
                                            f"{v.bounds_scale} ≈ native coordinate)" if v.bounds_scale else ""),
-        v.screenshot_path and f"shareable screenshot saved to {v.screenshot_path}",
+        v.screenshot_path and f"shareable screenshot saved to {v.screenshot_path} (encrypted; reopen with vision_analyze)",
+        v.screenshot_unavailable and (f"screenshot not retained ({v.screenshot_unavailable}); "
+                                      "it exists only in this response"),
         v.cap.note,
         v.elements_file and (f"{'' if v.ax_capped else 'full '}element tree with untruncated labels "
-                             f"saved to {v.elements_file} — read_file/search_files it if you need dropped label "
+                             f"saved to {v.elements_file} (encrypted) — read_file/search_files it if you need dropped label "
                              "text or elements beyond the cap"),
+        v.elements_unavailable and (f"full element tree not retained ({v.elements_unavailable}); only the "
+                                    "capped list below is available"),
         v.ax_capped and (f"accessibility walk capped at {v.ax_capped} elements; pass app= to narrow"),
     )
     return [
@@ -652,7 +657,8 @@ def _text_capture_payload(v: SimpleNamespace, summary: str, extra: Optional[dict
         "elements": [_element_to_dict(e) for e in v.visible], "total_elements": v.total, "summary": summary,
         **(extra or {}),
         **_present(truncated_elements=v.truncated, elements_file=v.elements_file, screenshot_path=v.screenshot_path,
-                   bounds_scale=v.bounds_scale),
+                   bounds_scale=v.bounds_scale, screenshot_unavailable=v.screenshot_unavailable,
+                   elements_file_unavailable=v.elements_unavailable),
     })
 
 def _capture_digest(cap: CaptureResult) -> str:
@@ -682,7 +688,9 @@ def _capture_response(cap: CaptureResult, max_elements: int = _DEFAULT_MAX_ELEME
                             {"type": "image_url", "image_url": {"url": f"data:{_capture_image_format(cap)[0]};base64,{cap.png_b64}"}}],
                 "text_summary": summary,
                 "meta": {"mode": cap.mode, "width": v.width, "height": v.height, "elements": v.total, "png_bytes": cap.png_bytes_len,
-                         **_present(screenshot_path=v.screenshot_path, elements_file=v.elements_file, bounds_scale=v.bounds_scale)},
+                         **_present(screenshot_path=v.screenshot_path, elements_file=v.elements_file, bounds_scale=v.bounds_scale,
+                                    screenshot_unavailable=v.screenshot_unavailable,
+                                    elements_file_unavailable=v.elements_unavailable)},
             }
         # Decide whether to hand the screenshot to the auxiliary.vision pipeline (text-only result) or keep
         # the multimodal envelope (main model handles vision natively). Issue #24015: previously the
@@ -690,7 +698,8 @@ def _capture_response(cap: CaptureResult, max_elements: int = _DEFAULT_MAX_ELEME
         # at the provider boundary even when auxiliary.vision was explicitly configured to handle this.
         routed = _route_capture_through_aux_vision(
             cap, summary, visible_elements=v.visible, truncated_elements=v.truncated,
-            elements_file=v.elements_file, screenshot_path=v.screenshot_path)
+            elements_file=v.elements_file, screenshot_path=v.screenshot_path,
+            screenshot_unavailable=v.screenshot_unavailable, elements_unavailable=v.elements_unavailable)
         if routed is not None:
             return routed
         # Aux routing requested but failed (vision node down, empty analysis...): the multimodal envelope could
@@ -699,8 +708,9 @@ def _capture_response(cap: CaptureResult, max_elements: int = _DEFAULT_MAX_ELEME
                      "omitted. Element-index actions still work — drive via the element list above.)")
         extra = {"vision_unavailable": True}
     if v.truncated:  # text paths carry the `elements` array, so the truncation note applies
-        lines.append(f"  (response truncated to {len(v.visible)} of {v.total} elements; the full tree is in "
-                     "elements_file — read_file/search_files it, or pass app= to narrow scope)")
+        lines.append(f"  (response truncated to {len(v.visible)} of {v.total} elements; "
+                     + ("the full tree is in elements_file — read_file/search_files it, or " if v.elements_file else "")
+                     + "pass app= to narrow scope)")
     return _text_capture_payload(v, "\n".join(lines), extra)
 
 def _maybe_follow_capture(backend: ComputerUseBackend, res: ActionResult, do_capture: bool,
@@ -725,105 +735,25 @@ def _maybe_follow_capture(backend: ComputerUseBackend, res: ActionResult, do_cap
         return resp
     return json.dumps({**json.loads(resp), **payload})  # text capture: merge the action payload in
 
-# ── Cache files (screenshots, element spills, vision temps) ─────────────────
-def _secure_dir_policy(cache_dir) -> None:
-    """Create/reconcile a Hermes media-cache dir owner-only (0700), except managed.
+# ── Retained copies (encrypted screenshot, full element tree) ───────────────
+# A capture is as sensitive as the screen it came from: both copies are this profile's encrypted media artifacts
+# (tools.computer_use.private_media), never a plaintext cache. An unavailable vault keeps the in-memory evidence
+# and the response says the copy was not retained; control never breaks on it.
 
-    A capture is as sensitive as the screen it came from — an open password
-    manager, a private chat, a bank tab. The umask-derived 0755 these dirs
-    used to get made every local account able to list (and read) those
-    frames whenever ``HERMES_HOME`` itself is traversable, which is exactly
-    what the documented ``HERMES_HOME_MODE=0701`` web-server escape hatch
-    arranges. Delegates to the same house policy as every Hermes secret dir —
-    ``hermes_cli.config._secure_dir`` — with the mode passed to ``mkdir`` so
-    there is no window between mkdir and chmod; managed/NixOS installs keep
-    their group-share design (the mode is left to the configured umask/setgid
-    because these lazily-created dirs are not covered by the module's
-    ``systemd.tmpfiles`` rules). Best-effort; never breaks a capture.
-    """
+def _persist_capture_image(cap: CaptureResult, home) -> Retained:
+    """Encrypted original capture under the owning ``home`` so vision_analyze / attachment surfaces can reopen it."""
     try:
-        managed = False
-        try:
-            from hermes_cli.config import is_managed
+        data = base64.b64decode(cap.png_b64, validate=False)
+    except ValueError as exc:
+        return Retained(unavailable=f"undecodable capture: {exc}")
+    return retain_screenshot(home, data, _capture_image_format(cap)[1])
 
-            managed = bool(is_managed())
-        except Exception:  # pragma: no cover - defensive
-            pass
-        if managed:
-            cache_dir.mkdir(parents=True, exist_ok=True)
-            return
-        cache_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-        try:
-            from hermes_cli.config import _secure_dir
-
-            _secure_dir(cache_dir)
-        except Exception as exc:  # pragma: no cover - defensive
-            logger.debug("computer_use: cache dir chmod skipped: %s", exc)
-    except Exception as exc:  # pragma: no cover - defensive
-        logger.debug("computer_use: cache dir creation failed for %s: %s", cache_dir, exc)
-        cache_dir.mkdir(parents=True, exist_ok=True)
-
-
-def _write_private_bytes(path, data: bytes) -> None:
-    """Write ``data`` to ``path`` with owner-only (0600) permissions.
-
-    ``Path.write_bytes`` would land 0644 under a default umask. POSIX mode
-    bits are advisory on Windows (``os.chmod`` there only toggles the
-    read-only flag), so this is a best-effort narrowing that falls back to a
-    plain write rather than failing the capture.
-    """
-    import os as _os_priv
-
-    flags = _os_priv.O_WRONLY | _os_priv.O_CREAT | _os_priv.O_TRUNC
-    try:
-        fd = _os_priv.open(str(path), flags, 0o600)
-    except OSError:
-        path.write_bytes(data)
-        return
-    with _os_priv.fdopen(fd, "wb") as handle:
-        handle.write(data)
-
-
-def _cache_file(subdir: str, legacy: str, name: str, pattern: str = "", cap: int = 0):
-    """Path for a new file under ``$HERMES_HOME/<subdir>`` (dir created owner-only, per #77579).
-    With ``pattern``/``cap``, first unlinks the oldest matching files so at most ``cap - 1`` remain
-    (best-effort)."""
-    from hermes_constants import get_hermes_dir  # lazy so tests can patch get_hermes_dir
-    cache_dir = get_hermes_dir(subdir, legacy)
-    _secure_dir_policy(cache_dir)
-    with contextlib.suppress(Exception):
-        files = sorted(cache_dir.glob(pattern), key=lambda p: p.stat().st_mtime) if pattern else []
-        for stale in files[: max(0, len(files) - (cap - 1))]:
-            stale.unlink(missing_ok=True)
-    return cache_dir / name
-
-def _write_cache_file(what: str, subdir: str, legacy: str, name: str, pattern: str, cap: int,
-                      write: Callable[[Any], None]) -> Optional[str]:
-    """Bounded cache write via ``write(path)``; the path, or None on any failure — an unwritable cache must never
-    break control (a capture keeps working without its spill/screenshot copy)."""
-    try:
-        write(path := _cache_file(subdir, legacy, name, pattern, cap))
-        return str(path)
-    except Exception as exc:  # pragma: no cover - defensive
-        logger.debug("computer_use: %s failed: %s", what, exc)
-        return None
-
-def _persist_capture_image(cap: CaptureResult) -> Optional[str]:
-    """Copy of the capture in Hermes' media cache so attachment surfaces can deliver it (None without an image)."""
-    return _write_cache_file(
-        "screenshot persistence", "cache/images", "image_cache", f"computer_use_{uuid.uuid4().hex}{_capture_image_format(cap)[1]}",
-        "computer_use_*.*", _MAX_CAPTURE_FILES,
-        lambda p: _write_private_bytes(p, base64.b64decode(cap.png_b64, validate=False)),
-    ) if cap.png_b64 else None
-
-def _spill_elements_to_file(cap: CaptureResult) -> Optional[str]:
-    """FULL element tree (untruncated labels) in a cache file — the read_file/search_files escape hatch for capped text."""
+def _spill_elements_to_file(cap: CaptureResult, home) -> Retained:
+    """FULL element tree (untruncated labels), encrypted under the owning ``home`` — read_file's escape hatch."""
     payload = {"app": cap.app, "window_title": cap.window_title, "total_elements": len(cap.elements),
                "elements": [{"index": e.index, "role": e.role, "label": e.label, "bounds": list(e.bounds), "app": e.app}
                             for e in cap.elements]}
-    return _write_cache_file("element spill", "cache/computer_use", "computer_use_cache", f"elements_{uuid.uuid4().hex}.json",
-                             "elements_*.json", _MAX_SPILL_FILES,
-                             lambda p: p.write_text(json.dumps(payload, ensure_ascii=False, indent=1), encoding="utf-8"))
+    return retain_element_tree(home, json.dumps(payload, ensure_ascii=False, indent=1).encode("utf-8"))
 
 # ── auxiliary.vision routing for captured screenshots ───────────────────────
 _MAX_VISION_DIM = 1456  # longest image side handed to the aux vision model: full-resolution desktop captures tokenize heavily
@@ -885,24 +815,25 @@ _VISION_PROMPT = ("Describe what is visible in this desktop application screensh
 
 def _route_capture_through_aux_vision(cap: CaptureResult, summary: str, *, visible_elements: Optional[list[UIElement]] = None,
                                       truncated_elements: int = 0, elements_file: Optional[str] = None,
-                                      screenshot_path: Optional[str] = None) -> Optional[str]:
-    """Pre-analyse the capture via ``vision_analyze_tool`` (temp file under ``$HERMES_HOME/cache/vision/``) and merge
-    the description with the AX/SOM summary into one text payload. JSON, or None on any failure."""
+                                      screenshot_path: Optional[str] = None, screenshot_unavailable: Optional[str] = None,
+                                      elements_unavailable: Optional[str] = None) -> Optional[str]:
+    """Pre-analyse the capture via ``vision_analyze_tool`` and merge the description with the AX/SOM summary into
+    one text payload. The pixels travel as an in-memory ``data:`` URL — no staged copy on disk. JSON, or None on
+    any failure."""
     if not cap.png_b64:
         return None
-    problem, temp_image_path = "aux-vision import failed", None
+    problem = "aux-vision import failed"
     try:
         from model_tools import _run_async
         from tools.vision_tools import vision_analyze_tool
         problem = "failed to decode capture base64"
         raw = base64.b64decode(cap.png_b64, validate=False)
         problem = None  # from here on failures are loud (warning)
-        ext = _capture_image_format(cap)[1]
-        temp_image_path = _cache_file("cache/vision", "temp_vision_images", f"computer_use_{uuid.uuid4().hex}{ext}")
+        mime, ext = _capture_image_format(cap)
         raw, scale_note = _shrink_capture_for_vision(raw, ext)
-        _write_private_bytes(temp_image_path, raw)
         prompt = _VISION_PROMPT + summary + (f"\n\nNote: {scale_note}" if scale_note else "")
-        result_json = _run_async(vision_analyze_tool(str(temp_image_path), prompt))
+        data_url = f"data:{mime};base64,{base64.b64encode(raw).decode('ascii')}"
+        result_json = _run_async(vision_analyze_tool(data_url, prompt))
     except Exception as exc:
         if problem:
             logger.debug("computer_use: %s: %s", problem, exc)
@@ -910,10 +841,6 @@ def _route_capture_through_aux_vision(cap: CaptureResult, summary: str, *, visib
             logger.warning("computer_use: auxiliary.vision pre-analysis failed (%s); "
                            "returning to caller without aux analysis", exc)
         return None
-    finally:
-        if temp_image_path is not None:
-            with contextlib.suppress(Exception):
-                os.unlink(str(temp_image_path))
     # The ``analysis`` field of vision_analyze_tool's JSON result; raw text when it isn't JSON; empty -> no merge.
     analysis_text = result_json.strip() if isinstance(result_json, str) else ""
     with contextlib.suppress(TypeError, json.JSONDecodeError):
@@ -925,7 +852,8 @@ def _route_capture_through_aux_vision(cap: CaptureResult, summary: str, *, visib
     # exactly for non-vision main models. Dimensions are the backend's on this branch.
     view = SimpleNamespace(cap=cap, visible=cap.elements if visible_elements is None else visible_elements,
                            total=len(cap.elements), width=cap.width, height=cap.height, truncated=truncated_elements,
-                           elements_file=elements_file, screenshot_path=screenshot_path, bounds_scale=None)
+                           elements_file=elements_file, screenshot_path=screenshot_path, bounds_scale=None,
+                           screenshot_unavailable=screenshot_unavailable, elements_unavailable=elements_unavailable)
     return _text_capture_payload(view, summary, {"vision_analysis": analysis_text,
                                                  "vision_analysis_routed_via": "auxiliary.vision"})
 

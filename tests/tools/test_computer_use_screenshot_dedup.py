@@ -52,7 +52,7 @@ def _fresh_dedup(monkeypatch):
     # Keep the aux-vision router out of the way — these tests exercise the
     # multimodal branch directly.
     monkeypatch.setattr(cu_tool, "_should_route_through_aux_vision", lambda: False)
-    monkeypatch.setattr(cu_tool, "_persist_capture_image", lambda cap: None)
+    monkeypatch.setattr(cu_tool, "_persist_capture_image", lambda cap, home: cu_tool.NOT_NEEDED)
     yield
     cu_tool._reset_screenshot_dedup()
 

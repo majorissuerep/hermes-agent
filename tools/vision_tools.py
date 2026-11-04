@@ -685,7 +685,8 @@ _ANALYSIS_KINDS = {
 def _debug_call_data(kind: str, source: str, user_prompt: str, model) -> dict:
     prompt = user_prompt[:200] + "..." if len(user_prompt) > 200 else user_prompt
     return {
-        "parameters": {f"{kind}_url": source, "user_prompt": prompt, "model": model},
+        "parameters": {f"{kind}_url": source.split(",", 1)[0] + ",<omitted>" if source.startswith("data:") else source,
+                       "user_prompt": prompt, "model": model},
         "error": None, "success": False, "analysis_length": 0, "model_used": model, f"{kind}_size_bytes": 0}
 
 

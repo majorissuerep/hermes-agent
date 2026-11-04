@@ -67,7 +67,7 @@ class TestCappedWalkHint:
     def _summary(monkeypatch, n_elements: int, bound: int) -> str:
         from tools.computer_use import tool
         from tools.computer_use.backend import CaptureResult, UIElement
-        monkeypatch.setattr(tool, "_spill_elements_to_file", lambda cap: "/tmp/elements.json")
+        monkeypatch.setattr(tool, "_spill_elements_to_file", lambda cap, home: tool.Retained(path="/tmp/elements.json"))
         cap = CaptureResult(mode="ax", width=800, height=600, ax_max_elements=bound,
                             elements=[UIElement(index=i + 1, role="AXButton", label=f"b{i}") for i in range(n_elements)])
         return "\n".join(tool._capture_summary_lines(tool._capture_view(cap, max_elements=5)))
