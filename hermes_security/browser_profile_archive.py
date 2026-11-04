@@ -26,6 +26,7 @@ LEGACY_DEBUG_ROOT = "chrome-debug"
 ARCHIVE_SUFFIX = ".hbpa"
 DEBUG_SLOT = "chrome-debug"
 REAL_SLOT_PREFIX = "real-profile:"
+OUTGOING_SLOT_PREFIX = "outgoing:"
 # Runtime ownership metadata kept beside the active RAM copy; never part of the persisted profile.
 RUNTIME_BINDING_NAME = ".hermes-browser-binding.json"
 
@@ -68,6 +69,8 @@ def archive_relative(slot: str, digest: str) -> PurePosixPath:
     """Durable location: one debug-profile archive; one archive per real-profile source identity."""
     if slot == DEBUG_SLOT:
         return PurePosixPath(ARCHIVE_ROOT, DEBUG_SLOT + ARCHIVE_SUFFIX)
+    if slot.startswith(OUTGOING_SLOT_PREFIX):
+        return PurePosixPath(ARCHIVE_ROOT, f"outgoing-{digest[:32]}{ARCHIVE_SUFFIX}")
     return PurePosixPath(ARCHIVE_ROOT, f"real-{digest[:32]}{ARCHIVE_SUFFIX}")
 
 

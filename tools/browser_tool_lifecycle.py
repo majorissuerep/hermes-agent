@@ -733,6 +733,12 @@ def _cleanup_admitted_browser_session(task_id: str) -> None:
 
     _bt.logger.debug("Found session for task %s: bb_session_id=%s", task_id, session_info.get("bb_session_id", "unknown"))
     _recording.stop(task_id)  # seals the completed video before close
+    from tools import browser_outgoing_profile as outgoing
+    if outgoing.lookup(task_id) is not None:
+        outgoing.require_saved_recordings(outgoing.lookup(task_id).env)
+        outgoing.close(task_id, session_info)  # failure retains tracking and the original backend
+        _release_session_resources(task_id, session_info)
+        return
 
     # Lightpanda sessions have no daemon to ``close``; an expired cloud CDP URL cannot
     # accept one and would make _get_session_info() renew the session mid-cleanup.

@@ -158,6 +158,11 @@ def test_a_vanished_backend_runtime_requires_recovery_without_replaying_the_comm
     from tools.environments import streams
 
     backend = selected(FakeBackend([("/tmp", "tmpfs", "rw,noswap")]))
+    # This transport-only fake cannot hold an authenticated browser profile. The
+    # owned-profile admission/continuity contract is exercised with real vaults
+    # in test_browser_outgoing_continuity; retain this one-shot missing-runtime oracle.
+    from tools import browser_outgoing_profile
+    monkeypatch.setattr(browser_outgoing_profile, "prepare", lambda *_args: None)
     monkeypatch.setattr(streams, "remote_command", lambda _e, argv, *, child_env, interactive, expected_prefix: ["client", *argv])
     clients = []
     def failed_client(argv, *_args):

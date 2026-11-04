@@ -12,7 +12,7 @@ import selectors
 import subprocess
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, BinaryIO
 
 
 class ClientOutputLimit(RuntimeError):
@@ -24,6 +24,8 @@ class _Streams:
     selector: Any
     limit: int
     pending: memoryview
+    input_source: BinaryIO | None = None
+    output_sink: BinaryIO | None = None
     output: dict[str, bytearray] = field(default_factory=lambda: {
         "stdout": bytearray(), "stderr": bytearray()})
     total: int = 0
@@ -37,6 +39,8 @@ class _Streams:
         try:
             if channel == "stdin":
                 self.pending = self.pending[os.write(handle.fileno(), self.pending[:65536]):]
+                if not self.pending and self.input_source is not None:
+                    self.pending = memoryview(self.input_source.read(65536))
                 if not self.pending:
                     self.close(handle)
                 return
@@ -52,7 +56,11 @@ class _Streams:
         self.total += len(chunk)
         if self.total > self.limit:
             raise ClientOutputLimit(f"The client exceeded its {self.limit} byte output limit")
-        self.output[channel].extend(chunk)
+        if channel == "stdout" and self.output_sink is not None:
+            if self.output_sink.write(chunk) != len(chunk):
+                raise OSError("The client output sink did not accept the complete chunk")
+        else:
+            self.output[channel].extend(chunk)
 
 
 def _register(selector, child, payload: bytes) -> None:
@@ -92,22 +100,28 @@ def _collect(child, streams: _Streams, timeout: float) -> int | None:
 
 
 def run_client(argv, *, env, payload: bytes | None = None, timeout: float,
-               max_output: int = 64 * 1024 * 1024) -> tuple[int | None, bytes, bytes]:
+               max_output: int = 64 * 1024 * 1024, input_source: BinaryIO | None = None,
+               output_sink: BinaryIO | None = None) -> tuple[int | None, bytes, bytes]:
     """Return at this client's exit, using bounded pipes on Linux and macOS.
 
     ``None`` is the timeout result; output overflow raises without returning
     partial JSON as success. No pathname, disk spool or pipe-EOF wait is used.
+    A caller-owned input source replaces ``payload``; a caller-owned stdout sink avoids
+    buffering transferred profile trees. The caller proves/stages its files in protected RAM;
+    streams remain open, stderr is still captured, and the total output bound still applies.
     """
     if timeout <= 0 or max_output <= 0:
         raise ValueError("Client capture needs positive timeout and output bounds")
-    data = payload or b""
+    if input_source is not None and payload is not None:
+        raise ValueError("Client capture accepts one input source")
+    data = input_source.read(65536) if input_source is not None else payload or b""
     child = subprocess.Popen(
-        argv, stdin=subprocess.PIPE if payload is not None else subprocess.DEVNULL,
+        argv, stdin=subprocess.PIPE if payload is not None or input_source is not None else subprocess.DEVNULL,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, close_fds=True)
     try:
         with selectors.DefaultSelector() as selector:
             _register(selector, child, data)
-            streams = _Streams(selector, max_output, memoryview(data))
+            streams = _Streams(selector, max_output, memoryview(data), input_source, output_sink)
             code = _collect(child, streams, timeout)
             return code, bytes(streams.output["stdout"]), bytes(streams.output["stderr"])
     finally:

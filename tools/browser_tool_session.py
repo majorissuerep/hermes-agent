@@ -749,8 +749,14 @@ def _collect_in_sandbox(task_id: str, session_info: dict[str, Any], cmd_parts: l
                         stdin_payload: Optional[bytes]) -> dict[str, Any]:
     """Run once in the selected backend; a lost runtime needs an explicit recovery decision."""
     from tools import browser_terminal as terminal
-    wrapped, client_env = _sandbox_wrap(cmd_parts, browser_env, task_socket_dir)
-    returncode, stdout, stderr = _run_agent_browser_client(wrapped, client_env, stdin_payload, timeout)
+    from tools import browser_outgoing_profile as profiles
+    env = terminal.terminal_environment(create=True)
+    with profiles.target_scope(env):
+        runtime = terminal.browser_runtime(env)
+        profiles.prepare(task_id, session_info, env, runtime, cmd_parts[0])
+        with profiles.command_scope(task_id):
+            wrapped, client_env = _sandbox_wrap(cmd_parts, browser_env, task_socket_dir)
+            returncode, stdout, stderr = _run_agent_browser_client(wrapped, client_env, stdin_payload, timeout)
     if returncode is None:
         return _timed_out_result(task_id, session_info, task_socket_dir, command, timeout, stdout, stderr)
     if terminal.runtime_missing(returncode, stderr):
@@ -821,6 +827,19 @@ def _run_recording_command(task_id: str, session_info: dict[str, Any], browser_c
 
 
 def _run_browser_command(
+    task_id: str,
+    command: str,
+    args: list[str] | None = None,
+    timeout: Optional[int] = None,
+    _engine_override: Optional[str] = None,
+) -> dict[str, Any]:
+    """Retain an outgoing session's original home/custody/target before preflight and lookup."""
+    from tools.browser_outgoing_profile import command_scope
+    with command_scope(task_id):
+        return _run_browser_command_owned(task_id, command, args, timeout, _engine_override)
+
+
+def _run_browser_command_owned(
     task_id: str,
     command: str,
     args: list[str] | None = None,

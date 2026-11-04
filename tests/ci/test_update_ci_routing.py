@@ -775,3 +775,7 @@ def test_run_tests_forwards_the_strict_switch():
     text = (_REPO / "scripts/run_tests.sh").read_text(encoding="utf-8-sig")
     allow = re.search(r"for _test_var in (.*?); do", text, re.DOTALL)
     assert allow and "HERMES_E2E_STRICT_ACCEPTANCE" in allow.group(1).split()
+
+
+def test_pending_outgoing_profile_restore_fence_reaches_upgrade_lane():
+    assert cc.classify(["tools/browser_outgoing_state.py"])["e2e_upgrade"]

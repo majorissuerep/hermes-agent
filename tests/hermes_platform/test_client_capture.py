@@ -59,3 +59,29 @@ def test_duplex_output_is_complete_and_overflow_refuses_partial_success():
     with pytest.raises(ClientOutputLimit, match="output limit"):
         run_client([sys.executable, "-c", script], env=os.environ.copy(),
                    payload=payload, timeout=10, max_output=1024)
+
+
+@pytest.mark.platforms("posix")
+def test_streamed_client_transfer_is_bounded_duplex_and_never_buffers_stdout(tmp_path):
+    payload = b"synthetic-private-tree-transfer|" * 16384
+    source, target = tmp_path / "input", tmp_path / "output"
+    source.write_bytes(payload)
+    script = (
+        "import sys\n"
+        "while chunk := sys.stdin.buffer.read(65536):\n"
+        " sys.stdout.buffer.write(chunk); sys.stdout.buffer.flush()\n"
+        "print('complete',file=sys.stderr)\n"
+    )
+    with source.open("rb") as incoming, target.open("wb") as outgoing:
+        code, output, error = run_client(
+            [sys.executable, "-c", script], env=os.environ.copy(), timeout=10,
+            input_source=incoming, output_sink=outgoing, max_output=len(payload) + 1024)
+        assert not incoming.closed and not outgoing.closed
+    assert (code, output, error) == (0, b"", b"complete\n")
+    assert target.read_bytes() == source.read_bytes() == payload
+    with source.open("rb") as incoming, target.open("wb") as outgoing:
+        with pytest.raises(ClientOutputLimit, match="output limit"):
+            run_client([sys.executable, "-c", script], env=os.environ.copy(), timeout=10,
+                       input_source=incoming, output_sink=outgoing, max_output=1024)
+        assert not incoming.closed and not outgoing.closed
+    assert target.stat().st_size <= 1024

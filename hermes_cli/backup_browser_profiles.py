@@ -155,6 +155,7 @@ def restore_guard(home: Path, relative_members):
     """Hold existing profile locks until restore finishes; stale RAM must never undo a restore."""
     from hermes_cli import browser_profile_store as store
     from hermes_state.runtime_ownership import OwnershipConflict
+    from tools.browser_outgoing_state import OutgoingProfileError, pending
 
     owners = set()
     worker_owners = set()
@@ -167,14 +168,19 @@ def restore_guard(home: Path, relative_members):
             if paths(candidate):
                 owners.add(candidate)
                 worker_owners.add(candidate)
-        if current_archive(relative):
+        inner = parts[2:] if len(parts) > 2 and parts[0] == "profiles" else parts
+        if current_archive(relative) or inner[:2] == ("state", "browser-outgoing"):
             owner = home.joinpath(*parts[:2]) if parts[0] == "profiles" else home
             owners.add(owner)
-            if browser_relative(relative).parts[0] == workers.ARCHIVE_ROOT:
+            if current_archive(relative) and browser_relative(relative).parts[0] == workers.ARCHIVE_ROOT:
                 worker_owners.add(owner)
     with contextlib.ExitStack() as stack:
         try:
             for owner in sorted(owners):
+                if pending(owner):
+                    raise OwnershipConflict(
+                        "Outgoing browser RAM/recovery state is pending. Close its owning Hermes and run "
+                        "'hermes secure-vault repair --outgoing-browser-profile' before import. No members were restored.")
                 if owner in worker_owners:
                     from hermes_cli import browser_worker_store
 
@@ -191,6 +197,6 @@ def restore_guard(home: Path, relative_members):
                             "Browser state still exists in RAM. Close that browser and Hermes, run "
                             "'hermes secure-vault repair' for this profile to save and retire it, then retry import. "
                             "No backup members were restored.")
-        except (store.BrowserProfileError, VaultError, OSError) as exc:
+        except (store.BrowserProfileError, VaultError, OSError, ValueError, OutgoingProfileError) as exc:
             raise OwnershipConflict(f"Cannot safely inspect browser RAM state before restore: {exc}") from exc
         yield

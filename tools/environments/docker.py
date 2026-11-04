@@ -48,6 +48,25 @@ _DOCKER_SEARCH_PATHS = [
 _docker_executable: Optional[str] = None  # resolved once, cached
 _ENV_VAR_NAME_RE = _SHELL_ENV_NAME_RE
 _ENVIRONMENT_LABEL_KEY = "hermes-environment"
+_HOME_LABEL_KEY = "hermes-home"
+_OWNERSHIP_LABEL_KEY = "hermes-ownership"
+
+
+def canonical_home_identity() -> str:
+    """Exact canonical home, rather than the possibly colliding display profile name."""
+    return hashlib.sha256(str(Path(get_hermes_home()).resolve()).encode()).hexdigest()[:32]
+
+
+def _orphan_home_admitted() -> bool:
+    from tools.browser_outgoing_state import pending
+    try:
+        if not pending(Path(get_hermes_home()).resolve()):
+            return True
+        logger.warning("Docker orphan cleanup retained this home's containers: outgoing browser recovery "
+                       "is pending; run 'hermes secure-vault repair --outgoing-browser-profile'")
+    except (OSError, ValueError, RuntimeError) as exc:
+        logger.warning("Docker orphan cleanup retained containers: browser recovery state cannot be inspected (%s)", exc)
+    return False
 
 
 def _normalize_forward_env_names(forward_env: list[str] | None) -> list[str]:
@@ -183,8 +202,12 @@ def reap_orphan_containers(
     than *max_age_seconds* (a just-exited sibling may be about to reuse its container).
     Best-effort and idempotent: failures log at debug and the count removed so far is returned.
     """
+    if not _orphan_home_admitted():
+        return 0
     docker = docker_exe or find_docker() or "docker"
-    filters = ["--filter", "label=hermes-agent=1", "--filter", "status=exited"]
+    filters = ["--filter", "label=hermes-agent=1", "--filter", "status=exited",
+               "--filter", f"label={_HOME_LABEL_KEY}={canonical_home_identity()}",
+               "--filter", f"label={_OWNERSHIP_LABEL_KEY}=exclusive"]
     if profile_filter:
         filters.extend(["--filter", f"label=hermes-profile={_sanitize_label_value(profile_filter)}"])
 
@@ -727,6 +750,8 @@ class DockerEnvironment(BaseEnvironment):
             "hermes-agent": "1",
             "hermes-task-id": task_label,
             "hermes-profile": profile_name,
+            _HOME_LABEL_KEY: canonical_home_identity(),
+            _OWNERSHIP_LABEL_KEY: "shared" if shared_container_key else "exclusive",
             _EGRESS_LABEL_KEY: egress_label}
         # Explicit sharing opts into the first creator's settings. Otherwise,
         # changed image/mount/home configuration must start a fresh container.

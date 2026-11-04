@@ -35,6 +35,11 @@ def build_secure_vault_parser(subparsers) -> None:
     parser.add_argument("--yes", action="store_true", help="migrate: skip the confirmation prompt")
     parser.add_argument("--output", help="export: new plaintext .tar outside every encrypted home (never overwritten)")
     parser.add_argument("--migration-backup", help="export: standalone encrypted migration rollback; requires its original credential")
+    recovery = parser.add_mutually_exclusive_group()
+    recovery.add_argument("--outgoing-browser-profile", action="store_true",
+                          help="repair: explicitly connect to the selected original backend to settle a quiescent orphan; retains unknown/live state")
+    recovery.add_argument("--outgoing-browser-legacy", action="store_true",
+                          help="repair: explicitly seal the old selected target browser profile; refuses raw/cipher conflicts")
     parser.add_argument(
         "--native-browser-state", metavar="DIRECTORY",
         help="repair: explicitly move an owned .agent-browser directory into verified encrypted browser state; "

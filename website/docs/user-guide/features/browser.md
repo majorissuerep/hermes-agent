@@ -263,6 +263,33 @@ RAM copy exists, so that copy cannot overwrite restored state later. Close the b
 Hermes session, run `hermes secure-vault repair` to save and retire a quiescent RAM copy, then
 retry import. A live browser, unverifiable copy, or failed save is retained and reported.
 
+For a selected Docker, SSH or Singularity terminal backend, Hermes keeps its managed browser
+profile in proven RAM on that target. A confirmed normal browser close checkpoints cookies and
+site storage into a dedicated encrypted `browser-profile/outgoing-*.hbpa` archive in the owning
+local Hermes home. A fresh environment restores that archive before private browsing. Target
+Python 3.11 or later and enough proven RAM on both machines are prerequisites; Hermes does not
+install them or fall back to a disk profile. The target never receives the local vault key.
+
+An unsuccessful close, unavailable target, revoked owning session, incomplete transfer or
+pending recording retains the original environment and recovery reference. Ordinary idle or
+exit cleanup refuses destruction in that state. Existing explicit user force-removal can still
+destroy an environment after a failed checkpoint, with a warning that unsaved state may be
+lost. A power loss or lost remote RAM can lose changes since the last verified checkpoint.
+
+After closing the original browser and Hermes process, explicitly select its original terminal
+backend and run `hermes secure-vault repair --outgoing-browser-profile` to settle a quiescent
+orphan. This command may connect to that selected backend; default offline repair does not.
+Repair requires the original target generation, account and RAM binding. A live/unknown owner,
+changed target, partial restore or unrelated recording is retained with recovery details.
+An older SSH profile under `$HOME/.cache/hermes-agent/browser/<home-scope>` is never silently
+adopted or deleted. Use `hermes secure-vault repair --outgoing-browser-legacy` deliberately to
+verify an encrypted checkpoint before retiring that old raw copy. Raw/current-archive conflicts
+refuse without overwriting either copy. No SSD secure-erase is claimed.
+
+Automatic Docker orphan cleanup reclaims only entries labelled as exclusive resources of the
+exact current Hermes home. Shared, foreign and older unlabelled entries remain for deliberate
+operator cleanup; pending outgoing recovery references also prevent automatic deletion.
+
 :::note A running browser can block the login/autofill databases
 On Windows a running Chrome/Edge/Brave holds its cookie and login databases with
 an exclusive (deny-all) lock, so Hermes cannot copy them while the browser is

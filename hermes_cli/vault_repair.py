@@ -17,6 +17,9 @@ def run(args, home) -> int:
 
     try:
         with exclusive_maintenance([home]):
+            if getattr(args, "outgoing_browser_profile", False) or getattr(args, "outgoing_browser_legacy", False):
+                from hermes_cli.browser_outgoing_repair import run as repair_outgoing
+                return repair_outgoing(home, legacy=getattr(args, "outgoing_browser_legacy", False))
             source = getattr(args, "native_browser_state", None)
             if source:
                 from hermes_cli.browser_worker_repair import import_native_home
