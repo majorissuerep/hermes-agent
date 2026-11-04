@@ -373,22 +373,32 @@ def _unlink_capture(fd: int, lease: CaptureLease, recorded: dict) -> None:
     os.unlink(lease.name, dir_fd=fd)
 
 
-def _unlink_locator(lease: CaptureLease) -> None:
+def _unlink_locator(lease: CaptureLease, custody: Any) -> None:
     from hermes_security import artifacts
 
     relative = lease.locator.relative_to(lease.home)
     with artifacts._parent(lease.home, relative) as parent:
         try:
-            os.unlink(relative.name, dir_fd=parent)
+            before = os.stat(relative.name, dir_fd=parent, follow_symlinks=False)
         except FileNotFoundError:
             return
+        binding = json.loads(artifacts.read_bytes(lease.locator, home=lease.home, custody=custody))
+        if binding != _binding(lease):
+            raise PendingRecordingError("the recording locator now describes another allocation; it was kept")
+        custody.check()
+        after = os.stat(relative.name, dir_fd=parent, follow_symlinks=False)
+        if (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino):
+            raise PendingRecordingError("the recording locator changed during cleanup; it was kept")
+        os.unlink(relative.name, dir_fd=parent)
         os.fsync(parent)
 
 
-def _retire(fd: int, lease: CaptureLease, recorded: dict) -> None:
+def _retire(fd: int, lease: CaptureLease, recorded: dict, custody: Any) -> None:
     """Capture, then locator, then manifest; a ``published`` manifest marks every partial state."""
+    _require_custody(lease, custody)
     _unlink_capture(fd, lease, recorded)
-    _unlink_locator(lease)
+    _unlink_locator(lease, custody)
+    custody.check()
     os.unlink(_MANIFEST, dir_fd=fd)
 
 
@@ -403,12 +413,13 @@ def publish_and_retire(lease: CaptureLease, custody: Any) -> tuple[Path, Optiona
         recorded = _recorded_capture(manifest, lease)
         destination = _seal(fd, lease, custody, manifest, recorded)
         try:
-            _retire(fd, lease, recorded)
-        except (OSError, PendingRecordingError) as exc:
+            _retire(fd, lease, recorded, custody)
+        except (OSError, ValueError, VaultError, PendingRecordingError) as exc:
             return destination, f"{type(exc).__name__}: {exc}"
     try:
+        custody.check()
         _remove_directory(lease)
-    except (OSError, PendingRecordingError) as exc:
+    except (OSError, VaultError, PendingRecordingError) as exc:
         return destination, f"the empty RAM directory {lease.workspace} remains ({exc})"
     return destination, None
 
@@ -438,7 +449,7 @@ def discard_empty(lease: CaptureLease, custody: Any) -> None:
             if not stat.S_ISREG(info.st_mode) or info.st_size or info.st_nlink != 1:
                 raise PendingRecordingError(f"{lease.stage} holds capture data; it was kept for recovery")
             os.unlink(lease.name, dir_fd=fd)
-        _unlink_locator(lease)
+        _unlink_locator(lease, custody)
         os.unlink(_MANIFEST, dir_fd=fd)
     _remove_directory(lease)
 

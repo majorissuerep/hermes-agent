@@ -45,7 +45,7 @@ _CLIENT_ENV = ("PATH", "HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "LC_CTYPE", 
 
 
 class RecordingError(RuntimeError):
-    """A recording could not be completed or sealed; any only copy stays in RAM."""
+    """A recording could not be completed or sealed; its original capture is retained."""
 
 
 @dataclass
@@ -302,9 +302,11 @@ def _publish(rec: _Recording) -> Optional[Path]:
         sealed, cleanup_problem = _owned_call(rec, _seal, rec)
     except (VaultError, OSError, ValueError, RuntimeError) as exc:
         rec.state, rec.error = "sealing", str(exc)
-        _log(rec, logging.ERROR, "Browser recording for %s was NOT saved (%s). Its only copy stays in protected RAM "
-                     "at %s; closing this browser session again retries with the original vault unlock.",
-                     rec.session_key, exc, rec.stage)
+        location = ("on the original selected outgoing backend; no complete local copy was confirmed"
+                    if rec.outgoing and not rec.complete else f"in protected RAM at {rec.stage}")
+        _log(rec, logging.ERROR, "Browser recording for %s was NOT saved (%s). Its capture remains %s; "
+                     "closing this browser session again retries with the original vault unlock.",
+                     rec.session_key, exc, location)
         return None
     finally:
         rec.lock.release()

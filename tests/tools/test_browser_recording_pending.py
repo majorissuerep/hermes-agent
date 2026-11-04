@@ -157,11 +157,11 @@ def test_verified_recording_and_failed_retirement_remain_distinct_and_retryable(
     pending.completed(lease, custody)
     unlink, failures = pending._unlink_locator, []
 
-    def fail_once(selected):
+    def fail_once(selected, custody):
         if not failures:
             failures.append(True)
             raise OSError("synthetic directory synchronization failure")
-        return unlink(selected)
+        return unlink(selected, custody)
 
     monkeypatch.setattr(pending, "_unlink_locator", fail_once)
     first = recover_pending(home)
