@@ -23,6 +23,7 @@ from hermes_platform.resolver import locate_command
 _CONTEXT = "HERMES_CI_NAMESPACE_CONTEXT"
 _RESTRICTION = Path("/proc/sys/kernel/apparmor_restrict_unprivileged_userns")
 _PROFILE = re.compile(r"hermes-ci-userns-[0-9a-f]{32}")
+_ATTACHMENT = re.compile(r"/[A-Za-z0-9._/-]+")
 
 
 def _restriction() -> str | None:
@@ -77,12 +78,13 @@ def _authorized_launcher(*, env: dict[str, str]):
     profile = f"hermes-ci-userns-{uuid.uuid4().hex}"
     sudo, parser = _command("sudo"), _command("apparmor_parser")
     with tempfile.TemporaryDirectory(prefix="hermes-ci-userns-") as directory:
-        root = Path(directory)
+        root = Path(directory).resolve()
         launcher = root / "launcher"
+        if not _ATTACHMENT.fullmatch(str(launcher)):
+            raise RuntimeError("Native qualification requires an exact ASCII attachment path")
         shutil.copyfile(_command("env")[0], launcher)
         launcher.chmod(0o700)
-        quoted = str(launcher).replace("\\", "\\\\").replace('"', '\\"')
-        policy = f'abi <abi/4.0>,\nprofile {profile} "{quoted}" flags=(unconfined) {{\n  userns,\n}}\n'
+        policy = f'abi <abi/4.0>,\nprofile {profile} "{launcher}" flags=(unconfined) {{\n  userns,\n}}\n'
         subprocess.run([*sudo, "-n", *parser, "--add", "--skip-cache"],
                        input=policy, text=True, env=env, check=True, timeout=30)
         try:

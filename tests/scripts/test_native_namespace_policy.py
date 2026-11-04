@@ -55,3 +55,16 @@ def test_failed_profile_add_does_not_remove_an_existing_profile(namespace_worker
             pytest.fail("A rejected policy cannot launch qualification")
     assert len(calls) == 1 and "--add" in calls[0] and "--remove" not in calls[0]
     assert namespace_worker.read_bytes() == b"1\n"
+
+
+def test_glob_in_temporary_parent_cannot_widen_profile_attachment(namespace_worker, tmp_path, monkeypatch):
+    parent = tmp_path / "policy-*"
+    parent.mkdir()
+    monkeypatch.setattr(policy.tempfile, "tempdir", str(parent))
+    calls = []
+    monkeypatch.setattr(policy.subprocess, "run", lambda *args, **options: calls.append(args))
+    with pytest.raises(RuntimeError, match="exact ASCII attachment"):
+        with policy._authorized_launcher(env={}):
+            pytest.fail("An AppArmor glob cannot authorize a CI launcher")
+    assert calls == []
+    assert list(parent.iterdir()) == []
