@@ -276,11 +276,16 @@ exit cleanup refuses destruction in that state. Existing explicit user force-rem
 destroy an environment after a failed checkpoint, with a warning that unsaved state may be
 lost. A power loss or lost remote RAM can lose changes since the last verified checkpoint.
 
-After closing the original browser and Hermes process, explicitly select its original terminal
-backend and run `hermes secure-vault repair --outgoing-browser-profile` to settle a quiescent
-orphan. This command may connect to that selected backend; default offline repair does not.
-Repair requires the original target generation, account and RAM binding. A live/unknown owner,
-changed target, partial restore or unrelated recording is retained with recovery details.
+After the original task ends, explicitly select its original terminal backend and run
+`hermes secure-vault repair --outgoing-browser-profile`. In the same logged-in process, repair
+requires the exact resident task's source to be irrevocably ended while its shared vault resource
+is still live. A fresh valid request can normally close that exact unshared browser session and
+checkpoint it after quiescence. It does not reuse the ended task's authority or kill a process.
+Without that exact resident proof, the original owning Hermes process must have ended and its
+browser must already be quiescent. This command may connect to the selected backend; default
+offline repair does not. Repair also requires the original target generation, account and RAM
+binding. A live/unknown owner, shared session, failed close, changed target, partial restore or
+unrelated recording is retained with recovery details.
 An older SSH profile under `$HOME/.cache/hermes-agent/browser/<home-scope>` is never silently
 adopted or deleted. Use `hermes secure-vault repair --outgoing-browser-legacy` deliberately to
 verify an encrypted checkpoint before retiring that old raw copy. Raw/current-archive conflicts

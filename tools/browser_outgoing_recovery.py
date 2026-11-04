@@ -8,6 +8,7 @@ and unrelated captures remain retained; no automatic reconnect or force close.
 from __future__ import annotations
 
 import copy
+from contextlib import contextmanager
 from dataclasses import asdict
 from pathlib import Path
 
@@ -16,13 +17,22 @@ from tools import browser_outgoing_profile as profiles
 from tools import browser_outgoing_state as state, browser_outgoing_transfer as transfer
 
 
-def _owner_ended(reference):
+@contextmanager
+def _owner_admission(home, digest, reference):
     from tools.browser_recording_pending import _owner_state
     import os
 
     owner = reference["owner"]
-    if owner["uid"] != os.getuid() or _owner_state(owner) != "dead":
-        raise state.OutgoingProfileError("Original outgoing browser owner is live or unknown; RAM and archive retained")
+    if owner["uid"] != os.getuid():
+        raise state.OutgoingProfileError("Original outgoing browser owner is foreign; RAM retained")
+    if _owner_state(owner) == "dead":
+        yield None
+        return
+    resident = profiles.ended_resident(home, digest, reference)
+    with profiles.environment_lock(resident.env):
+        profiles.ended_resident(home, digest, reference)  # recheck after waiting for in-flight effects
+        profiles.require_saved_recordings(resident.env)
+        yield resident
 
 
 def _captured_env(reference, env):
@@ -58,10 +68,9 @@ def _runtime(reference, env):
                           generation=RuntimeIdentity(recorded["epoch"], directories))
 
 
-def _recover(home, digest, reference, selected_env):
+def _recover(home, digest, reference, selected_env, *, resident=None):
     from tools import browser_terminal
 
-    _owner_ended(reference)  # before provisioning or connecting to any target
     if reference["backend"] != browser_terminal.terminal_backend():
         raise state.OutgoingProfileError("Select the original outgoing backend before explicit repair; retained")
     env = _captured_env(reference, selected_env)
@@ -80,6 +89,10 @@ def _recover(home, digest, reference, selected_env):
             raise state.OutgoingProfileError("Outgoing recovery reference changed; retained")
         if not transfer.inspect(lease, path=runtime.captures, stale=True):
             raise state.OutgoingProfileError(f"Unrelated captures remain at {runtime.captures}; retained separately")
+        if resident is not None and not resident.closed and reference["phase"] == "active":
+            name = profiles.exclusive_resident(resident)
+            transfer.close_ended_browser(lease, name)
+            resident.closed = True
         if reference["phase"] == "restoring":
             _restoring(lease, reference)
         else:
@@ -121,11 +134,13 @@ def recover(home: Path) -> dict:
         try:
             if reference is None:
                 continue
-            _owner_ended(reference)
-            if reference["backend"] != browser_terminal.terminal_backend():
-                raise state.OutgoingProfileError("Select the original configured backend to recover this reference")
-            env = browser_terminal.terminal_environment(create=True)
-            report["saved"].append(_recover(home, digest, reference, env))
+            with _owner_admission(home, digest, reference) as resident:
+                if reference["backend"] != browser_terminal.terminal_backend():
+                    raise state.OutgoingProfileError("Select the original configured backend to recover this reference")
+                env = browser_terminal.terminal_environment(create=True)
+                report["saved"].append(_recover(home, digest, reference, env, resident=resident))
+                if resident is not None:
+                    profiles.forget_settled(resident)
         except (RuntimeError, OSError, ValueError) as exc:
             report["retained"].append(f"{state.relative(digest)} ({type(exc).__name__}: {exc})")
     return report

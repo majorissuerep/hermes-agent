@@ -46,6 +46,54 @@ def retire_environment(env):
     env._hermes_browser_profile_retired = True
 
 
+def ended_resident(home, digest, reference):
+    """Only our exact resident task can prove ended local custody while its process lives."""
+    from hermes_security.errors import VaultLockedError
+    if reference["owner"] != _owner():
+        raise state.OutgoingProfileError("Original browser owner is live or unknown in another process; retained")
+    with _LOCK:
+        candidates = [lease for lease in _LEASES.values()
+                      if lease.home == home and lease.digest == digest and lease.token == reference["lease"]]
+    if len(candidates) != 1:
+        raise state.OutgoingProfileError("Original owner is live or unknown; no exact resident ended task can be proven; RAM retained")
+    lease = candidates[0]
+    lease.custody.resource.check()  # Vault loss is not evidence that the task's source ended.
+    try:
+        lease.custody.check()
+    except VaultLockedError:
+        return lease  # original SessionCustody is permanently refused; never revived or reused
+    raise state.OutgoingProfileError("Original outgoing task source remains live; its RAM was retained")
+
+
+def forget_settled(lease):
+    """Metadata only, after a NEW request saved and retired this exact ended task's RAM."""
+    from tools.browser_tool_lifecycle import _forget_session_tracking, _drop_last_active_binding
+    with _LOCK:
+        key = lease.home, lease.task_id
+        if _LEASES.get(key) is lease:
+            del _LEASES[key]
+    if _forget_session_tracking(lease.task_id, session=True, expected_session=lease.session_info):
+        _drop_last_active_binding(lease.task_id)
+
+
+def exclusive_resident(lease):
+    """No other tracked task may share the exact session or profile being explicitly closed."""
+    from tools import browser_tool
+    name = lease.session_info.get("session_name")
+    if not isinstance(name, str) or not name or len(name) > 256:
+        raise state.OutgoingProfileError("Original browser session identity is unknown; retained")
+    with browser_tool._cleanup_lock:
+        if (browser_tool._active_sessions.get(lease.task_id) is not lease.session_info
+                or any(task != lease.task_id and info.get("session_name") == name
+                       for task, info in browser_tool._active_sessions.items())):
+            raise state.OutgoingProfileError("Original browser session is shared or was replaced; retained")
+    with _LOCK:
+        if any(other is not lease and other.home == lease.home and other.digest == lease.digest
+               for other in _LEASES.values()):
+            raise state.OutgoingProfileError("Another task retains this browser profile; close refused")
+    return name
+
+
 @dataclass
 class Lease:
     home: Path

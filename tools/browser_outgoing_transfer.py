@@ -13,7 +13,7 @@ from tools.browser_outgoing_state import OutgoingProfileError
 TIMEOUT = 120
 
 
-def client(lease, argv, *, payload=None, input_source=None, output_sink=None, maximum=2048):
+def client(lease, argv, *, payload=None, input_source=None, output_sink=None, maximum=2048, child_env=None):
     """Use the captured context, custody, exact client prefix and native generation once."""
     from tools import browser_terminal as terminal
     from tools.environments import streams
@@ -22,6 +22,7 @@ def client(lease, argv, *, payload=None, input_source=None, output_sink=None, ma
         lease.custody.check()
         with terminal.captured_execution(lease.home, lease.backend, lease.env, lease.runtime):
             command = streams.remote_command(lease.env, lease.runtime.guarded(argv), interactive=True,
+                                              child_env=child_env,
                                               expected_prefix=lease.runtime.client_identity)
             if command is None:
                 raise OutgoingProfileError("Original backend cannot stream browser profiles; every copy retained")
@@ -39,6 +40,19 @@ def client(lease, argv, *, payload=None, input_source=None, output_sink=None, ma
         return output
 
     return lease.context.copy().run(invoke)
+
+
+def close_ended_browser(lease, session_name):
+    """One normal close owned by this explicit fresh request, never an old revoked callback."""
+    binding = remote_profile.command("binding", lease.runtime.profile, maximum=2048, binding=lease.binding)
+    if json.loads(client(lease, binding)) is not True:
+        raise OutgoingProfileError("Original browser binding is unavailable; close refused")
+    raw = client(lease, ["agent-browser", "--session", session_name, "--json", "close"], maximum=16384,
+                 child_env={"AGENT_BROWSER_SOCKET_DIR": lease.runtime.sockets,
+                            "AGENT_BROWSER_PROFILE": lease.runtime.profile, "TMPDIR": lease.runtime.tmp})
+    result = json.loads(raw)
+    if not isinstance(result, dict) or result.get("success") is not True:
+        raise OutgoingProfileError(f"Original ended task's normal close was not confirmed; RAM retained at {lease.runtime.profile}")
 
 
 def capacity(lease):

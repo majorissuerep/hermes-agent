@@ -132,13 +132,17 @@ def retire(fd, identity):
 def run():
     fd, identity = pinned()
     try:
-        quiet(fd)
+        if operation != "binding":
+            quiet(fd)
         if operation == "claim":
             claim(fd)
         elif operation == "inspect":
             bound(fd)
             entries = set(os.listdir(fd)) - ({BINDING} if binding else set())
             print(json.dumps({"empty": not entries}))
+        elif operation == "binding":
+            bound(fd)
+            print("true")
         elif operation == "export":
             bound(fd)
             result = subprocess.run(tar_argv(fd), stdin=subprocess.DEVNULL, stdout=sys.stdout.buffer,
@@ -167,7 +171,8 @@ def run():
             unchanged(fd, identity)
         if operation not in ("retire", "retire-legacy"):
             bound(fd)
-        quiet(fd)
+        if operation != "binding":
+            quiet(fd)
     finally:
         os.close(fd)
 
@@ -182,7 +187,7 @@ except Exception as error:
 def command(operation: str, path: str, *, maximum: int, expected: str = "", stale: bool = False,
             binding: dict | None = None) -> list[str]:
     """A fixed operation; the caller supplies a generated/proven profile path, never shell text."""
-    if operation not in {"inspect", "export", "restore", "retire", "retire-legacy", "claim"} or maximum <= 0:
+    if operation not in {"inspect", "binding", "export", "restore", "retire", "retire-legacy", "claim"} or maximum <= 0:
         raise ValueError("Invalid outgoing profile operation")
     if not posixpath.isabs(path) or "\x00" in path or any(part == ".." for part in path.split("/")):
         raise ValueError("Outgoing profile operations require a proven absolute directory")

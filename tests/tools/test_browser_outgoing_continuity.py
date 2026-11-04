@@ -64,8 +64,12 @@ def outgoing(tmp_path, monkeypatch):
                               timeout=kwargs.get("timeout", 30), check=False)
 
     def command(_env, argv, **kwargs):
-        if kwargs.get("child_env", {}).get("AGENT_BROWSER_PROFILE"):
+        if (kwargs.get("child_env") or {}).get("AGENT_BROWSER_PROFILE"):
             wire.update(kwargs["child_env"])
+            if argv[-1] == "close":
+                wire["repair_closes"] = wire.get("repair_closes", 0) + 1
+                response = json.dumps({"success": wire.get("stop_ok", True), "data": {}})
+                return [sys.executable, "-c", "print(" + repr(response) + ")"]
         return list(argv)
 
     original_client = client_capture.run_client
@@ -308,5 +312,65 @@ def test_fresh_source_reuses_completed_profile_resource_without_reviving_old_tas
                 transfer.capacity(old)
             fresh.custody.check()
             cleanup_browser('fresh-B')
+    finally:
+        first.close();sibling.close()
+
+
+def test_logged_in_fresh_sibling_repairs_proven_ended_quiescent_task(outgoing):
+    from hermes_security.session_authority import start_session_authority
+    from agent.session_context import scoped_current_session_id
+    from tests.hermes_cli.browser_profile_env import cookie_db
+    from tools import browser_outgoing_recovery as recovery
+    from tools import browser_tool, browser_outgoing_profile as profiles, browser_outgoing_transfer as transfer
+    from tools.browser_tool_lifecycle import cleanup_browser
+    from hermes_security.errors import VaultLockedError
+    first=start_session_authority(outgoing.home,'ended-A')
+    sibling=start_session_authority(outgoing.home,'repair-B')
+    try:
+        with scoped_current_session_id('ended-A'):
+            profile=outgoing.start('orphan-A')
+            cookie_db(profile/'Cookies','logged-in-recovery-cookie')
+            original=profiles.lookup('orphan-A')
+        with scoped_current_session_id('repair-B'):
+            blocked=recovery.recover(outgoing.home)
+            assert not blocked['saved'] and blocked['retained']  # live A cannot be taken over
+        first.close()
+        with scoped_current_session_id('repair-B'):
+            browser_tool._active_sessions['sharing-task']={'session_name':original.session_info['session_name']}
+            blocked=recovery.recover(outgoing.home)
+            assert not blocked['saved'] and blocked['retained']
+            assert outgoing.wire.get('repair_closes',0)==0
+            browser_tool._active_sessions.pop('sharing-task')
+            from tools import browser_recording
+            browser_recording._RECORDINGS['orphan-A']=SimpleNamespace(
+                env=original.env,runtime=original.runtime,capture=original.runtime.captures+'/pending.webm')
+            try:
+                blocked=recovery.recover(outgoing.home)
+                assert not blocked['saved'] and blocked['retained']
+                assert outgoing.wire.get('repair_closes',0)==0
+            finally:
+                browser_recording._RECORDINGS.pop('orphan-A')
+            outgoing.wire['stop_ok']=False
+            blocked=recovery.recover(outgoing.home)
+            assert not blocked['saved'] and blocked['retained']
+            assert cookie_db(profile/'Cookies')=='logged-in-recovery-cookie'
+            assert archive.archive_paths(outgoing.home)==[]
+            outgoing.wire['stop_ok']=True
+            lock=profile/'SingletonLock'
+            lock.symlink_to(os.uname().nodename+'-'+str(os.getpid()))
+            blocked=recovery.recover(outgoing.home)
+            assert not blocked['saved'] and blocked['retained']  # ended task alone does not prove browser quiescence
+            assert cookie_db(profile/'Cookies')=='logged-in-recovery-cookie'
+            lock.unlink()
+            result=recovery.recover(outgoing.home)
+            assert result['saved'] and not result['retained'], result
+            assert outgoing.wire['repair_closes']==2  # one failed and one confirmed close, no blind replay
+            assert 'orphan-A' not in browser_tool._active_sessions
+            with pytest.raises(VaultLockedError):
+                transfer.capacity(original)
+            outgoing.choose('logged-in-fresh-B')
+            restored=outgoing.start('fresh-repaired-B')
+            assert cookie_db(restored/'Cookies')=='logged-in-recovery-cookie'
+            cleanup_browser('fresh-repaired-B')
     finally:
         first.close();sibling.close()

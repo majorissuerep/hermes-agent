@@ -149,15 +149,19 @@ def _session_owner_scope(task_id: str):
             reset_hermes_home_override(home_token)
 
 
-def _forget_session_tracking(task_id: str, *, activity: bool = True, session: bool = False) -> None:
+def _forget_session_tracking(task_id: str, *, activity: bool = True, session: bool = False,
+                            expected_session: dict | None = None) -> bool:
     """Drop the janitor's bookkeeping (and optionally the session entry) for ``task_id``."""
     with _bt._cleanup_lock:
+        if expected_session is not None and _bt._active_sessions.get(task_id) is not expected_session:
+            return False
         if session:
             _bt._active_sessions.pop(task_id, None)
         if activity:
             _bt._session_last_activity.pop(task_id, None)
         _bt._session_owner_homes.pop(task_id, None)
         _bt._cleanup_failures.pop(task_id, None)
+    return True
 
 
 def _cleanup_inactive_browser_sessions():
