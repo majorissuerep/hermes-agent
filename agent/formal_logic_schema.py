@@ -83,8 +83,15 @@ def _name(raw: Any, seen: set[str]) -> str:
     return raw
 
 
+def _utf8(value: str) -> bytes:
+    try:
+        return value.encode("utf-8")
+    except UnicodeEncodeError as error:
+        raise LogicFormatError("Checkpoint contains invalid Unicode scalar values") from error
+
+
 def parse_checkpoint(raw: str) -> Checkpoint:
-    if not isinstance(raw, str) or len(raw.encode("utf-8")) > MAX_BYTES:
+    if not isinstance(raw, str) or len(_utf8(raw)) > MAX_BYTES:
         raise LogicFormatError("Checkpoint exceeds its 48 KB bound")
     try:
         data = json.loads(raw, object_pairs_hook=_unique_keys)
@@ -107,7 +114,7 @@ def parse_checkpoint(raw: str) -> Checkpoint:
         raise LogicFormatError("Conclusion must name a proved hypothesis")
     canonical = json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return Checkpoint(atoms, assumptions, hypotheses, data["conclusion"],
-                      hashlib.sha256(canonical.encode()).hexdigest())
+                      hashlib.sha256(_utf8(canonical)).hexdigest())
 
 
 def _unique_keys(pairs):
