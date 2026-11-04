@@ -15,7 +15,6 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from hermes_cli._subprocess_compat import windows_hide_flags
 from tools.browser_tool_origin import origin as _bt
 from tools import browser_tool_cdp as _cdp
 from tools import browser_tool_cloud as _cloud
@@ -81,26 +80,6 @@ def windows_headless_browser_options(browser_env: dict[str, str],
     if not is_windows or "AGENT_BROWSER_HEADED" in browser_env:
         return browser_env
     return {**browser_env, "AGENT_BROWSER_HEADED": "false"}
-
-
-def _read_command_output_files(stdout_path: str, stderr_path: str) -> tuple[str, str]:
-    """Best-effort read of agent-browser stdout/stderr temp files."""
-    out = []
-    for path in (stdout_path, stderr_path):
-        try:
-            with open(path, "r", encoding="utf-8-sig") as f:
-                out.append(f.read().strip())
-        except OSError:
-            out.append("")
-    return out[0], out[1]
-
-
-def _unlink_command_output_files(*paths: str) -> None:
-    for path in paths:
-        try:
-            os.unlink(path)
-        except OSError:
-            pass
 
 
 def _format_browser_timeout_error(
@@ -200,37 +179,6 @@ def _daemon_idle_timeout_seconds() -> int:
 
 
 
-
-
-def _popen_agent_browser(argv: list[str], env: dict[str, str], socket_dir: str, tag: str,
-                         stdin_payload: Optional[bytes] = None) -> subprocess.Popen:
-    """Spawn agent-browser with stdout/stderr redirected to ``socket_dir/_std{out,err}_<tag>``;
-    ``stdin_payload`` (a ``batch`` JSON body) is served from ``_stdin_<tag>`` the same way.
-
-    Temp files, not pipes: the CLI forks a daemon that inherits its fds, so pipes never
-    see EOF until the timeout. Windows: CREATE_NO_WINDOW only (CREATE_NEW_PROCESS_GROUP
-    cancels asyncio's running task on 3.11), STARTF_USESTDHANDLES + close_fds so the child
-    gets ONLY our three handles (leaked console handles kill the Rust daemon grandchild).
-    """
-    fds = [os.open(os.path.join(socket_dir, f"_{slot}_{tag}"), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-           for slot in ("stdout", "stderr")]
-    stdin: Any = subprocess.DEVNULL
-    if stdin_payload is not None:
-        stdin_path = os.path.join(socket_dir, f"_stdin_{tag}")
-        with open(stdin_path, "wb") as f:
-            f.write(stdin_payload)
-        fds.append(os.open(stdin_path, os.O_RDONLY))
-        stdin = fds[-1]
-    try:
-        _popen_extra: dict = {}
-        if os.name == "nt":
-            _si = subprocess.STARTUPINFO()
-            _si.dwFlags |= subprocess.STARTF_USESTDHANDLES
-            _popen_extra = {"creationflags": windows_hide_flags(), "close_fds": True, "startupinfo": _si}
-        return subprocess.Popen(argv, stdout=fds[0], stderr=fds[1], stdin=stdin, env=env, **_popen_extra)
-    finally:
-        for fd in fds:
-            os.close(fd)
 
 
 def _session_record(prefix: str, cdp_url: Optional[str], features: dict[str, Any]) -> dict[str, Any]:
@@ -676,9 +624,14 @@ def _sandbox_wrap(cmd_parts: list[str], browser_env: dict[str, str], task_socket
     return wrapped, {"PATH": browser_env.get("PATH", os.environ.get("PATH", "")), "HOME": os.environ.get("HOME", "")}
 
 
-def _run_sandbox_client(argv: list[str], env: dict[str, str], stdin_payload: Optional[bytes],
-                        timeout: int) -> tuple[Optional[int], str, str]:
-    """Collect the selected backend client's output in memory until the client exits."""
+def _run_agent_browser_client(argv: list[str], env: dict[str, str], stdin_payload: Optional[bytes],
+                              timeout: float) -> tuple[Optional[int], str, str]:
+    """Run one agent-browser client (native or selected-backend wrapper) and return
+    ``(returncode, stdout, stderr)`` from memory, never from a spool pathname.
+
+    The client may fork a resident daemon that inherits its stdio; collection ends at the
+    client's own exit, and a timeout (``None`` code) kills only the client. Exceeding the
+    output bound raises ``ClientOutputLimit`` rather than returning partial JSON."""
     from hermes_platform.client_capture import run_client
 
     code, stdout, stderr = run_client(argv, env=env, payload=stdin_payload, timeout=timeout)
@@ -754,24 +707,10 @@ def _spawn_and_collect(
     if terminal.browser_in_terminal():
         return _collect_in_sandbox(task_id, session_info, cmd_parts, command, timeout,
                                    browser_env, task_socket_dir, stdin_payload)
-    stdout_path = os.path.join(task_socket_dir, f"_stdout_{command}")
-    stderr_path = os.path.join(task_socket_dir, f"_stderr_{command}")
-    proc = _popen_agent_browser(cmd_parts, browser_env, task_socket_dir, command, stdin_payload)
-
-    try:
-        proc.wait(timeout=timeout)
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        proc.wait()
-        stdout, stderr = _read_command_output_files(stdout_path, stderr_path)
-        _unlink_command_output_files(stdout_path, stderr_path)
+    returncode, stdout, stderr = _run_agent_browser_client(cmd_parts, browser_env, stdin_payload, timeout)
+    if returncode is None:
         return _timed_out_result(task_id, session_info, task_socket_dir, command, timeout, stdout, stderr)
-    with open(stdout_path, "r", encoding="utf-8-sig") as f:
-        stdout = f.read()
-    with open(stderr_path, "r", encoding="utf-8-sig") as f:
-        stderr = f.read()
-    _unlink_command_output_files(stdout_path, stderr_path)
-    return _interpret_browser_command_output(command, stdout, stderr, proc.returncode)
+    return _interpret_browser_command_output(command, stdout, stderr, returncode)
 
 
 def _timed_out_result(task_id: str, session_info: dict[str, Any], task_socket_dir: str, command: str,
@@ -790,7 +729,7 @@ def _collect_in_sandbox(task_id: str, session_info: dict[str, Any], cmd_parts: l
     """Run once in the selected backend; a lost runtime needs an explicit recovery decision."""
     from tools import browser_terminal as terminal
     wrapped, client_env = _sandbox_wrap(cmd_parts, browser_env, task_socket_dir)
-    returncode, stdout, stderr = _run_sandbox_client(wrapped, client_env, stdin_payload, timeout)
+    returncode, stdout, stderr = _run_agent_browser_client(wrapped, client_env, stdin_payload, timeout)
     if returncode is None:
         return _timed_out_result(task_id, session_info, task_socket_dir, command, timeout, stdout, stderr)
     if terminal.runtime_missing(returncode, stderr):

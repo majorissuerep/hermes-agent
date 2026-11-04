@@ -285,10 +285,10 @@ class TestRealProfileCdpLaunch:
         self._reset()
         captured = {}
 
-        def fake_agent_browser_spawn(argv, env, socket_dir, tag):
+        def fake_agent_browser_client(argv, env, stdin_payload, timeout):
             captured["argv"] = argv
             captured["env"] = env
-            return Mock(wait=Mock(return_value=0), returncode=0)
+            return 0, "", ""
 
         class FakeChrome:
             def poll(self):
@@ -309,7 +309,7 @@ class TestRealProfileCdpLaunch:
              patch.object(bt_real_profile, "_agent_browser_get_cdp",
                           side_effect=[None, "http://127.0.0.1:41000"]), \
              patch.object(bt_install, "_find_agent_browser", return_value="/usr/bin/agent-browser"), \
-             patch.object(bt_session, "_popen_agent_browser", side_effect=fake_agent_browser_spawn), \
+             patch.object(bt_session, "_run_agent_browser_client", side_effect=fake_agent_browser_client), \
              patch.object(bt, "_socket_safe_tmpdir", return_value=str(tmp_path)), \
              patch.object(bt_cloud, "_is_headed_mode", return_value=False):
             bt_real_profile._real_profile_cdp()
@@ -401,8 +401,8 @@ class TestRealProfileCdpLaunch:
 
 class TestAgentBrowserCliCapture:
     """#96731: agent-browser's resident daemon inherits the caller's stdio and
-    outlives the CLI, so pipe-based capture never sees EOF after the CLI
-    exits. Capture must go through temp files and wait only for the CLI."""
+    outlives the CLI, so its pipes never see EOF after the CLI exits. Capture
+    stays in memory and ends at the CLI's own exit, not at pipe EOF."""
 
     STUB_GRANDCHILD = (
         "import subprocess, sys\n"
@@ -434,12 +434,8 @@ class TestAgentBrowserCliCapture:
 
     @pytest.mark.platforms("linux")
     def test_get_cdp_cleans_capture_files_despite_grandchild(self, tmp_path):
-        """POSIX: the capture files are unlinked even while the daemon
-        grandchild still holds them open. On Windows the inherited handles
-        keep the files until the daemon exits and the unlink is best-effort
-        by design (_unlink_command_output_files swallows OSError), so this
-        assertion is a linux_only test rather than a bare sys.platform check
-        — the contract stays visible in both CI lanes."""
+        """No output spool file is left in the socket dir while the daemon
+        grandchild still holds the client's inherited stdio."""
         import sys
 
         stub = tmp_path / "agent_browser_daemon_stub.py"
@@ -467,8 +463,8 @@ class TestAgentBrowserCliCapture:
                 [sys.executable, str(stub)], timeout=15, tag="rp-test",
             )
         assert proc.returncode == 3
-        assert proc.stdout == "out-42"
-        assert proc.stderr == "err-7"
+        assert proc.stdout == "out-42\n"
+        assert proc.stderr == "err-7\n"
 
     def test_capture_cli_timeout_kills_cli_without_stall(self, tmp_path):
         import subprocess
@@ -491,12 +487,7 @@ class TestAgentBrowserCliCapture:
 
     @pytest.mark.platforms("linux")
     def test_capture_cli_timeout_cleans_capture_files(self, tmp_path):
-        """POSIX: the capture files are unlinked after the timeout kill. On
-        Windows the killed CLI's handles can outlive the kill() return, so
-        the best-effort unlink may hit a still-open file and leave the
-        fixed-name pair behind (bounded: reused and truncated by the next
-        call with the same tag) — hence linux_only, not an inline
-        sys.platform guard."""
+        """No output spool file is left in the socket dir after the timeout kill."""
         import subprocess
         import sys
 

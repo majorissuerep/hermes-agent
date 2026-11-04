@@ -245,9 +245,8 @@ print(json.dumps({"argv": sys.argv, "env": dict(os.environ)}))
     socket_dir.mkdir()
     command = install._find_agent_browser(validate=False)
     env = session._agent_browser_command_env(str(socket_dir))
-    proc = session._popen_agent_browser([command, "--json", "get", "url"], env, str(socket_dir), "probe")
-    assert proc.wait(timeout=10) == 0
-    output, error = session._read_command_output_files(str(socket_dir / "_stdout_probe"), str(socket_dir / "_stderr_probe"))
+    code, output, error = session._run_agent_browser_client([command, "--json", "get", "url"], env, None, 10)
+    assert code == 0
     assert error == ""
     child = json.loads(output)
     assert Path(child["argv"][0]) == binary

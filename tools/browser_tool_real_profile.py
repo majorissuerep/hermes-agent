@@ -55,30 +55,17 @@ def _real_profile_daemon_env() -> tuple:
 
 
 def _capture_agent_browser_cli(argv: list, timeout: float, tag: str) -> subprocess.CompletedProcess:
-    """Run an agent-browser CLI argv once, capturing output through temp files (not pipes).
+    """Run an agent-browser CLI argv once in the real-profile daemon env, output kept in memory.
 
-    The CLI forks a resident daemon that inherits its stdio and outlives the CLI, so with
-    pipe capture the CLI can exit while its output never reaches EOF: POSIX burns the whole
-    timeout draining pipes on every call, and Windows' ``TimeoutExpired`` cleanup re-drains
-    with no timeout, blocking past the outer tool deadline (#96731). Same pattern as
-    ``_popen_agent_browser``: wait for the CLI alone — a grandchild holding the inherited
-    file handles is harmless. Raises ``TimeoutExpired`` after killing the CLI."""
-    env, socket_dir = _real_profile_daemon_env()
-    stdout_path = os.path.join(socket_dir, f"_stdout_{tag}")
-    stderr_path = os.path.join(socket_dir, f"_stderr_{tag}")
-    proc = _session._popen_agent_browser(argv, env, socket_dir, tag)
-    timed_out = False
-    try:
-        proc.wait(timeout=timeout)
-    except subprocess.TimeoutExpired:
-        timed_out = True
-        proc.kill()
-        proc.wait()
-    stdout, stderr = _session._read_command_output_files(stdout_path, stderr_path)
-    _session._unlink_command_output_files(stdout_path, stderr_path)
-    if timed_out:
+    The CLI forks a resident daemon that inherits its stdio and outlives the CLI; collection
+    ends at the CLI's own exit, never at pipe EOF (#96731), and the daemon is left running.
+    ``tag`` labels the call in diagnostics. Raises ``TimeoutExpired`` after killing the CLI."""
+    env, _socket_dir = _real_profile_daemon_env()
+    returncode, stdout, stderr = _session._run_agent_browser_client(argv, env, None, timeout)
+    if returncode is None:
+        _origin().logger.debug("real-profile agent-browser %s timed out after %ss", tag, timeout)
         raise subprocess.TimeoutExpired(argv, timeout)
-    return subprocess.CompletedProcess(argv, proc.returncode, stdout=stdout, stderr=stderr)
+    return subprocess.CompletedProcess(argv, returncode, stdout=stdout, stderr=stderr)
 
 
 def _agent_browser_session_cmd(session_name: str, *cmd: str, log_label: str) -> Optional[subprocess.CompletedProcess]:
@@ -260,7 +247,7 @@ def _attach_agent_browser_to_real_profile(port: int, copy_dir: str) -> tuple[Opt
     except (subprocess.SubprocessError, OSError) as e:
         return None, f"{_RP}the launch failed: {e}"
     if proc.returncode != 0:
-        tail = (proc.stderr or proc.stdout or "").strip().splitlines()
+        tail = (proc.stderr.strip() or proc.stdout.strip()).splitlines()
         return None, f"{_RP}the real-profile browser failed to start: {tail[-1] if tail else f'exit {proc.returncode}'}"
     cdp = _agent_browser_get_cdp(_bt._REAL_PROFILE_SESSION)
     our_port = _read_devtools_port(copy_dir)

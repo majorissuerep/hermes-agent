@@ -113,7 +113,7 @@ def test_unproven_backend_ram_refuses_the_browser_with_its_identity_before_any_s
 
     backend = selected(FakeBackend([("/tmp", "tmpfs", "rw,size=512m")], swaps=ACTIVE_SWAP))
     monkeypatch.setattr(session._install, "_find_agent_browser", lambda: pytest.fail("host CLI discovery"))
-    monkeypatch.setattr(session, "_run_sandbox_client", lambda *a, **k: pytest.fail("browser client spawned"))
+    monkeypatch.setattr(session, "_run_agent_browser_client", lambda *a, **k: pytest.fail("browser client spawned"))
     result = session._run_browser_command("task", "snapshot", [])
     assert result["success"] is False
     assert "docker terminal backend" in result["error"]
@@ -163,7 +163,7 @@ def test_a_vanished_backend_runtime_requires_recovery_without_replaying_the_comm
     def failed_client(argv, *_args):
         clients.append(argv)
         return target.RUNTIME_MISSING_EXIT, "", target.RUNTIME_MISSING_MESSAGE + "\n"
-    monkeypatch.setattr(session, "_run_sandbox_client", failed_client)
+    monkeypatch.setattr(session, "_run_agent_browser_client", failed_client)
     result = session._collect_in_sandbox("task", {"session_name": "h_1"}, ["agent-browser", "--json", "get", "title"],
                                          "get", 10, {"PATH": "/bin"}, "/host/socket", None)
     assert not result["success"] and "not run" in result["error"]
@@ -209,7 +209,7 @@ def test_sandbox_client_preserves_nonzero_status_and_decodes_memory_output():
     import sys
     from tools import browser_tool_session as session
 
-    code, stdout, stderr = session._run_sandbox_client(
+    code, stdout, stderr = session._run_agent_browser_client(
         [sys.executable, "-c", "import sys; print('é'); print('diagnostic',file=sys.stderr); sys.exit(3)"],
         os.environ.copy(), None, 10)
     assert (code, stdout, stderr) == (3, "é\n", "diagnostic\n")
