@@ -17,6 +17,7 @@ def _require_profile_metadata(home):
     metadata = home / ".hermes-vault"
     if not metadata.is_file() or metadata.is_symlink():
         raise VaultNotInitializedError("Delegation state requires this exact initialized profile")
+    artifacts._require_profile_metadata(home)
 
 
 class DelegationStore:

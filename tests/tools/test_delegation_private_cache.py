@@ -133,3 +133,39 @@ def test_explicit_repair_converts_legacy_delegation_without_runtime_fallback(hom
     assert scan_for_plaintext(home) == []
     with pytest.raises(PermissionError):
         artifacts.read_bytes(manifest, home=home)
+
+
+def test_damaged_own_metadata_refuses_cached_delegation_and_private_output_custody(home):
+    delegation_id, writers, paths = live.create_live_transcripts([{"goal": "original private goal"}], home=home)
+    writer = writers[0]
+    log, manifest = Path(paths[0]), Path(paths[0]).parent / "manifest.json"
+    outputs = [home / "artifacts" / family / name for family, name in (
+        ("terminal-output", "captured.log"), ("tool-results", "captured.txt"), ("browser", "captured.png"))]
+    for path in outputs:
+        artifacts.write_bytes(path, b"original private content", home=home, custody=writer.store.custody)
+    sink_path = home / "artifacts" / "terminal-output" / "retained.log"
+    sink = artifacts.open_text(sink_path, home=home)
+    sink.write("original buffered content")
+    before = {path: path.read_bytes() for path in (log, manifest, *outputs, sink_path)}
+    (home / ".hermes-vault").write_text("{damaged own metadata", encoding="utf-8")
+    with pytest.raises(VaultError):
+        sink.write("must not persist")
+    with pytest.raises(VaultError):
+        sink.close()
+    assert sink.fd == -1
+    writer.event("assistant", "must not persist")
+    live.update_manifest_statuses(delegation_id, [{"task_index": 0, "status": "completed"}],
+                                  home=home, store=writer.store)
+    _, spill = _trim_summary_with_footer("private damaged-metadata summary" * 3000, 2000, 0, store=writer.store)
+    assert spill is None
+    assert writer.error and not writer._ok
+    assert live.create_live_transcripts([{"goal": "must refuse fresh writer"}], home=home) == (None, [None], [])
+    with pytest.raises(VaultError):
+        DelegationStore(home)
+    for path in outputs:
+        with pytest.raises(VaultError):
+            artifacts.read_bytes(path, home=home, custody=writer.store.custody)
+        with pytest.raises(VaultError):
+            artifacts.write_bytes(path, b"must not persist", home=home, custody=writer.store.custody, overwrite=True)
+    assert all(path.read_bytes() == content for path, content in before.items())
+    assert not list(home.rglob("subagent-summary*.txt"))

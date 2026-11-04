@@ -71,6 +71,7 @@ class _Custody:
     def check(self):
         from hermes_security.session_authority import SessionAuthorityError
 
+        _require_profile_metadata(self.vault.home)
         if self.revoked:
             raise VaultLockedError("Private artifact's original custody was revoked")
         try:
@@ -132,10 +133,16 @@ def _wire_bound():
     return _MAX_BYTES + max(128, batches * frames._FRAME_OVERHEAD)
 
 
-def _bound_custody(home, custody=None):
+def _require_profile_metadata(home):
+    from hermes_security.vault import _load_meta
+
     metadata = home / ".hermes-vault"
-    if not metadata.is_file() or metadata.is_symlink():
+    if not metadata.is_file() or metadata.is_symlink() or _load_meta(home) is None:
         raise VaultLockedError("Private output requires this exact initialized profile")
+
+
+def _bound_custody(home, custody=None):
+    _require_profile_metadata(home)
     custody = _Custody(home) if custody is None else custody
     if custody.vault.home != home:
         raise PermissionError("Private artifact custody belongs to a different profile")
