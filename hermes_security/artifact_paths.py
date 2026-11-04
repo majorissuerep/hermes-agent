@@ -36,7 +36,7 @@ def _under(relative, roots) -> bool:
 
 
 def is_artifact_relative_path(relative) -> bool:
-    if is_legacy_browser_snapshot_path(relative) or media_kind(relative):
+    if is_legacy_browser_snapshot_path(relative) or is_private_pet_state(relative) or media_kind(relative):
         return True
     if _under(relative, _DELEGATION_ROOTS):
         return is_delegation_output_path(relative)
@@ -75,6 +75,8 @@ def is_artifact_directory(relative) -> bool:
     parts = Path(relative).parts
     if ".." in parts:
         return False
+    if parts[:3] in {("artifacts", "generated", "pet-store"), ("artifacts", "generated", "pet-drafts")}:
+        return len(parts) == 3 or (len(parts) == 4 and re.fullmatch(r"[0-9a-f]{12}|[0-9a-f]{32}", parts[3]) is not None)
     delegated = _delegation_parts(relative)
     if delegated is not None:
         return delegated == () or (len(delegated) in (1, 2) and delegated[0] == "live")
@@ -102,6 +104,13 @@ def generated_kind(relative) -> str | None:
     """Provider deliverables, including the precise historical only-copy family."""
     path = Path(relative)
     parts = path.parts
+    if is_private_pet_state(path) and path.name != "registry.json":
+        return "images"
+    if (len(parts) == 5 and parts[:3] == ("artifacts", "generated", "pet-drafts")
+            and _pet_draft_parts(parts[3:])):
+        return "images"
+    if len(parts) == 4 and parts[:2] == ("cache", "pet-gen") and _pet_draft_parts(parts[2:]):
+        return "images"
     if ".." in parts or len(parts) != 4 or parts[2] not in {"images", "videos"}:
         return None
     if parts[:2] == ("artifacts", "generated"):
@@ -110,6 +119,20 @@ def generated_kind(relative) -> str | None:
             and re.fullmatch(r"[A-Za-z0-9_.-]+_\d{8}_\d{6}_[0-9a-f]{8}\.[A-Za-z0-9]{1,12}", path.name)):
         return parts[2]
     return None
+
+
+def _pet_draft_parts(parts) -> bool:
+    return (re.fullmatch(r"[0-9a-f]{12}", parts[0]) is not None
+            and re.fullmatch(r"draft-\d+\.png|reference\.(?:png|jpg|jpeg|webp|gif)", parts[1]) is not None)
+
+
+def is_private_pet_state(relative) -> bool:
+    parts = Path(relative).parts
+    if parts == ("artifacts", "generated", "pet-store", "registry.json"):
+        return True
+    return (len(parts) == 5 and parts[:3] == ("artifacts", "generated", "pet-store")
+            and re.fullmatch(r"[0-9a-f]{32}", parts[3]) is not None
+            and parts[4] in {"spritesheet.png", "spritesheet.webp", "thumbnail.png"})
 
 
 def legacy_media_codec(relative) -> str | None:
@@ -149,4 +172,7 @@ def is_private_cache_branch(relative) -> bool:
             or parts in _SNAPSHOT_CACHE_ROOTS or is_legacy_browser_snapshot_path(relative)
             or parts in _LEGACY_MEDIA or parts in {("cache", "generated"), ("cache", "generated", "images"),
                                                  ("cache", "generated", "videos")}
+            or parts == ("cache", "pet-gen")
+            or (len(parts) == 3 and parts[:2] == ("cache", "pet-gen")
+                and re.fullmatch(r"[0-9a-f]{12}", parts[2]) is not None)
             or media_kind(relative) is not None)

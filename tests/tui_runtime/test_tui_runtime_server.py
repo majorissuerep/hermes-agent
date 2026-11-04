@@ -7128,7 +7128,7 @@ def test_pet_info_known_revision_elides_spritesheet(monkeypatch):
     }
 
     monkeypatch.setattr(server, "_pet_active_selection", lambda: (True, _FakePet(), 0.33))
-    monkeypatch.setattr(server, "_pet_sprite_payload", lambda pet, *, scale: dict(payload))
+    monkeypatch.setattr("tui_runtime.pet_media.sprite_payload", lambda pet, *, scale: dict(payload))
 
     # Matching revision: bytes elided, unchanged marker set.
     resp = server.handle_request(

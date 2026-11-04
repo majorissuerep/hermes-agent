@@ -97,11 +97,17 @@ async def _resolve_owned_media(src: str, permitted: tuple) -> Optional[ResolvedI
         return None
     try:
         from hermes_security import artifacts
-        from hermes_security.artifact_paths import generated_kind
+        from hermes_security.artifact_paths import generated_kind, is_image_relative_path
+        from agent.provider_media import current_generation_custody
 
         relative = artifacts._location(path)[1]
-        reader = artifacts.read_bytes if generated_kind(relative) == "videos" else read_owned_media
-        data = await asyncio.to_thread(reader, path)
+        if captured := current_generation_custody():
+            if not is_image_relative_path(relative) and generated_kind(relative) != "videos":
+                raise PermissionError("Only owned media may be read as a generation source")
+            data = await asyncio.to_thread(artifacts.read_bytes, path, home=captured[0], custody=captured[1])
+        else:
+            reader = artifacts.read_bytes if generated_kind(relative) == "videos" else read_owned_media
+            data = await asyncio.to_thread(reader, path)
     except FileNotFoundError:
         raise SourceNotFound(f"media file not found: '{path}'", src=src, origin="artifact") from None
     except (VaultError, OSError, ValueError) as exc:

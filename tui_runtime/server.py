@@ -1513,45 +1513,12 @@ def _hydrate_session_cwd(sid: str, key: str, session_db, profile_home: str | Non
 
 # Pet helpers are fail-open throughout: a decode hiccup degrades to a static fallback rather than
 # breaking the (cosmetic) pet surface.
-_pet_payload_cache_lock = threading.Lock()
-_pet_payload_cache: dict[tuple, dict] = {}
 
 
-def _pet_sheet_revision(spritesheet) -> str:
-    """Stable revision id for one spritesheet file."""
-    with contextlib.suppress(Exception):
-        stat = spritesheet.stat()
-        return f"{stat.st_mtime_ns}:{stat.st_size}"
-    return "0:0"
 
 
-def _clone_pet_payload(payload: dict) -> dict:
-    """Shallow-clone cached payloads so callers can't mutate shared state."""
-    out = dict(payload)
-    for key, kind in (("framesByState", dict), ("framesByRow", dict), ("stateRows", list)):
-        if isinstance(payload.get(key), kind):
-            out[key] = kind(payload[key])
-    return out
 
 
-def _pet_row_frame_counts(spritesheet) -> dict:
-    """Real frame count per concrete spritesheet row name."""
-    with contextlib.suppress(Exception):
-        from PIL import Image
-        from agent.pet import constants, render
-        with Image.open(spritesheet) as opened:
-            image = opened.convert("RGBA")
-        W, H = constants.FRAME_W, constants.FRAME_H
-        cols = max(1, image.width // W)
-        row_count = max(1, image.height // H)
-        rows = constants.state_rows_for_grid(row_count)
-        out: dict[str, int] = {}
-        for row_idx, name in enumerate(rows[:row_count]):
-            top = row_idx * H
-            blank = lambda col: render._frame_is_blank(image.crop((col * W, top, col * W + W, top + H)))
-            out[name] = next((col for col in range(cols) if blank(col)), cols)  # frames before the first blank cell
-        return out
-    return {}
 
 
 def _pet_cfg() -> dict:
@@ -1572,43 +1539,6 @@ def _pet_config_scale() -> float:
     return constants.DEFAULT_SCALE
 
 
-def _pet_sprite_payload(pet, *, scale: float) -> dict:
-    """Renderer payload (spritesheet bytes + geometry) for *pet* — one shape for ``pet.info`` (active
-    mascot) and ``pet.hatch`` (unadopted preview)."""
-    import base64
-    from agent.pet import constants
-    try:
-        stat = pet.spritesheet.stat()
-        cache_key = (str(pet.spritesheet), stat.st_mtime_ns, stat.st_size, pet.slug, pet.display_name, round(scale, 4))
-    except Exception:
-        cache_key = None
-    if cache_key is not None:
-        with _pet_payload_cache_lock:
-            cached = _pet_payload_cache.get(cache_key)
-        if cached is not None:
-            return _clone_pet_payload(cached)
-    try:  # real (padding-trimmed) frame count per state; {} → the canvas uses the static framesPerState
-        from agent.pet import render
-        frames_by_state = render.state_frame_counts(str(pet.spritesheet))
-    except Exception:
-        frames_by_state = {}
-    raw = pet.spritesheet.read_bytes()
-    mime = "image/png" if pet.spritesheet.suffix.lower() == ".png" else "image/webp"
-    payload = {
-        "slug": pet.slug, "displayName": pet.display_name, "mime": mime,
-        "spritesheetBase64": base64.standard_b64encode(raw).decode("ascii"),
-        "spritesheetRevision": _pet_sheet_revision(pet.spritesheet), "frameW": constants.FRAME_W,
-        "frameH": constants.FRAME_H, "framesPerState": constants.FRAMES_PER_STATE,
-        "framesByState": frames_by_state,
-        "framesByRow": _pet_row_frame_counts(pet.spritesheet), "loopMs": constants.LOOP_MS,
-        "scale": scale, "stateRows": _pet_state_rows(pet.spritesheet),
-    }
-    if cache_key is not None:
-        with _pet_payload_cache_lock:
-            _pet_payload_cache[cache_key] = payload
-            while len(_pet_payload_cache) > 8:
-                _pet_payload_cache.pop(next(iter(_pet_payload_cache)))
-    return _clone_pet_payload(payload)
 
 
 def _pet_active_selection():
@@ -1620,77 +1550,20 @@ def _pet_active_selection():
     return enabled, pet, float(pet_cfg.get("scale", constants.DEFAULT_SCALE) or constants.DEFAULT_SCALE)
 
 
-def _pet_state_rows(spritesheet) -> list[str]:
-    """Row taxonomy for the concrete sheet (legacy 8-row or current 9-row atlas), in the renderer's `PetState` names."""
-    from agent.pet import constants
-    with contextlib.suppress(Exception):
-        from PIL import Image
-        with Image.open(spritesheet) as image:
-            row_count = max(1, image.height // constants.FRAME_H)
-        return list(constants.state_rows_for_grid(row_count))
-    return list(constants.STATE_ROWS)
 
 
-def _pet_gen_root():
-    """Profile-scoped staging dir for in-progress generation drafts."""
-    root = get_hermes_home() / "cache" / "pet-gen"
-    root.mkdir(parents=True, exist_ok=True)
-    return root
 
 
-def _pet_gen_sweep(root, *, max_age_s: float = 3600.0) -> None:
-    """Drop stale draft staging dirs so cache never grows unbounded."""
-    import shutil
-    try:
-        now = time.time()
-        for child in (c for c in root.iterdir() if c.is_dir() and now - c.stat().st_mtime > max_age_s):
-            shutil.rmtree(child, ignore_errors=True)
-    except Exception as exc:
-        logger.debug("pet-gen sweep failed: %s", exc)
 
 
-def _pet_png_data_uri(path, *, max_px: int = 160) -> str:
-    """Downscaled PNG data URI for a draft image (small preview payload)."""
-    import base64, io
-    from PIL import Image
-    with Image.open(path) as opened:
-        img = opened.convert("RGBA")
-    img.thumbnail((max_px, max_px), Image.LANCZOS)
-    img.save(buf := io.BytesIO(), format="PNG")
-    return "data:image/png;base64," + base64.standard_b64encode(buf.getvalue()).decode("ascii")
 
 
 # Cooperative cancellation for pet generation: Stop aborts the RPC, but the pool job keeps running unless
 # pet.cancel flips its token (polled between provider calls).
 _pet_cancel_lock = threading.Lock()
 _pet_cancelled: set[str] = set()
-_PET_REFERENCE_MIME_EXT = {"png": "png", "jpeg": "jpg", "jpg": "jpg", "webp": "webp", "gif": "gif"}
-try:
-    _PET_REFERENCE_MAX_BYTES = max(1, int(os.environ.get("HERMES_PET_REFERENCE_MAX_BYTES") or str(16 * 1024 * 1024)))
-except (TypeError, ValueError):
-    _PET_REFERENCE_MAX_BYTES = 16 * 1024 * 1024
 
 
-def _pet_reference_images_from_data_url(ref_raw: str, stage) -> list:
-    """Decode + validate a reference-image data URL into the stage dir."""
-    import base64, binascii
-    import re as _re
-    match = _re.match(r"^data:image/([a-zA-Z0-9.+-]+);base64,(.*)$", ref_raw, _re.DOTALL)
-    if not match:
-        raise ValueError("invalid reference image format")
-    if (ext := _PET_REFERENCE_MIME_EXT.get(match.group(1).lower())) is None:
-        raise ValueError("unsupported reference image type")
-    payload = "".join(match.group(2).split())
-    if (len(payload) * 3) // 4 > _PET_REFERENCE_MAX_BYTES:
-        raise ValueError("reference image too large")
-    try:
-        raw = base64.b64decode(payload, validate=True)
-    except (binascii.Error, ValueError) as exc:
-        raise ValueError("invalid reference image data") from exc
-    if len(raw) > _PET_REFERENCE_MAX_BYTES:
-        raise ValueError("reference image too large")
-    (ref_path := stage / f"reference.{ext}").write_bytes(raw)
-    return [ref_path]
 
 
 def _pet_cancel_arm(token: str) -> None:

@@ -19,6 +19,11 @@ export function privateMediaKind(path: string): string | null {
     return generated
   }
 
+  if (/\/artifacts\/generated\/pet-store\/[a-f0-9]{32}\/(?:spritesheet\.(?:png|webp)|thumbnail\.png)$/.test(normalized)
+    || /\/(?:artifacts\/generated\/pet-drafts|cache\/pet-gen)\/[a-f0-9]{12}\/(?:draft-\d+\.png|reference\.(?:png|jpg|jpeg|webp|gif))$/.test(normalized)) {
+    return 'images'
+  }
+
   const legacy = normalized.match(
     /\/(cache\/(?:images|audio|documents)|image_cache|audio_cache|document_cache)\/(img|audio|doc)_[a-f0-9]{32}\.[a-z0-9]{1,12}$/i
   )

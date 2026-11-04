@@ -783,6 +783,19 @@ def _confine_source_images(image_url, reference_image_urls, task_id, *, permitte
 
 
 def _handle_image_generate(args, **kw):
+    if not args.get("prompt"):
+        return tool_error("prompt is required for image generation")
+    from agent.provider_media import generation_scope
+    from hermes_security.errors import VaultError
+
+    try:
+        with generation_scope():
+            return _generate_for_profile(args, **kw)
+    except VaultError as exc:
+        return _provider_error(f"Encrypted generation unavailable: {exc}", "vault_unavailable")
+
+
+def _generate_for_profile(args, **kw):
     prompt = args.get("prompt", "")
     if not prompt:
         return tool_error("prompt is required for image generation")

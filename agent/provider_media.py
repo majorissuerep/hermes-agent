@@ -26,6 +26,11 @@ _MAX_SAVE_URL_REDIRECTS = 5
 _GENERATION_CUSTODY: ContextVar[tuple | None] = ContextVar("generated_media_custody", default=None)
 
 
+def current_generation_custody():
+    """Keyless captured request ownership for the existing in-memory source resolver."""
+    return _GENERATION_CUSTODY.get()
+
+
 def _output_custody(home=None):
     from hermes_constants import get_hermes_home
 
@@ -46,6 +51,7 @@ def generation_scope():
     token = _GENERATION_CUSTODY.set(active)
     try:
         yield
+        active[1].check()
     finally:
         _GENERATION_CUSTODY.reset(token)
 
