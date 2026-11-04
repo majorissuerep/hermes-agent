@@ -50,6 +50,7 @@ from hermes_state.guard import (
 )
 from hermes_state.readpool import _READ_POOL_MAX, _proc_fd_targets, _read_budget_for
 from hermes_state.sessions import SessionSessionsMixin
+from hermes_state.custody import SessionCustodyMixin
 from hermes_state.fts import SessionFtsSetupMixin, load_fts5_cjk_extension
 from hermes_state.portability import SessionPortabilityMixin
 from hermes_state.profile_repair import SessionProfileRepairMixin
@@ -490,6 +491,7 @@ def _vaulted_row_factory(db_path) -> "sqlite3.Row":
 
 
 class SessionDB(
+    SessionCustodyMixin,
     SessionSessionsMixin, SessionFtsSetupMixin, SessionSearchMixin, SessionSchemaMixin,
     SessionPortabilityMixin, SessionCompressionMixin,
     SessionLegacyMixin, SessionMaintenanceMixin, SessionUsageMixin, SessionTitlesMixin,
@@ -609,8 +611,7 @@ class SessionDB(
             logger.warning("%s close failed for %s: %s", label, self.db_path, exc)
 
     def __init__(self, db_path: Path | None = None, read_only: bool = False):
-        self.db_path = db_path or _default_db_path()
-        _ensure_test_isolation(self.db_path)  # before any connection/pragma/mkdir
+        self._bind_database_custody(db_path or _default_db_path())
         self.read_only = read_only
         # Keep only the opening call site, never a frame (which pins caller locals).
         self._creation_site = "unknown"
@@ -784,18 +785,6 @@ class SessionDB(
                     raise
                 time.sleep(_READ_ONLY_IOERR_RETRY_BACKOFF_S)
 
-    def _connect_read_only(self, timeout: float) -> sqlite3.Connection:
-        """``mode=ro`` tracked connection with Row factory. check_same_thread=False: pooled connections
-        are borrowed by whichever thread reads next; exclusive ownership is enforced by pool checkout."""
-        conn = _connect_tracked_db(
-            read_only_db_uri(self.db_path), tracking_path=self.db_path, uri=True,
-            check_same_thread=False, timeout=timeout, isolation_level=None,
-        )
-        # Fork: SQLCipher connections need SQLCipher's Row (stdlib Row rejects
-        # sqlcipher cursors).
-        conn.row_factory = _vaulted_row_factory(self.db_path)
-        return conn
-
     def _handle_quarantine_if_invalid(self, already_locked: bool = False) -> None:
         """Quarantine a zero-byte/headerless state.db so a fresh one can open; if quarantine failed,
         raise the clear message instead of opening the zeroed file."""
@@ -822,7 +811,7 @@ class SessionDB(
         """Connect + WAL/pragma/tokenizer setup for a writer connection (no schema init). Short timeout:
         jittered application-level retry handles contention, not SQLite's busy handler;
         isolation_level=None: explicit BEGIN IMMEDIATE."""
-        conn = _connect_tracked_db(
+        conn = self._connect_with_custody(
             str(self.db_path), check_same_thread=False, timeout=1.0, isolation_level=None,
         )
         try:
@@ -998,6 +987,7 @@ class SessionDB(
         set ``_conn = None`` while a worker still had a transcript flush to land).
         Loud (WARNING) and bounded (only after an explicit close()). Caller holds
         ``self._lock``. No _init_schema: no DDL races with siblings during teardown."""
+        self._assert_database_custody()
         if self.read_only:
             raise sqlite3.ProgrammingError(
                 f"SessionDB for {self.db_path} was closed (read-only handle); "

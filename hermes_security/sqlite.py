@@ -99,7 +99,8 @@ def connection_version_info(connection) -> tuple[int, ...]:
     return sqlite3.sqlite_version_info
 
 
-def connect(db_path: Path | str, *, purpose: str = _PURPOSE, key_path: Path | str | None = None, **kwargs: Any):
+def connect(db_path: Path | str, *, purpose: str = _PURPOSE, key_path: Path | str | None = None,
+            custody=None, **kwargs: Any):
     """Open (creating if needed) a SQLCipher database keyed by the vault.
 
     The key is bound to the database's path relative to its vault home, so
@@ -115,7 +116,13 @@ def connect(db_path: Path | str, *, purpose: str = _PURPOSE, key_path: Path | st
     # A snapshot may be staged outside the home. Its key still belongs to the
     # original database so publishing or archiving the staging file is safe.
     home = find_vault_home(key_source)
-    vault = get_vault(home)
+    from hermes_security.sqlite_custody import SQLCipherCustody, guarded_connection_factory
+
+    custody = SQLCipherCustody(get_vault(home)) if custody is None else custody
+    custody.assert_live()
+    vault = custody._vault
+    if vault.home != home:
+        raise VaultKeyMismatchError("The original database custody belongs to another vault")
     outside_vault_home = False
     try:
         rel = key_source.resolve(strict=False).relative_to(home).as_posix()
@@ -125,12 +132,14 @@ def connect(db_path: Path | str, *, purpose: str = _PURPOSE, key_path: Path | st
         # plaintext board misrouted into SQLCipher — the shared-board incident).
         rel = key_source.name
         outside_vault_home = True
-    key = vault.derive_key(f"{purpose}:{rel}")
+    key = custody.derive_key(f"{purpose}:{rel}")
     hexkey = key.hex()
 
     sqlcipher = _sqlcipher_module()
+    kwargs["factory"] = guarded_connection_factory(kwargs.get("factory", sqlcipher.Connection), sqlcipher)
     connection_path = str(db_path) if kwargs.get("uri") else str(target)
     conn = sqlcipher.connect(connection_path, **kwargs)
+    conn._hermes_custody = custody
     try:
         conn.execute(f"PRAGMA key = \"x'{hexkey}'\"")
         # Force a schema read: wrong keys fail now, not on first query.
@@ -206,7 +215,9 @@ def is_vaulted(db_path: Path | str) -> bool:
 def connection_class():
     """SQLCipher's Connection class (factory chains must derive from it)."""
 
-    return _sqlcipher_module().Connection
+    from hermes_security.sqlite_custody import guarded_connection_factory
+    driver = _sqlcipher_module()
+    return guarded_connection_factory(driver.Connection, driver)
 
 
 def row_class():

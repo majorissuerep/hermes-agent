@@ -38,6 +38,7 @@ _SALT_BYTES = 32
 _META_FILENAME = ".hermes-vault"
 _VERIFIER_PLAINTEXT = b"hermes-vault-v1-verifier"
 _KEY_SLOT_AAD = b"hermes-vault-keyslot-v1"
+_CURRENT_AUTHORITY = object()
 
 # scrypt parameters for new vaults.  Stored per-vault in metadata so future
 # releases can tighten them without invalidating existing vaults.
@@ -155,13 +156,26 @@ class Vault:
     def _require_live(self) -> None:
         """Recheck this borrower's lifetime, including callers holding a stale Vault reference."""
         try:
-            if not self._custody.held:
-                raise VaultLockedError("The vault key was wiped by a lock")
+            self.assert_custody_live()
             if self._borrowed:
                 _require_live_authority(self.home)
         except VaultLockedError:
             _discard_cached_vault(self)
             raise
+
+    def assert_custody_live(self) -> None:
+        """Check this exact custody without exporting a key or selecting borrowed lineage.
+
+        Retained native resources pair this with their captured authority validator;
+        they must never silently adopt a later unlock or another session's grant.
+        """
+        if not self._custody.held:
+            raise VaultLockedError("The vault key was wiped by a lock")
+
+    def custody_is_current(self) -> bool:
+        """Local epoch eligibility only; no upstream IPC while a registry lock is held."""
+        with _VAULT_LOCK:
+            return self._custody.held and _VAULTS.get(self.home) is self
 
     def protection_status(self) -> dict[str, bool]:
         """Local custody metadata for an already-authorized status request; exports no key.
@@ -187,19 +201,46 @@ class Vault:
     def derive_key(self, purpose: str) -> bytes:
         return derive_purpose_key(self.master_key, purpose)
 
+    def derive_key_for_custody(self, purpose: str, *, authority) -> bytes:
+        """Derive for a retained resource's captured lineage, never ambient adoption.
+
+        The resource keeps this original Vault and authority snapshot together.
+        Only the derived purpose key leaves this method; a revoked object is
+        never replaced with a current profile's newly unlocked Vault.
+        """
+        from hermes_security.session_authority import SessionAuthorityError
+
+        self.assert_custody_live()
+        if authority is not None:
+            if authority.home != self.home:
+                raise VaultLockedError("The retained authority belongs to another vault")
+            try:
+                authority.validate()
+            except SessionAuthorityError as exc:
+                raise VaultLockedError("The retained authority was revoked") from exc
+        elif self._borrowed:
+            raise VaultLockedError("Borrowed custody requires its original authority snapshot")
+        return derive_purpose_key(self._custody.export_copy(), purpose)
+
     # -- envelopes ----------------------------------------------------------
 
     def _aad(self, purpose: str, relpath: str) -> bytes:
         return f"hermes-vault|{_VERSION}|{purpose}|{relpath}".encode()
 
-    def encrypt(self, plaintext: bytes, *, purpose: str, relpath: str) -> bytes:
+    def _envelope_key(self, purpose: str, authority) -> bytes:
+        if authority is _CURRENT_AUTHORITY:
+            return self.derive_key("file:" + purpose)
+        return self.derive_key_for_custody("file:" + purpose, authority=authority)
+
+    def encrypt(self, plaintext: bytes, *, purpose: str, relpath: str, authority=_CURRENT_AUTHORITY) -> bytes:
+        """Seal with current authority, or an explicitly captured retained-resource lineage."""
         nonce = secrets.token_bytes(_NONCE_BYTES)
-        ciphertext = AESGCM(self.derive_key("file:" + purpose)).encrypt(
+        ciphertext = AESGCM(self._envelope_key(purpose, authority)).encrypt(
             nonce, plaintext, self._aad(purpose, relpath)
         )
         return _MAGIC + bytes((_VERSION,)) + nonce + ciphertext
 
-    def decrypt(self, envelope: bytes, *, purpose: str, relpath: str) -> bytes:
+    def decrypt(self, envelope: bytes, *, purpose: str, relpath: str, authority=_CURRENT_AUTHORITY) -> bytes:
         prefix_size = len(_MAGIC) + 1 + _NONCE_BYTES
         if len(envelope) < prefix_size + 16 or not envelope.startswith(_MAGIC):
             raise VaultIntegrityError("File is not a Hermes encrypted envelope")
@@ -210,7 +251,7 @@ class Vault:
         nonce = envelope[nonce_start : nonce_start + _NONCE_BYTES]
         ciphertext = envelope[nonce_start + _NONCE_BYTES :]
         try:
-            return AESGCM(self.derive_key("file:" + purpose)).decrypt(
+            return AESGCM(self._envelope_key(purpose, authority)).decrypt(
                 nonce, ciphertext, self._aad(purpose, relpath)
             )
         except InvalidTag as exc:

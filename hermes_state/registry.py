@@ -38,6 +38,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Dict, Iterator, List, Optional, Tuple
 
 from hermes_state.common import stat_db_file_identity as _stat_db_file_identity
+from hermes_state.custody import generation_custody_current
 
 if TYPE_CHECKING:  # pragma: no cover - import cycle guard, typed only
     from hermes_state import SessionDB
@@ -212,7 +213,8 @@ def acquire(db_path: Optional[Path] = None) -> SessionDB:
             generation = _generations.get(path)
             if generation is not None:
                 current = _stat_db_file_identity(path)
-                if current is not None and generation.identity is not None and current != generation.identity:
+                if (not generation_custody_current(generation.db)
+                        or (current is not None and generation.identity is not None and current != generation.identity)):
                     # File replaced: retire this generation so it is never lent again, then elect one
                     # caller to open the replacement. It stays alive for its holders, tracked in
                     # ``_retired`` by ``id(db)`` so their releases find it after the path remaps.

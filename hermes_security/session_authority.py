@@ -410,6 +410,39 @@ def validate_inherited_authority(home: Path | str) -> None:
         _check_grant(selected, raw)
 
 
+class InheritedAuthoritySnapshot:
+    """Original borrowed lineage for retained resources, never an ambient replacement."""
+
+    def __init__(self, home: Path, grants: tuple) -> None:
+        self.home, self._grants = home, grants
+
+    def validate(self) -> None:
+        for selected, raw, proof in self._grants:
+            _check_grant(selected, raw, trusted_key_proof=proof)
+
+    def is_current(self) -> bool:
+        return self._grants == _inherited_authority_records(self.home)
+
+    def __repr__(self) -> str:
+        return "<InheritedAuthoritySnapshot>"
+
+    def __reduce__(self):
+        raise TypeError("Borrowed authority snapshots cannot be pickled")
+
+
+def _inherited_authority_records(home: Path) -> tuple:
+    owner = _vault_home(home)
+    with _lock:
+        return tuple((Path(selected), raw, _legacy_proofs.get(selected))
+                     for selected, raw in sorted(_adopted.items()) if _vault_home(Path(selected)) == owner)
+
+
+def capture_inherited_authority(home: Path | str) -> InheritedAuthoritySnapshot:
+    """Snapshot only already-adopted provenance of this explicit vault owner; no key copies."""
+    selected = Path(home).resolve()
+    return InheritedAuthoritySnapshot(selected, _inherited_authority_records(selected))
+
+
 def inherited_grant(home: Path | str) -> str | None:
     """Capture lineage inside a trusted FD, independent of mutable child env."""
     from agent.session_context import get_session_env
