@@ -23,8 +23,8 @@ def resume_command(args, home) -> int:
         for failure in report.failures:
             print(f"    {failure}")
         return 1
-    print("✓ Migration complete; encrypted state and rollback verified.")
-    return 0
+    print("✓ Selected home migration complete; encrypted state and rollback verified.")
+    return profile_report(report)
 
 
 def _confirm(args, home, report):
@@ -56,12 +56,12 @@ def _report(home, report):
             print(f"    {failure}")
         print("  Run 'hermes secure-vault migrate --yes' with the original credential to resume.")
         return 1
-    if migrate.scan_for_plaintext(home):
+    if migrate.scan_for_plaintext(home, selected_only=True):
         print("✗ Unconverted state remains; preserve the rollback and resume migration.")
         return 1
-    print(f"✓ Migration complete ({len(report.databases)} DBs, {len(report.envelopes)} files, {len(report.frame_streams)} streams)")
+    print(f"✓ Selected home migration complete ({len(report.databases)} DBs, {len(report.envelopes)} files, {len(report.frame_streams)} streams)")
     print("  Keep the original credential with the encrypted rollback for disaster recovery.")
-    return 0
+    return profile_report(report)
 
 
 def migrate_command(args, home):
@@ -95,3 +95,18 @@ def migrate_command(args, home):
         print(f"✗ Migration refused; original state and any encrypted rollback retained: {error}")
         return 1
     return _report(home, report)
+
+
+def profile_report(report) -> int:
+    """Selected-home success never certifies independently owned named homes."""
+    if report.profiles_opaque:
+        print("  Other profile data retained as opaque rollback members; not authenticated by this home's credential:")
+        for name in report.profiles_opaque:
+            print(f"    {name}")
+    if report.profiles_pending:
+        print("✗ Named profiles require separate migration or repair with their own credentials:")
+        for name in report.profiles_pending:
+            print(f"    {name}")
+        print("  Select that named profile explicitly with --profile; no child credential was created.")
+        return 1
+    return 0

@@ -16,8 +16,10 @@ from hermes_security.errors import VaultError, VaultIntegrityError
 def _backup_directory(home):
     from hermes_security.migrate import _private_backup_directory
     from hermes_security.migration_archive import MigrationArchiveError, _destination_parent
+    from hermes_security.migration_profiles import storage_home
 
-    for directory in (home.parent, _private_backup_directory(home)):
+    owner = storage_home(home)
+    for directory in (owner.parent, _private_backup_directory(owner)):
         if directory is None:
             continue
         try:
@@ -29,11 +31,9 @@ def _backup_directory(home):
 
 
 def entries(home):
-    from hermes_security.migrate import _iter_files
-    from hermes_security.migration_resume import attributes
+    from hermes_security.migration_profiles import snapshot_entries
 
-    for path, relative in _iter_files(home):
-        yield path, relative, attributes(path, relative)
+    yield from snapshot_entries(home)
 
 
 def _backup(home, state, unlocked):
@@ -47,7 +47,11 @@ def _backup(home, state, unlocked):
         state["backup"] = str(directory / f"hermes-premigration-{home.name}-{stamp}-{state['id']}.hmb")
         migration_state.write(home, unlocked, state)
     target = Path(state["backup"])
-    permitted = {home.parent, home.parent / (home.name + "-migration-backups")}
+    from hermes_security.migration_profiles import storage_home
+
+    owner = storage_home(home)
+    permitted = {owner.parent, owner.parent / (owner.name + "-migration-backups"),
+                 home.parent, home.parent / (home.name + "-migration-backups")}
     if target.parent not in permitted or target.is_symlink():
         raise VaultIntegrityError("Migration rollback path does not belong to the original home")
     custody = _Custody(home)
@@ -80,8 +84,8 @@ def _convert_member(home, member, unlocked, state, report):
     original = {name.removeprefix("HERMES."): value for name, value in member.pax_headers.items()
                 if name.startswith("HERMES.")}
     kind = original.get("kind")
-    if kind == "skip":
-        return
+    if kind in {"skip", "profile"}:
+        return  # full rollback retains independent islands without using their keys
     if kind == "browser":
         migrate._note_browser_root(report, relative)
         return
@@ -125,7 +129,7 @@ def _continue(home, unlocked, state, report):
     if not report.failures:
         migrate._convert_browser_profiles(home, report)
     if not report.failures:
-        leftovers = migrate.scan_for_plaintext(home)
+        leftovers = migrate.scan_for_plaintext(home, selected_only=True)
         if leftovers:
             report.failures.append("Unconverted state remains; retain the encrypted rollback and run migrate again")
         else:
@@ -137,9 +141,13 @@ def _plan(home):
     from hermes_security import migrate
 
     report = migrate.MigrationReport(home=home)
+    from hermes_security.migration_profiles import refuse_ancestor_sealed, scope
+
+    refuse_ancestor_sealed(home)
+    report.profiles_opaque, report.profiles_pending = scope(home)
     destinations = {"db": report.databases, "frames": report.frame_streams,
                     "envelope": report.envelopes}
-    for path, relative in migrate._iter_files(home):
+    for path, relative in migrate._iter_files(home, exclude_roots={"profiles"}):
         kind = migrate._classify(path, relative)
         if kind == "browser":
             migrate._note_browser_root(report, relative)
@@ -151,28 +159,34 @@ def _plan(home):
 def run(home, password, *, dry_run=False, public_key_raw=None):
     from hermes_security import migrate
     from hermes_state.runtime_ownership import exclusive_maintenance
+    from hermes_security.migration_profiles import children, refuse_ancestor_sealed, scope
 
     home = Path(home).expanduser().resolve()
     if dry_run:
         if vault.vault_exists(home):
             raise VaultError("An existing vault requires explicit authenticated migration continuation")
         return _plan(home)
-    with exclusive_maintenance([home]):
+    with exclusive_maintenance([home, *children(home)]):
         if vault.vault_exists(home):
             if not migration_state.pending(home):
                 raise VaultError("A vault already exists without an authenticated pending migration")
             unlocked = vault.get_vault(home, allow_env_unlock=False) if password is None else vault.unlock(home, password)
         else:
-            files = list(migrate._iter_files(home))
-            if not files:
+            refuse_ancestor_sealed(home)
+            has_state = next(entries(home), None) is not None
+            if not has_state:
                 vault.init_vault(home, password, _allow_existing_state=True, public_key_raw=public_key_raw)
-                return migrate.MigrationReport(home=home)
+                report = migrate.MigrationReport(home=home)
+                report.profiles_opaque, report.profiles_pending = scope(home)
+                return report
             _backup_directory(home)  # refuse unavailable rollback storage before publishing credential metadata
             vault.init_vault(home, password, _allow_existing_state=True, public_key_raw=public_key_raw,
                              _migration_id=secrets.token_hex(16))
             unlocked = vault.unlock(home, password)
         state = migration_state.read(home, unlocked)
-        return _continue(home, unlocked, state, migrate.MigrationReport(home=home))
+        report = migrate.MigrationReport(home=home)
+        report.profiles_opaque, report.profiles_pending = scope(home)
+        return _continue(home, unlocked, state, report)
 
 
 def original_member(backup: Path, home: Path, name: str) -> bytes | None:

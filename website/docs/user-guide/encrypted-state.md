@@ -182,3 +182,37 @@ Restore the recovered original data only through a deliberate offline recovery w
 Older `hermes-premigration-*.tar` files may already contain plaintext. Explicit vault
 repair can still read them to recover damaged state; it never deletes their sole copy
 or claims that replacing or deleting them erases historical SSD bytes.
+
+
+### Named-profile boundaries during migration
+
+Migration converts only the selected home. Its direct `profiles/` subtree is
+retained as opaque data in the full encrypted rollback, including each child's
+original credential metadata. It never unlocks, decrypts, rekeys or initializes
+another profile. Unknown or markerless directories remain data; migration does
+not turn them into new profiles. The snapshot requires the existing maintenance
+fences to be available for those child homes.
+
+The completion message applies to the **selected home**, not the whole machine.
+A recognized named profile without usable own metadata is listed as requiring
+its own migration or repair, and the CLI returns nonzero until that work is
+selected separately. For example, choose the named profile explicitly with
+`hermes --profile work secure-vault migrate`; an unattended migration must use
+its own deliberately selected new external `--key-out` credential. Initialized
+children are preserved opaquely, not authenticated with the selected home's key.
+
+New named-profile rollbacks are stored outside the outermost validated vaulted
+ancestor, with the same owner-private sibling fallback for immutable parent
+directories. Old rollback locations remain passive recovery inputs; migration
+never silently moves or deletes them.
+
+Some historical profiles have encrypted files but no metadata of their own:
+those files still use an ancestor vault and their original home-relative paths.
+Independent migration refuses that state during its read-only plan, before
+publishing a child credential or metadata that would shadow the old owner.
+Keep the original ancestor metadata, original credential, existing ciphertext
+and rollback. Recover a separate plaintext copy through deliberate offline
+recovery with that original owning vault before migrating it independently.
+Automatic cross-vault rekeying is unsupported; this refusal leaves the existing
+legacy reader compatibility intact. Do not remove the ancestor metadata or
+replace the only existing copy to force migration.

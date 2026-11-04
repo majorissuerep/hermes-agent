@@ -113,12 +113,14 @@ def admitted(path: Path, relative: Path, original: dict, vault, *, checkpoint=No
 
     if path.is_symlink() or not path.is_file():
         raise VaultIntegrityError(f"Migration source changed type or disappeared: {relative}")
-    if file_hash(path) == original.get("sha256"):
-        return False
     kind = original.get("kind")
+    # Committed rows may live only in WAL while the main DB bytes still match.
+    # Logical admission must precede every database checkpoint or replacement.
     if kind == "db":
         return _database_admission(path, relative, original, checkpoint)
-    elif kind == "frames":
+    if file_hash(path) == original.get("sha256"):
+        return False
+    if kind == "frames":
         actual = _sealed_frames_fingerprint(path, vault, migrate._frame_purpose(path))
         expected = original.get("frames_fingerprint")
     else:
@@ -141,8 +143,10 @@ def _database_admission(path, relative, original, checkpoint):
         # WAL checkpointing may change physical bytes before ciphertext replaces the
         # original. Only this exact in-progress entry may admit equivalent SQLite.
         active = {"path": relative.as_posix(), "kind": "db", "original": original.get("sha256")}
-        if checkpoint != active or not expected or migrate._plain_dump_md5(path) != expected:
+        if not expected or migrate._plain_dump_md5(path) != expected:
             raise VaultIntegrityError(f"Original SQLite content changed during migration: {relative}")
+        if file_hash(path) != original.get("sha256") and checkpoint != active:
+            raise VaultIntegrityError(f"Original SQLite layout changed outside its migration checkpoint: {relative}")
         return False
     with closing(connect(path)) as connection:
         actual = migrate._conn_fingerprint(connection)

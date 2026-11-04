@@ -65,6 +65,8 @@ class MigrationReport:
     envelopes: list[str] = field(default_factory=list)
     frame_streams: list[str] = field(default_factory=list)
     browser_profiles: list[str] = field(default_factory=list)
+    profiles_opaque: list[str] = field(default_factory=list)
+    profiles_pending: list[str] = field(default_factory=list)
     skipped: list[str] = field(default_factory=list)
     failures: list[str] = field(default_factory=list)
 
@@ -397,6 +399,8 @@ def _iter_files(home: Path, *, onerror=None, exclude_roots=()):
                                 and not (parent == home and name in exclude_roots)
                                 and not vault_mod._is_in_skip_dir((parent / name).relative_to(home)))
         for name in sorted(files + links):
+            if parent == home and name in exclude_roots:
+                continue  # a reserved opaque root can itself be a link or file
             path = parent / name
             if not path.is_file() and not path.is_symlink():
                 continue
@@ -427,10 +431,16 @@ def _private_backup_directory(home: Path) -> Optional[Path]:
 
 
 def _migration_backups(home: Path) -> list[Path]:
-    directories = [home.parent]
-    private = _private_backup_directory(home)
-    if private is not None:
-        directories.append(private)
+    from hermes_security.migration_profiles import storage_home
+
+    outermost = storage_home(home)
+    # Passive discovery retains pre-change locations; new snapshots stay outside
+    # every validated owning vault, including an initialized machine ancestor.
+    directories = list(dict.fromkeys([outermost.parent, home.parent]))
+    for owner in (outermost, home):
+        private = _private_backup_directory(owner)
+        if private is not None and private not in directories:
+            directories.append(private)
     return sorted((path for directory in directories for suffix in ("hmb", "tar")
                    for path in directory.glob(f"hermes-premigration-{home.name}-*.{suffix}")),
                   key=lambda path: path.name, reverse=True)
@@ -741,7 +751,7 @@ def _browser_offender(path: Path, rel: Path) -> str | None:
     return _browser_root(rel)
 
 
-def scan_for_plaintext(home: Path | str) -> list[str]:
+def scan_for_plaintext(home: Path | str, *, selected_only: bool = False) -> list[str]:
     """State paths whose encryption cannot be verified (including unreadable/locked state).
 
     Code, skills and public caches retain the migration exclusion policy. Old
@@ -762,7 +772,7 @@ def scan_for_plaintext(home: Path | str) -> list[str]:
     def unreadable(exc):
         offenders.append(Path(exc.filename or home).relative_to(home).as_posix())
 
-    for path, rel in _iter_files(home, onerror=unreadable):
+    for path, rel in _iter_files(home, onerror=unreadable, exclude_roots={"profiles"} if selected_only else ()):
         if _classify(path, rel) == "browser":
             entry = _browser_offender(path, rel)
             if entry is not None and entry not in offenders:  # one entry per legacy profile directory
