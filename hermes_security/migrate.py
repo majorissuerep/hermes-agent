@@ -39,6 +39,7 @@ _SAFE_IDENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 from hermes_security import errors as vault_errors
 from hermes_security import frames as sec_frames
 from hermes_security import vault as vault_mod
+from hermes_security.artifact_paths import is_legacy_artifact_path
 
 _MAGIC = b"HRMVAULT\x00"
 
@@ -105,6 +106,7 @@ def repair_clobbered_state(home: Path | str) -> dict:
         if kind == "skip" or path.is_symlink():
             continue  # never repair through a link (it may point outside the home)
         try:
+            _harden_private_artifact(home_path, rel)
             with path.open("rb") as handle:
                 head = handle.read(16)
             if kind == "db":
@@ -117,6 +119,23 @@ def repair_clobbered_state(home: Path | str) -> dict:
             report["unrecoverable"].append(f"{rel.as_posix()}: {type(exc).__name__}: {exc}")
     report["code_files"] = _restore_code_trees(vault, home_path, report)
     return report
+
+
+def _harden_private_artifact(home: Path, relative: Path) -> None:
+    """The explicit repair makes old private output readable by strict custody I/O."""
+    if not is_legacy_artifact_path(relative):
+        return
+    from hermes_security.artifacts import _parent
+
+    with _parent(home, relative, create=True) as parent:
+        fd = os.open(relative.name, os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0), dir_fd=parent)
+        try:
+            info = os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid():
+                raise PermissionError("Legacy private output requires an owned regular file")
+            os.fchmod(fd, 0o600)
+        finally:
+            os.close(fd)
 
 
 def _frame_purpose(path: Path) -> str:
@@ -643,6 +662,8 @@ def migrate_home(home: Path | str, password: str | bytes, *, dry_run: bool = Fal
             kind = _classify(path)
             if kind == "skip":
                 continue
+            if not dry_run:
+                _harden_private_artifact(home, rel)
             if kind == "db":
                 if dry_run:
                     report.databases.append(rel.as_posix())
@@ -671,7 +692,8 @@ def migrate_home(home: Path | str, password: str | bytes, *, dry_run: bool = Fal
 def scan_for_plaintext(home: Path | str) -> list[str]:
     """State paths whose encryption cannot be verified (including unreadable/locked state).
 
-    Code, skills and cache roots retain the migration exclusion policy. An empty
+    Code, skills and public caches retain the migration exclusion policy. Old
+    terminal, tool-result and screenshot outputs are private state. An empty
     result qualifies only those inspected paths, not excluded trees.
     """
     from hermes_security import io as state_io

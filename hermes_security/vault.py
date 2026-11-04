@@ -853,7 +853,10 @@ def _is_in_skip_dir(rel: Path | str) -> bool:
     """
     parts = Path(rel).parts
     from hermes_cli.home_data_layout import PM_RUNTIME_ROOT_DIRS, profile_root_entry
+    from hermes_security.artifact_paths import is_private_cache_branch
 
+    if is_private_cache_branch(rel):
+        return False
     if profile_root_entry(parts) in PM_RUNTIME_ROOT_DIRS:
         return True
     if parts and parts[0].startswith("hermes-agent."):

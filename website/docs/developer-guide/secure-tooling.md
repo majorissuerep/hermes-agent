@@ -60,6 +60,13 @@ hosting remain outside this fork. No change authorizes a public deployment.
 - Owned skill indexes and usage audit records use the existing authenticated
   storage formats. A locked or damaged file is preserved and reported, never
   treated as permission to append plaintext or overwrite it with an empty value.
+- Retained SQLCipher connections, cursors and transaction admission remain bound
+  to their original unlock and borrowed session. A live sibling or later human
+  unlock cannot revive a revoked handle. Cleanup remains possible after revocation.
+- Terminal overflow, large tool/MCP results and owned browser captures use
+  authenticated encrypted artifacts. Existing file tools recover text in the
+  owning profile; vision consumers authenticate image bytes and stage derivatives
+  only in a proven RAM workspace. Refused persistence reports its limitation.
 - Codex and Claude command integrations use noninteractive invocation and do not
   persist an additional plaintext conversation. Their permission controls remain
   effective; refusal must be reported rather than retried without confinement.
@@ -138,6 +145,30 @@ invalid location never falls back. Normal completion removes the private task
 directory. Existing general `cache/scratch` retention does not make that cache a
 protected workspace. Native executor persistence and owner-death cleanup need
 their own qualification; non-persistence flags alone are insufficient evidence.
+
+Private terminal and tool outputs are stored beneath `artifacts/terminal-output`
+and `artifacts/tool-results`; owned browser images use `artifacts/browser`.
+An explicit image path can be inspected with `hermes artifacts view PATH` or
+`/artifacts view PATH`. This authenticates and decodes in memory, then renders a
+bounded grayscale text preview (at most 120 columns by 60 rows). It creates no
+plaintext viewing file. Vision tools still receive the image pixels. Private
+`MEDIA:` references provide that slash-command hint instead of an external link
+to ciphertext. General configuration and credentials are outside this reader.
+
+Older private outputs in `cache/terminal-output`, `cache/spillover`,
+`cache/screenshots` and `browser_screenshots` remain visible to the read-only
+plaintext scan. Explicit vault repair seals them in place and hardens their
+permissions; it preserves their authenticated legacy paths. Raw old images are
+refused by runtime readers until repaired. Package-manager and other public
+caches remain excluded. This change does not erase old bytes from SSD media.
+
+The existing initial migration creates a documented plaintext recovery archive
+outside the home, and deliberate offline exports also produce plaintext. These
+operator recovery operations are distinct from normal encrypted runtime output.
+Arbitrary user-image staging, desktop captures, browser profiles and selected
+remote browser scratch have not received whole-toolchain qualification here.
+Their review remains explicit follow-up work; these changes do not certify
+every SSD byte or the host's swap and crash storage.
 
 A running old owner retains its old implementation after a source update. New
 operation-only clients report `owner_restart_required` with restart/resume
@@ -687,6 +718,8 @@ login, macOS or exact merged-revision acceptance.
 | --- | --- | --- |
 | **P0 SEC-03: qualify custody and session repairs** | Fixed owner-executed installer stages return receipts only; trusted workers require their exact live session; ordinary and outgoing MCP/remote environments exclude installer control authority. | Integration owner; exact-head private/native gates, then non-author fresh-main key-custody, revocation-between-preparation-and-adoption, parent/sibling survival and failure cleanup checks. The earlier confirmed failures remain negative evidence. |
 | **P0 SEC-04: qualify owned-state encryption** | Seal derived skill indexes and cron usage audit appends in their canonical authenticated formats, preserving existing records and refusing unavailable/damaged state. | Integration owner; ciphertext and authenticated roundtrip checks, migrated-record preservation, locked/damaged non-mutation and public cron/self-call replay with no owned plaintext residue. |
+| **P0 SEC-05: qualify retained database and private output custody** | SQLCipher handles keep their original session across cached reads, cursor fetches, transactions and reopened connections. Terminal/result archives and browser captures remain encrypted, recoverable and revocable; old private caches participate in explicit repair. | Security and integration owners; final exact-head gates, then non-author fresh-main tests for stale handles, sibling isolation, authenticated text/image recovery, real RAM staging, unavailable custody and unchanged data on refusal. Pre-fix native failures remain evidence; unit/browser fixtures do not establish live browser qualification. |
+| **P1 MEDIA-02: complete private media and recovery lifecycle review** | Inventory desktop captures, arbitrary image staging, browser profiles, selected remote scratch and deliberate offline migration/export archives. Preserve actual consumers while closing demonstrated private-byte writers. | Tool/lifecycle owners; isolated real-backend routing, residue scans and recovery tests. Explain the recovery archive before deliberate plaintext export; define safe lifecycle handling without claiming SSD erasure. Keep unknown host memory/swap protection separate. |
 | **P0 HOST-01: transient-memory admission** | Establish swap, hibernation and crash-storage protection for each supported protected host; report unknown evidence honestly. Retained-key locking and RAM-only files do not protect every Python, crypto or SQLCipher buffer. | Operator supplies host guarantees or a native deployment proves the required posture. A non-author tests refusal and recovery. Full protected-workflow acceptance remains pending while admission is unevaluated. No implicit host setting changes. |
 | **P0 DEP-01: Pillow advisory closure (external blocker)** | Upstream browser-harness and fastembed metadata currently prevent installing the aged fixed Pillow through normal consistency checks. | Dependency owner tracks compatible upstream releases and rechecks at the next eligible release/quarantine boundary; then fresh PM lock/environment, applicable advisory closure and real browser/image consumers. Preserve the 14-day quarantine and all existing tooling; do not force incompatible metadata. |
 | **P0 DEP-00: qualify the aged refresh** | Land the separately prepared security dependency and SDK refresh after its exact-head checks. Local audit reduces 65 advisories in seven packages to the 39 Pillow advisories recorded above. | Integration owner; fresh PM environment, actual SDK protocol checks, full required gates and independent fresh-main consumers. Local test counts alone do not establish publication. |
