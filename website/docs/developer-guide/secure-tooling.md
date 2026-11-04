@@ -732,8 +732,9 @@ later features stay explicitly deferred; a deadline does not authorize bypassing
 checks. Roll back an unmerged increment by reverting only its task-owned commits;
 post-merge defects require a corrective PR and the same checks.
 
-The cutoff has passed. Only repairs to concrete M0 acceptance failures continue;
-new workflow features remain deferred. Each major merge is followed by a fresh
+The November 4 checkpoint ended the initial timebox. The operator subsequently
+resumed work until a stable fork release. Concrete encrypted-integration and
+lifecycle failures retain priority over new orchestration. Each major merge is followed by a fresh
 non-author acceptance run before that milestone is described as complete. A
 stacked feature may be prepared earlier, but does not skip that acceptance step.
 
@@ -849,3 +850,51 @@ The existing experiments are the primary basis for implementation choices.
 Small Hermes-specific comparisons are a fallback for consequential transfer
 assumptions and acceptance of the actual package; they are not a substitute for
 the published evidence or a pretext to postpone the integration work.
+
+### DeepSeek super-agent assessment
+
+The reviewed [DeepSeek research prototype](https://github.com/deepseek-ai/dsh-superagent-prototype/tree/8c32a9dc5d72c033816c6a8110b37f40cf94fba4)
+was published on October 31, 2026. Its own README distinguishes the reference
+code from the internal implementation and proposed future features. The design
+separates coordination from independent workers, durable work and environments,
+and surfaces decisions that need human attention. These principles fit the
+fork where existing local consumers already implement them:
+
+| Mechanism | Fork implementation and acceptance boundary |
+| --- | --- |
+| Concurrent isolated work and follow-up | Existing native delegation contexts, stable child identity and owner-scoped steer/stop; no new model tools. |
+| Recoverable work and bounded recall | Encrypted session/delegation records and authenticated artifact paging; an output pointer grants no new authority. |
+| Admission before semantic judgment | Existing session capabilities and deterministic goal/formal gates; a model judgment never grants permission. |
+| Useful waiting, failure and attention states | Existing goal/kanban outcomes and process supervision; running or self-reported success does not establish completion. |
+| Verification behind the main conversation | The separate opt-in formal consumer under review uses existing auxiliary routes and append-only feedback; its own qualification remains required. |
+
+Adopt these ideas by reuse. No uncovered consumer currently justifies another
+controller, model-facing coordination skill, listener or default provider switch.
+The prototype's GitHub/Feishu subscriptions, web panel and cloud daemon remain
+outside this fork. Its [per-request prompt refresh](https://github.com/deepseek-ai/dsh-superagent-prototype/blob/8c32a9dc5d72c033816c6a8110b37f40cf94fba4/docs/004-prompts.md)
+conflicts with this fork's active-session snapshots. Its
+[deployment defaults](https://github.com/deepseek-ai/dsh-superagent-prototype/blob/8c32a9dc5d72c033816c6a8110b37f40cf94fba4/docs/006-deployment.md)
+do not provide an OS isolation boundary. Neither is imported.
+
+The authors' [design article](https://x.com/i/article/2116829218935857152)
+reports a synthetic scheduling test with approximately 300 messages, 20 work
+requests and five runs per design. Median/p95 task time was 12.4/15.7 minutes
+versus 20.4/29.5 for its neutral single-session baseline; coding work was a mock
+tool. Cache-read tokens increased from 6.1M to 23.2M. These are scheduling results,
+not coding correctness or equal-cost task-resolution gains. The model identity
+was absent from the recovered article. Direct article access was unavailable;
+the numbers were recovered through a public cache of the official author's post
+and were not independently replicated.
+
+The cross-model [scaling study, version 3](https://arxiv.org/html/2512.08296v3)
+also reports mixed coding results: on 20 Terminal-Bench cases GPT-5 improved
+from 30% single-agent to 50% hybrid, while Sonnet 4.5 fell from 60% to 50%.
+The reported intervals are wide. Neither study establishes a model-independent
+gain or a result for Sol 6.1 and Opus 5.5 in this fork.
+
+Revisit the empty implementation delta when an actual existing consumer loses
+acknowledged work, admits a foreign or duplicate completion, confuses waiting
+with completion, reuses stale premises or accepts a failed required gate.
+Retain that failure as a behavioral regression and repair the existing consumer.
+Kernel acceptance still proves only the encoded deduction: source currency,
+premise truth and faithful translation retain their separate review obligations.
