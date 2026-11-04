@@ -32,6 +32,10 @@ class WorkerStateError(VaultError):
     """Private browser state was retained because it could not be used safely."""
 
 
+class UnverifiedWorkerState(WorkerStateError):
+    """A bootstrap did not verify its restored state; do not replace the last good archive."""
+
+
 def _prove(path):
     from hermes_platform.memory_protection import ram_only_directory_proof
 
@@ -70,13 +74,32 @@ def _write(path, document):
     _atomic_write(path, json.dumps(document, sort_keys=True).encode())
 
 
+def _guard(operation):
+    from hermes_security.operation_custody import guarded
+
+    return guarded(operation)
+
+
+def _wait_for_lock(acquire, deadline, check_alive):
+    while True:
+        if check_alive is not None:
+            check_alive()
+        if acquire():
+            return
+        if time.monotonic() >= deadline:
+            raise WorkerStateError('Private browser state is busy; no files were replaced')
+        time.sleep(0.05)
+
+
 @contextlib.contextmanager
-def _lock(path, *, wait=60):
+def _lock(path, *, wait=60, check_alive=None):
     from hermes_platform.processes import release_file_lock, try_acquire_file_lock
 
     with _POOL_LOCK:
         local = _LOCKS.setdefault(path, threading.RLock())
-    with local:
+    deadline = time.monotonic()+wait
+    _wait_for_lock(lambda: local.acquire(blocking=False), deadline, check_alive)
+    try:
         held = getattr(_HELD, 'paths', None)
         if held is None:
             held = _HELD.paths = set()
@@ -88,17 +111,15 @@ def _lock(path, *, wait=60):
             info = os.fstat(fd)
             if not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid() or info.st_mode & 0o077:
                 raise WorkerStateError('Private browser state lock has unsafe ownership or permissions')
-            deadline = time.monotonic() + wait
-            while not try_acquire_file_lock(handle):
-                if time.monotonic() >= deadline:
-                    raise WorkerStateError('Private browser state is busy in another request; no files were replaced')
-                time.sleep(0.05)
+            _wait_for_lock(lambda: try_acquire_file_lock(handle), deadline, check_alive)
             try:
                 held.add(path)
                 yield
             finally:
                 held.remove(path)
                 release_file_lock(handle)
+    finally:
+        local.release()
 
 
 class WorkerCall:
@@ -128,6 +149,11 @@ class WorkerCall:
 
     def checkpoint(self):
         self.check()
+        if self.resource.identity.get('kind') == 'native-browser-config':
+            from hermes_cli import browser_native_restore, browser_native_state
+
+            browser_native_restore.checkpoint_allowed(self.resource)
+            browser_native_state.prepare(self.resource, self)
         return archive.write_archive(self.resource.home, self.resource.relative, self.resource.tree,
                                      custody=self, identity=self.resource.identity, digest=self.resource.digest)
 
@@ -193,10 +219,10 @@ class WorkerResource:
     def access(self, *, operation=None):
         from hermes_security import browser_worker_pending as pending
 
-        operation = operation or SessionCustody.capture(self.home, resource=self.custody)
+        operation = _guard(operation or SessionCustody.capture(self.home, resource=self.custody))
         if operation.home != self.home or operation.resource is not self.custody:
             raise WorkerStateError('The browser operation belongs to another resource')
-        with _lock(self.lock_path):
+        with _lock(self.lock_path, check_alive=operation.check):
             document = pending.read_optional(self.home, self.digest, custody=operation)
             if document is not None:
                 retained = Path(document['path'])
@@ -221,16 +247,23 @@ class WorkerResource:
             # A failed first checkpoint never launches that producer.
             if archive.archive_ciphertext_size(self.home, self.relative, digest=self.digest) is None:
                 call.checkpoint()
+            unverified = False
             try:
                 yield call
+            except UnverifiedWorkerState:
+                unverified = True
+                raise
             finally:
-                try:
-                    call.checkpoint()
-                    pending.sync(self, call)
-                except (VaultError, OSError, ValueError) as exc:
-                    raise WorkerStateError(
-                        'Private browser state could not be saved; the original archive and RAM files were retained. '
-                        'Close the browser and use hermes secure-vault repair before removing the RAM workspace.') from exc
+                if not unverified:
+                    try:
+                        call.checkpoint()
+                        pending.sync(self, call)
+                    except UnverifiedWorkerState:
+                        raise
+                    except (VaultError, OSError, ValueError) as exc:
+                        raise WorkerStateError(
+                            'Private browser state could not be saved; the original archive and RAM files were retained. '
+                            'Close the browser and use hermes secure-vault repair before removing the RAM workspace.') from exc
 
     def claim(self):
         from hermes_platform.processes import get_process_start_time
@@ -243,8 +276,8 @@ class WorkerResource:
     def release(self, *, operation=None):
         from hermes_security import browser_worker_pending as pending
 
-        operation = operation or SessionCustody.capture(self.home, resource=self.custody)
-        with _lock(self.lock_path):
+        operation = _guard(operation or SessionCustody.capture(self.home, resource=self.custody))
+        with _lock(self.lock_path, check_alive=operation.check):
             operation.check()
             self._validate()
             (self.path/'claims'/str(os.getpid())).unlink(missing_ok=True)
@@ -286,8 +319,9 @@ def resources_in_ram(home):
     home = Path(home).resolve()
     seen = set()
     custody = archive.capture_custody(home)
+    guard = _guard(custody)
     for reference in pending.paths(home):
-        document = pending.read(home, reference.relative_to(home), custody=custody)
+        document = pending.read(home, reference.relative_to(home), custody=guard)
         retained = Path(document['path'])
         if pending.root_missing(document):
             raise WorkerStateError(
@@ -311,6 +345,7 @@ def resources_in_ram(home):
             return
         raise WorkerStateError('Cannot inspect private browser state without its proven RAM workspace')
     for path in sorted(base.glob(PREFIX+'*')):
+        guard.check()
         if path.name.endswith('.lock'):
             continue
         if path in seen:
@@ -333,6 +368,7 @@ def _require_idle(selected):
 
     for folder in ('claims', 'processes'):
         for entry in (selected.path/folder).iterdir():
+            _guard(selected.custody).check()
             record = _read(entry)
             if entry.name != str(record.get('pid')) or not process_record_is_dead(record):
                 raise WorkerStateError('A private browser owner is live or unknown; close every browser and Hermes first')
@@ -343,7 +379,7 @@ def retire_quiescent(home):
     from hermes_security.protected_workspace import remove_stable_workspace
     from hermes_security import browser_worker_pending as pending
 
-    operation = SessionCustody.capture(home)
+    operation = _guard(SessionCustody.capture(home))
     missing, retained = pending.recover_missing(home, custody=operation)
     saved = []
     if retained:
@@ -355,11 +391,18 @@ def retire_quiescent(home):
             return {'archived':[], 'retained':[], 'missing':missing}  # no admitted private worker state
         raise
     for selected in candidates:
+        operation = _guard(SessionCustody.capture(selected.home, resource=selected.custody))
         try:
-            with _lock(selected.lock_path):
-                operation = SessionCustody.capture(selected.home, resource=selected.custody)
+            with _lock(selected.lock_path, check_alive=operation.check):
                 selected._validate()
                 _require_idle(selected)
+                if selected.identity.get('kind') == 'native-browser-config':
+                    from hermes_cli.browser_native_restore import authorize_retry
+
+                    retry = authorize_retry(selected, operation)
+                    if retry is not None:
+                        retained.append(retry)
+                        continue
                 call = WorkerCall(selected, operation)
                 call.checkpoint()
                 _require_idle(selected)

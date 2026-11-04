@@ -3,14 +3,21 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import NamedTuple
 
 import psutil
 
 from hermes_platform.processes import get_process_start_time
 
 
-def agent_browser_action(argv) -> str | None:
-    """The action in Hermes's concrete agent-browser argv, refusing unknown option grammars."""
+class AgentBrowserCommand(NamedTuple):
+    prefix: tuple[str, ...]
+    action: str
+    arguments: tuple[str, ...]
+
+
+def parse_agent_browser_command(argv) -> AgentBrowserCommand | None:
+    """Hermes's concrete client prefix/action, refusing unknown option grammars."""
     values = {'--session', '--cdp', '--engine'}
     switches = {'--json', '--headed'}
     index = 1
@@ -23,7 +30,7 @@ def agent_browser_action(argv) -> str | None:
         elif token.startswith('-'):
             return None
         else:
-            return token
+            return AgentBrowserCommand(tuple(argv[:index]), token, tuple(argv[index+1:]))
     return None
 
 

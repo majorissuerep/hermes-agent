@@ -6,14 +6,16 @@ import sys
 
 import pytest
 
-from hermes_platform.browser_process import agent_browser_action, browser_process_record
+from hermes_platform.browser_process import parse_agent_browser_command, browser_process_record
 
 
 def test_browser_action_uses_the_actual_command_position():
-    assert agent_browser_action(['/pm/agent-browser', '--session', 'a', '--engine', 'chrome', '--json', 'close']) == 'close'
-    assert agent_browser_action(['/pm/agent-browser', '--cdp', 'http://127.0.0.1:1', 'eval', 'close']) == 'eval'
-    assert agent_browser_action(['/pm/agent-browser', '--unknown', 'close']) is None
-    assert agent_browser_action(['/pm/agent-browser', '--session']) is None
+    command = parse_agent_browser_command(['/pm/agent-browser', '--session', 'a', '--engine', 'chrome', '--json', 'close'])
+    assert command.action == 'close' and command.prefix[-1] == '--json'
+    command = parse_agent_browser_command(['/pm/agent-browser', '--cdp', 'http://127.0.0.1:1', 'eval', 'close'])
+    assert command.action == 'eval' and command.arguments == ('close',)
+    assert parse_agent_browser_command(['/pm/agent-browser', '--unknown', 'close']) is None
+    assert parse_agent_browser_command(['/pm/agent-browser', '--session']) is None
 
 
 @pytest.mark.platforms('linux', 'macos')

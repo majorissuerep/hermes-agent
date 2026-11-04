@@ -29,12 +29,13 @@ class NativeEnvironment(dict):
         super().__init__(values)
         self.lease, self.operation = lease, operation
         self.directories = directories
+        self.call = None
 
     def copy(self):
         return NativeEnvironment(self, self.lease, self.operation, directories=self.directories)
 
     def check(self):
-        self.operation.check()
+        store._guard(self.operation).check()
         self.lease.check()
         if self.directories is None:
             raise store.WorkerStateError('Native browser private directories were not prepared')
@@ -178,22 +179,40 @@ def client_guard(env, argv):
         env.lease.executable = str(Path(argv[0]).resolve())
     env.close_completed = False
     with env.lease.resource.operation(operation=env) as call:
-        store._write(env.lease.pending, {'unknown':True, 'session':env.lease.session,
-                                      'executable':env.lease.executable, 'socket':str(env.lease.socket),
-                                      'socket_inode':list(env.lease.identity)})
-        from hermes_security.browser_worker_pending import sync
-        sync(env.lease.resource, call)
+        from hermes_cli import browser_native_state
+        env.call = call
+        browser_native_state.prepare(env.lease.resource, call)
         try:
             yield env
         finally:
-            _record_daemon(env)
+            try:
+                _record_daemon(env)
+                from hermes_cli import browser_native_restore
+                browser_native_restore.checkpoint_allowed(env.lease.resource)
+                browser_native_state.capture(env.lease.resource, call)
+            finally:
+                env.call = None
+
+
+def starting_client(env):
+    """Record uncertainty only after admission, immediately before the concrete child start."""
+    if not isinstance(env, NativeEnvironment):
+        return
+    env.call.check()
+    store._write(env.lease.pending, {'unknown':True, 'session':env.lease.session,
+                                  'executable':env.lease.executable, 'socket':str(env.lease.socket),
+                                  'socket_inode':list(env.lease.identity)})
+    from hermes_security.browser_worker_pending import sync
+    sync(env.lease.resource, env.call)
+    env.check()
 
 
 def completed_client(env, argv, returncode, output):
     """A completed fixed JSON close plus kernel death can retire the previously known daemon."""
-    from hermes_platform.browser_process import agent_browser_action
+    from hermes_platform.browser_process import parse_agent_browser_command
 
-    if not isinstance(env, NativeEnvironment) or returncode != 0 or agent_browser_action(argv) != 'close':
+    command = parse_agent_browser_command(argv)
+    if not isinstance(env, NativeEnvironment) or returncode != 0 or command is None or command.action != 'close':
         return
     try:
         result = json.loads(output.decode('utf-8-sig'))

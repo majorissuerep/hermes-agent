@@ -18,6 +18,27 @@ from hermes_security.errors import VaultError
 from hermes_security.session_custody import SessionCustody
 
 
+def repair_owned(home):
+    """Fixed logged-in owner operation: authenticated pending resources, never caller paths.
+
+    Ordinary import/general repair retain their exclusive whole-home maintenance boundary.
+    Unknown/live producers are reported, never signalled or replaced by this operation.
+    """
+    from hermes_security.operation_custody import guarded
+    from hermes_state.runtime_ownership import ProfileOwnership
+
+    operation = guarded(SessionCustody.capture(home))
+    operation.check()
+    owner = ProfileOwnership()
+    try:
+        owner.reserve([operation.home])
+        result = store.retire_quiescent(operation.home)
+        operation.check()
+        return {'saved':result['archived'], 'retained':[*result['retained'], *result['missing']]}
+    finally:
+        owner.close()
+
+
 def _source(home, selected):
     from hermes_security.io import _home_for
 

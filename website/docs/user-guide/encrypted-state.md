@@ -130,7 +130,22 @@ SSD blocks. Retain the reported recovery archive and its original vault credenti
 Every queued browser operation retains its original session authority. A later unlock
 or live sibling cannot revive it; a fresh sibling operation can use shared profile
 configuration. A failed checkpoint retains both the latest RAM state and the previous
-archive. After closing all owners, `hermes secure-vault repair` saves and retires
+archive. For a fresh named native Chrome daemon, Hermes preserves the exact selected
+saved-state bytes in RAM before bootstrap and explicitly loads that input once. It
+does not reload an already-active browser. Ambiguous historical snapshot ordering
+refuses automatic selection and retains every file for explicit recovery.
+
+A failed bootstrap retains its exact input and last verified archive. After closing
+the browser, a logged-in owner can inspect/recover authenticated worker state with:
+
+```sh
+printf '%s\n' '{"op":"browser.worker.repair"}' | hermes manage apply
+```
+
+An unverified bootstrap is reported as retained, and the original command can then
+retry the same verified input; it is never reported as a saved empty replacement.
+Ordinary repair does not import arbitrary external paths. After closing all owners,
+`hermes secure-vault repair` saves and retires
 quiescent worker RAM state. A live or unknown process identity prevents retirement.
 Encrypted pending references identify the original RAM location even if the configured
 workspace changes. If RAM is truly missing, explicit repair authenticates the last
