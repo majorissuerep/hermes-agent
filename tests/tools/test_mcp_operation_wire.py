@@ -45,6 +45,7 @@ def test_real_stdio_result_keeps_original_session_and_fresh_sibling_connection_w
     from hermes_security.session_authority import start_session_authority
     from tools.mcp_tool_discovery import register_mcp_servers
     from tools.mcp_tool_lifecycle import shutdown_mcp_servers
+    from tools.mcp_tool_schema import mcp_prefixed_tool_name
     from tools.registry import registry, session_tool_scope
 
     first_id, sibling_id = "wire-A-" + change, "wire-B-" + change
@@ -81,9 +82,9 @@ def test_real_stdio_result_keeps_original_session_and_fresh_sibling_connection_w
     def invoke(session_id, revoke_url):
         with scoped_current_session_id(session_id), session_tool_scope(session_id):
             register_mcp_servers(config)
-            names = [name for name in registry.get_all_tool_names() if name.startswith("mcp__operation_media__")]
-            assert len(names) == 1, names
-            result = registry.dispatch(names[0], {"canary": canary, "revoke_url": revoke_url})
+            name = mcp_prefixed_tool_name("operation-media", "capture")
+            assert registry.get_entry(name) is not None
+            result = registry.dispatch(name, {"canary": canary, "revoke_url": revoke_url})
             return json.loads(result["text_summary"] if isinstance(result, dict) else result)
 
     try:
