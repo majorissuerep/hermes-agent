@@ -66,10 +66,22 @@ def _require_proven(path: Path, prove: Prover, what: str) -> None:
 
 
 def _verify_created(workspace: Path, prove: Prover) -> None:
-    info = workspace.lstat()
-    owner_only = stat.S_ISDIR(info.st_mode) and stat.S_IMODE(info.st_mode) == 0o700
-    if not owner_only or info.st_uid != os.geteuid() or os.path.realpath(workspace) != str(workspace):
-        raise ProtectedWorkspaceUnavailable("The protected workspace changed while it was created")
+    fd = os.open(workspace, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        created = os.fstat(fd)
+        owner_only = stat.S_ISDIR(created.st_mode) and stat.S_IMODE(created.st_mode) in {0o700, 0o2700}
+        if not owner_only or created.st_uid != os.geteuid() or os.path.realpath(workspace) != str(workspace):
+            raise ProtectedWorkspaceUnavailable("The protected workspace changed while it was created")
+        # mkdtemp's 0700 mode can inherit SGID from a group-managed runtime root.
+        # Clear that bit only on the fresh pinned owner-only inode, never the base.
+        if stat.S_IMODE(created.st_mode) == 0o2700:
+            os.fchmod(fd, 0o700)
+        current = workspace.lstat()
+        if ((current.st_dev, current.st_ino) != (created.st_dev, created.st_ino)
+                or stat.S_IMODE(current.st_mode) != 0o700):
+            raise ProtectedWorkspaceUnavailable("The protected workspace changed while it was created")
+    finally:
+        os.close(fd)
     _require_proven(workspace, prove, "The created workspace")
 
 
