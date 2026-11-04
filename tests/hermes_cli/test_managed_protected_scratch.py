@@ -30,6 +30,11 @@ echo protected-scratch-ok
 
 @pytest.mark.platforms("linux")
 def test_sandboxed_vendor_reaches_the_owning_management_route(world, tmp_path, ram_runtime):
+    from hermes_security.sandbox.spawn import backend_status
+
+    status = backend_status()
+    if not status["available"]:
+        pytest.skip(f"native sandbox unavailable: {status['detail']}")
     result, output = world.call({"op": "config.set", "path": ["sandbox", "enabled"], "value": True,
                                  "revision": world.get()["revision"]})
     assert result.returncode == 0, output
