@@ -15,13 +15,15 @@ from tests.e2e.vault_home import spawn_unlocked
 class NativeRuntime:
     """The real stdio backend the local Ink TUI drives (``python -m tui_runtime``)."""
 
-    def __init__(self, home: Path, log_path: Path, extra_env: dict[str, str] | None = None) -> None:
+    def __init__(self, home: Path, log_path: Path, extra_env: dict[str, str] | None = None,
+                 *, additional_homes: tuple[Path, ...] = ()) -> None:
         import queue
         import threading
 
         self._log = open(log_path, "a", encoding="utf-8")
         self.proc = spawn_unlocked(
             [sys.executable, "-m", "tui_runtime"], cwd=str(home), env=hermetic_env(home, extra_env),
+            additional_homes=additional_homes,  # explicit, independently unlocked fixture owners only
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=self._log, text=True, bufsize=1,
             start_new_session=True,
         )

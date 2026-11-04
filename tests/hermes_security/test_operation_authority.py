@@ -126,3 +126,38 @@ def test_nested_native_runner_cannot_bypass_command_or_interactive_refusal(argum
 
     with pytest.raises(ValueError):
         checked_arguments(arguments)
+
+
+@pytest.mark.platforms("linux", "macos")
+@pytest.mark.parametrize("endpoint", ["socket", "pipe"])
+def test_operation_admission_accepts_only_the_selected_canonical_home(tmp_path, monkeypatch, endpoint):
+    from hermes_security import authority_transport
+    from hermes_security.session_authority import SessionAuthorityError, operation_request
+
+    first, second = tmp_path / "first", tmp_path / "second"
+    first.mkdir()
+    second.mkdir()
+    alias = tmp_path / "alias"
+    alias.symlink_to(first, target_is_directory=True)
+    grant = {endpoint: str(tmp_path / "synthetic-endpoint"), "home": str(first.resolve()),
+             "version": 2, "scope": "operations", "session_id": "synthetic-owner",
+             "token": "synthetic-operation-token"}  # no live authority in this admission-only contract
+    sent = []
+
+    def transport(selected, request):
+        sent.append(selected.copy())
+        return {"home": selected["home"], "live": True}
+
+    monkeypatch.setattr(authority_transport, "request_operation", transport)
+    raw = json.dumps(grant)
+    assert operation_request(alias, raw, {"op": "check"})["live"] is True
+    assert sent == [grant]  # canonicalize the caller's selected path, never rewrite the grant
+    with pytest.raises(SessionAuthorityError):
+        operation_request(first, json.dumps({**grant, "home": str(alias)}), {"op": "check"})
+    alias.unlink()
+    alias.symlink_to(second, target_is_directory=True)
+    with pytest.raises(SessionAuthorityError):
+        operation_request(alias, raw, {"op": "check"})
+    assert sent == [grant]
+    own_second = {**grant, "home": str(second.resolve()), "session_id": "synthetic-sibling"}
+    assert operation_request(second, json.dumps(own_second), {"op": "check"})["live"] is True

@@ -286,6 +286,7 @@ def apply_session_environment(env: dict[str, str]) -> None:
 
 def operation_request(home: Path, raw: str, request: dict) -> dict:
     """Send one operation, preserving exact profile/session identity."""
+    home = Path(home).resolve()
     try:
         grant = json.loads(raw)
         if (not isinstance(grant, dict) or grant.get("home") != str(home)
