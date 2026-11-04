@@ -498,6 +498,15 @@ def _accepted_mimes() -> frozenset:
     return _UNIVERSALLY_SUPPORTED_MIMES
 
 
+def _read_local_image(path: Path) -> bytes:
+    """A private image artifact is ciphertext at rest: authenticate and decrypt it for the bound
+    profile in memory (a foreign/locked one raises). Any other path is the user's file, read as-is."""
+    from tools.browser_media_custody import owned_media_path, read_owned_media
+
+    owned = owned_media_path(str(path))
+    return read_owned_media(owned) if owned is not None else path.read_bytes()
+
+
 def _file_to_data_url(path: Path) -> Optional[str]:
     """Encode a local image as a base64 data URL at native size (the agent retry
     loop shrinks on rejection, so lenient providers pay no silent quality tax);
@@ -513,7 +522,7 @@ def _file_to_data_url(path: Path) -> Optional[str]:
     except Exception:
         pass  # Keep attachment routing best-effort if the guard itself is unavailable.
     try:
-        raw = path.read_bytes()
+        raw = _read_local_image(path)
     except Exception as exc:
         logger.warning("image_routing: failed to read %s — %s", path, exc)
         return None

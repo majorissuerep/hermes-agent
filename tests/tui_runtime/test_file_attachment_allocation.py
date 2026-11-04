@@ -120,7 +120,14 @@ def test_failed_write_removes_only_its_partial_upload(sessions, tmp_path, monkey
     assert set(root.iterdir()) == {survivor}
 
 
-def test_cross_session_attached_images_allocate_unique_paths(sessions, tmp_path):
+def test_cross_session_attached_images_allocate_unique_paths(sessions, tmp_path, monkeypatch):
+    from hermes_security import artifacts, vault
+
+    owner = tmp_path / "profile"
+    owner.mkdir()
+    monkeypatch.setattr(vault, "_SCRYPT_N", 1024)
+    vault.init_vault(owner, "synthetic allocation password")
+    vault.unlock(owner, "synthetic allocation password")
     session_a = sessions["first"]
     session_b = sessions["second"]
     img_bytes_a = b"SESSION_A_IMAGE_PNG"
@@ -132,9 +139,9 @@ def test_cross_session_attached_images_allocate_unique_paths(sessions, tmp_path)
     path_b = server._queue_attached_image(session_b, img_bytes_b, ".png", prefix="upload")
 
     assert path_a != path_b
-    assert path_a.read_bytes() == img_bytes_a
-    assert path_b.read_bytes() == img_bytes_b
-    assert path_a.exists() and path_b.exists()
+    assert artifacts.read_bytes(path_a, home=owner) == img_bytes_a
+    assert artifacts.read_bytes(path_b, home=owner) == img_bytes_b
+    vault.clear_vault_cache()
 
 
 

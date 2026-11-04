@@ -785,18 +785,6 @@ def _status_update(sid: str, kind: str, text: str | None = None):
     _emit("status.update", sid, {"kind": out_kind, "text": body})
 
 
-def _image_meta(path: Path) -> dict:
-    meta = {"name": path.name}
-    with contextlib.suppress(Exception):
-        from PIL import Image
-        with Image.open(path) as img:
-            width, height = (int(v) for v in img.size)
-        # Rough attachment-display token estimate: 512px tiles at ~85 tokens/tile (cross-provider hint).
-        tiles = max(1, (width + 511) // 512) * max(1, (height + 511) // 512) if width > 0 and height > 0 else 0
-        meta.update(width=width, height=height, token_estimate=tiles * 85)
-    return meta
-
-
 def _ok(rid, result: dict) -> dict:
     return {"jsonrpc": "2.0", "id": rid, "result": result}
 
