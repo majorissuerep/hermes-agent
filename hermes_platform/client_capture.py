@@ -1,0 +1,119 @@
+"""Memory-only output from a client whose daemon may inherit its standard streams.
+
+The client is our unreaped Popen child, so its timeout signal cannot target a
+reused PID. Its descendants have separate session ownership: their inherited
+pipes must neither delay the result until EOF nor be killed at client exit.
+Callers retain responsibility for their daemon's normal and timeout cleanup.
+"""
+from __future__ import annotations
+
+import os
+import selectors
+import subprocess
+import time
+from dataclasses import dataclass, field
+from typing import Any
+
+
+class ClientOutputLimit(RuntimeError):
+    """The client exceeded the bounded in-memory output budget."""
+
+
+@dataclass
+class _Streams:
+    selector: Any
+    limit: int
+    pending: memoryview
+    output: dict[str, bytearray] = field(default_factory=lambda: {
+        "stdout": bytearray(), "stderr": bytearray()})
+    total: int = 0
+
+    def close(self, handle) -> None:
+        self.selector.unregister(handle)
+        handle.close()
+
+    def ready(self, key) -> None:
+        handle, channel = key.fileobj, key.data
+        try:
+            if channel == "stdin":
+                self.pending = self.pending[os.write(handle.fileno(), self.pending[:65536]):]
+                if not self.pending:
+                    self.close(handle)
+                return
+            chunk = os.read(handle.fileno(), 65536)
+        except (BlockingIOError, InterruptedError):
+            return
+        except BrokenPipeError:
+            self.close(handle)
+            return
+        if not chunk:
+            self.close(handle)
+            return
+        self.total += len(chunk)
+        if self.total > self.limit:
+            raise ClientOutputLimit(f"The client exceeded its {self.limit} byte output limit")
+        self.output[channel].extend(chunk)
+
+
+def _register(selector, child, payload: bytes) -> None:
+    for channel in ("stdout", "stderr", "stdin"):
+        handle = getattr(child, channel)
+        if handle is None:
+            continue
+        if channel == "stdin" and not payload:
+            handle.close()
+            continue
+        os.set_blocking(handle.fileno(), False)
+        selector.register(handle, selectors.EVENT_WRITE if channel == "stdin" else selectors.EVENT_READ,
+                          channel)
+
+
+def _collect(child, streams: _Streams, timeout: float) -> int | None:
+    deadline = time.monotonic() + timeout
+    expired = False
+    while child.poll() is None:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            child.kill()
+            child.wait()
+            expired = True
+            break
+        for key, _ in streams.selector.select(min(remaining, 0.05)):
+            streams.ready(key)
+    # Read currently available data; a daemon still holding a pipe cannot hold
+    # the call open. Output emitted after the client's exit belongs to the daemon.
+    while ready := streams.selector.select(0):
+        for key, _ in ready:
+            if key.data == "stdin":
+                streams.close(key.fileobj)
+            else:
+                streams.ready(key)
+    return None if expired else child.wait()
+
+
+def run_client(argv, *, env, payload: bytes | None = None, timeout: float,
+               max_output: int = 64 * 1024 * 1024) -> tuple[int | None, bytes, bytes]:
+    """Return at this client's exit, using bounded pipes on Linux and macOS.
+
+    ``None`` is the timeout result; output overflow raises without returning
+    partial JSON as success. No pathname, disk spool or pipe-EOF wait is used.
+    """
+    if timeout <= 0 or max_output <= 0:
+        raise ValueError("Client capture needs positive timeout and output bounds")
+    data = payload or b""
+    child = subprocess.Popen(
+        argv, stdin=subprocess.PIPE if payload is not None else subprocess.DEVNULL,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, close_fds=True)
+    try:
+        with selectors.DefaultSelector() as selector:
+            _register(selector, child, data)
+            streams = _Streams(selector, max_output, memoryview(data))
+            code = _collect(child, streams, timeout)
+            return code, bytes(streams.output["stdout"]), bytes(streams.output["stderr"])
+    finally:
+        if child.poll() is None:
+            child.kill()
+        child.wait(timeout=5)
+        for handle in (child.stdin, child.stdout, child.stderr):
+            if handle is not None:
+                handle.close()

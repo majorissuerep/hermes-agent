@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+from dataclasses import dataclass
 from typing import Any
 
 
@@ -32,19 +33,81 @@ def terminal_environment(*, create: bool = True) -> Any:
     return env
 
 
-def browser_profile_dir(env: Any) -> str:
-    """Keep the remote browser's generated profile in its selected user's persistent home."""
-    from tools.environments import streams
+@dataclass(frozen=True)
+class BrowserRuntime:
+    """Backend paths of the sandbox browser's private state, all inside one proven RAM directory."""
+
+    root: str
+    profile: str
+    captures: str
+    sockets: str
+    tmp: str
+
+    def guarded(self, argv: list[str]) -> list[str]:
+        """``argv`` preceded by a check that every runtime directory is still ours and not a link.
+
+        A recreated container or rebooted target loses the RAM directory; the guard refuses
+        (exit ``RUNTIME_MISSING_EXIT``) instead of letting the browser recreate it unproven."""
+        return ["sh", "-c", _GUARD, "hermes-browser-guard",
+                self.root, self.profile, self.captures, self.sockets, self.tmp, *argv]
+
+
+_RUNTIME_PARTS = ("profile", "captures", "sockets", "tmp")
+RUNTIME_MISSING_EXIT = 97
+RUNTIME_MISSING_MESSAGE = "hermes: the protected browser runtime is missing"
+_GUARD = ('u=$(id -u); for p in "$1" "$2" "$3" "$4" "$5"; do '
+          'if [ -L "$p" ] || [ ! -d "$p" ] || [ "$(stat -c %u:%a "$p" 2>/dev/null)" != "$u:700" ]; then '
+          f'echo "{RUNTIME_MISSING_MESSAGE}" >&2; exit {RUNTIME_MISSING_EXIT}; fi; done; shift 5; exec "$@"')
+
+
+def backend_identity(env: Any) -> str:
+    return f"{terminal_backend()} terminal backend ({type(env).__name__})"
+
+
+def _profile_scope() -> str:
     from hermes_constants import get_hermes_home
-    home = getattr(env, "_hermes_browser_home", None)
-    if home is None:
-        probe = streams.run_in(env, ["sh", "-c", 'printf %s "$HOME"'], timeout=15)
-        home = probe.stdout.decode("utf-8", "replace").strip() if probe.returncode == 0 else ""
-        if not home.startswith("/"):
-            raise RuntimeError("the selected terminal backend did not report its user's home")
-        env._hermes_browser_home = home
-    scope = hashlib.sha256(str(get_hermes_home().resolve()).encode()).hexdigest()[:16]
-    return f"{home.rstrip('/')}/.cache/hermes-agent/browser/{scope}"
+    return hashlib.sha256(str(get_hermes_home().resolve()).encode()).hexdigest()[:16]
+
+
+def browser_runtime(env: Any) -> BrowserRuntime:
+    """This profile's sandbox browser profile/capture/socket/temp directories.
+
+    They live in an owner-only directory that the selected backend proves is never-swapped RAM
+    (``hermes_platform.remote_workspace``); the control host's protected_work_dir cannot
+    attest a remote filesystem. Reused for the backend's lifetime so the browser profile keeps its
+    continuity across sessions; nothing is written to the target's disk. Raises an actionable
+    ``RuntimeError`` naming the selected backend when no such directory can be proven.
+    """
+    scope = _profile_scope()
+    cache = getattr(env, "_hermes_browser_runtimes", None)
+    if cache is None:
+        cache = env._hermes_browser_runtimes = {}
+    from hermes_platform import remote_workspace
+    from tools.environments import streams
+
+    def run(argv, *, timeout):
+        return streams.run_in(env, argv, timeout=timeout)
+
+    temp = env.get_temp_dir()
+    try:
+        if scope in cache:
+            runtime = cache[scope]
+            remote_workspace.validate(run, runtime.root, _RUNTIME_PARTS)
+            return runtime
+        found = remote_workspace.acquire(run, f"hermes-browser-{scope}", _RUNTIME_PARTS, candidates=(temp,))
+    except remote_workspace.ProtectedTargetUnavailable as exc:
+        raise RuntimeError(
+            f"The {backend_identity(env)} has no proven RAM-only directory for private browser "
+            f"profile, capture and temporary files ({exc}). Mount a ramfs, or a tmpfs with the noswap "
+            f"option, at $XDG_RUNTIME_DIR or {temp} inside that backend, or run it where no swap is "
+            "active, then retry. Hermes does not change mounts or swap settings."
+        ) from exc
+    runtime = cache[scope] = BrowserRuntime(found.root, **found.children)
+    return runtime
+
+
+def runtime_missing(returncode: int, stderr: str) -> bool:
+    return returncode == RUNTIME_MISSING_EXIT and RUNTIME_MISSING_MESSAGE in (stderr or "")
 
 
 def require_browser_cli(env: Any) -> None:

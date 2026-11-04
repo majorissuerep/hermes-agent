@@ -212,8 +212,16 @@ The existing initial migration creates a documented plaintext recovery archive
 outside the home, and deliberate offline exports also produce plaintext. These
 operator recovery operations are distinct from normal encrypted runtime output.
 Inspected computer-use image/element caches and ordinary user-image staging
-still have plaintext writers, as does selected remote browser scratch. Browser
-profiles and remaining generated media require an inventory. Those ports and
+still have plaintext writers. A browser in a selected Docker, SSH or Singularity
+terminal keeps its generated profile, captures, sockets and temporary files in
+an owner-only directory that the backend itself proves is never-swapped RAM:
+a bounded mount/swap probe runs there and the host applies its own RAM rule.
+The backend's runtime directory or temp directory must be ramfs, noswap tmpfs,
+or tmpfs without active swap; otherwise browser use refuses and names the
+backend. Captures move into the host RAM stage and are removed remotely. Client
+output stays in anonymous memory, which requires a Linux control host. Earlier
+backend-home profiles are left in place. Owned local browser profiles,
+recordings and remaining generated media require an inventory. Those ports and
 their native-backend qualification remain explicit follow-up work; these changes
 do not certify every SSD byte or the host's swap and crash storage.
 
