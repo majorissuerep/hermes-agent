@@ -92,12 +92,8 @@ def main() -> None:
         with tempfile.TemporaryDirectory(prefix="hermes-bootstrap-protocol-") as temporary:
             bootstrap_protocol(env, Path(temporary))
     # The opt-in verifier needs real kernel evidence on both supported native hosts.
-    with tempfile.TemporaryDirectory(prefix="hermes-lean-qualification-") as temporary:
-        executable = subprocess.check_output(
-            [sys.executable, "scripts/ci/install_lean.py", "--directory", str(Path(temporary) / "toolchain")],
-            cwd=ROOT, text=True, timeout=600).strip()
-        logic_env = dict(env, PATH=str(Path(executable).parent) + os.pathsep + env["PATH"])
-        run("scripts/run_tests.sh", "--fail-on-skip", "--file-retries", "0", *FORMAL_FILES, env=logic_env)
+    run(sys.executable, "scripts/ci/install_lean.py", env=env)
+    run("scripts/run_tests.sh", "--fail-on-skip", "--file-retries", "0", *FORMAL_FILES, env=env)
     run("git", "diff", "--exit-code", env=env)
     if subprocess.check_output(["git", "ls-files", "--others", "--exclude-standard"],
                                cwd=ROOT, text=True, timeout=30).strip():

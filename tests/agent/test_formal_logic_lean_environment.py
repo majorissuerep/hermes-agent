@@ -1,9 +1,10 @@
 """Every compiler invocation uses the same empty cwd and credential-free environment."""
 import json
 from pathlib import Path
-import sys
 
 import pytest
+
+from tests.agent._formal_checker import install_checker
 
 from agent.formal_logic_lean import LEAN_COMMIT, LEAN_VERSION, verify
 from agent.formal_logic_schema import parse_checkpoint
@@ -12,8 +13,7 @@ from agent.formal_logic_schema import parse_checkpoint
 @pytest.mark.platforms("linux", "macos")
 def test_checker_version_and_proof_calls_do_not_inherit_owner_authority(tmp_path, monkeypatch):
     record = tmp_path / "public-probe-metadata.jsonl"
-    compiler = tmp_path / "lean"
-    compiler.write_text(f"""#!{sys.executable}
+    compiler = install_checker(tmp_path, monkeypatch, f"""
 import json,os,sys
 from pathlib import Path
 with Path({str(record)!r}).open("a", encoding="utf-8") as output:
@@ -25,8 +25,7 @@ if "--version" in sys.argv:
     raise SystemExit(0)
 print(json.dumps({{"severity":"error","data":"deliberately unavailable test checker"}}))
 raise SystemExit(1)
-""", encoding="utf-8")
-    compiler.chmod(0o700)
+""")
     monkeypatch.setenv("HERMES_SESSION_VAULT", "synthetic-unused-owner-grant")
     monkeypatch.setenv("OPENAI_API_KEY", "synthetic-unused-owner-key")
     checkpoint = parse_checkpoint(json.dumps({

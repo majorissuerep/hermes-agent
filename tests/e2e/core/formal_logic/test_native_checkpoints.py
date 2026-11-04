@@ -1,17 +1,18 @@
 """Real encrypted CLI, recorded model wire, and the pinned native Lean kernel."""
 
 import json
+import os
 
 import pytest
 
-from hermes_platform.resolver import locate_command
+from agent.formal_logic_toolchain import installed_checker
 from agent.formal_logic_lean import verify
 from agent.formal_logic_schema import parse_checkpoint
 from tests.e2e.core.mcp_plugins._helpers import build_home, run_chat_q
 from tests.e2e.vault_home import connect_state
 from tests.fakes.fake_llm_provider import FakeLLMServer, Text
 
-pytestmark = pytest.mark.platforms("posix")
+pytestmark = pytest.mark.platforms("linux", "macos")
 
 
 def _checkpoint(*, valid=True):
@@ -30,9 +31,9 @@ def _answer(data):
 
 
 def _lean():
-    command = locate_command("lean").command
-    assert command, "Install the pinned native Lean toolchain before running this qualification file"
-    return command[0]
+    selected = installed_checker()
+    assert selected is not None, "Install the pinned native Lean through Hermes PM before qualification"
+    return str(selected.executable.path)
 
 
 def _home(tmp_path, server, *, repairs=3):
@@ -41,6 +42,7 @@ def _home(tmp_path, server, *, repairs=3):
                   "formal_logic": {"enabled": True, "lean_path": _lean(), "max_repairs": repairs}},
         "memory": {"memory_enabled": False, "user_profile_enabled": False},
         "auxiliary": {"title_generation": {"enabled": False}},
+        "security": {"protected_work_dir": os.environ.get("XDG_RUNTIME_DIR")},
     })
     home.update_config(lambda cfg: cfg["model"].update(api_mode="chat_completions"))
     return home
@@ -51,6 +53,8 @@ def test_native_kernel_certifies_conditional_inference_and_rejects_inconsistency
     receipt = verify(parse_checkpoint(json.dumps(data)), _lean())
     assert receipt["status"] == "logic_verified" and receipt["axioms"] == []
     assert receipt["obligations"] == len(data["hypotheses"]) + 1
+    assert receipt["checker"]["toolchain"]["pm_verified"] is True
+    assert receipt["checker"]["invocations"] == 3
     data["assumptions"][1]["formula"] = ["not", "P"]
     assert verify(parse_checkpoint(json.dumps(data)), _lean())["error"] == "inconsistent_assumptions"
 
@@ -200,5 +204,6 @@ def test_exit_zero_from_a_broken_checker_does_not_certify_a_proof(tmp_path):
                           f"print('Lean (version {LEAN_VERSION}, commit {LEAN_COMMIT})' if '--version' in sys.argv else '')\n")
     executable.chmod(0o700)
     receipt = verify(parse_checkpoint(json.dumps(_checkpoint())), str(executable))
-    assert receipt["status"] == "checker_failed"
-    assert "false canary" in receipt["error"]
+    assert receipt["status"] == "checker_unavailable"
+    assert receipt["checker"]["invocations"] == 0
+    assert "explicit lean_path" in receipt["error"]

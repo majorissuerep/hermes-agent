@@ -21,25 +21,22 @@ insufficient.
 
 ## Enable for a new session
 
-Install the pinned official compiler into a new directory:
+Install the optional pinned compiler and standard library through Hermes PM:
 
 ```sh
-python scripts/ci/install_lean.py --directory /absolute/path/to/new-lean-runtime
-```
-
-The installer prints the compiler path, verifies the platform-specific release
-archive SHA-256 before extraction, and refuses to overwrite an existing directory.
-It requires a native Linux or macOS host and tar with Zstandard support.
-
-Set the owning profile's encrypted configuration through the normal command:
-
-```sh
-hermes config set agent.formal_logic.lean_path /absolute/path/to/new-lean-runtime/lean-4.35.0-linux/bin/lean
+hermes pm install lean --tools-only
+hermes config set agent.formal_logic.lean_path lean
 hermes config set agent.formal_logic.enabled true
 ```
 
-Use the path printed by the installer on your actual platform. Start a new
-conversation after enabling or disabling the mode:
+Here `lean` selects the verified PM package; it never resolves an ambient PATH
+executable or elan installation. PM verifies the locked release archive and the
+published package tree, including the standard library. An existing absolute
+`lean_path` is accepted only if it resolves to that same selected PM binary.
+A different, damaged or missing toolchain is refused, with installation guidance;
+Hermes never silently substitutes another executable or installs one mid-turn.
+
+Start a new conversation after enabling or disabling the mode:
 
 ```sh
 hermes config set agent.formal_logic.enabled false
@@ -113,8 +110,20 @@ unverified outcome. The native result's `formal_logic` receipt records the
 compiler version, checkpoint/source digests, obligation count, assumption review
 and acceptance flag. Conversation checkpoints, feedback and decisions use the
 existing encrypted transcript; generated Lean source is supplied through stdin. Compiler version probes,
-canary checks and proofs share an empty working directory and receive no owner
-credentials or session grants.
+canary checks and proofs share an empty 0700 working directory. They receive a
+clean HOME/TMPDIR, no owner credentials or session grants, and no inherited key
+FDs. Input and bounded diagnostics travel through anonymous pipes; unexpected
+file creation, a replaced executable or a failed check cannot produce acceptance.
+Linux requires a proven RAM-only protected workspace and refuses when one is
+unavailable. Native macOS retains its stdin-only empty-directory compatibility
+path; its receipt explicitly records that this directory is not RAM-proven.
+Neither path establishes whole-process swap/core or host crash-store confidentiality.
+
+Receipts record the observed workspace posture, PM archive/tree/binary digests,
+checker invocation count and elapsed time. The maximum is three compiler calls
+per verification attempt (version, false canary and generated obligations), with
+5/30/30-second process limits. Kernel deduction status remains separate from
+model-reviewed semantic fidelity and empirical premise truth.
 
 ## Research and qualification
 

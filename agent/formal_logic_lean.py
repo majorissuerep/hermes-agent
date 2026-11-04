@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import re
 import subprocess
-import tempfile
+import time
 
 from agent.formal_logic_schema import Checkpoint, counterexample
-from hermes_platform.resolver import locate_command
+from agent.formal_logic_toolchain import installed_checker, workspace
+from hermes_platform.checker_process import run as run_checker
 
 LEAN_VERSION = "4.35.0"
 LEAN_COMMIT = "eb6cafb7290e8bd5f2937522d8d804f58f02bafc"
@@ -66,16 +66,9 @@ def lean_source(checkpoint: Checkpoint) -> tuple[str, set[str]]:
     return "\n".join(lines) + "\n", expected
 
 
-def _environment() -> dict[str, str]:
-    return {key: os.environ[key] for key in ("PATH", "SystemRoot") if key in os.environ}
-
-
-def _invoke(executable: str, source: str, cwd: str) -> subprocess.CompletedProcess:
-    # No shell, model-generated tactics, imports, plugins, files, or environment credentials.
-    environment = _environment()
-    return subprocess.run([executable, "--stdin", "--json", "-j1", "-M1024", "-t0"],
-                          input=source, text=True, encoding="utf-8", capture_output=True,
-                          cwd=cwd, env=environment, timeout=30, check=False)
+def _invoke(selected, arguments, source, cwd, attempt, *, timeout=30):
+    attempt["invocations"] += 1
+    return run_checker(selected.executable, arguments, directory=cwd, source=source, timeout=timeout)
 
 
 def _messages(output: str) -> list[dict]:
@@ -88,34 +81,45 @@ def _messages(output: str) -> list[dict]:
 
 
 def verify(checkpoint: Checkpoint, lean_path: str = "lean") -> dict:
+    started = time.monotonic()
+    attempt = {"invocations": 0, "maximum_invocations": 3,
+               "process_wall_budget_seconds": 65, "toolchain": None, "workspace": "not_created"}
+    try:
+        result = _verify(checkpoint, lean_path, attempt)
+    except (OSError, subprocess.SubprocessError, RuntimeError, ValueError) as error:
+        result = {"status": "checker_failed", "error": str(error)[:1500]}
+    return {**result, "checker": attempt, "elapsed_seconds": time.monotonic() - started}
+
+
+def _verify(checkpoint, lean_path, attempt):
     failure = counterexample(checkpoint)
     if failure is not None:
-        return {"status": "logic_failed", **failure}
-    command = locate_command(lean_path).command
-    if not command:
-        return {"status": "checker_unavailable", "error": "Pinned Lean 4.35.0 is unavailable"}
-    executable = command[0]
+        return {"status": "logic_failed", "proof_status": "not_certified", **failure}
+    selected = installed_checker(lean_path, version=LEAN_VERSION)
+    if selected is None:
+        return {"status": "checker_unavailable", "proof_status": "unknown",
+                "error": "Verified PM Lean 4.35.0 is unavailable. Run hermes pm install lean --tools-only; "
+                         "an explicit lean_path must match that selected PM binary."}
+    attempt["toolchain"] = selected.receipt()
     source, expected = lean_source(checkpoint)
-    try:
-        with tempfile.TemporaryDirectory(prefix="hermes-logic-") as cwd:
-            version = subprocess.run([executable, "--version"], stdin=subprocess.DEVNULL,
-                                     capture_output=True, text=True, encoding="utf-8", timeout=5,
-                                     cwd=cwd, env=_environment(), check=False)
-            if version.returncode or f"version {LEAN_VERSION}," not in version.stdout or LEAN_COMMIT not in version.stdout:
-                return {"status": "checker_unavailable", "error": "Lean version/commit differs from the pinned toolchain"}
-            canary = _invoke(executable, "import Init\nexample : False := by decide\n", cwd)
-            canary_rows = _messages(canary.stdout)
-            if canary.returncode == 0 or not any(r.get("severity") == "error" for r in canary_rows):
-                return {"status": "checker_failed", "error": "The checker accepted or failed to diagnose the false canary"}
-            result = _invoke(executable, source, cwd)
-            rows = _messages(result.stdout)
-        reports = {_THEOREM.fullmatch(r.get("data", "")).group(1) for r in rows
-                   if _THEOREM.fullmatch(r.get("data", ""))}
-        if result.returncode or any(r.get("severity") in {"error", "warning"} for r in rows) or reports != expected:
-            return {"status": "logic_failed", "error": "Lean did not certify every axiom-free obligation",
-                    "diagnostics": [r.get("data", "")[:1500] for r in rows][:20]}
-    except (OSError, subprocess.SubprocessError, ValueError) as error:
-        return {"status": "checker_failed", "error": str(error)[:1500]}
-    return {"status": "logic_verified", "checkpoint": checkpoint.digest, "lean": LEAN_VERSION,
+    arguments = ["--stdin", "--json", "-j1", "-M1024", "-t0"]
+    with workspace() as (cwd, posture):
+        attempt["workspace"] = posture
+        version = _invoke(selected, ["--version"], None, cwd, attempt, timeout=5)
+        if version.returncode or f"version {LEAN_VERSION}," not in version.stdout or LEAN_COMMIT not in version.stdout:
+            return {"status": "checker_unavailable", "error": "Lean version/commit differs from the pinned toolchain"}
+        canary = _invoke(selected, arguments, "import Init\nexample : False := by decide\n", cwd, attempt)
+        canary_rows = _messages(canary.stdout)
+        if canary.returncode == 0 or not any(r.get("severity") == "error" for r in canary_rows):
+            return {"status": "checker_failed", "error": "The checker accepted or failed to diagnose the false canary"}
+        result = _invoke(selected, arguments, source, cwd, attempt)
+        rows = _messages(result.stdout)
+    reports = {_THEOREM.fullmatch(r.get("data", "")).group(1) for r in rows
+               if _THEOREM.fullmatch(r.get("data", ""))}
+    if result.returncode or any(r.get("severity") in {"error", "warning"} for r in rows) or reports != expected:
+        return {"status": "logic_failed", "error": "Lean did not certify every axiom-free obligation",
+                "diagnostics": [r.get("data", "")[:1500] for r in rows][:20]}
+    return {"status": "logic_verified", "proof_status": "verified_finite_conditional_deductions",
+            "premise_truth": "not_checked_by_kernel", "checkpoint": checkpoint.digest, "lean": LEAN_VERSION,
             "source_sha256": hashlib.sha256(source.encode()).hexdigest(),
             "obligations": len(expected), "axioms": []}
