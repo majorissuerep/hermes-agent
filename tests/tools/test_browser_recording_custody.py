@@ -342,3 +342,40 @@ def test_legacy_recordings_keep_their_path_bound_encryption_and_binary_recovery(
     assert artifacts.read_bytes(path, home=home) == VIDEO
     result = json.loads(private_artifact_files.read_file(str(path), 1, 100, 1000))
     assert result["is_binary"] and "secure-vault export" in result["error"]
+
+
+@pytest.mark.platforms('posix')
+@pytest.mark.parametrize('close_original', [False, True])
+def test_local_recording_operation_keeps_its_source_without_revoking_shared_profile(owner, monkeypatch, close_original):
+    from agent.session_context import scoped_current_session_id
+    from hermes_security import artifacts, vault
+    from hermes_security.session_authority import start_session_authority
+
+    home, _ram = owner
+    first = start_session_authority(home, 'recording-original')
+    sibling = start_session_authority(home, 'recording-sibling')
+    browser = FakeBrowser()
+    _bind_browser(monkeypatch, browser)
+    try:
+        with scoped_current_session_id('recording-original'):
+            rec_mod.start('original-browser')
+        original = Path(browser.capture)
+        original.write_bytes(VIDEO)
+        (first if close_original else sibling).close()
+        with scoped_current_session_id('recording-sibling'):
+            sealed = rec_mod.stop('original-browser')
+        if close_original:
+            assert sealed is None and browser.stops() == []
+            assert original.read_bytes() == VIDEO
+            with scoped_current_session_id('recording-sibling'):
+                rec_mod.start('sibling-browser')
+                own_sealed = rec_mod.stop('sibling-browser')
+            assert artifacts.read_bytes(own_sealed, home=home) == VIDEO
+            assert original.read_bytes() == VIDEO
+        else:
+            assert sealed is not None and len(browser.stops()) == 1
+            assert artifacts.read_bytes(sealed, home=home) == VIDEO
+        assert vault.is_unlocked(home)
+    finally:
+        first.close()
+        sibling.close()

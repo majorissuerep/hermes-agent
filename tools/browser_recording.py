@@ -1,7 +1,7 @@
 """Opt-in ``browser.record_sessions`` video: RAM-only while recording, encrypted when retained.
 
-A recording binds, at start, the exact owning home, that home's original vault custody
-(``hermes_security.artifacts._Custody``), the browser session key and the execution target.
+A recording binds, at start, the exact owning home, that home's original vault custody and
+session (``hermes_security.session_custody.SessionCustody``), the browser session key and target.
 The native browser writes into an owned 0700 proven-RAM workspace held for the recording's
 whole lifetime. A browser in the explicitly selected outgoing terminal writes into that
 backend's proven-RAM capture directory; only the backend path is passed to it, and a backend
@@ -177,12 +177,12 @@ def _remove_backend_capture(rec: _Recording) -> None:
 def _allocate(session_key: str) -> Optional[_Recording]:
     """Bind home/custody/target and allocate the RAM capture; None when recording must not start."""
     from hermes_constants import get_hermes_home
-    from hermes_security import artifacts
+    from hermes_security.session_custody import SessionCustody
     from hermes_security.errors import VaultError
 
     home = Path(get_hermes_home()).resolve()
     try:
-        custody = artifacts._bound_custody(home)
+        custody = SessionCustody.capture(home)
         context = _capture_context(home, custody)
         return context.run(_allocate_owned, session_key, home, custody, context)
     except (VaultError, OSError, ValueError, RuntimeError) as exc:
