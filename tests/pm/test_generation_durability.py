@@ -5,18 +5,30 @@ the page cache, and the next boot selects a half-written environment.
 """
 from __future__ import annotations
 
+import errno
 import os
 
+import pytest
 
-def _flush_probe(monkeypatch, observe):
-    """Replace the filesystem-wide flush with one that records what was on disk
-    when it ran; ``raising=False`` so the contract is exercised on Windows too."""
-    seen: list = []
-    monkeypatch.setattr(os, "sync", lambda: seen.append(observe()), raising=False)
+
+def _flush_probe(monkeypatch, observe, *, fail=False):
+    from pm import filesystem
+
+    seen = []
+    def flush(*directories):
+        assert directories, "publication must identify the completed generation"
+        seen.append((tuple(directory.resolve() for directory in directories), observe()))
+        if fail:
+            raise OSError(errno.EIO, "synthetic writeback failure")
+    def global_flush():
+        raise AssertionError("publication must not flush unrelated filesystems")
+    monkeypatch.setattr(os, "sync", global_flush, raising=False)
+    monkeypatch.setattr(filesystem, "sync_filesystems", flush, raising=False)
     return seen
 
 
-def test_install_selection_is_committed_only_after_its_tree_is_flushed(tmp_path, monkeypatch):
+@pytest.mark.parametrize("flush_fails", [False, True], ids=["durable", "writeback-error"])
+def test_install_selection_is_committed_only_after_its_tree_is_flushed(tmp_path, monkeypatch, flush_fails):
     from pm import install
     from pm import paths
     from pm.environments import install_state_dir, runtime_facts_path, selected_venv
@@ -41,11 +53,16 @@ def test_install_selection_is_committed_only_after_its_tree_is_flushed(tmp_path,
     def committed() -> bool:
         return runtime_facts_path(repo).is_file() and selected_venv(repo) == candidate.resolve()
 
-    flushes = _flush_probe(monkeypatch, lambda: (candidate / "pyvenv.cfg").is_file() and not committed())
-    install.sync_venv([], explicit=True)
-
-    assert flushes == [True], "the tree must be flushed after it is complete and before it is selected"
-    assert selected_venv(repo) == candidate.resolve()
+    flushes = _flush_probe(monkeypatch, lambda: (candidate / "pyvenv.cfg").is_file() and not committed(),
+                           fail=flush_fails)
+    if flush_fails:
+        with pytest.raises(OSError, match="writeback failure"):
+            install.sync_venv([], explicit=True)
+        assert not runtime_facts_path(repo).is_file()
+    else:
+        install.sync_venv([], explicit=True)
+        assert selected_venv(repo) == candidate.resolve()
+    assert flushes == [((candidate.resolve(), store.resolve()), True)]
 
 
 def test_side_environment_selection_is_committed_only_after_its_tree_is_flushed(tmp_path, monkeypatch):
@@ -70,5 +87,5 @@ def test_side_environment_selection_is_committed_only_after_its_tree_is_flushed(
     flushes = _flush_probe(monkeypatch, lambda: bool(built) and not (root / "active.json").exists())
     python = operations._ensure_generation("proof", root, {}, build, record={}, explicit=True)
 
-    assert flushes == [True], "the tree must be flushed after it is complete and before it is selected"
+    assert flushes == [((built[0].parent.resolve(), base.parent.resolve()), True)]
     assert operations.environment_python("proof", root=root) == python

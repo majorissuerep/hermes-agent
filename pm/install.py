@@ -784,7 +784,10 @@ def _commit_selection(package, facts: Facts, change, *, enabled: list[str], stam
         if not current:
             if result.get("environment") is not None:
                 from pm.environments import flush_before_selecting
-                flush_before_selecting()
+                if change is None:
+                    flush_before_selecting(result["environment"], paths.store_root())
+                else:
+                    flush_before_selecting()
             facts.record_state("venv", stamp, enabled, **result)
         if change is not None:
             finish_publication(paths.repo_root())

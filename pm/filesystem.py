@@ -106,6 +106,48 @@ def file_digest(path: Path) -> str | None:
     return hashlib.sha256(data).hexdigest() if data is not None else None
 
 
+def _sync_linux_filesystem(fd: int) -> None:
+    """Flush the descriptor's filesystem and report writeback failures."""
+    import ctypes
+
+    library = ctypes.CDLL(None, use_errno=True)
+    try:
+        syncfs = library.syncfs
+    except AttributeError as error:
+        raise OSError(errno.ENOSYS, "Linux syncfs is unavailable") from error
+    syncfs.argtypes = [ctypes.c_int]
+    syncfs.restype = ctypes.c_int
+    if syncfs(fd) != 0:
+        code = ctypes.get_errno()
+        raise OSError(code, os.strerror(code))
+
+
+def sync_filesystems(*directories: Path) -> None:
+    """Durably flush the filesystems containing completed generation directories.
+
+    Linux syncfs waits for the same writeback as sync, without flushing unrelated
+    host filesystems. Resolve supported store symlinks, then keep each directory
+    open through its flush. A failed flush must prevent selection publication.
+    Callers with writes outside known roots retain the global barrier.
+    """
+    if sys.platform != "linux" or not directories:
+        sync = getattr(os, "sync", None)
+        if sync is not None:
+            sync()
+        return
+    seen: set[int] = set()
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW
+    for directory in directories:
+        fd = os.open(Path(directory).resolve(strict=True), flags)
+        try:
+            device = os.fstat(fd).st_dev
+            if device not in seen:
+                _sync_linux_filesystem(fd)
+                seen.add(device)
+        finally:
+            os.close(fd)
+
+
 def durable_write_bytes(path: Path, data: bytes) -> None:
     """Replace ``path`` atomically and fsync file and directory so a crash keeps old or new bytes."""
     path.parent.mkdir(parents=True, exist_ok=True)
