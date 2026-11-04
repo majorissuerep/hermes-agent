@@ -23,16 +23,21 @@ KEY_FD_ENV = "HERMES_VAULT_KEY_FD"
 
 def prepare_child_key(home: Path | str | None = None, *,
                       additional_homes: tuple[Path, ...] = (),
-                      retain_session: bool = True) -> tuple[int, dict[str, str]] | None:
+                      retain_session: bool = True,
+                      source_grant: str | None = None) -> tuple[int, dict[str, str]] | None:
     """Selected owners only, never every key cached by a local process.
 
     The caller passes ``read_fd`` in ``pass_fds`` and closes it after spawn,
     including on failure. An omitted home resolves the current profile at call time.
     A maintenance caller must name every additional home it needs explicitly.
+    Only an owning human may detach a finite dispatcher; borrowed custody retains its upstream.
+    source_grant selects the exact live local issuer, without sibling or RPC fallback.
     """
     from hermes_security.vault import is_unlocked, export_unlocked_key
     from hermes_security.errors import VaultError, VaultLockedError
-    from hermes_security.session_authority import _vault_home, inherited_grant, validate_inherited_authority
+    from hermes_security.session_authority import (
+        _vault_home, has_borrowed_authority, inherited_grant, validate_inherited_authority, validate_local_source_grant,
+    )
     if home is None:
         from hermes_constants import get_hermes_home
         home = get_hermes_home()
@@ -52,7 +57,11 @@ def prepare_child_key(home: Path | str | None = None, *,
     keys = []
     for selected in sorted(owners):
         profile = Path(home).resolve() if selected == owner else selected
-        grant = inherited_grant(profile) if retain_session else None
+        if selected == owner and source_grant is not None:
+            validate_local_source_grant(profile, source_grant)
+            grant = source_grant
+        else:
+            grant = inherited_grant(profile) if retain_session or has_borrowed_authority(selected) else None
         if grant is not None:
             profile = Path(json.loads(grant)["home"])
         entry = {"home": str(selected), "key": base64.b64encode(export_unlocked_key(selected)).decode("ascii"),

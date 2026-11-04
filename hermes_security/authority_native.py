@@ -10,7 +10,7 @@ import time
 
 _lock = threading.RLock()
 _jobs = {}
-_COMMANDS = {"chat", "manage", "config", "sessions", "memory", "skills", "tools", "mcp", "cron",
+_COMMANDS = {"chat", "manage", "doctor", "config", "sessions", "memory", "skills", "tools", "mcp", "cron",
              "kanban", "profile", "auth", "help", "status", "backup", "import"}
 _EXECUTION_FLAGS = {"--run-module", "--code", "--python", "--script", "--monitor-script", "--workdir", "--cwd",
                     "--in", "--worktree", "-w", "--accept-hooks", "--yolo"}
@@ -82,12 +82,17 @@ def _start(authority, request):
     from hermes_constants import set_hermes_home_override, reset_hermes_home_override
     from agent.secret_scope import set_secret_scope, reset_secret_scope
     from agent.session_context import scoped_current_session_id
+    from hermes_security.session_authority import ENV_NAME
 
     arguments = checked_arguments(profile_arguments(authority.home, request.get("arguments")))
     data = base64.b64decode(request.get("stdin", ""), validate=True)
     if len(data) > 524288:
         raise ValueError("native stdin exceeds the bounded input limit")
     with _lock:
+        # close_native takes this same lock after revocation. A previously dispatched request
+        # cannot enter after that fence; an admitted child is registered before close can reap it.
+        if not authority.is_live():
+            raise ValueError("the owning session ended before the native command could start")
         for identity, (owner, child) in list(_jobs.items()):
             if owner is authority and child.finished.is_set() and time.monotonic() - child.last_poll >= 20:
                 del _jobs[identity]
@@ -99,12 +104,13 @@ def _start(authority, request):
         try:
             with scoped_current_session_id(authority.session_id):
                 env = served_profile_child_env(target_home=authority.home)
-                env.update(authority.environment())
+                grant_env = authority.environment()
+                env.update(grant_env)
                 env["HERMES_HOME"] = str(authority.home)
                 env["HERMES_SESSION_ID"] = authority.session_id
                 for name in ("HERMES_VAULT_KEY_FD", "HERMES_VAULT_PRIVATE_KEY", "HERMES_MASTER_PASSWORD"):
                     env.pop(name, None)
-                handoff = prepare_child_key(authority.home)
+                handoff = prepare_child_key(authority.home, source_grant=grant_env[ENV_NAME])
                 if handoff is None:
                     raise ValueError("the owning vault is locked")
                 env.update(handoff[1])

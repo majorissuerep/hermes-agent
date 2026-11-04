@@ -85,10 +85,13 @@ def client_env_with(values: dict[str, str]) -> dict[str, str]:
 def run_capture(cmd: list[str], *, timeout: float, check: bool = False, env: dict | None = None,
                 ) -> subprocess.CompletedProcess:
     """``subprocess.run`` with the backend-standard capture settings: text mode with utf-8/replace
-    decoding and stdin closed (DEVNULL) so a CLI that unexpectedly prompts cannot hang the agent."""
+    decoding and stdin closed (DEVNULL) so a CLI that unexpectedly prompts cannot hang the agent.
+    Strip local authority even for setup/probe calls; preserve an explicitly curated environment.
+    """
+    client_env = client_env_with({}) if env is None else strip_local_vault_authority(dict(env))
     return subprocess.run(
         cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
-        timeout=timeout, check=check, stdin=subprocess.DEVNULL, env=env)
+        timeout=timeout, check=check, stdin=subprocess.DEVNULL, env=client_env)
 
 
 def bash_argv(cmd_string: str, login: bool = False) -> list[str]:

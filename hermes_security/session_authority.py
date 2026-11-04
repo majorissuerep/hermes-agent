@@ -124,8 +124,9 @@ class SessionAuthority:
 
     def is_live(self) -> bool:
         """A derived grant cannot outlive the exact authority that issued it."""
-        return (_sessions.get((str(self.home), self.session_id)) is self
-                and (self.parent is None or self.parent.is_live()))
+        with _lock:
+            return (_sessions.get((str(self.home), self.session_id)) is self
+                    and (self.parent is None or self.parent.is_live()))
 
     def environment(self, *, session_id: str | None = None) -> dict[str, str]:
         from hermes_security.pipe_authority import PipeServer
@@ -242,6 +243,26 @@ def session_environment(home: Path | str, session_id: str) -> dict[str, str]:
     with _lock:
         authority = _sessions.get((str(Path(home).resolve()), session_id))
         return authority.environment(session_id=session_id) if authority else {}
+
+
+def validate_local_source_grant(home: Path, raw: str) -> None:
+    """Check the exact issuing authority in memory; never RPC into our own serving thread."""
+    try:
+        grant = json.loads(raw)
+    except (ValueError, TypeError):
+        raise SessionAuthorityError("The native handoff has no valid local issuing authority.") from None
+    if not isinstance(grant, dict) or not isinstance(grant.get("session_id"), str):
+        raise SessionAuthorityError("The native handoff has no valid local issuing authority.")
+    with _lock:
+        authority = _sessions.get((str(Path(home).resolve()), grant["session_id"]))
+        if authority is None or not authority.is_live():
+            raise SessionAuthorityError("The native handoff's issuing session is no longer live.")
+        expected = json.loads(authority.environment(session_id=grant["session_id"])[ENV_NAME])
+        token = grant.get("token")
+        if (not isinstance(token, str) or not secrets.compare_digest(token, expected["token"])
+                or {key: value for key, value in grant.items() if key != "token"}
+                != {key: value for key, value in expected.items() if key != "token"}):
+            raise SessionAuthorityError("The native handoff does not match its exact issuing authority.")
 
 
 def apply_session_environment(env: dict[str, str]) -> None:

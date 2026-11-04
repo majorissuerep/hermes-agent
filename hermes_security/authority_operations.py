@@ -26,6 +26,9 @@ def dispatch_management(authority, request: dict) -> dict:
             raise ManagementError("invalid_request", "this operation does not take a secret")
         with scoped_current_session_id(authority.session_id):
             result = execute(operation, authority.home, secret_value=secret)
+        if operation["op"] == "status":
+            from hermes_cli.management_status import requester_status
+            result["requester"] = requester_status("operations_only")
         return {"ok": True, "result": result}
     except ManagementError as exc:
         return {"ok": False, "management_error": {"code": exc.code, "message": str(exc)}}

@@ -17,7 +17,7 @@ from hermes_constants import get_hermes_home
 from tools.environments.base import BaseEnvironment, _load_json_store, _save_json_store
 from tools.environments.base_output import _popen_bash
 from tools.environments.path_utils import sanitize_task_id_for_path
-from tools.environments.remote_common import bash_argv, run_capture
+from tools.environments.remote_common import bash_argv, client_env_with, run_capture
 
 logger = logging.getLogger(__name__)
 
@@ -202,7 +202,7 @@ class SingularityEnvironment(BaseEnvironment):
         if not self._instance_started:
             raise RuntimeError("Singularity instance not started")
         cmd = [self.executable, "exec", f"instance://{self.instance_id}", *bash_argv(cmd_string, login)]
-        return _popen_bash(cmd, stdin_data)
+        return _popen_bash(cmd, stdin_data, env=client_env_with({}))
 
     def cleanup(self):
         """Stop the instance. If persistent, the overlay dir survives."""

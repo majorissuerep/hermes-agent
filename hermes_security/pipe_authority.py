@@ -97,7 +97,11 @@ def _is_protected(fd: int, kind: int) -> bool:
 
 
 def _open(directory: Path, name: str, kind: int) -> int:
-    fd = os.open(directory / name, os.O_RDWR | os.O_NONBLOCK | os.O_NOFOLLOW)
+    # The server creates the empty regular lock once. Exclusive flock needs no
+    # regular-file writes; O_RDONLY also works through a native read-only mount.
+    # FIFO payloads stay in the kernel and still use their duplex pipe handles.
+    access = os.O_RDONLY if kind == stat.S_IFREG else os.O_RDWR
+    fd = os.open(directory / name, access | os.O_NONBLOCK | os.O_NOFOLLOW)
     if not _is_protected(fd, kind):
         os.close(fd)
         raise ValueError("unprotected authority pipe")

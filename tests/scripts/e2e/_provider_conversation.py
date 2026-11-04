@@ -8,6 +8,9 @@ from __future__ import annotations
 from contextlib import ExitStack
 import json
 import re
+from unittest.mock import patch
+
+import hermes_time
 
 from scripts.e2e.provider_conversation import TURNS, run_probe
 from scripts.e2e.provider_matrix import CONNECTIONS
@@ -83,7 +86,11 @@ def assert_growing_conversation(tmp_path, provider, mode, inject_faults):
                  "api_key": "sk-synthetic-protocol", "base_url": server.base_url}
         summary_route = {**route, "provider": "custom", "api_mode": "chat_completions",
                          "base_url": summary.base_url}
-        receipt = run_probe(tmp_path, route, summary_route=summary_route)
+        # Compaction may legitimately refresh the date after midnight. This wire
+        # fixture holds its clock fixed so its stronger byte-stability contract
+        # tests provider routing, tool history and resume independently of time.
+        with patch("hermes_time.now", return_value=hermes_time.now()):
+            receipt = run_probe(tmp_path, route, summary_route=summary_route)
         errors = server.schema_errors() if mode == "anthropic_messages" else server.invalid_requests()
         if errors:
             print("PROTOCOL-SCHEMA", errors[0][1])

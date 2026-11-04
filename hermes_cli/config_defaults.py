@@ -1394,10 +1394,10 @@ DEFAULT_CONFIG = {
         # banner. Add via `hermes doctor --ack <id>`; remove by editing the list. Catalog:
         # hermes_cli/security_advisories.py.
         "acked_advisories": [],
-        # Lazy-install opt-in backend packages from PyPI when a backend that needs them is first
-        # enabled (e.g. `elevenlabs`). False = require explicit pip install for everything beyond
-        # the base set (restricted/audited/air-gapped environments).
+        # Lazy runtime dependencies use PM; False requires an explicit PM install.
         "allow_lazy_installs": True,
+        # Native executors require this candidate directory to be proven never-swapped RAM.
+        "protected_work_dir": None,
     },
 
     "cron": {

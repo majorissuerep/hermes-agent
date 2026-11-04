@@ -276,6 +276,8 @@ def run(home: Path, runner: str, arguments: list[str]) -> int:
               _vendor_scratch(runner) as scratch):
             env = _child_env(home, runner, directory)
             if runner == "codex":
+                from hermes_cli.managed_agent_routes import codex_api_arguments
+                command.extend(codex_api_arguments(env))
                 command.extend(["--add-dir", str(authority.server.path)])
             if runner == "hermes":
                 # Hermes itself confines its own tool spawns under the same policy.

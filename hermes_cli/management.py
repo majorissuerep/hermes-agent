@@ -28,6 +28,9 @@ def schema():
             "secrets": "inherited one-shot secret_fd >= 3, distinct from unlock FD; UTF-8, no trailing newline",
             "secret_read_deadline_seconds": SECRET_READ_DEADLINE_SECONDS,
             "config_batch": "atomic config-only; no cross-file transactions", "effect": "next_session",
+            "status": {"version": 2, "resource_scope": "protection of the responding owning process",
+                       "requester_scope": "operation proxies remain operations_only; status asserts no owner consent",
+                       "protection": "observed custody/limits/swap/workspace; unknown swap/crash-store evidence stays unknown"},
             "errors": ["invalid_request", "invalid_operation", "invalid_path", "not_found", "invalid_type", "invalid_value",
                        "invalid_config", "conflict", "secret_operation_required", "secret_timeout", "locked", "state_refused", "unavailable", "consent_required", "owner_restart_required"],
             "runners": RUNNERS, "run": "hermes manage run RUNNER [--] ARGS; stdin/stdout passed through; existing permissions retained",
@@ -125,10 +128,8 @@ def _execute(request, home, secret_value=None):
         from hermes_cli.management_config import config_operation
         return config_operation(home, request)
     if op == "status":
-        from hermes_cli.management_config import config_operation
-        config_operation(home, {"op": "config.get"})
-        from hermes_cli.config import load_env
-        return {"home": str(home), "unlocked": True, "secret_names": sorted(load_env()), "effect": "next_session"}
+        from hermes_cli.management_status import status
+        return status(home)
     if op == "passphrase.change":
         if has_borrowed_authority(home):
             raise ManagementError("consent_required", "changing the passphrase requires the owning human's consent")
@@ -168,8 +169,13 @@ class _Parser(argparse.ArgumentParser):
 def _home_scope(profile):
     from hermes_constants import get_hermes_home, reset_hermes_home_override, set_hermes_home_override
     from agent.secret_scope import reset_secret_scope, set_secret_scope
+    from hermes_security.handoff import KEY_FD_ENV
+    from hermes_security.session_authority import ENV_NAME, has_borrowed_authority
     home = get_hermes_home()
-    if profile is None and home.parent.name != "profiles":
+    # Inherited authority binds the selected home even after a trusted native
+    # child has consumed its FD and removed the environment's operation grant.
+    inherited = bool(os.environ.get(ENV_NAME) or os.environ.get(KEY_FD_ENV) or has_borrowed_authority(home))
+    if profile is None and home.parent.name != "profiles" and not inherited:
         from hermes_cli.profiles import get_active_profile
         profile = get_active_profile(home)
     if profile is not None:
