@@ -616,9 +616,9 @@ def os_replace(src: Path, dst: Path) -> None:
 
 
 def _purpose_for(rel: Path) -> str:
-    from hermes_security.artifact_paths import media_kind
+    from hermes_security.artifact_paths import legacy_media_codec, media_kind
 
-    if media_kind(rel):
+    if media_kind(rel) and not legacy_media_codec(rel):
         return "state"
     if is_delegation_manifest_path(rel):
         return "delegation-manifest:v1"
@@ -644,9 +644,10 @@ def _purpose_for(rel: Path) -> str:
 
 
 def _classify(path: Path, relative: Path | None = None) -> str:
-    from hermes_security.artifact_paths import media_kind
+    from hermes_security.artifact_paths import legacy_media_codec, media_kind
 
-    if media_kind(relative if relative is not None else path):
+    candidate = relative if relative is not None else path
+    if media_kind(candidate) and not legacy_media_codec(candidate):
         return "envelope"
     if is_delegation_log_path(relative if relative is not None else path):
         return "envelope"

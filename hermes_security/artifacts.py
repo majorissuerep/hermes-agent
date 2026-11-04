@@ -13,7 +13,8 @@ import stat
 
 from hermes_security import frames
 from hermes_security.artifact_paths import (
-    ARTIFACT_ROOTS, is_artifact_relative_path, is_legacy_browser_snapshot_path, media_kind, terminal_frame_purpose,
+    ARTIFACT_ROOTS, is_artifact_relative_path, is_legacy_browser_snapshot_path,
+    legacy_media_codec, media_kind, terminal_frame_purpose,
 )
 from hermes_security.errors import VaultLockedError
 
@@ -60,6 +61,10 @@ def _location(path, home=None):
         raise PermissionError("Not an admitted private artifact path")
     if not (selected / ".hermes-vault").is_file():
         raise VaultLockedError("Private output requires an initialized, unlocked profile vault")
+    if legacy_media_codec(relative):
+        raise PermissionError(
+            "Historical MCP document retains its published encrypted codec. Explicit offline recovery: "
+            "hermes secure-vault export --output /outside-home/recovery.tar (whole-profile plaintext archive).")
     return selected, relative
 
 
