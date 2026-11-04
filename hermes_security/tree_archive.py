@@ -452,22 +452,33 @@ class _Replay:
 
 
 def _replay_from(parent: int, name: str, keyed: _PurposeKey, purpose: str, replay: _Replay) -> ArchiveSummary:
-    label = replay.label
     fd = os.open(name, os.O_RDONLY | _NOFOLLOW | _CLOEXEC | getattr(os, "O_NONBLOCK", 0), dir_fd=parent)
     with os.fdopen(fd, "rb", buffering=_CHUNK) as handle:
-        info = os.fstat(handle.fileno())
-        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
-            raise PermissionError(f"A {label} archive must be an owner-only regular file")
-        if info.st_size > _wire_bound(replay.policy):
-            raise ArchiveError(f"The {label} archive exceeds its supported bound")
-        try:
-            for kind, body in _iter_records(handle, keyed, purpose, label):
-                replay.feed(kind, body)
-        finally:
-            replay.close()
+        return _replay_handle(handle, keyed, purpose, replay)
+
+
+def _replay_handle(handle, keyed: _PurposeKey, purpose: str, replay: _Replay) -> ArchiveSummary:
+    label = replay.label
+    info = os.fstat(handle.fileno())
+    if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
+        raise PermissionError(f"A {label} archive must be an owner-only regular file")
+    if info.st_size > _wire_bound(replay.policy):
+        raise ArchiveError(f"The {label} archive exceeds its supported bound")
+    try:
+        for kind, body in _iter_records(handle, keyed, purpose, label):
+            replay.feed(kind, body)
+    finally:
+        replay.close()
     if replay.summary is None:
         raise ArchiveError(f"The {label} archive is incomplete")
     return replay.summary
+
+
+def authenticate_ciphertext(handle, *, custody, purpose: str, policy: TreePolicy) -> ArchiveSummary:
+    """Authenticate a caller-owned opened archive completely; restore no plaintext or close its FD."""
+    summary = _replay_handle(handle, _PurposeKey(custody, purpose), purpose, _Replay(policy, None, None, None))
+    custody.check()
+    return summary
 
 
 def replay_archive(home: Path, relative: PurePosixPath, *, custody, purpose: str, policy: TreePolicy,

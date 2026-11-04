@@ -197,3 +197,51 @@ def test_persistent_application_state_survives_cache_shaped_names(home, tmp_path
                ("DevToolsActivePort", "RunningChromeVersion", "launch-stderr.log"))
     assert not (restored / "SingletonSocket").is_symlink()
     assert not (restored / "SingletonLock").is_symlink()
+
+
+@pytest.mark.parametrize('case', ['valid', 'truncated', 'public-mode', 'oversized', 'revoked-mid-pass'])
+def test_opened_fd_authentication_keeps_caller_fd_and_publishes_no_plaintext(home, tmp_path, monkeypatch, case):
+    from hermes_security import frames, vault
+    from tests.hermes_cli.browser_profile_env import PASSWORD
+
+    source = chromium_tree(tmp_path/'profile')
+    custody, relative, _digest = _write(home, source)
+    staged = tmp_path/'encrypted-stage'
+    raw = (home/relative).read_bytes()
+    staged.write_bytes(raw[:-1] if case == 'truncated' else raw)
+    staged.chmod(0o644 if case == 'public-mode' else 0o600)
+    if case == 'oversized':
+        monkeypatch.setattr(archive, 'MAX_PROFILE_BYTES', 1)
+        monkeypatch.setattr(archive, 'MAX_ENTRIES', 0)
+        with staged.open('r+b') as handle:
+            handle.truncate(1024*1024)
+    revoked = []
+    if case == 'revoked-mid-pass':
+        decode = frames.decode_frame_at
+        def decode_then_revoke(*args, **kwargs):
+            result = decode(*args, **kwargs)
+            if not revoked:
+                revoked.append(True)
+                vault.lock_now(home)
+                vault.unlock(home, PASSWORD)
+            return result
+        monkeypatch.setattr(frames, 'decode_frame_at', decode_then_revoke)
+    before = (home/'.hermes-vault').read_bytes(), (home/relative).read_bytes(), staged.read_bytes()
+    paths = sorted(path.relative_to(tmp_path).as_posix() for path in tmp_path.rglob('*'))
+    with staged.open('rb') as handle:
+        if case == 'valid':
+            assert archive.authenticate_ciphertext(handle, relative, custody=custody) == archive.tree_digest(source)
+            assert handle.tell() == len(raw)
+        else:
+            with pytest.raises((PermissionError, VaultError)):
+                archive.authenticate_ciphertext(handle, relative, custody=custody)
+            if case in {'public-mode', 'oversized'}:
+                assert handle.tell() == 0
+        assert not handle.closed
+    assert ((home/'.hermes-vault').read_bytes(), (home/relative).read_bytes(), staged.read_bytes()) == before
+    assert sorted(path.relative_to(tmp_path).as_posix() for path in tmp_path.rglob('*')) == paths
+    assert plaintext_hits(home) == []
+    if case == 'revoked-mid-pass':
+        assert revoked
+        fresh = archive.capture_custody(home)
+        assert archive.replay_archive(home, relative, custody=fresh) == archive.tree_digest(source)
