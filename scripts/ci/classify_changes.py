@@ -176,6 +176,7 @@ _UPDATE_DEPENDENCIES = (
     "hermes_security/artifact_paths.py",  # private state classification during update migration
     "hermes_security/artifacts.py",  # authenticated private output recovery
     "hermes_security/browser_profile_archive.py",  # verified browser archive repair during migration
+    "hermes_security/tree_archive.py",  # shared verified tree grammar used by browser archive repair
     "hermes_cli/browser_profile_repair.py",  # explicit legacy browser conversion during update repair
     "hermes_security/delegation_repair.py",  # legacy delegation conversion during repair
     "agent/pet/__init__.py",  # package initialization for private pet migration

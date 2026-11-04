@@ -14,6 +14,7 @@ import pytest
 from hermes_security import artifacts
 from hermes_security import browser_profile_archive as archive
 from hermes_security.errors import VaultError
+from hermes_security.tree_archive import ArchiveError
 from tests.hermes_cli.browser_profile_env import (
     CANARY, chromium_tree, cookie_db, owned_profile_env, plaintext_hits, reset_owned_profiles)
 
@@ -78,7 +79,7 @@ def test_archive_is_bound_to_its_slot_identity_and_location(home, tmp_path):
     digest_b = archive.identity_digest(custody, slot, account_b)
 
     assert archive.archive_relative(slot, digest_a) != archive.archive_relative(slot, digest_b)
-    with pytest.raises(archive.ArchiveError, match="different profile or account"):
+    with pytest.raises(ArchiveError, match="different profile or account"):
         archive.replay_archive(home, relative, custody=custody, slot=slot, digest=digest_b)
     moved = PurePosixPath(archive.ARCHIVE_ROOT, "real-" + "0" * 32 + archive.ARCHIVE_SUFFIX)
     (home / Path(relative)).rename(home / Path(moved))
@@ -94,7 +95,7 @@ def test_failed_persist_keeps_the_previous_archive_and_leaves_no_stage(home, tmp
     (second / "Default" / "big.bin").write_bytes(b"x" * 4096)
     monkeypatch.setattr(archive, "MAX_PROFILE_BYTES", 2048)
 
-    with pytest.raises(archive.ArchiveError, match="persistence bound"):
+    with pytest.raises(ArchiveError, match="persistence bound"):
         archive.write_archive(home, relative, second, custody=custody, slot=SLOT, identity={}, digest=digest)
 
     assert (home / Path(relative)).read_bytes() == published
@@ -128,7 +129,7 @@ def test_swapped_source_ancestor_is_never_followed_outside_the_profile(home, tmp
         return fd
 
     monkeypatch.setattr(os, "open", racing_open)
-    with pytest.raises((OSError, archive.ArchiveError)):
+    with pytest.raises((OSError, ArchiveError)):
         archive.write_archive(home, relative, source, custody=custody, slot=SLOT, identity={}, digest=digest)
     assert swapped and (home / Path(relative)).read_bytes() == previous
     assert opened_foreign == []
@@ -149,7 +150,7 @@ def test_post_publication_fsync_failure_reports_uncertain_durability_and_retains
         return original_sync(fd)
 
     monkeypatch.setattr(os, "fsync", fail_parent)
-    with pytest.raises(archive.ArchiveError, match="published.*durability"):
+    with pytest.raises(ArchiveError, match="published.*durability"):
         archive.write_archive(home, relative, source, custody=custody, slot=SLOT, identity={}, digest=digest)
     assert archive.replay_archive(home, relative, custody=custody) == archive.tree_digest(source)
     assert cookie_db(source / "Default" / "Network" / "Cookies") == CANARY.decode()

@@ -41,6 +41,7 @@ from hermes_platform.memory_protection import RamProof, ram_only_directory_proof
 from hermes_security import browser_profile_archive as archive
 from hermes_platform.memory_capacity import capacity_budget as _capacity
 from hermes_security.errors import VaultError
+from hermes_security.tree_archive import ArchiveError
 
 logger = logging.getLogger(__name__)
 
@@ -305,7 +306,7 @@ def _persist_locked(profile: OwnedProfile, custody, path: Path, binding: dict) -
         summary = archive.write_archive(
             profile.home, _archive_relative(binding), path, custody=custody, slot=profile.slot,
             identity=binding.get("identity_doc") or {}, digest=str(binding.get("identity")))
-    except (archive.ArchiveError, VaultError, OSError, ValueError, BrowserProfileError) as exc:
+    except (ArchiveError, VaultError, OSError, ValueError, BrowserProfileError) as exc:
         reason = f"{type(exc).__name__}: {exc}"
         if _custody_live(custody):
             _write_binding(path, {**binding, "persisted": False, "last_error": reason})
@@ -368,7 +369,7 @@ def _restore_or_create(profile: OwnedProfile, custody, binding: dict) -> Path:
                                    digest=binding["identity"], target=stage)
         _write_binding(stage, {**binding, "persisted": size is not None, "restored": size is not None})
         os.rename(stage, profile.path)
-    except (archive.ArchiveError, VaultError, OSError) as exc:
+    except (ArchiveError, VaultError, OSError) as exc:
         remove_stable_workspace(stage)
         raise BrowserProfileError(
             f"The encrypted browser profile could not be restored ({type(exc).__name__}: {exc}). It "
