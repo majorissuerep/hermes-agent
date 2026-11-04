@@ -148,7 +148,7 @@ def _strip_trailing_screenshot_placeholders(text: str) -> tuple[str, int]:
     return "\n".join(lines), count
 
 
-def _user_image_display_text(content: Any) -> str | None:
+def _user_image_display_text(content: Any, profile_home=None) -> str | None:
     """Project verified native-vision images as refs without changing stored/model content."""
     if not isinstance(content, list) or len(content) < 2 or not isinstance(content[0], dict):
         return None
@@ -187,6 +187,7 @@ def _user_image_display_text(content: Any) -> str | None:
     import binascii
     from pathlib import Path
     import stat
+    from hermes_security.errors import VaultError
     image_parts = content[1:1 + len(paths)]
     if len(image_parts) != len(paths) or len(content) not in (1 + len(paths), 2 + len(paths)):
         return None
@@ -205,11 +206,18 @@ def _user_image_display_text(content: Any) -> str | None:
             target = Path(path).resolve(strict=True)
             st = target.stat()
             if (not stat.S_ISREG(st.st_mode) or st.st_size > _IMAGE_PROJECTION_MAX_BYTES
-                    or target.read_bytes() != base64.b64decode(match[1], validate=True)):
+                    or _projected_image_bytes(target, profile_home) != base64.b64decode(match[1], validate=True)):
                 return None
-        except (OSError, ValueError, binascii.Error):
+        except (OSError, ValueError, binascii.Error, VaultError):
             return None
     return projected
+
+
+def _projected_image_bytes(target, profile_home):
+    """The user's own file as-is; a sealed attachment decrypted in memory for the session's owner."""
+    from tools.browser_media_custody import owned_media_path, read_owned_media
+    owned = owned_media_path(str(target))
+    return target.read_bytes() if owned is None else read_owned_media(owned, home=profile_home or _hermes_home)
 
 
 def _history_text_only_part(part: dict) -> bool:
@@ -300,7 +308,7 @@ def _history_to_messages(history: list[dict], *, profile_home=None, image_urls: 
         # display_kind="hidden": model-facing scaffolding the "[System:" sniff does not catch.
         if role not in _HISTORY_ROLES or m.get("display_kind") == "hidden":
             continue
-        content_text = _user_image_display_text(m.get("content")) if role == "user" else None
+        content_text = _user_image_display_text(m.get("content"), profile_home) if role == "user" else None
         if content_text is None:
             content_text = _coerce_message_text(m.get("content"), image_urls=image_urls)
         if _is_display_hidden_marker(role, content_text):
