@@ -52,11 +52,27 @@ def test_monitor_keys_pin_controls_across_roster_changes(monkeypatch):
 
 
 
-def test_extended_tail_is_bounded_and_literal(tmp_path):
+def test_extended_tail_is_bounded_and_literal(tmp_path, monkeypatch):
     from hermes_cli.cli_subagent_monitor import read_tail
-    path = tmp_path / 'child.log'
-    path.write_text('old data\n' * 20000 + '\x1b[2Jlast activity\n', encoding='utf-8')
-    tail = read_tail(str(path))
-    assert 'last activity' in tail and '\x1b' not in tail
-    assert len(tail) <= 32768
-    assert 'not available' in read_tail(str(tmp_path / 'missing.log'))
+    from hermes_security import vault
+    from hermes_security.delegation_state import DelegationStore
+
+    home = tmp_path / 'profile'
+    monkeypatch.setenv('HERMES_HOME', str(home))
+    monkeypatch.setattr(vault, '_SCRYPT_N', 1024)
+    vault.init_vault(home, 'synthetic monitor qualification password')
+    vault.unlock(home, 'synthetic monitor qualification password')
+    try:
+        store = DelegationStore(home)
+        path = home / 'cache' / 'delegation' / 'live' / 'deleg_tail' / 'task-0.log'
+        store.create_log(path, 'old data\n' * 20000 + '\x1b[2Jlast activity\n')
+        assert path.read_bytes().startswith(b'HRMVAULT\x00')
+        tail = read_tail(str(path), store=store)
+        assert 'last activity' in tail and '\x1b' not in tail
+        assert len(tail) <= 32768
+        assert 'not available' in read_tail(str(path.with_name('task-1.log')), store=store)
+        raw = tmp_path / 'child.log'
+        raw.write_text('plaintext must not become a trusted live view', encoding='utf-8')
+        assert 'not available' in read_tail(str(raw), store=store)
+    finally:
+        vault.clear_vault_cache()
