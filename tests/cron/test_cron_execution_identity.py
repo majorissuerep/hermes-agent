@@ -60,10 +60,18 @@ def test_tool_hook_in_a_ticked_job_sees_its_execution_and_none_outside(tmp_path,
         from cron.executions import list_executions
         from hermes_cli.plugins import discover_plugins, get_plugin_manager
         discover_plugins()
-        assert scheduler.tick(verbose=False, sync=True) == 1
-        ctx = get_plugin_manager()._plugins["cron-identity-probe"].module.CTX
-        report = {"outside": ctx.current_cron_execution(), "profile": ctx.profile_name,
-                  "executions": list_executions(job_id="probe")}
+        # The owning session has a ready encrypted store before its tick. This
+        # contract measures identity propagation; cold acquisition has separate
+        # bounded, fail-closed coverage in test_sessiondb_init_hang.py.
+        from hermes_state.registry import acquire, release
+        database = acquire()
+        try:
+            assert scheduler.tick(verbose=False, sync=True) == 1
+            ctx = get_plugin_manager()._plugins["cron-identity-probe"].module.CTX
+            report = {"outside": ctx.current_cron_execution(), "profile": ctx.profile_name,
+                      "executions": list_executions(job_id="probe")}
+        finally:
+            release(database)
     seen = json.loads((tmp_path / "seen.json").read_text())
     (execution,) = report["executions"]
 

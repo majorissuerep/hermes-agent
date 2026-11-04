@@ -2,6 +2,7 @@
 import os
 from pathlib import Path
 import subprocess
+import shutil
 
 import pytest
 import hermes_yaml as yaml
@@ -12,7 +13,25 @@ def test_external_validator_checkout_uses_requested_ref_and_preserves_caller(tmp
     repo = Path(__file__).resolve().parents[2]
     action = yaml.safe_load((repo / ".github/actions/plugin-validate/action.yml").read_text())
     source_step = next(step for step in action["runs"]["steps"] if step.get("id") == "source")
-    ref = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip()
+    # Exercise the real pin reader with a small Git origin. Unrelated app assets
+    # and test files must not determine the duration of this checkout contract.
+    origin = tmp_path / "hermes-source"
+    origin.mkdir()
+    shutil.copytree(repo / "pm", origin / "pm",
+                    ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    bootstrap = origin / "scripts" / "ci" / "setup_toolchain.py"
+    bootstrap.parent.mkdir(parents=True)
+    shutil.copy2(repo / "scripts" / "ci" / "setup_toolchain.py", bootstrap)
+    subprocess.run(["git", "init", str(origin)], check=True, capture_output=True)
+    subprocess.run(["git", "add", "."], cwd=origin, check=True)
+    commit = ["git", "-c", "user.name=Hermes fixture",
+              "-c", "user.email=fixture@example.invalid", "commit", "-m"]
+    subprocess.run([*commit, "requested bootstrap"], cwd=origin, check=True, capture_output=True)
+    ref = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=origin, text=True).strip()
+    # Make the default ref different: ignoring _HERMES_REF must fail the test.
+    (origin / "newer-ref.txt").write_text("not the requested revision")
+    subprocess.run(["git", "add", "."], cwd=origin, check=True)
+    subprocess.run([*commit, "newer default revision"], cwd=origin, check=True, capture_output=True)
     caller = tmp_path / "plugin"
     caller.mkdir()
     manifest = caller / "pyproject.toml"
@@ -24,7 +43,7 @@ def test_external_validator_checkout_uses_requested_ref_and_preserves_caller(tmp
     env_file = tmp_path / "env"
     env = {**os.environ, "RUNNER_TEMP": str(runner), "RUNNER_OS": "Linux",
            "GITHUB_OUTPUT": str(output), "GITHUB_ENV": str(env_file), "_HERMES_REF": ref,
-           "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": f"url.{repo.as_uri()}.insteadOf",
+           "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": f"url.{origin.as_uri()}.insteadOf",
            "GIT_CONFIG_VALUE_0": "https://github.com/NousResearch/hermes-agent.git"}
     subprocess.run(["bash", "-c", source_step["run"]], cwd=caller, env=env, check=True,
                    capture_output=True, text=True, timeout=60)
