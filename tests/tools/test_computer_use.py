@@ -1403,7 +1403,7 @@ class TestCaptureAfterExactTarget:
 class TestCuaEnvironmentScrubbing:
     """Verify that cua-driver subprocess environment is sanitized (issue #37878)."""
 
-    def test_cua_session_sanitizes_provider_env_vars(self):
+    def test_cua_session_sanitizes_provider_env_vars(self, tmp_path):
         """_CuaDriverSession lifecycle must sanitize sensitive env vars.
 
         The cua-driver MCP subprocess should not inherit Hermes-managed
@@ -1417,8 +1417,15 @@ class TestCuaEnvironmentScrubbing:
         """
         from unittest.mock import MagicMock, patch, AsyncMock
         from tools.computer_use.cua_backend_session import _CuaDriverSession, _AsyncBridge
+        from tests.e2e.vault_home import seal_fixture_home
         import asyncio
 
+        user = tmp_path / "user"
+        user.mkdir()
+        home = user / ".hermes"
+        home.mkdir()
+        (home / "config.yaml").write_text("terminal: {env: local}\nupdates: {check: false}\n")
+        seal_fixture_home(home)
         bridge = _AsyncBridge()
         session = _CuaDriverSession(bridge)
 
@@ -1429,7 +1436,9 @@ class TestCuaEnvironmentScrubbing:
                 "OPENAI_API_KEY": "sk-secret",         # blocked
                 "ANTHROPIC_API_KEY": "sk-ant-secret",  # blocked
                 "PATH": "/usr/bin:/bin",               # safe
-                "HOME": "/home/user",                  # safe
+                "HOME": str(user),                     # safe and owned
+                "HERMES_HOME": str(home),
+                "HERMES_RUNTIME_DIR": str(tmp_path / "runtime"),
                 "SAFE_VAR": "allowed",                 # safe
             }
 
@@ -1455,7 +1464,11 @@ class TestCuaEnvironmentScrubbing:
 
                 # ClientSession(read, write) is used as `async with`.
                 fake_session = MagicMock()
-                fake_session.initialize = AsyncMock()
+                def signal_shutdown():
+                    assert session._shutdown_event is not None
+                    session._shutdown_event.set()
+
+                fake_session.initialize = AsyncMock(side_effect=signal_shutdown)
                 # tools/list yields nothing — keeps _populate_capabilities
                 # quiet without us needing to fully mock the response shape.
                 fake_session.list_tools = AsyncMock(return_value=MagicMock(tools=[]))
@@ -1463,31 +1476,14 @@ class TestCuaEnvironmentScrubbing:
                     return_value=fake_session)
                 mock_session_class.return_value.__aexit__ = AsyncMock(return_value=None)
 
-                # Run the lifecycle with the shutdown event pre-set so it
-                # tears down right after setup. We can't pre-set
-                # session._shutdown_event because _lifecycle_coro creates
-                # it inside the coroutine; instead, kick a background
-                # task that signals as soon as the event exists.
-                async def _signal_shutdown_when_ready():
-                    for _ in range(200):  # ~1s budget
-                        if session._shutdown_event is not None:
-                            session._shutdown_event.set()
-                            return
-                        await asyncio.sleep(0.005)
-
-                signal_task = asyncio.create_task(_signal_shutdown_when_ready())
-                try:
-                    await session._lifecycle_coro()
-                except BaseException:
-                    pass  # mocks may raise; the env capture still landed
-                finally:
-                    signal_task.cancel()
-                    try:
-                        await signal_task
-                    except (asyncio.CancelledError, BaseException):
-                        pass
+                # The real lifecycle creates its event before initialize. Signal
+                # it there so setup still completes, without a polling task.
+                await session._lifecycle_coro()
 
         asyncio.run(drive_lifecycle())
+        assert session._setup_error is None
+        assert session._startup_phase == "ready"
+        assert captured_env["HOME"] == str(user)
 
         # Blocked credentials must NOT have been passed to the subprocess.
         assert "OPENAI_API_KEY" not in captured_env, \

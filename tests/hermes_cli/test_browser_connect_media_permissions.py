@@ -16,6 +16,18 @@ import pytest
 
 import hermes_cli.browser_connect as bc
 
+pytestmark = pytest.mark.platforms("linux", "macos")
+
+
+@pytest.fixture
+def private_home(tmp_path):
+    """Exact-0700 cases need a parent without an inherited SGID policy."""
+    home = tmp_path / "hh"
+    home.mkdir(mode=0o700)
+    home.chmod(0o700)
+    assert _mode(home) == 0o700
+    return home
+
 
 def _mode(path) -> int:
     return stat.S_IMODE(os.stat(path).st_mode)
@@ -30,19 +42,19 @@ def _no_managed(monkeypatch, home):
     monkeypatch.setattr("hermes_constants.get_hermes_home", lambda: home)
 
 
-def test_chrome_debug_data_dir_created_owner_only(tmp_path, monkeypatch):
+def test_chrome_debug_data_dir_created_owner_only(private_home, monkeypatch):
     """A fresh chrome-debug profile dir lands 0700, not the umask-derived 0755."""
-    home = tmp_path / "hh"
+    home = private_home
     _no_managed(monkeypatch, home)
     monkeypatch.setattr(bc, "get_hermes_home", lambda: home)
     bc._ensure_chrome_debug_data_dir(bc.chrome_debug_data_dir())
     assert _mode(home / "chrome-debug") == 0o700
 
 
-def test_chrome_debug_data_dir_reconciles_explicit_owner_only_policy(tmp_path, monkeypatch):
+def test_chrome_debug_data_dir_reconciles_explicit_owner_only_policy(private_home, monkeypatch):
     """A profile an older Hermes left at 0755 is tightened on the next launch — the
     exposure is already on disk, so creation-time hardening alone is not enough."""
-    home = tmp_path / "hh"
+    home = private_home
     _no_managed(monkeypatch, home)
     monkeypatch.setattr(bc, "get_hermes_home", lambda: home)
     profile = home / "chrome-debug"
@@ -52,11 +64,11 @@ def test_chrome_debug_data_dir_reconciles_explicit_owner_only_policy(tmp_path, m
     assert _mode(profile) == 0o700
 
 
-def test_chrome_debug_data_dir_managed_install_leaves_mode_to_umask(tmp_path, monkeypatch):
+def test_chrome_debug_data_dir_managed_install_leaves_mode_to_umask(private_home, monkeypatch):
     """Managed (NixOS) installs share $HERMES_HOME group-wise by design; the profile
     is not pre-created by tmpfiles rules, so the creation mode must stay with the
     configured umask/setgid rather than a hardcoded 0700."""
-    home = tmp_path / "hh"
+    home = private_home
     monkeypatch.setenv("HERMES_MANAGED", "nixos")
     monkeypatch.delenv("HERMES_HOME_MODE", raising=False)
     monkeypatch.setattr(bc, "get_hermes_home", lambda: home)
@@ -74,10 +86,10 @@ def _umask() -> int:
     return current
 
 
-def test_launch_stderr_log_owner_only(tmp_path, monkeypatch):
+def test_launch_stderr_log_owner_only(private_home, monkeypatch):
     """The launch stderr log (fixed, guessable name inside the profile dir) is created
     0600, and an older 0644 log is reconciled, not left exposed on upgrade."""
-    home = tmp_path / "hh"
+    home = private_home
     _no_managed(monkeypatch, home)
     monkeypatch.setattr(bc, "get_hermes_home", lambda: home)
     log = home / "chrome-debug" / bc._LAUNCH_STDERR_LOG
@@ -87,10 +99,10 @@ def test_launch_stderr_log_owner_only(tmp_path, monkeypatch):
     assert _mode(log) == 0o600
 
 
-def test_legacy_launch_stderr_log_reconciles_on_bare_hosts(tmp_path, monkeypatch):
+def test_legacy_launch_stderr_log_reconciles_on_bare_hosts(private_home, monkeypatch):
     import hermes_constants
 
-    home = tmp_path / "hh"
+    home = private_home
     _no_managed(monkeypatch, home)
     if hermes_constants._container_or_chmod_skipped():
         pytest.skip("container/shared-mount policy intentionally leaves existing file modes unchanged")
@@ -103,3 +115,32 @@ def test_legacy_launch_stderr_log_reconciles_on_bare_hosts(tmp_path, monkeypatch
         handle.write(b"again")
     assert _mode(log) == 0o600
     assert log.read_bytes() == b"again"
+
+
+@pytest.mark.parametrize("managed", [False, True], ids=["private", "managed"])
+def test_chrome_debug_preserves_native_sgid_policy_without_extra_private_access(tmp_path, monkeypatch, managed):
+    import hermes_constants
+
+    home = tmp_path / "group-home"
+    home.mkdir()
+    os.chown(home, -1, os.getegid())
+    home.chmod(0o2700)
+    assert _mode(home) == 0o2700
+    _no_managed(monkeypatch, home)
+    if managed:
+        monkeypatch.setenv("HERMES_MANAGED", "nixos")
+    monkeypatch.setattr(bc, "get_hermes_home", lambda: home)
+    monkeypatch.setattr(bc, "_managed_install", lambda: managed)
+    previous_umask = os.umask(0o022)
+    try:
+        bc._ensure_chrome_debug_data_dir(bc.chrome_debug_data_dir())
+    finally:
+        os.umask(previous_umask)
+    profile = home / "chrome-debug"
+    assert _mode(home) == 0o2700
+    if managed:
+        assert _mode(profile) == 0o2755
+    else:
+        assert _mode(profile) & 0o777 == 0o700
+        expected = 0o2700 if hermes_constants._container_or_chmod_skipped() else 0o700
+        assert _mode(profile) == expected
