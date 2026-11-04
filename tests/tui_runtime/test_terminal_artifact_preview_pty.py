@@ -8,6 +8,7 @@ from __future__ import annotations
 import http.server
 from io import BytesIO
 import os
+import re
 import shlex
 import shutil
 import threading
@@ -81,16 +82,17 @@ def test_public_ink_views_encrypted_image_once_unlocked_and_keeps_owner_usable(t
         terminal.until(lambda _: _composer_ready(terminal), "public encrypted owner ready")
         terminal.submit("/artifacts view " + shlex.quote(str(path)) + " --cols 16 --rows 4",
                         rendered_suffix="--cols 16 --rows 4")
-        terminal.until(lambda text: "Bounded grayscale preview" in text and _composer_ready(terminal),
-                       "encrypted image preview rendered in Ink")
+        terminal.until(lambda text: "Bounded grayscale preview" in text
+                       and "Esc/q close" in "\n".join(terminal.screen.display()),
+                       "encrypted image preview rendered in the Ink pager")
         rendered = "\n".join(terminal.screen.display())
         assert "32×16 pixels; 16×4 text cells" in rendered
-        palette = set(" .:-=+*#%@")
-        rows = [row.strip(" │") for row in rendered.splitlines()
-                if "@" in row and set(row.strip(" │")) <= palette]
+        rows = [row.strip() for row in re.findall(r"[│║]([ .:=+*#%@-]*@[ .:=+*#%@-]*)[│║]", rendered)]
         assert len(rows) == 4 and all(1 <= len(row) <= 16 for row in rows), rendered
         assert path.read_bytes() == ciphertext
         assert not server.requests, "viewing a private image must not call the model"
+        terminal.key(b"q")
+        terminal.until(lambda _: _composer_ready(terminal), "image pager closed by real keyboard input")
         terminal.submit("after-private-preview")
         terminal.until(lambda text: "fixture-reply-1" in text and _composer_ready(terminal),
                        "same owner completed its next real model turn")
