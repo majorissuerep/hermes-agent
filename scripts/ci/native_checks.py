@@ -10,6 +10,9 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[2]
 LINUX_FILES = [
+    "tests/hermes_platform/test_remote_workspace_file_read.py",
+    "tests/tools/test_browser_client_private_stdio.py",
+    "tests/tools/test_browser_recording_pending.py",
     "tests/hermes_platform/test_client_capture.py",
     "tests/hermes_platform/test_remote_workspace.py",
     "tests/tools/test_browser_terminal.py",
