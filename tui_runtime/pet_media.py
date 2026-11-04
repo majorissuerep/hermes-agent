@@ -90,8 +90,8 @@ def sprite_payload(pet, *, scale: float) -> dict:
         "spritesheetRevision": sheet_revision(pet.spritesheet), "frameW": constants.FRAME_W,
         "frameH": constants.FRAME_H, "framesPerState": constants.FRAMES_PER_STATE,
         "framesByState": frames_by_state,
-        "framesByRow": _row_frame_counts(pet.spritesheet), "loopMs": constants.LOOP_MS,
-        "scale": scale, "stateRows": _state_rows(pet.spritesheet),
+        "framesByRow": _row_frame_counts(raw), "loopMs": constants.LOOP_MS,
+        "scale": scale, "stateRows": _state_rows(raw),
     }
     if cache_key is not None:
         with _pet_payload_cache_lock:
