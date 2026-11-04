@@ -80,8 +80,8 @@ def _emergency_cleanup_all_sessions():
     """atexit: close this process's sessions, then sweep orphans left by crashed
     hermes processes — every clean exit reaps accumulated orphans, not only
     processes that used the browser tool."""
-    logger = _bt.logger
     try:
+        logger = _bt.logger
         if _bt._cleanup_done:
             return
         _bt._cleanup_done = True
