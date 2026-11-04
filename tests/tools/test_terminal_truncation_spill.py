@@ -7,17 +7,22 @@ from pathlib import Path
 import pytest
 
 from tools.terminal_tool import terminal_tool
+from hermes_security import artifacts, vault
 
 
 @pytest.fixture
 def small_cap(tmp_path, monkeypatch):
     monkeypatch.setenv("HERMES_HOME", str(tmp_path / ".hermes"))
+    monkeypatch.setattr(vault, "_SCRYPT_N", 1024)
+    vault.init_vault(tmp_path / ".hermes", "synthetic terminal spill password")
+    vault.unlock(tmp_path / ".hermes", "synthetic terminal spill password")
     from hermes_constants import hermes_home_key
     import tools.tool_output_limits as lim
     monkeypatch.setattr(lim, "_cached_limits", {hermes_home_key(): {
         "max_bytes": 2000, "max_lines": 2000, "max_line_length": 2000,
     }})
-    return tmp_path
+    yield tmp_path
+    vault.clear_vault_cache()
 
 
 class TestTruncationSpill:
@@ -31,7 +36,8 @@ class TestTruncationSpill:
         assert r["output_total_chars"] > 2000
         p = Path(r["full_output_path"])
         assert p.exists()
-        full = p.read_text()
+        full = artifacts.read_text(p)
+        assert b"marker_head" not in p.read_bytes()
         assert "marker_head" in full and "marker_tail" in full
         # The spill contains rows that were cut from the visible window.
         assert "row_100 " in full
@@ -49,11 +55,11 @@ class TestTruncationSpill:
             "python3 -c \"print('sk-proj-' + 'a1B2c3D4e5F6g7H8i9J0' * 3); [print('pad', 'y'*90) for i in range(200)]\"",
             task_id="t-spill-3"))
         p = Path(r["full_output_path"])
-        full = p.read_text()
+        full = artifacts.read_text(p)
         assert "a1B2c3D4e5F6g7H8i9J0a1B2c3D4e5F6g7H8i9J0" not in full
 
     def test_old_spills_cleaned(self, small_cap, tmp_path):
-        spill_dir = tmp_path / ".hermes" / "cache" / "terminal-output"
+        spill_dir = tmp_path / ".hermes" / "artifacts" / "terminal-output"
         spill_dir.mkdir(parents=True, exist_ok=True)
         stale = spill_dir / "out-1-2-dead.log"
         stale.write_text("old")

@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import IO, Callable, Protocol
 
 from hermes_constants import get_hermes_home
+from hermes_security.errors import VaultError
 from tools.tool_output_truncate import head_tail_split, truncation_notice
 from hermes_cli._subprocess_compat import windows_hide_flags
 
@@ -48,6 +49,8 @@ class _BoundedOutputCollector:
         self._spill_fh: IO[str] | None = None
         self._spill_chars = 0
         self._spill_capped = False
+        self._spill_home = get_hermes_home().resolve()
+        self.archive_error: str | None = None
 
     def _maybe_spill(self, text: str) -> None:
         """Tee ``text`` to the spill file (opened lazily on first overflow)."""
@@ -55,11 +58,13 @@ class _BoundedOutputCollector:
             return
         try:
             if self._spill_fh is None:
-                from tools.spill_safety import ensure_spill_dir, open_exclusive
-                # Raw pre-redaction output: private perms + symlink-refusing
-                # exclusive create (a planted link must fail, never redirect).
-                ensure_spill_dir(self._spill_path.parent, private=True)
-                self._spill_fh = open_exclusive(self._spill_path, private=True, errors="replace")
+                from hermes_security import artifacts
+                if artifacts.is_artifact_path(self._spill_path, home=self._spill_home):
+                    self._spill_fh = artifacts.open_text(self._spill_path, home=self._spill_home)
+                else:
+                    from tools.spill_safety import ensure_spill_dir, open_exclusive
+                    ensure_spill_dir(self._spill_path.parent, private=True)
+                    self._spill_fh = open_exclusive(self._spill_path, private=True, errors="replace")
                 # Backfill what's retained so the file holds the stream from byte 0.
                 backlog = "".join(self._head) + "".join(self._tail)
                 self._spill_fh.write(backlog)
@@ -72,9 +77,10 @@ class _BoundedOutputCollector:
             else:
                 self._spill_fh.write(text)
             self._spill_chars += len(text)
-        except OSError:
-            # Disk trouble must never break command execution.
+        except (OSError, ValueError, VaultError):
+            # Preserve command output/exit on archive failure; never claim recovery succeeded.
             self._spill_capped = True
+            self.archive_error = "Full output could not be retained in the owning profile's encrypted archive."
 
     def close_spill(self) -> str | None:
         """Close the spill file and return its path if it was used."""
@@ -83,9 +89,11 @@ class _BoundedOutputCollector:
                 return None
             try:
                 self._spill_fh.close()
-            except OSError:
-                pass
+            except (OSError, ValueError, VaultError):
+                self.archive_error = "The encrypted output archive could not be finalized."
             self._spill_fh = None
+            if self.archive_error:
+                return None
             return str(self._spill_path)
 
     @property
@@ -181,7 +189,7 @@ def _new_output_collector(proc, bounded_capture: bool) -> _BoundedOutputCollecto
         capture_limit = 50_000
     spill_path = None
     try:
-        spill_dir = get_hermes_home() / "cache" / "terminal-output"
+        spill_dir = get_hermes_home().resolve() / "artifacts" / "terminal-output"
         spill_path = spill_dir / f"out-{int(time.time())}-{os.getpid()}-{id(proc) & 0xffff:x}.log"
         if spill_dir.is_dir():
             cutoff = time.time() - _SPILL_MAX_AGE_S
@@ -200,6 +208,8 @@ def _finalize_wait_result(collector: _BoundedOutputCollector, rendered: str, ret
     """Assemble a wait result, attaching spill metadata when overflow occurred."""
     result = {"output": rendered, "returncode": returncode}
     spill = collector.close_spill()
+    if collector.archive_error:
+        result["output_archive_error"] = collector.archive_error
     if spill:
         result["output_total_chars"] = collector.total_chars
         result["full_output_path"] = spill

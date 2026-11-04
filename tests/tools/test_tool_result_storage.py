@@ -2,11 +2,12 @@
 
 import json
 import os
-import subprocess
-import sys
+from pathlib import Path
 
 import pytest
 from unittest.mock import MagicMock, patch
+
+from hermes_security import artifacts, vault
 
 from tools.budget_config import (
     DEFAULT_PREVIEW_SIZE_CHARS,
@@ -15,18 +16,44 @@ from tools.budget_config import (
 from tools.tool_result_storage import (
     PERSISTED_OUTPUT_TAG,
     PERSISTED_OUTPUT_CLOSING_TAG,
-    STORAGE_DIR,
     _build_persisted_message,
     _pageable_text,
-    _resolve_storage_dir,
     _safe_result_filename,
-    _write_to_sandbox,
     cleanup_spillover_cache,
     enforce_turn_budget,
     generate_preview,
     get_spillover_dir,
     maybe_persist_tool_result,
 )
+
+
+@pytest.fixture(autouse=True)
+def sealed_home(tmp_path, monkeypatch):
+    home = tmp_path / ".hermes"
+    home.mkdir()
+    monkeypatch.setenv("HERMES_HOME", str(home))
+    monkeypatch.setattr(vault, "_SCRYPT_N", 1024)
+    vault.init_vault(home, "synthetic result storage password")
+    vault.unlock(home, "synthetic result storage password")
+    monkeypatch.setattr("tools.tool_result_storage._spillover_pruned_homes", set())
+    yield home
+    vault.clear_vault_cache()
+
+
+class TestVerifiedArchive:
+    @pytest.mark.parametrize("complete", [False, True])
+    def test_byte_exact_recovery_is_required(self, monkeypatch, complete):
+        from tools.tool_result_storage import _write_to_spillover
+
+        content = "héllo wörld ✓" * 10
+        original = artifacts.read_bytes
+        if not complete:
+            monkeypatch.setattr(artifacts, "read_bytes", lambda *a, **kw: original(*a, **kw)[:-1])
+        path = _write_to_spillover(content, "byte-exact.txt")
+        assert (path is not None) is complete
+        assert (get_spillover_dir() / "byte-exact.txt").exists() is complete
+        if complete:
+            assert artifacts.read_text(path) == content
 
 # ── generate_preview ──────────────────────────────────────────────────
 
@@ -45,142 +72,7 @@ class TestGeneratePreview:
 
 # ── _write_to_sandbox ─────────────────────────────────────────────────
 
-class TestWriteToSandbox:
-    def test_success(self, tmp_path):
-        env = MagicMock()
-        env.execute.return_value = {"output": "", "returncode": 0}
-        remote = str(tmp_path / "shared" / "hermes-results" / "abc.txt")
-        if sys.platform != "win32":
-            # Run the real commands so the owner-only modes are observed, not
-            # pattern-matched.
-            def _bash(cmd, timeout=None, stdin_data=None, **_kw):
-                r = subprocess.run(["bash", "-c", cmd], input=stdin_data or "",
-                                   capture_output=True, text=True, timeout=timeout, check=False)
-                return {"output": r.stdout + r.stderr, "returncode": r.returncode}
-            env.execute.side_effect = _bash
-        result = _write_to_sandbox("hello world", remote, env)
-        assert result is True
-        cmd = env.execute.call_args_list[0][0][0]
-        if sys.platform != "win32":
-            # The storage dir sits under shared temp and holds tool output that
-            # can contain secrets: dir and archive are owner-only.
-            assert os.stat(os.path.dirname(remote)).st_mode & 0o777 == 0o700
-            assert os.stat(remote).st_mode & 0o777 == 0o600
-            with open(remote, encoding="utf-8") as fh:
-                assert fh.read() == "hello world"
-        # Content travels through stdin, NOT inside the command string —
-        # otherwise large content would hit Linux's 128 KB MAX_ARG_STRLEN
-        # ceiling on `bash -c <cmd>` (#22906).
-        assert "hello world" not in cmd
-        assert env.execute.call_args_list[0][1]["stdin_data"] == "hello world"
 
-    def test_large_content_via_stdin(self):
-        """Regression: 200 KB content exceeds Linux MAX_ARG_STRLEN (128 KB).
-        It must travel via stdin, never inside the command string."""
-        env = MagicMock()
-        env.execute.return_value = {"output": "", "returncode": 0}
-        big = "x" * 200_000
-        _write_to_sandbox(big, "/tmp/hermes-results/big.txt", env)
-        cmd = env.execute.call_args_list[0][0][0]
-        assert len(cmd) < 1_000  # cmd is just `mkdir -p X && cat > Y`
-        assert env.execute.call_args_list[0][1]["stdin_data"] == big
-
-    def test_path_with_spaces_is_quoted(self):
-        env = MagicMock()
-        env.execute.return_value = {"output": "", "returncode": 0}
-        remote_path = "/tmp/hermes results/abc file.txt"
-        _write_to_sandbox("content", remote_path, env)
-        cmd = env.execute.call_args_list[0][0][0]
-        assert "'/tmp/hermes results'" in cmd
-        assert "'/tmp/hermes results/abc file.txt'" in cmd
-
-    def test_shell_metacharacters_neutralized(self):
-        """Paths with shell metacharacters must be quoted to prevent injection."""
-        env = MagicMock()
-        env.execute.return_value = {"output": "", "returncode": 0}
-        malicious_path = "/tmp/hermes-results/$(whoami).txt"
-        _write_to_sandbox("content", malicious_path, env)
-        cmd = env.execute.call_args_list[0][0][0]
-        # The $() must not appear unquoted — shlex.quote wraps it
-        assert "'/tmp/hermes-results/$(whoami).txt'" in cmd
-
-    def test_semicolon_injection_neutralized(self):
-        env = MagicMock()
-        env.execute.return_value = {"output": "", "returncode": 0}
-        malicious_path = "/tmp/x; rm -rf /; echo .txt"
-        _write_to_sandbox("content", malicious_path, env)
-        cmd = env.execute.call_args_list[0][0][0]
-        # The semicolons must be inside quotes, not acting as command separators
-        assert "'/tmp/x; rm -rf /; echo .txt'" in cmd
-
-    @pytest.mark.parametrize(
-        "stdin_mode, probed, ok",
-        [
-            ("pipe", 512, False),      # short write: bytes lost
-            ("pipe", 171, False),      # pipe backends must be exact
-            ("heredoc", 171, False),   # heredoc stdin is byte-exact too; a +1 is a loss, not the old newline
-            ("host", 3, False),        # host spillover: os.stat says only 3 bytes landed
-            ("host", None, True),      # host spillover: real write, real stat
-        ],
-    )
-    def test_size_probe_decides_lossless(self, stdin_mode, probed, ok):
-        """An archive that is not byte-exact is discarded — never
-        referenced to the model (port of lobehub/lobehub#18258). Multibyte content pins the
-        comparison to UTF-8 bytes (170 here, 130 chars), on both the sandbox and host paths."""
-        import os
-
-        from tools.tool_result_storage import _write_to_spillover
-
-        content = "héllo wörld ✓" * 10
-        assert len(content.encode("utf-8")) == 170 != len(content)
-        if stdin_mode == "host":
-            filename = "tc_verify_host.txt"
-            real_stat = os.stat
-
-            def fake_stat(p, *a, **kw):
-                if probed is not None and str(p).endswith(filename):
-                    return type("S", (), {"st_size": probed})()
-                return real_stat(p, *a, **kw)
-
-            with patch("tools.tool_result_storage.os.stat", side_effect=fake_stat):
-                path = _write_to_spillover(content, filename)
-            assert (path is not None) is ok
-            assert (get_spillover_dir() / filename).exists() is ok
-            if path is not None:
-                with open(path, encoding="utf-8") as fh:
-                    assert fh.read() == content
-            return
-        env = MagicMock()
-        env._stdin_mode = stdin_mode
-        env.execute.side_effect = [
-            {"output": "", "returncode": 0},          # write
-            {"output": f"{probed}\n", "returncode": 0},  # wc -c
-            {"output": "", "returncode": 0},          # rm -f cleanup (mismatch only)
-        ]
-        assert _write_to_sandbox(content, "/tmp/hermes-results/p.txt", env) is ok
-        if not ok:
-            rm_cmd = env.execute.call_args_list[2][0][0]
-            assert rm_cmd.startswith("rm -f ") and "/tmp/hermes-results/p.txt" in rm_cmd
-        else:
-            assert env.execute.call_count == 2
-
-    def test_unprobeable_backend_is_best_effort_success(self):
-        """No wc / probe crash must not discard a likely-good archive."""
-        env = MagicMock()
-        env.execute.side_effect = [
-            {"output": "", "returncode": 0},
-            RuntimeError("exec transport gone"),
-        ]
-        assert _write_to_sandbox("data", "/tmp/hermes-results/np.txt", env) is True
-
-class TestResolveStorageDir:
-    def test_defaults_to_storage_dir_without_env(self):
-        assert _resolve_storage_dir(None) == STORAGE_DIR
-
-    def test_uses_env_temp_dir_when_available(self):
-        env = MagicMock()
-        env.get_temp_dir.return_value = "/var/host/tmp"
-        assert _resolve_storage_dir(env) == "/var/host/tmp/hermes-results"
 
 class TestSafeResultFilename:
     def test_preserves_normal_tool_call_id(self):
@@ -244,8 +136,7 @@ class TestMaybePersistToolResult:
         """Content is persisted verbatim — no JSON extraction."""
         import json
         env = MagicMock()
-        # Readability probe fails -> falls back to the in-sandbox write,
-        # whose size probe returns unparseable output (best-effort success).
+        # A task backend's capabilities do not change private owner storage.
         env.execute.side_effect = [
             {"output": "", "returncode": 1},
             {"output": "", "returncode": 0},
@@ -264,11 +155,12 @@ class TestMaybePersistToolResult:
         assert PERSISTED_OUTPUT_TAG in result
         # Content is delivered through stdin (no longer embedded in the
         # command string — see test_large_content_via_stdin for why).
-        assert env.execute.call_args_list[1][1]["stdin_data"] == content
+        assert artifacts.read_text(get_spillover_dir() / "tc_json.txt") == content
+        env.execute.assert_not_called()
 
     def test_tool_use_id_cannot_escape_storage_dir(self):
         env = MagicMock()
-        # Readability probe fails -> in-sandbox write is the reference path.
+        # Caller-controlled ids must remain a single safe owner-archive filename.
         env.execute.side_effect = [
             {"output": "", "returncode": 1},
             {"output": "", "returncode": 0},
@@ -283,17 +175,14 @@ class TestMaybePersistToolResult:
             env=env,
             threshold=30_000,
         )
-        cmd = env.execute.call_args_list[1][0][0]
-        target = cmd.split("cat > ", 1)[1].split(" <<", 1)[0]
-
-        from tools.tool_result_storage import STORAGE_DIR
-
-        assert f"Full output saved to: {STORAGE_DIR}/outside_whoami_x_" in result
-        assert f"{STORAGE_DIR}/../" not in result
-        assert target.startswith(f"{STORAGE_DIR}/outside_whoami_x_")
-        assert "/../" not in target
-        assert "$(whoami)" not in target
-        assert ";" not in target
+        from tools.tool_result_storage import extract_persisted_path
+        target = extract_persisted_path(result)
+        assert target is not None
+        assert str(get_spillover_dir() / "outside_whoami_x_") in target
+        assert Path(target).parent == get_spillover_dir()
+        assert "/../" not in target and "$(whoami)" not in target and ";" not in target
+        assert artifacts.read_text(target) == content
+        env.execute.assert_not_called()
 
     def test_threshold_zero_forces_persist(self):
         env = MagicMock()
@@ -380,13 +269,6 @@ class TestPerToolThresholds:
 # ── Host-side spillover ($HERMES_HOME/cache/spillover) ────────────────
 
 class TestSpillover:
-    @pytest.fixture(autouse=True)
-    def _isolated_home(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("HERMES_HOME", str(tmp_path / ".hermes"))
-        # Reset the once-per-process prune flag so each test is independent.
-        import tools.tool_result_storage as trs
-        monkeypatch.setattr(trs, "_spillover_pruned_homes", set())
-        yield
 
     def test_env_none_persists_to_spillover(self):
         """No active sandbox env (MCP-only / cron session) must persist
@@ -403,7 +285,7 @@ class TestSpillover:
         assert "could not be saved" not in result
         spill_file = get_spillover_dir() / "tc_mcp_1.txt"
         assert spill_file.exists()
-        assert spill_file.read_text(encoding="utf-8") == content
+        assert artifacts.read_text(spill_file) == content
         assert str(spill_file) in result
 
     def test_local_env_persists_to_spillover_not_sandbox(self):
@@ -423,10 +305,8 @@ class TestSpillover:
         assert (get_spillover_dir() / "tc_local_1.txt").exists()
         env.execute.assert_not_called()
 
-    def test_remote_env_probe_success_references_mounted_path(self):
-        """Remote env: host-side write is canonical; when the sandbox can read
-        the mounted/synced spillover path, the reference uses it and no
-        in-sandbox copy is written."""
+    def test_remote_env_recovers_explicit_owner_artifact_without_upload(self):
+        """Remote execution does not authorize copying private output to that backend."""
         env = MagicMock()  # not a LocalEnvironment
         env.execute.return_value = {"output": "", "returncode": 0}  # probe OK
         content = "z" * 60_000
@@ -440,13 +320,11 @@ class TestSpillover:
         assert PERSISTED_OUTPUT_TAG in result
         # Canonical host copy always exists now.
         assert (get_spillover_dir() / "tc_remote_1.txt").exists()
-        # Only the readability probe ran — no cat-into-sandbox call.
-        assert env.execute.call_count == 1
-        assert "test -r" in env.execute.call_args[0][0]
+        # No backend command or upload is needed for an explicit owner artifact.
+        env.execute.assert_not_called()
 
-    def test_remote_env_probe_failure_falls_back_to_sandbox_write(self):
-        """Persistent containers without the spillover mount still get a
-        readable in-sandbox copy."""
+    def test_remote_backend_without_mount_still_uses_owner_archive(self):
+        """Owner file tools recover the artifact even without a remote mount."""
         env = MagicMock()
         env.execute.side_effect = [
             {"output": "", "returncode": 1},  # probe: not readable
@@ -463,8 +341,8 @@ class TestSpillover:
             threshold=30_000,
         )
         assert PERSISTED_OUTPUT_TAG in result
-        assert "/tmp/hermes-results/tc_remote_2.txt" in result
-        assert env.execute.call_count == 3
+        assert str(get_spillover_dir() / "tc_remote_2.txt") in result
+        env.execute.assert_not_called()
         # Host canonical copy exists regardless.
         assert (get_spillover_dir() / "tc_remote_2.txt").exists()
 
@@ -483,15 +361,14 @@ class TestSpillover:
         assert PERSISTED_OUTPUT_TAG not in result
 
     def test_cleanup_spillover_cache_removes_old_keeps_new(self):
-        import os
         import time as _time
 
         spill_dir = get_spillover_dir()
         spill_dir.mkdir(parents=True, exist_ok=True)
         old = spill_dir / "old.txt"
         new = spill_dir / "new.txt"
-        old.write_text("old", encoding="utf-8")
-        new.write_text("new", encoding="utf-8")
+        artifacts.write_bytes(old, b"old")
+        artifacts.write_bytes(new, b"new")
         stale = _time.time() - (48 * 3600)
         os.utime(old, (stale, stale))
 
@@ -506,13 +383,12 @@ class TestSpillover:
 
     def test_first_spill_prunes_expired_files(self):
         """The once-per-process prune fires on the first host-side spill."""
-        import os
         import time as _time
 
         spill_dir = get_spillover_dir()
         spill_dir.mkdir(parents=True, exist_ok=True)
         old = spill_dir / "ancient.txt"
-        old.write_text("ancient", encoding="utf-8")
+        artifacts.write_bytes(old, b"ancient")
         stale = _time.time() - (48 * 3600)
         os.utime(old, (stale, stale))
 
@@ -563,12 +439,6 @@ class TestPageableText:
 class TestMcpEnvelopeSpillover:
     """An oversized MCP result spills its pageable text, not one escaped JSON line (#90426)."""
 
-    @pytest.fixture(autouse=True)
-    def _isolated_home(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("HERMES_HOME", str(tmp_path / ".hermes"))
-        import tools.tool_result_storage as trs
-        monkeypatch.setattr(trs, "_spillover_pruned_homes", set())
-        yield
 
     def test_envelope_spills_real_newlines(self):
         markdown = "# Research guide\n\n" + "pageable content\n" * 4_000
@@ -581,7 +451,7 @@ class TestMcpEnvelopeSpillover:
 
         assert PERSISTED_OUTPUT_TAG in result
         spill_file = get_spillover_dir() / "tc_mcp_text.txt"
-        assert spill_file.read_text(encoding="utf-8") == markdown
+        assert artifacts.read_text(spill_file) == markdown
         # read_file offset/limit is only usable if the preview is the text too.
         preview = result.split("Preview (first", 1)[1]
         assert "# Research guide" in preview
@@ -594,7 +464,7 @@ class TestMcpEnvelopeSpillover:
             content=envelope, tool_name="mcp__archive__structured", tool_use_id="tc_mcp_meta",
             env=None, threshold=30_000)
 
-        spill = (get_spillover_dir() / "tc_mcp_meta.txt").read_text(encoding="utf-8")
+        spill = artifacts.read_text(get_spillover_dir() / "tc_mcp_meta.txt")
         text, _, tail = spill.partition("\n\n<mcp-result-metadata>\n")
         assert text == markdown
         assert json.loads(tail.split("\n</mcp-result-metadata>")[0]) == {"structuredContent": {"count": 5_000}}
@@ -604,16 +474,16 @@ class TestMcpEnvelopeSpillover:
         maybe_persist_tool_result(
             content=content, tool_name="terminal", tool_use_id="tc_json_verbatim",
             env=None, threshold=30_000)
-        assert (get_spillover_dir() / "tc_json_verbatim.txt").read_text(encoding="utf-8") == content
+        assert artifacts.read_text(get_spillover_dir() / "tc_json_verbatim.txt") == content
 
     def test_structured_content_only_result_still_verbatim(self):
         content = json.dumps({"result": {"blob": "z" * 40_000}})
         maybe_persist_tool_result(
             content=content, tool_name="mcp__archive__opaque", tool_use_id="tc_mcp_opaque",
             env=None, threshold=30_000)
-        assert (get_spillover_dir() / "tc_mcp_opaque.txt").read_text(encoding="utf-8") == content
+        assert artifacts.read_text(get_spillover_dir() / "tc_mcp_opaque.txt") == content
 
-    def test_sandbox_write_carries_pageable_text(self):
+    def test_remote_context_preserves_pageable_text_without_upload(self):
         env = MagicMock()  # not a LocalEnvironment -> remote path
         env.execute.side_effect = [
             {"output": "", "returncode": 1},  # mounted-path probe: not readable
@@ -625,7 +495,8 @@ class TestMcpEnvelopeSpillover:
         maybe_persist_tool_result(
             content=json.dumps({"result": markdown}), tool_name="mcp__archive__remote",
             tool_use_id="tc_mcp_remote", env=env, threshold=30_000)
-        assert env.execute.call_args_list[1][1]["stdin_data"] == markdown
+        assert artifacts.read_text(get_spillover_dir() / "tc_mcp_remote.txt") == markdown
+        env.execute.assert_not_called()
 
     def test_turn_budget_spill_unwraps_envelope(self):
         """The aggregate layer persists under __budget_enforcement__, so a tool-name gate would
@@ -639,4 +510,4 @@ class TestMcpEnvelopeSpillover:
         enforce_turn_budget(msgs, env=None, config=BudgetConfig(turn_budget=10_000))
 
         assert PERSISTED_OUTPUT_TAG in msgs[0]["content"]
-        assert (get_spillover_dir() / "tc_budget_mcp.txt").read_text(encoding="utf-8") == markdown
+        assert artifacts.read_text(get_spillover_dir() / "tc_budget_mcp.txt") == markdown

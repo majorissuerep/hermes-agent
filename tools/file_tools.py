@@ -618,9 +618,10 @@ def read_file_tool(path: str, offset: int = 1, limit: int = DEFAULT_READ_LIMIT, 
         # on Windows resolving \??\UNC\host\share already sends SMB auth (NTLM
         # leak); on POSIX the task-base join would anchor the prefix as a
         # relative segment and hide it from every resolved-path check below.
-        nt_err = get_nt_namespace_error(path, verb="Read")
-        if nt_err:
-            return tool_error(nt_err)
+        from tools.private_artifact_files import read_file as read_private_artifact
+        private_result = read_private_artifact(path, offset, limit, _get_max_read_chars())
+        if private_result is not None:
+            return private_result
 
         device_base = None if Path(path).expanduser().is_absolute() else _resolve_base_dir(task_id)
         if _is_blocked_device(path, base_dir=device_base):
@@ -1080,6 +1081,11 @@ def search_tool(pattern: str, target: str = "content", path: str = ".",
         nt_err = get_nt_namespace_error(path, verb="Search")
         if nt_err:
             return tool_error(nt_err)
+        from tools.private_artifact_files import search as search_private_artifacts
+        private_result = search_private_artifacts(
+            path, pattern, target, file_glob, limit, offset, output_mode, context, order)
+        if private_result is not None:
+            return private_result
         try:
             resolved_search_path = str(_resolve_path_for_task(path, task_id))
         except (OSError, ValueError, RuntimeError) as exc:

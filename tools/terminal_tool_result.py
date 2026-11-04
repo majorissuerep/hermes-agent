@@ -169,24 +169,20 @@ def _failure_hint(command: str, returncode: int, output: str, exit_note) -> Opti
 
 def _redact_spill_file(path, total_chars, command) -> list[tuple[str, Any]]:
     """Spill handle so the model can read the omitted middle instead of
-    re-running. The collector wrote it raw; redact it with the same pass so no
-    secret persists unmasked on disk. On failure drop the handle (and file)."""
+    re-running. Raw output was encrypted before storage; the model-facing archive
+    applies the same typed redaction as inline output. On failure drop the handle."""
     if not path:
         return []
     try:
         from agent.redact import redact_terminal_output
         from tools.ansi_strip import strip_ansi
-        from tools.spill_safety import write_text_exclusive
-        raw_spill = Path(path).read_text(encoding="utf-8-sig", errors="replace")
-        # lstat-checked unlink + exclusive create: the redacted copy can't
-        # be diverted through a symlink planted since the collector's write.
-        write_text_exclusive(Path(path), redact_terminal_output(strip_ansi(raw_spill), command),
-                             private=True, overwrite=True, errors="replace")
+        from hermes_security import artifacts
+        raw_spill = artifacts.read_text(path)
+        artifacts.write_bytes(path, redact_terminal_output(strip_ansi(raw_spill), command).encode("utf-8"),
+                              overwrite=True)
     except Exception:
         logger.debug("spill redaction failed; dropping spill handle", exc_info=True)
-        with _quiet("spill unlink"):
-            Path(path).unlink()
-        return []
+        return [("output_archive_error", "The full output archive could not be prepared for safe recovery.")]
     note = ("Output exceeded the capture window (head+tail shown). "
             f"Full output ({total_chars:,} chars) saved to {path} — search it with "
             "search_files or page it with read_file instead of re-running the command.")
@@ -261,6 +257,7 @@ def finalize_foreground_result(
     optional_fields: list[tuple[str, Any]] = [
         ("cwd", changed_cwd),
         ("environment_recreated", _ENV_RECREATED_NOTE if result.get("environment_recreated") else None),
+        ("output_archive_error", result.get("output_archive_error")),
         *_redact_spill_file(result.get("full_output_path"), result.get("output_total_chars"), command),
         ("verification_evidence", _verification_evidence(
             command, command_cwd, session_id or task_id or effective_task_id or "default",
