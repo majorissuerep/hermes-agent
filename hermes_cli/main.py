@@ -355,34 +355,9 @@ _startup_fast.ensure_project_root_on_path()
 # cache HERMES_HOME at import time. --profile/-p is pre-parsed from sys.argv,
 # HERMES_HOME set, and the flag stripped so argparse never sees it. Falls back
 # to ~/.hermes/active_profile for the sticky default.
-_PROFILE_NAME_RE = r"^[a-z0-9][a-z0-9_-]{0,63}$"  # mirrors hermes_cli.profiles._PROFILE_ID_RE
 # Set only when -p/--profile was on argv. Sticky active_profile must not count:
 # `hermes desktop` with no flag must not overwrite Desktop's stored profile.
 _explicit_cli_profile: str | None = None
-
-
-def _inside_mcp_add_args(argv: list, index: int) -> bool:
-    """True once argv reaches `hermes mcp add ... --args <command argv>`.
-
-    ``mcp add --args`` is command-argv passthrough. Flags after that point
-    belong to the child MCP command (for example Docker MCP Toolkit's
-    ``--profile``), not to Hermes' own profile selector.
-    """
-    try:
-        mcp_index = argv.index("mcp", 0, index)
-        argv.index("add", mcp_index + 1, index)
-    except ValueError:
-        return False
-    return True
-
-
-def _looks_like_hermes_invocation() -> bool:
-    """False when ``sys.argv`` belongs to a test runner rather than a ``hermes`` run.
-
-    pytest's own ``-p no:xdist`` reaches ``_scan_profile_flag`` through ``sys.argv`` at import
-    time; it must stay a silent skip, while a real ``hermes -p 'Work Bot'`` must fail loudly.
-    """
-    return "pytest" not in (sys.argv[0] or "")
 
 
 def _exit_invalid_profile_name(value: str) -> None:
@@ -391,73 +366,6 @@ def _exit_invalid_profile_name(value: str) -> None:
     print(f"Error: {_invalid_profile_name_error(value)}", file=sys.stderr)
     print("Run `hermes profile list` to see your profiles.", file=sys.stderr)
     sys.exit(2)
-
-
-def _looks_like_option_value(value: str) -> bool:
-    """A ``-p`` value that clearly belongs to some other tool (pytest's ``-p no:xdist``, a
-    third-party ``-p --flag``), never a mistyped profile name."""
-    return value.startswith("-") or ":" in value
-
-
-def _scan_profile_flag(argv: list) -> tuple:
-    """Find -p/--profile/--profile= in argv -> (name, tokens_consumed, index).
-
-    Historically the flag worked even after the subcommand (`hermes chat -p
-    coder`), so scan broadly; stop at ``--`` and at the `mcp add --args`
-    passthrough region. The value is normalised (strip + casefold, matching
-    ``profiles.normalize_profile_name``) before validation so ``-p Work`` selects
-    ``work``. A value that cannot be a profile name is rejected so
-    resolve_profile_env never sys.exits on it; the rejection is explained (exit 2)
-    only when the flag comes BEFORE the first subcommand token under a real
-    ``hermes`` run — after a subcommand, ``-p`` may belong to that subcommand or a
-    plugin (`hermes kanban ... -p 8080`), and option-looking values (``no:xdist``,
-    ``--flag``) are always a silent skip.
-    """
-    from hermes_cli._parser import top_level_value_flag_sets
-
-    value_flags, optional_value_flags = top_level_value_flag_sets()
-    i = 0
-    saw_subcommand = False
-    while i < len(argv):
-        arg = argv[i]
-        if arg == "--" or (arg == "--args" and _inside_mcp_add_args(argv, i)):
-            break
-        if arg in {"--profile", "-p"} and i + 1 < len(argv):
-            raw = argv[i + 1]
-            value = raw.strip().casefold()
-            if re.match(_PROFILE_NAME_RE, value):
-                return value, 2, i
-            if not saw_subcommand and not _looks_like_option_value(raw) and _looks_like_hermes_invocation():
-                _exit_invalid_profile_name(raw)
-            break
-        if arg.startswith("--profile="):
-            return arg.split("=", 1)[1].strip().casefold(), 1, i
-        takes_value = "=" not in arg and i + 1 < len(argv) and (
-            arg in value_flags
-            or (arg in optional_value_flags and not argv[i + 1].startswith("-"))
-        )
-        if not takes_value and not arg.startswith("-"):
-            saw_subcommand = True
-        i += 2 if takes_value else 1
-    return None, 0, None
-
-
-def _resolve_sudo_user_profile_env(name: str) -> str | None:
-    """Resolve `sudo hermes -p <name>` against the invoking user's home.
-
-    This runs before argparse, so `--run-as-user` is not available yet. For
-    sudo invocations the best signal is SUDO_USER: root is only doing the
-    privileged install/start action; the profile store belongs to the user.
-    """
-    if name == "default":
-        return None
-    from hermes_constants import named_profile_is_live, sudo_invoker_default_home
-
-    sudo_home = sudo_invoker_default_home()
-    if sudo_home is None:
-        return None
-    candidate = sudo_home / "profiles" / name
-    return str(candidate) if named_profile_is_live(candidate) else None
 
 
 def explicit_cli_profile() -> str | None:
@@ -474,30 +382,10 @@ def _apply_profile_override() -> None:
     global _explicit_cli_profile
     _explicit_cli_profile = None
     argv = sys.argv[1:]
-    profile_name, consume, profile_index = _scan_profile_flag(argv)
-    from_sticky_profile = False
+    from hermes_cli._profile_selection import select_profile
 
-    # HERMES_HOME already set with no explicit flag: trust it only when it
-    # points at a specific profile dir ("profiles" as immediate parent). If it
-    # points at the hermes root (systemd hardcodes HERMES_HOME=/root/.hermes)
-    # we must still read active_profile — the user may have run
-    # `hermes profile use` and the gateway should honour it (#22502).
-    hermes_home_env = os.environ.get("HERMES_HOME", "")
-    if profile_name is None and hermes_home_env and Path(hermes_home_env).parent.name == "profiles":
-        return
-
-    if profile_name is None:
-        try:
-            from hermes_constants import get_default_hermes_root
-
-            active_path = get_default_hermes_root() / "active_profile"
-            if active_path.exists():
-                name = active_path.read_text(encoding="utf-8-sig").strip()
-                if name and name != "default":
-                    profile_name = name  # consume stays 0: nothing to strip
-                    from_sticky_profile = True
-        except (UnicodeDecodeError, OSError):
-            pass  # corrupted file, skip
+    profile_name, consume, profile_index, from_sticky_profile = select_profile(
+        argv, invalid_name=_exit_invalid_profile_name)
 
     if profile_name is None:
         return
@@ -506,7 +394,9 @@ def _apply_profile_override() -> None:
 
         hermes_home = resolve_profile_env(profile_name)
     except FileNotFoundError as exc:
-        hermes_home = _resolve_sudo_user_profile_env(profile_name)
+        from hermes_cli._profile_selection import sudo_user_profile_env
+
+        hermes_home = sudo_user_profile_env(profile_name)
         error = str(exc)
         if not hermes_home and from_sticky_profile:
             from hermes_cli.main_profile_recovery import is_stale_profile_recovery_command

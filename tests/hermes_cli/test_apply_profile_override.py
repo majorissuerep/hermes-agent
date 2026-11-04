@@ -179,11 +179,12 @@ class TestApplyProfileOverrideHermesHomeGuard:
 
         monkeypatch.setattr(pwd, "getpwnam", lambda name: SimpleNamespace(pw_dir=str(user_home)))
 
-        from hermes_cli.main import _apply_profile_override, _resolve_sudo_user_profile_env
+        from hermes_cli.main import _apply_profile_override
+        from hermes_cli._profile_selection import sudo_user_profile_env
         _apply_profile_override()
 
         assert os.environ.get("HERMES_HOME") == str(profile_dir)
         assert sys.argv == ["hermes", "gateway", "install", "--system"]
         # Same identity gate as ``-p`` without sudo: a marker-less shell is not a profile.
         (user_home / ".hermes" / "profiles" / "ghost" / "cron").mkdir(parents=True)
-        assert _resolve_sudo_user_profile_env("ghost") is None
+        assert sudo_user_profile_env("ghost") is None

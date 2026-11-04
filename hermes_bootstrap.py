@@ -608,6 +608,14 @@ from hermes_cli._early_recovery import recover_if_needed
 
 from hermes_cli._parser import command_argv
 
+# Only this read-only stdlib admission runs before dependency activation. Source
+# update/repair continuations retain their fixed prepare/relaunch transition and
+# never import this command module in the pre-pull interpreter.
+if command_argv(sys.argv[1:])[:1] == ["secure-vault"]:
+    from hermes_cli.vault_startup_admission import admit_vault_command
+
+    admit_vault_command(sys.argv[1:])
+
 # Repair needs only stdlib. Do not activate the damaged tree to reach it.
 _pm_repair = command_argv(sys.argv[1:])[:2] == ["pm", "repair"]
 if not _pm_repair:
