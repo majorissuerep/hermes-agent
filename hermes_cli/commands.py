@@ -305,6 +305,8 @@ COMMAND_REGISTRY: list[CommandDef] = [
                cli_only=True, ),
     CommandDef("image", "Attach a local image file for your next prompt", "Info",
                cli_only=True, args_hint="<path>", ),
+    CommandDef("artifacts", "Show a bounded preview of an encrypted browser image", "Info",
+               args_hint="view <path> [--cols N] [--rows N]", subcommands=("view",), busy_policy="dispatch"),
     CommandDef("update", "Update Hermes Agent to the latest version", "Info",
                busy_policy="dispatch", ),
     CommandDef("version", "Show Hermes Agent version", "Info", aliases=("v",),

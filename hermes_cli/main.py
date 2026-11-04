@@ -76,7 +76,6 @@ def _exit_after_oneshot(rc: object) -> None:
         pass
     os._exit(rc if isinstance(rc, int) else (0 if rc is None else 1))
 
-
 _oneshot_cleanup_done = False
 # (module, attr, kwargs, exceptions swallowed). MCP shutdown may raise
 # BaseException-derived errors from executor teardown; the rest are Exception.
@@ -91,7 +90,6 @@ _ONESHOT_CLEANUPS = (
     # The atexit hook that closes the metrics session never runs past os._exit.
     ("hermes_cli.observability.relay_shared_metrics", "shutdown_runtimes", {}, Exception),
 )
-
 
 def _cleanup_oneshot_runtime() -> None:
     """Best-effort process-global cleanup before one-shot hard exit.
@@ -112,7 +110,6 @@ def _cleanup_oneshot_runtime() -> None:
             getattr(importlib.import_module(module), attr)(**kwargs)
         except swallow:
             pass
-
 
 def _run_and_exit_oneshot(
     prompt: str,
@@ -295,6 +292,7 @@ from hermes_cli.subcommands.approvals import build_approvals_parser
 from hermes_cli.subcommands.dump import build_dump_parser
 from hermes_cli.subcommands.debug import build_debug_parser
 from hermes_cli.subcommands.backup import build_backup_parser
+from hermes_cli.subcommands.artifacts import build_artifacts_parser
 from hermes_cli.subcommands.import_cmd import build_import_cmd_parser
 from hermes_cli.subcommands.import_agent import build_import_agent_parser
 from hermes_cli.subcommands.config import build_config_parser
@@ -2084,7 +2082,7 @@ def _coalesce_session_name_args(argv: list) -> list:
     """
     _SUBCOMMANDS = {
         "chat", "model", "gateway", "setup", "whatsapp", "whatsapp-cloud", "login", "logout",
-        "auth", "status", "cron", "doctor", "config", "pairing", "skills", "tools", "mcp",
+        "auth", "status", "cron", "doctor", "config", "pairing", "skills", "tools", "mcp", "artifacts",
         "sessions", "deck", "insights", "update", "uninstall", "profile", "dashboard", "serve",
         "desktop", "gui", "honcho", "claw", "plugins", "security", "acp", "webhook", "peer",
         "memory", "dump", "debug", "backup", "import", "completion", "logs", "usage",
@@ -2187,7 +2185,7 @@ _BUILTIN_SUBCOMMANDS = frozenset(
         "resume",
         "send", "sessions", "setup",
         "skin", "skills", "slack", "status", "tools", "uninstall", "update",
-        "usage", "vault",
+        "usage", "vault", "artifacts",
         "webhook", "whatsapp", "whatsapp-cloud", "worktree", "chat", "secrets", "security",
         "browser",
         "verify",
@@ -2697,8 +2695,6 @@ def _build_cli_parser():
     build_status_parser(subparsers, cmd_status=cmd_status)
     build_cron_parser(subparsers, cmd_cron=cmd_cron)
     build_pause_parser(subparsers)
-
-
     from hermes_cli.portal_cli import add_parser as _add_portal_parser
     _add_portal_parser(subparsers)
 
@@ -2716,6 +2712,7 @@ def _build_cli_parser():
     build_dump_parser(subparsers, cmd_dump=cmd_dump)
     build_debug_parser(subparsers, cmd_debug=cmd_debug)
     build_backup_parser(subparsers, cmd_backup=cmd_backup)
+    build_artifacts_parser(subparsers)
     build_checkpoints_parser(subparsers)
     build_import_cmd_parser(subparsers, cmd_import=cmd_import)
     build_import_agent_parser(subparsers, cmd_import_agent=cmd_import_agent)

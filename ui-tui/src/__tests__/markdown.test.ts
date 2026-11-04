@@ -179,6 +179,15 @@ describe('INLINE_RE inline math', () => {
 })
 
 describe('protocol sentinels', () => {
+  it('offers private image selfservice without a ciphertext file hyperlink', () => {
+    const path = '/home/test/.hermes/artifacts/browser/screenshots/private.png'
+    const rendered = renderAnsi(React.createElement(Md, { t: DEFAULT_THEME, text: `MEDIA:${path}` }))
+
+    expect(stripAnsi(rendered)).toContain('Encrypted image:')
+    expect(stripAnsi(rendered)).toContain('/artifacts view')
+    expect(rendered).not.toContain(`file://${path}`)
+  })
+
   it('captures MEDIA: paths with surrounding quotes or backticks', () => {
     expect('MEDIA:/tmp/a.png'.match(MEDIA_LINE_RE)?.[1]).toBe('/tmp/a.png')
     expect('  MEDIA: /home/me/.hermes/cache/screenshots/browser_screenshot_ecc.png  '.match(MEDIA_LINE_RE)?.[1]).toBe(

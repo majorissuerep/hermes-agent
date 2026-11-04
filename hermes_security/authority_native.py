@@ -10,7 +10,7 @@ import time
 
 _lock = threading.RLock()
 _jobs = {}
-_COMMANDS = {"chat", "manage", "doctor", "config", "sessions", "memory", "skills", "tools", "mcp", "cron",
+_COMMANDS = {"chat", "manage", "doctor", "config", "sessions", "memory", "skills", "tools", "mcp", "cron", "artifacts",
              "kanban", "profile", "auth", "help", "status", "backup", "import"}
 _EXECUTION_FLAGS = {"--run-module", "--code", "--python", "--script", "--monitor-script", "--workdir", "--cwd",
                     "--in", "--worktree", "-w", "--accept-hooks", "--yolo"}
@@ -43,6 +43,9 @@ def checked_arguments(arguments):
     command = command_args[0] if command_args else ("chat" if query else "help" if readonly else "")
     if command not in _COMMANDS:
         raise ValueError("the session grant does not authorize this native command")
+    if command == "artifacts":
+        from hermes_cli.artifacts import validate_native_arguments
+        validate_native_arguments(command_args[1:])
     scoped = _scope_arguments(command_args, arguments)
     if any(arg in {"-p", "--profile"} or arg.startswith("--profile=") for arg in scoped):
         raise ValueError("a borrowed command cannot select another profile")

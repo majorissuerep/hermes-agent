@@ -4,6 +4,7 @@ import { Fragment, memo, type ReactNode, useMemo } from 'react'
 import { ensureEmojiPresentation } from '../lib/emoji.js'
 import { normalizeExternalUrl } from '../lib/externalLink.js'
 import { BOX_CLOSE, BOX_OPEN, texToUnicode } from '../lib/mathUnicode.js'
+import { privateImagePreviewCommand, quotedPrivateMediaPath } from '../lib/privateMedia.js'
 import { highlightLine, isHighlightable } from '../lib/syntax.js'
 import type { Theme } from '../theme.js'
 
@@ -88,6 +89,30 @@ const MATH_BLOCK_CLOSE_BRACKET_RE = /^(.*?)\\\]\s*$/
 
 export const MEDIA_LINE_RE = /^\s*[`"']?MEDIA:\s*(\S+?)[`"']?\s*$/
 export const AUDIO_DIRECTIVE_RE = /^\s*\[\[audio_as_voice\]\]\s*$/
+
+function MediaReference({ path, theme }: { path: string; theme: Theme }) {
+  const command = privateImagePreviewCommand(path)
+
+  if (command) {
+    return (
+      <Box flexDirection="column">
+        <Text color={theme.color.muted}>Encrypted image: {path}</Text>
+        <Text color={theme.color.accent}>Bounded preview: {command}</Text>
+      </Box>
+    )
+  }
+
+  return (
+    <Text color={theme.color.muted} wrap="wrap-trim">
+      {'▸ '}
+      <Link url={/^(?:\/|[a-z]:[\\/])/i.test(path) ? `file://${path}` : path}>
+        <Text color={theme.color.accent} underline>
+          {path}
+        </Text>
+      </Link>
+    </Text>
+  )
+}
 
 // Inline markdown tokens, in priority order. The outer regex picks the
 // leftmost match at each position, preferring earlier alternatives on tie —
@@ -743,21 +768,11 @@ function MdImpl({ cols, compact, t, text }: MdProps) {
         continue
       }
 
-      const media = line.match(MEDIA_LINE_RE)?.[1]
+      const media = quotedPrivateMediaPath(line) ?? line.match(MEDIA_LINE_RE)?.[1]
 
       if (media) {
         start('paragraph')
-        nodes.push(
-          <Text color={t.color.muted} key={key} wrap="wrap-trim">
-            {'▸ '}
-
-            <Link url={/^(?:\/|[a-z]:[\\/])/i.test(media) ? `file://${media}` : media}>
-              <Text color={t.color.accent} underline>
-                {media}
-              </Text>
-            </Link>
-          </Text>
-        )
+        nodes.push(<MediaReference key={key} path={media} theme={t} />)
         i++
 
         continue

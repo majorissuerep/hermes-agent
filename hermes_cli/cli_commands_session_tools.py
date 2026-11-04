@@ -93,6 +93,9 @@ class CLICommandsSessionToolsMixin:
     """``/stop``, ``/agents``, ``/journey``, ``/paste``, ``/copy``, ``/image``, ``/tools``,
     ``/profile`` handlers (moved from ``CLICommandsMixin``)."""
 
+    def _handle_artifacts_command(self, command: str):
+        from hermes_cli.artifacts import slash_command
+        slash_command(command)
 
     # ---- /stop, /agents -------------------------------------------------------------------
     def _handle_stop_command(self):
