@@ -81,9 +81,18 @@ def _heal_exec_bit(binary: Path) -> bool:
     return os.access(binary, os.X_OK)
 
 
+def _executable_usable(binary: Path, *, read_only: bool) -> bool:
+    """Security inspection never chmods bytes/links before their integrity is established.
+
+    Ordinary lookup and explicit PM maintenance retain their established public-tool
+    exec-bit repair. Recorded executable in-store symlinks remain valid package data.
+    """
+    return (os.name == "nt" or os.access(binary, os.X_OK)) if read_only else _heal_exec_bit(binary)
+
+
 def _installed_location(package: Package, lockfile: Lockfile, target: str, *,
                         verify: bool = False, allow_outdated: bool = False,
-                        roots: tuple[Path, ...] | None = None):
+                        roots: tuple[Path, ...] | None = None, read_only: bool = False):
     """Prefer the current pin. An explicit read may retain a prior PM install."""
     search_roots = dict.fromkeys(roots if roots is not None else (paths.store_root(), paths.writable_store_root()))
     fallback = None
@@ -96,7 +105,7 @@ def _installed_location(package: Package, lockfile: Lockfile, target: str, *,
         binary = package.binary(store.entry(fact["entry"]), target)
         if binary is not None and not binary.is_file():
             continue
-        if binary is not None and target == current_target() and not _heal_exec_bit(binary):
+        if binary is not None and target == current_target() and not _executable_usable(binary, read_only=read_only):
             continue
         if verify and not _entry_verified(package, fact, store, target):
             continue
@@ -120,14 +129,16 @@ def installed_package(name: str, *, allow_outdated: bool = False,
                       verify: bool = False) -> InstalledPackage | None:
     """Read a selected entry; security checkers may require its recorded tree digest.
 
-    This never installs, repairs or changes facts. A requested verification
+    Verified reads never repair execution permissions or change facts. Ordinary
+    reads retain legacy public-tool exec-bit healing. A requested verification
     failure is a missing verified entry, not permission to use an ambient tool.
     """
     package = get_package(name)
     if package.internal:
         raise ValueError(f"{name} is internal PM tooling, not an application package")
     target = current_target()
-    location = _installed_location(package, _lockfile(), target, verify=verify, allow_outdated=allow_outdated)
+    location = _installed_location(package, _lockfile(), target, verify=verify,
+                                   allow_outdated=allow_outdated, read_only=verify)
     if location is None:
         return None
     facts, store = location
