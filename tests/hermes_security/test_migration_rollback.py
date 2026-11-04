@@ -168,3 +168,45 @@ def test_unknown_initialized_vault_without_checkpoint_cannot_resume(plain):
         migrate.migrate_home(home, PASSWORD)
     # Exclusive maintenance may create only its existing empty lease; user bytes stay exact.
     assert all((home / name).read_bytes() == data for name, data in before.items())
+
+
+@pytest.mark.parametrize("drift", [False, True], ids=["checkpoint-only", "changed-row"])
+def test_interrupted_sqlite_checkpoint_resumes_only_original_logical_state(plain, monkeypatch, drift):
+    home, nonce = plain
+    original = migrate._checkpoint_plain_db
+    before = (home / "state.db").read_bytes()
+
+    def checkpoint_then_crashed(path):
+        original(path)
+        # A real SQLite layout change models a checkpoint/VACUUM before replacement;
+        # physical bytes change while the original schema/data retain their meaning.
+        connection = sqlite3.connect(path)
+        connection.execute("VACUUM")
+        connection.close()
+        raise KeyboardInterrupt("synthetic stop after the plaintext database checkpoint")
+
+    monkeypatch.setattr(migrate, "_checkpoint_plain_db", checkpoint_then_crashed)
+    with pytest.raises(KeyboardInterrupt):
+        migrate.migrate_home(home, PASSWORD)
+    assert (home / "state.db").read_bytes() != before
+    state = migration_state.read(home, vault.get_vault(home))
+    assert state["current"]["path"] == "state.db"
+    if drift:
+        connection = sqlite3.connect(home / "state.db")
+        connection.execute("UPDATE sample SET value='unexpected source change'")
+        connection.commit(); connection.close()
+    snapshot = _snapshot(home)
+    monkeypatch.setattr(migrate, "_checkpoint_plain_db", original)
+    report = migrate.migrate_home(home, PASSWORD)
+    if drift:
+        assert not report.ok and "changed" in report.failures[0]
+        assert all((home / name).read_bytes() == data for name, data in snapshot.items())
+    else:
+        assert report.ok, report.failures
+        from hermes_security.sqlite import connect
+
+        connection = connect(home / "state.db")
+        try:
+            assert connection.execute("SELECT value FROM sample").fetchall() == [(nonce.decode(),)]
+        finally:
+            connection.close()

@@ -66,7 +66,8 @@ def _report(home, report):
 
 def migrate_command(args, home):
     from hermes_cli.vault_cmd import _prompt_new_password
-    from hermes_cli.vault_key_creation import KeyOutputError, key_destination, migrate_with_key_file
+    from hermes_cli.vault_key_creation import KeyOutputError, migrate_with_key_file
+    from hermes_cli.vault_key_policy import key_destination
     from hermes_security import migrate, migration_state, vault
 
     if vault.vault_exists(home):

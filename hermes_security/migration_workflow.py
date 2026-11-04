@@ -15,14 +15,15 @@ from hermes_security.errors import VaultError, VaultIntegrityError
 
 def _backup_directory(home):
     from hermes_security.migrate import _private_backup_directory
+    from hermes_security.migration_archive import MigrationArchiveError, _destination_parent
 
     for directory in (home.parent, _private_backup_directory(home)):
         if directory is None:
             continue
         try:
-            with tempfile.TemporaryFile(dir=directory):
+            with _destination_parent(directory), tempfile.TemporaryFile(dir=directory):
                 return directory
-        except PermissionError:
+        except (PermissionError, MigrationArchiveError):
             continue
     raise PermissionError("Cannot create encrypted rollback; provide an owned 0700 sibling migration-backups directory")
 
@@ -86,7 +87,7 @@ def _convert_member(home, member, unlocked, state, report):
         return
     if kind not in {"db", "frames", "envelope"}:
         raise VaultIntegrityError("Migration rollback member lacks its original classification")
-    if admitted(target, relative, original, unlocked):
+    if admitted(target, relative, original, unlocked, checkpoint=state["current"]):
         report.skipped.append(relative.as_posix() + " (verified converted content)")
         return
     state["current"] = {"path": relative.as_posix(), "kind": kind,
@@ -96,7 +97,7 @@ def _convert_member(home, member, unlocked, state, report):
     converters = {"db": migrate._migrate_database, "frames": migrate._migrate_frames,
                   "envelope": migrate._migrate_envelope}
     converters[kind](home, target, relative, report)
-    if not admitted(target, relative, original, unlocked) and target.stat().st_size:
+    if not admitted(target, relative, original, unlocked, checkpoint=state["current"]) and target.stat().st_size:
         raise VaultIntegrityError("Migration conversion did not produce authenticated state")
     state["current"] = None
     migration_state.write(home, unlocked, state)

@@ -107,7 +107,7 @@ def _sealed_frames_fingerprint(path: Path, vault, purpose: str) -> str:
     return digest.hexdigest()
 
 
-def admitted(path: Path, relative: Path, original: dict, vault) -> bool:
+def admitted(path: Path, relative: Path, original: dict, vault, *, checkpoint=None) -> bool:
     """False means exact original plaintext, True means verified converted content; anything else refuses."""
     from hermes_security import migrate
 
@@ -117,12 +117,7 @@ def admitted(path: Path, relative: Path, original: dict, vault) -> bool:
         return False
     kind = original.get("kind")
     if kind == "db":
-        from contextlib import closing
-        from hermes_security.sqlite import connect
-
-        with closing(connect(path)) as connection:
-            actual = migrate._conn_fingerprint(connection)
-        expected = original.get("sqlite_fingerprint")
+        return _database_admission(path, relative, original, checkpoint)
     elif kind == "frames":
         actual = _sealed_frames_fingerprint(path, vault, migrate._frame_purpose(path))
         expected = original.get("frames_fingerprint")
@@ -131,4 +126,26 @@ def admitted(path: Path, relative: Path, original: dict, vault) -> bool:
         actual, expected = hashlib.sha256(content).hexdigest(), original.get("sha256")
     if not expected or actual != expected:
         raise VaultIntegrityError(f"Migration content changed after the verified rollback: {relative}")
+    return True
+
+
+def _database_admission(path, relative, original, checkpoint):
+    from contextlib import closing
+    from hermes_security import migrate
+    from hermes_security.sqlite import connect
+
+    expected = original.get("sqlite_fingerprint")
+    with path.open("rb") as source:
+        plaintext = source.read(16) == b"SQLite format 3\0"
+    if plaintext:
+        # WAL checkpointing may change physical bytes before ciphertext replaces the
+        # original. Only this exact in-progress entry may admit equivalent SQLite.
+        active = {"path": relative.as_posix(), "kind": "db", "original": original.get("sha256")}
+        if checkpoint != active or not expected or migrate._plain_dump_md5(path) != expected:
+            raise VaultIntegrityError(f"Original SQLite content changed during migration: {relative}")
+        return False
+    with closing(connect(path)) as connection:
+        actual = migrate._conn_fingerprint(connection)
+    if not expected or actual != expected:
+        raise VaultIntegrityError(f"Converted SQLite content changed during migration: {relative}")
     return True
