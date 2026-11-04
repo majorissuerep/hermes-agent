@@ -8,6 +8,7 @@ import base64
 import json
 import logging
 import os
+import posixpath
 import shutil
 import subprocess
 import uuid
@@ -531,31 +532,60 @@ def _sandbox_close_daemon(session_name: str) -> None:
         return
     try:
         env = terminal.terminal_environment(create=False)
-        streams.run_in(env, [_SANDBOX_AGENT_BROWSER, "--session", session_name, "close"],
-                       child_env={"AGENT_BROWSER_SOCKET_DIR": _sandbox_socket_dir(env)}, timeout=15)
+        runtime = terminal.browser_runtime(env)
+        streams.run_in(env, runtime.guarded([_SANDBOX_AGENT_BROWSER, "--session", session_name, "close"]),
+                       child_env={"AGENT_BROWSER_SOCKET_DIR": runtime.sockets}, timeout=15)
     except (RuntimeError, OSError, subprocess.SubprocessError) as exc:
         _bt.logger.debug("sandbox browser close for %s failed: %s", session_name, exc)
 
 
-def _sandbox_socket_dir(env) -> str:
-    return f"{env.get_temp_dir().rstrip('/')}/hermes-browser/agent-browser"
+_SANDBOX_CAPTURE_LIMIT = 16 * 1024 * 1024
 
 
 def sandbox_screenshot_path(host_path: Path) -> Optional[str]:
+    """Backend path for a capture inside the selected backend's proven RAM runtime (None locally).
+
+    Raises ``MediaCustodyError`` with the backend's actionable reason when no such runtime exists."""
     from tools import browser_terminal as terminal
+    from tools.browser_media_custody import MediaCustodyError
     if not terminal.browser_in_terminal():
         return None
-    env = terminal.terminal_environment(create=False)
-    return f"{env.get_temp_dir().rstrip('/')}/hermes-browser/shots/{host_path.name}"
+    try:
+        runtime = terminal.browser_runtime(terminal.terminal_environment(create=False))
+    except RuntimeError as exc:
+        raise MediaCustodyError(str(exc)) from exc
+    return posixpath.join(runtime.captures, host_path.name)
 
 
-def fetch_sandbox_file(remote_path: str, local_dest: Path, *, max_bytes: int = 16 * 1024 * 1024) -> bool:
+def _capture_in(captures: str, reported: Any) -> Optional[str]:
+    text = reported if isinstance(reported, str) else ""
+    path = posixpath.normpath(text) if text.startswith("/") else ""
+    return path if path.startswith(captures.rstrip("/") + "/") else None
+
+
+def settle_sandbox_capture(expected: str, reported: Any, local_dest: Path, *, fetch: bool) -> None:
+    """Copy a sandbox capture into the host's RAM-staged ``local_dest`` when the command succeeded,
+    then delete it from the backend runtime on success and failure alike. Only paths inside the
+    runtime's capture directory are read or deleted; a reported path elsewhere is ignored."""
     from tools import browser_terminal as terminal
-    if not terminal.browser_in_terminal():
-        return False
-    env = terminal.terminal_environment(create=False)
-    env.fetch_file(remote_path, local_dest, max_bytes=max_bytes)
-    return True
+    from tools.environments import streams
+    try:
+        env = terminal.terminal_environment(create=False)
+        captures = terminal.browser_runtime(env).captures
+    except RuntimeError as exc:
+        _bt.logger.warning("could not settle the sandbox screenshot %s: %s", expected, exc)
+        return
+    source = _capture_in(captures, reported) or expected
+    try:
+        if fetch:
+            env.fetch_file(source, local_dest, max_bytes=_SANDBOX_CAPTURE_LIMIT)
+    except (RuntimeError, OSError) as exc:
+        _bt.logger.warning("could not fetch the sandbox screenshot %s: %s", source, exc)
+    finally:
+        try:
+            streams.run_in(env, ["rm", "-f", "--", *sorted({expected, source})], timeout=15)
+        except (RuntimeError, OSError, subprocess.SubprocessError) as exc:
+            _bt.logger.warning("could not remove the sandbox screenshot %s: %s", source, exc)
 
 
 def _is_recoverable_local_backend_failure(session_info: dict[str, Any], result: dict[str, Any]) -> bool:
@@ -622,7 +652,10 @@ _SANDBOX_ENV_KEYS = ("AGENT_BROWSER_SOCKET_DIR", "AGENT_BROWSER_IDLE_TIMEOUT_MS"
 
 
 def _sandbox_wrap(cmd_parts: list[str], browser_env: dict[str, str], task_socket_dir: str) -> tuple[list[str], dict[str, str]]:
-    """Run agent-browser in the chosen terminal, never on a fallback host."""
+    """Run agent-browser in the chosen terminal, never on a fallback host.
+
+    Its profile, sockets, captures and TMPDIR live in the backend's proven RAM runtime; only the
+    allowlisted browser variables cross the boundary (no credentials, grants or vault material)."""
     from tools import browser_terminal as terminal
     if not terminal.browser_in_terminal():
         return cmd_parts, browser_env
@@ -630,22 +663,26 @@ def _sandbox_wrap(cmd_parts: list[str], browser_env: dict[str, str], task_socket
     if "--headed" in cmd_parts and "--cdp" not in cmd_parts:
         raise RuntimeError("Headed sandbox browsers require an explicit outgoing CDP endpoint")
     env = terminal.terminal_environment(create=True)
+    runtime = terminal.browser_runtime(env)
     remote_env = {k: v for k, v in browser_env.items() if k in _SANDBOX_ENV_KEYS}
-    remote_env["AGENT_BROWSER_SOCKET_DIR"] = _sandbox_socket_dir(env)
     remote_env.pop("AGENT_BROWSER_EXECUTABLE_PATH", None)
-    remote_env["AGENT_BROWSER_PROFILE"] = terminal.browser_profile_dir(env)
-    remote_env["TMPDIR"] = env.get_temp_dir()
-    if not getattr(env, "_hermes_browser_dirs_ready", False):
-        streams.run_in(env, ["mkdir", "-p", _sandbox_socket_dir(env),
-                             f"{env.get_temp_dir().rstrip('/')}/hermes-browser/shots",
-                             remote_env["AGENT_BROWSER_PROFILE"]], timeout=15)
-        env._hermes_browser_dirs_ready = True
-    remote_env["AGENT_BROWSER_ARGS"] = ",".join(CHROMIUM_SANDBOX_BYPASS_ARGS)
+    remote_env.update(AGENT_BROWSER_SOCKET_DIR=runtime.sockets, AGENT_BROWSER_PROFILE=runtime.profile,
+                      TMPDIR=runtime.tmp, AGENT_BROWSER_ARGS=",".join(CHROMIUM_SANDBOX_BYPASS_ARGS))
     tail = cmd_parts[len(_agent_browser_argv(cmd_parts[0])):]
-    wrapped = streams.remote_command(env, [_SANDBOX_AGENT_BROWSER, *tail], child_env=remote_env, interactive=True)
+    wrapped = streams.remote_command(env, runtime.guarded([_SANDBOX_AGENT_BROWSER, *tail]),
+                                     child_env=remote_env, interactive=True)
     if wrapped is None:
         raise RuntimeError(f"{type(env).__name__} cannot host browser commands")
     return wrapped, {"PATH": browser_env.get("PATH", os.environ.get("PATH", "")), "HOME": os.environ.get("HOME", "")}
+
+
+def _run_sandbox_client(argv: list[str], env: dict[str, str], stdin_payload: Optional[bytes],
+                        timeout: int) -> tuple[Optional[int], str, str]:
+    """Collect the selected backend client's output in memory until the client exits."""
+    from hermes_platform.client_capture import run_client
+
+    code, stdout, stderr = run_client(argv, env=env, payload=stdin_payload, timeout=timeout)
+    return code, stdout.decode("utf-8-sig", "replace"), stderr.decode("utf-8-sig", "replace")
 
 
 def _browser_command_preflight() -> dict[str, Any]:
@@ -661,6 +698,7 @@ def _browser_command_preflight() -> dict[str, Any]:
             terminal.require_browser_cli(env)
             if _cloud._is_local_mode() and _cloud._is_headed_mode() and _cloud._get_browser_engine() != "lightpanda":
                 raise RuntimeError("headed sandbox browsers are unsupported; use headless browsing or an explicit outgoing CDP endpoint")
+            terminal.browser_runtime(env)  # private browser state needs the backend's proven RAM first
         except RuntimeError as exc:
             return {"success": False, "error": f"The browser cannot run in the selected terminal backend: {exc}"}
         return {"browser_cmd": _SANDBOX_AGENT_BROWSER}
@@ -712,9 +750,12 @@ def _spawn_and_collect(
         if not session_info.get("cdp_url") and not _cloud._is_headed_mode():
             browser_env = windows_headless_browser_options(browser_env)
 
+    from tools import browser_terminal as terminal
+    if terminal.browser_in_terminal():
+        return _collect_in_sandbox(task_id, session_info, cmd_parts, command, timeout,
+                                   browser_env, task_socket_dir, stdin_payload)
     stdout_path = os.path.join(task_socket_dir, f"_stdout_{command}")
     stderr_path = os.path.join(task_socket_dir, f"_stderr_{command}")
-    cmd_parts, browser_env = _sandbox_wrap(cmd_parts, browser_env, task_socket_dir)
     proc = _popen_agent_browser(cmd_parts, browser_env, task_socket_dir, command, stdin_payload)
 
     try:
@@ -724,18 +765,40 @@ def _spawn_and_collect(
         proc.wait()
         stdout, stderr = _read_command_output_files(stdout_path, stderr_path)
         _unlink_command_output_files(stdout_path, stderr_path)
-        _handle_browser_command_timeout(task_id, session_info, task_socket_dir)
-        if stderr and stderr.strip():
-            _bt.logger.warning("browser '%s' stderr after timeout: %s", command, stderr.strip()[:500])
-        _bt.logger.warning("browser '%s' timed out after %ds (task=%s, socket_dir=%s)",
-                       command, timeout, task_id, task_socket_dir)
-        return {"success": False, "error": _format_browser_timeout_error(command, timeout, stdout, stderr)}
+        return _timed_out_result(task_id, session_info, task_socket_dir, command, timeout, stdout, stderr)
     with open(stdout_path, "r", encoding="utf-8-sig") as f:
         stdout = f.read()
     with open(stderr_path, "r", encoding="utf-8-sig") as f:
         stderr = f.read()
     _unlink_command_output_files(stdout_path, stderr_path)
     return _interpret_browser_command_output(command, stdout, stderr, proc.returncode)
+
+
+def _timed_out_result(task_id: str, session_info: dict[str, Any], task_socket_dir: str, command: str,
+                      timeout: int, stdout: str, stderr: str) -> dict[str, Any]:
+    _handle_browser_command_timeout(task_id, session_info, task_socket_dir)
+    if stderr and stderr.strip():
+        _bt.logger.warning("browser '%s' stderr after timeout: %s", command, stderr.strip()[:500])
+    _bt.logger.warning("browser '%s' timed out after %ds (task=%s, socket_dir=%s)",
+                       command, timeout, task_id, task_socket_dir)
+    return {"success": False, "error": _format_browser_timeout_error(command, timeout, stdout, stderr)}
+
+
+def _collect_in_sandbox(task_id: str, session_info: dict[str, Any], cmd_parts: list[str], command: str,
+                        timeout: int, browser_env: dict[str, str], task_socket_dir: str,
+                        stdin_payload: Optional[bytes]) -> dict[str, Any]:
+    """Run once in the selected backend; a lost runtime needs an explicit recovery decision."""
+    from tools import browser_terminal as terminal
+    wrapped, client_env = _sandbox_wrap(cmd_parts, browser_env, task_socket_dir)
+    returncode, stdout, stderr = _run_sandbox_client(wrapped, client_env, stdin_payload, timeout)
+    if returncode is None:
+        return _timed_out_result(task_id, session_info, task_socket_dir, command, timeout, stdout, stderr)
+    if terminal.runtime_missing(returncode, stderr):
+        return {"success": False, "error": "The protected browser runtime in the selected terminal "
+                                           "backend disappeared. The command was not run. Restore "
+                                           "the owning browser profile before starting a new session."}
+    return _interpret_browser_command_output(command, stdout, stderr, returncode)
+
 
 
 

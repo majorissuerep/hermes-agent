@@ -1240,11 +1240,9 @@ def _capture_vision_screenshot(effective_task_id: str, annotate: bool, screensho
         # doesn't trigger a redundant LP fallback.
         result = _session._run_browser_command(effective_task_id, "screenshot", screenshot_args,
                                       _engine_override="auto" if lp_prerouted else None)
-        if remote_path and result.get("success"):
-            try:
-                _session.fetch_sandbox_file(str((result.get("data") or {}).get("path") or remote_path), screenshot_path)
-            except Exception as exc:
-                logger.warning("could not fetch the sandbox screenshot %s: %s", remote_path, exc)
+        if remote_path:  # fetched into the host RAM stage, then removed from the backend either way
+            _session.settle_sandbox_capture(remote_path, (result.get("data") or {}).get("path"),
+                                            screenshot_path, fetch=bool(result.get("success")))
         elif result.get("success"):
             _vision.adopt_capture(str((result.get("data") or {}).get("path") or ""), screenshot_path)
     if not result.get("success"):
