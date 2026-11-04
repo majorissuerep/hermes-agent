@@ -39,7 +39,9 @@ _SAFE_IDENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 from hermes_security import errors as vault_errors
 from hermes_security import frames as sec_frames
 from hermes_security import vault as vault_mod
-from hermes_security.artifact_paths import is_legacy_artifact_path, terminal_frame_purpose
+from hermes_security.artifact_paths import (
+    is_delegation_log_path, is_delegation_manifest_path, is_legacy_artifact_path, terminal_frame_purpose,
+)
 
 _MAGIC = b"HRMVAULT\x00"
 
@@ -102,7 +104,7 @@ def repair_clobbered_state(home: Path | str) -> dict:
     # Snapshots retain their ORIGINAL path-bound ciphertext and inventory hashes.
     # Re-sealing them in their storage location makes the restore point unusable.
     for path, rel in _iter_files(home_path, exclude_roots={"backups", "state-snapshots", "profiles"}):
-        kind = _classify(path)
+        kind = _classify(path, rel)
         if kind == "skip" or path.is_symlink():
             continue  # never repair through a link (it may point outside the home)
         try:
@@ -284,6 +286,10 @@ def _repair_frames(vault, path: Path, rel: Path, report: dict) -> None:
 
 
 def _repair_envelope(vault, home: Path, path: Path, rel: Path, head: bytes, report: dict) -> None:
+    if is_delegation_log_path(rel) or is_delegation_manifest_path(rel):
+        from hermes_security.delegation_repair import repair_delegation_state
+
+        return repair_delegation_state(vault, path, rel, report)
     purpose = _purpose_for(rel)
     if head.startswith(_MAGIC):
         if purpose != "env":
@@ -609,6 +615,10 @@ def os_replace(src: Path, dst: Path) -> None:
 
 
 def _purpose_for(rel: Path) -> str:
+    if is_delegation_manifest_path(rel):
+        return "delegation-manifest:v1"
+    if rel.parent == Path("sessions") and rel.name.startswith("request_dump_") and rel.suffix == ".json":
+        return "state"
     name = rel.name
     suffix = rel.suffix
     if name == "config.yaml":
@@ -630,7 +640,9 @@ def _purpose_for(rel: Path) -> str:
     return "state"
 
 
-def _classify(path: Path) -> str:
+def _classify(path: Path, relative: Path | None = None) -> str:
+    if is_delegation_log_path(relative if relative is not None else path):
+        return "envelope"
     # DB sidecars are consumed by the parent DB's migration (checkpointed and
     # removed); migrating one as its own file races the parent conversion.
     if path.name.endswith(("-wal", "-shm", "-journal")):
@@ -666,7 +678,7 @@ def migrate_home(home: Path | str, password: str | bytes, *, dry_run: bool = Fal
 
     for path, rel in files:
         try:
-            kind = _classify(path)
+            kind = _classify(path, rel)
             if kind == "skip":
                 continue
             if not dry_run:
@@ -713,7 +725,8 @@ def scan_for_plaintext(home: Path | str) -> list[str]:
 
     for path, rel in _iter_files(home, onerror=unreadable):
         try:
-            if path.suffix in _DB_SUFFIXES:
+            kind = _classify(path, rel)
+            if kind == "db":
                 owner = vault_mod.find_vault_home(path)
                 vault = vault_mod.get_vault(owner)
                 key = vault.derive_key(f"sqlcipher:{path.relative_to(owner).as_posix()}").hex()
@@ -724,7 +737,7 @@ def scan_for_plaintext(home: Path | str) -> list[str]:
                     valid = conn.execute("PRAGMA integrity_check").fetchall() == [("ok",)]
                 finally:
                     conn.close()
-            elif path.suffix in _FRAME_SUFFIXES:
+            elif kind == "frames":
                 raw = path.read_bytes()
                 vault = vault_mod.get_vault(vault_mod.find_vault_home(path))
                 _, consumed = sec_frames.split_stream(raw, vault=vault, purpose=_frame_purpose(path))

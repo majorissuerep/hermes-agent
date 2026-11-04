@@ -127,3 +127,31 @@ def test_missing_nested_profile_never_uses_an_unlocked_ancestor_vault(owned_agen
     assert _dump(agent, "synthetic forbidden ancestor diagnostic context") is None
     assert {path.name: path.read_bytes() for path in (selected / "sessions").iterdir()} == before
     assert vault.is_unlocked(parent)
+
+
+@pytest.mark.parametrize("consumer", ["scanner", "offline-export"])
+def test_diagnostic_and_conventional_transcript_retain_their_distinct_purposes(owned_agent, tmp_path, consumer):
+    import json
+    import tarfile
+
+    from hermes_security.migrate import scan_for_plaintext
+    from hermes_security.recovery_export import export_home
+
+    home, agent, _ = owned_agent
+    marker = "synthetic private forensic context " + secrets.token_hex(8)
+    target = _dump(agent, marker)
+    assert target is not None
+    conventional = home / "sessions" / "conversation.json"
+    io.write_json(conventional, {"ordinary": "preserved conversation"}, purpose="transcript")
+    before = {path.name: path.read_bytes() for path in (home / "sessions").iterdir()}
+    if consumer == "scanner":
+        assert scan_for_plaintext(home) == []
+    else:
+        archive = tmp_path / "explicit-forensic-export.tar"
+        export_home(home, archive)
+        with tarfile.open(archive) as saved:
+            diagnostic = json.load(saved.extractfile(target.relative_to(home).as_posix()))
+            transcript = json.load(saved.extractfile("sessions/conversation.json"))
+        assert diagnostic["request"]["body"]["messages"][0]["content"] == marker
+        assert transcript == {"ordinary": "preserved conversation"}
+    assert {path.name: path.read_bytes() for path in (home / "sessions").iterdir()} == before

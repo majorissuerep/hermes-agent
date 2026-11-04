@@ -69,6 +69,11 @@ hosting remain outside this fork. No change authorizes a public deployment.
   only in a proven RAM workspace. Refused persistence reports its limitation.
   Ciphertext copied from another artifact or a different log must fail
   authentication for the requested output path.
+- Request-failure diagnostics and delegated task manifests, live views and
+  summary spills use authenticated encrypted persistence. Their original home,
+  unlock and session remain bound through callbacks and finalization. A later
+  unlock cannot revive old work; unavailable persistence is reported without
+  creating a plaintext substitute.
 - Codex and Claude command integrations use noninteractive invocation and do not
   persist an additional plaintext conversation. Their permission controls remain
   effective; refusal must be reported rather than retried without confinement.
@@ -156,6 +161,26 @@ bounded grayscale text preview (at most 120 columns by 60 rows). It creates no
 plaintext viewing file. Vision tools still receive the image pixels. Private
 `MEDIA:` references provide that slash-command hint instead of an external link
 to ciphertext. General configuration and credentials are outside this reader.
+
+Delegation keeps its existing `cache/delegation` layout, including populated
+legacy `delegation_cache` homes. Task live views and full summary spills can be
+read through the authenticated file tool. `/agents` and the terminal subagent
+view authenticate their retained child's log before presenting its tail. The
+control manifest has a separate authenticated purpose and is unavailable to
+generic file tools. These private caches are not mounted into remote backends.
+The compact live view is atomically resealed per event, with a 64 MiB limit;
+the encrypted child history retains the full conversation. Refused or failed
+live persistence is marked unavailable while bounded result delivery survives.
+An old batch with no original storage custody cannot acquire a later unlock.
+Explicit offline repair handles plaintext and older encrypted cache formats;
+runtime readers never import those formats implicitly.
+
+API failure diagnostics retain their masked request/error JSON under `sessions`
+using the existing encrypted state format. The error notice names the encrypted
+file and deliberate offline forensic export. Missing profile metadata, revoked
+custody or a failed write withholds the dump and preserves the original API
+failure. An explicitly selected profile without its own vault cannot borrow an
+initialized ancestor's diagnostic storage.
 
 Older private outputs in `cache/terminal-output`, `cache/spillover`,
 `cache/screenshots` and `browser_screenshots` remain visible to the read-only
@@ -267,6 +292,16 @@ Separate real-SDK regressions verify owning/explicit child homes, filtered unloc
 material, encrypted/redacted diagnostics, write failure and legacy-log recovery.
 The six cold lifecycle/live-gateway scenarios require their existing dedicated
 credentials and disposable environments; they remain pending here.
+
+A later isolated Linux replay exercised actual managed native chat and a native
+delegated conversation, including child and parent terminal self-calls: two
+authenticated model requests for the managed child and five for the delegated
+conversation, with two SQLCipher sessions. All functional contracts passed, but
+private goal text was found in the delegation cache. An intentionally rejected
+API request separately exposed plaintext request diagnostics. Both failures
+remain negative evidence; their repairs require an exact-candidate replay and
+independent acceptance. Neither a successful exit nor redacting API keys alone
+establishes encrypted conversation storage.
 
 The repository-wide security scan was executed and failed: existing shell lint
 findings, synthetic-secret detections, static audit findings, dependency advisories
@@ -732,6 +767,7 @@ login, macOS or exact merged-revision acceptance.
 | **P0 SEC-03: qualify custody and session repairs** | Fixed owner-executed installer stages return receipts only; trusted workers require their exact live session; ordinary and outgoing MCP/remote environments exclude installer control authority. | Integration owner; exact-head private/native gates, then non-author fresh-main key-custody, revocation-between-preparation-and-adoption, parent/sibling survival and failure cleanup checks. The earlier confirmed failures remain negative evidence. |
 | **P0 SEC-04: qualify owned-state encryption** | Seal derived skill indexes and cron usage audit appends in their canonical authenticated formats, preserving existing records and refusing unavailable/damaged state. | Integration owner; ciphertext and authenticated roundtrip checks, migrated-record preservation, locked/damaged non-mutation and public cron/self-call replay with no owned plaintext residue. |
 | **P0 SEC-05: qualify retained database and private output custody** | SQLCipher handles keep their original session across cached reads, cursor fetches, transactions and reopened connections. Terminal/result archives and browser captures remain encrypted, recoverable and revocable; old private caches participate in explicit repair. | Security and integration owners; final exact-head gates, then non-author fresh-main tests for stale handles, sibling isolation, authenticated text/image recovery, real RAM staging, unavailable custody and unchanged data on refusal. Pre-fix native failures remain evidence; unit/browser fixtures do not establish live browser qualification. |
+| **P0 SEC-06: qualify failure diagnostics and delegation persistence** | Seal request dumps, task goals/control manifests, live views and summary spills while preserving public readers, original home/session custody, legacy recovery and bounded results when storage fails. Generic file tools cannot read the control manifest. | Integration and security owners; retain the actual native negative receipts, then independently test ciphertext and authenticated roundtrips, nested missing profiles, wrong-home reads, lock/re-unlock, delayed callbacks, failed initial storage, concurrent writers, CLI/TUI consumers and explicit legacy repair. Replay the successful five-request native delegation and the separate rejected-request privacy case on the final candidate, then fresh main after merge. |
 | **P0 MEDIA-02: finish private media ports and recovery lifecycle** | Port computer-use screenshot/element caches, ordinary private image staging and selected remote capture scratch; inventory browser profiles and generated media. Keep deliberate offline migration/export archives explicit and preserve consumers. This blocks a whole-toolchain encrypted-storage claim. | Tool/lifecycle owners; isolate and reproduce each private-byte writer, use encrypted persistence or proven RAM, then run real-backend routing, residue and recovery checks. Independently repeat after the corresponding main milestone. Explain deliberate plaintext recovery archives and define their lifecycle without claiming SSD erasure; keep unknown host swap protection separate. |
 | **P0 HOST-01: transient-memory admission** | Establish swap, hibernation and crash-storage protection for each supported protected host; report unknown evidence honestly. Retained-key locking and RAM-only files do not protect every Python, crypto or SQLCipher buffer. | Operator supplies host guarantees or a native deployment proves the required posture. A non-author tests refusal and recovery. Full protected-workflow acceptance remains pending while admission is unevaluated. No implicit host setting changes. |
 | **P0 DEP-01: Pillow advisory closure (external blocker)** | Upstream browser-harness and fastembed metadata currently prevent installing the aged fixed Pillow through normal consistency checks. | Dependency owner tracks compatible upstream releases and rechecks at the next eligible release/quarantine boundary; then fresh PM lock/environment, applicable advisory closure and real browser/image consumers. Preserve the 14-day quarantine and all existing tooling; do not force incompatible metadata. |
