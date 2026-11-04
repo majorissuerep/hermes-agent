@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from pathlib import Path
 import secrets
 import sys
@@ -11,7 +12,7 @@ import pytest
 
 from hermes_security import artifacts, vault
 
-pytestmark = pytest.mark.platforms("posix")
+pytestmark = pytest.mark.platforms("linux")
 ROOT = Path(__file__).resolve().parents[2]
 SERVER = '''from mcp.server import MCPServer
 from mcp.types import CallToolResult,ImageContent,AudioContent,EmbeddedResource,BlobResourceContents
@@ -36,12 +37,19 @@ def test_real_mcp_media_wire_encrypted_readers_ram_and_owner_lifetime(tmp_path, 
     from tools.mcp_tool_content import _mcp_native_image_part
     from tools import file_tools, media_artifacts
     from hermes_security.errors import VaultLockedError
+    from hermes_security.io import write_text
+    from hermes_security.protected_workspace import protected_workspace_status
 
+    ram = os.environ.get("HERMES_TEST_PRIVATE_MEDIA_RAM_BASE")
+    if not ram:
+        pytest.skip("actual private-media RAM qualification requires the driver's explicit protected workspace path")
+    assert Path(ram).is_absolute() and protected_workspace_status(ram).proven
     home = tmp_path / "owner"
     monkeypatch.setenv("HERMES_HOME", str(home))
     monkeypatch.setattr(vault, "_SCRYPT_N", 1024)
     vault.init_vault(home, "synthetic MCP media wire password")
     vault.unlock(home, "synthetic MCP media wire password")
+    write_text(home / "config.yaml", "security:\n  protected_work_dir: " + json.dumps(ram) + "\n", purpose="config")
     canary = secrets.token_hex(24)
     script = tmp_path / "public-server.py"
     script.write_text(SERVER)

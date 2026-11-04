@@ -89,9 +89,10 @@ def _decode_block_b64(data, what: str, label: str, *, cap_what: Optional[str] = 
 
 def _write_block_cache(writer: str, what: str, skip_label: str, *args,
                        unavailable: str = "", failed: str = "", **kwargs) -> tuple[Optional[str], str]:
-    """Call ``gateway.platforms.base.<writer>(*args, **kwargs)``: ``(path, "")`` or ``(None,
-    marker)``. Fail-open so one bad block never kills the tool result: gateway deps missing
-    (cron without gateway) → ``unavailable``; any other cache error → warning + ``failed``."""
+    """Retain one block encrypted, or report its failure without a plaintext fallback.
+
+    Other content blocks remain usable; a failed private block is never silently dropped.
+    """
     try:
         from tools import media_cache as _base
         return getattr(_base, writer)(*args, **kwargs), ""
@@ -107,9 +108,7 @@ _WAV_MIME_EXT = {"audio/wav": ".wav", "audio/x-wav": ".wav", "audio/wave": ".wav
 
 
 def _cache_mcp_media_block(block, kind: str, writer: str, ext_for, *, cap_what: Optional[str] = None) -> str:
-    """Cache an image/audio block and return a ``MEDIA:<path>`` tag. "" (logging, not raising)
-    when the block isn't ``kind`` media, the base64 is malformed, or the cache rejects the
-    bytes: the caller falls through to any text blocks."""
+    """Return a media reference or visible refusal; empty means another block kind."""
     data = getattr(block, "data", None)
     mime = _base_mime(mcp_field(block, "mime_type", "mimeType"))
     if not mime.startswith(f"{kind}/"):
@@ -129,7 +128,7 @@ def _cache_mcp_media_block(block, kind: str, writer: str, ext_for, *, cap_what: 
 
 
 def _cache_mcp_image_block(block) -> str:
-    """Cache an ``ImageContent`` block and return a ``MEDIA:<path>`` tag ("" on any failure)."""
+    """Retain an ImageContent block or return a visible storage/decode failure."""
     return _cache_mcp_media_block(block, "image", "cache_image_from_bytes", _mcp_image_extension_for_mime_type)
 
 
@@ -244,7 +243,7 @@ def _mcp_result_with_native_images(text: str, image_paths: list[str]) -> Any:
 
 
 def _cache_mcp_audio_block(block) -> str:
-    """Cache an ``AudioContent`` block and return a ``MEDIA:<path>`` tag ("" on any failure)."""
+    """Retain an AudioContent block or return a visible storage/decode failure."""
     return _cache_mcp_media_block(
         block, "audio", "cache_audio_from_bytes",
         lambda mime: _WAV_MIME_EXT.get(mime) or mimetypes.guess_extension(mime) or ".ogg",

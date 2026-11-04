@@ -112,7 +112,7 @@ function MediaReference({ path, theme }: { path: string; theme: Theme }) {
         </Text>
         <Text color={theme.color.muted}>
           {privateKind === 'audio'
-            ? 'Original retained; use the configured transcription consumer.'
+            ? 'Explicit offline recovery: hermes secure-vault export --output /outside-home/recovery.tar (whole-profile plaintext archive).'
             : 'Original retained; use read_file for authenticated document access.'}
         </Text>
       </Box>
