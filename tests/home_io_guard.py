@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import shutil
 import sqlite3
+import stat
 import sys
 import threading
 
@@ -55,6 +56,8 @@ class HomeIOGuard:
         self.installed_apps = installed_apps
         self.checking = threading.local()
         self.directories: dict[int, Path] = {}
+        self._identities: dict[int, tuple[int, int, int]] = {}
+        self._descriptor_lock = threading.RLock()
 
     def check(self, value, *, dir_fd=None, metadata=False, destructive=False):
         if value is None or isinstance(value, int) or getattr(self.checking, "active", False):
@@ -70,7 +73,7 @@ class HomeIOGuard:
                 except Exception:
                     pass
             if dir_fd is not None and not os.path.isabs(candidate):
-                parent = self.directories.get(dir_fd)
+                parent = self._descriptor_path(dir_fd)
                 if parent is None:
                     raise AssertionError("TEST BUG: untracked dir_fd in guarded filesystem I/O")
                 candidate = os.path.join(os.fspath(parent), candidate)
@@ -194,25 +197,75 @@ class HomeIOGuard:
         wrap(shutil, "rmtree", (("path", "dir_fd"),), destructive=True)
         wrap(sqlite3, "connect", (("database", None),))
 
+        self._install_descriptors(monkeypatch, preserve_capabilities)
+
+    def _forget_descriptor(self, fd):
+        self.directories.pop(fd, None)
+        self._identities.pop(fd, None)
+
+    def _track_descriptor(self, fd, path):
+        info = os.fstat(fd)
+        self.directories[fd] = path
+        self._identities[fd] = (info.st_dev, info.st_ino, stat.S_IFMT(info.st_mode))
+
+    def _descriptor_path(self, fd):
+        """Unknown or natively recycled numbers never inherit another descriptor's path."""
+        with self._descriptor_lock:
+            path = self.directories.get(fd)
+            if path is not None:
+                try:
+                    info = os.fstat(fd)
+                except OSError:
+                    self._forget_descriptor(fd)
+                else:
+                    identity = (info.st_dev, info.st_ino, stat.S_IFMT(info.st_mode))
+                    if self._identities.get(fd) == identity:
+                        return path
+                    self._forget_descriptor(fd)
+            return None
+
+    def _install_descriptors(self, monkeypatch, preserve_capabilities):
         original_open, original_close = os.open, os.close
+        original_dup, original_dup2 = os.dup, os.dup2
 
         @wraps(original_open)
         def guarded_open(path, flags, *args, **kwargs):
-            self.check(path, dir_fd=kwargs.get("dir_fd"), destructive=bool(flags & (os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_TRUNC)))
-            fd = original_open(path, flags, *args, **kwargs)
-            candidate = Path(os.fsdecode(path))
-            if kwargs.get("dir_fd") is not None and not candidate.is_absolute():
-                candidate = self.directories[kwargs["dir_fd"]] / candidate
-            self.directories[fd] = candidate.absolute()
-            return fd
+            with self._descriptor_lock:
+                self.check(path, dir_fd=kwargs.get("dir_fd"), destructive=bool(
+                    flags & (os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_TRUNC)))
+                fd = original_open(path, flags, *args, **kwargs)
+                candidate = Path(os.fsdecode(path))
+                if kwargs.get("dir_fd") is not None and not candidate.is_absolute():
+                    candidate = self.directories[kwargs["dir_fd"]] / candidate
+                self._track_descriptor(fd, candidate.absolute())
+                return fd
 
         @wraps(original_close)
         def guarded_close(fd):
-            # Forget the old owner before close releases the number for reuse
-            # by another thread's open; afterwards we could erase its mapping.
-            self.directories.pop(fd, None)
-            return original_close(fd)
+            with self._descriptor_lock:
+                # Forget before close makes the number available to another open.
+                self._forget_descriptor(fd)
+                return original_close(fd)
+
+        def duplicate(original, fd, *args, **kwargs):
+            with self._descriptor_lock:
+                path = self._descriptor_path(fd)
+                result = original(fd, *args, **kwargs)
+                self._forget_descriptor(result)
+                if path is not None:
+                    self._track_descriptor(result, path)
+                return result
+
+        @wraps(original_dup)
+        def guarded_dup(fd):
+            return duplicate(original_dup, fd)
+
+        @wraps(original_dup2)
+        def guarded_dup2(fd, fd2, inheritable=True):
+            return duplicate(original_dup2, fd, fd2, inheritable=inheritable)
 
         preserve_capabilities(original_open, guarded_open)
         monkeypatch.setattr(os, "open", guarded_open)
         monkeypatch.setattr(os, "close", guarded_close)
+        monkeypatch.setattr(os, "dup", guarded_dup)
+        monkeypatch.setattr(os, "dup2", guarded_dup2)

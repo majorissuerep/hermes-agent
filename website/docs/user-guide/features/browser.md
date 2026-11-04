@@ -174,9 +174,10 @@ browser:
 
 When enabled, Hermes copies your default browser's **active** profile — the one
 you actually browse (`Local State → profile.last_used`), with its cookies, saved
-logins, and preferences — into a managed snapshot under
-`~/.hermes/browser-profile/<browser>/`, then launches your **real browser
-binary** on that snapshot and attaches its browsing engine to it. Launching the
+logins, and preferences — into a Hermes-owned snapshot, then launches your **real browser
+binary** on that snapshot and attaches its browsing engine to it. The snapshot is only ever
+*active* in protected RAM and is stored on disk only *encrypted* (see
+[Where owned browser profiles live](#where-owned-browser-profiles-live)). Launching the
 real binary (instead of a bundled Chromium with mock-keychain switches) is what
 keeps OS-encrypted cookies decryptable — on macOS, Chrome cookies are encrypted
 through the Keychain, and a mock-keychain launch would silently drop every one
@@ -213,9 +214,45 @@ browser:
 A pin naming a profile directory that doesn't exist fails closed with a
 fixable message — it never silently falls back to the last-used profile.
 
-When you turn the toggle back off, Hermes deletes the snapshot store
-(`~/.hermes/browser-profile/`) on the next browser use, so the copied
-credentials don't linger after you revoke consent.
+When you turn the toggle back off, Hermes deletes the real-profile snapshots — their
+encrypted archives and any RAM copy no browser is using — on the next browser use, so the
+copied credentials don't linger after you revoke consent. A copy a browser still has open is
+kept until that browser closes (it is never deleted under a running browser), and the
+`/browser connect` debug profile is not affected.
+
+#### Where owned browser profiles live
+
+Both profiles Hermes owns — the real-profile snapshot and the `/browser connect` debug
+profile — hold live cookies and logins, so neither is ever written to persistent storage in
+plaintext:
+
+- **Active copy: protected RAM.** The browser runs on a directory in the protected RAM
+  workspace — `security.protected_work_dir` if set, otherwise your per-user runtime directory
+  (`XDG_RUNTIME_DIR`) — and only when Hermes can prove that location is RAM-only (ramfs, or
+  tmpfs with `noswap` or no active swap). Otherwise Hermes refuses with a message telling you to
+  set `security.protected_work_dir` to an owner-only ramfs directory; it never falls back to disk.
+  Hermes does not change swap or other system settings for you.
+- **Durable copy: an encrypted archive.** When the browser running on a copy exits (Hermes ends
+  its real-profile browser on exit; the debug browser is yours to close), Hermes saves the copy
+  as one authenticated archive under `browser-profile/` in your Hermes home, sealed with this
+  profile's vault, and removes the RAM copy. Regenerable caches are not saved. Each real-profile
+  source profile/account gets its own archive, so a different signed-in account never inherits
+  another's cookies. A save that fails (vault locked, profile over the 2 GiB bound) keeps both
+  the RAM copy and the previous archive and is reported by `hermes secure-vault status`.
+- **Volatile window.** Changes made since the last save exist only in RAM until that browser
+  closes; a power loss or logout that clears the runtime directory in between loses them (the
+  previous archive remains). `hermes secure-vault status` shows unsaved RAM copies.
+- **Upgrading.** Profiles an older Hermes left as plaintext (`browser-profile/<browser>/`,
+  `chrome-debug/`) are not used and not deleted automatically. With Hermes and that browser
+  closed, run `hermes secure-vault repair`: it archives each one, verifies an actual restore
+  matches it byte for byte, and only then removes the plaintext directory (an ordinary delete,
+  not a secure erase of SSD blocks).
+- **macOS.** The RAM-only proof is currently Linux-only, so owned browser profiles refuse on
+  macOS until a provable RAM location is supported there. A `/browser connect` to a browser you
+  start yourself (below) is unaffected.
+
+Owned browser profiles are excluded from `hermes backup`, profile exports and plaintext
+`hermes secure-vault export`, like every other copied cookie store.
 
 :::note A running browser can block the login/autofill databases
 On Windows a running Chrome/Edge/Brave holds its cookie and login databases with
@@ -527,37 +564,37 @@ In the CLI, use:
 /browser disconnect              # Detach and return to cloud/local mode
 ```
 
-If a browser isn't already running with remote debugging, Hermes will attempt to auto-launch a supported Chromium-family browser with `--remote-debugging-port=9222`. Detection includes Brave, Brave Origin/Nightly, Google Chrome, Chromium, and Microsoft Edge, with common Linux install paths and binary names such as `brave-origin`, `brave-origin-nightly`, `/opt/brave.com/brave-origin/brave-origin`, `/opt/brave.com/brave-origin-nightly/brave-origin`, `/opt/brave-bin/brave`, and `/snap/bin/brave`.
+If a browser isn't already running with remote debugging, Hermes will attempt to auto-launch a supported Chromium-family browser with `--remote-debugging-port=9222` on Hermes' own debug profile, which is active only in protected RAM and stored encrypted (see [Where owned browser profiles live](#where-owned-browser-profiles-live)). If that profile cannot be prepared safely, nothing is launched and the reason is shown. If the browser itself fails to start, Hermes prints the exact command for the prepared profile so you can run it by hand. Detection includes Brave, Brave Origin/Nightly, Google Chrome, Chromium, and Microsoft Edge, with common Linux install paths and binary names such as `brave-origin`, `brave-origin-nightly`, `/opt/brave.com/brave-origin/brave-origin`, `/opt/brave.com/brave-origin-nightly/brave-origin`, `/opt/brave-bin/brave`, and `/snap/bin/brave`.
 
 :::tip
-To start a Chromium-family browser manually with CDP enabled, use a dedicated user-data-dir so the debug port actually comes up even if the browser is already running with your normal profile:
+To attach to a browser you start and manage yourself, give it a dedicated user-data-dir of your own so the debug port actually comes up even if the browser is already running with your normal profile. Keep that directory outside your Hermes home: Hermes only attaches to it over CDP, and does not manage or encrypt a profile it did not create.
 
 ```bash
 # Linux — Brave
 brave-browser \
   --remote-debugging-port=9222 \
-  --user-data-dir=$HOME/.hermes/chrome-debug \
+  --user-data-dir="$HOME/chrome-debug-profile" \
   --no-first-run \
   --no-default-browser-check &
 
 # Linux — Google Chrome
 google-chrome \
   --remote-debugging-port=9222 \
-  --user-data-dir=$HOME/.hermes/chrome-debug \
+  --user-data-dir="$HOME/chrome-debug-profile" \
   --no-first-run \
   --no-default-browser-check &
 
 # macOS — Brave
 "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser" \
   --remote-debugging-port=9222 \
-  --user-data-dir="$HOME/.hermes/chrome-debug" \
+  --user-data-dir="$HOME/chrome-debug-profile" \
   --no-first-run \
   --no-default-browser-check &
 
 # macOS — Google Chrome
 "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
   --remote-debugging-port=9222 \
-  --user-data-dir="$HOME/.hermes/chrome-debug" \
+  --user-data-dir="$HOME/chrome-debug-profile" \
   --no-first-run \
   --no-default-browser-check &
 ```
@@ -566,7 +603,7 @@ Then launch the Hermes CLI and run `/browser connect`.
 
 **Why `--user-data-dir`?** Without it, launching a Chromium-family browser while a regular instance is already running typically opens a new window on the existing process — and that existing process was not started with `--remote-debugging-port`, so port 9222 never opens. A dedicated user-data-dir forces a fresh browser process where the debug port actually listens. `--no-first-run --no-default-browser-check` skips the first-launch wizard for the fresh profile.
 
-**Chrome 136+ makes the dedicated profile mandatory.** Two separate mechanisms are in play, and neither applies once you pass a non-default `--user-data-dir`. First, since [Chrome 136](https://developer.chrome.com/blog/remote-debugging-port) `--remote-debugging-port` and `--remote-debugging-pipe` "will no longer be respected if attempting to debug the default Chrome data directory" — the flag is silently ignored, no dialog, and `/browser connect` (or `curl http://127.0.0.1:9222/json/version`) gets connection refused even from a cold start. Second, [Chrome 144+](https://developer.chrome.com/blog/chrome-devtools-mcp-debug-your-browser-session) adds an opt-in *approval* flow for debugging your real profile: you enable it under `chrome://inspect/#remote-debugging`, and Chrome then shows an **"Allow remote debugging?"** dialog for **every incoming connection** (not once per launch), with nothing listening until you press **Allow**. If you see that dialog, you are on the approval path, not the flag path. The fix is exactly the commands above: point `--user-data-dir` somewhere other than your default profile directory (e.g. `$HOME/.hermes/chrome-debug`), which needs neither the toggle nor the dialog. This applies to Chrome, Chromium, Edge, and Brave builds that have picked up the change.
+**Chrome 136+ makes the dedicated profile mandatory.** Two separate mechanisms are in play, and neither applies once you pass a non-default `--user-data-dir`. First, since [Chrome 136](https://developer.chrome.com/blog/remote-debugging-port) `--remote-debugging-port` and `--remote-debugging-pipe` "will no longer be respected if attempting to debug the default Chrome data directory" — the flag is silently ignored, no dialog, and `/browser connect` (or `curl http://127.0.0.1:9222/json/version`) gets connection refused even from a cold start. Second, [Chrome 144+](https://developer.chrome.com/blog/chrome-devtools-mcp-debug-your-browser-session) adds an opt-in *approval* flow for debugging your real profile: you enable it under `chrome://inspect/#remote-debugging`, and Chrome then shows an **"Allow remote debugging?"** dialog for **every incoming connection** (not once per launch), with nothing listening until you press **Allow**. If you see that dialog, you are on the approval path, not the flag path. The fix is exactly the commands above: point `--user-data-dir` somewhere other than your default profile directory (e.g. `$HOME/chrome-debug-profile`), which needs neither the toggle nor the dialog. This applies to Chrome, Chromium, Edge, and Brave builds that have picked up the change.
 
 A dedicated profile starts out signed out of everything. If you want the agent to browse with your existing logins *and* no approval dialog, use [`browser.use_real_profile`](#real-profile-browsing-use-your-own-logins) instead: it snapshots your active profile into a copy and drives that, which is a non-default user-data-dir and so never triggers either mechanism.
 :::

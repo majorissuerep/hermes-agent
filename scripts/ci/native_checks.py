@@ -13,6 +13,8 @@ LINUX_FILES = [
     "tests/hermes_platform/test_client_capture.py",
     "tests/hermes_platform/test_remote_workspace.py",
     "tests/tools/test_browser_terminal.py",
+    "tests/hermes_cli/test_browser_profile_store.py",
+    "tests/hermes_cli/test_browser_profile_repair.py",
     "tests/hermes_platform/test_private_ipc_directory.py",
     "tests/tui_runtime/test_terminal_model_pty.py",
     "tests/tui_runtime/test_terminal_artifact_preview_pty.py",
