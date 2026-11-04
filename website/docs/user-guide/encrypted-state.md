@@ -150,3 +150,35 @@ Extract into a new directory to inspect or migrate the copy. To use it as a
 Hermes home again, select that isolated home and run `hermes secure-vault migrate`
 to re-encrypt it before normal use. Validate the copy before removing any recovery
 material. See the [qualification contract](../developer-guide/reliability.md).
+
+
+### Interrupted migration and original rollback recovery
+
+Migration establishes your intended credential and an encrypted checkpoint together,
+then streams and verifies a full encrypted rollback outside the home before converting
+any file. Keep its reported `.hmb` file and the original credential. A later credential
+change cannot revoke credentials already known for a historical backup.
+
+If migration stops, run `hermes secure-vault migrate --yes` again with the original
+passphrase or external key file. Hermes authenticates the exact pending checkpoint
+and complete rollback before resuming. Already-converted databases are checked by
+their schema and data fingerprint, not by comparing physical SQLite bytes. Unexpected
+changes are retained and reported; an unrelated initialized vault cannot be resumed.
+
+If the live home's metadata is lost, recover from the rollback's embedded ordinary
+public vault metadata and your original credential without changing the live home:
+
+```sh
+hermes secure-vault export --migration-backup /recovery/original.hmb --output /offline/original.tar
+```
+
+This is an explicitly requested **plaintext offline export**. The output must be new
+and outside every encrypted Hermes home. The full rollback authenticates before any
+member is used or output is published. Metadata staging needs a proven RAM-only
+`XDG_RUNTIME_DIR`; an unavailable RAM proof refuses recovery rather than placing
+private recovery work on SSD. The original rollback stays encrypted and unchanged.
+Restore the recovered original data only through a deliberate offline recovery workflow.
+
+Older `hermes-premigration-*.tar` files may already contain plaintext. Explicit vault
+repair can still read them to recover damaged state; it never deletes their sole copy
+or claims that replacing or deleting them erases historical SSD bytes.

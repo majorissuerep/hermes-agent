@@ -160,6 +160,10 @@ _UPDATE_ENTRY_POINTS = (
 )
 # What the entry points import, outside the update_* family and the pipeline above.
 _UPDATE_DEPENDENCIES = (
+    "hermes_security/migration_archive.py",  # encrypted rollback and interrupted migration
+    "hermes_security/migration_state.py",  # encrypted rollback and interrupted migration
+    "hermes_security/migration_resume.py",  # encrypted rollback and interrupted migration
+    "hermes_security/migration_workflow.py",  # encrypted rollback and interrupted migration
     "hermes_cli/terminal_update.py",
     "hermes_platform/process_argv.py",
     "hermes_platform/child_processes.py",  # native updater custody and completion receipt ownership

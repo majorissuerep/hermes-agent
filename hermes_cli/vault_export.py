@@ -4,6 +4,10 @@ from __future__ import annotations
 
 
 def export_command(args) -> int:
+    if getattr(args, "migration_backup", None):
+        from hermes_cli.vault_migration_export import export_command as export_migration
+
+        return export_migration(args)
     from hermes_constants import get_hermes_home
     from hermes_cli.vault_cmd import gate_locked_vault
     from hermes_security.errors import VaultError

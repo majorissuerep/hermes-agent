@@ -24,7 +24,7 @@ def build_secure_vault_parser(subparsers) -> None:
         default="status",
         choices=["init", "migrate", "unlock", "status", "lock", "keygen", "add-key", "remove-key", "slots", "repair", "export"],
         help="init = create vault on a fresh home; migrate = convert an existing plaintext home "
-        "in place (full tar backup first, every file verified, sessions/config preserved); "
+        "in place (encrypted rollback verified first; interrupted migration resumes with its original credential); "
         "unlock = unlock for this process; status = show state; lock = drop this process's keys; "
         "keygen = generate an X25519 keypair (private key shown ONCE, store it yourself — "
         "the system never holds it); add-key = seal the vault to a public key (key slot); "
@@ -34,6 +34,7 @@ def build_secure_vault_parser(subparsers) -> None:
     )
     parser.add_argument("--yes", action="store_true", help="migrate: skip the confirmation prompt")
     parser.add_argument("--output", help="export: new plaintext .tar outside every encrypted home (never overwritten)")
+    parser.add_argument("--migration-backup", help="export: standalone encrypted migration rollback; requires its original credential")
     parser.add_argument(
         "--key-only", action="store_true",
         help="migrate: non-interactive creation for daemons/scripts — generate an X25519 pair, "

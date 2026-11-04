@@ -43,13 +43,13 @@ hermes secure-vault status
 ```
 
 Choose a passphrase in the terminal prompt, never in chat, argv or an environment
-variable. Migration creates a pre-encryption backup. Verify the installation before
-securely removing that **plaintext backup**. Losing every unlock credential means
+variable. Migration verifies an **encrypted rollback** outside the home before converting state.
+Keep that rollback with its original unlock credential until the installation is verified. Losing every unlock credential means
 losing access to encrypted data.
 
 Container images keep their code immutable. When the data home's parent is
 read-only, migration uses the provisioned owner-only sibling directory
-`<HERMES_HOME>-migration-backups`; the reported backup remains outside the encrypted home.
+`<HERMES_HOME>-migration-backups`; the reported encrypted rollback remains outside the home.
 
 Unlock once when starting a session. Local self-management commands and delegated
 terminal agents reuse temporary, profile-scoped session authority without another

@@ -7,8 +7,8 @@
 - Text/config/JSON/YAML/markdown -> AES-GCM envelopes.
 - Append-only logs and ``.jsonl`` transcripts -> encrypted frame streams.
 
-Before touching anything it writes a full tar backup OUTSIDE the home
-(sibling of the home directory).  Every converted file is verified
+Before converting state it writes and authenticates an encrypted full rollback
+OUTSIDE the home. The initial credential metadata includes its encrypted continuation checkpoint.  Every converted file is verified
 (byte-compare for envelopes, full ``iterdump`` compare for databases) before
 the plaintext original is replaced.  A final scan asserts no plaintext state
 remains inside the home.
@@ -24,7 +24,6 @@ import os
 import sqlite3
 import stat
 import tarfile
-import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -332,10 +331,10 @@ def _restore_env_from_backup(vault, home: Path, path: Path, rel: Path, garbage: 
     member = rel.as_posix()
     for tar_path in _migration_backups(home):
         try:
-            with tarfile.open(tar_path) as tar:
-                extracted = tar.extractfile(member)
-                original = extracted.read() if extracted is not None else None
-        except (KeyError, OSError, tarfile.TarError):
+            from hermes_security.migration_workflow import original_member
+
+            original = original_member(tar_path, home, member)
+        except (KeyError, OSError, tarfile.TarError, vault_errors.VaultError):
             continue
         if original is None or _is_mangled_text(original):
             continue
@@ -432,37 +431,20 @@ def _migration_backups(home: Path) -> list[Path]:
     private = _private_backup_directory(home)
     if private is not None:
         directories.append(private)
-    return sorted((path for directory in directories
-                   for path in directory.glob(f"hermes-premigration-{home.name}-*.tar")),
+    return sorted((path for directory in directories for suffix in ("hmb", "tar")
+                   for path in directory.glob(f"hermes-premigration-{home.name}-*.{suffix}")),
                   key=lambda path: path.name, reverse=True)
 
 
-def _open_migration_backup(home: Path, dest_dir: Path, prefix: str):
-    try:
-        return tempfile.mkstemp(prefix=prefix, suffix=".tar", dir=dest_dir)
-    except PermissionError:
-        # A volume can be writable inside an immutable container's /opt.
-        # Its image provisions this owner-private sibling; code remains immutable.
-        private = _private_backup_directory(home) if dest_dir == home.parent else None
-        if private is None:
-            raise PermissionError(
-                f"Cannot create a pre-migration backup in {dest_dir}; provide an owner-only "
-                f"directory at {home.parent / (home.name + '-migration-backups')} (mode 0700)"
-            ) from None
-        return tempfile.mkstemp(prefix=prefix, suffix=".tar", dir=private)
-
-
 def _backup_home(home: Path, dest_dir: Path) -> Path:
-    stamp = time.strftime("%Y%m%d-%H%M%S")
-    fd, name = _open_migration_backup(home, dest_dir, f"hermes-premigration-{home.name}-{stamp}-")
-    backup = Path(name)
-    # mkstemp is owner-only from creation, not after the sensitive first write.
-    with os.fdopen(fd, "wb") as handle:
-        with tarfile.open(fileobj=handle, mode="w") as tar:
-            for path, rel in _iter_files(home):
-                tar.add(str(path), arcname=str(rel), recursive=False)
-        handle.flush()
-        os.fsync(handle.fileno())
+    """Create an encrypted rollback with an already-established original vault credential."""
+    from hermes_security.artifacts import _Custody
+    from hermes_security.migration_archive import write_backup
+    from hermes_security.migration_workflow import entries
+
+    backup = dest_dir / f"hermes-premigration-{home.name}-{time.strftime('%Y%m%d-%H%M%S')}-{os.urandom(16).hex()}.hmb"
+    write_backup(home, backup, custody=_Custody(home), entries=entries(home),
+                 metadata=(home / ".hermes-vault").read_bytes())
     return backup
 
 
@@ -689,66 +671,12 @@ def _classify(path: Path, relative: Path | None = None) -> str:
     return "envelope"
 
 
-def migrate_home(home: Path | str, password: str | bytes, *, dry_run: bool = False) -> MigrationReport:
-    home = Path(home).expanduser().resolve()
-    if vault_mod.vault_exists(home):
-        raise vault_errors.VaultError(f"A vault already exists at {home}")
-    report = MigrationReport(home=home)
-    from agent.pet.private_repair import plaintext_paths as legacy_generated_pet_paths
+def migrate_home(home: Path | str, password: str | bytes | None, *, dry_run: bool = False,
+                 public_key_raw: bytes | None = None) -> MigrationReport:
+    """Create or explicitly resume a credential-bound migration with verified encrypted rollback."""
+    from hermes_security.migration_workflow import run
 
-    files = list(_iter_files(home))
-    legacy_pets = legacy_generated_pet_paths(home)
-    if not files and not legacy_pets:
-        # nothing to convert; still create the vault
-        if not dry_run:
-            vault_mod.init_vault(home, password, _allow_existing_state=True)
-        return report
-
-    backup_root = home.parent
-    if not dry_run:
-        report.backup_path = _backup_home(home, backup_root)
-
-    # unlock vault FIRST so envelope writers can seal
-    if not dry_run:
-        vault_mod.init_vault(home, password, _allow_existing_state=True)
-        vault_mod.unlock(home, password)
-
-    for path, rel in files:
-        try:
-            kind = _classify(path, rel)
-            if kind == "skip":
-                continue
-            if kind == "browser":
-                _note_browser_root(report, rel)
-                continue
-            if not dry_run:
-                _harden_private_artifact(home, rel)
-            if kind == "db":
-                if dry_run:
-                    report.databases.append(rel.as_posix())
-                else:
-                    _migrate_database(home, path, rel, report)
-            elif kind == "frames":
-                if dry_run:
-                    report.frame_streams.append(rel.as_posix())
-                else:
-                    _migrate_frames(home, path, rel, report)
-            else:
-                if dry_run:
-                    report.envelopes.append(rel.as_posix())
-                else:
-                    _migrate_envelope(home, path, rel, report)
-        except FileNotFoundError:
-            # vanished mid-migration (e.g. a sidecar consumed by its parent
-            # DB conversion) — nothing to convert
-            report.skipped.append(rel.as_posix() + " (vanished)")
-        except Exception as exc:
-            report.failures.append(f"{rel.as_posix()}: {exc}")
-
-    if not dry_run:
-        _convert_browser_profiles(home, report)
-    _migrate_generated_pets(home, report, dry_run=dry_run)
-    return report
+    return run(home, password, dry_run=dry_run, public_key_raw=public_key_raw)
 
 
 def _migrate_generated_pets(home, report, *, dry_run):

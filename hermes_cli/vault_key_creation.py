@@ -57,7 +57,7 @@ def migrate_with_key_file(home: Path, output: Path) -> int:
     one_time = secrets.token_urlsafe(48)
     try:
         print("→ Backing up and migrating (this can take a minute)...")
-        report = migrate.migrate_home(home, one_time)
+        report = migrate.migrate_home(home, one_time, public_key_raw=public_key)
         if not report.ok:
             print("✗ Migration finished WITH FAILURES (backup and external credential kept):")
             for failure in report.failures:
@@ -65,7 +65,6 @@ def migrate_with_key_file(home: Path, output: Path) -> int:
             if report.backup_path:
                 print(f"  Backup: {report.backup_path}")
             return 1
-        vault.add_key_slot(home, public_key_raw=public_key, password=one_time)
     finally:
         del one_time
     leftovers = migrate.scan_for_plaintext(home)
@@ -78,6 +77,6 @@ def migrate_with_key_file(home: Path, output: Path) -> int:
     print(f"  Unlock with: HERMES_VAULT_PRIVATE_KEY={output}")
     if report.backup_path:
         print(f"  Pre-migration backup: {report.backup_path}")
-        print("  Verify everything works, then delete it (it is PLAINTEXT).")
+        print("  Encrypted rollback retained; keep its original credential for recovery.")
     print("  Keep this external credential in your deliberately selected protected storage.")
     return 0
