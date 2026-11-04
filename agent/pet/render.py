@@ -364,7 +364,9 @@ class PetRenderer:
 
 
 def build_renderer(
-    spritesheet: str | Path, *, configured_mode: str | None = None, scale: float = DEFAULT_SCALE, unicode_cols: int = 20, stream=None
+    spritesheet: str | Path, *, configured_mode: str | None = None, scale: float = DEFAULT_SCALE,
+    unicode_cols: int = 20, stream=None, private_custody=None,
 ) -> PetRenderer:
     """Resolve the mode from config+env, then construct a :class:`PetRenderer`."""
-    return PetRenderer(spritesheet, mode=resolve_mode(configured_mode, stream=stream), scale=scale, unicode_cols=unicode_cols)
+    return PetRenderer(spritesheet, mode=resolve_mode(configured_mode, stream=stream), scale=scale,
+                       unicode_cols=unicode_cols, private_custody=private_custody)

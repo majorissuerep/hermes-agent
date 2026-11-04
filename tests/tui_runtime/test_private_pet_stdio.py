@@ -161,6 +161,54 @@ def test_native_generated_media_and_pet_roundtrip_over_private_stdio(tmp_path, m
         vault.clear_vault_cache()
 
 
+def _public_show_once(user_home):
+    """Existing public CLI on a real PTY; decoded output stays only in memory."""
+    import pty
+    import select
+    import subprocess
+    import sys
+    import time
+    from tests.e2e.core.security._helpers import hermetic_env, kill_group
+    from tests.e2e.vault_home import spawn_unlocked
+
+    master, slave = pty.openpty()
+    proc = None
+    output = bytearray()
+    try:
+        proc = spawn_unlocked([sys.executable, "-m", "hermes_cli.main", "pets", "show", "Legacy.ID",
+                "--mode", "unicode", "--once", "--state", "idle"], cwd=user_home,
+                env=hermetic_env(user_home), stdin=slave, stdout=slave, stderr=slave, start_new_session=True)
+        os.close(slave)
+        slave = None
+        deadline = time.monotonic() + 45
+        while True:
+            if time.monotonic() >= deadline:
+                raise AssertionError("Bounded public pet show did not exit")
+            ready = select.select([master], [], [], 0.2 if proc.poll() is None else 0)[0]
+            if ready:
+                try:
+                    chunk = os.read(master, 65536)
+                except OSError:
+                    break
+                if not chunk:
+                    break
+                output.extend(chunk)
+                if len(output) > 1024 * 1024:
+                    raise AssertionError("Public pet preview exceeded its observation bound")
+            elif proc.poll() is not None:
+                break
+        proc.wait(timeout=10)
+        completed = proc.returncode == 0 and b"mode=unicode" in output and b"\xe2\x96" in output
+        assert completed, "Public pet show did not produce a successful bounded grayscale frame"
+    finally:
+        if slave is not None:
+            os.close(slave)
+        if proc is not None:
+            kill_group(proc)
+            proc.wait(timeout=10)
+        os.close(master)
+
+
 def test_public_repair_cli_converts_legacy_pet_then_a_cold_stdio_reader_recovers_it(tmp_path, monkeypatch):
     from hermes_security import io as state_io
     from hermes_security.protected_workspace import protected_workspace_status
@@ -195,6 +243,8 @@ def test_public_repair_cli_converts_legacy_pet_then_a_cold_stdio_reader_recovers
     before = {p: p.read_bytes() for p in (home / "artifacts/generated/pet-store").rglob("*") if p.is_file()}
     repeated = run_hermes(["secure-vault", "repair"], user_home, timeout=90)
     assert repeated.returncode == 0 and all(p.read_bytes() == raw for p, raw in before.items())
+    _public_show_once(user_home)
+    assert all(p.read_bytes() == raw for p, raw in before.items())
     with tempfile.TemporaryDirectory(prefix="pet-repair-native-", dir=ram) as logging:
         runtime = NativeRuntime(user_home, Path(logging) / "stderr.log")
         try:
