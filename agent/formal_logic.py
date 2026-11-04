@@ -56,6 +56,7 @@ class FormalState:
     decisions: dict = field(default_factory=dict)
     cache: dict = field(default_factory=dict)
     last_receipt: dict = field(default_factory=dict)
+    authority: Any = field(default=None, repr=False, compare=False)
 
 
 def state(agent) -> FormalState | None:
@@ -64,14 +65,16 @@ def state(agent) -> FormalState | None:
 
 
 def _interruption_feedback(agent, current: FormalState) -> str | None:
-    if not getattr(agent, "_interrupt_requested", False):
+    interrupted = getattr(agent, "_interrupt_requested", False)
+    ended = current.authority is not None and not current.authority.is_live()
+    if not interrupted and not ended:
         return None
     current.approved, current.pending = False, {}
     current.finalized, current.accepted_response = False, ""
-    current.status = "interrupted"
-    current.last_receipt = {"status": "interrupted"}
+    current.status = "interrupted" if interrupted else "authority_ended"
+    current.last_receipt = {"status": current.status}
     return json.dumps({"formal_logic": current.last_receipt, "pending_stakeholder_questions": [],
-                       "instruction": "Turn interrupted. Request no automatic repair or stakeholder input."})
+                       "instruction": "The original turn ended. Request no automatic repair or stakeholder input."})
 
 
 def begin_turn(agent, user_message: Any) -> str:
@@ -93,6 +96,7 @@ def begin_turn(agent, user_message: Any) -> str:
     if getattr(agent, "api_mode", None) == "codex_app_server":
         raise RuntimeError("Formal logic mode requires the native Hermes loop; managed Codex/Claude children remain available")
     current.task = user_message if isinstance(user_message, str) else json.dumps(user_message, ensure_ascii=False)
+    current.authority = getattr(agent, "_vault_session_authority", None)
     current.attempts, current.approved, current.status = 0, False, "checkpoint_required"
     current.finalized, current.accepted_response = False, ""
     current.pending, current.decisions, current.cache, current.last_receipt = {}, {}, {}, {}
@@ -151,7 +155,7 @@ def gate_final(agent, final_msg: dict, final_response: str, messages: list) -> t
         return None
     accepted, text = check_candidate(agent, final_response)
     if _interruption_feedback(agent, current) is not None:
-        return False, _FAILURE + " Status: interrupted."
+        return False, _FAILURE + f" Status: {current.status}."
     if accepted:
         current.finalized, current.accepted_response = True, text
         set_checked_message(final_msg, text)
