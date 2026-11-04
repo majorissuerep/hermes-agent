@@ -14,6 +14,7 @@ from hermes_platform.resolver import locate_command
 
 ROOT = Path(__file__).resolve().parents[2]
 FILES = [
+    "tests/tools/test_mcp_operation_wire.py",
     "tests/hermes_platform/test_remote_workspace.py",
     "tests/hermes_cli/test_browser_recording_public_recovery.py",
     "tests/hermes_cli/test_management_public_cli.py",
