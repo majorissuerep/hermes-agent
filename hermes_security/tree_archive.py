@@ -61,6 +61,8 @@ class TreePolicy:
 
     ``excluded(relative, kind)`` drops a known expendable entry before its type is checked;
     ``None`` retains every regular file and directory. ``label`` names the domain in errors.
+    ``preserve_owner_exec`` declares authenticated owner-execute metadata and includes it in the
+    completion digest. Domains without it keep the original format-1 bytes and private restore.
     """
 
     label: str
@@ -68,6 +70,7 @@ class TreePolicy:
     max_entries: int
     excluded: Callable[[str, int], bool] | None = None
     bound_hint: str = ""
+    preserve_owner_exec: bool = False
 
 
 def canonical_json(document: Any) -> bytes:
@@ -125,21 +128,24 @@ def _iter_tree(root: Path | int, policy: TreePolicy) -> Iterator[tuple[str, bool
 
 
 class _TreeDigest:
-    def __init__(self) -> None:
+    def __init__(self, preserve_owner_exec: bool = False) -> None:
         self._hash = hashlib.sha256(_TREE_DIGEST_LABEL)
+        self._owner_exec = preserve_owner_exec
 
     def directory(self, relative: str) -> None:
         self._hash.update(b"D" + os.fsencode(relative) + b"\0")
 
-    def file(self, relative: str, size: int, content: bytes) -> None:
+    def file(self, relative: str, size: int, content: bytes, owner_exec: bool = False) -> None:
         self._hash.update(b"F" + os.fsencode(relative) + b"\0" + size.to_bytes(8, "big") + content)
+        if self._owner_exec:
+            self._hash.update(b"X" + bytes([owner_exec]))
 
     def hexdigest(self) -> str:
         return self._hash.hexdigest()
 
 
 @contextlib.contextmanager
-def _source_file(root: Path | int, label: str, relative: str):
+def _source_file(root: Path | int, label: str, relative: str, preserve_owner_exec: bool = False):
     path = PurePosixPath(_relative(relative, label))
     with _source_directory(root, label, path.parent.as_posix()) as parent:
         fd = os.open(path.name, os.O_RDONLY | _NOFOLLOW | _CLOEXEC | getattr(os, "O_NONBLOCK", 0), dir_fd=parent)
@@ -148,7 +154,9 @@ def _source_file(root: Path | int, label: str, relative: str):
         if not stat.S_ISREG(info.st_mode):
             raise ArchiveError(f"A {label} entry changed type while it was persisted")
         yield handle, info
-        if handle.read(1) or os.fstat(handle.fileno()).st_mtime_ns != info.st_mtime_ns:
+        after = os.fstat(handle.fileno())
+        exec_changed = preserve_owner_exec and bool((after.st_mode ^ info.st_mode) & stat.S_IXUSR)
+        if handle.read(1) or after.st_mtime_ns != info.st_mtime_ns or exec_changed:
             raise ArchiveError(f"The {label} changed while it was persisted (a browser is still writing it)")
 
 
@@ -169,17 +177,17 @@ def tree_digest(root: Path, policy: TreePolicy) -> ArchiveSummary:
 
 
 def _tree_digest(root: int, policy: TreePolicy) -> ArchiveSummary:
-    digest, entries, total = _TreeDigest(), 0, 0
+    digest, entries, total = _TreeDigest(policy.preserve_owner_exec), 0, 0
     for relative, is_dir in _iter_tree(root, policy):
         entries += 1
         if is_dir:
             digest.directory(relative)
             continue
-        with _source_file(root, policy.label, relative) as (handle, info):
+        with _source_file(root, policy.label, relative, policy.preserve_owner_exec) as (handle, info):
             content = hashlib.sha256()
             for chunk in _read_chunks(handle, info.st_size, policy.label):
                 content.update(chunk)
-        digest.file(relative, info.st_size, content.digest())
+        digest.file(relative, info.st_size, content.digest(), bool(info.st_mode & stat.S_IXUSR))
         total += info.st_size
     return ArchiveSummary(entries, total, digest.hexdigest())
 
@@ -222,25 +230,29 @@ def _meta(document: dict, label: str) -> bytes:
 
 def _stream_file(sink: _RecordSink, root: int, relative: str, digest: _TreeDigest, budget: int,
                  policy: TreePolicy) -> int:
-    with _source_file(root, policy.label, relative) as (handle, info):
+    with _source_file(root, policy.label, relative, policy.preserve_owner_exec) as (handle, info):
         if info.st_size > budget:
             raise ArchiveError(
                 f"The {policy.label} exceeds the {policy.max_bytes // 1024 ** 3} GiB persistence bound; "
                 f"nothing was discarded.{policy.bound_hint}")
-        sink.record(b"F", _meta({"path": relative, "size": info.st_size, "mtime_ns": info.st_mtime_ns},
-                                policy.label))
+        metadata = {"path": relative, "size": info.st_size, "mtime_ns": info.st_mtime_ns}
+        if policy.preserve_owner_exec:
+            metadata["owner_exec"] = bool(info.st_mode & stat.S_IXUSR)
+        sink.record(b"F", _meta(metadata, policy.label))
         content = hashlib.sha256()
         for chunk in _read_chunks(handle, info.st_size, policy.label):
             content.update(chunk)
             sink.record(b"C", chunk)
-    digest.file(relative, info.st_size, content.digest())
+    digest.file(relative, info.st_size, content.digest(), bool(info.st_mode & stat.S_IXUSR))
     return info.st_size
 
 
 def _stream_tree(sink: _RecordSink, root: int, header: dict, policy: TreePolicy) -> ArchiveSummary:
     label = policy.label
+    if policy.preserve_owner_exec:
+        header = {**header, "file_attributes": "owner-exec-v1"}
     sink.record(b"H", _meta({"format": _FORMAT, **header}, label))
-    digest, entries, total = _TreeDigest(), 0, 0
+    digest, entries, total = _TreeDigest(policy.preserve_owner_exec), 0, 0
     for relative, is_dir in _iter_tree(root, policy):
         entries += 1
         if entries > policy.max_entries:
@@ -358,8 +370,8 @@ class _Replay:
         self.slot, self.expected, self.target = slot, digest, target
         self.header: dict | None = None
         self.summary: ArchiveSummary | None = None
-        self.tree, self.entries, self.total = _TreeDigest(), 0, 0
-        self.pending: list | None = None  # [relative, remaining, fd, content hash, mtime_ns, size]
+        self.tree, self.entries, self.total = _TreeDigest(policy.preserve_owner_exec), 0, 0
+        self.pending: list | None = None  # [relative, remaining, fd, content hash, mtime_ns, size, owner_exec]
 
     def feed(self, kind: bytes, body: bytes) -> None:
         handler = {b"H": self._header, b"D": self._directory, b"F": self._file,
@@ -378,6 +390,8 @@ class _Replay:
         header = _document(body, self.label)
         if header.get("format") != _FORMAT:
             raise ArchiveError(f"The {self.label} archive uses an unsupported format")
+        if self.policy.preserve_owner_exec and header.get("file_attributes") != "owner-exec-v1":
+            raise ArchiveError(f"The {self.label} archive lacks authenticated file attributes")
         if self.slot is not None and (header.get("slot") != self.slot
                                       or header.get("identity_digest") != self.expected):
             raise ArchiveError(f"The {self.label} archive belongs to a different profile or account")
@@ -404,11 +418,14 @@ class _Replay:
         if (not isinstance(size, int) or size < 0 or size > self.policy.max_bytes - self.total
                 or not isinstance(mtime, int)):
             raise ArchiveError(f"The {self.label} archive is corrupt")
+        owner_exec = document.get("owner_exec", False) if self.policy.preserve_owner_exec else False
+        if type(owner_exec) is not bool or (self.policy.preserve_owner_exec and "owner_exec" not in document):
+            raise ArchiveError(f"The {self.label} archive has invalid file attributes")
         self._count()
         fd = -1
         if self.target is not None:
             fd = os.open(self.target / relative, os.O_WRONLY | os.O_CREAT | os.O_EXCL | _NOFOLLOW | _CLOEXEC, 0o600)
-        self.pending = [relative, size, fd, hashlib.sha256(), mtime, size]
+        self.pending = [relative, size, fd, hashlib.sha256(), mtime, size, owner_exec]
         if size == 0:
             self._finish_file()
 
@@ -425,15 +442,17 @@ class _Replay:
             self._finish_file()
 
     def _finish_file(self) -> None:
-        relative, _remaining, fd, content, mtime, size = self.pending
+        relative, _remaining, fd, content, mtime, size, owner_exec = self.pending
         self.pending = None
         if fd >= 0:
             try:
                 if os.utime in os.supports_fd:
                     os.utime(fd, ns=(mtime, mtime))
+                if self.policy.preserve_owner_exec:
+                    os.fchmod(fd, 0o700 if owner_exec else 0o600)
             finally:
                 os.close(fd)
-        self.tree.file(relative, size, content.digest())
+        self.tree.file(relative, size, content.digest(), owner_exec)
         self.total += size
 
     def _end(self, body: bytes) -> None:

@@ -10,6 +10,9 @@ is derived, even under the same vault.
 Every regular file and directory is retained, including cache-shaped Chromium directories,
 ``SingletonLock`` and temporary-named files: runtime sockets and locks live outside the archived
 tree. The record format, bounds checks and verification are ``hermes_security.tree_archive``.
+Worker headers require ``file_attributes=owner-exec-v1``: each file's authenticated owner-execute
+bit also contributes to the completion digest. Restore grants only owner read/write and that
+optional owner execute bit; group/world permissions and special mode bits are never restored.
 """
 from __future__ import annotations
 
@@ -30,7 +33,8 @@ _DIGEST = re.compile(r"[0-9a-f]{64}")
 
 
 def _policy() -> tree_archive.TreePolicy:
-    return tree_archive.TreePolicy(label=_LABEL, max_bytes=MAX_STATE_BYTES, max_entries=MAX_ENTRIES)
+    return tree_archive.TreePolicy(label=_LABEL, max_bytes=MAX_STATE_BYTES, max_entries=MAX_ENTRIES,
+                                   preserve_owner_exec=True)
 
 
 def _purpose(relative: PurePosixPath) -> str:

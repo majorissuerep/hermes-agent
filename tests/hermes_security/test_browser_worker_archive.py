@@ -131,3 +131,64 @@ def test_worker_old_custody_cannot_revive_after_human_unlock_and_sibling_survive
         workers.capture_custody(nested)
     assert _files(owner) == before
     assert workers.replay_archive(sibling, sibling_path, custody=sibling_custody, digest=sibling_digest).bytes > 0
+
+
+@pytest.mark.platforms('posix')
+def test_worker_cold_restore_preserves_only_owner_execute_and_binds_it_to_digest(owner, tmp_path):
+    import stat
+
+    source, restored = tmp_path/'executable-source', tmp_path/'executable-restored'
+    source.mkdir(mode=0o700)
+    restored.mkdir(mode=0o700)
+    helper = source/'helper.sh'
+    helper.write_bytes(b'#!/bin/sh\nexit 0\n')
+    helper.chmod(0o7755)
+    (source/'private.txt').write_bytes(b'retained private data')
+    custody = workers.capture_custody(owner)
+    identity = {'workspace': 'owner executable helper'}
+    digest = workers.identity_digest(custody, identity)
+    relative = workers.archive_relative(digest)
+    summary = workers.write_archive(owner, relative, source, custody=custody, identity=identity, digest=digest)
+    workers.replay_archive(owner, relative, custody=custody, digest=digest, target=restored)
+    assert (restored/'helper.sh').read_bytes() == helper.read_bytes()
+    assert stat.S_IMODE((restored/'helper.sh').stat().st_mode) == 0o700
+    assert stat.S_IMODE((restored/'private.txt').stat().st_mode) == 0o600
+    assert workers.tree_digest(restored) == summary
+    (restored/'helper.sh').chmod(0o600)
+    assert workers.tree_digest(restored) != summary
+
+
+@pytest.mark.platforms('posix')
+def test_worker_authenticated_attribute_change_requires_matching_completion_digest(owner, tmp_path):
+    import json
+    import struct
+    from hermes_security import frames
+
+    source = tmp_path/'attribute-source'
+    source.mkdir(mode=0o700)
+    helper = source/'helper.sh'
+    helper.write_bytes(b'#!/bin/sh\nexit 0\n')
+    helper.chmod(0o700)
+    custody = workers.capture_custody(owner)
+    identity = {'workspace': 'authenticated worker attributes'}
+    digest = workers.identity_digest(custody, identity)
+    relative = workers.archive_relative(digest)
+    workers.write_archive(owner, relative, source, custody=custody, identity=identity, digest=digest)
+    purpose = 'browser-worker-archive:v1:'+relative.as_posix()
+    records, consumed = frames.split_stream((owner/relative).read_bytes(), vault=custody, purpose=purpose, strict=True)
+    assert consumed == (owner/relative).stat().st_size
+    prefix = struct.Struct('>c16sQ')
+    changed = []
+    for payload in records:
+        kind, _archive, _sequence = prefix.unpack_from(payload)
+        if kind == b'F':
+            document = json.loads(payload[prefix.size:])
+            document['owner_exec'] = False
+            payload = payload[:prefix.size]+json.dumps(document).encode()
+        changed.append(payload)
+    (owner/relative).write_bytes(frames.encode_frames(changed, vault=custody, purpose=purpose))
+    before = (owner/relative).read_bytes()
+    with pytest.raises(ArchiveError, match='content verification'):
+        workers.replay_archive(owner, relative, custody=custody, digest=digest)
+    assert (owner/relative).read_bytes() == before
+    assert helper.stat().st_mode & 0o100
