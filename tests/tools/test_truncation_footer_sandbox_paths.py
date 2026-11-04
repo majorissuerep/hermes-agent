@@ -1,9 +1,9 @@
-"""Truncation footers tell the AGENT where the full text lives, and the agent's read_file runs inside
-the active terminal backend: under docker the mounted cache is at /root/.hermes, so a host path in the
-footer is unreadable from the sandbox (#72389, #81984, #77015)."""
+"""Public caches use task-backend paths; encrypted delegation summaries use authenticated host reads."""
 
+import json
 import os
 import re
+from pathlib import Path
 
 from tools import browser_tool_snapshot
 from tools import delegate_tool_results
@@ -19,17 +19,33 @@ def test_truncation_footers_render_the_sandbox_visible_cache_path(tmp_path, monk
     home = tmp_path / ".hermes"
     monkeypatch.setenv("HERMES_HOME", str(home))
     monkeypatch.setenv("TERMINAL_ENV", "docker")
+    home.mkdir()
+    from tests.e2e.vault_home import seal_fixture_home
+
+    seal_fixture_home(home)
     body = "\n".join(f"row {i}" for i in range(5000))
 
     web_out, _ = web_tools_truncate._truncate_with_footer(body, "https://example.com/doc", 3000)
     snap_out = browser_tool_snapshot._truncate_snapshot(body, 3000)
     deleg_out, _ = delegate_tool_results._trim_summary_with_footer(body, 3000, 0)
 
-    for text, subdir in ((web_out, "cache/web"), (snap_out, "cache/web"), (deleg_out, "cache/delegation")):
+    for text, subdir in ((web_out, "cache/web"), (snap_out, "cache/web")):
         path = _footer_path(text)
         assert path.startswith(f"/root/.hermes/{subdir}/"), path
         # The bytes still live on the host under HERMES_HOME; only the rendered path is translated.
         assert os.path.exists(str(home / subdir / os.path.basename(path)))
+
+    path = _footer_path(deleg_out)
+    assert path.startswith(str(home / "cache/delegation") + os.sep), path
+    assert os.path.exists(path)
+    encrypted = Path(path).read_bytes()
+    assert encrypted.startswith(b"HRMVAULT\x00") and body.encode() not in encrypted
+    from tools.file_tools import read_file_tool
+
+    recovered = json.loads(read_file_tool(path, offset=2501, limit=2))
+    assert recovered["content"] == "2501|row 2500\n2502|row 2501"
+    assert "host" in recovered["source"]
+    assert Path(path).read_bytes() == encrypted
 
 
 def test_local_backend_footer_keeps_the_host_path(tmp_path, monkeypatch):
