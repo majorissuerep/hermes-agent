@@ -30,8 +30,8 @@ def test_snapshot_paging_and_search_keep_original_private_content_off_disk(owner
     monkeypatch.setenv("TERMINAL_ENV", "ssh")
     body = "\n".join(f'- item "private-page-74fe line {i}" [ref=e{i}]' for i in range(80))
     stored = Path(_store_full_snapshot(body))
-    assert stored.is_relative_to(owner / "artifacts" / "browser-snapshots")
     assert b"private-page-74fe" not in stored.read_bytes()
+    assert stored.is_relative_to(owner / "artifacts" / "browser-snapshots")
     assert artifacts.read_text(stored) == body
     assert _store_full_snapshot(body) == str(stored)
     footer = _truncate_snapshot(body, max_chars=500)
