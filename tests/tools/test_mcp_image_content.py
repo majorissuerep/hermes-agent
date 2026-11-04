@@ -182,6 +182,8 @@ class TestNativeImageAttach:
         is its own part, so it stays next to the resized screenshot (else the model clicks the wrong pixel)."""
         from agent.tool_executor import _persist_multimodal_text_parts
         from tools.budget_config import BudgetConfig
+        from tests.e2e.vault_home import seal_fixture_home
+        seal_fixture_home(tmp_path)
         out = self._call(monkeypatch, tmp_path, {})
         first_text = next(p for p in out["content"] if p.get("type") == "text")
         first_text["text"] = first_text["text"].replace("snapshot", "snapshot" + "x" * 200_000, 1)
