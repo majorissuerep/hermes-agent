@@ -64,7 +64,9 @@ def test_proven_workspace_is_owner_only_and_removed(base: Path) -> None:
 @pytest.mark.platforms("posix")
 def test_sgid_base_keeps_its_mode_and_creates_an_owner_only_workspace(base: Path) -> None:
     """Native mode inheritance is real here; the RAM proof remains a labelled unit seam."""
+    os.chown(base, -1, os.getegid())
     base.chmod(0o2700)
+    assert stat.S_IMODE(base.stat().st_mode) == 0o2700
     with protected_workspace("group-runtime", base=base, prove=_always_proven) as workspace:
         _assert_owner_only_workspace(workspace, base, "group-runtime")
         assert stat.S_IMODE(base.stat().st_mode) == 0o2700
@@ -79,7 +81,9 @@ def test_created_workspace_rejects_shared_permissions_without_changing_them(base
 
     workspace = base / "unsafe"
     workspace.mkdir()
+    os.chown(workspace, -1, os.getegid())
     workspace.chmod(mode)
+    assert stat.S_IMODE(workspace.stat().st_mode) == mode
     with pytest.raises(ProtectedWorkspaceUnavailable, match="changed"):
         _verify_created(workspace, _always_proven)
     assert stat.S_IMODE(workspace.stat().st_mode) == mode
