@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 import re
 import uuid
 
-from hermes_constants import get_hermes_dir
+from hermes_constants import get_hermes_home
 
 MAX_MEDIA_BYTES = 128 * 1024 * 1024
 
@@ -17,20 +16,12 @@ def _write_media(kind: str, prefix: str, extension: str, data: bytes) -> str:
         raise ValueError(f"Media artifact exceeds {MAX_MEDIA_BYTES} bytes")
     if not re.fullmatch(r"\.[A-Za-z0-9]{1,12}", extension):
         raise ValueError("Invalid media extension")
-    directory = get_hermes_dir(f"cache/{kind}", f"{kind.rstrip('s')}_cache")
-    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
-    from hermes_cli.config import _secure_dir
+    from hermes_security import artifacts
 
-    _secure_dir(directory)
+    home = get_hermes_home()
+    directory = home / "artifacts" / "media" / kind
     path = directory / f"{prefix}_{uuid.uuid4().hex}{extension}"
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
-    try:
-        with os.fdopen(fd, "wb") as handle:
-            handle.write(data)
-    except BaseException:
-        path.unlink(missing_ok=True)
-        raise
-    return str(path)
+    return str(artifacts.write_bytes(path, data, home=home))
 
 
 def cache_image_from_bytes(data: bytes, ext: str = ".jpg") -> str:

@@ -13,6 +13,18 @@ from types import SimpleNamespace
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def sealed_media_home(tmp_path, monkeypatch):
+    from hermes_security import vault
+
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    monkeypatch.setattr(vault, "_SCRYPT_N", 1024)
+    vault.init_vault(tmp_path, "synthetic MCP media password")
+    vault.unlock(tmp_path, "synthetic MCP media password")
+    yield
+    vault.clear_vault_cache()
+
+
 PDF_BYTES = b"%PDF-1.4 fake pdf payload for tests"
 
 
@@ -34,7 +46,7 @@ def doc_cache(tmp_path, monkeypatch):
     """Point the document cache at a temp dir."""
     from tools import media_cache as base
 
-    monkeypatch.setattr(base, "get_hermes_dir", lambda *args: tmp_path)
+    monkeypatch.setattr(base, "get_hermes_home", lambda: tmp_path)
     monkeypatch.setenv("HERMES_DOCUMENT_CACHE_DIR", str(tmp_path))
     # _resolve_cache_dir consults the module constant; patching the constant
     # is sufficient because the import-default comparison detects the change.
@@ -50,8 +62,9 @@ class TestRenderResourceBlock:
         assert "application/pdf" in out
         # Extract path and verify bytes round-trip
         path = out.split("saved to ", 1)[1].split(" (", 1)[0]
-        with open(path, "rb") as fh:
-            assert fh.read() == PDF_BYTES
+        from hermes_security.artifacts import read_bytes
+        assert read_bytes(path) == PDF_BYTES
+        assert Path(path).read_bytes() != PDF_BYTES
         assert Path(path).suffix == ".pdf"
 
 
@@ -120,7 +133,7 @@ class TestAudioBlock:
         from tools import media_cache as base
         from tools.mcp_tool_content import _cache_mcp_audio_block
 
-        monkeypatch.setattr(base, "get_hermes_dir", lambda *args: tmp_path)
+        monkeypatch.setattr(base, "get_hermes_home", lambda: tmp_path)
         block = SimpleNamespace(
             data=base64.b64encode(b"RIFFfakewav").decode(),
             mimeType="audio/wav",

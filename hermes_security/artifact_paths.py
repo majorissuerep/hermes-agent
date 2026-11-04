@@ -15,9 +15,15 @@ _DELEGATION_ROOTS = (_DELEGATION_ROOT, ("delegation_cache",))
 PRIVATE_CACHE_ROOTS = (*_OUTPUT_CACHE_ROOTS, *_DELEGATION_ROOTS)
 LEGACY_ROOTS = (*PRIVATE_CACHE_ROOTS, ("browser_screenshots",))
 ARTIFACT_ROOTS = (("artifacts", "terminal-output"), ("artifacts", "tool-results"),
-                  ("artifacts", "browser"), *_OUTPUT_CACHE_ROOTS, ("browser_screenshots",), *_DELEGATION_ROOTS)
-IMAGE_ROOTS = (("artifacts", "browser"), ("cache", "screenshots"), ("browser_screenshots",))
+                  ("artifacts", "browser"), ("artifacts", "media", "images"),
+                  ("artifacts", "media", "audio"), ("artifacts", "media", "documents"),
+                  *_OUTPUT_CACHE_ROOTS, ("browser_screenshots",), *_DELEGATION_ROOTS)
+IMAGE_ROOTS = (("artifacts", "browser"), ("artifacts", "media", "images"),
+               ("cache", "screenshots"), ("browser_screenshots",))
 _TERMINAL_ROOTS = (("artifacts", "terminal-output"), ("cache", "terminal-output"))
+_LEGACY_MEDIA = {("cache", "images"): ("images", "img"), ("image_cache",): ("images", "img"),
+                 ("cache", "audio"): ("audio", "audio"), ("audio_cache",): ("audio", "audio"),
+                 ("cache", "documents"): ("documents", "doc"), ("document_cache",): ("documents", "doc")}
 
 
 def _under(relative, roots) -> bool:
@@ -27,6 +33,8 @@ def _under(relative, roots) -> bool:
 
 
 def is_artifact_relative_path(relative) -> bool:
+    if media_kind(relative):
+        return True
     if _under(relative, _DELEGATION_ROOTS):
         return is_delegation_output_path(relative)
     return _under(relative, ARTIFACT_ROOTS)
@@ -71,7 +79,17 @@ def is_artifact_directory(relative) -> bool:
 
 
 def is_image_relative_path(relative) -> bool:
-    return _under(relative, IMAGE_ROOTS)
+    return _under(relative, IMAGE_ROOTS) or media_kind(relative) == "images"
+
+
+def media_kind(relative) -> str | None:
+    parts = Path(relative).parts
+    if ".." not in parts and len(parts) == 4 and parts[:2] == ("artifacts", "media"):
+        return parts[2] if parts[2] in {"images", "audio", "documents"} else None
+    family = _LEGACY_MEDIA.get(parts[:-1]) if ".." not in parts else None
+    if family and re.fullmatch(family[1] + r"_[a-f0-9]{32}\.[A-Za-z0-9]{1,12}", parts[-1]):
+        return family[0]
+    return None
 
 
 def terminal_frame_purpose(relative) -> str | None:
@@ -80,10 +98,11 @@ def terminal_frame_purpose(relative) -> str | None:
 
 
 def is_legacy_artifact_path(relative) -> bool:
-    return _under(relative, LEGACY_ROOTS)
+    return _under(relative, LEGACY_ROOTS) or (media_kind(relative) is not None and Path(relative).parts[0] != "artifacts")
 
 
 def is_private_cache_branch(relative) -> bool:
     """Admit only old private cache roots and their ancestors while walking."""
     parts = Path(relative).parts
-    return parts == ("cache",) or _under(relative, PRIVATE_CACHE_ROOTS) or parts in PRIVATE_CACHE_ROOTS
+    return (parts == ("cache",) or _under(relative, PRIVATE_CACHE_ROOTS) or parts in PRIVATE_CACHE_ROOTS
+            or parts in _LEGACY_MEDIA or media_kind(relative) is not None)

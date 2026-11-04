@@ -108,11 +108,12 @@ def test_borrowed_view_grammar_does_not_expand_execution_or_export(arguments):
         validate_native_arguments(arguments)
 
 
-def test_public_v2_cli_and_real_slash_worker_preview_encrypted_image(world):
+@pytest.mark.parametrize("family", ["artifacts/browser", "artifacts/media/images"])
+def test_public_v2_cli_and_real_slash_worker_preview_encrypted_image(world, family):
     from hermes_cli._launchers import runtime_command
     from tui_runtime import server
 
-    path = world.home / "artifacts" / "browser" / "screen with spaces.png"
+    path = world.home / family / "screen with spaces.png"
     artifacts.write_bytes(path, _image(), home=world.home)
     before = path.read_bytes()
     assert "HERMES_VAULT_KEY_FD" not in world.env

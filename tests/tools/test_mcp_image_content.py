@@ -19,6 +19,7 @@ from __future__ import annotations
 import base64
 import json
 from types import SimpleNamespace
+from pathlib import Path
 
 import pytest
 
@@ -77,16 +78,16 @@ class TestCacheMcpImageBlock:
         tag = _cache_mcp_image_block(block)
         assert tag.startswith("MEDIA:"), f"expected MEDIA: tag, got {tag!r}"
         # The cached file should be in Hermes' image cache dir
-        from hermes_constants import get_hermes_dir
-        cache_dir = str(get_hermes_dir("cache/images", "image_cache").resolve())
+        cache_dir = str(tmp_path / "artifacts" / "media" / "images")
         assert tag.startswith(f"MEDIA:{cache_dir}"), (
             f"cached file not under HERMES_HOME image cache dir. "
             f"tag={tag!r}, cache_dir={cache_dir!r}"
         )
         # And it should exist + have the PNG bytes
         path = tag[len("MEDIA:"):]
-        with open(path, "rb") as fh:
-            assert fh.read() == _png_bytes()
+        from hermes_security.artifacts import read_bytes
+        assert read_bytes(path) == _png_bytes()
+        assert Path(path).read_bytes() != _png_bytes()
 
     def test_returns_empty_when_block_is_not_an_image(self, tmp_path, monkeypatch):
         """Non-image MIME types shouldn't trigger caching."""
@@ -104,7 +105,7 @@ class TestCacheMcpImageBlock:
         from tools.mcp_tool_content import _cache_mcp_image_block
 
         block = SimpleNamespace(data=None, mimeType="image/png")
-        assert _cache_mcp_image_block(block) == ""
+        assert "no media payload" in _cache_mcp_image_block(block)
 
 
     def test_returns_empty_when_bytes_dont_look_like_an_image(self, tmp_path, monkeypatch):
@@ -118,7 +119,7 @@ class TestCacheMcpImageBlock:
             data=base64.b64encode(b"<html>error</html>").decode("ascii"),
             mimeType="image/png",
         )
-        assert _cache_mcp_image_block(block) == ""
+        assert "could not be retained" in _cache_mcp_image_block(block)
 
     def test_handles_jpeg(self, tmp_path, monkeypatch):
         """JPEG signature should also be accepted."""

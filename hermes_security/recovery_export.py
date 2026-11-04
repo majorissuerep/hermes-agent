@@ -13,6 +13,7 @@ import tempfile
 
 from hermes_security import frames, vault as vault_mod
 from hermes_security.errors import VaultIntegrityError
+from hermes_security.artifact_paths import media_kind
 from hermes_security.migrate import _DB_SUFFIXES, _FRAME_SUFFIXES, _conn_fingerprint, _frame_purpose, _purpose_for
 
 _MANIFEST = ".hermes-export.json"
@@ -127,7 +128,7 @@ def export_home(home: Path | str, output: Path | str) -> dict:
             os.fchmod(handle.fileno(), 0o600)
             with tarfile.open(fileobj=handle, mode="w") as archive:
                 for path, relative in _files(home):
-                    if path.suffix in _DB_SUFFIXES and not vault_mod._is_in_skip_dir(relative):
+                    if path.suffix in _DB_SUFFIXES and not media_kind(relative) and not vault_mod._is_in_skip_dir(relative):
                         database = staging / "database.sqlite"
                         _export_database(path, database, vault)
                         data = database.read_bytes()
