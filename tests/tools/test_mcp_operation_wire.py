@@ -39,8 +39,9 @@ server.run(transport="stdio")
 
 
 @pytest.mark.parametrize("change", ["session-close", "vault-reunlock"])
+@pytest.mark.parametrize("when", ["reply", "approval"])
 def test_real_stdio_result_keeps_original_session_and_fresh_sibling_connection_works(
-        home, tmp_path, monkeypatch, change):
+        home, tmp_path, monkeypatch, change, when):
     from agent.session_context import scoped_current_session_id
     from agent.secret_scope import build_profile_secret_scope, reset_secret_scope, set_secret_scope
     from hermes_security.session_authority import start_session_authority
@@ -52,15 +53,19 @@ def test_real_stdio_result_keeps_original_session_and_fresh_sibling_connection_w
     first_id, sibling_id = "wire-A-" + change, "wire-B-" + change
     first, sibling = start_session_authority(home, first_id), start_session_authority(home, sibling_id)
     callback_errors, signals, connections, connection_scopes = [], [], [], []
+    consents, fresh = [], False
+
+    def revoke():
+        if change == "session-close":
+            first.close()
+        else:
+            vault.lock_now(home)
+            vault.unlock(home, "synthetic media custody password")
 
     class Revoke(http.server.BaseHTTPRequestHandler):
         def do_GET(self):
             try:
-                if change == "session-close":
-                    first.close()
-                else:
-                    vault.lock_now(home)
-                    vault.unlock(home, "synthetic media custody password")
+                revoke()
                 signals.append(self.path)
                 self.send_response(200)
             except Exception as error:
@@ -77,8 +82,19 @@ def test_real_stdio_result_keeps_original_session_and_fresh_sibling_connection_w
     script = tmp_path / "public-server.py"
     script.write_text(SERVER)
     config = {"operation-media": {"command": sys.executable, "args": [str(script)],
-        "cwd": str(tmp_path), "env": {"PYTHONPATH": str(ROOT)}, "connect_timeout": 20}}
+        "cwd": str(tmp_path), "env": {"PYTHONPATH": str(ROOT)}, "connect_timeout": 20,
+        "trust": "untrusted" if when == "approval" else "full"}}
     canary = secrets.token_hex(24)
+
+    def consent(*_args, **_kwargs):
+        consents.append("accepted")
+        if not fresh:
+            revoke()
+        return "accept"
+
+    if when == "approval":
+        from tools import approval_prompt
+        monkeypatch.setattr(approval_prompt, "request_elicitation_consent", consent)
 
     def invoke(session_id, revoke_url):
         from tools.mcp_tool_discovery import _owner_scope_home
@@ -111,16 +127,21 @@ def test_real_stdio_result_keeps_original_session_and_fresh_sibling_connection_w
 
     try:
         result = invoke(first_id, f"http://127.0.0.1:{callback.server_port}/revoke")
-        assert signals == ["/revoke"] and callback_errors == []
-        assert "could not be retained" in result["result"] and "MEDIA:" not in result["result"]
+        assert callback_errors == []
+        if when == "reply":
+            assert signals == ["/revoke"]
+            assert "could not be retained" in result["result"] and "MEDIA:" not in result["result"]
+        else:
+            assert signals == [] and consents == ["accepted"] and result.get("error")
         assert not [path for path in (home / "artifacts").rglob("*") if path.is_file()]
         assert vault.is_unlocked(home)
         if change == "vault-reunlock":
             sibling.close()
             sibling = start_session_authority(home, sibling_id)
-        fresh = invoke(sibling_id, "")
+        fresh = True
+        response = invoke(sibling_id, "")
         retained = [path for path in (home / "artifacts").rglob("*") if path.is_file()]
-        assert len(retained) == 1 and str(retained[0]) in fresh["result"]
+        assert len(retained) == 1 and str(retained[0]) in response["result"]
         assert artifacts.read_bytes(retained[0], home=home) == _image(canary)
         assert all(canary.encode() not in path.read_bytes() for path in tmp_path.rglob("*") if path.is_file())
     finally:

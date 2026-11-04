@@ -18,6 +18,7 @@ from tools.ansi_strip import strip_unicode_tags
 from tools.mcp_tool_common import _exc_str, _sanitize_error, mcp_field, _core
 from tools import mcp_tool_loop as _loop
 from tools.media_cache import retention_owner, retention_scope
+from tools.mcp_request_owner import RequestRefused, original_request_check
 from tools.mcp_tool_content import (
     _MCP_HARD_RESULT_CAP_CHARS, _cache_mcp_audio_block, _cache_mcp_image_block, _mcp_result_with_native_images,
     _render_mcp_dropped_block_notice, _render_mcp_resource_block, _strip_reserved_meta_keys,
@@ -151,6 +152,8 @@ def _result_is_error(result) -> bool:
 def _record_call_outcome(server_name: str, result) -> Any:
     """Breaker bookkeeping: an error payload from the tool itself still counts as a strike (#10447),
     flagged as an application error so the open-breaker message stays truthful."""
+    if isinstance(result, RequestRefused):
+        return result
     if _result_is_error(result):
         _core._bump_server_error(server_name, application=True)
     else:
@@ -326,11 +329,14 @@ def _handle_stdio_child_exited_and_retry(server_name: str, exc: Exception, retry
 
 
 def _dispatch(server_name: str, server: Any, op: str, call, tool_timeout: float, recoverers,
-              on_final_failure: Callable[[BaseException], None], record_outcome: bool = False) -> str:
+              on_final_failure: Callable[[BaseException], None], record_outcome: bool = False,
+              admission=None, call_may_have_side_effects: bool = False) -> str:
     """Mark the call started on *server* (doubles may lack ``mark_tool_call``), run coroutine function *call*
     on the MCP loop and, on failure, walk ``recoverers`` (``(server_name, exc, retry_call, op) -> Optional[str]``,
     None = not its kind; order matters). Unrecovered exceptions go through ``on_final_failure`` and become the
     generic call-failed error. ``record_outcome`` applies breaker bookkeeping to the FIRST attempt only."""
+    if admission is not None and (refused := admission()) is not None:
+        return refused
     if callable(getattr(server, "mark_tool_call", None)):
         server.mark_tool_call()
 
@@ -344,6 +350,8 @@ def _dispatch(server_name: str, server: Any, op: str, call, tool_timeout: float,
         return tool_error("MCP call interrupted: user sent a new message")
     except Exception as exc:
         for recover in recoverers:
+            if admission is not None and (refused := admission(uncertain=call_may_have_side_effects)) is not None:
+                return refused
             recovered = recover(server_name, exc, call_once, op)
             if recovered is not None:
                 return recovered
@@ -573,13 +581,20 @@ def _make_tool_handler(server_name: str, tool_name: str, tool_timeout: float, *,
 
     @retention_scope()
     def _handler(args: dict, **kwargs) -> Any:
+        admission = original_request_check()
+        if (refused := admission()) is not None:
+            return refused
         # Security boundary: untrusted-server write tools need approval before ANY transport work (incl. lazy spawn).
         error = _trust_gate_check(server_name, tool_name) or _check_circuit_breaker(server_name)
         if error is not None:
             return error
+        if (refused := admission()) is not None:
+            return refused
         server, error = _acquire_call_server(server_name, tool_timeout)
         if server is None:
             return error
+        if (refused := admission()) is not None:
+            return refused
         # Only a tool annotated readOnlyHint=True is replayed after session expiry; a 401 is always
         # pre-dispatch so the auth recoverer keeps its retry for every tool.
         read_only = _tool_is_read_only(server_name, tool_name)
@@ -588,6 +603,8 @@ def _make_tool_handler(server_name: str, tool_name: str, tool_timeout: float, *,
 
         async def _call():
             async with server._rpc_lock, _track_inflight_rpc(server, server_name, op, retry_safe=read_only):
+                if (refused := admission()) is not None:
+                    return refused
                 server._pending_call_context = contextvars.copy_context()  # for the elicitation callback
                 try:
                     result = await _call_tool_racing_stdio_death(server, server_name, tool_name, args)
@@ -606,7 +623,8 @@ def _make_tool_handler(server_name: str, tool_name: str, tool_timeout: float, *,
         text = _dispatch(
             server_name, server, op, _call, tool_timeout,
             (_handle_stdio_child_exited_and_retry, _handle_auth_error_and_retry, session_expired),
-            _on_failure, record_outcome=True)
+            _on_failure, record_outcome=True, admission=admission,
+            call_may_have_side_effects=not read_only)
         # Off the MCP loop on purpose: image prep is CPU work (bounded vision pool) that must not stall other servers' I/O.
         return _mcp_result_with_native_images(text, image_paths) if native_images and not _result_is_error(text) else text
     return _handler
@@ -619,6 +637,9 @@ def _make_utility_handler(op: str, log_label: str, rpc, render, required: Option
     def _factory(server_name: str, tool_timeout: float):
         @retention_scope()
         def _handler(args: dict, **kwargs) -> str:
+            admission = original_request_check()
+            if (refused := admission()) is not None:
+                return refused
             from tools import mcp_tool_discovery as _discovery  # lazy: import cycle
             server = _discovery._get_connected_server_for_call(server_name)
             if not server or not server.session:
@@ -629,13 +650,16 @@ def _make_utility_handler(op: str, log_label: str, rpc, render, required: Option
 
             async def _call():
                 async with server._rpc_lock:
+                    if (refused := admission()) is not None:
+                        return refused
                     result = await rpc(server.session, args, server_name)
                 with retention_scope(owner):
                     return json.dumps(render(result, server_name), ensure_ascii=False)
             return _dispatch(
                 server_name, server, op, _call, tool_timeout,
                 (_handle_auth_error_and_retry, _handle_session_expired_and_retry),
-                lambda exc: logger.error("MCP %s/%s failed: %s", server_name, log_label, exc))
+                lambda exc: logger.error("MCP %s/%s failed: %s", server_name, log_label, exc),
+                admission=admission)
         return _handler
     return _factory
 
