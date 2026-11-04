@@ -208,22 +208,29 @@ The same explicit repair covers the old `browser-snapshot-<hash>.txt` files in
 their existing cache policy. A planted symlink at a private destination is
 refused and retained for inspection; its target is never written through.
 
-The existing initial migration creates a documented plaintext recovery archive
-outside the home, and deliberate offline exports also produce plaintext. These
-operator recovery operations are distinct from normal encrypted runtime output.
-Inspected computer-use image/element caches and ordinary user-image staging
-still have plaintext writers. A browser in a selected Docker, SSH or Singularity
+The candidate initial migration streams its full rollback directly into an
+authenticated encrypted archive before converting state. The original credential
+can recover it even if conversion stops; explicit offline export is the action
+that creates plaintext. A selected home preserves nested profiles as opaque
+independent islands, including their own credential metadata, and reports known
+profiles that still need their own migration. It never borrows an ancestor key
+or claims that converting one home encrypted every child.
+
+Candidate computer-use caches, ordinary image preparation and generated media
+use encrypted persistence or proven RAM storage. These ports remain subject to
+combined-candidate and independent main acceptance. A browser in a selected Docker, SSH or Singularity
 terminal keeps its generated profile, captures, sockets and temporary files in
 an owner-only directory that the backend itself proves is never-swapped RAM:
 a bounded mount/swap probe runs there and the host applies its own RAM rule.
 The backend's runtime directory or temp directory must be ramfs, noswap tmpfs,
 or tmpfs without active swap; otherwise browser use refuses and names the
-backend. Captures move into the host RAM stage and are removed remotely. Client
-output stays in anonymous memory, which requires a Linux control host. Earlier
-backend-home profiles are left in place. Owned local browser profiles,
-recordings and remaining generated media require an inventory. Those ports and
-their native-backend qualification remain explicit follow-up work; these changes
-do not certify every SSD byte or the host's swap and crash storage.
+backend. Captures move through bounded anonymous pipes into the host RAM stage
+and are removed only through the owning runtime. Earlier backend-home profiles
+are retained. Durable remote profile continuity, verified legacy conversion and
+actual Docker/SSH/Singularity replay are still release blockers. Local real/debug
+browser profiles have component-level encrypted disconnect/cold-restore evidence;
+recording recovery and remaining native worker state are still under qualification.
+These changes do not certify every SSD byte or the host's swap and crash storage.
 
 A running old owner retains its old implementation after a source update. New
 operation-only clients report `owner_restart_required` with restart/resume
@@ -787,6 +794,28 @@ and `openai_base_url` configuration. These arguments contain no credential. The
 no-profile-key case leaves native CLI-owned login and routing in control. These
 are native CLI/protocol observations, not current paid-provider, subscription
 login, macOS or exact merged-revision acceptance.
+
+### Current candidate and remaining release gates
+
+The November 4 continuation belongs to the integration owner after the operator
+confirmed that the desktop session stopped. No milestone has merged into main.
+Composition happens in a separate checkout; independently tested component SHAs
+remain frozen. The exact composed SHA must pass its own checks.
+
+| Capability | Observed component evidence | Remaining obligation |
+| --- | --- | --- |
+| Source CI and native integration | Private run 50 passed `84713d6a31`; its public Linux/macOS run failed and remains negative evidence. Repairs are at `20ef555c2e`, with private run 51 still pending at this checkpoint. | Both current-head native jobs, required aggregate, guarded source merge and automatic mirror; then fresh independent actual-main acceptance. A previous green revision cannot qualify this head. |
+| Browser profile continuity | `207238f488` passed a real stock Debian/Chromium disconnect and cold restore of cookies, local storage and CacheStorage. Its separate 90-case native component cohort passed without retries or skips. | Combined-head and macOS qualification. RAM/cgroup capacity is an admission observation, not a reservation or an OOM guarantee. |
+| Migration rollback and profile scope | `cbf8edd94d` passed 127 native cases, including public CLI original-credential recovery, unchanged independent child state and refusal before WAL-drift mutation. Earlier failures remain retained. | Non-author review, combined-head replay, required gates and fresh-main acceptance. Existing ancestor-sealed legacy children need explicit recovery, not implicit rekeying. |
+| Browser backup and shared archive engine | Browser backup/repair has its own native CLI packet; `8a028f7724` retains the old encrypted format and the opened-file authentication API used by backup. | Test actual backup/import consumers on the composition, including cold disaster recovery. Codec compatibility alone does not qualify those consumers. |
+| Recording recovery | `fdcb6581ab` ran in a fresh native pod. Its guard/routing checks passed, but fixture failures prevented acceptance. Independent heldouts found locator replacement and misleading outgoing-failure guidance. | Repair the reproduced failures, repeat the full native recording/public-recovery cohort and run a real browser recording. Keep incomplete or uncertain copies recoverable and report their actual location. |
+| Browser worker state | Anonymous-pipe collection passed 181 native cases at `72a859890d`; the shared tree format has two-way compatibility evidence. | Protect default native browser HOME/temp state and Browser Use workspace/config files, preserve supported explicit paths and qualify native/outgoing lifecycle behavior. Pipes alone do not protect daemon files. |
+
+The remaining producer, remote continuity and advisory items below are required
+release work. They do not become optional because another component passes.
+Each major merge is followed by a non-author replay from newly fetched main and
+its automatic public mirror before the next major merge. A failing replay opens
+a corrective PR and prevents completion of that milestone.
 
 ### Explicit follow-up backlog
 
