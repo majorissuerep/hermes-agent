@@ -248,7 +248,9 @@ def _build_safe_env(user_env: Optional[dict]) -> dict:
     if user_env:
         env.update(user_env)
     from agent.delegation_context import delegated_child_subprocess_env
-    return delegated_child_subprocess_env(env)
+    from tools.environments.local_env_policy import strip_local_vault_authority
+
+    return strip_local_vault_authority(delegated_child_subprocess_env(env))
 
 
 def _which_with_config_pathext(command: str, path_arg, env: dict):

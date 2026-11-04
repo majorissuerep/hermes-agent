@@ -14,6 +14,7 @@ _HERMES_PROVIDER_ENV_FORCE_PREFIX = "_HERMES_FORCE_"
 LOCAL_VAULT_AUTHORITY_ENV = frozenset({
     "__HERMES_INSTALL_KEYS_FD",
     "HERMES_SESSION_VAULT", "HERMES_VAULT_KEY_FD", "HERMES_VAULT_PRIVATE_KEY", "HERMES_MASTER_PASSWORD",
+    "__HERMES_INSTALL_OWNER_FD",
 })
 
 
@@ -210,7 +211,7 @@ def _is_hermes_internal_secret(key: str) -> bool:
     auth; non-secret routing hints stay visible). Stripped on every spawn path
     regardless of env_passthrough registration or ``inherit_credentials``."""
     upper = key.upper()
-    if upper == "__HERMES_INSTALL_KEYS_FD":
+    if upper in {"__HERMES_INSTALL_KEYS_FD", "__HERMES_INSTALL_OWNER_FD"}:
         return True
     if upper.startswith("AUXILIARY_") and upper.endswith(("_API_KEY", "_BASE_URL")):
         return True

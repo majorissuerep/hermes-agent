@@ -9,20 +9,30 @@ import sys
 import pytest
 
 AUTHORITY = ("HERMES_SESSION_VAULT", "HERMES_VAULT_KEY_FD", "HERMES_VAULT_PRIVATE_KEY",
-             "HERMES_MASTER_PASSWORD", "__HERMES_INSTALL_KEYS_FD")
+             "HERMES_MASTER_PASSWORD", "__HERMES_INSTALL_KEYS_FD", "__HERMES_INSTALL_OWNER_FD")
 
 
-@pytest.mark.parametrize("factory", ["remote", "credential-helper"])
+@pytest.mark.parametrize("factory", ["remote", "credential-helper", "ordinary", "mcp"])
 def test_unrelated_child_never_inherits_local_vault_authority(monkeypatch, factory):
     from tools.environments.local import build_subprocess_env
     from tools.environments.remote_common import client_env_with
+    from tools.mcp_tool_config import _build_safe_env
 
-    for name in AUTHORITY:
+    # Local commands retain their separately scoped operation-grant seam. The
+    # installer's control descriptor never belongs to that ordinary child.
+    names = ("__HERMES_INSTALL_OWNER_FD",) if factory == "ordinary" else AUTHORITY
+    for name in names:
         monkeypatch.setenv(name, "synthetic-local-authority")
     monkeypatch.setenv("USER_OWN_CREDENTIAL", "user-owned")
-    env = (client_env_with({}) if factory == "remote" else
-           build_subprocess_env(scrub_secrets=False, inherit_profile_home=False))
-    script = "import json,os; print(json.dumps({k:os.environ.get(k) for k in " + repr(AUTHORITY) + "}))"
+    factories = {
+        "remote": lambda: client_env_with({}),
+        "credential-helper": lambda: build_subprocess_env(scrub_secrets=False, inherit_profile_home=False),
+        "ordinary": lambda: build_subprocess_env(extra={"_HERMES_FORCE___HERMES_INSTALL_OWNER_FD": "override"}),
+        "mcp": lambda: _build_safe_env({**dict.fromkeys(AUTHORITY, "explicit-override"),
+                                        "USER_OWN_CREDENTIAL": "user-owned"}),
+    }
+    env = factories[factory]()
+    script = "import json,os; print(json.dumps({k:os.environ.get(k) for k in " + repr(names) + "}))"
     child = subprocess.run([sys.executable, "-c", script], env=env, text=True, capture_output=True,
                            check=True, timeout=10)
     assert all(value is None for value in json.loads(child.stdout).values())
