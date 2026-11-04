@@ -2,9 +2,12 @@
 from __future__ import annotations
 
 import pytest
+from pathlib import Path
 
-from hermes_security import frames, io, vault
-from hermes_security.migrate import repair_clobbered_state, scan_for_plaintext
+from hermes_security import artifacts, frames, io, vault
+from hermes_security.artifact_paths import terminal_frame_purpose
+from hermes_security.errors import VaultError
+from hermes_security.migrate import migrate_home, repair_clobbered_state, scan_for_plaintext
 
 
 @pytest.fixture
@@ -50,7 +53,7 @@ def test_repair_seals_legacy_outputs_and_keeps_authenticated_readers(legacy_home
     for relative, data in payloads.items():
         path = home / relative
         assert data not in path.read_bytes(), relative
-        recovered = (b"".join(frames.read_frames(path, purpose="log"))
+        recovered = (b"".join(frames.read_frames(path, purpose=terminal_frame_purpose(Path(relative))))
                      if path.suffix == ".log" else io.read_bytes(path, purpose="state"))
         assert recovered == data
         assert artifacts.read_bytes(path, home=home) == data
@@ -60,3 +63,58 @@ def test_repair_seals_legacy_outputs_and_keeps_authenticated_readers(legacy_home
     assert public.read_bytes() == b"synthetic public package archive"
     vault.lock_now(home)
     assert set(scan_for_plaintext(home)) == set(payloads)
+
+
+@pytest.mark.parametrize("family", ["cache/terminal-output", "artifacts/terminal-output"])
+def test_only_offline_repair_rekeys_unbound_legacy_terminal_frames(legacy_home, family):
+    home, _, _ = legacy_home
+    relative = Path(family) / "previous-codec.log"
+    target = home / relative
+    for parent in reversed(target.parents):
+        if parent.is_relative_to(home):
+            parent.mkdir(mode=0o700, exist_ok=True)
+            parent.chmod(0o700)
+    message = b"synthetic legacy terminal frame must survive repair\n"
+    frames.append(target, message, purpose="log")
+    before = target.read_bytes()
+    assert relative.as_posix() in scan_for_plaintext(home)
+    with pytest.raises(VaultError):
+        artifacts.read_bytes(target, home=home)
+    assert target.read_bytes() == before
+    repaired = repair_clobbered_state(home)
+    assert repaired["unrecoverable"] == []
+    assert relative.as_posix() in repaired["reframed"]
+    assert artifacts.read_bytes(target, home=home) == message
+    with pytest.raises(VaultError):
+        list(frames.read_frames(target, purpose="log"))
+    after = target.read_bytes()
+    assert repair_clobbered_state(home)["reframed"] == []
+    assert target.read_bytes() == after and scan_for_plaintext(home) == []
+    moved = target.with_name("path-swap.log")
+    moved.write_bytes(after)
+    moved.chmod(0o600)
+    refused = repair_clobbered_state(home)
+    assert any(moved.relative_to(home).as_posix() in entry for entry in refused["unrecoverable"])
+    assert moved.read_bytes() == after
+    assert artifacts.read_bytes(target, home=home) == message
+
+
+def test_initial_migration_binds_terminal_frames_to_final_path(tmp_path, monkeypatch):
+    home = tmp_path / "migrate-owner"
+    relative = Path("cache/terminal-output/out-migrate.log")
+    path = home / relative
+    path.parent.mkdir(parents=True)
+    message = b"synthetic initial terminal migration\nunterminated tail"
+    path.write_bytes(message)
+    monkeypatch.setenv("HERMES_HOME", str(home))
+    monkeypatch.setattr(vault, "_SCRYPT_N", 1024)
+    try:
+        assert migrate_home(home, "synthetic bound migration credential").ok
+        vault.unlock(home, "synthetic bound migration credential")
+        assert artifacts.read_bytes(path, home=home) == message
+        assert b"".join(frames.read_frames(path, purpose=terminal_frame_purpose(relative))) == message
+        with pytest.raises(VaultError):
+            list(frames.read_frames(path, purpose="log"))
+        assert scan_for_plaintext(home) == []
+    finally:
+        vault.clear_vault_cache()

@@ -12,7 +12,7 @@ import secrets
 import stat
 
 from hermes_security import frames
-from hermes_security.artifact_paths import ARTIFACT_ROOTS, is_artifact_relative_path
+from hermes_security.artifact_paths import ARTIFACT_ROOTS, is_artifact_relative_path, terminal_frame_purpose
 from hermes_security.errors import VaultLockedError
 
 _ROOTS = ARTIFACT_ROOTS
@@ -122,7 +122,7 @@ def _write_all(fd, data):
 
 
 def _stream(relative):
-    return relative.parts[:2] in (("artifacts", "terminal-output"), ("cache", "terminal-output"))
+    return terminal_frame_purpose(relative) is not None
 
 
 def _wire_bound():
@@ -138,7 +138,7 @@ def write_bytes(path, data: bytes, *, home=None, overwrite=False, purpose="state
         raise ValueError("Unsupported private artifact purpose or size")
     selected, relative = _location(path, home)
     custody = _Custody(selected)
-    encoded = (frames.encode_frames([data], vault=custody, purpose="log") if _stream(relative)
+    encoded = (frames.encode_frames([data], vault=custody, purpose=terminal_frame_purpose(relative)) if _stream(relative)
                else custody.vault.encrypt(data, purpose="state", relpath=relative.as_posix(),
                                           authority=custody.authority))
     with _parent(selected, relative, create=True) as parent:
@@ -193,7 +193,7 @@ def read_bytes(path, *, home=None, purpose="state") -> bytes:
     if not _stream(relative):
         decoded = custody.vault.decrypt(raw, purpose="state", relpath=relative.as_posix(), authority=custody.authority)
     else:
-        chunks, consumed = frames.split_stream(raw, vault=custody, purpose="log", strict=True)
+        chunks, consumed = frames.split_stream(raw, vault=custody, purpose=terminal_frame_purpose(relative), strict=True)
         if consumed != len(raw):
             raise ValueError("Private terminal artifact is incomplete")
         decoded = b"".join(chunks)
@@ -233,7 +233,8 @@ class _TextSink:
 
     def _flush(self):
         if self.pending:
-            encoded = frames.encode_frames([bytes(self.pending)], vault=self.custody, purpose="log")
+            encoded = frames.encode_frames([bytes(self.pending)], vault=self.custody,
+                                           purpose=terminal_frame_purpose(self.relative))
             _write_all(self.fd, encoded)
             self.pending.clear()
 

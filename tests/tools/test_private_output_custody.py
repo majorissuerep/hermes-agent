@@ -3,12 +3,13 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import shutil
 from unittest.mock import Mock
 
 import pytest
 
-from hermes_security import artifacts, vault
-from hermes_security.errors import VaultLockedError
+from hermes_security import artifacts, frames, vault
+from hermes_security.errors import VaultError, VaultLockedError
 from tools import file_tools, terminal_tool_result, tool_result_storage
 from tools.environments.base_output import _BoundedOutputCollector
 
@@ -227,3 +228,30 @@ def test_image_families_do_not_become_text_reads_or_searches_by_renaming(home, f
     found = json.loads(file_tools.search_tool("synthetic private image", path=str(image),
                                              task_id="mislabeled-image-search"))
     assert found["total_count"] == 0 and "synthetic private image body" not in json.dumps(found)
+
+
+@pytest.mark.parametrize("source_kind", ["profile-log", "sibling-artifact"])
+def test_terminal_artifact_frames_cannot_be_imported_from_other_paths(home, source_kind):
+    marker = b"synthetic private frame origin canary f1a83"
+    source = home / "logs" / "agent.log"
+    if source_kind == "profile-log":
+        frames.append(source, marker + b"\n", purpose="log")
+        from hermes_cli.logs import _read_all_lines
+        assert any(marker.decode() in row for row in _read_all_lines(source))
+    else:
+        source = home / "artifacts" / "terminal-output" / "original.log"
+        artifacts.write_bytes(source, marker + b"\n", home=home)
+        assert artifacts.read_bytes(source, home=home) == marker + b"\n"
+    target = home / "artifacts" / "terminal-output" / "copied.log"
+    artifacts.write_bytes(target, b"legitimate destination before ciphertext replacement", home=home)
+    shutil.copyfile(source, target)
+    target.chmod(0o600)
+    original_ciphertext = target.read_bytes()
+    result = json.loads(file_tools.read_file_tool(str(target), task_id="copied-frame-read"))
+    assert result.get("error") and marker.decode() not in json.dumps(result)
+    found = json.loads(file_tools.search_tool("frame origin canary", path=str(target),
+                                             task_id="copied-frame-search"))
+    assert found.get("error") and marker.decode() not in json.dumps(found)
+    with pytest.raises(VaultError):
+        artifacts.read_bytes(target, home=home)
+    assert target.read_bytes() == original_ciphertext

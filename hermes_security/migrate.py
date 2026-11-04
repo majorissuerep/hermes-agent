@@ -39,7 +39,7 @@ _SAFE_IDENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 from hermes_security import errors as vault_errors
 from hermes_security import frames as sec_frames
 from hermes_security import vault as vault_mod
-from hermes_security.artifact_paths import is_legacy_artifact_path
+from hermes_security.artifact_paths import is_legacy_artifact_path, terminal_frame_purpose
 
 _MAGIC = b"HRMVAULT\x00"
 
@@ -139,7 +139,8 @@ def _harden_private_artifact(home: Path, relative: Path) -> None:
 
 
 def _frame_purpose(path: Path) -> str:
-    return "log" if path.suffix == ".log" else "transcript"
+    relative = path.relative_to(vault_mod.find_vault_home(path)) if path.is_absolute() else path
+    return terminal_frame_purpose(relative) or ("log" if path.suffix == ".log" else "transcript")
 
 
 def _repair_db(vault, path: Path, rel: Path, head: bytes, report: dict) -> None:
@@ -263,17 +264,23 @@ def _repair_frames(vault, path: Path, rel: Path, report: dict) -> None:
                 vault, raw, relpath=rel.as_posix(), purpose=_purpose_for(rel),
                 frame_purpose=purpose, jsonl=jsonl)
     parsed = _parse_mixed(vault, source, purpose=purpose, jsonl=jsonl)
+    legacy_rekey = False
+    if parsed is None and terminal_frame_purpose(rel) is not None:
+        # Explicit offline repair alone may import the older unbound log codec.
+        # Runtime artifact reads never try this purpose or accept a moved frame.
+        parsed = _parse_mixed(vault, source, purpose="log", jsonl=jsonl)
+        legacy_rekey = parsed is not None
     if parsed is None:
         raise RuntimeError("neither frames nor text (binary content mid-stream); left as is")
     payloads, saw_text = parsed
-    if not wrapped and not saw_text:
+    if not wrapped and not saw_text and not legacy_rekey:
         return  # clean frame stream (a truncated tail is tolerated by readers)
     payloads.extend(appended)
     rebuilt = sec_frames.encode_frames(payloads, vault=vault, purpose=purpose)
     if sec_frames.split_stream(rebuilt, vault=vault, purpose=purpose)[0] != payloads:
         raise RuntimeError("frame roundtrip mismatch")
     vault_mod._atomic_write(path, rebuilt)
-    report["reframed" if saw_text or appended else "unwrapped"].append(rel.as_posix())
+    report["reframed" if saw_text or appended or legacy_rekey else "unwrapped"].append(rel.as_posix())
 
 
 def _repair_envelope(vault, home: Path, path: Path, rel: Path, head: bytes, report: dict) -> None:
@@ -563,7 +570,7 @@ def _migrate_envelope(home: Path, path: Path, rel: Path, report: MigrationReport
 
 
 def _migrate_frames(home: Path, path: Path, rel: Path, report: MigrationReport) -> None:
-    purpose = "log" if path.suffix == ".log" else "transcript"
+    purpose = _frame_purpose(path)
     plaintext = path.read_bytes()
     if plaintext.startswith(_MAGIC):
         report.skipped.append(rel.as_posix() + " (already sealed)")

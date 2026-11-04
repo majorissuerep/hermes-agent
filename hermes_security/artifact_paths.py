@@ -14,6 +14,7 @@ LEGACY_ROOTS = (*PRIVATE_CACHE_ROOTS, ("browser_screenshots",))
 ARTIFACT_ROOTS = (("artifacts", "terminal-output"), ("artifacts", "tool-results"),
                   ("artifacts", "browser"), *LEGACY_ROOTS)
 IMAGE_ROOTS = (("artifacts", "browser"), ("cache", "screenshots"), ("browser_screenshots",))
+_TERMINAL_ROOTS = (("artifacts", "terminal-output"), ("cache", "terminal-output"))
 
 
 def _under(relative, roots) -> bool:
@@ -28,6 +29,11 @@ def is_artifact_relative_path(relative) -> bool:
 
 def is_image_relative_path(relative) -> bool:
     return _under(relative, IMAGE_ROOTS)
+
+
+def terminal_frame_purpose(relative) -> str | None:
+    """Bind terminal frames' KDF and authenticated data to their exact owner-relative path."""
+    return "artifact-terminal:v1:" + Path(relative).as_posix() if _under(relative, _TERMINAL_ROOTS) else None
 
 
 def is_legacy_artifact_path(relative) -> bool:
