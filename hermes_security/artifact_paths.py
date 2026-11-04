@@ -88,10 +88,26 @@ def media_kind(relative) -> str | None:
     parts = Path(relative).parts
     if ".." not in parts and len(parts) == 4 and parts[:2] == ("artifacts", "media"):
         return parts[2] if parts[2] in {"images", "audio", "documents"} else None
+    if _legacy_tui_image(relative):
+        return "images"
     family = _LEGACY_MEDIA.get(parts[:-1]) if ".." not in parts else None
     if family and re.fullmatch(family[1] + r"_[a-f0-9]{32}\.[A-Za-z0-9]{1,12}", parts[-1]):
         return family[0]
     return None
+
+
+def _legacy_tui_image(relative) -> bool:
+    """Published uploads, clipboard captures and PDF pages in the private images root.
+
+    These files already used path-bound state envelopes during home migration.
+    Admit their historical names without turning arbitrary profile state into media.
+    """
+    parts = Path(relative).parts
+    return (len(parts) == 2 and parts[0] == "images" and re.fullmatch(
+        r"(?:upload_[a-z0-9_]{8}|pdf_p[0-9]+_[a-z0-9_]{8}|"
+        r"clip_(?:[a-z0-9_]{8}|[0-9]{8}_[0-9]{6}_[0-9]+))"
+        r"\.(?:png|jpe?g|gif|webp|bmp|tiff?|avif|heic|heif|svg|ico)",
+        parts[-1], flags=re.IGNORECASE) is not None)
 
 
 def legacy_media_codec(relative) -> str | None:
