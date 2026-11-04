@@ -783,9 +783,12 @@ def _commit_selection(package, facts: Facts, change, *, enabled: list[str], stam
             change.publish(paths.repo_root())
         if not current:
             if result.get("environment") is not None:
-                from pm.environments import flush_before_selecting
+                from pm.environments import flush_before_selecting, venv_python
                 if change is None:
-                    flush_before_selecting(result["environment"], paths.store_root())
+                    # The interpreter can belong to a sealed/external toolchain;
+                    # its actual filesystem matters, even when no writable store exists.
+                    base = venv_python(result["environment"]).resolve(strict=True)
+                    flush_before_selecting(result["environment"], base.parent)
                 else:
                     flush_before_selecting()
             facts.record_state("venv", stamp, enabled, **result)

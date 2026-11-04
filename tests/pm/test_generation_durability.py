@@ -31,7 +31,7 @@ def _flush_probe(monkeypatch, observe, *, fail=False):
 def test_install_selection_is_committed_only_after_its_tree_is_flushed(tmp_path, monkeypatch, flush_fails):
     from pm import install
     from pm import paths
-    from pm.environments import install_state_dir, runtime_facts_path, selected_venv
+    from pm.environments import install_state_dir, runtime_facts_path, selected_venv, venv_python
 
     store = tmp_path / "tools"
     store.mkdir()
@@ -46,6 +46,9 @@ def test_install_selection_is_committed_only_after_its_tree_is_flushed(tmp_path,
     def apply(*args, **kwargs):
         candidate.mkdir(parents=True)
         (candidate / "pyvenv.cfg").write_text("home = fixture\n", encoding="utf-8")
+        executable = venv_python(candidate)
+        executable.parent.mkdir()
+        executable.touch()
         return {"environment": candidate}
 
     monkeypatch.setattr(venv, "apply", apply)
@@ -62,7 +65,7 @@ def test_install_selection_is_committed_only_after_its_tree_is_flushed(tmp_path,
     else:
         install.sync_venv([], explicit=True)
         assert selected_venv(repo) == candidate.resolve()
-    assert flushes == [((candidate.resolve(), store.resolve()), True)]
+    assert flushes == [((candidate.resolve(), venv_python(candidate).resolve().parent), True)]
 
 
 def test_side_environment_selection_is_committed_only_after_its_tree_is_flushed(tmp_path, monkeypatch):
