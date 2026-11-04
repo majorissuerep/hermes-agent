@@ -94,7 +94,7 @@ def owned_media_path(source: str) -> Path | None:
     return path if is_artifact_path(path) else None
 
 
-def read_owned_media(path: Path, *, home: Path | None = None) -> bytes:
+def read_owned_media(path: Path, *, home: Path | None = None, custody=None) -> bytes:
     """Authenticate and decrypt one owned image artifact of ``home`` into memory.
 
     ``home`` defaults to the bound profile; callers outside a profile scope (attach/resume RPCs)
@@ -107,4 +107,4 @@ def read_owned_media(path: Path, *, home: Path | None = None) -> bytes:
     _, relative = artifacts._location(path, home=home)
     if not is_image_relative_path(relative):
         raise PermissionError("Only owned image artifacts can be read as images")
-    return artifacts.read_bytes(path, home=home)
+    return artifacts.read_bytes(path, home=home, custody=custody)

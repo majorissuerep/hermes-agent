@@ -150,9 +150,14 @@ def _mcp_native_image_part(path: str) -> Optional[tuple[dict[str, Any], Optional
     from tools.vision_tools_image_prep import (_detect_image_mime_type_from_bytes, _normalize_to_supported_image,
                                                _validate_raster_image_decodable)
     from tools.browser_media_custody import owned_media_path, read_owned_media
+    from tools.media_cache import output_custody
 
     owned = owned_media_path(path)
-    raw = read_owned_media(owned) if owned is not None else Path(path).read_bytes()
+    if owned is not None:
+        home, custody = output_custody()
+        raw = read_owned_media(owned, home=home, custody=custody)
+    else:
+        raw = Path(path).read_bytes()
     mime = _detect_image_mime_type_from_bytes(raw)
     if not mime:
         return None

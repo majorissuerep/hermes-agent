@@ -17,6 +17,7 @@ from tools.registry import invalidate_check_fn_cache, tool_error
 from tools.ansi_strip import strip_unicode_tags
 from tools.mcp_tool_common import _exc_str, _sanitize_error, mcp_field, _core
 from tools import mcp_tool_loop as _loop
+from tools.media_cache import retention_owner, retention_scope
 from tools.mcp_tool_content import (
     _MCP_HARD_RESULT_CAP_CHARS, _cache_mcp_audio_block, _cache_mcp_image_block, _mcp_result_with_native_images,
     _render_mcp_dropped_block_notice, _render_mcp_resource_block, _strip_reserved_meta_keys,
@@ -570,6 +571,7 @@ def _make_tool_handler(server_name: str, tool_name: str, tool_timeout: float, *,
     Direct callers (plugins' ``ctx.call_mcp``) keep the string contract and the ``MEDIA:`` paths."""
     op = f"tools/call {tool_name}"
 
+    @retention_scope()
     def _handler(args: dict, **kwargs) -> Any:
         # Security boundary: untrusted-server write tools need approval before ANY transport work (incl. lazy spawn).
         error = _trust_gate_check(server_name, tool_name) or _check_circuit_breaker(server_name)
@@ -582,6 +584,7 @@ def _make_tool_handler(server_name: str, tool_name: str, tool_timeout: float, *,
         # pre-dispatch so the auth recoverer keeps its retry for every tool.
         read_only = _tool_is_read_only(server_name, tool_name)
         image_paths: list[str] = []  # the LAST attempt's cached images (a recoverer may retry _call)
+        owner = retention_owner()
 
         async def _call():
             async with server._rpc_lock, _track_inflight_rpc(server, server_name, op, retry_safe=read_only):
@@ -593,7 +596,8 @@ def _make_tool_handler(server_name: str, tool_name: str, tool_timeout: float, *,
             if getattr(server, "_mark_session_proven", None) is not None:  # round-trip done: transport healthy
                 server._mark_session_proven()
             image_paths.clear()
-            return _render_call_tool_result(result, server_name, image_paths)
+            with retention_scope(owner):
+                return _render_call_tool_result(result, server_name, image_paths)
 
         def _on_failure(exc):
             _core._bump_server_error(server_name)
@@ -613,6 +617,7 @@ def _make_utility_handler(op: str, log_label: str, rpc, render, required: Option
     server_name)`` awaited under ``_rpc_lock``, ``render(result, server_name)`` -> JSON-able
     payload, ``required`` validated before any transport work."""
     def _factory(server_name: str, tool_timeout: float):
+        @retention_scope()
         def _handler(args: dict, **kwargs) -> str:
             from tools import mcp_tool_discovery as _discovery  # lazy: import cycle
             server = _discovery._get_connected_server_for_call(server_name)
@@ -620,11 +625,13 @@ def _make_utility_handler(op: str, log_label: str, rpc, render, required: Option
                 return tool_error(f"MCP server '{server_name}' is not connected")
             if required and not args.get(required):
                 return tool_error(f"Missing required parameter '{required}'")
+            owner = retention_owner()
 
             async def _call():
                 async with server._rpc_lock:
                     result = await rpc(server.session, args, server_name)
-                return json.dumps(render(result, server_name), ensure_ascii=False)
+                with retention_scope(owner):
+                    return json.dumps(render(result, server_name), ensure_ascii=False)
             return _dispatch(
                 server_name, server, op, _call, tool_timeout,
                 (_handle_auth_error_and_retry, _handle_session_expired_and_retry),
