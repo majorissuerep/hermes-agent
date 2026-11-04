@@ -110,8 +110,8 @@ class TestCommandTimeoutRecovery:
         monkeypatch.setattr("tools.browser_tool_lifecycle._write_owner_pid", lambda *_args: None)
         monkeypatch.setattr(bt, "_build_browser_env", dict)
         monkeypatch.setattr("tools.browser_tool_install._merge_browser_path", lambda value: value)
-        monkeypatch.setattr(bt_session, "_run_agent_browser_client",
-                            lambda *_args, **_kwargs: (None, "", ""))
+        client = Mock(side_effect=[(None, "", ""), (0, '{"success": true}', "")])
+        monkeypatch.setattr(bt_session, "_run_agent_browser_client", client)
         monkeypatch.setattr("tools.interrupt.is_interrupted", lambda: False)
 
         bt_session._run_browser_command(task_id, "click", ["@e1"], timeout=1)
