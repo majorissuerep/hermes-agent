@@ -38,7 +38,10 @@ finally:
     server.server_close()
     thread.join(timeout=5)
 """
-    result = subprocess.run(["unshare", "--user", "--map-root-user", "--mount", sys.executable, "-c", code],
+    # Probe mount propagation inside the child so unsupported containers return 77.
+    # unshare otherwise fails before Python can report that capability boundary.
+    result = subprocess.run(["unshare", "--user", "--map-root-user", "--mount", "--propagation", "unchanged",
+                             sys.executable, "-c", code],
                             capture_output=True, text=True, timeout=30, check=False)
     if result.returncode == 77 or ("unshare failed" in result.stderr and "Operation not permitted" in result.stderr):
         pytest.skip("native user/mount namespaces are unavailable on this host")
