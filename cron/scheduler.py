@@ -1159,14 +1159,13 @@ def _utcnow_iso_ms() -> str:
 
 
 def _write_usage_audit(record: dict) -> None:
-    """Append one JSONL line to cron/usage_audit.jsonl. NEVER raises — a logger bug must not
+    """Append one audit record to cron/usage_audit.jsonl. NEVER raises — a logger bug must not
     break cron jobs (the whole write is inside one try)."""
     try:
         path = _usage_audit_path()
         _ensure_cron_dir(path.parent)
-        line = json.dumps(record, ensure_ascii=False)
-        with open(path, "a", encoding="utf-8") as f:
-            f.write(line + "\n")
+        from cron.usage_audit import append_record
+        append_record(path, record)
     except Exception as e:
         logger.warning("usage_audit write failed: %s", e)
 

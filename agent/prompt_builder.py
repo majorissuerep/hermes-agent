@@ -28,7 +28,7 @@ from agent.skill_utils import (
     skill_matches_platform, skill_matches_platform_list,
 )
 from tools.threat_patterns import scan_for_threats as _scan_for_threats
-from utils import atomic_json_write, file_signature
+from utils import file_signature
 
 logger = logging.getLogger(__name__)
 
@@ -1062,10 +1062,17 @@ def _build_skills_manifest(skills_dir: Path) -> dict[str, list[int]]:
 
 def _load_skills_snapshot(skills_dir: Path, manifest: Optional[dict] = None) -> Optional[dict]:
     """The disk snapshot if it exists, is current-version, and its manifest still matches."""
-    try:
-        snapshot = json.loads(_skills_prompt_snapshot_path().read_text(encoding="utf-8-sig"))
-    except Exception:  # missing, unreadable or corrupt -> rebuild
-        return None
+    from hermes_security import io as state_io
+
+    path = _skills_prompt_snapshot_path()
+    if state_io._home_for(path) is not None:
+        # Sealed state must authenticate: a locked or damaged index is not missing.
+        snapshot = state_io.read_json(path, purpose="state")
+    else:
+        try:
+            snapshot = json.loads(path.read_text(encoding="utf-8-sig"))
+        except (OSError, ValueError):  # Pre-migration caches can be rebuilt.
+            return None
     if (isinstance(snapshot, dict) and snapshot.get("version") == _SKILLS_SNAPSHOT_VERSION
             and snapshot.get("manifest") == (manifest if manifest is not None else _build_skills_manifest(skills_dir))):
         return snapshot
@@ -1418,10 +1425,12 @@ def _build_skills_system_prompt_inner(
     if snapshot is None:  # persist for fast cold-start reuse (best-effort)
         category_descriptions.update(_read_category_descriptions(skills_dir, "Could not read skill description %s: %s"))
         try:
-            atomic_json_write(_skills_prompt_snapshot_path(), {
+            from hermes_security.io import atomic_write_state_json
+
+            atomic_write_state_json(_skills_prompt_snapshot_path(), {
                 "version": _SKILLS_SNAPSHOT_VERSION, "manifest": _build_skills_manifest(skills_dir),
                 "skills": [entry for entry, _ in candidates], "category_descriptions": category_descriptions,
-            })
+            }, purpose="state")
         except Exception as e:
             logger.debug("Could not write skills prompt snapshot: %s", e)
 
