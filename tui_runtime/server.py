@@ -1314,10 +1314,11 @@ def _session_info(agent, session: dict | None = None) -> dict:
         session = next((c for c in _sessions.values() if c.get("agent") is agent), None)
     agent = session_runtime_view(agent)
     sess = session or {}
+    pending_switch = sess.get("pending_model_switch") or {}
     cwd = _display_session_cwd(session)
     session_key = str(sess.get("session_key") or getattr(agent, "session_id", "") or "")
     personality = sess.get("personality", _display_cfg().get("personality") or "")
-    reasoning_config = getattr(agent, "reasoning_config", None)
+    reasoning_config = pending_switch.get("display_reasoning_config") or getattr(agent, "reasoning_config", None)
     reasoning_effort = ""
     if isinstance(reasoning_config, dict):
         # Disabled must differ from unset ("" = provider default) or the desktop loses "thinking off" after turn 1.
@@ -1334,7 +1335,6 @@ def _session_info(agent, session: dict | None = None) -> dict:
         yolo, approval_mode = False, "manual"
     # A switch queued mid-turn applies at next turn start (agent.model still reads the OLD model); report the
     # pending pick so the end-of-turn settle doesn't blip the UI back first.
-    pending_switch = sess.get("pending_model_switch") or {}
     pending_model = str(pending_switch.get("display_model") or "").strip()
     pending_provider = str(pending_switch.get("display_provider") or "").strip()
     provider = getattr(agent, "provider", "")
