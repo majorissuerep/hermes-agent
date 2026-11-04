@@ -68,3 +68,29 @@ def test_glob_in_temporary_parent_cannot_widen_profile_attachment(namespace_work
             pytest.fail("An AppArmor glob cannot authorize a CI launcher")
     assert calls == []
     assert list(parent.iterdir()) == []
+
+
+@pytest.mark.platforms("posix")
+def test_multicall_environment_launcher_preserves_dispatch_name(namespace_worker, monkeypatch):
+    """A declared multicall stand-in requires env's basename, as Ubuntu's real binary does.
+
+    This exercises child dispatch and cleanup, not actual AppArmor policy admission.
+    """
+    run = subprocess.run
+    calls = []
+
+    def copied_multicall(_source, target):
+        target.write_text('#!/bin/sh\n[ "${0##*/}" = env ] || exit 64\nexec "$@"\n')
+
+    def parser(command, **options):
+        calls.append(command)
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(policy.shutil, "copyfile", copied_multicall)
+    monkeypatch.setattr(policy.subprocess, "run", parser)
+    with policy._authorized_launcher(env={}) as (launcher, env):
+        child = run([str(launcher), "/bin/sh", "-c", "printf namespace-child"],
+                    env=env, capture_output=True, timeout=10, check=False)
+    assert child.returncode == 0 and child.stdout == b"namespace-child"
+    assert len(calls) == 2 and "--add" in calls[0] and "--remove" in calls[1]
+    assert not launcher.parent.exists() and namespace_worker.read_bytes() == b"1\n"

@@ -79,7 +79,7 @@ def _authorized_launcher(*, env: dict[str, str]):
     sudo, parser = _command("sudo"), _command("apparmor_parser")
     with tempfile.TemporaryDirectory(prefix="hermes-ci-userns-") as directory:
         root = Path(directory).resolve()
-        launcher = root / "launcher"
+        launcher = root / "env"  # Multicall coreutils selects its applet from argv[0].
         if not _ATTACHMENT.fullmatch(str(launcher)):
             raise RuntimeError("Native qualification requires an exact ASCII attachment path")
         shutil.copyfile(_command("env")[0], launcher)
