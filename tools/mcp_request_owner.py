@@ -21,11 +21,11 @@ def original_request_check():
     selected = bool(get_session_env('HERMES_SESSION_ID', ''))
 
     def refusal(*, uncertain=False):
-        if owner[1] is None and not selected:
-            return None
         try:
             if get_hermes_home().resolve() != owner[0]:
                 raise ValueError('The selected profile changed')
+            if owner[1] is None and not selected:
+                return None
             output_custody(owner)
         except (VaultError, OSError, ValueError):
             if uncertain:
