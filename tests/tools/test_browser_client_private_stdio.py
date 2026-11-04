@@ -7,12 +7,14 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 import subprocess
 import sys
 
 import pytest
 
-from hermes_platform.processes import get_process_start_time, terminate_pid
+from hermes_platform.processes import get_process_start_time, pid_exists
+from tests.waiting import wait_until
 from tools import browser_terminal
 from tools import browser_tool_lightpanda_fallback as fallback
 from tools import browser_tool_real_profile as real_profile
@@ -90,11 +92,12 @@ def test_client_exit_or_timeout_does_not_wait_for_or_kill_independent_daemon(tmp
     _environment(monkeypatch, directory)
     receipt = tmp_path / "process-identities.json"
     executable = tmp_path / "native-client"
-    executable.write_text(f"#!{sys.executable}\n" + '''import json, os, signal, sys
+    executable.write_text(f"#!{sys.executable}\n" + '''import json, os, signal, socket, sys
 from pathlib import Path
 daemon = os.fork()
 if daemon == 0:
-    signal.pause()
+    with socket.create_connection(("127.0.0.1", int(sys.argv[3]))) as control:
+        control.recv(1)
     os._exit(0)
 Path(sys.argv[1]).write_text(json.dumps({"client": os.getpid(), "daemon": daemon}))
 sys.stdout.buffer.write(b"\\xef\\xbb\\xbf{\\\"success\\\":true,\\\"data\\\":{\\\"text\\\":\\\"caf\\xc3\\xa9\\\"}}\\n")
@@ -104,26 +107,31 @@ if sys.argv[2] == "timeout":
     signal.pause()
 ''')
     executable.chmod(0o700)
-    argv = [str(executable), str(receipt), "timeout" if timed_out else "exit"]
-    daemon = started = None
-    try:
-        if timed_out:
-            with pytest.raises(subprocess.TimeoutExpired):
-                real_profile._capture_agent_browser_cli(argv, 2, "lifetime")
-        else:
-            result = real_profile._capture_agent_browser_cli(argv, 5, "lifetime")
-            assert result.returncode == 0
-            assert json.loads(result.stdout)["data"]["text"] == "café"
-            assert result.stderr == "diagnostic-\ufffd\n"
-        identities = json.loads(receipt.read_text())
-        daemon = identities["daemon"]
-        started = get_process_start_time(daemon)
-        assert started is not None
-        assert get_process_start_time(identities["client"]) is None
-        assert not list(directory.iterdir())
-    finally:
-        if receipt.exists() and daemon is None:
-            daemon = json.loads(receipt.read_text())["daemon"]
-            started = get_process_start_time(daemon)
-        if started is not None:
-            terminate_pid(daemon, force=True, expected_start_time=started)
+    # The daemon reparents when the client exits. Let this exact owned fixture
+    # exit through its private control channel; never bypass the process guard.
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(1)
+        listener.settimeout(5)
+        argv = [str(executable), str(receipt), "timeout" if timed_out else "exit",
+                str(listener.getsockname()[1])]
+        try:
+            if timed_out:
+                with pytest.raises(subprocess.TimeoutExpired):
+                    real_profile._capture_agent_browser_cli(argv, 2, "lifetime")
+            else:
+                result = real_profile._capture_agent_browser_cli(argv, 5, "lifetime")
+                assert result.returncode == 0
+                assert json.loads(result.stdout)["data"]["text"] == "café"
+                assert result.stderr == "diagnostic-\ufffd\n"
+            identities = json.loads(receipt.read_text())
+            assert get_process_start_time(identities["daemon"]) is not None
+            assert get_process_start_time(identities["client"]) is None
+            assert not list(directory.iterdir())
+        finally:
+            if receipt.exists():
+                daemon = json.loads(receipt.read_text())["daemon"]
+                connection, _ = listener.accept()
+                with connection:
+                    connection.sendall(b"stop")
+                assert wait_until(lambda: not pid_exists(daemon), timeout=5)

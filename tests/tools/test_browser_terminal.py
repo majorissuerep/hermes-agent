@@ -195,6 +195,7 @@ def test_runtime_guard_refuses_a_missing_or_replaced_runtime_directory(tmp_path)
     parts = [tmp_path / name for name in ("profile", "captures", "sockets", "tmp")]
     for part in parts:
         part.mkdir(mode=0o700)
+        part.chmod(0o700)  # owned fixture: mkdir can inherit SGID from the runner's parent
     runtime = BrowserRuntime(str(tmp_path), *map(str, parts))
     ran = subprocess.run(runtime.guarded(["printf", "ran"]), capture_output=True, text=True, timeout=30, check=False)
     assert (ran.returncode, ran.stdout) == (0, "ran")

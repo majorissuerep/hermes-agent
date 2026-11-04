@@ -184,13 +184,10 @@ class TestChromeFallback:
     def test_chrome_fallback_injects_required_sandbox_args(self, tmp_path):
 
         captured_envs = []
-        mock_proc = MagicMock()
-        mock_proc.wait.return_value = None
-        mock_proc.returncode = 1
 
-        def capture_popen(_cmd, **kwargs):
-            captured_envs.append(kwargs["env"])
-            return mock_proc
+        def capture_client(_cmd, env, stdin_payload, timeout):
+            captured_envs.append(env)
+            return 1, "", ""
 
         # Keep the fallback's socket dir under this test's private tmp_path.
         # Using the real shared tmpdir raced concurrent orphan reapers from
@@ -204,7 +201,7 @@ class TestChromeFallback:
              patch("tools.browser_tool_install._find_agent_browser", return_value="/usr/bin/agent-browser"), \
              patch("tools.browser_tool_install._chromium_installed", return_value=True), \
              patch("tools.browser_tool_session._needs_chromium_sandbox_bypass", return_value=True), \
-             patch("subprocess.Popen", side_effect=capture_popen):
+             patch.object(bt_session, "_run_agent_browser_client", side_effect=capture_client):
             result = bt_lightpanda_fallback._run_chrome_fallback_command(
                 "task1", "screenshot", [], timeout=30
             )
@@ -328,26 +325,14 @@ class TestEngineOverride:
 
         _session.return_value = {"session_name": "test-sess"}
 
-        # Track the cmd_parts that Popen receives
+        # Track the argv passed to the real command-collection boundary.
         captured_cmds = []
-        mock_proc = MagicMock()
-        mock_proc.wait.return_value = None
-        mock_proc.returncode = 0
 
-        def capture_popen(cmd, **kwargs):
+        def capture_client(cmd, env, stdin_payload, timeout):
             captured_cmds.append(cmd)
-            return mock_proc
+            return 0, '{"success": true, "data": {}}', ""
 
-        # We need to mock the file operations too
-        with patch("subprocess.Popen", side_effect=capture_popen), \
-             patch("os.open", return_value=99), \
-             patch("os.close"), \
-             patch("os.unlink"), \
-             patch("os.makedirs"), \
-             patch("builtins.open", MagicMock(return_value=MagicMock(
-                 __enter__=MagicMock(return_value=MagicMock(read=MagicMock(return_value='{"success": true, "data": {}}'))),
-                 __exit__=MagicMock(return_value=False),
-             ))), \
+        with patch.object(bt_session, "_run_agent_browser_client", side_effect=capture_client), \
              patch("tools.interrupt.is_interrupted", return_value=False), \
              patch("tools.browser_tool_lifecycle._write_owner_pid"):
             bt_session._run_browser_command("task1", "snapshot", [], _engine_override="auto")
@@ -376,26 +361,15 @@ class TestEngineOverride:
 
         captured_cmds = []
         captured_envs = []
-        mock_proc = MagicMock()
-        mock_proc.wait.return_value = None
-        mock_proc.returncode = 0
 
-        def capture_popen(cmd, **kwargs):
+        def capture_client(cmd, env, stdin_payload, timeout):
             captured_cmds.append(cmd)
-            captured_envs.append(kwargs["env"])
-            return mock_proc
+            captured_envs.append(env)
+            return 0, mock_stdout, ""
 
         # Return a substantive snapshot so the LP fallback does NOT trigger.
         mock_stdout = '{"success": true, "data": {"snapshot": "- heading \\"Hello\\" [ref=e1]", "refs": {"e1": {}}}}'
-        with patch("subprocess.Popen", side_effect=capture_popen), \
-             patch("os.open", return_value=99), \
-             patch("os.close"), \
-             patch("os.unlink"), \
-             patch("os.makedirs"), \
-             patch("builtins.open", MagicMock(return_value=MagicMock(
-                 __enter__=MagicMock(return_value=MagicMock(read=MagicMock(return_value=mock_stdout))),
-                 __exit__=MagicMock(return_value=False),
-             ))), \
+        with patch.object(bt_session, "_run_agent_browser_client", side_effect=capture_client), \
              patch("tools.interrupt.is_interrupted", return_value=False), \
              patch("tools.browser_tool_session._needs_chromium_sandbox_bypass", return_value=True), \
              patch("tools.browser_tool_lifecycle._write_owner_pid"), \
