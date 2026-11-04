@@ -94,7 +94,6 @@ def check_candidate(agent, content: str) -> tuple[bool, str]:
         return True, content
     current.approved, current.pending = False, {}
     current.finalized, current.accepted_response = False, ""
-    current.attempts += 1
     try:
         blocks = list(_BLOCK.finditer(content or ""))
         if len(blocks) != 1 or len(content) > 80_000:
@@ -120,6 +119,8 @@ def check_candidate(agent, content: str) -> tuple[bool, str]:
         current.approved = True
         current.attempts = 0
         return True, content + "\n\nFormal check: Lean 4.35.0 verified the deductions; assumptions were reviewed separately."
+    if current.status != "needs_stakeholder":
+        current.attempts += 1
     feedback = {"formal_logic": receipt, "pending_stakeholder_questions": list(current.pending),
                 "instruction": "Repair the checkpoint/answer automatically. Ask no human about proof or checker failures."}
     if current.pending:
