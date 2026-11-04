@@ -84,9 +84,6 @@ def prepare_child_key(home: Path | str | None = None, *,
 def adopt_inherited_key() -> bool:
     """Consume a parent's handed-over key if one was passed (idempotent: the fd and env var are gone after
     the first call). True when a vault was unlocked from it."""
-    from hermes_security.install_handoff import adopt_install_key
-
-    adopt_install_key()
     raw_fd = os.environ.pop(KEY_FD_ENV, "")
     if not raw_fd.isdigit():
         from hermes_security.session_authority import adopt_session_authority
@@ -156,12 +153,15 @@ def adopt_inherited_key() -> bool:
 def native_child_key(home: Path, env: dict, *, session_id: str):
     """A trusted native child retains its selected session and one-use FD only."""
     from agent.session_context import scoped_current_session_id
-    from hermes_security.session_authority import _vault_home
+    from hermes_security.session_authority import ENV_NAME, _vault_home, session_environment
     from hermes_security.errors import VaultLockedError
 
     env.pop(KEY_FD_ENV, None)
+    source_grant = session_environment(home, session_id).get(ENV_NAME)
+    if source_grant is None and _vault_home(home.resolve()) is not None:
+        raise VaultLockedError("The trusted native child's owning session is no longer live.")
     with scoped_current_session_id(session_id):
-        handoff = prepare_child_key(home)
+        handoff = prepare_child_key(home, source_grant=source_grant)
     if handoff is None and _vault_home(home.resolve()) is not None:
         raise VaultLockedError("The trusted native child's owning vault is locked.")
     try:

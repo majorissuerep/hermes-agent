@@ -882,8 +882,11 @@ bootstrap_pm() {
     # Refresh the sudo ticket cached in prerequisites (never prompts): the
     # clone and downloads can outlast sudo's timestamp_timeout.
     if [ "$(id -u)" -ne 0 ] && command -v sudo >/dev/null 2>&1; then sudo -n -v 2>/dev/null || :; fi
-    (cd "$INSTALL_DIR" && run_logged "Installing dependencies (hash-verified via uv.lock)" \
-        "$boot_py" -m pm.cli "${pm_args[@]}") \
+    local command=("$boot_py" -m pm.cli "${pm_args[@]}")
+    if [ -n "${__HERMES_INSTALL_OWNER_FD:-}" ]; then
+        command=("$boot_py" -I -B "$INSTALL_DIR/hermes_cli/source_install_session.py" --stage dependencies "${pm_args[@]:1}")
+    fi
+    (cd "$INSTALL_DIR" && run_logged "Installing dependencies (hash-verified via uv.lock)" "${command[@]}") \
         || fail "pm install failed" deps_install_failed
     log_success "dependencies installed"
 }
@@ -946,8 +949,11 @@ stage_products() {
     local boot_py
     local args=(--source "$INSTALL_DIR")
     bootstrap_python
-    (cd "$INSTALL_DIR" && run_logged "Building the hermes command and TUI" \
-        "$boot_py" -I -B -X utf8 hermes_cli/source_completion.py "${args[@]}") \
+    local command=("$boot_py" -I -B -X utf8 hermes_cli/source_completion.py "${args[@]}")
+    if [ -n "${__HERMES_INSTALL_OWNER_FD:-}" ]; then
+        command=("$boot_py" -I -B "$INSTALL_DIR/hermes_cli/source_install_session.py" --stage products)
+    fi
+    (cd "$INSTALL_DIR" && run_logged "Building the hermes command and TUI" "${command[@]}") \
         || fail "TUI product or command publication failed" products_build_failed
     wire_shell_path
     log_success "TUI product and hermes command ready"
@@ -960,7 +966,11 @@ stage_config() {
     if vaulted_install_home; then
         local boot_py
         bootstrap_python
-        "$boot_py" -I -B "$INSTALL_DIR/hermes_cli/source_install_seed.py" "$HERMES_HOME" \
+        local command=("$boot_py" -I -B "$INSTALL_DIR/hermes_cli/source_install_seed.py" "$HERMES_HOME")
+        if [ -n "${__HERMES_INSTALL_OWNER_FD:-}" ]; then
+            command=("$boot_py" -I -B "$INSTALL_DIR/hermes_cli/source_install_session.py" --stage config)
+        fi
+        "${command[@]}" \
             || fail "cannot seed encrypted config; existing state was retained" configuration_failed
         log_success "config prepared in $HERMES_HOME"
         return 0
@@ -986,7 +996,14 @@ stage_setup() {
         log "setup skipped (no terminal); run 'hermes setup' after install"
         return 0
     fi
-    "$INSTALL_DIR/.hermes/bin/hermes" setup </dev/tty || fail "setup failed" setup_failed
+    if [ -n "${__HERMES_INSTALL_OWNER_FD:-}" ]; then
+        local boot_py
+        bootstrap_python
+        "$boot_py" -I -B "$INSTALL_DIR/hermes_cli/source_install_session.py" --stage setup </dev/tty \
+            || fail "setup failed" setup_failed
+    else
+        "$INSTALL_DIR/.hermes/bin/hermes" setup </dev/tty || fail "setup failed" setup_failed
+    fi
 }
 
 stage_complete() {
@@ -1060,7 +1077,7 @@ run_install_session() {
     [ "$VERBOSE" != true ] || args+=(--verbose)
     [ "$JSON" != true ] || args+=(--json)
     bootstrap_python
-    "$boot_py" -I -B "$INSTALL_DIR/hermes_cli/source_install_session.py" \
+    "$boot_py" -I -B "$INSTALL_DIR/hermes_cli/source_install_session.py" --stages \
         bash -c 'source "$1" --manifest "${@:4}"
             INSTALL_RUN_ID="$2"
             INSTALL_STARTED="$3"

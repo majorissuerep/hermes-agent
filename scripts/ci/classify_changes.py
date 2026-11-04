@@ -164,11 +164,13 @@ _UPDATE_DEPENDENCIES = (
     "hermes_platform/process_argv.py",
     "hermes_platform/child_processes.py",  # native updater custody and completion receipt ownership
     "hermes_security/handoff.py",
-    "hermes_security/protected_memory.py",
-    "hermes_security/install_handoff.py",
     "hermes_security/session_authority.py",
     "hermes_security/passphrase.py",  # wrapped credential readers and rotation metadata
     "hermes_security/vault_metadata.py",  # serialized key-slot/credential publication
+    "hermes_security/protected_memory.py",  # vault key custody on every encrypted update
+    "hermes_platform/memory_protection.py",  # native backing proof used by key custody
+    "hermes_platform/managed_supervision.py",  # encrypted installer owner and stage lifetime
+    "hermes_platform/owned_cleanup.py",  # supervisor-owned cleanup descriptors
     "hermes_cli/_subprocess_compat.py",  # update git env, process-tree kill, PM git exposure
     "hermes_cli/local_runtime/processes.py",  # bounded probes' spawn_server/job custody
     "agent/deadline.py",  # bounded probes' process-tree timeout cleanup

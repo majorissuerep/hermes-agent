@@ -9,8 +9,11 @@ if __name__ == "__main__":
 
 
 def seed_encrypted_install_state(home: Path) -> None:
+    from hermes_constants import get_hermes_home
     from pm.state_io import prepare_owner
 
+    if home.resolve() != get_hermes_home().resolve():
+        raise ValueError("installer seed must select its owning profile")
     prepare_owner()
     from hermes_cli.config import _write_env_lines, seed_config_file
 

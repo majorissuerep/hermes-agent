@@ -22,6 +22,17 @@ def test_config_stage_seeds_only_missing_files_through_unlocked_owner(tmp_path, 
     vault.init_vault(home, "synthetic-seed-password")
     vault.unlock(home, "synthetic-seed-password")
     originals = {}
+    handoffs, first_seed = [], {}
+    from hermes_security import handoff
+    prepare = handoff.prepare_child_key
+
+    def prepare_stage(selected, **kwargs):
+        handoffs.append((Path(selected), bool(kwargs.get("source_grant"))))
+        if len(handoffs) == 2:
+            first_seed.update({name: (home / name).read_bytes() for name in ("config.yaml", ".env")})
+        return prepare(selected, **kwargs)
+
+    monkeypatch.setattr(handoff, "prepare_child_key", prepare_stage)
     if existing:
         # Source repair must not bless or replace untrusted clobbered state.
         for name in ("config.yaml", ".env"):
@@ -37,9 +48,11 @@ stage_config
     # Inject only the already provisioned test interpreter, not application I/O.
     command = ["bash", "-c", script, "installer-seed-test", str(ROOT), str(home), sys.executable]
     try:
-        assert run_install_session(command) == 0
+        assert run_install_session(command, stages=True) == 0
+        assert handoffs == [(home, True), (home, True)]
         for name, purpose in (("config.yaml", "config"), (".env", "env")):
             raw = (home / name).read_bytes()
+            assert raw == first_seed[name]
             if existing:
                 assert raw == originals[name]
             else:

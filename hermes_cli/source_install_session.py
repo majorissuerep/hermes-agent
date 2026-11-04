@@ -11,7 +11,7 @@ if __name__ == "__main__":
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 
-def run_install_session(command: list[str]) -> int:
+def run_install_session(command: list[str], *, stages: bool = False) -> int:
     from hermes_constants import get_hermes_home
     from hermes_cli.source_install_log import LOG_FD_ENV, encrypted_install_log
     from pm.state_io import prepare_owner, vault_home
@@ -25,7 +25,6 @@ def run_install_session(command: list[str]) -> int:
     # Keep its temporary authority alive until every installer stage exits.
     prepare_owner()
     from hermes_security.session_authority import start_session_authority
-    from hermes_security.install_handoff import installer_keys
 
     session_id = "source-install-" + secrets.token_hex(16)
     authority = start_session_authority(home, session_id)
@@ -33,13 +32,22 @@ def run_install_session(command: list[str]) -> int:
         raise RuntimeError("encrypted install has no unlocked vault owner")
     env = {**os.environ, "HERMES_SESSION_ID": session_id, **authority.environment()}
     try:
-        with encrypted_install_log(home, env) as pass_fds, installer_keys(home, session_id, env) as key_fd:
-            return subprocess.call(command, env=env, timeout=7200, pass_fds=(*pass_fds, key_fd))
+        with encrypted_install_log(home, env) as pass_fds:
+            from hermes_cli.source_install_stages import run_owned_install
+
+            return run_owned_install(command, home, authority, env, pass_fds, stages=stages)
     finally:
         authority.close()
 
 
 if __name__ == "__main__":
+    if sys.argv[1:2] == ["--stage"]:
+        from hermes_cli.source_install_stages import request_stage
+
+        raise SystemExit(request_stage(sys.argv[2:]))
+    staged = sys.argv[1:2] == ["--stages"]
+    if staged:
+        del sys.argv[1]
     if len(sys.argv) < 2:
         raise SystemExit("Usage: source_install_session.py COMMAND [ARG ...]")
-    raise SystemExit(run_install_session(sys.argv[1:]))
+    raise SystemExit(run_install_session(sys.argv[1:], stages=staged))

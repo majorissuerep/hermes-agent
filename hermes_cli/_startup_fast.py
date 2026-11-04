@@ -59,9 +59,6 @@ def try_management(argv: list[str]) -> None:
 
 def try_session_proxy(argv: list[str]) -> None:
     """An inherited operation grant forwards native work before any vault read."""
-    if os.environ.get("__HERMES_INSTALL_KEYS_FD"):
-        from hermes_security.install_handoff import adopt_install_key
-        adopt_install_key()
     if not os.environ.get("HERMES_SESSION_VAULT") or os.environ.get("HERMES_VAULT_KEY_FD"):
         return
     from hermes_constants import get_hermes_home
