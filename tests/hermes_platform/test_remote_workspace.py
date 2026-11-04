@@ -87,15 +87,19 @@ def test_real_probe_reaches_the_same_verdict_as_the_host_proof(monkeypatch, tmp_
 
     monkeypatch.delenv("XDG_RUNTIME_DIR", raising=False)
     run = _local_transport(monkeypatch)
-    expected = ram_only_directory_proof(tmp_path)
+    # The autouse synthetic home also lives under tmp_path. Only this dedicated
+    # target base is under the probe's ownership/nonmutation contract.
+    base = tmp_path / "backend-scratch"
+    base.mkdir(mode=0o700)
+    expected = ram_only_directory_proof(base)
     if not expected.proven:
         with pytest.raises(protected_scratch.ProtectedTargetUnavailable, match=expected.reason):
-            protected_scratch.acquire(run, "hermes-probe-test", ("profile",), candidates=(str(tmp_path),))
-        assert list(tmp_path.iterdir()) == []
+            protected_scratch.acquire(run, "hermes-probe-test", ("profile",), candidates=(str(base),))
+        assert list(base.iterdir()) == []
         return
-    found = protected_scratch.acquire(run, "hermes-probe-test", ("profile",), candidates=(str(tmp_path),))
+    found = protected_scratch.acquire(run, "hermes-probe-test", ("profile",), candidates=(str(base),))
     root = Path(found.root)
-    assert root.parent == Path(os.path.realpath(tmp_path))
+    assert root.parent == Path(os.path.realpath(base))
     for path in (root, root / "profile"):
         assert path.is_dir() and not path.is_symlink()
         assert (path.stat().st_mode & 0o7777, path.stat().st_uid) == (0o700, os.geteuid())
