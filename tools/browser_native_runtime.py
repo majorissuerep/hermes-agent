@@ -25,12 +25,40 @@ _CLEANUP = ContextVar('native_browser_cleanup', default=None)
 
 class NativeEnvironment(dict):
     """Ordinary subprocess strings plus an in-process-only original operation guard."""
-    def __init__(self, values, lease, operation):
+    def __init__(self, values, lease, operation, *, directories=None):
         super().__init__(values)
         self.lease, self.operation = lease, operation
+        self.directories = directories
 
     def copy(self):
-        return NativeEnvironment(self, self.lease, self.operation)
+        return NativeEnvironment(self, self.lease, self.operation, directories=self.directories)
+
+    def check(self):
+        self.operation.check()
+        self.lease.check()
+        if self.directories is None:
+            raise store.WorkerStateError('Native browser private directories were not prepared')
+        self.directories.check(self)
+
+    @property
+    def home(self):
+        return self.operation.home
+
+    @property
+    def resource(self):
+        return self.operation.resource
+
+    @property
+    def vault(self):
+        return self.operation.vault
+
+    @property
+    def authority(self):
+        return self.operation.authority
+
+    def derive_key(self, purpose):
+        self.check()
+        return self.operation.derive_key(purpose)
 
 
 class NativeLease:
@@ -86,7 +114,10 @@ def environment(values, socket):
                  SessionCustody.capture(lease.home, resource=lease.resource.custody))
     operation.check()
     if cleanup is not None and cleanup[0] is lease and cleanup[2] and lease.original_environment is not None:
-        return NativeEnvironment(lease.original_environment, lease, operation)
+        original = lease.original_environment
+        result = NativeEnvironment(original, lease, operation, directories=original.directories)
+        result.check()
+        return result
     # Never silently ignore a pre-existing external credential/config store.
     original = Path(values.get('HOME') or Path.home())/'.agent-browser'
     selected = lease.resource.tree/'home'
@@ -113,8 +144,10 @@ def environment(values, socket):
                   XDG_CACHE_HOME=str(selected/'.cache'), XDG_DATA_HOME=str(selected/'.local'/'share'),
                   TMPDIR=str(lease.resource.path/'tmp'), TMP=str(lease.resource.path/'tmp'),
                   TEMP=str(lease.resource.path/'tmp'), AGENT_BROWSER_SOCKET_DIR=str(lease.socket))
+    from tools.browser_native_paths import PrivateDirectories
+    result.directories = PrivateDirectories(result)
     if lease.original_environment is None:
-        lease.original_environment = dict(result)
+        lease.original_environment = result.copy()
     return result
 
 
@@ -140,12 +173,11 @@ def client_guard(env, argv):
             raise store.WorkerStateError('The native browser operation lost its original session guard')
         yield env
         return
-    env.operation.check()
-    env.lease.check()
+    env.check()
     if env.lease.executable is None:
         env.lease.executable = str(Path(argv[0]).resolve())
     env.close_completed = False
-    with env.lease.resource.operation(operation=env.operation) as call:
+    with env.lease.resource.operation(operation=env) as call:
         store._write(env.lease.pending, {'unknown':True, 'session':env.lease.session,
                                       'executable':env.lease.executable, 'socket':str(env.lease.socket),
                                       'socket_inode':list(env.lease.identity)})

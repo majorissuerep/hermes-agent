@@ -651,10 +651,12 @@ def _run_agent_browser_client(argv: list[str], env: dict[str, str], stdin_payloa
     client's own exit, and a timeout (``None`` code) kills only the client. Exceeding the
     output bound raises ``ClientOutputLimit`` rather than returning partial JSON."""
     from hermes_platform.client_capture import run_client
-    from tools.browser_native_runtime import client_guard, completed_client
+    from tools.browser_native_runtime import NativeEnvironment, client_guard, completed_client
 
     with client_guard(env, argv) as guarded:
-        code, stdout, stderr = run_client(argv, env=guarded, payload=stdin_payload, timeout=timeout)
+        check = guarded.check if isinstance(guarded, NativeEnvironment) else None
+        code, stdout, stderr = run_client(argv, env=guarded, payload=stdin_payload, timeout=timeout,
+                                         check_alive=check)
         completed_client(guarded, argv, code, stdout)
     return code, stdout.decode("utf-8-sig", "replace"), stderr.decode("utf-8-sig", "replace")
 

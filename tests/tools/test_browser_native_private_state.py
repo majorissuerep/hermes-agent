@@ -188,3 +188,36 @@ def test_inactive_callback_cannot_close_with_sibling_but_new_explicit_cleanup_ca
         sibling.close()
         browser._active_sessions.pop(task, None)
         browser._session_owner_homes.pop(task, None)
+
+
+@pytest.mark.parametrize('selection', ['HOME', 'XDG_CACHE_HOME', 'vendor-auth-root'])
+def test_queued_native_directory_replacement_refuses_before_private_bytes_leave_ram(native_state, monkeypatch, selection):
+    from tools import browser_tool_session as session
+
+    home, user, ram = native_state
+    calls = []
+    def vendor(_argv, *, env, **_kwargs):
+        calls.append(True)
+        if len(calls) > 1:
+            root = Path(env['HOME'])/'.agent-browser' if selection == 'vendor-auth-root' else Path(env[selection])
+            root.mkdir(mode=0o700, parents=True, exist_ok=True)
+            (root/'private-state').write_bytes(b'synthetic queued native private auth')
+        return 0, b'{}', b''
+    monkeypatch.setattr('hermes_platform.client_capture.run_client', vendor)
+    socket = session._prepare_session_socket_dir('native-directory-admission')
+    original = session._agent_browser_command_env(socket)
+    selected = Path(original['HOME'])/'.agent-browser' if selection == 'vendor-auth-root' else Path(original[selection])
+    selected.mkdir(mode=0o700, exist_ok=True)
+    (selected/'original-state').write_bytes(b'original native data must remain available')
+    session._run_agent_browser_client(['declared-unit-vendor'], original, None, 10)
+    cipher = (home/original.lease.resource.relative).read_bytes()
+    retained = ram/'retained-native-directory'
+    selected.rename(retained)
+    disk = user/'unrelated-persistent-directory'
+    disk.mkdir(mode=0o700)
+    selected.symlink_to(disk, target_is_directory=True)
+    with pytest.raises(RuntimeError):
+        session._run_agent_browser_client(['declared-unit-vendor'], original.copy(), None, 10)
+    assert calls == [True] and not list(disk.iterdir())
+    assert (retained/'original-state').read_bytes() == b'original native data must remain available'
+    assert (home/original.lease.resource.relative).read_bytes() == cipher
