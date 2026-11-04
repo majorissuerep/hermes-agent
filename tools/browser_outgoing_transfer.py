@@ -13,7 +13,8 @@ from tools.browser_outgoing_state import OutgoingProfileError
 TIMEOUT = 120
 
 
-def client(lease, argv, *, payload=None, input_source=None, output_sink=None, maximum=2048, child_env=None):
+def client(lease, argv, *, payload=None, input_source=None, output_sink=None, maximum=2048, child_env=None,
+           keep_input_open=False):
     """Use the captured context, custody, exact client prefix and native generation once."""
     from tools import browser_terminal as terminal
     from tools.environments import streams
@@ -28,7 +29,8 @@ def client(lease, argv, *, payload=None, input_source=None, output_sink=None, ma
                 raise OutgoingProfileError("Original backend cannot stream browser profiles; every copy retained")
             code, output, error = run_client(command, env=lease.client_env, timeout=TIMEOUT,
                                              payload=payload, input_source=input_source,
-                                             output_sink=output_sink, max_output=maximum, check_alive=lease.custody.check)
+                                             output_sink=output_sink, max_output=maximum, check_alive=lease.custody.check,
+                                             keep_input_open=keep_input_open)
         lease.custody.check()
         if code != 0:
             if b"protected browser continuity requires Python 3.11" in error or b"python3: not found" in error:
@@ -101,7 +103,7 @@ def download(lease, ram: Path, *, path=None, stale=False):
     binding = lease.binding if lease.bound and path is None else None
     command = remote_profile.command("export", path or lease.runtime.profile, maximum=maximum, stale=stale, binding=binding)
     with target.open("w+b") as spool:
-        client(lease, command, output_sink=spool, maximum=maximum)
+        client(lease, command, output_sink=spool, maximum=maximum, keep_input_open=True)
         spool.flush()
         spool.seek(0)
         digest = hashlib.file_digest(spool, "sha256").hexdigest()
@@ -153,4 +155,4 @@ def retire(lease, digest: str, maximum: int, *, path=None, stale=False):
     command = remote_profile.command("retire-legacy" if path else "retire", path or lease.runtime.profile,
                                      maximum=maximum, expected=digest, stale=stale,
                                      binding=lease.binding if lease.bound and path is None else None)
-    client(lease, command)
+    client(lease, command, keep_input_open=True)

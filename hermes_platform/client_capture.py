@@ -63,13 +63,14 @@ class _Streams:
             self.output[channel].extend(chunk)
 
 
-def _register(selector, child, payload: bytes) -> None:
+def _register(selector, child, payload: bytes, keep_input_open: bool = False) -> None:
     for channel in ("stdout", "stderr", "stdin"):
         handle = getattr(child, channel)
         if handle is None:
             continue
         if channel == "stdin" and not payload:
-            handle.close()
+            if not keep_input_open:
+                handle.close()
             continue
         os.set_blocking(handle.fileno(), False)
         selector.register(handle, selectors.EVENT_WRITE if channel == "stdin" else selectors.EVENT_READ,
@@ -103,7 +104,8 @@ def _collect(child, streams: _Streams, timeout: float, check_alive=None) -> int 
 
 def run_client(argv, *, env, payload: bytes | None = None, timeout: float,
                max_output: int = 64 * 1024 * 1024, input_source: BinaryIO | None = None,
-               output_sink: BinaryIO | None = None, check_alive=None) -> tuple[int | None, bytes, bytes]:
+               output_sink: BinaryIO | None = None, check_alive=None,
+               keep_input_open: bool = False) -> tuple[int | None, bytes, bytes]:
     """Return at this client's exit, using bounded pipes on Linux and macOS.
 
     ``None`` is the timeout result; output overflow raises without returning
@@ -111,20 +113,24 @@ def run_client(argv, *, env, payload: bytes | None = None, timeout: float,
     A caller-owned input source replaces ``payload``; a caller-owned stdout sink avoids
     buffering transferred profile trees. The caller proves/stages its files in protected RAM;
     streams remain open, stderr is still captured, and the total output bound still applies.
+    Fixed remote transfers may hold an otherwise empty stdin pipe as their owner
+    lifetime. It carries no data and closes on cancellation, failure or owner exit.
     """
     if timeout <= 0 or max_output <= 0:
         raise ValueError("Client capture needs positive timeout and output bounds")
     if input_source is not None and payload is not None:
         raise ValueError("Client capture accepts one input source")
+    if keep_input_open and (payload is not None or input_source is not None):
+        raise ValueError("The fixed lifetime pipe cannot also carry an input payload")
     if check_alive is not None:
         check_alive()
     data = input_source.read(65536) if input_source is not None else payload or b""
     child = subprocess.Popen(
-        argv, stdin=subprocess.PIPE if payload is not None or input_source is not None else subprocess.DEVNULL,
+        argv, stdin=subprocess.PIPE if payload is not None or input_source is not None or keep_input_open else subprocess.DEVNULL,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, close_fds=True)
     try:
         with selectors.DefaultSelector() as selector:
-            _register(selector, child, data)
+            _register(selector, child, data, keep_input_open)
             streams = _Streams(selector, max_output, memoryview(data), input_source, output_sink)
             code = _collect(child, streams, timeout, check_alive)
             return code, bytes(streams.output["stdout"]), bytes(streams.output["stderr"])

@@ -11,18 +11,35 @@ import posixpath
 _TAR = ("tar", "--format=posix", "--sort=name", "--owner=0", "--group=0", "--numeric-owner",
         "--mtime=@0", "--pax-option=delete=atime,delete=ctime,exthdr.name=%d/PaxHeaders/%f")
 _PROGRAM = r'''
-import ctypes, hashlib, json, os, shutil, signal, stat, subprocess, sys
+import ctypes, hashlib, json, os, select, shutil, signal, stat, subprocess, sys, time
 if sys.version_info < (3, 11):
     raise RuntimeError("protected browser continuity requires Python 3.11 or later")
 operation, path, maximum, expected, stale, binding_raw = sys.argv[1:]
 maximum, stale = int(maximum), stale == "yes"
 binding = json.loads(binding_raw) if binding_raw else None
 BINDING = ".hermes-browser-binding.json"
+DEADLINE = time.monotonic() + 120
+WATCH_OWNER = operation in {"export", "retire", "retire-legacy"}
+def terminal(error_type, reason):
+    # Cancellation is single-shot: another tick must not interrupt kill()/wait().
+    signal.setitimer(signal.ITIMER_REAL, 0)
+    raise error_type(reason)
+
 def expired(_number, _frame):
-    raise TimeoutError("profile transfer deadline reached")
+    if time.monotonic() >= DEADLINE:
+        terminal(TimeoutError, "profile transfer deadline reached")
+    if WATCH_OWNER and select.select([0], [], [], 0)[0]:
+        if not os.read(0, 1):
+            terminal(RuntimeError, "original transfer owner closed; recovery state retained")
+        terminal(RuntimeError, "fixed transfer lifetime pipe contained unexpected data")
 
 signal.signal(signal.SIGALRM, expired)
-signal.alarm(120)
+if WATCH_OWNER:
+    # SSH/server processes can survive a disconnected client. The original
+    # owner's anonymous stdin pipe is the lifetime, including while tar is busy.
+    signal.setitimer(signal.ITIMER_REAL, 0.1, 0.1)
+else:
+    signal.alarm(120)
 
 PARENT = os.getpid()
 def child_lifetime():
@@ -177,10 +194,14 @@ def run():
         os.close(fd)
 
 try:
+    if WATCH_OWNER:
+        expired(None, None)  # a preclosed owner channel admits no transfer effects
     run()
 except Exception as error:
     print("Outgoing browser profile " + operation + " refused: " + str(error), file=sys.stderr)
     raise SystemExit(1)
+finally:
+    signal.setitimer(signal.ITIMER_REAL, 0)
 '''
 
 
