@@ -68,6 +68,13 @@ def _stop_all_lightpanda() -> None:
     stop_all_lightpanda()
 
 
+def _settle_owned_browser_profiles() -> None:
+    """Save (encrypted) and retire every owned profile copy this process prepared whose browser
+    has exited; copies a browser still holds stay active in RAM and are saved at a later boundary."""
+    from hermes_cli.browser_profile_store import settle
+    settle()
+
+
 def _emergency_cleanup_all_sessions():
     """atexit: close this process's sessions, then sweep orphans left by crashed
     hermes processes — every clean exit reaps accumulated orphans, not only
@@ -100,6 +107,8 @@ def _emergency_cleanup_all_sessions():
                 _bt._recording_sessions.clear()
     # Lightpanda servers we spawned that fell out of ``_active_sessions``.
     _best_effort("Lightpanda cleanup on exit", _stop_all_lightpanda)
+    # The debug browser (/browser connect) is the user's to close; save it only if already closed.
+    _best_effort("Owned browser profile save on exit", _settle_owned_browser_profiles)
     # Safe even if we never used the browser — owner_pid liveness protects daemons
     # owned by other live hermes processes.
     _best_effort("Orphan reap on exit", _reap_orphaned_browser_sessions)
@@ -418,6 +427,7 @@ def _browser_cleanup_thread_worker():
             _cleanup_inactive_browser_sessions()
         except Exception as e:
             _bt.logger.warning("Cleanup thread error: %s", e)
+        _best_effort("Owned browser profile save", _settle_owned_browser_profiles)
 
         for _ in range(30):  # 1s granularity so stop is quick
             if not _bt._cleanup_running:

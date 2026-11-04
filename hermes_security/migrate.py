@@ -65,6 +65,7 @@ class MigrationReport:
     databases: list[str] = field(default_factory=list)
     envelopes: list[str] = field(default_factory=list)
     frame_streams: list[str] = field(default_factory=list)
+    browser_profiles: list[str] = field(default_factory=list)
     skipped: list[str] = field(default_factory=list)
     failures: list[str] = field(default_factory=list)
 
@@ -105,7 +106,7 @@ def repair_clobbered_state(home: Path | str) -> dict:
     # Re-sealing them in their storage location makes the restore point unusable.
     for path, rel in _iter_files(home_path, exclude_roots={"backups", "state-snapshots", "profiles"}):
         kind = _classify(path, rel)
-        if kind == "skip" or path.is_symlink():
+        if kind in ("skip", "browser") or path.is_symlink():
             continue  # never repair through a link (it may point outside the home)
         try:
             _harden_private_artifact(home_path, rel)
@@ -120,6 +121,10 @@ def repair_clobbered_state(home: Path | str) -> dict:
         except Exception as exc:
             report["unrecoverable"].append(f"{rel.as_posix()}: {type(exc).__name__}: {exc}")
     report["code_files"] = _restore_code_trees(vault, home_path, report)
+    from hermes_cli.browser_profile_repair import convert_legacy_browser_profiles
+
+    browser = convert_legacy_browser_profiles(home_path)
+    report["browser_archived"], report["browser_retained"] = browser["archived"], browser["retained"]
     return report
 
 
@@ -643,9 +648,23 @@ def _purpose_for(rel: Path) -> str:
     return "state"
 
 
+def _browser_relative(relative: Path | None) -> Path | None:
+    """Home-relative browser-profile path, also inside a named profile (``profiles/<name>/…``)."""
+    from hermes_security.browser_profile_archive import browser_state_kind
+
+    if relative is None:
+        return None
+    parts = Path(relative).parts
+    candidate = Path(*parts[2:]) if len(parts) > 2 and parts[0] == "profiles" else Path(relative)
+    return candidate if browser_state_kind(candidate) else None
+
+
 def _classify(path: Path, relative: Path | None = None) -> str:
     from hermes_security.artifact_paths import legacy_media_codec, media_kind
 
+    # Chromium needs its profile files raw: they are archived whole, never sealed file by file.
+    if _browser_relative(relative) is not None:
+        return "browser"
     candidate = relative if relative is not None else path
     if media_kind(candidate) and not legacy_media_codec(candidate):
         return "envelope"
@@ -689,6 +708,9 @@ def migrate_home(home: Path | str, password: str | bytes, *, dry_run: bool = Fal
             kind = _classify(path, rel)
             if kind == "skip":
                 continue
+            if kind == "browser":
+                _note_browser_root(report, rel)
+                continue
             if not dry_run:
                 _harden_private_artifact(home, rel)
             if kind == "db":
@@ -713,7 +735,55 @@ def migrate_home(home: Path | str, password: str | bytes, *, dry_run: bool = Fal
         except Exception as exc:
             report.failures.append(f"{rel.as_posix()}: {exc}")
 
+    if not dry_run:
+        _convert_browser_profiles(home, report)
     return report
+
+
+def _note_browser_root(report: MigrationReport, relative: Path) -> None:
+    root = _browser_root(relative)
+    if root not in report.browser_profiles:
+        report.browser_profiles.append(root)
+
+
+def _convert_browser_profiles(home: Path, report: MigrationReport) -> None:
+    """Archive legacy plaintext browser profiles whole (verified), never file by file."""
+    if not report.browser_profiles:
+        return
+    from hermes_cli.browser_profile_repair import convert_legacy_browser_profiles
+
+    retained = convert_legacy_browser_profiles(home)["retained"]
+    report.failures += [f"{item} — run 'hermes secure-vault repair' once resolved" for item in retained]
+
+
+def _browser_root(relative: Path) -> str:
+    """The browser-profile directory (or archive) a file belongs to, as one report entry."""
+    parts = Path(relative).parts
+    prefix = parts[:2] if len(parts) > 2 and parts[0] == "profiles" else ()
+    inner = parts[len(prefix):]
+    return Path(*prefix, *inner[:2 if inner[0] != "chrome-debug" else 1]).as_posix()
+
+
+def _browser_offender(path: Path, rel: Path) -> str | None:
+    """Report any browser state that the dedicated reader cannot authenticate.
+
+    An interrupted stage is unverified. Legacy plaintext is reported by its
+    whole profile directory, while damaged archives keep their exact path.
+    """
+    from hermes_security import browser_profile_archive as archive
+
+    inner = _browser_relative(rel)
+    kind = archive.browser_state_kind(inner)
+    if kind == "stage":
+        return rel.as_posix()  # A filename cannot authenticate an interrupted publication.
+    if kind == "archive":
+        owner = vault_mod.find_vault_home(path)
+        try:
+            archive.replay_archive(owner, inner, custody=archive.capture_custody(owner))
+            return None
+        except (OSError, ValueError, vault_errors.VaultError):
+            return rel.as_posix()
+    return _browser_root(rel)
 
 
 def scan_for_plaintext(home: Path | str) -> list[str]:
@@ -732,6 +802,11 @@ def scan_for_plaintext(home: Path | str) -> list[str]:
         offenders.append(Path(exc.filename or home).relative_to(home).as_posix())
 
     for path, rel in _iter_files(home, onerror=unreadable):
+        if _classify(path, rel) == "browser":
+            entry = _browser_offender(path, rel)
+            if entry is not None and entry not in offenders:  # one entry per legacy profile directory
+                offenders.append(entry)
+            continue
         try:
             kind = _classify(path, rel)
             if kind == "db":

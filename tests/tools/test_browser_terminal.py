@@ -88,7 +88,7 @@ def test_native_browser_launchers_refuse_selected_sandbox_before_host_spawn(monk
         pytest.fail("native browser launched outside the chosen sandbox")
     monkeypatch.setattr(browser_lightpanda.subprocess, "Popen", unexpected_spawn)
     if engine == "profile":
-        value, error = browser_tool_real_profile._launch_real_profile_chrome("/native/chrome", "/unused")
+        value, error = browser_tool_real_profile._launch_real_profile_chrome("/native/chrome", "/unused", "chrome")
     else:
         value, error = browser_lightpanda.launch_lightpanda("private")
     assert value is None

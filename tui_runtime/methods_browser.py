@@ -81,7 +81,11 @@ def _connect_local_default(port: int, system: str, announce) -> str | None:
         return discovered
     if launch.hint:
         announce(launch.hint, level="error")
-    command = manual_chrome_debug_command(launch_port, system)
+    if launch.profile_error:  # the protected debug profile could not be prepared: offer no bypass
+        announce("Browser not connected — resolve the browser profile problem above and retry /browser connect",
+                 level="error")
+        return None
+    command = manual_chrome_debug_command(launch_port, system, launch.profile_dir)
     hints = (
         ["Start a Chromium-family browser with remote debugging, then retry /browser connect:", command]
         if command else [

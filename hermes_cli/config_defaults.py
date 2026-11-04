@@ -364,8 +364,8 @@ DEFAULT_CONFIG = {
         # of the ACTIVE default-Chromium profile (Local State -> profile.last_used; cookies, logins,
         # prefs copied and re-synced per fresh session) driven by Hermes' packaged Chromium. The
         # snapshot dir sidesteps Chrome 136+'s default-profile debugging block and never contends
-        # with the running browser. Turning off deletes ~/.hermes/browser-profile/ so credentials
-        # don't outlive consent. Chromium-family only (Chrome, Edge, Brave, Brave Origin, Chromium);
+        # with the running browser. Copies use RAM and encrypted archives; turning off removes
+        # owned copies. Chromium-family only (Chrome, Edge, Brave, Brave Origin, Chromium);
         # Firefox etc. fails closed. Also gates the browser_exec `local` argument (real-profile
         # local session even under a cloud backend). Desktop Settings -> Browser.
         "use_real_profile": False,

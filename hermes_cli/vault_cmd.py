@@ -116,6 +116,8 @@ def cmd_vault(args: Any) -> int:
             print(f"    {name}")
         print(f"  files     -> envelopes : {len(report.envelopes)}")
         print(f"  streams   -> frames    : {len(report.frame_streams)}")
+        if report.browser_profiles:
+            print(f"  browser profiles -> verified encrypted archives : {len(report.browser_profiles)}")
         print(f"  total: {total} item(s)")
         if getattr(args, "yes", False) is not True and not getattr(args, "key_only", False):
             answer = input("\nProceed with migration? A full tar backup is written first. [y/N] ").strip().lower()
@@ -292,6 +294,9 @@ def cmd_vault(args: Any) -> int:
             ("restored", "✓ Restored {n} mangled file(s) from the pre-migration backup:"),
             ("skipped_dbs", "⚠ {n} PLAINTEXT database(s) left untouched (vault bypass suspected — investigate):"),
             ("unrecoverable", "✗ {n} file(s) could not be repaired:"),
+            ("browser_archived", "✓ Moved {n} plaintext browser profile(s) into verified encrypted archives "
+                                 "(old copies removed; no SSD secure-erase is claimed):"),
+            ("browser_retained", "✗ {n} plaintext browser profile(s) left exactly in place:"),
         )
         for key, title in sections:
             items = report[key]
@@ -306,7 +311,7 @@ def cmd_vault(args: Any) -> int:
             print(f"✓ Restored {report['code_files']} file(s) in hermes-agent.* code trees to plaintext (public code)")
         if not any(report[key] for key, _ in sections) and not report["code_files"]:
             print("○ Nothing to repair (every state file is in its canonical sealed form)")
-        if report["unrecoverable"] or report["skipped_dbs"]:
+        if report["unrecoverable"] or report["skipped_dbs"] or report["browser_retained"]:
             return 1
         return 0
 

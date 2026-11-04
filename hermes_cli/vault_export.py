@@ -20,5 +20,6 @@ def export_command(args) -> int:
         print(f"Export failed; encrypted originals retained: {exc}")
         return 1
     print(f"Exported {report['files']} files ({report['databases']} databases) to {args.output}")
+    print("Browser profile archives (copied cookies/logins) are credential stores and are not exported.")
     print("This recovery archive is PLAINTEXT. Keep it private; the original home remains encrypted.")
     return 0

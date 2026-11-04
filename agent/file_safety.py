@@ -243,10 +243,22 @@ def build_write_approval_paths(home: str) -> set[str]:
 # rewrite. Session transcripts (state.db, sessions/) are application-owned
 # state whose rewrite can falsify history and break resume/compression;
 # mcp-tokens/, pairing/, vault/ (key + ciphertext side by side) and
-# browser-profile/ (copied cookies / Login Data) hold credential material.
+# browser-profile/ (encrypted browser profile archives, and copied cookies /
+# Login Data an older build left raw) and chrome-debug/ (an older build's raw
+# /browser connect profile) hold credential material.
 # Control files (auth.json, config.yaml, webhook_subscriptions.json) are
 # deliberately NOT here (#45947): read-denied, but the user may ask to edit them.
-_HERMES_PROTECTED_SUBPATHS = ("state.db", "sessions", "mcp-tokens", "pairing", "vault", "browser-profile")
+_HERMES_PROTECTED_SUBPATHS = ("state.db", "sessions", "mcp-tokens", "pairing", "vault", "browser-profile",
+                              "chrome-debug")
+
+# Active owned browser profiles live in the protected RAM workspace (outside HERMES_HOME) under
+# this owned name prefix (``hermes_cli.browser_profile_store``), including their staging and lock
+# siblings. Their cookies/logins are as secret as the encrypted archives they are restored from.
+_OWNED_BROWSER_PROFILE_PREFIX = "hermes-browser-profile-"
+
+
+def _in_owned_browser_profile(resolved: str | Path) -> bool:
+    return any(part.startswith(_OWNED_BROWSER_PROFILE_PREFIX) for part in Path(resolved).parts)
 
 
 def _classify_write_denial(path: str, *, entry: bool = False) -> Optional[str]:
@@ -296,6 +308,8 @@ def _classify_resolved_write_denial(homes: set[str], resolved: str) -> Optional[
             with suppress(Exception):
                 if _is_under(resolved, os.path.realpath(os.path.join(str(base), sub))):
                     return "credential"
+    if _in_owned_browser_profile(resolved):
+        return "credential"
 
     safe_roots = get_safe_write_roots()
     if safe_roots and not any(_is_under(resolved, root) for root in safe_roots):
@@ -356,8 +370,11 @@ _READ_DENIED_DIRS = (
      "is the Hermes MCP token directory and cannot be read directly.",
      "is a Hermes MCP token file and cannot be read directly."),
     ("browser-profile",
-     "is the Hermes real-profile browser snapshot directory (copied cookies/logins) and cannot be read directly.",
-     "is inside the Hermes real-profile browser snapshot (copied cookies/logins) and cannot be read directly."),
+     "is the Hermes browser profile store (copied cookies/logins) and cannot be read directly.",
+     "is inside the Hermes browser profile store (copied cookies/logins) and cannot be read directly."),
+    ("chrome-debug",
+     "is a Hermes browser profile (cookies/logins) and cannot be read directly.",
+     "is inside a Hermes browser profile (cookies/logins) and cannot be read directly."),
     # vault.key + vault.json.enc sit side by side; key + ciphertext = plaintext, so the whole dir is one credential.
     ("vault",
      "is the Hermes credential vault directory and cannot be read directly (secrets are filled server-side by browser_vault).",
@@ -406,6 +423,9 @@ def get_read_block_error(path: str) -> Optional[str]:
                     break
             if reason:
                 break
+        if reason is None and _in_owned_browser_profile(resolved):
+            reason = ("is inside an active Hermes browser profile (cookies/logins held in protected RAM) "
+                      "and cannot be read directly." + _DID_SUFFIX)
         if reason is None and resolved.name.lower() in _BLOCKED_PROJECT_ENV_BASENAMES:
             reason = (
                 "is a secret-bearing environment file and cannot be read to prevent credential "

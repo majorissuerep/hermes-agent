@@ -24,11 +24,16 @@ _RP = "browser.use_real_profile is on, but "
 
 def _terminate_real_profile_chrome() -> None:
     """Terminate real-browser processes launched for real-profile sessions (idempotent, atexit-safe);
-    agent-browser only ATTACHED to them, so its own session cleanup never kills them."""
+    agent-browser only ATTACHED to them, so its own session cleanup never kills them. Their exit is
+    the quiescent boundary: each copy is then saved encrypted and its RAM copy retired (a failed
+    save keeps the RAM copy and the previous archive)."""
+    from hermes_cli.browser_profile_store import settle
+    from hermes_security.browser_profile_archive import REAL_SLOT_PREFIX
     from tools.browser_lightpanda import _terminate
     _bt = _origin()
     while _bt._real_profile_chrome_procs:
         _terminate(_bt._real_profile_chrome_procs.pop(), what="real-profile chrome")
+    settle(REAL_SLOT_PREFIX)
 
 
 def _cdp_http_ready(http_cdp: str) -> bool:
@@ -177,7 +182,19 @@ def _real_profile_snapshot_error(err: str) -> str:
     return f"{_RP}{err}"
 
 
-def _launch_real_profile_chrome(real_binary: str, copy_dir: str) -> tuple[Optional[int], Optional[str]]:
+def _record_real_profile_launch(browser: str, chrome_proc) -> None:
+    """Bind the launched browser to the owned copy so it is saved only after this browser exits.
+    Not fatal when it fails: Chromium's own SingletonLock still marks the copy busy."""
+    from hermes_cli.browser_profile_store import BrowserProfileError, owned_profile, record_launch
+    from hermes_security.browser_profile_archive import real_slot
+    try:
+        record_launch(owned_profile(real_slot(browser)), chrome_proc)
+    except (BrowserProfileError, OSError) as exc:
+        _origin().logger.warning("real-profile: launched browser not bound to its copy: %s", exc)
+
+
+def _launch_real_profile_chrome(real_binary: str, copy_dir: str,
+                                browser: str) -> tuple[Optional[int], Optional[str]]:
     """Launch the user's REAL browser binary on the profile COPY; return (debug_port, error).
 
     agent-browser's own launch force-adds --use-mock-keychain / --password-store=basic, which makes
@@ -206,6 +223,7 @@ def _launch_real_profile_chrome(real_binary: str, copy_dir: str) -> tuple[Option
     except (subprocess.SubprocessError, OSError) as e:
         return None, f"{_RP}the launch failed: {e}"
     _bt._real_profile_chrome_procs.append(chrome_proc)
+    _record_real_profile_launch(browser, chrome_proc)
 
     deadline = time.monotonic() + 30.0
     while time.monotonic() < deadline:
@@ -279,8 +297,8 @@ def _real_profile_cdp() -> tuple:
         return None, (_RP + "browser.engine is set to 'lightpanda', which cannot load a real Chromium profile. "
                       "Set browser.engine to 'auto' or 'chrome' to use real-profile browsing, or turn the toggle off.")
 
-    from hermes_cli.browser_connect import (chromium_executable, detect_default_chromium,
-                                            real_profile_copy_dir, snapshot_real_profile)
+    from hermes_cli.browser_connect import detect_default_chromium, real_profile_copy_dir
+    from hermes_cli.browser_profile_store import BrowserProfileError
 
     if not _bt._real_profile_cdp_lock.acquire(
         timeout=_bt._REAL_PROFILE_CDP_LOCK_TIMEOUT_S
@@ -303,44 +321,78 @@ def _real_profile_cdp() -> tuple:
         unsupported = _real_profile_unsupported_reason(browser)
         if unsupported:
             return None, unsupported
-
-        # Reuse BEFORE writing anything. CRITICAL: the snapshot overlay (truncates/rewrites
-        # Cookies / Login Data) must NOT run while a live copy-browser (maybe from a previous
-        # hermes process) holds the user-data-dir open — that corrupts the databases.
-        copy_dir = real_profile_copy_dir(browser)
-        existing = _agent_browser_get_cdp(_bt._REAL_PROFILE_SESSION)
-        if existing and _cdp_http_ready(existing) and _cdp_on_data_dir(existing, copy_dir):
-            _bt._real_profile_cdp_cache["cdp"] = existing
-            return existing, None
-        if existing:  # stale/wrong-dir session: close it so nothing holds the dir open
-            _agent_browser_close_session(_bt._REAL_PROFILE_SESSION)
-        # A Chrome from an earlier hermes process can still hold the copy dir after its attach
-        # daemon was reaped (that owner died). Re-attach to it rather than overlay a live profile;
-        # if the daemon cannot attach, fail closed — never snapshot over an open profile. Not ours
-        # to terminate (no Popen handle): it lives until the user closes it, by design.
-        surviving = _surviving_chrome_cdp(copy_dir)
-        if surviving:
-            cdp, err = _attach_agent_browser_to_real_profile(int(surviving.rsplit(":", 1)[1]), copy_dir)
-            if not cdp:
-                return None, err
-            _bt._real_profile_cdp_cache["cdp"] = cdp
-            _bt.logger.info("real-profile: re-attached to surviving Chrome at %s (%s)", cdp, copy_dir)
-            return cdp, None
-
-        copy_dir, err = snapshot_real_profile(browser)
-        if err or not copy_dir:
-            return None, _real_profile_snapshot_error(err)
-        real_binary = chromium_executable(browser)
-        if real_binary is None:
-            return None, f"{_RP}the real browser binary for '{browser}' could not be found. Reinstall it or turn the toggle off."
-        port, err = _launch_real_profile_chrome(real_binary, copy_dir)
-        if port is None:
-            return None, err
-        cdp, err = _attach_agent_browser_to_real_profile(port, copy_dir)
-        if not cdp:
-            return None, err
-        _bt._real_profile_cdp_cache["cdp"] = cdp
-        _bt.logger.info("real-profile browser ready for %s at %s (%s)", browser, cdp, copy_dir)
-        return cdp, None
+        try:
+            copy_dir = real_profile_copy_dir(browser)
+        except BrowserProfileError as exc:
+            return None, f"{_RP}{exc}"
+        cdp, err = _reuse_live_copy(browser, copy_dir)
+        if cdp or err:
+            return cdp, err
+        return _snapshot_launch_attach(browser)
     finally:
         _bt._real_profile_cdp_lock.release()
+
+
+def _reuse_live_copy(browser: str, copy_dir: str) -> tuple:
+    """``(cdp, None)`` for a browser already live on the copy, ``(None, err)`` when one exists but
+    cannot be attached, ``(None, None)`` when nothing holds the copy.
+
+    Reuse BEFORE writing anything. CRITICAL: the snapshot overlay (truncates/rewrites Cookies /
+    Login Data) must NOT run while a live copy-browser (maybe from a previous hermes process)
+    holds the user-data-dir open — that corrupts the databases."""
+    _bt = _origin()
+    existing = _agent_browser_get_cdp(_bt._REAL_PROFILE_SESSION)
+    if existing and _cdp_http_ready(existing) and _cdp_on_data_dir(existing, copy_dir):
+        _bt._real_profile_cdp_cache["cdp"] = existing
+        return existing, None
+    if existing:  # stale/wrong-dir session: close it so nothing holds the dir open
+        _agent_browser_close_session(_bt._REAL_PROFILE_SESSION)
+    # A Chrome from an earlier hermes process can still hold the copy dir after its attach
+    # daemon was reaped (that owner died). Re-attach to it rather than overlay a live profile;
+    # if the daemon cannot attach, fail closed — never snapshot over an open profile. Not ours
+    # to terminate (no Popen handle): it lives until the user closes it, by design; this request's
+    # custody saves the copy once it exits.
+    surviving = _surviving_chrome_cdp(copy_dir)
+    if not surviving:
+        return None, None
+    cdp, err = _attach_agent_browser_to_real_profile(int(surviving.rsplit(":", 1)[1]), copy_dir)
+    if not cdp:
+        return None, err
+    _adopt_surviving_copy(browser)
+    _bt._real_profile_cdp_cache["cdp"] = cdp
+    _bt.logger.info("real-profile: re-attached to surviving Chrome at %s (%s)", cdp, copy_dir)
+    return cdp, None
+
+
+def _adopt_surviving_copy(browser: str) -> None:
+    from hermes_cli.browser_profile_store import BrowserProfileError, adopt, owned_profile
+    from hermes_security.browser_profile_archive import real_slot
+    try:
+        adopt(owned_profile(real_slot(browser)))
+    except (BrowserProfileError, OSError) as exc:
+        _origin().logger.warning("real-profile: re-attached copy will not be saved by this process: %s", exc)
+
+
+def _snapshot_launch_attach(browser: str) -> tuple:
+    """Prepare the RAM copy from its encrypted archive + the live source, launch, attach."""
+    from hermes_cli.browser_connect import chromium_executable, snapshot_real_profile
+    from tools.browser_terminal import browser_in_terminal
+    _bt = _origin()
+    if browser_in_terminal():  # refuse before any copy is prepared on this host
+        return None, ("Native browser profiles cannot be launched outside the selected terminal sandbox; "
+                      "configure an explicit outgoing CDP endpoint instead.")
+    copy_dir, err = snapshot_real_profile(browser)
+    if err or not copy_dir:
+        return None, _real_profile_snapshot_error(err)
+    real_binary = chromium_executable(browser)
+    if real_binary is None:
+        return None, f"{_RP}the real browser binary for '{browser}' could not be found. Reinstall it or turn the toggle off."
+    port, err = _launch_real_profile_chrome(real_binary, copy_dir, browser)
+    if port is None:
+        return None, err
+    cdp, err = _attach_agent_browser_to_real_profile(port, copy_dir)
+    if not cdp:
+        return None, err
+    _bt._real_profile_cdp_cache["cdp"] = cdp
+    _bt.logger.info("real-profile browser ready for %s at %s (%s)", browser, cdp, copy_dir)
+    return cdp, None
