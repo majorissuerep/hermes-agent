@@ -129,13 +129,25 @@ def _require_session(lease, info=None):
 
 
 @contextmanager
+def request_scope(lease):
+    """A caller may not borrow the live lease's source after its own source was revoked."""
+    from hermes_security.session_custody import SessionCustody
+    if Path(get_hermes_home()).resolve() != lease.home:
+        raise state.OutgoingProfileError("Outgoing browser request belongs to a different selected home")
+    operation = SessionCustody.capture(lease.home, resource=lease.custody.resource)
+    operation.check()
+    yield
+    operation.check()
+
+
+@contextmanager
 def command_scope(task_id: str):
     from tools.browser_terminal import captured_execution
     lease = lookup(task_id)
     if lease is None:
         yield
         return
-    with target_scope(lease.env):
+    with request_scope(lease), target_scope(lease.env):
         _require_session(lease)
         with captured_execution(lease.home, lease.backend, lease.env, lease.runtime):
             yield
@@ -260,11 +272,16 @@ def _finish_checkpoint(lease, document, *, stale=False, path=None):
 
 def close(task_id: str, info: dict) -> bool | None:
     """None=native/external CDP; True=closed+saved; failure raises without forgetting target state."""
-    from tools import browser_tool_session as session
-    from tools.browser_terminal import captured_execution
     lease = lookup(task_id)
     if lease is None:
         return None
+    with request_scope(lease):
+        return _close(lease, task_id, info)
+
+
+def _close(lease, task_id, info):
+    from tools import browser_tool_session as session
+    from tools.browser_terminal import captured_execution
     _require_session(lease, info)
     with state.locked(lease.home, lease.digest, lease.base):
         def finish():
@@ -294,7 +311,8 @@ def before_destroy(env) -> None:
     if leases:
         from tools.browser_tool_lifecycle import _cleanup_single_browser_session
         for lease in leases:
-            lease.context.copy().run(_cleanup_single_browser_session, lease.task_id)
+            with request_scope(lease):
+                lease.context.copy().run(_cleanup_single_browser_session, lease.task_id)
     require_saved_recordings(env)
     _require_no_cold_pending(env)
 

@@ -263,3 +263,50 @@ def test_ordinary_teardown_retains_only_copy_tracking_and_restore_refuses_pendin
     with pytest.raises(OwnershipConflict, match="Outgoing browser RAM/recovery"):
         with restore_guard(outgoing.home, [ref]):
             raise AssertionError("pending reference would have been replaced without archive members")
+
+
+def test_revoked_current_source_cannot_use_another_live_source_browser(outgoing):
+    from hermes_security.session_authority import start_session_authority
+    from agent.session_context import scoped_current_session_id
+    from hermes_security.errors import VaultLockedError
+    first=start_session_authority(outgoing.home,'A')
+    other=start_session_authority(outgoing.home,'B')
+    try:
+        with scoped_current_session_id('A'):
+            outgoing.start('original-A')
+        other.close()
+        with scoped_current_session_id('B'):
+            with pytest.raises(VaultLockedError):
+                outgoing.session._run_browser_command('original-A','get',['title'])
+    finally:
+        first.close();other.close()
+
+
+def test_fresh_source_reuses_completed_profile_resource_without_reviving_old_task(outgoing):
+    from agent.session_context import scoped_current_session_id
+    from hermes_security.session_authority import start_session_authority
+    from hermes_security.errors import VaultLockedError
+    from tools import browser_outgoing_profile as profiles, browser_outgoing_transfer as transfer
+    from tools.browser_tool_lifecycle import cleanup_browser
+
+    first=start_session_authority(outgoing.home,'completed-A')
+    sibling=start_session_authority(outgoing.home,'fresh-B')
+    try:
+        with scoped_current_session_id('completed-A'):
+            profile=outgoing.start('completed-A')
+            cookie_db(profile/'Cookies','shared-profile-cookie')
+            old=profiles.lookup('completed-A')
+            cleanup_browser('completed-A')
+        first.close()
+        with scoped_current_session_id('fresh-B'):
+            outgoing.choose('fresh-source-target')
+            reopened=outgoing.start('fresh-B')
+            fresh=profiles.lookup('fresh-B')
+            assert fresh.custody.resource.vault is old.custody.resource.vault
+            assert cookie_db(reopened/'Cookies')=='shared-profile-cookie'
+            with pytest.raises(VaultLockedError):
+                transfer.capacity(old)
+            fresh.custody.check()
+            cleanup_browser('fresh-B')
+    finally:
+        first.close();sibling.close()
