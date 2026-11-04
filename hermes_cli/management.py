@@ -235,6 +235,9 @@ def main(argv=None):
                 raise ManagementError("invalid_request", "request is too large")
             request = json.loads(raw)
             with _home_scope(args.profile) as home:
+                from hermes_cli.management_browser import proxy_current_request
+                if (rc := proxy_current_request(request, home)) is not None:
+                    return rc
                 with contextlib.redirect_stdout(io.StringIO()):
                     result = execute(request, home)
         response, rc = {"version": 1, "ok": True, "result": result}, 0
