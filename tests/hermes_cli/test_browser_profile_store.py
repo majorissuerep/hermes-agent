@@ -288,8 +288,19 @@ def test_stale_lease_never_saves_or_retires_a_copy_another_request_claimed(env):
     with store.prepare(profile, IDENTITY_A):  # a newer request re-claims the same copy
         pass
 
+    # The legitimate newer request checkpoints the previous copy before claiming it.
+    # Its durable archive and RAM binding belong to that request, not the stale callback.
+    archives_before = {p.name: p.read_bytes() for p in archive.archive_paths(home)}
+    assert archives_before
+    binding_before = (path / archive.RUNTIME_BINDING_NAME).read_bytes()
+    tree_before = archive.tree_digest(path)
+
     assert store._settle_lease(stale) == "superseded"
-    assert path.is_dir() and archive.archive_paths(home) == []
+    assert path.is_dir()
+    archives_unchanged = {p.name: p.read_bytes() for p in archive.archive_paths(home)} == archives_before
+    binding_unchanged = (path / archive.RUNTIME_BINDING_NAME).read_bytes() == binding_before
+    assert archives_unchanged and binding_unchanged
+    assert archive.tree_digest(path) == tree_before
 
 
 def test_restored_copy_is_not_touched_after_its_custody_is_revoked(env):
