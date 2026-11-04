@@ -92,6 +92,19 @@ def media_kind(relative) -> str | None:
     return None
 
 
+def legacy_media_codec(relative) -> str | None:
+    """Published document_cache was migrated, unlike the excluded cache/* roots.
+
+    Keep its historical suffix codecs for offline repair/export. They are not
+    admitted by the runtime artifact reader: old frames have no per-path AAD.
+    """
+    path = Path(relative)
+    if path.parts[:-1] != ("document_cache",) or media_kind(path) != "documents":
+        return None
+    return {".db": "database", ".sqlite": "database", ".sqlite3": "database",
+            ".log": "log", ".jsonl": "transcript", ".env": "env"}.get(path.suffix)
+
+
 def terminal_frame_purpose(relative) -> str | None:
     """Bind terminal frames' KDF and authenticated data to their exact owner-relative path."""
     return "artifact-terminal:v1:" + Path(relative).as_posix() if _under(relative, _TERMINAL_ROOTS) else None
