@@ -151,3 +151,24 @@ def test_migration_converts_legacy_profiles_instead_of_sealing_chromium_files(tm
             assert cookie_db(restored / "Default" / "Network" / "Cookies") == "debug-cookie"
     finally:
         reset_owned_profiles()
+
+
+def test_explicit_debug_repair_keeps_the_only_persistent_application_copy(env):
+    from hermes_cli.browser_profile_repair import convert_legacy_browser_profiles
+    from tests.hermes_cli.browser_profile_env import application_state_tree
+
+    home, ram = env
+    legacy = chromium_tree(home / archive.LEGACY_DEBUG_ROOT, stale_lock=False)
+    payloads = application_state_tree(legacy)
+
+    report = convert_legacy_browser_profiles(home)
+
+    assert report == {"archived": [archive.LEGACY_DEBUG_ROOT], "retained": []}
+    assert not legacy.exists()  # the original sole disk copy has actually been retired
+    restored = ram / "explicit-app-recovery"
+    restored.mkdir(mode=0o700)
+    archive.replay_archive(home, archive.ARCHIVE_ROOT + "/" + archive.DEBUG_SLOT + archive.ARCHIVE_SUFFIX,
+                           custody=archive.capture_custody(home), target=restored)
+    for name, payload in payloads.items():
+        assert (restored / name).read_bytes() == payload
+        assert plaintext_hits(home, payload) == []

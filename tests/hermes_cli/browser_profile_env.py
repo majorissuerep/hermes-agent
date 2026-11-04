@@ -86,3 +86,33 @@ def exited_browser() -> subprocess.Popen:
     child = subprocess.Popen([sys.executable, "-c", "pass"], stdin=subprocess.DEVNULL)
     child.wait(timeout=30)
     return child
+
+
+def application_state_tree(root: Path) -> dict[str, bytes]:
+    """Independent payload oracle: cache-shaped names may hold the only offline app copy."""
+    names = (
+        "Default/Service Worker/CacheStorage/fixture/only-copy",
+        "Default/Service Worker/ScriptCache/offline-worker",
+        "Default/AppCache/only-copy",
+        "Default/Local Storage/leveldb/Cache-manifest",
+        "Default/Local Storage/leveldb/pending.tmp",
+        "Default/app-data/Cache/only-copy",
+        "Default/app-data/Crashpad/only-copy",
+        "Default/app-data/DevToolsActivePort",
+        "Default/app-data/SingletonLock",
+        "Profile 2/Service Worker/CacheStorage/fixture/only-copy",
+        "Custom Profile/Cache/only-copy",
+        "CacheStorage/root-app-data",
+        "MyCache/only-copy.tmp",
+        "SingletonApplicationState/only-copy",
+        "operator-state.tmp",
+        "pending-app.tmp/only-copy",
+        "BrowserMetrics-operator-state.tmp",
+        "Profile 3/Cache",
+    )
+    payloads = {name: b"synthetic-private-only-copy|" + name.encode() for name in names}
+    for name, payload in payloads.items():
+        target = root / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(payload)
+    return payloads

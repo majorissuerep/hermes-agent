@@ -20,7 +20,6 @@ and truncation. A reader rejects anything else before any restored tree is publi
 from __future__ import annotations
 
 import contextlib
-import fnmatch
 import hashlib
 import hmac
 import json
@@ -43,12 +42,17 @@ REAL_SLOT_PREFIX = "real-profile:"
 # Runtime ownership metadata kept beside the active RAM copy; never part of the persisted profile.
 RUNTIME_BINDING_NAME = ".hermes-browser-binding.json"
 
-# Persistence keeps profile state and drops regenerable caches and live-instance objects, the same
-# family the real-profile snapshot never copies (``browser_connect._SNAPSHOT_IGNORES``), plus the
-# per-launch diagnostic log Hermes rewrites on every debug-browser launch.
-PERSIST_EXCLUDES = ("*Cache*", "Crashpad", "Crash Reports", "BrowserMetrics*", "Singleton*",
-                    "DevToolsActivePort", "RunningChromeVersion", "*.tmp", "launch-stderr.log",
-                    RUNTIME_BINDING_NAME)
+# Persistence is not the auth-only initial real-profile snapshot: CacheStorage, service workers,
+# unknown app data and temporary-named files can be the only offline copy. Drop only these known
+# Chromium layout locations. Names at another depth, and unexpected entry types, are not caches.
+_ROOT_RUNTIME_NAMES = frozenset({
+    "SingletonLock", "SingletonSocket", "SingletonCookie", "DevToolsActivePort",
+    "RunningChromeVersion", "launch-stderr.log", RUNTIME_BINDING_NAME,
+})
+_ROOT_REGENERABLE_DIRECTORIES = frozenset({
+    "ShaderCache", "GrShaderCache", "Crashpad", "Crash Reports", "BrowserMetrics",
+})
+_PROFILE_CACHE_DIRECTORIES = frozenset({"Cache", "Code Cache", "GPUCache"})
 
 # Bounds: the real-profile copy keeps auth/login state only (tens of MB); a dedicated debug profile
 # also keeps site storage. Exceeding a bound fails the persist explicitly and deletes nothing.
@@ -149,8 +153,20 @@ def legacy_profile_roots(home: Path) -> list[Path]:
 
 # --- Tree walking and digests -----------------------------------------------------------------
 
-def _excluded(name: str) -> bool:
-    return any(fnmatch.fnmatchcase(name, pattern) for pattern in PERSIST_EXCLUDES)
+def _excluded(relative: str, kind: int) -> bool:
+    """Only known root runtime objects and structural Chromium cache directories are expendable."""
+    parts = PurePosixPath(relative).parts
+    if len(parts) == 1:
+        name = parts[0]
+        return (name in _ROOT_RUNTIME_NAMES
+                or (kind == stat.S_IFDIR and name in _ROOT_REGENERABLE_DIRECTORIES)
+                or (kind == stat.S_IFREG and name == "BrowserMetrics-spare.pma"))
+    if len(parts) != 2 or kind != stat.S_IFDIR or parts[1] not in _PROFILE_CACHE_DIRECTORIES:
+        return False
+    profile = parts[0]
+    standard = profile in {"Default", "Guest Profile", "System Profile"}
+    numbered = profile.startswith("Profile ") and profile[8:].isascii() and profile[8:].isdigit()
+    return standard or numbered
 
 
 @contextlib.contextmanager
@@ -180,7 +196,7 @@ def _directory_entries(root: Path | int, relative: str) -> list[tuple[str, int]]
 def iter_tree(root: Path | int) -> Iterator[tuple[str, bool]]:
     """``(relative path, is_dir)`` in deterministic order; directories precede their contents.
 
-    Only declared cache/live-instance names are excluded. An unexpected link or
+    Only declared cache locations and root live-instance objects are excluded. An unexpected link or
     special file refuses persistence so verified legacy repair cannot erase it.
     """
     pending = [""]
@@ -188,9 +204,9 @@ def iter_tree(root: Path | int) -> Iterator[tuple[str, bool]]:
         relative = pending.pop()
         children = []
         for name, kind in _directory_entries(root, relative):
-            if _excluded(name):
-                continue
             child = f"{relative}/{name}" if relative else name
+            if _excluded(child, kind):
+                continue
             if kind == stat.S_IFDIR:
                 children.append(child)
                 yield child, True

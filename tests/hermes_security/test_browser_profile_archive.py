@@ -165,3 +165,34 @@ def test_archives_are_not_admitted_by_generic_artifact_or_file_tools(home, tmp_p
     with pytest.raises(PermissionError):
         artifacts.read_bytes(stored, home=home)
     assert get_read_block_error(str(stored)) and is_write_denied(str(stored))
+
+
+@pytest.mark.parametrize("slot", [SLOT, archive.real_slot("chrome")], ids=["debug", "owned-real-copy"])
+def test_persistent_application_state_survives_cache_shaped_names(home, tmp_path, slot):
+    from tests.hermes_cli.browser_profile_env import application_state_tree
+
+    source = chromium_tree(tmp_path / "profile")
+    payloads = application_state_tree(source)
+    discarded = ("Default/Cache", "Profile 2/Cache", "Default/Code Cache", "Default/GPUCache",
+                 "ShaderCache", "GrShaderCache", "Crashpad", "BrowserMetrics")
+    for name in discarded:
+        directory = source / name
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / "regenerable").write_bytes(b"synthetic-regenerable-browser-cache")
+    for name in ("DevToolsActivePort", "RunningChromeVersion", "launch-stderr.log"):
+        (source / name).write_text("synthetic previous runtime")
+    (source / "SingletonSocket").symlink_to("synthetic-dead-browser-socket")
+    custody, relative, digest = _write(home, source, slot=slot)
+    restored = tmp_path / "restored"
+    restored.mkdir()
+
+    archive.replay_archive(home, relative, custody=custody, slot=slot, digest=digest, target=restored)
+
+    for name, payload in payloads.items():
+        assert (restored / name).read_bytes() == payload
+        assert plaintext_hits(home, payload) == []
+    assert all(not (restored / name).exists() for name in discarded)
+    assert all(not (restored / name).exists() for name in
+               ("DevToolsActivePort", "RunningChromeVersion", "launch-stderr.log"))
+    assert not (restored / "SingletonSocket").is_symlink()
+    assert not (restored / "SingletonLock").is_symlink()
