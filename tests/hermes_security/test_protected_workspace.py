@@ -72,6 +72,19 @@ def test_sgid_base_keeps_its_mode_and_creates_an_owner_only_workspace(base: Path
     assert list(base.iterdir()) == []
 
 
+@pytest.mark.platforms("posix")
+@pytest.mark.parametrize("mode", [0o750, 0o770, 0o2770])
+def test_created_workspace_rejects_shared_permissions_without_changing_them(base: Path, mode: int) -> None:
+    from hermes_security.protected_workspace import _verify_created
+
+    workspace = base / "unsafe"
+    workspace.mkdir()
+    workspace.chmod(mode)
+    with pytest.raises(ProtectedWorkspaceUnavailable, match="changed"):
+        _verify_created(workspace, _always_proven)
+    assert stat.S_IMODE(workspace.stat().st_mode) == mode
+
+
 def test_workspace_is_removed_when_the_body_raises(base: Path) -> None:
     with pytest.raises(LookupError):
         with protected_workspace("vendor-cli", base=base, prove=_always_proven) as workspace:
