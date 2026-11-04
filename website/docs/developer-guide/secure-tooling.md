@@ -9,6 +9,23 @@ use native, Codex and Claude children after one human unlock. Configuration,
 credentials, history and owned outputs must remain encrypted. A successful
 command exit alone does not establish that outcome.
 
+## Delivery status
+
+The integration milestone is **held for qualification**. The behavior below is
+the intended contract and the implementation under review, not a claim about the
+installed package or current main. Independent native checks found custody,
+session-binding and owned-state persistence defects in unmerged candidates.
+Repairs and red-on-base contracts are prepared. Acceptance still requires the
+final candidate's required checks, guarded merge/publication and a non-author's
+fresh-main replay. Private security evidence stays with the restricted review.
+
+The [delivery order](#delivery-order-and-gates) and
+[follow-up backlog](#explicit-follow-up-backlog) define the stopping point.
+The wider hidden reasoning controller remains deferred; the separate opt-in
+formal-checkpoint consumer and held Goal prototype do not establish its delivery.
+Unknown swap protection and unresolved image-library advisories also prevent a
+whole-system privacy or advisory-closure claim.
+
 ## Baseline and boundaries
 
 The starting fork revision is `1815472adf69eb16cc201c0d9ac4c7e69f5fa51b`.
@@ -17,6 +34,11 @@ On 2026-11-02 upstream main was fetched at
 the shared base `eb75627faf532fa6ffbdae59a0d14b0b385fc780`. The unfinished
 `sync/upstream-20261022` and `ci/gitea-primary-20261028` branches are inputs to
 review, not accepted product evidence.
+
+A read-only upstream refresh on November 4 observed and fetched
+`9302ba9e212c63ba24cdf1f47f26b47bcd3b042e`, 584 commits beyond that
+reviewed input. This is a new review input, not an accepted port. **UPSTREAM-02**
+tracks the relevant local CLI/agent/MCP fixes; removed product surfaces stay out.
 
 The local command layer owns management; the native agent owns conversations;
 `hermes_security` owns encryption and temporary unlock authority; terminal and
@@ -32,6 +54,12 @@ hosting remain outside this fork. No change authorizes a public deployment.
   commands remain locked. Unreadable state is an error, not an empty substitute.
 - A child can invoke the owning Hermes installation. Closing that child leaves
   the parent usable; ending the owner revokes grants derived from it.
+- A trusted worker's one-shot key descriptor belongs to the exact live session.
+  A stale session cannot select a sibling's authority. Installer shell children
+  request fixed owner-executed stages and receive completion receipts only.
+- Owned skill indexes and usage audit records use the existing authenticated
+  storage formats. A locked or damaged file is preserved and reported, never
+  treated as permission to append plaintext or overwrite it with an empty value.
 - Codex and Claude command integrations use noninteractive invocation and do not
   persist an additional plaintext conversation. Their permission controls remain
   effective; refusal must be reported rather than retried without confinement.
@@ -50,20 +78,22 @@ forge-specific scripts. Port relevant upstream changes in reviewable increments;
 a wholesale merge currently includes more than two million added lines and would
 cross removed product boundaries.
 
-Ordinary POSIX children invoke operation-scoped grants through private,
-owner-only Unix sockets. These grants cannot export a vault key. Trusted native
-children use a separate one-shot key descriptor and retain their lending owner's
-revocation chain.
-The managed coding-agent runner uses private kernel FIFOs because a real Codex
-workspace sandbox rejected even Unix socket connections with networking disabled.
-The transport directory contains FIFO nodes, an empty lock inode and a
-credential-free command bound to the owning installation. Keys and requests remain
-in process memory and pipe buffers; client responses are correlated and bounded.
-Both ends validate the open descriptor's FIFO type, owner and private mode.
-A replaced response file, symlink, directory or shared FIFO is refused before an
-authority response is written, and repairing the node permits the next valid request.
-The runner adds only this transport directory to Codex's writable paths. Profile
-writes outside the workspace require the caller's explicit `--add-dir` selection.
+Ordinary local children receive operation-scoped grants through private Unix
+sockets or kernel FIFOs. These grants never export a permanent vault key. The
+owner executes bounded management requests and approved native Hermes commands
+under the exact profile/session scope. Native commands preserve stdin, streamed
+stdout/stderr, exit status, cancellation and owner lifetime. Interactive or
+arbitrary executable/interpreter escapes are refused. Trusted native Hermes
+children receive keys only through an explicitly inherited one-shot kernel FD.
+
+Managed coding agents use FIFOs because a real Codex workspace sandbox rejected
+Unix sockets with networking disabled. Endpoints live in short, owner-only IPC
+directories outside idle-pruned profile scratch. They contain socket/FIFO nodes
+and an empty lock inode; payloads stay in memory and kernel buffers. Both ends
+validate descriptor type, owner and private mode. Replaced response files,
+symlinks, directories and shared FIFOs fail closed. The source-bound command has
+its own active runtime directory and lifetime. Vendor filesystem access does
+not need a writable encrypted profile: management writes happen in its owner.
 
 Compression reanchors conversation identity without replacing unlock ownership;
 old grants for running children expire with the same owner. Delegated and nested
@@ -76,15 +106,44 @@ An explicit lock detaches all grants backed by that vault before stopping their
 transports; a later unlock cannot revive the old tokens or revoke another vault.
 
 Nested executor output may contain a capability unknown to the parent's exact
-secret registry. The output redactor recognizes the grant structure, including
-one JSON wrapper, before optional redaction preferences. It removes the bearer
-token while preserving diagnostic routing metadata.
+secret registry. The output redactor recognizes structured grants and typed v2
+tokens even after registry churn, revocation or a fresh process. This boundary
+precedes optional redaction preferences and preserves diagnostic metadata.
 Managed runners use the existing profile-aware environment builder and remove
 launch-profile residue and native executor tokens before selecting vendor
 credentials. A profile's endpoint accompanies its API key; a CLI-owned login
-keeps its own routing. Codex receives the key through its documented per-run
-`CODEX_API_KEY` interface, rather than relying on `OPENAI_API_KEY` to override
-saved CLI authentication.
+keeps its own routing. Qualification must observe the selected native API
+endpoint and credential on the wire; merely exporting `CODEX_API_KEY` does not
+prove the CLI selected that authentication path.
+
+Retained vault keys use kernel-locked, wipeable custody. Refused memory locking
+fails the unlock; explicit lock, cache clear and normal finalization wipe that
+custody. Native borrowed objects check their original lifetime before key use,
+including retained object references. Human re-unlock creates distinct owner
+custody. An already exported immutable Python snapshot cannot be erased by
+revoking a grant. KDF/crypto copies, SQLCipher memory temporaries and ordinary
+process buffers remain outside the locked arena.
+
+`hermes manage apply` with `{"op":"status"}` reports requester scope separately
+from the responding resource, actual retained-key protection, memory limits,
+swap state and protected-workdir evidence. It never treats an observation as
+human consent or certifies unknown swap/crash storage. A RAM-backed filesystem
+alone does not establish whole-process confidentiality. The current WSL host's
+swap is active and its backing encryption could not be verified.
+
+`security.protected_work_dir` selects transient storage for managed vendor work
+and formal checks. When absent, the per-user runtime directory is only a
+candidate. Creation requires an actual never-swapped RAM proof; an explicitly
+invalid location never falls back. Normal completion removes the private task
+directory. Existing general `cache/scratch` retention does not make that cache a
+protected workspace. Native executor persistence and owner-death cleanup need
+their own qualification; non-persistence flags alone are insufficient evidence.
+
+A running old owner retains its old implementation after a source update. New
+operation-only clients report `owner_restart_required` with restart/resume
+guidance; repeated provider login cannot upgrade that process. The frozen
+trusted-FD updater handoff remains supported. It does not authorize generic
+key redemption or imply that an old owner has acquired v2 protections.
 
 Source/module launches also provide a private temporary Hermes command when no
 published installation launcher exists. This prevents a PM environment's console
@@ -122,6 +181,11 @@ after preview is retained rather than overwritten.
 
 ## Evidence and review
 
+This section retains earlier diagnostics and their limits. Separate ciphertext,
+wire and process observations establish those particular contracts; they do not
+replace non-author acceptance of the actual merged revision. Historical receipts
+cannot qualify a later candidate.
+
 The November 2 investigation retained these negative results: encrypted xAI
 credentials were invisible to its availability probe; compression changed the
 conversation ID without reanchoring authority; login shells dropped executable
@@ -144,14 +208,14 @@ contained extractor that rejects escaping paths/links, special members, duplicat
 files and forward hard links; it strips archive ownership and privilege bits.
 Current Python continues to use its stdlib data filter.
 
-Live host evidence at `ea337ed0db3b24d3a29ee533d23c0e78e9ade192` used Linux
+Historical live host evidence at `ea337ed0db3b24d3a29ee533d23c0e78e9ade192` used Linux
 6.6.114.1 WSL2 x86_64, Codex CLI 0.166.0 and Claude Code 2.1.316 with their own
 existing logins with invalid ambient executor tokens deliberately supplied.
 Both executed an owning-Hermes configuration read and write;
 independent command refusal, owner-close revocation, ciphertext and synthetic-home
-removal were independently checked. Codex used `workspace-write` with networking
+removal were checked through separate observations. Codex used `workspace-write` with networking
 disabled. Claude used narrowly selected Bash permissions. These are CLI integration
-receipts, not cold-install or every-provider qualification.
+receipts, not current-candidate, cold-install or every-provider qualification.
 
 Native Linux protocol evidence includes the real public finite-chat/delegation
 path, a managed Hermes chat subprocess, encrypted SQLCipher history, two native
@@ -160,7 +224,7 @@ real PTY keyboard/transcript round trips and Docker source transport with no hos
 mounts or inherited model credential. The host's native macOS coverage is pending.
 A full native owner also launches a managed Hermes chat child, which reads the
 owning encrypted configuration; after its exit the parent reads that same state.
-Five provider requests and two SQLCipher sessions independently establish this
+Five provider requests and two SQLCipher sessions separately establish this
 round trip. Synthetic profiles must first receive a real PM dependency selection.
 The public MCP stdio scenarios completed four checks; seven pre-existing expected
 failures for unsupported image results and empty metadata remain unqualified.
@@ -172,10 +236,15 @@ credentials and disposable environments; they remain pending here.
 The repository-wide security scan was executed and failed: existing shell lint
 findings, synthetic-secret detections, static audit findings, dependency advisories
 and npm advisories remain visible. The committed patch's secret scan was clean.
-The PM-built test environment's audit reported 65 advisories in seven existing
-locked packages; no dependencies or lockfile were changed. Do not present this as
-a clean security audit or weaken directory permissions to satisfy a scanner's
-incorrect recommendation to replace owner-only directory mode 0700 with 0644.
+The initial PM-built environment reported 65 advisories in seven locked packages.
+A later, separately qualified dependency refresh reduces this to 39 advisories
+in Pillow 12.3.0. It updates certifi, MCP, PyJWT, urllib3, setuptools, Mistral and
+OpenTelemetry using releases older than the existing 14-day quarantine, without
+metadata overrides or quarantine exceptions. A fresh PM environment passes its
+dependency-consistency check; this remains a failing security audit. Pillow 13's
+fixes are blocked by the declared browser-harness and fastembed constraints.
+Do not weaken owner-only directory permissions to satisfy a scanner's incorrect
+recommendation to replace mode 0700 with 0644.
 
 The task PR records the final candidate and exact-head verification results.
 The fork maintainer owns review after an unlock regression, plaintext-state
@@ -203,7 +272,7 @@ tests execute actual tools from absolute and relative PATH entries. The larger
 upstream merge remains unaccepted.
 The profile-path port from `9d8efb3504d75810080bca994ed8a5a2bbf137c3` is adapted
 to the fork's encrypted MCP diagnostics and existing filtered environment.
-The refreshed November 3 inventory pins upstream
+An earlier November 3 inventory pins upstream
 `6059d35108afd0afc2455dbe5e6bdac999933d1e`. Its child-transcript reservation and
 first-turn initialization fixes (`13e0ce98012998a207932b2d1475162371053600` and
 `6059d35108afd0afc2455dbe5e6bdac999933d1e`) use this fork's native SQLCipher DB.
@@ -217,6 +286,17 @@ Tool Search can discover and invoke a recovered MCP tool while the conversation'
 schema bytes stay fixed. Pin restores in the same process preserve that boundary,
 including the synthesized bridge during an outage. Explicit reload retains its
 existing boundary. The ports keep the fork's session and sandbox filters.
+
+The latest source-only inventory pins upstream
+`8112254f8a934626032579cae967b25b7795836d`: 7,462 commits ahead and 7,091
+changed files relative to the fork's recorded shared base. The narrow issuer
+compatibility port from `1dadda835d9e67a11758481cf123c821dc2538db` accepts the
+single optional slash on a root issuer, preserving path-sensitive matching,
+discovery checks and origin restrictions. The refreshed MCP 2.2 SDK supplies
+the matching helper directly. Actual Mistral SDK wire tests also found that
+transcription hints require `context_bias`; generic `prompt` was rejected by
+both the previous and refreshed SDK. The port sends a vocabulary/phrase hint
+without changing other transcription providers.
 
 One Woodpecker quality flow invokes the shared verification command:
 PM-pinned bootstrap, blocking lint guards, lock consistency, canonical Python
@@ -471,3 +551,209 @@ logging. Its replacement controls time and checks active state just before
 expiry, then full cache eviction exactly at the deadline. Failed earlier runs
 remain negative evidence. Final private/native qualification and source/public
 main equality are still required before completion.
+
+## Refined protected-workflow backlog
+
+The operator's November 3 refinement prioritizes reliable encrypted native
+Hermes, Codex, Claude and outgoing MCP integration, followed by protected,
+decomposable workflows whose assumptions and deductions can be checked. The
+controller owns bookkeeping and verification. The main model keeps its ordinary
+working interface and receives concise consequential findings; this does not
+add a reasoning toolset or rewrite past prompts, memories or tool schemas.
+
+The bounded delivery window starts at **2026-11-03 21:08 UTC** and ends at
+**2026-11-04 07:08 UTC**. Work uses GPT-6.1 Sol at high effort and Claude Opus 5.5
+at high effort, with approximately equal delegated work packages. The
+coordinator owns integration, evidence reconciliation, merge and publication.
+Model agreement is not independent evidence. A non-author owns each milestone's
+independent acceptance, using fresh environments and the actual merged SHA.
+
+### Intent, boundaries and measurable completion
+
+The primary outcome is successful authorized work from an already-unlocked local
+session: no second unlock for owned children, no foreign-profile credential
+borrowing, no loss of encrypted state, correct cancellation and recoverable
+failures. "Flawless" is an acceptance objective expressed by executable
+contracts; it is not a claim that all possible defects have been ruled out.
+
+Sensitive prompts, claims, premises, evidence, proof artifacts, checkpoints,
+credentials and operational traces must use the existing encrypted writers.
+Plaintext processing needs a protected transient environment. RAM can be swapped
+or dumped: report the actual memory/storage posture, and fail closed when a
+required protection cannot be established. Do not put vault keys or passwords
+in argv, environment, persistent state or logs. Public source code and
+regenerable public tool caches retain the established exclusions. Do not change
+host swap, disk-encryption, deployment or public-exposure decisions implicitly.
+
+Measure completed tasks separately from verifier acceptance, rejection and
+abstention. Include every failed attempt, timeout, retry, elapsed time, model
+identity, token/cost evidence and human intervention in the denominator. Record
+the input, source, checker and environment identities. A green old revision,
+stale log stream or compiler exit code cannot certify the current outcome.
+
+### Delivery order and gates
+
+| Milestone | Backlog and owner | Completion evidence | Independent test after merge |
+| --- | --- | --- | --- |
+| **M0: qualify encrypted integrations** | **INT-01** native/self-called Hermes, Codex and Claude; **MCP-01** device login, refresh, issuer selection and scoped persistence; **CI-01** minimal private verification, native GitHub gates and automatic public mirror. Integration owner: coordinator; independent acceptance: a non-author for each boundary. | Real encrypted homes, real native processes and CLI entry points, observed routing, ciphertext inspection, parent survival, revocation, cancellation and failure cleanup. All required checks green for the candidate; source/public main readbacks match. Current status: held; custody, exact-session and owned-I/O repairs require final qualification. | A non-author starts from fresh main, with separate homes/runtime roots and held-out lifecycle scenarios. Exercise logged-in external CLIs, MCP refresh/failure recovery, install/update/restore and stale-capability rejection. Foreign-host or unavailable-credential cases remain explicitly unqualified. |
+| **M1: protected workflow vertical slice** | **WF-01** immutable contract and receipt; **ASSUME-01** encrypted, source-linked assumptions; **VERIFY-01** hidden checker routing; **LEAN-01** one reviewed formal obligation; **OPS-01** logged-in operational status, diagnosis, cancellation and recovery. Wider integration is deferred until M0 acceptance; the existing opt-in consumer is not the hidden controller. | A concrete local workflow decomposes into dependency-bound work, checks required premise review/attestation state and currency, runs an available validator, returns actionable feedback, and resumes from an encrypted checkpoint without replaying committed side effects. No new core model tools or persistent plaintext work artifacts. Formal evidence is conditional on the reviewed specification and premises; it does not establish premise truth. | Swap implementation/test ownership. Use fresh main and adversarial held-out cases: false/missing/stale premise, changed statement, contradictory premises, forged receipt, `sorry`/unexpected axiom, checker unavailable, interrupted child and revoked parent. Failure blocks certification and produces a corrective backlog item. |
+| **M2: broaden only from evidence** | **EVID-01** primary-source evidence register; **ORCH-02** larger DAGs and bounded parallel execution; **KB-02** source-change invalidation and selective human review; **ADAPT-02** additional executor/backend qualification. | Extend a proven consumer, retain model-neutral contracts and per-adapter evidence. Quantified task gains require an applicable published result or an honest Hermes-specific measurement; do not relabel filtering as better task completion. | Independent regression and outcome review after each subsequent major merge; no blanket provider, operating-system or model-independence claim. Deferred work stays in this backlog if the delivery window cannot accommodate its full merge and acceptance cycle. |
+
+M0 also includes **SEC-01**, operation-scoped child authority with trusted native
+key handoff; **SEC-02**, measured memory and temporary-storage protection; and
+**PROC-01**, supervised foreground executor lifetime and permission preservation.
+These are qualification blockers when their contracts fail. Independent review
+confirmed custody, exact-session and owned-state persistence defects; the
+prepared repairs remain unmerged. Reproduction, repair and acceptance remain
+separate steps. Security-report handling follows
+`SECURITY.md`; this backlog does not publish private report details.
+
+M1 must retain one checker backend and one active controller. The separately
+authorized opt-in formal-checkpoint consumer asks the main model for a bounded
+checkpoint and uses an auxiliary evidence reviewer. That is an explicit opt-in
+interface choice, not a mostly hidden implementation. The default architecture
+still aims to keep bookkeeping behind the harness. A locally tested Goal
+prototype checks reviewed obligations before the existing completion judge;
+hold that separate controller for reconciliation, then reuse common checker
+identity, policy and receipts through a narrow adapter. Existing kanban and
+process supervision retain decomposition and lifetime ownership. Automatic
+claim extraction, broad knowledge-graph synchronization and general parallel
+proof search belong to M2 until a smaller consumer is qualified.
+
+The retained Goal prototype is excluded from M0 and is not a product command in
+that candidate. In its separate local branch it accepts a finite Boolean obligation through the existing
+operator `/goal verify` command. It retains the original obligation, source
+digests, separate premise attestations, a review identity bound to the exact
+generated Lean module, and encrypted attempt receipts. `/goal verify show`
+exposes the exact statement and canonical variable binding for human review;
+ordinary status remains concise. At most eight atoms, sixteen premises and 128
+syntax nodes keep consistency and proof work bounded. Unknown, refuted or stale
+premises pause completion. The existing completion judge runs only after these
+prerequisites pass, and source currency is checked again before accepting DONE.
+This is a local completion gate; it does not automate claim extraction or prove
+an empirical premise true. Its pinned Lean process has a 15-second wall guard,
+one thread and a 512 MiB allocator limit, which is not a total RSS guarantee.
+Only this bounded completion slice is implemented locally. The wider M1
+decomposition, side-effect recovery and host-admission contracts remain pending;
+existing kanban functionality alone does not establish their combined acceptance.
+
+The integration cutoff is **00:08 UTC**: start exact-candidate qualification
+early enough to allow private CI, native GitHub gates, the source merge and an
+independent main acceptance cycle before the delivery deadline. Unqualified
+later features stay explicitly deferred; a deadline does not authorize bypassing
+checks. Roll back an unmerged increment by reverting only its task-owned commits;
+post-merge defects require a corrective PR and the same checks.
+
+The cutoff has passed. Only repairs to concrete M0 acceptance failures continue;
+new workflow features remain deferred. Each major merge is followed by a fresh
+non-author acceptance run before that milestone is described as complete. A
+stacked feature may be prepared earlier, but does not skip that acceptance step.
+
+### Consequential assumptions and review triggers
+
+| Assumption | Evidence or falsifier | Owner and response |
+| --- | --- | --- |
+| RAM-backed work avoids persistent plaintext. | Active swap, dumpability, filesystem backing and container memory controls must be established. Unknown backing encryption does not prove protection. | Memory owner; refuse sensitive protected-workspace creation when the required posture is missing. |
+| A child capability preserves the owner's encryption boundary. | A synthetic child can perform its authorized operation, cannot redeem a permanent key through its general capability, and loses mediated access when the owner closes. | Authority owner; block M0 until native and failure-path tests pass. |
+| More checking improves the intended result. | Published gains on other models and harnesses motivate the mechanism. Transfer to GPT-6.1 Sol or Opus 5.5 in Hermes is unestablished; changed domains or extra compute can invalidate it. Filtering precision alone does not establish task completion gains. | Harness owner; retain conditional claims and record outcome limits, using a bounded local comparison only when existing evidence cannot settle a material choice. |
+| The formal obligation preserves the user's meaning. | Human-reviewed original and formal statement identities agree; a changed statement or load-bearing unreviewed premise invalidates acceptance. | Obligation reviewer; keep fidelity or premise truth unknown until evidence exists. |
+
+**Historical failed M0 checkpoint:** candidate `0777eea6ba` had 35 task commits.
+Actual private run 26 processed all 3,895 Python files: 41,780 tests passed and
+525 skipped, but the MCP device-flow file exceeded its unchanged 600-second
+guard. The run is failed, so frontend/docs, current native GitHub qualification,
+merge and public-main publication remain pending. The isolated reproduction
+passed, which does not disprove the CI failure. Native diagnostic stacks locate
+repeated PM toolchain preparation before MCP starts; the suite-owned machine and
+fresh encrypted-profile repair is awaiting qualification. Its exact CI blocking
+syscall remains unknown. Other manual/native evidence and its limits are recorded
+above; none substitutes for the missing gates.
+
+**Native integration follow-up:** actual Codex 0.166.0 and Claude Code 2.1.316
+were exercised against synthetic encrypted homes and loopback model protocols
+in a private RAM filesystem namespace. Codex's default read-only sandbox
+exposed a client-lock write attempt; opening the existing validated regular
+lock read-only preserves exclusive locking and permits mediated encrypted
+writes without broadening the sandbox. A separate native probe showed that a
+profile API key also needs explicit Codex `model_provider`, `forced_login_method`
+and `openai_base_url` configuration. These arguments contain no credential. The
+no-profile-key case leaves native CLI-owned login and routing in control. These
+are native CLI/protocol observations, not current paid-provider, subscription
+login, macOS or exact merged-revision acceptance.
+
+### Explicit follow-up backlog
+
+| Priority and item | Required result | Acceptance and owner |
+| --- | --- | --- |
+| **P0 SEC-03: qualify custody and session repairs** | Fixed owner-executed installer stages return receipts only; trusted workers require their exact live session; ordinary and outgoing MCP/remote environments exclude installer control authority. | Integration owner; exact-head private/native gates, then non-author fresh-main key-custody, revocation-between-preparation-and-adoption, parent/sibling survival and failure cleanup checks. The earlier confirmed failures remain negative evidence. |
+| **P0 SEC-04: qualify owned-state encryption** | Seal derived skill indexes and cron usage audit appends in their canonical authenticated formats, preserving existing records and refusing unavailable/damaged state. | Integration owner; ciphertext and authenticated roundtrip checks, migrated-record preservation, locked/damaged non-mutation and public cron/self-call replay with no owned plaintext residue. |
+| **P0 HOST-01: transient-memory admission** | Establish swap, hibernation and crash-storage protection for each supported protected host; report unknown evidence honestly. Retained-key locking and RAM-only files do not protect every Python, crypto or SQLCipher buffer. | Operator supplies host guarantees or a native deployment proves the required posture. A non-author tests refusal and recovery. Full protected-workflow acceptance remains pending while admission is unevaluated. No implicit host setting changes. |
+| **P0 DEP-01: Pillow advisory closure (external blocker)** | Upstream browser-harness and fastembed metadata currently prevent installing the aged fixed Pillow through normal consistency checks. | Dependency owner tracks compatible upstream releases and rechecks at the next eligible release/quarantine boundary; then fresh PM lock/environment, applicable advisory closure and real browser/image consumers. Preserve the 14-day quarantine and all existing tooling; do not force incompatible metadata. |
+| **P0 DEP-00: qualify the aged refresh** | Land the separately prepared security dependency and SDK refresh after its exact-head checks. Local audit reduces 65 advisories in seven packages to the 39 Pillow advisories recorded above. | Integration owner; fresh PM environment, actual SDK protocol checks, full required gates and independent fresh-main consumers. Local test counts alone do not establish publication. |
+| **P0 INT-02: reconcile the native follow-ups** | Include read-only Codex management, profile API routing and cached-login preservation, sticky-profile authority binding, and every concrete remote-client spawn boundary in the final integration candidate. | Integration owner; exact-head private/native checks followed by independent fresh-main CLI and ciphertext checks. A partial author test run cannot qualify the milestone. |
+| **P1 NATIVE-02: remaining host and lifecycle evidence** | Qualify protected workspaces, native cancellation/reaping, install/update/restore and logged-in vendor routes on each supported native host. | Non-author host owner. Keep Linux protocol, macOS, synthetic API login and real account evidence distinct; unavailable dedicated credentials remain pending. |
+| **P1 UPSTREAM-02: refresh the reviewed input** | Review newer upstream changes against the pinned input and port only concrete consumers within this fork's encrypted local scope. | Integration owner records the fetched revision, port/defer decision and encrypted behavior proof. A newer upstream HEAD alone neither qualifies a port nor authorizes removed services. |
+| **P1 HARNESS-02: one coherent formal contract** | Preserve the authorized opt-in consumer and hold the separate Goal controller. Reuse verified PM tool identity, source/review identities, protected scratch, conditional status and aggregate attempt/cost receipts through one checker boundary. | Harness owner; compare existing consumers and failure contracts, then merge only a fully qualified bounded increment. A future default hidden controller requires a concrete consumer; opt-in checkpoint visibility is not evidence that this preference has been fulfilled. |
+| **P2 ORCH-02 / KB-02** | Broaden decomposition and source invalidation through existing kanban/goal interfaces only after a concrete consumer needs them. | Independent outcome review after each major merge; report actual task resolution, cost and human effort rather than verifier counts alone. |
+
+### M1 behavioral contracts
+
+- **Assumptions:** retain original statement/span, provenance, owner, applicability
+  scope, evidence revision, review state and dependencies. Distinguish observed
+  fact, source-supported claim, human requirement, model inference and open
+  premise. New evidence invalidates dependent receipts rather than silently
+  preserving a green result.
+- **Formal boundary:** keep the reviewed natural-language obligation and exact
+  formal statement linked by immutable identity. Lean checks a deduction under
+  its premises. It does not establish real-world truth or semantic fidelity.
+  Reject placeholders, unexpected axioms, statement substitution and unapproved
+  compiler-trusting shortcuts. Use satisfiability/witness checks where supported;
+  otherwise consistency and formalization remain unknown.
+- **Orchestration:** dependencies, budgets, cancellation, failure, intentional
+  inactivity and recovery are explicit states. Keep provider failure, execution
+  failure, checker failure and missing evidence distinct. A stale or unavailable
+  checker cannot pass a gate. Validate the current artifact again at an action's
+  side-effect boundary.
+- **Operational self-service:** expose useful status and repair actions through
+  existing CLI/session consumers, with scoped authority and redacted output.
+  Closing or cancelling one child must preserve its parent and unrelated work.
+  Persistent private state uses existing encryption and atomicity contracts.
+- **Independent acceptance:** an author or another model's agreement is not the
+  acceptance oracle. Prefer native execution, authoritative source data,
+  independent checker replay and a non-author's held-out scenarios. Record each
+  merged SHA and resulting observation; a failed post-merge gate opens a
+  corrective increment and prevents a completed-capability claim.
+
+### Evidence informing the design
+
+Existing results motivate selective external checking and a small persistent
+controller as a design hypothesis, with material limits. In formal mathematics, the October
+[h1 study](https://arxiv.org/html/2610.35962v1) reports the same Opus 4.8 improving
+from 63/100 FATE-X problems in native Claude Code to 73 with its prompt/tools and
+83 with h1. That is useful strong-backbone evidence, not a general task-success
+guarantee; the paper also describes reruns of some baseline failures.
+
+[VERGE](https://arxiv.org/html/2601.20055v2) reports GPT-OSS-120B HLE accuracy
+14.2% to 30.5% on its evaluated subset, using a hybrid formal/model-checking
+pipeline and substantially more calls than ordinary chain-of-thought. Its
+compute controls and soft-check coverage matter. [VeriFin](https://arxiv.org/html/2608.10213v1)
+primarily demonstrates selective financial-claim filtering, with rejection and
+abstention; that is distinct from increasing solved questions.
+
+[SkillsBench v4](https://arxiv.org/html/2602.12670v4) reports substantial curated
+guidance gains across several model/harness combinations, including GPT-5.5, but
+selected healthy/backfilled scored trials and partial-credit metrics must not
+be presented as all-attempt reliability. These studies do not establish gains
+for GPT-6.1 Sol or Opus 5.5 in Hermes. Transfer to these executors remains an
+explicit assumption until qualified.
+
+Lean's [official proof-validation guidance](https://lean-lang.org/doc/reference/latest/ValidatingProofs/)
+distinguishes proof validity from statement meaning and treats unreviewed
+AI-generated proof code as potentially malicious. A pinned checker, isolated
+execution and independent final validation therefore belong to the harness,
+not to a promise that compilation alone certifies an answer.
+
+The existing experiments are the primary basis for implementation choices.
+Small Hermes-specific comparisons are a fallback for consequential transfer
+assumptions and acceptance of the actual package; they are not a substitute for
+the published evidence or a pretext to postpone the integration work.
