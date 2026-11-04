@@ -17,6 +17,19 @@ FILES = [
     "tests/hermes_cli/test_management_public_cli.py",
     "tests/hermes_cli/test_managed_agents_public_cli.py",
     "tests/hermes_cli/test_managed_agent_supervision.py",
+    "tests/hermes_cli/test_management_rotation_cli.py",
+    "tests/hermes_cli/test_management_state_cli.py",
+    "tests/hermes_cli/test_management_keyfile_cli.py",
+    "tests/hermes_cli/test_management_secret_cli.py",
+    "tests/hermes_cli/test_management_backup_cli.py",
+    "tests/hermes_cli/test_managed_agents_codex_cli.py",
+    "tests/hermes_cli/test_managed_agents_claude_cli.py",
+    "tests/hermes_cli/test_managed_agents_native_cli.py",
+    "tests/hermes_cli/test_managed_agents_credentials_cli.py",
+    "tests/hermes_cli/test_managed_owner_death.py",
+    "tests/hermes_cli/test_managed_foreground_cancel.py",
+    "tests/hermes_cli/test_managed_child_descriptors.py",
+    "tests/hermes_cli/test_managed_protected_scratch.py",
 ]
 
 

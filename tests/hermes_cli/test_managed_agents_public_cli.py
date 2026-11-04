@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import json
 import os
-import secrets
 import subprocess
 import sys
 
@@ -47,9 +46,7 @@ def ram_runtime(monkeypatch):
     pytest.skip("this host has no writable RAM-only mount that is provably never swapped")
 
 
-@pytest.mark.parametrize("runner", ["codex", "claude"])
-@pytest.mark.parametrize("configured", [False, True])
-def test_managed_coding_executor_calls_owning_encrypted_cli_without_another_unlock(
+def _assert_managed_coding_executor(
         world, tmp_path, ram_runtime, runner, configured, monkeypatch):
     from hermes_cli._launchers import runtime_command
     from hermes_security import io
@@ -115,61 +112,10 @@ print('encrypted-child-management-ok')
 
 
 
-def test_managed_native_cli_keeps_parent_unlocked_and_standalone_refuses(world):
-    from hermes_cli._launchers import runtime_command
-
-    command = runtime_command(ROOT, ["manage", "run", "hermes", "config", "get", "agent.max_turns"])
-    result = subprocess.run(command, env=world.env, cwd=ROOT, stdin=subprocess.DEVNULL,
-                            text=True, capture_output=True, timeout=90, check=False)
-    assert result.returncode == 0 and "19" in result.stdout, world.diagnostic((result.stdout, result.stderr))
-    assert world.get(["agent", "max_turns"])["value"] == 19
-    independent = {k: v for k, v in world.env.items() if k != "HERMES_SESSION_VAULT"}
-    refused = subprocess.run(command, env=independent, cwd=ROOT, stdin=subprocess.DEVNULL,
-                             text=True, capture_output=True, timeout=90, check=False)
-    assert refused.returncode != 0
-    assert json.loads(refused.stdout)["ok"] is False
 
 
 
-def test_managed_runner_removes_the_launch_profiles_custom_secret_residue(world, tmp_path, ram_runtime):
-    from hermes_cli._launchers import runtime_command
-    from hermes_cli.config import save_config
-    from hermes_constants import reset_hermes_home_override, set_hermes_home_override
-    from hermes_security import io, vault
-    from tests.e2e.vault_home import prepare_fixture_runtime, spawn_unlocked
 
-    io.write_text(world.home / ".env", "LAUNCH_PROFILE_TOKEN=synthetic-foreign-secret\n", purpose="env")
-    selected = world.home / "profiles" / "work"
-    password = secrets.token_urlsafe(32)
-    vault.init_vault(selected, password)
-    vault.unlock(selected, password)
-    token = set_hermes_home_override(selected)
-    try:
-        save_config({"agent": {"max_turns": 61}, "updates": {"check": False}}, strip_defaults=False)
-        io.write_text(selected / ".env", "OPENAI_API_KEY=synthetic-selected-key\n", purpose="env")
-        prepare_fixture_runtime(selected, ROOT)
-    finally:
-        reset_hermes_home_override(token)
-    executable = tmp_path / "codex"
-    executable.write_text(f"#!{sys.executable}\n" + """
-import os
-assert 'LAUNCH_PROFILE_TOKEN' not in os.environ
-assert os.environ['CODEX_API_KEY'] == 'synthetic-selected-key'
-assert 'HERMES_VAULT_KEY_FD' not in os.environ
-print('profile-scoped-runner-ok')
-""", encoding="utf-8")
-    executable.chmod(0o700)
-    env = dict(world.env, PATH=str(tmp_path) + os.pathsep + world.env["PATH"],
-               LAUNCH_PROFILE_TOKEN="synthetic-foreign-secret", XDG_RUNTIME_DIR=str(ram_runtime))
-    env.pop("HERMES_SESSION_VAULT", None)
-    # The fixture's trusted maintenance parent names both keys explicitly; the
-    # external executor must still receive only the selected profile's grant.
-    with spawn_unlocked(runtime_command(ROOT, ["manage", "--profile", "work", "run", "codex"]),
-                        env=env, additional_homes=(selected,), cwd=ROOT, stdin=subprocess.DEVNULL,
-                        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) as process:
-        stdout, stderr = process.communicate(timeout=120)
-        assert process.returncode == 0, world.diagnostic((stdout, stderr), env=env)
-        assert stdout.strip() == "profile-scoped-runner-ok"
 
 
 # Each row is a supported spelling (per the installed vendor help/parser) that
@@ -224,20 +170,6 @@ def test_managed_runner_refuses_permission_and_sandbox_relaxation(tmp_path, monk
     assert refused.value.code == "invalid_request"
 
 
-@pytest.mark.parametrize("runner", ["codex", "claude"])
-def test_public_managed_run_refuses_a_bypass_before_starting_the_executor(world, tmp_path, monkeypatch, runner):
-    from hermes_cli._launchers import runtime_command
-
-    executable = _fake_runner(tmp_path, monkeypatch, runner)
-    bypass = ("--dangerously-bypass-approvals-and-sandbox" if runner == "codex"
-              else "--dangerously-skip-permissions")
-    env = dict(world.env, PATH=str(executable.parent) + os.pathsep + world.env["PATH"])
-    result = subprocess.run(runtime_command(ROOT, ["manage", "run", runner, "--", bypass, "task"]),
-                            env=env, cwd=ROOT, stdin=subprocess.DEVNULL, capture_output=True, text=True,
-                            timeout=120, check=False)
-    diagnostic = world.diagnostic((result.returncode, result.stdout, result.stderr), env=env)
-    assert "executor-started" not in result.stdout, diagnostic
-    assert result.returncode != 0 and json.loads(result.stdout)["error"]["code"] == "invalid_request", diagnostic
 
 
 @pytest.mark.parametrize(("runner", "arguments"), [

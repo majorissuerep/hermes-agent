@@ -13,7 +13,6 @@ import contextlib
 import json
 import os
 from pathlib import Path
-import signal
 import subprocess
 import sys
 
@@ -181,59 +180,12 @@ def _stop_owner(owner: subprocess.Popen) -> None:
 _ENTRIES = pytest.mark.parametrize("entry", ["public", "launch-seam"])
 
 
-@_ENTRIES
-@pytest.mark.platforms("linux")
-def test_owner_death_removes_every_managed_descendant(request, tmp_path, identities, entry):
-    record, log = tmp_path / "tree.json", tmp_path / "owner.log"
-    owner = _tree_owner(request, entry, tmp_path, record, log)
-    try:
-        _recorded_tree(owner, record, log, identities)
-        owner.kill()
-        owner.wait(timeout=30)
-        _assert_tree_gone(identities, log)
-    finally:
-        _stop_owner(owner)
 
 
-@_ENTRIES
-@pytest.mark.parametrize("target", ["terminal-group", "owner"])
-@pytest.mark.platforms("linux")
-def test_foreground_cancel_removes_every_managed_descendant(request, tmp_path, identities, entry, target):
-    record, log = tmp_path / "tree.json", tmp_path / "owner.log"
-    owner = _tree_owner(request, entry, tmp_path, record, log)
-    try:
-        _recorded_tree(owner, record, log, identities)
-        if target == "terminal-group":
-            os.killpg(owner.pid, signal.SIGINT)
-        else:
-            os.kill(owner.pid, signal.SIGINT)
-        assert owner.wait(timeout=60) != 0, _log(log)
-        _assert_tree_gone(identities, log)
-    finally:
-        _stop_owner(owner)
 
 
-@pytest.mark.platforms("linux", "macos")
-def test_trusted_hermes_runner_unlocks_through_its_inherited_key_fd(request, world, tmp_path):
-    log = tmp_path / "owner.log"
-    owner = _public_owner(request, tmp_path, ["hermes", "config", "get", "agent.max_turns"], log)
-    assert owner.wait(timeout=120) == 0, world.diagnostic(_log(log))
-    assert "19" in log.read_text(encoding="utf-8").split()
 
 
-@pytest.mark.platforms("linux", "macos")
-def test_vendor_runner_inherits_no_key_or_supervision_descriptor(request, tmp_path):
-    log = tmp_path / "owner.log"
-    executable = tmp_path / "codex"
-    executable.write_text(f"#!{sys.executable}\n" + _OPEN_DESCRIPTORS + """
-print(json.dumps({"key_fd": "HERMES_VAULT_KEY_FD" in os.environ, "extra": open_descriptors()}))
-sys.exit(5)
-""", encoding="utf-8")
-    executable.chmod(0o700)
-    owner = _public_owner(request, tmp_path, ["codex"], log)
-    assert owner.wait(timeout=120) == 5, _log(log)
-    reported = json.loads(log.read_text(encoding="utf-8").strip().splitlines()[-1])
-    assert reported == {"key_fd": False, "extra": []}
 
 
 @pytest.mark.platforms("linux", "macos")
@@ -353,35 +305,5 @@ def test_vendor_refuses_without_proven_ram_scratch_and_never_starts(world, tmp_p
     assert not marker.exists()
 
 
-@pytest.mark.platforms("linux")
-def test_vendor_temp_writes_use_a_removed_protected_task_scratch(world, tmp_path, ram_runtime):
-    report = tmp_path / "report"
-    _vendor(tmp_path / "executors", f"""set -e
-case "$TMPDIR" in "{ram_runtime}"/hermes-managed-codex-*) ;; *) exit 41 ;; esac
-[ "$TMP" = "$TMPDIR" ] && [ "$TEMP" = "$TMPDIR" ] && [ "$(stat -c %a "$TMPDIR")" = 700 ]
-printf synthetic-canary > "$TMPDIR/canary"
-printf '%s' "$TMPDIR" > '{report}'
-echo protected-scratch-ok
-""")
-    env = dict(world.env, PATH=str(tmp_path / "executors") + os.pathsep + world.env["PATH"],
-               XDG_RUNTIME_DIR=str(ram_runtime))
-    returncode, stdout, stderr = _run_owner(world, env)
-    assert returncode == 0, (stdout, stderr)
-    assert stdout.strip() == "protected-scratch-ok"
-    assert not Path(report.read_text()).exists()
 
 
-@pytest.mark.platforms("linux")
-def test_sandboxed_vendor_reaches_the_owning_management_route(world, tmp_path, ram_runtime):
-    result, output = world.call({"op": "config.set", "path": ["sandbox", "enabled"], "value": True,
-                                 "revision": world.get()["revision"]})
-    assert result.returncode == 0, output
-    _vendor(tmp_path / "executors", """set -e
-answer=$(printf '%s' '{"op": "config.get", "path": ["agent", "max_turns"]}' | hermes manage apply)
-case "$answer" in *'"value": 19'*) echo sandboxed-route-ok ;; *) echo "$answer" >&2; exit 42 ;; esac
-""")
-    env = dict(world.env, PATH=str(tmp_path / "executors") + os.pathsep + world.env["PATH"],
-               XDG_RUNTIME_DIR=str(ram_runtime))
-    returncode, stdout, stderr = _run_owner(world, env)
-    assert returncode == 0, (stdout, stderr)
-    assert stdout.strip() == "sandboxed-route-ok"
