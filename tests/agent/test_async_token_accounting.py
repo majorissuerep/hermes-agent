@@ -66,19 +66,24 @@ class TestOrdering:
         db.create_session("s-b", "test")
 
         applied = []
+        expected = [("s-a" if i % 2 else "s-b", i) for i in range(1, 7)]
+        completed = threading.Event()
         original = db.update_token_counts
 
         def recording(session_id, **kwargs):
+            original(session_id, **kwargs)
             applied.append((session_id, kwargs.get("input_tokens", 0)))
-            return original(session_id, **kwargs)
+            if len(applied) == len(expected):
+                completed.set()
 
         db.update_token_counts = recording
         try:
-            expected = []
-            for i in range(1, 7):
-                sid = "s-a" if i % 2 else "s-b"
-                db.queue_token_counts(sid, input_tokens=i, api_call_count=1)
-                expected.append((sid, i))
+            for sid, tokens in expected:
+                db.queue_token_counts(sid, input_tokens=tokens, api_call_count=1)
+            # Ordering concerns completed real writes. A five-second flush may
+            # legitimately report pending under disk pressure; its timeout
+            # contract is covered by the gated reader-flush tests below.
+            assert completed.wait(timeout=60), "queued accounting writes never completed"
             assert db.flush_token_counts()
         finally:
             db.update_token_counts = original
