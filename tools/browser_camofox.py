@@ -553,14 +553,14 @@ def _vision_llm_settings() -> tuple[float, float]:
 
 
 def _save_screenshot(content: bytes) -> str:
-    """Write PNG bytes under ``$HERMES_HOME/browser_screenshots`` and return the path."""
+    """Seal PNG bytes as this profile's encrypted browser artifact and return its path.
+
+    The pixels stay in memory for analysis; no plaintext copy is written. A locked or missing
+    vault raises an actionable ``MediaCustodyError`` before any analysis request is sent.
+    """
     from hermes_constants import get_hermes_home
-    screenshots_dir = get_hermes_home() / "browser_screenshots"
-    screenshots_dir.mkdir(parents=True, exist_ok=True)
-    screenshot_path = str(screenshots_dir / f"browser_screenshot_{uuid.uuid4().hex[:8]}.png")
-    with open(screenshot_path, "wb") as f:
-        f.write(content)
-    return screenshot_path
+    from tools.browser_media_custody import seal_camofox_capture
+    return str(seal_camofox_capture(content, get_hermes_home()))
 
 
 def camofox_vision(question: str, annotate: bool = False, task_id: Optional[str] = None) -> str:

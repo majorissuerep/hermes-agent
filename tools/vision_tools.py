@@ -8,6 +8,8 @@ model (multimodal tool-result envelope) or are described by the auxiliary vision
 
 import base64
 import asyncio
+import contextlib
+import contextvars
 import json
 from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
@@ -165,6 +167,27 @@ def _managed_install() -> bool:
         return False
 
 
+# Set only while an owned encrypted media source is being prepared: every ``cache/vision``
+# temp (decrypted copy, normalized/cropped derivative) then lives in that RAM workspace instead.
+_OWNED_MEDIA_STAGING: contextvars.ContextVar[Optional[Path]] = contextvars.ContextVar(
+    "vision_owned_media_staging", default=None)
+
+
+@contextlib.contextmanager
+def _owned_media_staging(image_url: str):
+    """Stage decrypted owned media in a proven RAM workspace; other sources keep ``cache/vision``."""
+    from tools.browser_media_custody import owned_media_path, protected_media_workspace
+    if owned_media_path(image_url) is None:
+        yield
+        return
+    with protected_media_workspace("vision-media") as workspace:
+        token = _OWNED_MEDIA_STAGING.set(workspace)
+        try:
+            yield
+        finally:
+            _OWNED_MEDIA_STAGING.reset(token)
+
+
 def _secure_cache_dir(new_subpath: str, old_name: str) -> Path:
     """Resolve a Hermes media-cache dir, creating it owner-only (0700).
 
@@ -207,6 +230,9 @@ def _secure_cache_dir(new_subpath: str, old_name: str) -> Path:
     the mode to the leaf only, so an intermediate ``cache/`` keeps its default
     mode; it is shared with other subsystems and holds only directory names.
     """
+    staged = _OWNED_MEDIA_STAGING.get()
+    if staged is not None and new_subpath == "cache/vision":
+        return staged
     cache_dir = get_hermes_dir(new_subpath, old_name)
     if _managed_install():
         # Managed mode: the NixOS-configured umask/setgid owns the mode, and
@@ -712,28 +738,30 @@ async def _vision_analyze_native(
         from tools.interrupt import is_interrupted
         if is_interrupted():
             return tool_error("Interrupted", success=False)
-        try:
-            prepared = await _prepare_image(image_url, task_id, region, validate_decode=True)
-        except _ImagePrepError as exc:
-            return tool_error(str(exc), success=False)
-        image_data_url = await _run_encode_on_cpu_executor(
-            _image_to_base64_data_url, prepared.path, mime_type=prepared.mime)
-        # Proactive embed cap: this image is re-sent on every later turn, so resize DOWN to the
-        # history-reuse target whenever the byte or long-edge cap is exceeded, not just at 20 MB.
-        _scale_info: dict = {}
-        # Anthropic still rejects >5 MB / >8000px with a non-retryable 400, but those are one-shot viewing
-        # limits — history embeds are sized smaller so repeated vision_analyze turns don't blow the context
-        # (#92699).
-        embed_target_bytes = _resolve_embed_target_bytes()
-        _over_dims = await _run_encode_on_cpu_executor(
-            _image_exceeds_dimension, prepared.path, _EMBED_MAX_DIMENSION)
-        if len(image_data_url) > embed_target_bytes or _over_dims:
-            image_data_url = await _resize_prepared(
-                prepared, _scale_info,
-                max_base64_bytes=embed_target_bytes, max_dimension=_EMBED_MAX_DIMENSION, force_jpeg=True)
-            # Reject rather than embed a session-wedging payload.
-            if len(image_data_url) > _MAX_BASE64_BYTES:
-                return tool_error(_too_large_message(image_data_url), success=False)
+        # Owned encrypted media decrypts only into a proven RAM workspace, gone after encoding.
+        with _owned_media_staging(image_url):
+            try:
+                prepared = await _prepare_image(image_url, task_id, region, validate_decode=True)
+            except _ImagePrepError as exc:
+                return tool_error(str(exc), success=False)
+            image_data_url = await _run_encode_on_cpu_executor(
+                _image_to_base64_data_url, prepared.path, mime_type=prepared.mime)
+            # Proactive embed cap: this image is re-sent on every later turn, so resize DOWN to the
+            # history-reuse target whenever the byte or long-edge cap is exceeded, not just at 20 MB.
+            _scale_info: dict = {}
+            # Anthropic still rejects >5 MB / >8000px with a non-retryable 400, but those are one-shot viewing
+            # limits — history embeds are sized smaller so repeated vision_analyze turns don't blow the context
+            # (#92699).
+            embed_target_bytes = _resolve_embed_target_bytes()
+            _over_dims = await _run_encode_on_cpu_executor(
+                _image_exceeds_dimension, prepared.path, _EMBED_MAX_DIMENSION)
+            if len(image_data_url) > embed_target_bytes or _over_dims:
+                image_data_url = await _resize_prepared(
+                    prepared, _scale_info,
+                    max_base64_bytes=embed_target_bytes, max_dimension=_EMBED_MAX_DIMENSION, force_jpeg=True)
+                # Reject rather than embed a session-wedging payload.
+                if len(image_data_url) > _MAX_BASE64_BYTES:
+                    return tool_error(_too_large_message(image_data_url), success=False)
         embedded = True
         if not reserved:
             _record_embed(image_url)
@@ -890,6 +918,10 @@ async def vision_analyze_tool(
     """Describe an image (URL, local path, data: URL) with the auxiliary vision LLM. ``user_prompt``
     is pre-formatted by the caller. Temp images live under $HERMES_HOME/cache/vision/."""
     async def stage(prompt: str, debug_call_data: dict, temp_paths: list) -> tuple:
+        with _owned_media_staging(image_url):  # owned encrypted media: RAM-only staging
+            return await _stage_image(prompt, debug_call_data, temp_paths)
+
+    async def _stage_image(prompt: str, debug_call_data: dict, temp_paths: list) -> tuple:
         prepared = await _prepare_image(image_url, task_id, region, validate_decode=False)
         temp_paths.append(prepared.path)
         logger.info("Image ready (%.1f KB)", prepared.size_bytes / 1024)

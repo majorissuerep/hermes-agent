@@ -13,6 +13,24 @@ from tools import browser_tool_cloud as bt_cloud
 from tools import browser_tool_cdp as bt_cdp
 
 
+@pytest.fixture
+def private_browser_media(tmp_path, monkeypatch):
+    """Unlocked vault home + labelled unit RAM-proof seam: browser captures are sealed artifacts."""
+    from hermes_platform.memory_protection import RamProof
+    from hermes_security import vault
+    home, ram = tmp_path / "owner", tmp_path / "ram"
+    home.mkdir()
+    ram.mkdir(mode=0o700)
+    monkeypatch.setenv("HERMES_HOME", str(home))
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(ram))
+    monkeypatch.setattr("tools.browser_media_custody._prove", lambda _p: RamProof(True, "ramfs", "synthetic unit proof"))
+    monkeypatch.setattr(vault, "_SCRYPT_N", 1024)
+    vault.init_vault(home, "synthetic browser media password")
+    vault.unlock(home, "synthetic browser media password")
+    yield home
+    vault.clear_vault_cache()
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -254,7 +272,7 @@ class TestLightpandaFallbackWarning:
         bt._last_active_session_key.pop("warn-test", None)
 
 
-    def test_browser_vision_lightpanda_response_has_structured_fallback(self, tmp_path):
+    def test_browser_vision_lightpanda_response_has_structured_fallback(self, tmp_path, private_browser_media):
         import json
         import tools.browser_tool as bt
 
@@ -275,7 +293,6 @@ class TestLightpandaFallbackWarning:
              patch("tools.browser_tool_lightpanda_fallback._chrome_fallback_screenshot", return_value={
                  "success": True, "data": {"path": str(chrome_shot)}
              }), \
-             patch("hermes_constants.get_hermes_dir", return_value=tmp_path), \
              patch("agent.auxiliary_client.call_llm", return_value=_Response()):
             response = json.loads(bt.browser_vision("what is this?", task_id="vision-structured"))
 

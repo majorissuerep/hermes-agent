@@ -3,11 +3,32 @@
 import json
 import os
 import sys
+from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 import pytest
 
+from hermes_security import artifacts
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+
+
+@pytest.fixture
+def private_browser_media(tmp_path, monkeypatch):
+    """Unlocked vault home + labelled unit RAM-proof seam: browser captures are sealed artifacts."""
+    from hermes_platform.memory_protection import RamProof
+    from hermes_security import vault
+    home, ram = tmp_path / "owner", tmp_path / "ram"
+    home.mkdir()
+    ram.mkdir(mode=0o700)
+    monkeypatch.setenv("HERMES_HOME", str(home))
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(ram))
+    monkeypatch.setattr("tools.browser_media_custody._prove", lambda _p: RamProof(True, "ramfs", "synthetic unit proof"))
+    monkeypatch.setattr(vault, "_SCRYPT_N", 1024)
+    vault.init_vault(home, "synthetic browser media password")
+    vault.unlock(home, "synthetic browser media password")
+    yield home
+    vault.clear_vault_cache()
 
 # ── browser_console ──────────────────────────────────────────────────
 
@@ -158,6 +179,7 @@ class TestBrowserConsole:
 
 # ── browser_vision annotate ──────────────────────────────────────────
 
+@pytest.mark.usefixtures("private_browser_media")
 class TestBrowserVisionConfig:
     def _setup_screenshot(self, tmp_path):
         shots_dir = tmp_path / "browser_screenshots"
@@ -169,14 +191,13 @@ class TestBrowserVisionConfig:
     def test_browser_vision_uses_configured_temperature_and_timeout(self, tmp_path):
         from tools.browser_tool import browser_vision
 
-        shots_dir, screenshot = self._setup_screenshot(tmp_path)
+        _, screenshot = self._setup_screenshot(tmp_path)
         mock_response = MagicMock()
         mock_choice = MagicMock()
         mock_choice.message.content = "Annotated screenshot analysis"
         mock_response.choices = [mock_choice]
 
         with (
-            patch("hermes_constants.get_hermes_dir", return_value=shots_dir),
             patch("tools.browser_tool_lifecycle._cleanup_old_screenshots"),
             patch("tools.browser_tool_session._run_browser_command", return_value={"success": True, "data": {"path": str(screenshot)}}),
             patch("tools.browser_tool._get_vision_model", return_value="test-model"),
@@ -193,18 +214,17 @@ class TestBrowserVisionConfig:
         # provider uses its full output budget (max-tokens-knob policy).
         assert "max_tokens" not in mock_llm.call_args.kwargs
 
-    def test_browser_vision_native_fast_path_returns_multimodal(self, tmp_path):
+    def test_browser_vision_native_fast_path_returns_multimodal(self, tmp_path, private_browser_media):
         """supports_vision override → screenshot attached natively, no aux call."""
         from agent.auxiliary_client import clear_runtime_main, set_runtime_main
         from tools.browser_tool import browser_vision
 
-        shots_dir, screenshot = self._setup_screenshot(tmp_path)
+        _, screenshot = self._setup_screenshot(tmp_path)
         annotations = [{"id": 1, "label": "Search box"}]
         set_runtime_main("brand-new-provider", "llava-v1.6")
         try:
             with (
-                patch("hermes_constants.get_hermes_dir", return_value=shots_dir),
-                patch("tools.browser_tool_lifecycle._cleanup_old_screenshots"),
+                    patch("tools.browser_tool_lifecycle._cleanup_old_screenshots"),
                 patch(
                     "tools.browser_tool_session._run_browser_command",
                     return_value={
@@ -225,10 +245,13 @@ class TestBrowserVisionConfig:
 
         assert isinstance(result, dict)
         assert result["_multimodal"] is True
-        assert result["meta"]["screenshot_path"] == str(screenshot)
+        sealed = result["meta"]["screenshot_path"]
+        assert Path(sealed).is_relative_to(private_browser_media / "artifacts" / "browser")
+        assert artifacts.read_bytes(sealed, home=private_browser_media) == b"\x89PNG\r\n\x1a\n" + b"\x00" * 8
+        assert not screenshot.exists(), "the plaintext capture moved into RAM custody"
         assert result["meta"]["annotations"] == annotations
         assert any(p.get("type") == "image_url" for p in result["content"])
-        assert f"Screenshot path: {screenshot}" in result["text_summary"]
+        assert f"Screenshot path: {sealed}" in result["text_summary"]
         mock_get_vision_model.assert_not_called()
         mock_llm.assert_not_called()
 
@@ -261,8 +284,7 @@ class TestBrowserVisionConfig:
         set_runtime_main("brand-new-provider", "llava-v1.6")
         try:
             with (
-                patch("hermes_constants.get_hermes_dir", return_value=shots_dir),
-                patch("tools.browser_tool_lifecycle._cleanup_old_screenshots"),
+                    patch("tools.browser_tool_lifecycle._cleanup_old_screenshots"),
                 patch(
                     "tools.browser_tool_session._run_browser_command",
                     return_value={
@@ -300,7 +322,7 @@ class TestBrowserVisionConfig:
         from agent.auxiliary_client import clear_runtime_main, set_runtime_main
         from tools.browser_tool import browser_vision
 
-        shots_dir, screenshot = self._setup_screenshot(tmp_path)
+        _, screenshot = self._setup_screenshot(tmp_path)
         mock_response = MagicMock()
         mock_choice = MagicMock()
         mock_choice.message.content = "Text-mode screenshot analysis"
@@ -309,8 +331,7 @@ class TestBrowserVisionConfig:
         set_runtime_main("brand-new-provider", "llava-v1.6")
         try:
             with (
-                patch("hermes_constants.get_hermes_dir", return_value=shots_dir),
-                patch("tools.browser_tool_lifecycle._cleanup_old_screenshots"),
+                    patch("tools.browser_tool_lifecycle._cleanup_old_screenshots"),
                 patch(
                     "tools.browser_tool_session._run_browser_command",
                     return_value={"success": True, "data": {"path": str(screenshot)}},

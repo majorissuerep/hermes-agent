@@ -43,7 +43,7 @@ class ResolveContext:
 class ResolvedImage:
     data: bytes
     mime: str
-    origin: str  # one of: data | http | file | local | container
+    origin: str  # one of: data | http | file | local | container | artifact
 
 
 # Explicit URL scheme ("ftp://", "s3://"). Bare Windows drive paths lack the "//".
@@ -70,6 +70,9 @@ async def resolve_image_source(
             src=s)
     # Everything else is a filesystem path — including bare relative names like "pic.png"
     # (a path-shape gate here regressed them once).
+    owned = await _resolve_owned_media(s, permitted)
+    if owned is not None:
+        return owned
     candidate = s[len("file://"):] if s.lower().startswith("file://") else s
     p = Path(os.path.expanduser(candidate))
     host_target = _permitted_host_read_target(p, ctx)
@@ -81,6 +84,23 @@ async def resolve_image_source(
         # Any path was host-readable, so a miss means the file doesn't exist.
         raise SourceNotFound(f"media file not found: '{p}'", src=s, origin="file")
     return await _resolve_container_fallback(p, ctx, s, permitted)
+
+
+async def _resolve_owned_media(src: str, permitted: tuple) -> Optional[ResolvedImage]:
+    """Private artifacts are ciphertext at rest: decrypt an own-profile browser media artifact in
+    memory (never a raw host read or sandbox exec-read); refuse every other reserved private root."""
+    from hermes_security.errors import VaultError
+    from tools.browser_media_custody import owned_media_path, read_owned_media
+    path = owned_media_path(src)
+    if path is None:
+        return None
+    try:
+        data = await asyncio.to_thread(read_owned_media, path)
+    except FileNotFoundError:
+        raise SourceNotFound(f"media file not found: '{path}'", src=src, origin="artifact") from None
+    except (VaultError, OSError, ValueError) as exc:
+        raise SourceUnsafe(f"private media artifact is unavailable: {exc}", src=src, origin="artifact") from exc
+    return _finalize(data, "", "artifact", src, permitted)
 
 
 def _guard_credential_read(host_target: Path, src: str) -> None:

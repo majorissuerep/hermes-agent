@@ -1227,7 +1227,8 @@ from tools import browser_tool_vision as _vision
 
 
 def _capture_vision_screenshot(effective_task_id: str, annotate: bool, screenshot_path: Path, lp_prerouted: bool):
-    """Take (or adopt the pre-routed) screenshot; returns ``(result, path, error_json_or_None)``."""
+    """Take (or adopt the pre-routed) screenshot into the RAM-staged ``screenshot_path``;
+    returns ``(result, error_json_or_None)``."""
     if lp_prerouted and screenshot_path.exists():
         result = _lp._annotate_lightpanda_fallback(
             {"success": True, "data": {"path": str(screenshot_path)}}, _LP_VISION_FALLBACK_REASON)
@@ -1242,74 +1243,93 @@ def _capture_vision_screenshot(effective_task_id: str, annotate: bool, screensho
         if remote_path and result.get("success"):
             try:
                 _session.fetch_sandbox_file(str((result.get("data") or {}).get("path") or remote_path), screenshot_path)
-                result.setdefault("data", {})["path"] = str(screenshot_path)
             except Exception as exc:
                 logger.warning("could not fetch the sandbox screenshot %s: %s", remote_path, exc)
+        elif result.get("success"):
+            _vision.adopt_capture(str((result.get("data") or {}).get("path") or ""), screenshot_path)
     if not result.get("success"):
-        return result, screenshot_path, _json_with_fallback(_err(
+        return result, _json_with_fallback(_err(
             f"Failed to take screenshot ({_vision._vision_mode_label()} mode): {result.get('error', 'Unknown error')}"
         ), result)
-    if result.get("data", {}).get("path"):
-        screenshot_path = Path(result["data"]["path"])
     if not screenshot_path.exists():
-        return result, screenshot_path, _dumps(_err(
+        return result, _dumps(_err(
             f"Screenshot file was not created at {screenshot_path} ({_vision._vision_mode_label()} mode). "
             f"This may indicate a socket path issue (macOS /var/folders/), "
             f"a missing Chromium install ('agent-browser install'), "
             f"or a stale daemon process."
         ))
-    return result, screenshot_path, None
+    return result, None
+
+
+def _vision_from_staged_capture(effective_task_id: str, question: str, annotate: bool, staged: Path,
+                                home: Path) -> str | dict[str, Any]:
+    """Capture into RAM, seal the encrypted artifact first, then analyse the RAM copy.
+
+    The published ``screenshot_path`` is always the encrypted artifact (reopenable with
+    vision_analyze); a failed analysis keeps it as evidence, and the 24-hour prune of the
+    canonical directory bounds disk growth.
+    """
+    from tools import browser_media_custody as _media
+
+    _lp_prerouted, _lp_fallback_warning, staged = _vision._lightpanda_vision_preroute(
+        effective_task_id, annotate, staged)
+    result: dict[str, Any] = {}
+    sealed: Optional[Path] = None
+    try:
+        result, error = _capture_vision_screenshot(effective_task_id, annotate, staged, _lp_prerouted)
+        if error is not None:
+            return error
+        sealed = _media.seal_capture(staged, home)
+        result.setdefault("data", {})["path"] = str(sealed)
+        _lifecycle._cleanup_old_screenshots(sealed.parent, max_age_hours=24)
+        # Native image routing: attach the screenshot directly instead of describing it
+        # through an aux vision LLM (no information loss).
+        from tools.vision_tools import _should_use_native_vision_fast_path
+        if _should_use_native_vision_fast_path():
+            return _vision._native_vision_result(staged, sealed, question, annotate, result, _lp_fallback_warning)
+
+        analysis = _vision._analyze_screenshot_with_aux_llm(staged, question)
+        response_data = {"success": True, "analysis": analysis or "Vision analysis returned no content.",
+                         "screenshot_path": str(sealed)}
+        _lp._copy_fallback_warning(response_data, result)
+        if annotate and result.get("data", {}).get("annotations"):
+            response_data["annotations"] = result["data"]["annotations"]
+        return _dumps(response_data)
+    except _media.MediaCustodyError:
+        raise  # actionable custody failure, reported by browser_vision
+    except Exception as e:
+        # Keep the sealed screenshot — the failure is in the analysis, not the capture,
+        # and deleting it loses evidence. The plaintext RAM copy is removed with the workspace.
+        logger.warning("browser_vision failed: %s", e, exc_info=True)
+        error_info = _err(f"Error during vision analysis: {e!s}")
+        if sealed is not None:
+            error_info["screenshot_path"] = str(sealed)
+            error_info["note"] = "Screenshot was captured but vision analysis failed. You can still share it via MEDIA:<path>."
+        _lp._copy_fallback_warning(error_info, result)
+        return _dumps(error_info)
 
 
 def browser_vision(question: str, annotate: bool = False, task_id: Optional[str] = None) -> str | dict[str, Any]:
     """Screenshot the current page for visual inspection. Native-vision models get the image
     attached to the conversation; otherwise the auxiliary vision model returns a text
-    analysis. The file is kept and its path returned (MEDIA:<path>)."""
+    analysis. The capture is staged in a proven RAM workspace and kept only as an encrypted
+    profile artifact whose path is returned (MEDIA:<path>)."""
     if _is_camofox_mode():
         return _camofox("camofox_vision", question, annotate, task_id)
 
     import uuid as uuid_mod
-    from hermes_constants import get_hermes_dir
-    screenshots_dir = get_hermes_dir("cache/screenshots", "browser_screenshots")
-    screenshot_path = screenshots_dir / f"browser_screenshot_{uuid_mod.uuid4().hex}.png"
+    from tools import browser_media_custody as _media
+    home = get_hermes_home()
     effective_task_id = _last_session_key(task_id or "default")
     blocked = _blocked_private_page_content(effective_task_id)
     if blocked is not None:
         return blocked
-
-    _lp_prerouted, _lp_fallback_warning, screenshot_path = _vision._lightpanda_vision_preroute(
-        effective_task_id, annotate, screenshot_path)
-    result: dict[str, Any] = {}
     try:
-        screenshots_dir.mkdir(parents=True, exist_ok=True)
-        _lifecycle._cleanup_old_screenshots(screenshots_dir, max_age_hours=24)
-        result, screenshot_path, error = _capture_vision_screenshot(
-            effective_task_id, annotate, screenshot_path, _lp_prerouted)
-        if error is not None:
-            return error
-        # Native image routing: attach the screenshot directly instead of describing it
-        # through an aux vision LLM (no information loss).
-        from tools.vision_tools import _should_use_native_vision_fast_path
-        if _should_use_native_vision_fast_path():
-            return _vision._native_vision_result(screenshot_path, question, annotate, result, _lp_fallback_warning)
-
-        analysis = _vision._analyze_screenshot_with_aux_llm(screenshot_path, question)
-        response_data = {"success": True, "analysis": analysis or "Vision analysis returned no content.",
-                         "screenshot_path": str(screenshot_path)}
-        _lp._copy_fallback_warning(response_data, result)
-        if annotate and result.get("data", {}).get("annotations"):
-            response_data["annotations"] = result["data"]["annotations"]
-        return _dumps(response_data)
-    except Exception as e:
-        # Keep a captured screenshot — the failure is in the analysis, not the capture,
-        # and deleting it loses evidence. The 24-hour cleanup bounds disk growth.
-        logger.warning("browser_vision failed: %s", e, exc_info=True)
-        error_info = _err(f"Error during vision analysis: {e!s}")
-        if screenshot_path.exists():
-            error_info["screenshot_path"] = str(screenshot_path)
-            error_info["note"] = "Screenshot was captured but vision analysis failed. You can still share it via MEDIA:<path>."
-        _lp._copy_fallback_warning(error_info, result)
-        return _dumps(error_info)
+        with _media.protected_media_workspace("browser-capture") as workspace:
+            staged = workspace / f"browser_screenshot_{uuid_mod.uuid4().hex}.png"
+            return _vision_from_staged_capture(effective_task_id, question, annotate, staged, home)
+    except _media.MediaCustodyError as e:
+        return _dumps(_err(str(e)))
 
 
 # ---------------------------------------------------------------------------

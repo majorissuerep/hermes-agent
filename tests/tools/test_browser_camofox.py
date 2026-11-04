@@ -3,6 +3,7 @@
 import json
 from unittest.mock import MagicMock, patch
 
+import pytest
 
 from tools.browser_camofox import (
     camofox_click,
@@ -16,6 +17,24 @@ from tools.browser_camofox import (
     is_camofox_mode,
     _rewrite_loopback_url_for_camofox,
 )
+
+
+@pytest.fixture
+def private_browser_media(tmp_path, monkeypatch):
+    """Unlocked vault home + labelled unit RAM-proof seam: browser captures are sealed artifacts."""
+    from hermes_platform.memory_protection import RamProof
+    from hermes_security import vault
+    home, ram = tmp_path / "owner", tmp_path / "ram"
+    home.mkdir()
+    ram.mkdir(mode=0o700)
+    monkeypatch.setenv("HERMES_HOME", str(home))
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(ram))
+    monkeypatch.setattr("tools.browser_media_custody._prove", lambda _p: RamProof(True, "ramfs", "synthetic unit proof"))
+    monkeypatch.setattr(vault, "_SCRYPT_N", 1024)
+    vault.init_vault(home, "synthetic browser media password")
+    vault.unlock(home, "synthetic browser media password")
+    yield home
+    vault.clear_vault_cache()
 
 
 # ---------------------------------------------------------------------------
@@ -254,7 +273,8 @@ class TestCamofoxVisionConfig:
     @patch("tools.browser_camofox.requests.post")
     @patch("tools.browser_camofox._get")
     @patch("tools.browser_camofox._get_raw")
-    def test_camofox_vision_uses_configured_temperature_and_timeout(self, mock_get_raw, mock_get, mock_post, monkeypatch):
+    def test_camofox_vision_uses_configured_temperature_and_timeout(self, mock_get_raw, mock_get, mock_post, monkeypatch,
+                                                                      private_browser_media):
         monkeypatch.setenv("CAMOFOX_URL", "http://localhost:9377")
         mock_post.return_value = _mock_response(json_data={"tabId": "tab11", "url": "https://x.com"})
         camofox_navigate("https://x.com", task_id="t11")
@@ -271,11 +291,9 @@ class TestCamofoxVisionConfig:
         mock_response.choices = [mock_choice]
 
         with (
-            patch("tools.browser_camofox.open", create=True) as mock_open,
             patch("agent.auxiliary_client.call_llm", return_value=mock_response) as mock_llm,
             patch("tools.browser_camofox.load_config", return_value={"auxiliary": {"vision": {"temperature": 1, "timeout": 45}}}),
         ):
-            mock_open.return_value.__enter__.return_value.read.return_value = b"fakepng"
             result = json.loads(camofox_vision("what is on the page?", annotate=True, task_id="t11"))
 
         assert result["success"] is True
