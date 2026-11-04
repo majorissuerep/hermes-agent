@@ -1,8 +1,10 @@
 """Public caches map to the task backend; private outputs use authenticated host file tools."""
 
+import json
 import os
 import re
 import pytest
+from pathlib import Path
 
 from tools import browser_tool_snapshot
 from tools import delegate_tool_results
@@ -45,6 +47,18 @@ def test_truncation_footers_render_public_cache_and_private_recovery_paths(owner
         path = _footer_path(text)
         assert path.startswith(str(home / subdir)), path
         assert os.path.exists(path)
+
+    path = _footer_path(deleg_out)
+    assert path.startswith(str(home / "cache/delegation") + os.sep), path
+    assert os.path.exists(path)
+    encrypted = Path(path).read_bytes()
+    assert encrypted.startswith(b"HRMVAULT\x00") and body.encode() not in encrypted
+    from tools.file_tools import read_file_tool
+
+    recovered = json.loads(read_file_tool(path, offset=2501, limit=2))
+    assert recovered["content"] == "2501|row 2500\n2502|row 2501"
+    assert "host" in recovered["source"]
+    assert Path(path).read_bytes() == encrypted
 
 
 def test_local_backend_footer_keeps_the_host_path(tmp_path, monkeypatch):

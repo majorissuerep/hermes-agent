@@ -35,6 +35,20 @@ def sealed_media_home(tmp_path, monkeypatch):
     yield
     vault.clear_vault_cache()
 
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def sealed_media_home(tmp_path, monkeypatch):
+    from hermes_security import vault
+
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    monkeypatch.setattr(vault, "_SCRYPT_N", 1024)
+    vault.init_vault(tmp_path, "synthetic MCP media password")
+    vault.unlock(tmp_path, "synthetic MCP media password")
+    yield
+    vault.clear_vault_cache()
+
 
 def _png_bytes():
     """Return a minimal valid PNG byte sequence.

@@ -37,12 +37,12 @@ def build_secure_vault_parser(subparsers) -> None:
     parser.add_argument(
         "--key-only", action="store_true",
         help="migrate: non-interactive creation for daemons/scripts — generate an X25519 pair, "
-        "seal the vault to the PUBLIC half, write the private key to --key-out (0600). "
+        "seal the vault to the PUBLIC half, write the private key to a NEW explicit external --key-out (0600). "
         "The vault has NO passphrase; the private key file is the ONLY credential.",
     )
     parser.add_argument(
         "--key-out", default=None,
-        help="migrate --key-only: where to write the private key (default: <home>/vault.key, 0600)",
+        help="migrate --key-only: REQUIRED new private-key file outside every Hermes home (0600); never overwritten",
     )
     parser.add_argument(
         "--public-key", default=None,
