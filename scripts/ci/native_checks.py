@@ -70,6 +70,7 @@ def main() -> None:
     if sys.platform.startswith("linux"):
         run(sys.executable, "-m", "scripts.ci.protected_management_checks", env=env)
         run("scripts/run_tests.sh", "--fail-on-skip", "--file-retries", "0",
+            "tests/hermes_security/test_pipe_readonly_namespace.py",
             "tests/tools/test_ssh_environment.py", "tests/tools/test_docker_backend_real.py",
             "tests/scripts/e2e/test_container_docker_live.py", "tests/scripts/test_fresh_source_install.py", env=env)
         with tempfile.TemporaryDirectory(prefix="hermes-bootstrap-protocol-") as temporary:
