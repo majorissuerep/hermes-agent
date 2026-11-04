@@ -659,9 +659,10 @@ controller owns bookkeeping and verification. The main model keeps its ordinary
 working interface and receives concise consequential findings; this does not
 add a reasoning toolset or rewrite past prompts, memories or tool schemas.
 
-The bounded delivery window starts at **2026-11-03 21:08 UTC** and ends at
-**2026-11-04 07:08 UTC**. Work uses GPT-6.1 Sol at high effort and Claude Opus 5.5
-at high effort, with approximately equal delegated work packages. The
+The initial ten-hour delivery window ended on November 4. The operator then
+extended the work until a stable fork release; qualification, rather than that
+elapsed deadline, determines completion. Work uses GPT-6.1 Sol at high effort
+and Claude Opus 5.5 at high effort, with approximately equal delegated work packages. The
 coordinator owns integration, evidence reconciliation, merge and publication.
 Model agreement is not independent evidence. A non-author owns each milestone's
 independent acceptance, using fresh environments and the actual merged SHA.
@@ -695,7 +696,7 @@ stale log stream or compiler exit code cannot certify the current outcome.
 | --- | --- | --- | --- |
 | **M0: qualify encrypted integrations** | **INT-01** native/self-called Hermes, Codex and Claude; **MCP-01** device login, refresh, issuer selection and scoped persistence; **CI-01** minimal private verification, native GitHub gates and automatic public mirror. Integration owner: coordinator; independent acceptance: a non-author for each boundary. | Real encrypted homes, real native processes and CLI entry points, observed routing, ciphertext inspection, parent survival, revocation, cancellation and failure cleanup. All required checks green for the candidate; source/public main readbacks match. Current status: held; custody, exact-session and owned-I/O repairs require final qualification. | A non-author starts from fresh main, with separate homes/runtime roots and held-out lifecycle scenarios. Exercise logged-in external CLIs, MCP refresh/failure recovery, install/update/restore and stale-capability rejection. Foreign-host or unavailable-credential cases remain explicitly unqualified. |
 | **M1: protected workflow vertical slice** | **WF-01** immutable contract and receipt; **ASSUME-01** encrypted, source-linked assumptions; **VERIFY-01** hidden checker routing; **LEAN-01** one reviewed formal obligation; **OPS-01** logged-in operational status, diagnosis, cancellation and recovery. Wider integration is deferred until M0 acceptance; the existing opt-in consumer is not the hidden controller. | A concrete local workflow decomposes into dependency-bound work, checks required premise review/attestation state and currency, runs an available validator, returns actionable feedback, and resumes from an encrypted checkpoint without replaying committed side effects. No new core model tools or persistent plaintext work artifacts. Formal evidence is conditional on the reviewed specification and premises; it does not establish premise truth. | Swap implementation/test ownership. Use fresh main and adversarial held-out cases: false/missing/stale premise, changed statement, contradictory premises, forged receipt, `sorry`/unexpected axiom, checker unavailable, interrupted child and revoked parent. Failure blocks certification and produces a corrective backlog item. |
-| **M2: broaden only from evidence** | **EVID-01** primary-source evidence register; **ORCH-02** larger DAGs and bounded parallel execution; **KB-02** source-change invalidation and selective human review; **ADAPT-02** additional executor/backend qualification. | Extend a proven consumer, retain model-neutral contracts and per-adapter evidence. Quantified task gains require an applicable published result or an honest Hermes-specific measurement; do not relabel filtering as better task completion. | Independent regression and outcome review after each subsequent major merge; no blanket provider, operating-system or model-independence claim. Deferred work stays in this backlog if the delivery window cannot accommodate its full merge and acceptance cycle. |
+| **M2: broaden only from evidence** | **EVID-01** primary-source evidence register; **ORCH-02** larger DAGs and bounded parallel execution; **KB-02** source-change invalidation and selective human review; **ADAPT-02** additional executor/backend qualification. | Extend a proven consumer, retain model-neutral contracts and per-adapter evidence. Quantified task gains require an applicable published result or an honest Hermes-specific measurement; do not relabel filtering as better task completion. | Independent regression and outcome review after each subsequent major merge; no blanket provider, operating-system or model-independence claim. Deferred work stays in this backlog until its full merge and acceptance cycle is complete. |
 
 M0 also includes **SEC-01**, operation-scoped child authority with trusted native
 key handoff; **SEC-02**, measured memory and temporary-storage protection; and
@@ -735,11 +736,10 @@ Only this bounded completion slice is implemented locally. The wider M1
 decomposition, side-effect recovery and host-admission contracts remain pending;
 existing kanban functionality alone does not establish their combined acceptance.
 
-The integration cutoff is **00:08 UTC**: start exact-candidate qualification
-early enough to allow private CI, native GitHub gates, the source merge and an
-independent main acceptance cycle before the delivery deadline. Unqualified
-later features stay explicitly deferred; a deadline does not authorize bypassing
-checks. Roll back an unmerged increment by reverting only its task-owned commits;
+Start exact-candidate qualification early enough to allow private CI, native
+GitHub gates, the source merge and an independent main acceptance cycle.
+Unqualified features stay explicitly deferred; a deadline does not authorize
+bypassing checks. Roll back an unmerged increment by reverting only its task-owned commits;
 post-merge defects require a corrective PR and the same checks.
 
 The November 4 checkpoint ended the initial timebox. The operator subsequently
