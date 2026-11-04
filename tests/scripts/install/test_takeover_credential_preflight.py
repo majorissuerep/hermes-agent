@@ -40,11 +40,16 @@ main
     assert not Path(env["TMPDIR"]).exists()
 
 
-def test_preparation_uses_unique_private_scratch_without_changing_caller_directory(tmp_path):
+@pytest.mark.parametrize("same_group", [False, True], ids=["inherited-root", "same-group-setgid"])
+def test_preparation_uses_unique_private_scratch_without_changing_caller_directory(tmp_path, same_group):
     env = _environment(tmp_path)
     env["HERMES_VAULT_KEY_OUT"] = str(tmp_path / "external-new.key")
     scratch_root = Path(env["TMPDIR"])
     scratch_root.mkdir(mode=0o755)
+    if same_group:
+        os.chown(scratch_root, -1, os.getegid())
+        scratch_root.chmod(0o2755)
+    original_mode = scratch_root.stat().st_mode & 0o7777
     occupied = scratch_root / "hermes-takeover"
     occupied.mkdir()
     (occupied / "retained").write_text("caller-owned bytes")
@@ -67,7 +72,7 @@ main
     chosen = Path(log.read_text().strip())
     assert chosen.parent == scratch_root and chosen != occupied
     assert not chosen.exists(), "owned scratch is removed even when source preparation fails"
-    assert scratch_root.stat().st_mode & 0o7777 == 0o755
+    assert scratch_root.stat().st_mode & 0o7777 == original_mode
     assert (occupied / "retained").read_text() == "caller-owned bytes"
 
 
