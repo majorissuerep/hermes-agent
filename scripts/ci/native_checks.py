@@ -55,6 +55,12 @@ def bootstrap_protocol(env: dict[str, str], directory: Path) -> None:
 
 
 def main() -> None:
+    if sys.platform.startswith("linux"):
+        from scripts.ci.native_namespace_policy import reexec_if_required
+
+        status = reexec_if_required()
+        if status is not None:
+            raise SystemExit(status)
     env = dict(os.environ, HERMES_TEST_FILE_RETRIES="0", HERMES_TEST_FILE_TIMEOUT="600",
                HERMES_TEST_WORKERS="2", HERMES_E2E_REQUIRE_TUI="1")
     for key in ("HERMES_TEST_PATHS", "HERMES_TEST_SLICE"):

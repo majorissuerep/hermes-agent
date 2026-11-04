@@ -616,6 +616,14 @@ swap setting. A run without proven RAM may test refusal behavior, but skipped
 positive vendor cases do not qualify execution. macOS has no protected vendor
 scratch proof backend in this increment.
 
+On restricted Ubuntu workers the native CI command creates a temporary launcher
+with a uniquely named, exact-path AppArmor profile allowing user namespaces.
+The test tree keeps its original unprivileged UID, GID and groups; the child
+checks its actual kernel profile before qualification. The global restriction
+stays enabled. Only this run's new profile is removed afterward, including when
+qualification fails. No host-wide AppArmor or namespace policy is disabled.
+The real namespace, ramfs, Landlock and bubblewrap assertions remain required.
+
 That pass exposed an owner/client fixture mismatch: operation-only dispatch
 selects executors in the owner's environment, while an old fixture changed only
 the client's PATH. Fixtures now bind synthetic executors in the owner and use
