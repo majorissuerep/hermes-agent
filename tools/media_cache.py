@@ -15,12 +15,15 @@ _RETENTION_OWNER: ContextVar[tuple | None] = ContextVar("private_media_retention
 
 
 def retention_owner():
+    active = _RETENTION_OWNER.get()
+    return active if active is not None else _capture_owner()
+
+
+def _capture_owner():
     """Capture the original home/session once; unavailable custody cannot become a later unlock."""
     from hermes_security.errors import VaultError
     from hermes_security.session_custody import SessionCustody
 
-    if (active := _RETENTION_OWNER.get()) is not None:
-        return active
     home = get_hermes_home().resolve()
     try:
         return home, SessionCustody.capture(home), None
@@ -31,7 +34,7 @@ def retention_owner():
 @contextmanager
 def retention_scope(owner=None):
     """Carry captured private-output authority explicitly through MCP and vision work."""
-    token = _RETENTION_OWNER.set(retention_owner() if owner is None else owner)
+    token = _RETENTION_OWNER.set(_capture_owner() if owner is None else owner)
     try:
         yield
     finally:

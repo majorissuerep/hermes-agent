@@ -94,3 +94,26 @@ def test_delayed_mcp_media_refuses_original_revocation_and_fresh_sibling_still_w
     finally:
         first.close()
         sibling.close()
+
+
+def test_nested_new_media_operation_cannot_borrow_its_live_outer_session(home):
+    from agent.session_context import scoped_current_session_id
+    from hermes_security.errors import VaultError
+    from hermes_security.session_authority import start_session_authority
+    from tools import media_cache
+
+    first = start_session_authority(home, "outer-A")
+    sibling = start_session_authority(home, "nested-B")
+    try:
+        with scoped_current_session_id("outer-A"), media_cache.retention_scope():
+            sibling.close()
+            with scoped_current_session_id("nested-B"), pytest.raises(VaultError):
+                with media_cache.retention_scope():
+                    media_cache.cache_document_from_bytes(b"nested private document", "result.txt")
+            assert not [path for path in (home / "artifacts").rglob("*") if path.is_file()]
+            saved = media_cache.cache_document_from_bytes(b"live outer result", "result.txt")
+            from hermes_security import artifacts
+            assert artifacts.read_bytes(saved, home=home) == b"live outer result"
+    finally:
+        first.close()
+        sibling.close()
