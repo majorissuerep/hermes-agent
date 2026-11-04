@@ -58,6 +58,15 @@ def bootstrap_protocol(env: dict[str, str], directory: Path) -> None:
     assert observed == sha
 
 
+def formal_checks(env: dict[str, str]) -> None:
+    """Forward the owning PM store explicitly across the hermetic test boundary."""
+    from pm.paths import store_root
+
+    run(sys.executable, "scripts/ci/install_lean.py", env=env)
+    run("scripts/run_tests.sh", "--fail-on-skip", "--file-retries", "0", *FORMAL_FILES,
+        "--", "--formal-checker-store", str(store_root().resolve()), env=env)
+
+
 def main() -> None:
     if sys.platform.startswith("linux"):
         from scripts.ci.native_namespace_policy import reexec_if_required
@@ -92,8 +101,7 @@ def main() -> None:
         with tempfile.TemporaryDirectory(prefix="hermes-bootstrap-protocol-") as temporary:
             bootstrap_protocol(env, Path(temporary))
     # The opt-in verifier needs real kernel evidence on both supported native hosts.
-    run(sys.executable, "scripts/ci/install_lean.py", env=env)
-    run("scripts/run_tests.sh", "--fail-on-skip", "--file-retries", "0", *FORMAL_FILES, env=env)
+    formal_checks(env)
     run("git", "diff", "--exit-code", env=env)
     if subprocess.check_output(["git", "ls-files", "--others", "--exclude-standard"],
                                cwd=ROOT, text=True, timeout=30).strip():

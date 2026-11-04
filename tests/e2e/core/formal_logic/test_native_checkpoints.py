@@ -44,6 +44,8 @@ def _home(tmp_path, server, *, repairs=3):
         "auxiliary": {"title_generation": {"enabled": False}},
         "security": {"protected_work_dir": os.environ.get("XDG_RUNTIME_DIR")},
     })
+    if store := os.environ.get("HERMES_RUNTIME_DIR"):
+        home.extra_env["HERMES_RUNTIME_DIR"] = store
     home.update_config(lambda cfg: cfg["model"].update(api_mode="chat_completions"))
     return home
 
