@@ -37,7 +37,17 @@ def test_mcp_subprocess_env_holds_only_own_profile_secrets(tmp_path: Path) -> No
                          env={S.SECRET_ENV: secrets[name]})
             assert (path / ".env").read_bytes().startswith(b"HRMVAULT\0")
 
-        runtime = NativeRuntime(home, tmp_path / "native-runtime.log")
+        # The launch profile's FD must not unlock an independently encrypted sibling.
+        default_only = NativeRuntime(home, tmp_path / "native-default-only.log")
+        try:
+            refused = default_only.call("session.create", {"profile": "beta"})
+            assert "error" in refused and "locked" in refused["error"]["message"]
+            assert not dumps["beta"].exists() and not second.main_requests()
+        finally:
+            default_only.close()
+
+        # This fixture's human owns both unlocks and names beta explicitly in a separate FD entry.
+        runtime = NativeRuntime(home, tmp_path / "native-runtime.log", additional_homes=(profiles["beta"],))
         try:
             for name in profiles:
                 params = {} if name == "default" else {"profile": name}

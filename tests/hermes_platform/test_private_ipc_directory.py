@@ -17,6 +17,8 @@ def test_private_ipc_directory_clears_inherited_group_bits_before_use(monkeypatc
 
     factory = tempfile.TemporaryDirectory
     with factory(prefix="hermes-ipc-parent-", dir="/tmp") as parent:
+        os.chown(parent, -1, os.getegid())  # the owned fixture must belong to an actual runner group
+        assert Path(parent).stat().st_gid == os.getegid()
         os.chmod(parent, 0o2700)
         assert stat.S_IMODE(Path(parent).stat().st_mode) == 0o2700
 
@@ -39,3 +41,5 @@ def test_private_ipc_directory_clears_inherited_group_bits_before_use(monkeypatc
                         with accepted:
                             client.sendall(b"protected")
                             assert accepted.recv(32) == b"protected"
+
+        assert stat.S_IMODE(Path(parent).stat().st_mode) == 0o2700
