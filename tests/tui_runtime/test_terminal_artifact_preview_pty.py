@@ -6,9 +6,11 @@ guide. It uses the published bare command and real slash worker, not private RPC
 from __future__ import annotations
 
 import http.server
+import hashlib
 from io import BytesIO
 import os
 import re
+import secrets
 import shlex
 import shutil
 import threading
@@ -23,24 +25,35 @@ from tests.tui_runtime.test_terminal_model_pty import (
 )
 
 pytestmark = [pytest.mark.platforms("linux"), pytest.mark.live_system_guard_bypass]
-CANARY = b"synthetic private PTY preview metadata 52e43f"
-
-
-def _private_png():
+def _private_png(canary):
     image = Image.new("RGB", (32, 16), "black")
     image.paste("white", (16, 0, 32, 16))
     metadata = PngInfo()
-    metadata.add_text("synthetic-private-metadata", CANARY.decode("ascii"))
+    metadata.add_text("synthetic-private-metadata", canary.decode("ascii"))
     output = BytesIO()
     image.save(output, format="PNG", pnginfo=metadata)
     return output.getvalue()
 
 
-def _assert_no_plaintext(home, png):
+def _existing_png_markers(home, magic):
+    """Remember public PNG assets present before creating the private image."""
+    result = {}
     for path in home.rglob("*"):
         if path.is_file() and not path.is_symlink():
             data = path.read_bytes()
-            assert not any(marker in data for marker in (png[:8], CANARY)), path.relative_to(home)
+            if data.startswith(magic):
+                result[path.relative_to(home)] = hashlib.sha256(data).digest()
+    return result
+
+
+def _assert_no_plaintext(home, png, existing_markers, canary):
+    for path in home.rglob("*"):
+        if path.is_file() and not path.is_symlink():
+            data = path.read_bytes()
+            relative = path.relative_to(home)
+            assert not any(marker in data for marker in (png, canary)), relative
+            if data.startswith(png[:8]):
+                assert existing_markers.get(relative) == hashlib.sha256(data).digest(), relative
 
 
 def test_public_ink_views_encrypted_image_once_unlocked_and_keeps_owner_usable(tmp_path, monkeypatch):
@@ -64,8 +77,10 @@ def test_public_ink_views_encrypted_image_once_unlocked_and_keeps_owner_usable(t
         home, password = _configure_global_home(tmp_path, monkeypatch,
             f"http://127.0.0.1:{server.server_port}/v1")
         vault.unlock(home, password)
-        png = _private_png()
-        assert CANARY in png
+        canary = ("synthetic-private-preview-" + secrets.token_hex(16)).encode("ascii")
+        png = _private_png(canary)
+        assert canary in png
+        existing_markers = _existing_png_markers(home, png[:8])
         path = home / "artifacts" / "browser" / "screen with spaces.png"
         artifacts.write_bytes(path, png, home=home)
         ciphertext = path.read_bytes()
@@ -100,13 +115,13 @@ def test_public_ink_views_encrypted_image_once_unlocked_and_keeps_owner_usable(t
         assert any(message["role"] == "user" and "after-private-preview" in str(message.get("content"))
                    for message in server.requests[0]["messages"])
         assert terminal.prompts == 1 and terminal.process.poll() is None
-        assert CANARY.decode("ascii") not in terminal.text()
+        assert canary.decode("ascii") not in terminal.text()
         assert path.read_bytes() == ciphertext
         terminal.submit("/quit")
         terminal.until(lambda _: terminal.process.poll() is not None, "image-preview owner exited normally")
         assert terminal.process.returncode == 0 and terminal.prompts == 1
         terminal.close()
-        _assert_no_plaintext(home, png)
+        _assert_no_plaintext(home, png, existing_markers, canary)
     finally:
         if terminal is not None:
             terminal.close()
