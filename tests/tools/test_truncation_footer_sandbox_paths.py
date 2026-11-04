@@ -7,6 +7,8 @@ ordinary paths to an outgoing terminal backend. No vault authority is forwarded.
 import os
 import json
 import re
+import pytest
+from pathlib import Path
 
 from tools import browser_tool_snapshot
 from tools import delegate_tool_results
@@ -15,16 +17,27 @@ from hermes_security import artifacts
 from tests.e2e.vault_home import seal_fixture_home
 
 
+@pytest.fixture
+def owner(tmp_path, monkeypatch):
+    from hermes_security import vault
+
+    home = tmp_path / ".hermes"
+    home.mkdir()
+    monkeypatch.setenv("HERMES_HOME", str(home))
+    monkeypatch.setattr(vault, "_SCRYPT_N", 1024)
+    vault.init_vault(home, "synthetic footer password")
+    vault.unlock(home, "synthetic footer password")
+    yield home
+    vault.clear_vault_cache()
+
+
 def _footer_path(text: str) -> str:
     """Every truncation footer tells the agent how to page the full text via ``read_file path="..."``."""
     return re.search(r'read_file path="([^"]+)"', text).group(1)
 
 
-def test_truncation_footers_keep_public_sandbox_and_private_owner_paths(tmp_path, monkeypatch):
-    home = tmp_path / ".hermes"
-    monkeypatch.setenv("HERMES_HOME", str(home))
-    home.mkdir()
-    seal_fixture_home(home)
+def test_truncation_footers_render_public_cache_and_private_recovery_paths(owner, monkeypatch):
+    home = owner
     monkeypatch.setenv("TERMINAL_ENV", "docker")
     body = "\n".join(f"row {i}" for i in range(5000))
 
@@ -32,23 +45,28 @@ def test_truncation_footers_keep_public_sandbox_and_private_owner_paths(tmp_path
     snap_out = browser_tool_snapshot._truncate_snapshot(body, 3000)
     deleg_out, _ = delegate_tool_results._trim_summary_with_footer(body, 3000, 0)
 
-    for text, subdir in ((web_out, "cache/web"), (snap_out, "cache/web"), (deleg_out, "cache/delegation")):
+    path = _footer_path(web_out)
+    assert path.startswith("/root/.hermes/cache/web/"), path
+    # Public bytes remain mounted at the task backend's path.
+    assert os.path.exists(str(home / "cache" / "web" / os.path.basename(path)))
+    for text, subdir in ((snap_out, "artifacts/browser-snapshots"), (deleg_out, "cache/delegation")):
         path = _footer_path(text)
-        expected = str(home / subdir) if subdir == "cache/delegation" else f"/root/.hermes/{subdir}"
-        assert path.startswith(expected + "/"), path
-        # Public cache paths are translated; encrypted output is served by the local owner.
-        stored = home / subdir / os.path.basename(path)
-        assert stored.is_file()
-        if subdir == "cache/delegation":
-            assert body.encode() not in stored.read_bytes()
-            assert body in artifacts.read_text(stored, home=home)
-            from tools.file_tools import read_file_tool
-            assert json.loads(read_file_tool(path, offset=1, limit=1))["content"] == "1|row 0"
-            encrypted = stored.read_bytes()
-            recovered = json.loads(read_file_tool(path, offset=2501, limit=2))
-            assert recovered["content"] == "2501|row 2500\n2502|row 2501"
-            assert "host" in recovered["source"]
-            assert stored.read_bytes() == encrypted
+        assert path.startswith(str(home / subdir)), path
+        assert os.path.exists(path)
+
+    path = _footer_path(deleg_out)
+    assert path.startswith(str(home / "cache/delegation") + os.sep), path
+    assert os.path.exists(path)
+    encrypted = Path(path).read_bytes()
+    assert encrypted.startswith(b"HRMVAULT\x00") and body.encode() not in encrypted
+    assert body in artifacts.read_text(Path(path), home=home)
+    from tools.file_tools import read_file_tool
+
+    assert json.loads(read_file_tool(path, offset=1, limit=1))["content"] == "1|row 0"
+    recovered = json.loads(read_file_tool(path, offset=2501, limit=2))
+    assert recovered["content"] == "2501|row 2500\n2502|row 2501"
+    assert "host" in recovered["source"]
+    assert Path(path).read_bytes() == encrypted
 
 
 def test_local_backend_footer_keeps_the_host_path(tmp_path, monkeypatch):

@@ -50,11 +50,11 @@ that interpreter with the update context and receipt. The parent does not clear
 Current source updates hand the selected checkout to a fresh completion owner.
 Its bootstrap Python disables site-package initialization before asking PM to
 sync the recorded extras and enabled plugins. The selected Python then owns
-frontend builds, profile/configuration maintenance, gateway restarts and runtime
+frontend builds, profile/configuration maintenance and local runtime
 verification. Git, already-current retries and ZIP fallback use this same path.
 The original command keeps the update lock while waiting; a missing or failed
 completion result cannot report success. Correlated PM failures remain in the
-update receipt, and interrupted restarts retain their fleet obligation.
+update receipt, and interrupted completion retains its recovery obligation.
 Dependency or build failures never retry through pip or a source re-download.
 Use `hermes pm repair` for damaged dependency files. See the developer
 [source completion ownership note](../developer-guide/source-update-completion.md).
@@ -64,42 +64,43 @@ Use `hermes pm repair` for damaged dependency files. See the developer
 Source installers provision the required tools plus Python. They select the
 `all` Python extra. Named optional tools install when requested.
 
-For a canonical source installation, Desktop checks and runs the published
-installation launcher. PM owns its interpreter and dependency selection. Desktop
-does not replace that command with a guessed `venv` path. Developer overrides
-retain their selected interpreter.
+The public `hermes` launcher selects the PM-owned interpreter. Bare interactive
+invocation opens the Ink TUI; headless commands use the same installation and
+encrypted profile. Developer overrides retain their selected interpreter.
 
-Native desktop bundles stage the supported tool set and all target-compatible
-Python extras before packaging. `--extra all` and `--all-extras` are not
-synonyms. Platform markers still exclude dependencies that cannot run on a target.
+Native terminal payloads stage the supported tool set and all target-compatible
+Python extras. `--extra all` and `--all-extras` are not synonyms. Platform markers
+exclude dependencies that cannot run on a target. Build each payload on its
+native Linux or macOS target with an isolated build home and runtime.
 
-The complete desktop builder composes PM with the Node/native packaging providers.
-From a clean checkout at a release tag, `python scripts/bundles/desktop.py --tag vX.Y.Z`
-prepares dependencies and builds the installer. Add `--prepare-only` to stop after
-preparation; consume its job-local result with
-`python scripts/bundles/desktop.py --prepared .build/desktop-job/prepared.json`.
-`--work` and `--cache` select separate build-owned roots. Preparation, not the
-caller, creates the work directory. A full commit SHA can replace the tag through
-`--commit`; the checkout must match.
+For a complete CLI/TUI payload, prepare the pinned JavaScript dependencies and
+compile the TUI, then pass that product to the stage adapter:
 
-Preparation uses isolated PM state, pinned tools, fresh path-bound Python
-environments, the complete JS workspace union, native bindings and packaging
-utilities. Reusable dependency caches are not live installations or portable
-virtual environments. The prepared result binds the source, target and paths;
-missing or changed inputs fail consumption rather than trigger a download.
-Reprepare after a move or input change. Signing and notarization can still use
-the network. See the
-[desktop build guide](https://github.com/majorissuerep/hermes-agent/blob/main/apps/desktop/BUILDING.md)
-for native compiler requirements and release verification limits.
+```sh
+node scripts/build/node-deps.mjs --source /work/source --workspace ui-tui --workspace apps/shared
+node scripts/build/tui.mjs --source /work/source --out /work/products/tui
+python scripts/bundles/stage.py --ref HEAD --tui /work/products/tui --out /work/agent
+```
 
-A packaged application's base payload is immutable. Hermes runs its backend
-from that payload, rather than copying a source checkout on first launch.
-The bundle builder checks its files and writes the launch paths into the desktop
-build stamp. Electron uses those paths without probing or repairing the payload.
-Additional pinned tools can use the writable tool store. Python additions use
-a complete writable environment outside the signed package. Its first generation
-retains the shipped extras along with the new requirements. Later generations
-use the recorded extra selection as their baseline.
+Run these commands from the clean source checkout using PM-provisioned tools.
+The stage adapter prepares the pinned native runtime and assembles its recorded
+launch paths. See [shared terminal builds](../developer-guide/shared-bundle-builds.md)
+for the product and distribution boundaries.
+
+The lower-level `scripts/bundles/native_build.py` separately prepares and consumes
+the PM dependency payload. Its `--prepare-only` request requires `--source`,
+`--work`, `--cache` and `--out`; `--ref` selects a source ref and `--commit`
+requires a full commit identity. With `--out /work/agent`, preparation publishes
+`/work/agent.prepared.json`; consume it with `--prepared /work/agent.prepared.json`.
+That dependency-only assembly does not add the TUI product. Keep work, cache and
+output roots separate. The prepared result binds the source, target and paths;
+missing or changed inputs require preparation again.
+
+A packaged application's base payload is immutable. Hermes runs from that
+payload, with manifest-bound launch paths. Additional pinned tools use the
+writable tool store. Python additions use a complete writable environment;
+its first generation retains the shipped extras along with the new requirements.
+Later generations use the recorded extra selection as their baseline.
 
 Termux uses a separate bionic build and a sealed APT package. Docker bakes its
 runtime into the image and disables on-demand dependency installation. Nix

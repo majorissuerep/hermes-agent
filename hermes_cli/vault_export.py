@@ -4,6 +4,10 @@ from __future__ import annotations
 
 
 def export_command(args) -> int:
+    if getattr(args, "migration_backup", None):
+        from hermes_cli.vault_migration_export import export_command as export_migration
+
+        return export_migration(args)
     from hermes_constants import get_hermes_home
     from hermes_cli.vault_cmd import gate_locked_vault
     from hermes_security.errors import VaultError
@@ -20,5 +24,6 @@ def export_command(args) -> int:
         print(f"Export failed; encrypted originals retained: {exc}")
         return 1
     print(f"Exported {report['files']} files ({report['databases']} databases) to {args.output}")
+    print("Browser profile/worker archives contain credentials and are not exported; full backups retain their ciphertext.")
     print("This recovery archive is PLAINTEXT. Keep it private; the original home remains encrypted.")
     return 0

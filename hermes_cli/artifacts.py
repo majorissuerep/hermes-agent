@@ -18,7 +18,7 @@ def _dimension(value, maximum):
 
 
 def add_view_arguments(parser):
-    parser.add_argument("path", help="Own encrypted artifacts/browser image path")
+    parser.add_argument("path", help="Own encrypted browser or MCP image artifact path")
     parser.add_argument("--cols", type=lambda value: _dimension(value, _MAX_COLUMNS), default=80)
     parser.add_argument("--rows", type=lambda value: _dimension(value, _MAX_ROWS), default=32)
 
@@ -51,7 +51,7 @@ def preview(path, *, cols=80, rows=32):
     home = get_hermes_home()
     _, relative = artifacts._location(path, home)
     if not is_image_relative_path(relative):
-        raise PermissionError("Preview permits only this profile's known browser image artifacts")
+        raise PermissionError("Preview permits only this profile's known image artifacts")
     if blocked := get_model_read_block_error(str(path)):
         raise PermissionError(blocked)
     data = artifacts.read_bytes(path, home=home)

@@ -43,28 +43,30 @@ class TestCropImageRegion:
     def test_crop_applied(self, tmp_path):
         from tools.vision_tools import _crop_image_region
 
-        src = _make_png(tmp_path / "src.png", 100, 50)
-        cropped_path, _mime, err = _crop_image_region(src, [10, 10, 60, 40])
+        (tmp_path / "user").mkdir()
+        src = _make_png(tmp_path / "user" / "src.png", 100, 50)
+        cropped, _mime, err = _crop_image_region(src, [10, 10, 60, 40])
         assert err is None
-        assert cropped_path is not None and cropped_path.exists()
-        with Image.open(cropped_path) as img:
+        with Image.open(io.BytesIO(cropped)) as img:
             assert img.size == (50, 30)
+        # The crop is returned in memory: nothing is written beside the user's source file.
+        assert [p.name for p in (tmp_path / "user").iterdir()] == ["src.png"]
 
     def test_out_of_bounds_clamped_to_image(self, tmp_path):
         from tools.vision_tools import _crop_image_region
 
         src = _make_png(tmp_path / "src.png", 100, 50)
-        cropped_path, _mime, err = _crop_image_region(src, [-10, -10, 200, 200])
+        cropped, _mime, err = _crop_image_region(src, [-10, -10, 200, 200])
         assert err is None
-        with Image.open(cropped_path) as img:
+        with Image.open(io.BytesIO(cropped)) as img:
             assert img.size == (100, 50)
 
     def test_zero_area_rejected_with_actual_dims_in_error(self, tmp_path):
         from tools.vision_tools import _crop_image_region
 
         src = _make_png(tmp_path / "src.png", 100, 50)
-        cropped_path, _mime, err = _crop_image_region(src, [200, 200, 300, 300])
-        assert cropped_path is None
+        cropped, _mime, err = _crop_image_region(src, [200, 200, 300, 300])
+        assert cropped is None
         assert err is not None
         # Error must name the actual image dimensions so the model can retry.
         assert "100" in err and "50" in err
@@ -73,8 +75,8 @@ class TestCropImageRegion:
         from tools.vision_tools import _crop_image_region
 
         src = _make_png(tmp_path / "src.png", 100, 50)
-        cropped_path, _mime, err = _crop_image_region(src, [60, 40, 10, 10])
-        assert cropped_path is None
+        cropped, _mime, err = _crop_image_region(src, [60, 40, 10, 10])
+        assert cropped is None
         assert "100" in err and "50" in err
 
     def test_malformed_region_rejected(self, tmp_path):
@@ -82,8 +84,8 @@ class TestCropImageRegion:
 
         src = _make_png(tmp_path / "src.png", 100, 50)
         for bad in ([1, 2, 3], "10,10,60,40", [1, 2, 3, "x"], None):
-            cropped_path, _mime, err = _crop_image_region(src, bad)
-            assert cropped_path is None
+            cropped, _mime, err = _crop_image_region(src, bad)
+            assert cropped is None
             assert err is not None
 
 

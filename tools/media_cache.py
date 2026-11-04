@@ -2,14 +2,53 @@
 
 from __future__ import annotations
 
-import os
+from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
 import re
 import uuid
 
-from hermes_constants import get_hermes_dir
+from hermes_constants import get_hermes_home
 
 MAX_MEDIA_BYTES = 128 * 1024 * 1024
+_RETENTION_OWNER: ContextVar[tuple | None] = ContextVar("private_media_retention_owner", default=None)
+
+
+def retention_owner():
+    active = _RETENTION_OWNER.get()
+    return active if active is not None else _capture_owner()
+
+
+def _capture_owner():
+    """Capture the original home/session once; unavailable custody cannot become a later unlock."""
+    from hermes_security.errors import VaultError
+    from hermes_security.session_custody import SessionCustody
+
+    home = get_hermes_home().resolve()
+    try:
+        return home, SessionCustody.capture(home), None
+    except (VaultError, OSError, ValueError) as exc:
+        return home, None, f"{type(exc).__name__}: {exc}"
+
+
+@contextmanager
+def retention_scope(owner=None):
+    """Carry captured private-output authority explicitly through MCP and vision work."""
+    token = _RETENTION_OWNER.set(_capture_owner() if owner is None else owner)
+    try:
+        yield
+    finally:
+        _RETENTION_OWNER.reset(token)
+
+
+def output_custody(owner=None):
+    from hermes_security.errors import VaultLockedError
+
+    home, custody, unavailable = retention_owner() if owner is None else owner
+    if custody is None:
+        raise VaultLockedError(unavailable)
+    custody.check()
+    return home, custody
 
 
 def _write_media(kind: str, prefix: str, extension: str, data: bytes) -> str:
@@ -17,20 +56,12 @@ def _write_media(kind: str, prefix: str, extension: str, data: bytes) -> str:
         raise ValueError(f"Media artifact exceeds {MAX_MEDIA_BYTES} bytes")
     if not re.fullmatch(r"\.[A-Za-z0-9]{1,12}", extension):
         raise ValueError("Invalid media extension")
-    directory = get_hermes_dir(f"cache/{kind}", f"{kind.rstrip('s')}_cache")
-    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
-    from hermes_cli.config import _secure_dir
+    from hermes_security import artifacts
 
-    _secure_dir(directory)
+    home, custody = output_custody()
+    directory = home / "artifacts" / "media" / kind
     path = directory / f"{prefix}_{uuid.uuid4().hex}{extension}"
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
-    try:
-        with os.fdopen(fd, "wb") as handle:
-            handle.write(data)
-    except BaseException:
-        path.unlink(missing_ok=True)
-        raise
-    return str(path)
+    return str(artifacts.write_bytes(path, data, home=home, custody=custody))
 
 
 def cache_image_from_bytes(data: bytes, ext: str = ".jpg") -> str:

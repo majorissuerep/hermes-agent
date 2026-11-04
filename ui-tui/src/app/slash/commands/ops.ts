@@ -175,9 +175,9 @@ export const opsCommands: SlashCommand[] = [
         })
         .then(
           ctx.guarded<BrowserManageResponse>(r => {
-            // Without a session we can't subscribe to streamed
-            // browser.progress events, so flush the bundled list.
-            if (!sid) {
+            // Connect streams progress to an active session; disconnect only returns its
+            // persistence warnings, which must remain visible with or without a session.
+            if (!sid || action === 'disconnect') {
               r.messages?.forEach(message => ctx.transcript.sys(message))
             }
 

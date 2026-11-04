@@ -1,6 +1,5 @@
 """Tests for browser first-open timeout and timeout diagnostics."""
 
-import subprocess
 from unittest.mock import Mock
 
 import pytest
@@ -100,9 +99,6 @@ class TestCommandTimeoutRecovery:
         bt._session_last_activity[task_id] = 1.0
         bt._last_active_session_key[task_id] = task_id
 
-        process = Mock()
-        process.returncode = 0
-        process.wait.side_effect = [subprocess.TimeoutExpired("agent-browser", 1), -9, 0]
         supervisor_events = []
 
         monkeypatch.setattr(bt_install, "_find_agent_browser", lambda: "agent-browser")
@@ -114,7 +110,8 @@ class TestCommandTimeoutRecovery:
         monkeypatch.setattr("tools.browser_tool_lifecycle._write_owner_pid", lambda *_args: None)
         monkeypatch.setattr(bt, "_build_browser_env", dict)
         monkeypatch.setattr("tools.browser_tool_install._merge_browser_path", lambda value: value)
-        monkeypatch.setattr(subprocess, "Popen", lambda *_args, **_kwargs: process)
+        client = Mock(side_effect=[(None, "", ""), (0, '{"success": true}', "")])
+        monkeypatch.setattr(bt_session, "_run_agent_browser_client", client)
         monkeypatch.setattr("tools.interrupt.is_interrupted", lambda: False)
 
         bt_session._run_browser_command(task_id, "click", ["@e1"], timeout=1)
@@ -165,7 +162,7 @@ class TestBrowserNavigateOpenTimeout:
         monkeypatch.setattr(
             bt, "_navigation_session_key", lambda task_id, url, local_browser=False: task_id
         )
-        monkeypatch.setattr(bt, "_maybe_start_recording", lambda *a, **kw: None)
+        monkeypatch.setattr("tools.browser_recording.start", lambda *a, **kw: None)
         monkeypatch.setattr(bt, "check_website_access", lambda url: None)
 
         bt.browser_navigate("https://example.com", task_id="task-1")

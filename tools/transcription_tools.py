@@ -445,10 +445,12 @@ def _transcribe_prepared_audio(
         return _error_result("STT is disabled in config.yaml (stt.enabled: false).")
     provider = _get_provider(stt_config)
     remote = not _is_local_stt_provider(provider, stt_config)
+    from tools.media_artifacts import temporary_directory_options
+
     with ExitStack() as cleanup:
         # Never overwrite a neighboring WAV or leave converted voice notes behind.
         if remote and Path(file_path).suffix.lower() == ".caf":
-            work_dir = cleanup.enter_context(TemporaryDirectory(prefix="hermes-caf-", ignore_cleanup_errors=True))
+            work_dir = cleanup.enter_context(TemporaryDirectory(prefix="hermes-caf-", ignore_cleanup_errors=True, **temporary_directory_options()))
             file_path = _convert_caf_to_wav(file_path, work_dir)
             if not file_path:
                 return _error_result("CAF audio could not be converted to WAV.")
@@ -567,6 +569,21 @@ def transcribe_audio(
     file_path: str, model: Optional[str] = None, source: Optional[str] = None) -> dict[str, Any]:
     """Validate, preprocess supported inputs, and dispatch transcription. ``source`` is a caller-surface
     label (``"gateway"``, ``"voice_mode"``) forwarded to the ``pre_transcription`` hook only."""
+    from tools.browser_media_custody import owned_media_path
+    private = owned_media_path(file_path)
+    if private is not None:
+        from hermes_security.errors import VaultError
+        from tools.browser_media_custody import MediaCustodyError
+        from tools.media_artifacts import transcribe_owned
+
+        try:
+            return transcribe_owned(private, lambda staged: _transcribe_audio_path(staged, model, source))
+        except (OSError, ValueError, VaultError, MediaCustodyError) as exc:
+            return _error_result(f"Private audio unavailable: {exc}")
+    return _transcribe_audio_path(file_path, model, source)
+
+
+def _transcribe_audio_path(file_path, model=None, source=None):
     # Secret-store refusal runs before ANY validation so the error names the real reason.
     blocked = _read_block_error(file_path)
     if blocked:

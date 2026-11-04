@@ -80,14 +80,23 @@ class TestUrlDecodedSecretCheck:
         assert "API key" in result["error"] or "Blocked" in result["error"]
 
 # ---------------------------------------------------------------------------
-# Thread safety: _recording_sessions
-# ---------------------------------------------------------------------------
-
-# ---------------------------------------------------------------------------
 # Structure-aware _truncate_snapshot
 # ---------------------------------------------------------------------------
 
 class TestTruncateSnapshot:
+
+    @pytest.fixture(autouse=True)
+    def _snapshot_owner(self, tmp_path, monkeypatch):
+        from hermes_security import vault
+
+        home = tmp_path / "snapshot-owner"
+        home.mkdir()
+        monkeypatch.setenv("HERMES_HOME", str(home))
+        monkeypatch.setattr(vault, "_SCRYPT_N", 1024)
+        vault.init_vault(home, "synthetic snapshot test password")
+        vault.unlock(home, "synthetic snapshot test password")
+        yield home
+        vault.clear_vault_cache()
 
     def test_short_snapshot_unchanged(self):
         from tools.browser_tool_snapshot import _truncate_snapshot
@@ -111,7 +120,7 @@ class TestTruncateSnapshot:
 
     def test_stored_snapshot_is_secret_redacted(self):
         """Page-rendered secrets must not land unmasked on disk."""
-        from pathlib import Path
+        from hermes_security.artifacts import read_text
         from tools.browser_tool_snapshot import _store_full_snapshot
 
         fake_key = "sk-" + "STOREDSNAPSHOTSECRET1234567890"
@@ -120,30 +129,24 @@ class TestTruncateSnapshot:
         )
         stored = _store_full_snapshot(snapshot)
         assert stored is not None
-        content = Path(stored).read_text(encoding="utf-8")
+        content = read_text(stored)
         assert "STOREDSNAPSHOTSECRET" not in content
 
-    def test_stored_snapshot_refuses_planted_symlink(self, tmp_path, monkeypatch):
+    @pytest.mark.platforms("posix")
+    @pytest.mark.require_symlinks
+    def test_stored_snapshot_refuses_planted_symlink(self, tmp_path, _snapshot_owner):
         """A pre-planted symlink at the content-hash path must not be
-        followed to its target — only the link itself may be replaced.
-
-        Mirrors web_tools._store_full_text's use of write_text_exclusive
-        (overwrite=True) for the same cache/web directory and naming
-        scheme: a legitimate re-snapshot of the same page state safely
-        replaces a same-path symlink with a real file, never writing
-        through it onto whatever the link points at.
+        followed to its target or overwritten by the encrypted writer.
         """
         import hashlib
-        from pathlib import Path
         from tools.browser_tool_snapshot import _store_full_snapshot
 
-        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
         snapshot = "\n".join(f"- line {i}" for i in range(50))
         # No secret-like content, so redact_sensitive_text leaves it
         # unchanged and the digest is predictable from the raw text.
         digest = hashlib.sha256(snapshot.encode("utf-8")).hexdigest()[:10]
 
-        cache_dir = tmp_path / "cache" / "web"
+        cache_dir = _snapshot_owner / "artifacts" / "browser-snapshots"
         cache_dir.mkdir(parents=True)
         victim = tmp_path / "victim.txt"
         victim.write_text("original", encoding="utf-8")
@@ -151,10 +154,9 @@ class TestTruncateSnapshot:
         planted.symlink_to(victim)
 
         stored = _store_full_snapshot(snapshot)
-        assert stored is not None
+        assert stored is None
         assert victim.read_text(encoding="utf-8") == "original"  # link target untouched
-        assert not planted.is_symlink()  # link replaced by a real file
-        assert Path(stored).read_text(encoding="utf-8") == snapshot
+        assert planted.is_symlink()
 
     def test_truncated_snapshot_appends_stored_pointer(self):
         """Truncated snapshots point at the stored full text for read_file paging."""

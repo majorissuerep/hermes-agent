@@ -144,7 +144,8 @@ def _cmd_show(args) -> int:
     scale = float(args.scale or cfg.get("scale", DEFAULT_SCALE) or DEFAULT_SCALE)
     cols = resolve_cols(scale, cfg.get("unicode_cols", 0))
 
-    renderer = build_renderer(pet.spritesheet, configured_mode=mode_cfg, scale=scale, unicode_cols=cols)
+    renderer = build_renderer(pet.spritesheet, configured_mode=mode_cfg, scale=scale,
+                              unicode_cols=cols, private_custody=pet._private_custody)
     if not renderer.available:
         _err(f"✗ cannot render here (no TTY / graphics disabled). Effective mode: {renderer.mode}.")
         return 1

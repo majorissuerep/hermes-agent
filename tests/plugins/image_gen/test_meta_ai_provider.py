@@ -9,6 +9,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from hermes_security import artifacts, vault
+
 # The plugin directory uses a hyphen, which is not a valid Python identifier
 # for the dotted-import form. Load it via importlib so tests don't need to
 # touch sys.path or rename the directory.
@@ -37,6 +39,9 @@ def _fake_response(*, b64=None, url=None, revised_prompt=None):
 @pytest.fixture(autouse=True)
 def _tmp_hermes_home(tmp_path, monkeypatch):
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    monkeypatch.setattr(vault, "_SCRYPT_N", 1024)
+    vault.init_vault(tmp_path, "synthetic image provider password")
+    vault.unlock(tmp_path, "synthetic image provider password")
     # Clear every auth + override env var so tests start from a clean slate.
     for env in (
         "MODEL_API_KEY",
@@ -47,6 +52,7 @@ def _tmp_hermes_home(tmp_path, monkeypatch):
     ):
         monkeypatch.delenv(env, raising=False)
     yield tmp_path
+    vault.clear_vault_cache()
 
 
 @pytest.fixture
@@ -203,8 +209,8 @@ class TestGenerate:
 
         saved = Path(result["image"])
         assert saved.exists()
-        assert saved.parent == tmp_path / "cache" / "generated" / "images"
-        assert saved.read_bytes() == png_bytes
+        assert saved.parent == tmp_path / "artifacts" / "generated" / "images"
+        assert artifacts.read_bytes(saved) == png_bytes
 
         call_kwargs = fake_client.images.generate.call_args.kwargs
         assert call_kwargs["model"] == "muse-image-1.0"

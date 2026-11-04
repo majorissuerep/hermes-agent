@@ -11,7 +11,6 @@ import logging
 import os
 import posixpath
 import stat
-import time
 from contextvars import ContextVar
 from pathlib import Path
 from typing import Callable, Dict, Iterator, List, Optional, Tuple
@@ -19,7 +18,6 @@ from typing import Callable, Dict, Iterator, List, Optional, Tuple
 from hermes_cli.config import cfg_get
 from hermes_constants import get_hermes_dir, get_hermes_home
 
-from agent.provider_media import GENERATED_SUBDIR, MEDIA_CACHE_MAX_AGE_HOURS
 from agent.skill_utils import EXCLUDED_SKILL_DIRS
 
 try:  # pragma: no cover - exercised via the fail-closed test below
@@ -244,7 +242,6 @@ def iter_skills_files(container_base: str = "/root/.hermes") -> list[dict[str, s
 # --- Cache directory mounts (documents, images, audio, videos, screenshots) ---
 
 # (new_subpath, old_name) pairs matching hermes_constants.get_hermes_dir().
-_GENERATED_CACHE = f"cache/{GENERATED_SUBDIR}"
 _CACHE_DIRS: list[tuple[str, str]] = [
     ("cache/documents", "document_cache"),
     ("cache/images", "image_cache"),
@@ -253,9 +250,8 @@ _CACHE_DIRS: list[tuple[str, str]] = [
     ("cache/screenshots", "browser_screenshots"),
     ("cache/web", "web_cache"),
     ("cache/spillover", "cache/spillover"),  # oversized tool results; host side is canonical
-    # Unswept generated image/video deliverables (#126445) need their own mount/sync
-    # entry or remote backends never see them. No legacy alias exists.
-    (_GENERATED_CACHE, _GENERATED_CACHE),
+    # Generated media belongs to the owning profile's encrypted artifact reader.
+    # Never auto-mount/upload historical private deliverables to remote storage.
     # Flat top-level desktop staging dirs (tui_runtime attach RPCs; no legacy alias),
     # mounted so vision/file tools in sandboxes reach uploads and dropped files.
     # Mount it so vision can reach uploads inside sandbox containers (#69575). No legacy alias exists, so
@@ -386,11 +382,7 @@ def to_agent_visible_cache_path(host_path: str, container_base: str = "/root/.he
 
 
 def iter_cache_files(container_base: str = "/root/.hermes") -> list[dict[str, str]]:
-    """Per-file cache entries (Modal upload/resync); skips symlinks. ``cache/generated`` is
-    never swept, so only its files from the last ``MEDIA_CACHE_MAX_AGE_HOURS`` are synced —
-    otherwise every remote sync would re-walk and upload the whole generation history."""
-    generated_cutoff = time.time() - MEDIA_CACHE_MAX_AGE_HOURS * 3600
-    gen_root = f"{container_base.rstrip('/')}/{_GENERATED_CACHE}"
+    """Per-file public cache entries (Modal upload/resync); skips symlinks and private generated output."""
     entries: list[dict[str, str]] = []
     for host_dir, root in _cache_dir_roots(container_base, create_missing=False):
         for item in host_dir.rglob("*"):
@@ -398,7 +390,7 @@ def iter_cache_files(container_base: str = "/root/.hermes") -> list[dict[str, st
                 st = item.lstat()
             except OSError:
                 continue
-            if stat.S_ISREG(st.st_mode) and (root != gen_root or st.st_mtime >= generated_cutoff):
+            if stat.S_ISREG(st.st_mode):
                 entries.append(_mount(item, f"{root}/{item.relative_to(host_dir)}"))
     return entries
 

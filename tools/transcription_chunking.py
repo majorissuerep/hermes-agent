@@ -122,7 +122,9 @@ def transcribe_oversized(
     ffmpeg = _find_ffmpeg_binary()
     if not ffmpeg:
         return _too_large(path, max_bytes, "ffmpeg was not found")
-    with TemporaryDirectory(prefix="hermes-stt-split-", ignore_cleanup_errors=True) as work_dir:
+    from tools.media_artifacts import temporary_directory_options
+
+    with TemporaryDirectory(prefix="hermes-stt-split-", ignore_cleanup_errors=True, **temporary_directory_options()) as work_dir:
         compact, error = _transcode_audio_for_stt(path, work_dir)
         if error or not compact:
             return _too_large(path, max_bytes, error or "re-encoding produced no file")

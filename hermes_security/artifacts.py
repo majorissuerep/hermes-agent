@@ -12,11 +12,16 @@ import secrets
 import stat
 
 from hermes_security import frames
-from hermes_security.artifact_paths import ARTIFACT_ROOTS, is_artifact_relative_path, terminal_frame_purpose
+from hermes_security.artifact_paths import (
+    ARTIFACT_ROOTS, is_artifact_directory, is_artifact_relative_path, is_legacy_browser_snapshot_path,
+    legacy_media_codec, media_kind, terminal_frame_purpose,
+)
 from hermes_security.errors import VaultLockedError
 
 _ROOTS = ARTIFACT_ROOTS
 _MAX_BYTES = 64 * 1024 * 1024
+_MAX_MEDIA_BYTES = 128 * 1024 * 1024
+_MAX_VIDEO_BYTES = 200 * 1024 * 1024  # generated/recorded video product bound
 _NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 
 
@@ -36,12 +41,20 @@ def _binding(path, home=None):
 def is_artifact_path(path, *, home=None) -> bool:
     """Recognize explicit reserved roots, including foreign ones to refuse safely."""
     selected, candidate = _binding(path, home)
+    if candidate.is_relative_to(selected) and _reserved(candidate.relative_to(selected)):
+        return True
     if any(candidate == selected.joinpath(*root) or selected.joinpath(*root) in candidate.parents
            for root in _ROOTS):
         return True
     # A foreign vaulted home cannot become ordinary host/remote file access.
     return any((parent / ".hermes-vault").is_file()
-               and is_artifact_relative_path(candidate.relative_to(parent)) for parent in candidate.parents)
+               and _reserved(candidate.relative_to(parent)) for parent in candidate.parents)
+
+
+def _reserved(relative) -> bool:
+    """Recognize the reserved video namespace even when the reader must refuse its filename."""
+    return (is_artifact_relative_path(relative) or is_artifact_directory(relative)
+            or Path(relative).parts[:3] == ("artifacts", "media", "videos"))
 
 
 def _location(path, home=None):
@@ -54,6 +67,10 @@ def _location(path, home=None):
         raise PermissionError("Not an admitted private artifact path")
     if not (selected / ".hermes-vault").is_file():
         raise VaultLockedError("Private output requires an initialized, unlocked profile vault")
+    if legacy_media_codec(relative):
+        raise PermissionError(
+            "Historical MCP document retains its published encrypted codec. Explicit offline recovery: "
+            "hermes secure-vault export --output /outside-home/recovery.tar (whole-profile plaintext archive).")
     return selected, relative
 
 
@@ -126,11 +143,19 @@ def _stream(relative):
     return terminal_frame_purpose(relative) is not None
 
 
-def _wire_bound():
+def _plaintext_bound(relative):
+    kind = media_kind(relative)
+    if kind == "videos":
+        return _MAX_VIDEO_BYTES
+    return _MAX_MEDIA_BYTES if kind else _MAX_BYTES
+
+
+def _wire_bound(relative):
     # The limit governs plaintext. Reserve envelope overhead and the maximum
     # frame overhead from the sink's >=4096-byte batches plus its final batch.
-    batches = (_MAX_BYTES + 4095) // 4096 + 1
-    return _MAX_BYTES + max(128, batches * frames._FRAME_OVERHEAD)
+    maximum = _plaintext_bound(relative)
+    batches = (maximum + 4095) // 4096 + 1
+    return maximum + (max(128, batches * frames._FRAME_OVERHEAD) if _stream(relative) else 128)
 
 
 def _require_profile_metadata(home):
@@ -152,9 +177,9 @@ def _bound_custody(home, custody=None):
 
 def write_bytes(path, data: bytes, *, home=None, overwrite=False, purpose="state", custody=None) -> Path:
     """Atomically publish ciphertext; binary browser artifacts use purpose ``state``."""
-    if purpose != "state" or len(data) > _MAX_BYTES:
-        raise ValueError("Unsupported private artifact purpose or size")
     selected, relative = _location(path, home)
+    if purpose != "state" or len(data) > _plaintext_bound(relative):
+        raise ValueError("Unsupported private artifact purpose or size")
     custody = _bound_custody(selected, custody)
     encoded = (frames.encode_frames([data], vault=custody, purpose=terminal_frame_purpose(relative)) if _stream(relative)
                else custody.vault.encrypt(data, purpose="state", relpath=relative.as_posix(),
@@ -215,7 +240,7 @@ def read_bytes(path, *, home=None, purpose="state", custody=None) -> bytes:
         raise ValueError("Unsupported private artifact purpose")
     selected, relative = _location(path, home)
     custody = _bound_custody(selected, custody)
-    wire_bound = _wire_bound()
+    wire_bound = _wire_bound(relative)
     raw = _read_owned_bytes(selected, relative, wire_bound)
     custody.check()
     if not _stream(relative):
@@ -225,7 +250,7 @@ def read_bytes(path, *, home=None, purpose="state", custody=None) -> bytes:
         if consumed != len(raw):
             raise ValueError("Private terminal artifact is incomplete")
         decoded = b"".join(chunks)
-    if len(decoded) > _MAX_BYTES:
+    if len(decoded) > _plaintext_bound(relative):
         raise ValueError("Private artifact exceeds the supported plaintext read bound")
     return decoded
 

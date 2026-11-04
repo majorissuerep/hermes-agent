@@ -7,8 +7,8 @@
 - Text/config/JSON/YAML/markdown -> AES-GCM envelopes.
 - Append-only logs and ``.jsonl`` transcripts -> encrypted frame streams.
 
-Before touching anything it writes a full tar backup OUTSIDE the home
-(sibling of the home directory).  Every converted file is verified
+Before converting state it writes and authenticates an encrypted full rollback
+OUTSIDE the home. The initial credential metadata includes its encrypted continuation checkpoint.  Every converted file is verified
 (byte-compare for envelopes, full ``iterdump`` compare for databases) before
 the plaintext original is replaced.  A final scan asserts no plaintext state
 remains inside the home.
@@ -24,7 +24,6 @@ import os
 import sqlite3
 import stat
 import tarfile
-import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -65,6 +64,9 @@ class MigrationReport:
     databases: list[str] = field(default_factory=list)
     envelopes: list[str] = field(default_factory=list)
     frame_streams: list[str] = field(default_factory=list)
+    browser_profiles: list[str] = field(default_factory=list)
+    profiles_opaque: list[str] = field(default_factory=list)
+    profiles_pending: list[str] = field(default_factory=list)
     skipped: list[str] = field(default_factory=list)
     failures: list[str] = field(default_factory=list)
 
@@ -101,11 +103,14 @@ def repair_clobbered_state(home: Path | str) -> dict:
 
     report: dict = {"sealed": [], "unwrapped": [], "reframed": [], "restored": [],
                     "unrecoverable": [], "skipped_dbs": [], "code_files": 0}
+    from agent.pet.private_repair import repair as repair_generated_pets
+
+    repair_generated_pets(home_path, report)
     # Snapshots retain their ORIGINAL path-bound ciphertext and inventory hashes.
     # Re-sealing them in their storage location makes the restore point unusable.
     for path, rel in _iter_files(home_path, exclude_roots={"backups", "state-snapshots", "profiles"}):
         kind = _classify(path, rel)
-        if kind == "skip" or path.is_symlink():
+        if kind in ("skip", "browser") or path.is_symlink():
             continue  # never repair through a link (it may point outside the home)
         try:
             _harden_private_artifact(home_path, rel)
@@ -120,6 +125,15 @@ def repair_clobbered_state(home: Path | str) -> dict:
         except Exception as exc:
             report["unrecoverable"].append(f"{rel.as_posix()}: {type(exc).__name__}: {exc}")
     report["code_files"] = _restore_code_trees(vault, home_path, report)
+    from hermes_cli.browser_profile_repair import convert_legacy_browser_profiles
+
+    browser = convert_legacy_browser_profiles(home_path)
+    from hermes_cli.browser_profile_recovery import recover_quiescent_profiles
+
+    recovered = recover_quiescent_profiles(home_path)
+    for key in ("archived", "retained"):
+        browser[key].extend(recovered[key])
+    report["browser_archived"], report["browser_retained"] = browser["archived"], browser["retained"]
     return report
 
 
@@ -319,10 +333,10 @@ def _restore_env_from_backup(vault, home: Path, path: Path, rel: Path, garbage: 
     member = rel.as_posix()
     for tar_path in _migration_backups(home):
         try:
-            with tarfile.open(tar_path) as tar:
-                extracted = tar.extractfile(member)
-                original = extracted.read() if extracted is not None else None
-        except (KeyError, OSError, tarfile.TarError):
+            from hermes_security.migration_workflow import original_member
+
+            original = original_member(tar_path, home, member)
+        except (KeyError, OSError, tarfile.TarError, vault_errors.VaultError):
             continue
         if original is None or _is_mangled_text(original):
             continue
@@ -385,6 +399,8 @@ def _iter_files(home: Path, *, onerror=None, exclude_roots=()):
                                 and not (parent == home and name in exclude_roots)
                                 and not vault_mod._is_in_skip_dir((parent / name).relative_to(home)))
         for name in sorted(files + links):
+            if parent == home and name in exclude_roots:
+                continue  # a reserved opaque root can itself be a link or file
             path = parent / name
             if not path.is_file() and not path.is_symlink():
                 continue
@@ -415,41 +431,30 @@ def _private_backup_directory(home: Path) -> Optional[Path]:
 
 
 def _migration_backups(home: Path) -> list[Path]:
-    directories = [home.parent]
-    private = _private_backup_directory(home)
-    if private is not None:
-        directories.append(private)
-    return sorted((path for directory in directories
-                   for path in directory.glob(f"hermes-premigration-{home.name}-*.tar")),
+    from hermes_security.migration_profiles import storage_home
+
+    outermost = storage_home(home)
+    # Passive discovery retains pre-change locations; new snapshots stay outside
+    # every validated owning vault, including an initialized machine ancestor.
+    directories = list(dict.fromkeys([outermost.parent, home.parent]))
+    for owner in (outermost, home):
+        private = _private_backup_directory(owner)
+        if private is not None and private not in directories:
+            directories.append(private)
+    return sorted((path for directory in directories for suffix in ("hmb", "tar")
+                   for path in directory.glob(f"hermes-premigration-{home.name}-*.{suffix}")),
                   key=lambda path: path.name, reverse=True)
 
 
-def _open_migration_backup(home: Path, dest_dir: Path, prefix: str):
-    try:
-        return tempfile.mkstemp(prefix=prefix, suffix=".tar", dir=dest_dir)
-    except PermissionError:
-        # A volume can be writable inside an immutable container's /opt.
-        # Its image provisions this owner-private sibling; code remains immutable.
-        private = _private_backup_directory(home) if dest_dir == home.parent else None
-        if private is None:
-            raise PermissionError(
-                f"Cannot create a pre-migration backup in {dest_dir}; provide an owner-only "
-                f"directory at {home.parent / (home.name + '-migration-backups')} (mode 0700)"
-            ) from None
-        return tempfile.mkstemp(prefix=prefix, suffix=".tar", dir=private)
-
-
 def _backup_home(home: Path, dest_dir: Path) -> Path:
-    stamp = time.strftime("%Y%m%d-%H%M%S")
-    fd, name = _open_migration_backup(home, dest_dir, f"hermes-premigration-{home.name}-{stamp}-")
-    backup = Path(name)
-    # mkstemp is owner-only from creation, not after the sensitive first write.
-    with os.fdopen(fd, "wb") as handle:
-        with tarfile.open(fileobj=handle, mode="w") as tar:
-            for path, rel in _iter_files(home):
-                tar.add(str(path), arcname=str(rel), recursive=False)
-        handle.flush()
-        os.fsync(handle.fileno())
+    """Create an encrypted rollback with an already-established original vault credential."""
+    from hermes_security.artifacts import _Custody
+    from hermes_security.migration_archive import write_backup
+    from hermes_security.migration_workflow import entries
+
+    backup = dest_dir / f"hermes-premigration-{home.name}-{time.strftime('%Y%m%d-%H%M%S')}-{os.urandom(16).hex()}.hmb"
+    write_backup(home, backup, custody=_Custody(home), entries=entries(home),
+                 metadata=(home / ".hermes-vault").read_bytes())
     return backup
 
 
@@ -616,6 +621,10 @@ def os_replace(src: Path, dst: Path) -> None:
 
 
 def _purpose_for(rel: Path) -> str:
+    from hermes_security.artifact_paths import legacy_media_codec, media_kind
+
+    if media_kind(rel) and not legacy_media_codec(rel):
+        return "state"
     if is_delegation_manifest_path(rel):
         return "delegation-manifest:v1"
     name = rel.name
@@ -639,7 +648,27 @@ def _purpose_for(rel: Path) -> str:
     return "state"
 
 
+def _browser_relative(relative: Path | None) -> Path | None:
+    """Home-relative browser-profile path, also inside a named profile (``profiles/<name>/…``)."""
+    from hermes_security.browser_profile_archive import browser_state_kind
+    from hermes_security.browser_worker_archive import worker_state_kind
+
+    if relative is None:
+        return None
+    parts = Path(relative).parts
+    candidate = Path(*parts[2:]) if len(parts) > 2 and parts[0] == "profiles" else Path(relative)
+    return candidate if browser_state_kind(candidate) or worker_state_kind(candidate) else None
+
+
 def _classify(path: Path, relative: Path | None = None) -> str:
+    from hermes_security.artifact_paths import legacy_media_codec, media_kind
+
+    # Chromium needs its profile files raw: they are archived whole, never sealed file by file.
+    if _browser_relative(relative) is not None:
+        return "browser"
+    candidate = relative if relative is not None else path
+    if media_kind(candidate) and not legacy_media_codec(candidate):
+        return "envelope"
     if is_delegation_log_path(relative if relative is not None else path):
         return "envelope"
     # DB sidecars are consumed by the parent DB's migration (checkpointed and
@@ -653,61 +682,90 @@ def _classify(path: Path, relative: Path | None = None) -> str:
     return "envelope"
 
 
-def migrate_home(home: Path | str, password: str | bytes, *, dry_run: bool = False) -> MigrationReport:
-    home = Path(home).expanduser().resolve()
-    if vault_mod.vault_exists(home):
-        raise vault_errors.VaultError(f"A vault already exists at {home}")
-    report = MigrationReport(home=home)
+def migrate_home(home: Path | str, password: str | bytes | None, *, dry_run: bool = False,
+                 public_key_raw: bytes | None = None) -> MigrationReport:
+    """Create or explicitly resume a credential-bound migration with verified encrypted rollback."""
+    from hermes_security.migration_workflow import run
 
-    files = list(_iter_files(home))
-    if not files:
-        # nothing to convert; still create the vault
-        if not dry_run:
-            vault_mod.init_vault(home, password, _allow_existing_state=True)
-        return report
+    return run(home, password, dry_run=dry_run, public_key_raw=public_key_raw)
 
-    backup_root = home.parent
-    if not dry_run:
-        report.backup_path = _backup_home(home, backup_root)
 
-    # unlock vault FIRST so envelope writers can seal
-    if not dry_run:
-        vault_mod.init_vault(home, password, _allow_existing_state=True)
-        vault_mod.unlock(home, password)
+def _migrate_generated_pets(home, report, *, dry_run):
+    if dry_run:
+        from agent.pet.private_repair import inventory
 
-    for path, rel in files:
+        known, unknown = inventory(home)
+        report.envelopes.extend(known)
+        report.failures.extend(path + ": pet provenance is unreadable; explicitly export before inspection" for path in unknown)
+        return
+    from agent.pet.private_repair import repair as repair_generated_pets
+
+    converted = {"sealed": [], "unrecoverable": []}
+    repair_generated_pets(home, converted)
+    report.envelopes.extend(converted["sealed"])
+    report.failures.extend(converted["unrecoverable"])
+
+
+def _note_browser_root(report: MigrationReport, relative: Path) -> None:
+    root = _browser_root(relative)
+    if root not in report.browser_profiles:
+        report.browser_profiles.append(root)
+
+
+def _convert_browser_profiles(home: Path, report: MigrationReport) -> None:
+    """Archive legacy plaintext browser profiles whole (verified), never file by file."""
+    if not report.browser_profiles:
+        return
+    from hermes_cli.browser_profile_repair import convert_legacy_browser_profiles
+
+    retained = convert_legacy_browser_profiles(home)["retained"]
+    report.failures += [f"{item} — run 'hermes secure-vault repair' once resolved" for item in retained]
+
+
+def _browser_root(relative: Path) -> str:
+    """The browser-profile directory (or archive) a file belongs to, as one report entry."""
+    parts = Path(relative).parts
+    prefix = parts[:2] if len(parts) > 2 and parts[0] == "profiles" else ()
+    inner = parts[len(prefix):]
+    return Path(*prefix, *inner[:2 if inner[0] != "chrome-debug" else 1]).as_posix()
+
+
+def _browser_offender(path: Path, rel: Path) -> str | None:
+    """Report any browser state that the dedicated reader cannot authenticate.
+
+    An interrupted stage is unverified. Legacy plaintext is reported by its
+    whole profile directory, while damaged archives keep their exact path.
+    """
+    from hermes_security import browser_profile_archive as archive
+    from hermes_security import browser_worker_archive as workers
+
+    inner = _browser_relative(rel)
+    if workers.worker_state_kind(inner):
+        archive, kind = workers, workers.worker_state_kind(inner)
+    else:
+        kind = archive.browser_state_kind(inner)
+    if kind == "stage":
+        return rel.as_posix()  # A filename cannot authenticate an interrupted publication.
+    if kind in {'locator', 'recovery'}:
+        from hermes_security.browser_worker_pending import read
+
         try:
-            kind = _classify(path, rel)
-            if kind == "skip":
-                continue
-            if not dry_run:
-                _harden_private_artifact(home, rel)
-            if kind == "db":
-                if dry_run:
-                    report.databases.append(rel.as_posix())
-                else:
-                    _migrate_database(home, path, rel, report)
-            elif kind == "frames":
-                if dry_run:
-                    report.frame_streams.append(rel.as_posix())
-                else:
-                    _migrate_frames(home, path, rel, report)
-            else:
-                if dry_run:
-                    report.envelopes.append(rel.as_posix())
-                else:
-                    _migrate_envelope(home, path, rel, report)
-        except FileNotFoundError:
-            # vanished mid-migration (e.g. a sidecar consumed by its parent
-            # DB conversion) — nothing to convert
-            report.skipped.append(rel.as_posix() + " (vanished)")
-        except Exception as exc:
-            report.failures.append(f"{rel.as_posix()}: {exc}")
-
-    return report
+            owner = path.parent.parent
+            read(owner, inner, custody=workers.capture_custody(owner))
+            return None
+        except (OSError, ValueError, vault_errors.VaultError):
+            return rel.as_posix()
+    if kind == "archive":
+        owner = vault_mod.find_vault_home(path)
+        try:
+            archive.replay_archive(owner, inner, custody=archive.capture_custody(owner))
+            return None
+        except (OSError, ValueError, vault_errors.VaultError):
+            return rel.as_posix()
+    return _browser_root(rel)
 
 
-def scan_for_plaintext(home: Path | str) -> list[str]:
+def scan_for_plaintext(home: Path | str, *, selected_only: bool = False) -> list[str]:
     """State paths whose encryption cannot be verified (including unreadable/locked state).
 
     Code, skills and public caches retain the migration exclusion policy. Old
@@ -719,10 +777,21 @@ def scan_for_plaintext(home: Path | str) -> list[str]:
 
     home = Path(home).expanduser().resolve()
     offenders = []
+    from agent.pet.private_repair import plaintext_paths as legacy_generated_pet_paths
+
+    try:
+        offenders.extend(legacy_generated_pet_paths(home))
+    except OSError:
+        offenders.append("pets")
     def unreadable(exc):
         offenders.append(Path(exc.filename or home).relative_to(home).as_posix())
 
-    for path, rel in _iter_files(home, onerror=unreadable):
+    for path, rel in _iter_files(home, onerror=unreadable, exclude_roots={"profiles"} if selected_only else ()):
+        if _classify(path, rel) == "browser":
+            entry = _browser_offender(path, rel)
+            if entry is not None and entry not in offenders:  # one entry per legacy profile directory
+                offenders.append(entry)
+            continue
         try:
             kind = _classify(path, rel)
             if kind == "db":

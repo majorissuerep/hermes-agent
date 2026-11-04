@@ -2,6 +2,13 @@
 
 from __future__ import annotations
 
+OUTGOING_REPAIR_ARGUMENTS = ("secure-vault", "repair", "--outgoing-browser-profile")
+
+
+def owner_repair_request(argv):
+    """The ONLY CLI spelling eligible for the existing owner-side UI adapter."""
+    return {"op": "browser.outgoing.repair"} if tuple(argv) == OUTGOING_REPAIR_ARGUMENTS else None
+
 
 def build_secure_vault_parser(subparsers) -> None:
     """Attach the fork's master-password vault subcommand.
@@ -24,7 +31,7 @@ def build_secure_vault_parser(subparsers) -> None:
         default="status",
         choices=["init", "migrate", "unlock", "status", "lock", "keygen", "add-key", "remove-key", "slots", "repair", "export"],
         help="init = create vault on a fresh home; migrate = convert an existing plaintext home "
-        "in place (full tar backup first, every file verified, sessions/config preserved); "
+        "in place (encrypted rollback verified first; interrupted migration resumes with its original credential); "
         "unlock = unlock for this process; status = show state; lock = drop this process's keys; "
         "keygen = generate an X25519 keypair (private key shown ONCE, store it yourself — "
         "the system never holds it); add-key = seal the vault to a public key (key slot); "
@@ -34,6 +41,17 @@ def build_secure_vault_parser(subparsers) -> None:
     )
     parser.add_argument("--yes", action="store_true", help="migrate: skip the confirmation prompt")
     parser.add_argument("--output", help="export: new plaintext .tar outside every encrypted home (never overwritten)")
+    parser.add_argument("--migration-backup", help="export: standalone encrypted migration rollback; requires its original credential")
+    recovery = parser.add_mutually_exclusive_group()
+    recovery.add_argument(OUTGOING_REPAIR_ARGUMENTS[-1], action="store_true",
+                          help="repair: explicitly connect to the selected original backend to settle a quiescent orphan; retains unknown/live state")
+    recovery.add_argument("--outgoing-browser-legacy", action="store_true",
+                          help="repair: explicitly seal the old selected target browser profile; refuses raw/cipher conflicts")
+    parser.add_argument(
+        "--native-browser-state", metavar="DIRECTORY",
+        help="repair: explicitly move an owned .agent-browser directory into verified encrypted browser state; "
+             "retire the original only after full verification, retaining an encrypted recovery snapshot",
+    )
     parser.add_argument(
         "--key-only", action="store_true",
         help="migrate: non-interactive creation for daemons/scripts — generate an X25519 pair, "
@@ -59,6 +77,8 @@ def build_secure_vault_parser(subparsers) -> None:
     )
 
     def _run(args):
+        if args.native_browser_state and args.vault_command != "repair":
+            parser.error("--native-browser-state requires secure-vault repair")
         from hermes_cli.vault_cmd import cmd_vault
         from hermes_cli.vault_export import export_command
 

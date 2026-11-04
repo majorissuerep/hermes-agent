@@ -93,64 +93,9 @@ def cmd_vault(args: Any) -> int:
     home = _home(args)
 
     if command == "migrate":
-        if vault_mod.vault_exists(home):
-            print(f"✗ A vault already exists at {home}")
-            return 1
-        from hermes_security import migrate as mig
+        from hermes_cli.vault_migration import migrate_command
 
-        if getattr(args, "key_only", False):
-            from hermes_cli.vault_key_policy import key_destination
-
-            try:
-                key_out = key_destination(home, getattr(args, "key_out", None))
-            except (ValueError, OSError) as error:
-                print(f"✗ Key-only creation refused: {error}", file=sys.stderr)
-                return 2
-
-        # dry run first
-        report = mig.migrate_home(home, "", dry_run=True)
-        total = len(report.databases) + len(report.envelopes) + len(report.frame_streams)
-        print(f"Migration plan for {home}:")
-        print(f"  databases -> SQLCipher : {len(report.databases)}")
-        for name in report.databases[:10]:
-            print(f"    {name}")
-        print(f"  files     -> envelopes : {len(report.envelopes)}")
-        print(f"  streams   -> frames    : {len(report.frame_streams)}")
-        print(f"  total: {total} item(s)")
-        if getattr(args, "yes", False) is not True and not getattr(args, "key_only", False):
-            answer = input("\nProceed with migration? A full tar backup is written first. [y/N] ").strip().lower()
-            if answer not in {"y", "yes"}:
-                print("Aborted; nothing was changed.")
-                return 1
-        if getattr(args, "key_only", False):
-            from hermes_cli.vault_key_creation import KeyOutputError, migrate_with_key_file
-
-            try:
-                return migrate_with_key_file(home, key_out)
-            except KeyOutputError as error:
-                print(f"✗ Key-only creation refused: {error}", file=sys.stderr)
-                return 2
-        password = _prompt_new_password()
-        print("→ Backing up and migrating (this can take a minute)...")
-        report = mig.migrate_home(home, password)
-        if not report.ok:
-            print("✗ Migration finished WITH FAILURES (backup kept):")
-            for failure in report.failures:
-                print(f"    {failure}")
-            if report.backup_path:
-                print(f"  Backup: {report.backup_path}")
-            return 1
-        leftovers = mig.scan_for_plaintext(home)
-        if leftovers:
-            print(f"✗ Plaintext remains after migration: {leftovers}")
-            print(f"  Backup: {report.backup_path}")
-            return 1
-        print(f"✓ Migration complete ({len(report.databases)} DBs, {len(report.envelopes)} files, {len(report.frame_streams)} streams)")
-        if report.backup_path:
-            print(f"  Pre-migration backup: {report.backup_path}")
-            print("  Verify everything works, then delete it (it is PLAINTEXT).")
-        print("  LOSE THE PASSWORD = LOSE THE DATA. There is no recovery.")
-        return 0
+        return migrate_command(args, home)
 
     if command == "init":
         if vault_mod.vault_exists(home):
@@ -278,37 +223,9 @@ def cmd_vault(args: Any) -> int:
         return 0
 
     if command == "repair":
-        if not vault_mod.vault_exists(home):
-            print(f"✗ No vault at {home}; run 'hermes secure-vault migrate' first")
-            return 1
-        gate_locked_vault(args, home)
-        from hermes_security.migrate import repair_clobbered_state
+        from hermes_cli.vault_repair import run
 
-        report = repair_clobbered_state(home)
-        sections = (
-            ("sealed", "✓ Re-sealed {n} plaintext file(s) into envelopes:"),
-            ("unwrapped", "✓ Unwrapped {n} database/stream file(s) a previous repair wrapped in envelopes:"),
-            ("reframed", "✓ Re-framed {n} log/transcript stream(s) holding plaintext:"),
-            ("restored", "✓ Restored {n} mangled file(s) from the pre-migration backup:"),
-            ("skipped_dbs", "⚠ {n} PLAINTEXT database(s) left untouched (vault bypass suspected — investigate):"),
-            ("unrecoverable", "✗ {n} file(s) could not be repaired:"),
-        )
-        for key, title in sections:
-            items = report[key]
-            if not items:
-                continue
-            print(title.format(n=len(items)))
-            for rel in items[:20]:
-                print(f"    {rel}")
-            if len(items) > 20:
-                print(f"    … and {len(items) - 20} more")
-        if report["code_files"]:
-            print(f"✓ Restored {report['code_files']} file(s) in hermes-agent.* code trees to plaintext (public code)")
-        if not any(report[key] for key, _ in sections) and not report["code_files"]:
-            print("○ Nothing to repair (every state file is in its canonical sealed form)")
-        if report["unrecoverable"] or report["skipped_dbs"]:
-            return 1
-        return 0
+        return run(args, home)
 
     if command == "lock":
         vault_mod.lock_now(home)

@@ -3,19 +3,23 @@
 Everything here runs BEFORE an image is base64-embedded: a vision tool result is
 baked into immutable history and re-sent every turn, so an unsupported media type
 or corrupt bytes would wedge the session with a non-retryable 400 on every resume.
+
+Private pixels never become a plaintext file here: helpers take either a caller-owned path
+or in-memory bytes and return bytes. Only the file-based SVG rasterizer fallbacks need a
+filesystem, and they run inside a proven RAM-only protected workspace or not at all.
 """
 
 from __future__ import annotations
 
 import logging
-import uuid
 from io import BytesIO
 from pathlib import Path
 from typing import Any, Optional
 
-from hermes_constants import get_hermes_dir
-
 logger = logging.getLogger("tools.vision_tools")
+
+# A caller-owned image file (read, never modified) or the image bytes themselves.
+ImageInput = Path | bytes
 
 _EXTENSION_MIME_TYPES = {
     ".jpg": "image/jpeg",
@@ -52,6 +56,26 @@ _MAGIC_MIME_TYPES = (
 def _determine_mime_type(image_path: Path) -> str:
     """MIME type from file extension (defaults to image/jpeg)."""
     return _EXTENSION_MIME_TYPES.get(image_path.suffix.lower(), "image/jpeg")
+
+
+def _image_bytes(image: ImageInput) -> bytes:
+    return image if isinstance(image, bytes) else Path(image).read_bytes()
+
+
+def _fallback_mime(image: ImageInput) -> str:
+    """Extension MIME for a path; in-memory bytes carry no name, so the same image/jpeg default."""
+    return "image/jpeg" if isinstance(image, bytes) else _determine_mime_type(Path(image))
+
+
+def _as_file(image: ImageInput):
+    """What ``PIL.Image.open`` reads: the path itself, or an in-memory buffer over the bytes."""
+    return BytesIO(image) if isinstance(image, bytes) else image
+
+
+def _open_image(image: ImageInput):
+    """``PIL.Image.open`` over a path or in-memory bytes (raises ImportError without Pillow)."""
+    from PIL import Image
+    return Image.open(_as_file(image))
 
 
 def _detect_image_mime_type_from_bytes(data: bytes) -> Optional[str]:
@@ -121,14 +145,23 @@ def _nonempty_file(path: Path) -> bool:
     return path.exists() and path.stat().st_size > 0
 
 
-def _rasterize_svg_to_png(svg_path: Path, out_path: Path) -> bool:
-    """Best-effort SVG → PNG via cairosvg, svglib+reportlab, rsvg-convert, inkscape (all soft deps)."""
+def _cairosvg_png(svg: bytes) -> Optional[bytes]:
+    """SVG -> PNG fully in memory via cairosvg (soft dependency); None when absent or failing."""
     try:
         import cairosvg  # type: ignore
-        cairosvg.svg2png(url=str(svg_path), write_to=str(out_path))
-        return _nonempty_file(out_path)
-    except Exception:
-        pass
+    except ImportError:
+        return None
+    try:
+        png = cairosvg.svg2png(bytestring=svg)
+    except Exception:  # cairosvg surfaces parser, cairo and resource errors of many types
+        logger.debug("cairosvg could not render the SVG in memory", exc_info=True)
+        return None
+    return png or None
+
+
+def _rasterize_svg_to_png(svg_path: Path, out_path: Path) -> bool:
+    """File-based SVG -> PNG fallbacks: svglib+reportlab, rsvg-convert, inkscape (all soft deps).
+    Only :func:`_rasterize_svg_bytes` calls this, with both paths inside a protected RAM workspace."""
     try:
         from svglib.svglib import svg2rlg  # type: ignore
         from reportlab.graphics import renderPM  # type: ignore
@@ -153,53 +186,76 @@ def _rasterize_svg_to_png(svg_path: Path, out_path: Path) -> bool:
     return False
 
 
+def _rasterize_svg_bytes(svg: bytes) -> Optional[bytes]:
+    """SVG -> PNG bytes, or None when no rasterizer is installed. cairosvg renders in memory; the
+    file-based fallbacks get the SVG only inside a proven RAM-only workspace, removed afterwards.
+    Raises ``MediaCustodyError`` when a fallback is needed but no such workspace exists — the SVG
+    is then never written anywhere."""
+    png = _cairosvg_png(svg)
+    if png is not None:
+        return png
+    from tools.browser_media_custody import protected_media_workspace
+    with protected_media_workspace("vision-svg") as workspace:
+        svg_path, png_path = workspace / "image.svg", workspace / "image.png"
+        svg_path.write_bytes(svg)
+        return png_path.read_bytes() if _rasterize_svg_to_png(svg_path, png_path) else None
+
+
 def rasterize_svg_data_url(url: str) -> Optional[str]:
     """``data:image/svg+xml[;base64],...`` → ``data:image/png;base64,...`` through the same
-    soft-dependency rasterizers vision_analyze uses; None when the payload does not decode or no
-    rasterizer is available. Request-path callers decide the fallback (Responses backends 400 on
-    SVG source, so the caller must never forward the SVG itself)."""
+    rasterizers vision_analyze uses; None when the payload does not decode, no rasterizer is
+    available, or a file-based rasterizer would need a RAM workspace this host cannot prove.
+    Request-path callers decide the fallback (Responses backends 400 on SVG source, so the caller
+    must never forward the SVG itself)."""
     import base64
-    from contextlib import suppress
     from urllib.parse import unquote
     header, _, payload = url.partition(",")
     try:
         raw = base64.b64decode(payload) if ";base64" in header.lower() else unquote(payload).encode()
     except Exception:
         return None
-    from tools.vision_tools import _secure_cache_dir, _write_private_bytes
-    out_dir = _secure_cache_dir("cache/vision", "temp_vision_images")
-    stem = out_dir / f"inline_{uuid.uuid4()}"
-    svg_path, png_path = stem.with_suffix(".svg"), stem.with_suffix(".png")
+    from hermes_security.errors import VaultError
+    from tools.browser_media_custody import MediaCustodyError
     try:
-        svg_path.write_bytes(raw)
-        if not _rasterize_svg_to_png(svg_path, png_path):
-            return None
-        return "data:image/png;base64," + base64.b64encode(png_path.read_bytes()).decode("ascii")
-    finally:
-        for path in (svg_path, png_path):
-            with suppress(OSError):
-                path.unlink()
+        png = _rasterize_svg_bytes(raw)
+    except (MediaCustodyError, VaultError, OSError) as exc:  # the caller's placeholder is the fallback
+        logger.warning("Inline SVG left unrasterized (no plaintext file is written for it): %s", exc)
+        return None
+    return None if png is None else "data:image/png;base64," + base64.b64encode(png).decode("ascii")
+
+
+_SVG_NO_RASTERIZER = (
+    "This is an SVG, which vision models cannot read directly, and no "
+    "SVG rasterizer is installed (tried cairosvg, svglib, rsvg-convert, "
+    "inkscape). Convert the SVG to PNG first — e.g. open it in a browser "
+    "and screenshot it — then re-run vision_analyze on the PNG.")
+
+
+def _normalize_svg(svg: bytes) -> tuple[Optional[bytes], Optional[str], Optional[str]]:
+    from tools.browser_media_custody import MediaCustodyError
+    try:
+        png = _rasterize_svg_bytes(svg)
+    except MediaCustodyError as exc:
+        return None, None, (
+            "This is an SVG, which vision models cannot read directly. cairosvg (which renders in "
+            "memory) is not installed, and the file-based rasterizers only run in a proven RAM-only "
+            f"workspace: {exc} Alternatively install cairosvg, or convert the SVG to PNG first.")
+    if png is None:
+        return None, None, _SVG_NO_RASTERIZER
+    return png, "image/png", None
 
 
 def _normalize_to_supported_image(
-    image_path: Path, detected_mime: str) -> tuple[Optional[Path], Optional[str], Optional[str]]:
-    """Ensure an image is in a provider-supported format. Returns ``(path, mime, error)``: the input
-    unchanged when supported; ``(new_png_path, "image/png", None)`` after conversion — a temp file
-    the CALLER must clean up; ``(None, None, message)`` when impossible. SVG is rasterized; other
-    Pillow-readable rasters (BMP, TIFF) re-encode to PNG."""
+    image: ImageInput, detected_mime: str) -> tuple[Optional[bytes], Optional[str], Optional[str]]:
+    """Ensure an image is in a provider-supported format, in memory. Returns ``(data, mime, error)``:
+    the original bytes when supported; ``(png_bytes, "image/png", None)`` after conversion;
+    ``(None, None, message)`` when impossible. SVG is rasterized; other Pillow-readable rasters
+    (BMP, TIFF, HEIC, AVIF) re-encode to PNG. No derivative file is created."""
+    data = _image_bytes(image)
     if detected_mime in _supported_media_types():
-        return image_path, detected_mime, None
-    from tools.vision_tools import _secure_cache_dir
-    out_dir = _secure_cache_dir("cache/vision", "temp_vision_images")
-    out_path = out_dir / f"converted_{uuid.uuid4()}.png"
+        return data, detected_mime, None
     if detected_mime == "image/svg+xml":
-        if _rasterize_svg_to_png(image_path, out_path):
-            return out_path, "image/png", None
-        return None, None, (
-            "This is an SVG, which vision models cannot read directly, and no "
-            "SVG rasterizer is installed (tried cairosvg, svglib, rsvg-convert, "
-            "inkscape). Convert the SVG to PNG first — e.g. open it in a browser "
-            "and screenshot it — then re-run vision_analyze on the PNG.")
+        return _normalize_svg(data)
     # HEIF/AVIF need a codec Pillow's core doesn't always carry, served by DIFFERENT optional
     # backends that must not be gated on one another: HEIC/HEIF (HEVC) needs the pillow-heif
     # plugin registered; AVIF (AV1) is native in Pillow >= 11.3 while pillow-heif wheels are
@@ -213,13 +269,13 @@ def _normalize_to_supported_image(
         except Exception:
             logger.debug("pillow-heif unavailable; relying on Pillow for %s", detected_mime)
     try:
-        from PIL import Image as _PILImage
-        with _PILImage.open(image_path) as _img:
+        out = BytesIO()
+        with _open_image(data) as _img:
             if _img.mode not in ("RGB", "RGBA", "L"):
                 _img = _img.convert("RGBA")
-            _img.save(out_path, format="PNG")
-        if _nonempty_file(out_path):
-            return out_path, "image/png", None
+            _img.save(out, format="PNG")
+        if out.getbuffer().nbytes:
+            return out.getvalue(), "image/png", None
     except Exception as _exc:
         logger.warning("Failed to normalize %s image to PNG: %s", detected_mime, _exc)
         # Codec-specific guidance: name the backend that actually serves this format.
@@ -249,22 +305,22 @@ _VISION_MAX_VALIDATED_AGGREGATE_PIXELS = 100_000_000
 
 
 def _validate_raster_image_decodable(
-    image_path: Path,
+    image: ImageInput,
     max_frames: int = _VISION_MAX_VALIDATED_FRAME_COUNT,
     max_pixels: int = _VISION_MAX_VALIDATED_AGGREGATE_PIXELS) -> Optional[str]:
     """Return an error unless Pillow can fully decode every frame. Header sniffing and ``Image.open``
     only inspect containers: a timed-out download can look like a valid PNG with a truncated pixel
     stream. Without Pillow the image passes unvalidated rather than rejecting everything."""
     try:
-        from PIL import Image as _PILImage, ImageSequence as _PILImageSequence
+        from PIL import ImageSequence as _PILImageSequence
     except ImportError:
         return None
     try:
-        with _PILImage.open(image_path) as image:
-            image.verify()
-        with _PILImage.open(image_path) as image:
+        with _open_image(image) as opened:
+            opened.verify()
+        with _open_image(image) as opened:
             validated_pixels = 0
-            for frame_number, frame in enumerate(_PILImageSequence.Iterator(image), start=1):
+            for frame_number, frame in enumerate(_PILImageSequence.Iterator(opened), start=1):
                 if frame_number > max_frames:
                     return (
                         "Image validation rejected animation: "
@@ -284,25 +340,24 @@ def _validate_raster_image_decodable(
     return None
 
 
-def _image_exceeds_dimension(image_path: Path, max_dimension: int) -> bool:
+def _image_exceeds_dimension(image: ImageInput, max_dimension: int) -> bool:
     """True if the longest side exceeds ``max_dimension`` px (Anthropic's 8000px per-side cap is
     independent of bytes). False without Pillow or on unreadable files — a missing soft
     dependency must never break the embed path."""
     try:
-        from PIL import Image as _PILImage
-        with _PILImage.open(image_path) as _img:
+        with _open_image(image) as _img:
             return max(_img.size) > max_dimension
     except Exception:
         return False
 
 
 def _crop_image_region(
-    image_path: Path, region: Any, offset_out: Optional[dict] = None
-) -> tuple[Optional[Path], Optional[str], Optional[str]]:
+    image: ImageInput, region: Any, offset_out: Optional[dict] = None
+) -> tuple[Optional[bytes], Optional[str], Optional[str]]:
     """Crop to ``region`` = [x1, y1, x2, y2] (original-image pixels), BEFORE downscaling so the crop
     gets the full resolution budget. Coordinates clamp to the image bounds; a zero-area/inverted
-    region is rejected with an error naming the real dimensions. Returns ``(cropped_temp_path,
-    mime, None)`` — caller owns cleanup — or ``(None, None, error)``.
+    region is rejected with an error naming the real dimensions. Returns ``(png_bytes, mime, None)``
+    — in memory, no derivative file — or ``(None, None, error)``.
     Ported from QwenLM/qwen-code zoom-image.ts (Apache-2.0)."""
     try:
         from PIL import Image
@@ -316,7 +371,7 @@ def _crop_image_region(
             "Invalid region: expected [x1, y1, x2, y2] as four numbers "
             "(pixel coordinates in the original image).")
     try:
-        with Image.open(image_path) as img:
+        with Image.open(_as_file(image)) as img:
             width, height = img.size
             x1, y1, x2, y2 = (int(v) for v in region)
             cx1, cy1, cx2, cy2 = (max(0, min(v, b)) for v, b in zip((x1, y1, x2, y2), (width, height) * 2))
@@ -329,10 +384,10 @@ def _crop_image_region(
             cropped = img.crop((cx1, cy1, cx2, cy2))
             if offset_out is not None:
                 offset_out.update(x=cx1, y=cy1, width=cx2 - cx1, height=cy2 - cy1)
-            out_path = image_path.with_name(f"{image_path.stem}_region_{uuid.uuid4().hex[:8]}.png")
             if cropped.mode not in ("RGB", "RGBA", "L", "LA", "P"):
                 cropped = cropped.convert("RGB")
-            cropped.save(out_path, format="PNG")
-            return out_path, "image/png", None
+            out = BytesIO()
+            cropped.save(out, format="PNG")
+            return out.getvalue(), "image/png", None
     except Exception as exc:
         return None, None, f"Failed to crop region: {exc}"

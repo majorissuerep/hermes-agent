@@ -18,6 +18,8 @@ OPERATIONS = {
     "config.unset": ["path", "revision"], "config.batch": ["operations", "revision"],
     "secret.set": ["name", "secret_fd"], "secret.unset": ["name"],
     "passphrase.change": ["secret_fd"], "status": [],
+    "browser.outgoing.repair": [],
+    "browser.worker.repair": [],
 }
 SECRET_READ_DEADLINE_SECONDS = 5.0
 
@@ -28,6 +30,7 @@ def schema():
             "secrets": "inherited one-shot secret_fd >= 3, distinct from unlock FD; UTF-8, no trailing newline",
             "secret_read_deadline_seconds": SECRET_READ_DEADLINE_SECONDS,
             "config_batch": "atomic config-only; no cross-file transactions", "effect": "next_session",
+            "browser_repairs": "explicit fixed maintenance; saved/retained outcomes report current completion, not future config effects",
             "status": {"version": 2, "resource_scope": "protection of the responding owning process",
                        "requester_scope": "operation proxies remain operations_only; status asserts no owner consent",
                        "protection": "observed custody/limits/swap/workspace; unknown swap/crash-store evidence stays unknown"},
@@ -130,6 +133,12 @@ def _execute(request, home, secret_value=None):
     if op == "status":
         from hermes_cli.management_status import status
         return status(home)
+    if op == "browser.outgoing.repair":
+        from hermes_cli.management_browser import perform
+        return perform(home)
+    if op == "browser.worker.repair":
+        from hermes_cli.management_browser import worker_repair
+        return worker_repair(home)
     if op == "passphrase.change":
         if has_borrowed_authority(home):
             raise ManagementError("consent_required", "changing the passphrase requires the owning human's consent")

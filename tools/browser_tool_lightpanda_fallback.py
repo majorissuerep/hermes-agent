@@ -7,8 +7,8 @@ Facade-owned state is read through ``_bt`` (``tools.browser_tool``, resolved per
 import json
 import os
 import shutil
-import subprocess
 from typing import Any, Dict, List, Optional, Tuple
+from hermes_platform.client_capture import ClientOutputLimit
 from tools.browser_tool_origin import origin_module as _origin
 from tools import browser_tool_cdp as _cdp
 from tools import browser_tool_cloud as _cloud
@@ -161,24 +161,19 @@ def _run_chrome_fallback_command(task_id: str, command: str, args: list[str], ti
     browser_env = _session.windows_headless_browser_options(browser_env)
 
     def _run_tmp(cmd: str, cmd_args: list[str]) -> dict[str, Any]:
-        proc = _session._popen_agent_browser(base_args + [cmd] + cmd_args, browser_env, task_socket_dir, cmd)
-        stdout_path = os.path.join(task_socket_dir, f"_stdout_{cmd}")
-        stderr_path = os.path.join(task_socket_dir, f"_stderr_{cmd}")
         try:
-            proc.wait(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.wait()
+            returncode, stdout, _stderr = _session._run_agent_browser_client(
+                base_args + [cmd] + cmd_args, browser_env, None, timeout)
+        except ClientOutputLimit as exc:
+            return {"success": False, "error": f"Chrome fallback '{cmd}' failed: {exc}"}
+        if returncode is None:
             return {"success": False, "error": f"Chrome fallback '{cmd}' timed out"}
+        stdout = stdout.strip()
         try:
-            with open(stdout_path, encoding="utf-8-sig") as f:
-                stdout = f.read().strip()
             if stdout:
                 return json.loads(stdout.split("\n")[-1])
         except Exception as exc:
             _bt.logger.debug("Chrome fallback tmp cmd '%s' error: %s", cmd, exc)
-        finally:
-            _session._unlink_command_output_files(stdout_path, stderr_path)
         return {"success": False, "error": f"Chrome fallback '{cmd}' failed"}
 
     try:

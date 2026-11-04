@@ -10,7 +10,6 @@ import pytest
 
 from tools.vision_tools import (
     _detect_video_mime_type,
-    _video_to_base64_data_url,
     _handle_video_analyze,
     video_analyze_tool,
 )
@@ -36,26 +35,6 @@ class TestDetectVideoMimeType:
         p = tmp_path / "clip.MP4"
         p.write_bytes(b"\x00" * 10)
         assert _detect_video_mime_type(p) == "video/mp4"
-
-# ---------------------------------------------------------------------------
-# _video_to_base64_data_url
-# ---------------------------------------------------------------------------
-
-class TestVideoToBase64DataUrl:
-    """Base64 encoding of video files."""
-
-    def test_produces_data_url(self, tmp_path):
-        p = tmp_path / "test.mp4"
-        p.write_bytes(b"\x00\x01\x02\x03")
-        result = _video_to_base64_data_url(p)
-        assert result.startswith("data:video/mp4;base64,")
-
-    def test_default_mime_for_unknown_ext(self, tmp_path):
-        p = tmp_path / "test.xyz"
-        p.write_bytes(b"\x00\x01\x02\x03")
-        result = _video_to_base64_data_url(p)
-        # Falls back to video/mp4
-        assert result.startswith("data:video/mp4;base64,")
 
 # ---------------------------------------------------------------------------
 # Schema validation

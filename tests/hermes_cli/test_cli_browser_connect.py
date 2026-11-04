@@ -1,14 +1,26 @@
 """Tests for CLI browser CDP auto-launch helpers."""
 
-from unittest.mock import patch
+from unittest.mock import Mock, patch
+
+import pytest
 
 from hermes_cli.browser_connect import (
+    ChromeDebugLaunch,
     _wait_for_browser_debug_ready_or_exit,
     get_chrome_debug_candidates,
     is_browser_debug_ready,
     launch_chrome_debug,
     manual_chrome_debug_command,
 )
+from tests.hermes_cli.browser_profile_env import chromium_tree, owned_profile_env, reset_owned_profiles
+
+PREPARED = "/run/user/1000/hermes-browser-profile-0123456789abcdef"
+
+
+@pytest.fixture
+def owned(tmp_path, monkeypatch):
+    yield owned_profile_env(tmp_path, monkeypatch)
+    reset_owned_profiles()
 
 
 class _FakeResponse:
@@ -45,10 +57,16 @@ class TestChromeDebugLaunch:
     def test_manual_command_uses_detected_linux_browser(self):
         with patch("hermes_cli.browser_connect.shutil.which", side_effect=lambda name: "/usr/bin/chromium" if name == "chromium" else None), \
              patch("hermes_cli.browser_connect.os.path.isfile", side_effect=lambda path: path == "/usr/bin/chromium"):
-            command = manual_chrome_debug_command(9222, "Linux")
+            command = manual_chrome_debug_command(9222, "Linux", PREPARED)
 
         assert command is not None
         assert command.startswith("/usr/bin/chromium --remote-debugging-port=9222")
+        assert f"--user-data-dir={PREPARED}" in command
+
+    def test_manual_command_requires_a_prepared_profile(self):
+        with patch("hermes_cli.browser_connect.shutil.which", side_effect=lambda name: "/usr/bin/chromium" if name == "chromium" else None), \
+             patch("hermes_cli.browser_connect.os.path.isfile", side_effect=lambda path: path == "/usr/bin/chromium"):
+            assert manual_chrome_debug_command(9222, "Linux", None) is None
 
 
 
@@ -98,28 +116,27 @@ class TestChromeDebugLaunch:
 
 
 
-    def test_launch_result_surfaces_stderr_tail_on_crash(self, tmp_path, monkeypatch):
+    def test_launch_result_surfaces_stderr_tail_on_crash(self, owned):
+        _home, ram = owned
         chrome = "/usr/bin/google-chrome"
+        launched = {}
 
         class _Proc:
             pid = 4321
             returncode = 127
 
-            def __init__(self, stderr_path):
+            def __init__(self, argv, stderr):
+                launched["argv"] = argv
                 # Simulate the browser writing to the redirected stderr file.
-                with open(stderr_path, "w", encoding="utf-8") as fh:
-                    fh.write("error while loading shared libraries: libnspr4.so\n")
+                stderr.write(b"error while loading shared libraries: libnspr4.so\n")
+                stderr.flush()
 
             def poll(self):
                 return 127
 
-        monkeypatch.setattr(
-            "hermes_cli.browser_connect.chrome_debug_data_dir", lambda: str(tmp_path)
-        )
-        stderr_path = tmp_path / "launch-stderr.log"
         with patch("hermes_cli.browser_connect.get_chrome_debug_candidates", return_value=[chrome]), \
              patch("hermes_cli.browser_connect.is_browser_debug_ready", return_value=False), \
-             patch("subprocess.Popen", side_effect=lambda *a, **k: _Proc(stderr_path)):
+             patch("subprocess.Popen", side_effect=lambda argv, **k: _Proc(argv, k["stderr"])):
             result = launch_chrome_debug(9222, "Linux")
 
         assert result.launched is False
@@ -127,6 +144,35 @@ class TestChromeDebugLaunch:
         assert "libnspr4.so" in result.attempts[0].stderr_tail
         assert result.hint is not None
         assert "libnspr4.so" in result.hint
+        # The browser ran on the prepared protected-RAM copy, never on a home path.
+        assert result.profile_dir and result.profile_dir.startswith(str(ram.resolve()))
+        assert f"--user-data-dir={result.profile_dir}" in launched["argv"]
+
+    def test_unpreparable_debug_profile_launches_nothing(self, owned):
+        home, _ram = owned
+        chromium_tree(home / "chrome-debug")  # an older build's plaintext profile awaiting repair
+        popen = Mock()
+        with patch("hermes_cli.browser_connect.get_chrome_debug_candidates", return_value=["/usr/bin/chromium"]), \
+             patch("subprocess.Popen", popen):
+            result = launch_chrome_debug(9222, "Linux")
+
+        popen.assert_not_called()
+        assert result.launched is False and result.profile_dir is None
+        assert "hermes secure-vault repair" in result.hint
+
+    def test_slash_connect_offers_no_manual_command_for_unpreparable_profile(self, capsys):
+        from hermes_cli import cli_browser_launch as mixin
+
+        refusal = ChromeDebugLaunch(profile_error="Hermes keeps active browser profiles only in proven RAM.")
+        manual = Mock(return_value="/usr/bin/chromium --user-data-dir=/unprotected")
+        with patch.object(mixin, "local_port_in_use", return_value=False), \
+             patch.object(mixin, "launch_chrome_debug", return_value=refusal), \
+             patch.object(mixin, "manual_chrome_debug_command", manual):
+            assert mixin.launch_default_cdp_browser(9222) is None
+
+        manual.assert_not_called()
+        printed = capsys.readouterr().out
+        assert refusal.profile_error in printed and "--user-data-dir" not in printed
 
     def test_launch_result_no_hint_when_no_candidates(self):
         with patch("hermes_cli.browser_connect.get_chrome_debug_candidates", return_value=[]):
@@ -141,7 +187,7 @@ class TestChromeDebugLaunch:
 
         with patch("hermes_cli.browser_connect.shutil.which", return_value=None), \
              patch("hermes_cli.browser_connect.os.path.isfile", side_effect=lambda path: path == chrome):
-            command = manual_chrome_debug_command(9222, "Linux")
+            command = manual_chrome_debug_command(9222, "Linux", PREPARED)
 
         assert command is not None
         # Linux/WSL uses POSIX shell quoting (single quotes around paths with spaces).
@@ -152,7 +198,7 @@ class TestChromeDebugLaunch:
 
         with patch("hermes_cli.browser_connect.shutil.which", side_effect=lambda name: chrome if name == "chrome.exe" else None), \
              patch("hermes_cli.browser_connect.os.path.isfile", side_effect=lambda path: path == chrome):
-            command = manual_chrome_debug_command(9222, "Windows")
+            command = manual_chrome_debug_command(9222, "Windows", PREPARED)
 
         assert command is not None
         # Windows uses cmd.exe-compatible quoting via subprocess.list2cmdline.

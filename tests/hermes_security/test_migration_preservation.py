@@ -2,7 +2,6 @@
 import os
 import sqlite3
 import stat
-import tarfile
 
 import pytest
 
@@ -49,13 +48,17 @@ def test_rollback_is_private_during_first_write_and_remains_restorable(tmp_path,
     home.mkdir()
     (home / "config.yaml").write_text("model: synthetic-rollback\n", encoding="utf-8")
     observed = []
-    original_add = tarfile.TarFile.add
+    from hermes_security.migration_archive import _Sink
+
+    original_add = _Sink._raw
 
     def add_checked(self, *args, **kwargs):
-        observed.append(stat.S_IMODE(os.fstat(self.fileobj.fileno()).st_mode))
+        observed.append(stat.S_IMODE(os.fstat(self.fd).st_mode))
         return original_add(self, *args, **kwargs)
 
-    monkeypatch.setattr(tarfile.TarFile, "add", add_checked)
+    monkeypatch.setattr(_Sink, "_raw", add_checked)
+    vault.init_vault(home, "synthetic-rollback", _allow_existing_state=True)
+    vault.unlock(home, "synthetic-rollback")
     old_umask = os.umask(0o022)
     try:
         first = migrate._backup_home(home, tmp_path)
@@ -66,7 +69,10 @@ def test_rollback_is_private_during_first_write_and_remains_restorable(tmp_path,
     assert first != second, "two backups must never overwrite the rollback copy"
     for path in (first, second):
         assert stat.S_IMODE(path.stat().st_mode) == 0o600
-        with tarfile.open(path) as archive:
-            restored = archive.extractfile("config.yaml")
-            assert restored is not None
-            assert restored.read() == b"model: synthetic-rollback\n"
+        from hermes_security.artifacts import _Custody
+        from hermes_security.migration_archive import verified_tar
+
+        with verified_tar(path, custody=_Custody(home)) as archive:
+            member = next(iter(archive))
+            assert member.name == "config.yaml"
+            assert archive.extractfile(member).read() == b"model: synthetic-rollback\n"

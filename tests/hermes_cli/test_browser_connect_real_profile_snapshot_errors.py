@@ -12,6 +12,7 @@ import sqlite3
 import pytest
 
 import hermes_cli.browser_connect as bc
+from tests.hermes_cli.browser_profile_env import owned_profile_env, reset_owned_profiles
 
 _LOCKED = ("Login Data", "Login Data For Account", "Web Data")
 
@@ -61,14 +62,17 @@ def test_snapshot_error_names_databases_and_reason(tmp_path, monkeypatch, reason
     wording when every failure is the backup deadline, the SQLite error otherwise."""
     root = tmp_path / "real"
     _fake_profile(root)
-    monkeypatch.setattr(bc, "get_hermes_home", lambda: tmp_path / "hh")
+    owned_profile_env(tmp_path, monkeypatch)
     locked_reason = reason or bc._AUTH_DB_LOCKED
 
     def fake_copy(src, dst_file):
         return locked_reason if os.path.basename(src) in _LOCKED else None
 
     monkeypatch.setattr(bc, "_copy_auth_file", fake_copy)
-    dst, err = bc.snapshot_real_profile("chrome", src=str(root))
+    try:
+        dst, err = bc.snapshot_real_profile("chrome", src=str(root))
+    finally:
+        reset_owned_profiles()
     assert dst is None and err
     for fragment in expect:
         assert fragment in err, err

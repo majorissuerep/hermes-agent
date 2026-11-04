@@ -794,6 +794,8 @@ def test_labels_attribute_populated_after_init(monkeypatch):
         "hermes-agent": "1",
         "hermes-task-id": "abc",
         "hermes-profile": "default",
+        "hermes-home": docker_env.canonical_home_identity(),
+        "hermes-ownership": "exclusive",
         "hermes-egress": "off",
     }
     assert re.fullmatch(r"[0-9a-f]{24}", environment_label)
@@ -860,8 +862,12 @@ def test_shared_container_key_replaces_profile_identity(monkeypatch, tmp_path):
     assert a._labels["hermes-profile"] == b._labels["hermes-profile"]
     assert a._labels["hermes-profile"] != "research"
     assert a._labels["hermes-profile"].startswith("team_workspace-")
-    # Explicit sharing retains the first creator's immutable settings.
-    assert a._labels == b._labels
+    # Reuse stays shared, while the actual creator's ownership is recorded separately.
+    # Automatic deletion never treats a shared entry as an exclusive profile resource.
+    assert a._labels["hermes-ownership"] == b._labels["hermes-ownership"] == "shared"
+    assert a._labels["hermes-home"] != b._labels["hermes-home"]
+    assert {k: v for k, v in a._labels.items() if k != "hermes-home"} == {
+        k: v for k, v in b._labels.items() if k != "hermes-home"}
 
 
 def test_distinct_shared_keys_never_collide(monkeypatch):

@@ -686,6 +686,21 @@ describe('createSlashHandler', () => {
     })
   })
 
+  it.each(['busy', 'revoked'])('shows an unsaved %s browser profile on active-session disconnect', async state => {
+    patchUiState({ sid: 'sid-owner' })
+    const warning = `Owned browser profile chrome-debug: ${state}; any unsaved copy remains in protected RAM.`
+    const rpc = vi.fn(() => Promise.resolve({ connected: false, messages: [warning] }))
+    const ctx = buildCtx({ gateway: { ...buildGateway(), rpc } })
+
+    expect(createSlashHandler(ctx)('/browser disconnect')).toBe(true)
+    await vi.waitFor(() => {
+      expect(ctx.transcript.sys).toHaveBeenCalledWith(warning)
+      expect(ctx.transcript.sys).toHaveBeenCalledWith(t('slashCmd.ops.browser.disconnected'))
+    })
+    expect(ctx.transcript.sys.mock.calls.filter(([message]) => message === warning)).toHaveLength(1)
+    expect(gatewayWork(ctx)).toEqual([])
+  })
+
   it('routes /rollback through native RPC when a session is active', () => {
     patchUiState({ sid: 'sid-abc' })
     const rpc = vi.fn(() => Promise.resolve({}))

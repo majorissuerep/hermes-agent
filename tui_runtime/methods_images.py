@@ -36,10 +36,15 @@ def _image_to_data_url(ref: str, cap: int):
                 data = b"".join(chunks)
                 mime = (resp.headers.get("content-type") or "image/png").split(";", 1)[0].strip()
         elif os.path.isfile(ref):
-            if os.path.getsize(ref) > cap:
-                return None
-            with open(ref, "rb") as fh:
-                data = fh.read(cap + 1)
+            from tools.browser_media_custody import owned_media_path, read_owned_media
+
+            if owned := owned_media_path(ref):
+                data = read_owned_media(owned)
+            else:
+                if os.path.getsize(ref) > cap:
+                    return None
+                with open(ref, "rb") as fh:
+                    data = fh.read(cap + 1)
             mime = mimetypes.guess_type(ref)[0] or "image/png"
         else:
             return None

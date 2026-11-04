@@ -792,19 +792,17 @@ def _(rid, params: dict) -> dict:
         from hermes_cli.clipboard import has_clipboard_image, save_clipboard_image
     except Exception as e:
         return _err(rid, 5027, f"clipboard unavailable: {e}")
-    session["image_counter"] = session.get("image_counter", 0) + 1
-    img_dir = _session_images_dir(session)
-    img_dir.mkdir(parents=True, exist_ok=True)
-    img_path = (
-        img_dir / f"clip_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{session['image_counter']}.png")
-    # Save-first (CLI keybinding parity): more robust than a has_image() precheck.
-    if not save_clipboard_image(img_path):
-        session["image_counter"] = max(0, session["image_counter"] - 1)
-        return _ok(rid, {"attached": False, "message": (
-            "Clipboard has image but extraction failed" if has_clipboard_image()
-            else "No image found in clipboard")})
-    session.setdefault("attached_images", []).append(str(img_path))
-    return _ok(rid, _attached_image_result(session, img_path))
+    try:
+        # Save-first (CLI keybinding parity): more robust than a has_image() precheck.
+        pixels = _capture_clipboard_pixels(save_clipboard_image)
+        if pixels is None:
+            return _ok(rid, {"attached": False, "message": (
+                "Clipboard has image but extraction failed" if has_clipboard_image()
+                else "No image found in clipboard")})
+        img_path = _queue_attached_image(session, pixels, ".png", prefix="clip")
+    except (RuntimeError, OSError, ValueError) as e:  # RAM workspace, vault custody, sealing
+        return _err(rid, 5027, f"clipboard image not stored: {e}")
+    return _ok(rid, _attached_image_result(session, img_path, pixels=pixels))
 
 
 @method("image.attach")
@@ -862,7 +860,7 @@ def _(rid, params: dict) -> dict:
     except Exception as e:
         return _err(rid, 5027, f"write failed: {e}")
     return _ok(rid, _attached_image_result(
-        session, img_path,
+        session, img_path, pixels=img_bytes,
         remainder="", text=f"[User attached image: {img_path.name}]", bytes=len(img_bytes)))
 
 
@@ -872,7 +870,7 @@ def _(rid, params: dict) -> dict:
     queuing the pages as images.  Host ``path`` or base64 ``content_base64``."""
     import shutil
     import subprocess
-    import tempfile
+    from tools.browser_media_custody import MediaCustodyError, protected_media_workspace
     session, err = _sess_building(params, rid)
     if err:
         return err
@@ -882,8 +880,12 @@ def _(rid, params: dict) -> dict:
     raw_b64 = str(params.get("content_base64") or params.get("data") or "").strip()
     if not raw_path and not raw_b64:
         return _err(rid, 4015, "path or content_base64 required")
-    with tempfile.TemporaryDirectory(prefix="pdf_attach_") as td:
-        td_path = Path(td)
+    # Source PDF and rendered pages stay in proven RAM; only sealed page artifacts persist.
+    with contextlib.ExitStack() as stack:
+        try:
+            td_path = stack.enter_context(protected_media_workspace("tui-pdf"))
+        except MediaCustodyError as e:
+            return _err(rid, 5028, str(e))
         pdf_path, display_name, err = _pdf_attach_source(rid, params, td_path, raw_path, raw_b64)
         if err is not None:
             return err
@@ -915,9 +917,9 @@ def _(rid, params: dict) -> dict:
                 page_int = int(page_num)
             except ValueError:
                 page_int = first_page + len(attached_pages)
-            dst = _queue_attached_image(
-                session, src.read_bytes(), ".png", prefix=f"pdf_p{page_num}")
-            attached_pages.append({"path": str(dst), "page": page_int, **_image_meta(dst)})
+            pixels = src.read_bytes()
+            dst = _queue_attached_image(session, pixels, ".png", prefix=f"pdf_p{page_int}")
+            attached_pages.append({"path": str(dst), "page": page_int, **_image_meta(dst, pixels)})
         return _ok(rid, {
             "attached": True, "filename": display_name, "pages_attached": len(attached_pages),
             "pages": attached_pages, "count": len(session["attached_images"]),
@@ -1095,11 +1097,12 @@ def _(rid, params: dict) -> dict:
 
 # ── attachments ─────────────────────────────────────────────────────────────
 
-def _attached_image_result(session, image_path, **extra) -> dict:
-    """Common ``{attached, path, count, ...meta}`` reply after queuing an image."""
+def _attached_image_result(session, image_path, *, pixels=None, **extra) -> dict:
+    """Common ``{attached, path, count, ...meta}`` reply after queuing an image (``pixels``: the
+    in-memory bytes of a sealed upload, whose stored file is ciphertext)."""
     return {
         "attached": True, "path": str(image_path), "count": len(session["attached_images"]),
-        **extra, **_image_meta(image_path)}
+        **extra, **_image_meta(image_path, pixels)}
 
 
 def _pdf_attach_source(rid, params, td_path, raw_path, raw_b64):

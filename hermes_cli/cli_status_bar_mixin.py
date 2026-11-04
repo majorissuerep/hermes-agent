@@ -10,6 +10,8 @@ from __future__ import annotations
 import errno
 import shutil
 import threading
+import contextvars
+from hermes_security.errors import VaultError
 import time
 
 from agent.i18n import t
@@ -689,7 +691,8 @@ class CLIStatusBarMixin:
                     or self._pet_scale != scale
                     or self._pet_renderer.mode != renderer_mode):
                     self._pet_renderer = pet_render.PetRenderer(
-                        str(pet.spritesheet), mode=renderer_mode, scale=scale, unicode_cols=cols)
+                        str(pet.spritesheet), mode=renderer_mode, scale=scale, unicode_cols=cols,
+                        private_custody=getattr(pet, "_private_custody", None))
                     self._pet_slug = pet.slug
                     self._pet_cols = cols
                     self._pet_scale = scale
@@ -754,6 +757,13 @@ class CLIStatusBarMixin:
 
     def _pet_frames_for(self, state: str) -> list:
         """Return (and cache) the half-block grids for one state."""
+        if self._pet_renderer is None:
+            return []
+        try:
+            self._pet_renderer.assert_live()
+        except (VaultError, OSError):
+            self._pet_frames_cache.clear()
+            return []
         cached = self._pet_frames_cache.get(state)
         if cached is not None:
             return cached
@@ -763,7 +773,8 @@ class CLIStatusBarMixin:
         try:
             count = renderer.frame_count(state) or 1
             grids = [renderer.cells(state, i, cols=self._pet_cols) for i in range(count)]
-        except Exception:
+            renderer.assert_live()
+        except (VaultError, OSError, ValueError):
             grids = []
         self._pet_frames_cache[state] = grids
         return grids
@@ -771,6 +782,13 @@ class CLIStatusBarMixin:
     def _pet_kitty_payload_for(self, state: str) -> dict | None:
         """Return and cache a Kitty virtual-placeholder payload for *state*."""
         with self._pet_lock:
+            if self._pet_renderer is None:
+                return None
+            try:
+                self._pet_renderer.assert_live()
+            except (VaultError, OSError):
+                self._pet_kitty_cache.clear()
+                return None
             cached = self._pet_kitty_cache.get(state)
             if cached is not None:
                 return cached
@@ -781,7 +799,8 @@ class CLIStatusBarMixin:
         try:
             # PNG encoding outside _pet_lock: first visit of a state must not stall the prompt.
             payload = renderer.kitty_payload(state, image_id=image_id)
-        except Exception:
+            renderer.assert_live()
+        except (VaultError, OSError, ValueError):
             payload = None
         if payload is not None:
             payload = {**payload, "image_id": image_id}
@@ -919,7 +938,8 @@ class CLIStatusBarMixin:
         if view is not None and view[1]:
             self._pet_queue_kitty_frame()
         self._pet_anim_running = True
-        self._pet_anim_thread = threading.Thread(target=self._pet_anim_loop, daemon=True)
+        self._pet_anim_thread = threading.Thread(target=contextvars.copy_context().run,
+                                                args=(self._pet_anim_loop,), daemon=True)
         self._pet_anim_thread.start()
 
     def _pet_stop_anim(self) -> None:

@@ -4,6 +4,7 @@ rebound onto server.py's globals at install time (method_ctx.bind_module)."""
 
 from __future__ import annotations
 
+
 from pathlib import Path
 
 from .method_ctx import HandlerRegistry, bind_module
@@ -97,6 +98,8 @@ def _active_pet():
 
 def _pet_sig() -> tuple:
     """(slug, spritesheet revision, scale) of the active pet — ("off",) when none."""
+    from . import pet_media
+
     display = _load_cfg().get("display") or {}
     pet_cfg = display.get("pet") if isinstance(display.get("pet"), dict) else {}
     if not pet_cfg or not is_truthy_value(pet_cfg.get("enabled"), default=False):
@@ -104,7 +107,7 @@ def _pet_sig() -> tuple:
     try:
         if active := _active_pet():
             pet, scale = active
-            return (pet.slug, _pet_sheet_revision(pet.spritesheet), scale)
+            return (pet.slug, pet_media.sheet_revision(pet.spritesheet), scale)
     except Exception:
         pass
     return ("off",)
@@ -112,11 +115,13 @@ def _pet_sig() -> tuple:
 
 def _pet_changed_payload() -> dict:
     """``pet.info.meta``-shaped payload so the renderer can decide whether to refetch sprites."""
+    from . import pet_media
+
     try:
         if active := _active_pet():
             pet, scale = active
             return {"enabled": True, "slug": pet.slug, "displayName": pet.display_name,
-                    "scale": scale, "spritesheetRevision": _pet_sheet_revision(pet.spritesheet)}
+                    "scale": scale, "spritesheetRevision": pet_media.sheet_revision(pet.spritesheet)}
     except Exception:
         pass
     return {"enabled": False}
