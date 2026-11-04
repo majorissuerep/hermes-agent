@@ -165,6 +165,7 @@ _UPDATE_DEPENDENCIES = (
     "hermes_security/migration_resume.py",  # encrypted rollback and interrupted migration
     "hermes_security/migration_workflow.py",  # encrypted rollback and interrupted migration
     "hermes_security/migration_profiles.py",  # selected-home conversion and opaque profile rollback
+    "hermes_security/migration_pets.py",  # private legacy producer rollback and group admission
     "hermes_cli/terminal_update.py",
     "hermes_platform/process_argv.py",
     "hermes_platform/child_processes.py",  # native updater custody and completion receipt ownership

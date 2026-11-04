@@ -652,6 +652,10 @@ def test_every_module_an_update_entry_point_imports_starts_its_suite(entries, la
     assert missing == {}, f"{lane}: imported by the update path but not routed to it: {missing}"
 
 
+def test_private_legacy_pet_migration_reaches_existing_upgrade_suite():
+    assert cc.classify(["hermes_security/migration_pets.py"])["e2e_upgrade"]
+
+
 def test_entry_points_themselves_start_their_suites():
     for module in _entry_modules(cc._UPDATE_ENTRY_POINTS):
         assert cc.classify([module.relative_to(_REPO).as_posix()])["e2e_upgrade"], module

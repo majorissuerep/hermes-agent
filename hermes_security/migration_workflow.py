@@ -32,8 +32,15 @@ def _backup_directory(home):
 
 def entries(home):
     from hermes_security.migration_profiles import snapshot_entries
+    from hermes_security.migration_pets import entries as pet_entries
 
-    yield from snapshot_entries(home)
+    seen = set()
+    for source, relative, attributes in snapshot_entries(home):
+        seen.add(relative)
+        yield source, relative, attributes
+    for source, relative, attributes in pet_entries(home):
+        if relative not in seen:
+            yield source, relative, attributes
 
 
 def _backup(home, state, unlocked):
@@ -84,7 +91,7 @@ def _convert_member(home, member, unlocked, state, report):
     original = {name.removeprefix("HERMES."): value for name, value in member.pax_headers.items()
                 if name.startswith("HERMES.")}
     kind = original.get("kind")
-    if kind in {"skip", "profile"}:
+    if kind in {"skip", "profile", "pet"}:
         return  # full rollback retains independent islands without using their keys
     if kind == "browser":
         migrate._note_browser_root(report, relative)
@@ -109,6 +116,7 @@ def _convert_member(home, member, unlocked, state, report):
 
 def _continue(home, unlocked, state, report):
     from hermes_security import migrate
+    from hermes_security import migration_pets
     from hermes_security.artifacts import _Custody
     from hermes_security.migration_archive import verified_tar
     from hermes_security.migration_resume import file_hash
@@ -118,14 +126,22 @@ def _continue(home, unlocked, state, report):
     if file_hash(target) != state["sha256"]:
         raise VaultIntegrityError("Verified migration rollback changed; no source files were converted")
     metadata = _archive_metadata(target, home, unlocked, state)
+    pets = {}
     with verified_tar(target, custody=_Custody(home), expected_sha256=state["sha256"],
                       expected_metadata=metadata) as archive:
         for member in archive:
             try:
+                if member.pax_headers.get("HERMES.kind") == "pet":
+                    pets[member.name] = migration_pets.remember(member, archive)
                 _convert_member(home, member, unlocked, state, report)
             except (OSError, ValueError, VaultError, RuntimeError, sqlite3.Error) as error:
                 report.failures.append(f"{member.name}: {type(error).__name__}: {error}")
                 break  # retain one exact interrupted entry; do not create new conversion debt
+    if not report.failures:
+        try:
+            migration_pets.convert(home, pets, report)
+        except (OSError, ValueError, VaultError, RuntimeError) as error:
+            report.failures.append(f"pets: {type(error).__name__}: {error}")
     if not report.failures:
         migrate._convert_browser_profiles(home, report)
     if not report.failures:
@@ -153,6 +169,9 @@ def _plan(home):
             migrate._note_browser_root(report, relative)
         elif kind in destinations:
             destinations[kind].append(relative.as_posix())
+    from hermes_security.migration_pets import plan as plan_pets
+
+    plan_pets(home, report)
     return report
 
 
