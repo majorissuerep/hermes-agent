@@ -12,7 +12,9 @@ import secrets
 import stat
 
 from hermes_security import frames
-from hermes_security.artifact_paths import ARTIFACT_ROOTS, is_artifact_relative_path, terminal_frame_purpose
+from hermes_security.artifact_paths import (
+    ARTIFACT_ROOTS, is_artifact_relative_path, is_legacy_browser_snapshot_path, terminal_frame_purpose,
+)
 from hermes_security.errors import VaultLockedError
 
 _ROOTS = ARTIFACT_ROOTS
@@ -36,6 +38,8 @@ def _binding(path, home=None):
 def is_artifact_path(path, *, home=None) -> bool:
     """Recognize explicit reserved roots, including foreign ones to refuse safely."""
     selected, candidate = _binding(path, home)
+    if candidate.is_relative_to(selected) and is_legacy_browser_snapshot_path(candidate.relative_to(selected)):
+        return True
     if any(candidate == selected.joinpath(*root) or selected.joinpath(*root) in candidate.parents
            for root in _ROOTS):
         return True

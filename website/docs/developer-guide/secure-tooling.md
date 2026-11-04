@@ -155,6 +155,11 @@ their own qualification; non-persistence flags alone are insufficient evidence.
 
 Private terminal and tool outputs are stored beneath `artifacts/terminal-output`
 and `artifacts/tool-results`; owned browser images use `artifacts/browser`.
+Oversized browser accessibility trees use `artifacts/browser-snapshots`. Their
+truncation footer names the authenticated host path for the existing file tools,
+including when task execution uses an outgoing backend. Paging, search and
+element references survive without mounting or uploading private page text.
+A failed encrypted save is explicitly reported; no plaintext cache is created.
 An explicit image path can be inspected with `hermes artifacts view PATH` or
 `/artifacts view PATH`. This authenticates and decodes in memory, then renders a
 bounded grayscale text preview (at most 120 columns by 60 rows). It creates no
@@ -188,6 +193,10 @@ plaintext scan. Explicit vault repair seals them in place and hardens their
 permissions; it preserves their authenticated legacy paths. Raw old images are
 refused by runtime readers until repaired. Package-manager and other public
 caches remain excluded. This change does not erase old bytes from SSD media.
+The same explicit repair covers the old `browser-snapshot-<hash>.txt` files in
+`cache/web` and `web_cache`. Ordinary public web extracts in `cache/web` keep
+their existing cache policy. A planted symlink at a private destination is
+refused and retained for inspection; its target is never written through.
 
 The existing initial migration creates a documented plaintext recovery archive
 outside the home, and deliberate offline exports also produce plaintext. These

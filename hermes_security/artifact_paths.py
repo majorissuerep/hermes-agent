@@ -12,10 +12,12 @@ import re
 _OUTPUT_CACHE_ROOTS = (("cache", "terminal-output"), ("cache", "spillover"), ("cache", "screenshots"))
 _DELEGATION_ROOT = ("cache", "delegation")
 _DELEGATION_ROOTS = (_DELEGATION_ROOT, ("delegation_cache",))
+_SNAPSHOT_CACHE_ROOTS = (("cache", "web"), ("web_cache",))
 PRIVATE_CACHE_ROOTS = (*_OUTPUT_CACHE_ROOTS, *_DELEGATION_ROOTS)
 LEGACY_ROOTS = (*PRIVATE_CACHE_ROOTS, ("browser_screenshots",))
 ARTIFACT_ROOTS = (("artifacts", "terminal-output"), ("artifacts", "tool-results"),
-                  ("artifacts", "browser"), *_OUTPUT_CACHE_ROOTS, ("browser_screenshots",), *_DELEGATION_ROOTS)
+                  ("artifacts", "browser"), ("artifacts", "browser-snapshots"),
+                  *_OUTPUT_CACHE_ROOTS, ("browser_screenshots",), *_DELEGATION_ROOTS)
 IMAGE_ROOTS = (("artifacts", "browser"), ("cache", "screenshots"), ("browser_screenshots",))
 _TERMINAL_ROOTS = (("artifacts", "terminal-output"), ("cache", "terminal-output"))
 
@@ -27,6 +29,8 @@ def _under(relative, roots) -> bool:
 
 
 def is_artifact_relative_path(relative) -> bool:
+    if is_legacy_browser_snapshot_path(relative):
+        return True
     if _under(relative, _DELEGATION_ROOTS):
         return is_delegation_output_path(relative)
     return _under(relative, ARTIFACT_ROOTS)
@@ -80,10 +84,18 @@ def terminal_frame_purpose(relative) -> str | None:
 
 
 def is_legacy_artifact_path(relative) -> bool:
-    return _under(relative, LEGACY_ROOTS)
+    return _under(relative, LEGACY_ROOTS) or is_legacy_browser_snapshot_path(relative)
+
+
+def is_legacy_browser_snapshot_path(relative) -> bool:
+    """Only the browser-owned text family in an otherwise public web cache."""
+    parts = Path(relative).parts
+    return (parts[:-1] in _SNAPSHOT_CACHE_ROOTS
+            and re.fullmatch(r"browser-snapshot-[0-9a-f]{10}\.txt", parts[-1]) is not None)
 
 
 def is_private_cache_branch(relative) -> bool:
     """Admit only old private cache roots and their ancestors while walking."""
     parts = Path(relative).parts
-    return parts == ("cache",) or _under(relative, PRIVATE_CACHE_ROOTS) or parts in PRIVATE_CACHE_ROOTS
+    return (parts == ("cache",) or _under(relative, PRIVATE_CACHE_ROOTS) or parts in PRIVATE_CACHE_ROOTS
+            or parts in _SNAPSHOT_CACHE_ROOTS or is_legacy_browser_snapshot_path(relative))

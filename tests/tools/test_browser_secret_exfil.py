@@ -165,10 +165,18 @@ class TestBrowserSnapshotRedaction:
     returned view (_redact_browser_output at the call sites).
     """
 
-    def test_stored_snapshot_redacts_secrets(self):
+    def test_stored_snapshot_redacts_secrets(self, tmp_path, monkeypatch):
         """Secrets in a snapshot must be masked in the stored full-text file."""
-        from pathlib import Path
+        from hermes_security import vault
+        from hermes_security.artifacts import read_text
         from tools.browser_tool_snapshot import _store_full_snapshot
+
+        home = tmp_path / "snapshot-owner"
+        home.mkdir()
+        monkeypatch.setenv("HERMES_HOME", str(home))
+        monkeypatch.setattr(vault, "_SCRYPT_N", 1024)
+        vault.init_vault(home, "synthetic redaction snapshot password")
+        vault.unlock(home, "synthetic redaction snapshot password")
 
         fake_key = "sk-" + "FAKESECRETVALUE1234567890ABCDEF"
         snapshot_with_secret = (
@@ -176,13 +184,16 @@ class TestBrowserSnapshotRedaction:
             f"text: API Key: {fake_key}\n"
             "button [ref=e5]: Save\n"
         )
-        stored = _store_full_snapshot(snapshot_with_secret)
-        assert stored is not None
-        content = Path(stored).read_text(encoding="utf-8")
-        assert "FAKESECRETVALUE1234567890" not in content
-        # Non-secret content should survive
-        assert "Dashboard" in content
-        assert "ref=e5" in content
+        try:
+            stored = _store_full_snapshot(snapshot_with_secret)
+            assert stored is not None
+            content = read_text(stored)
+            assert "FAKESECRETVALUE1234567890" not in content
+            # Non-secret content should survive
+            assert "Dashboard" in content
+            assert "ref=e5" in content
+        finally:
+            vault.clear_vault_cache()
 
 
 
