@@ -39,6 +39,7 @@ from typing import Any, Iterator
 
 from hermes_platform.memory_protection import RamProof, ram_only_directory_proof
 from hermes_security import browser_profile_archive as archive
+from hermes_platform.memory_capacity import capacity_budget as _capacity
 from hermes_security.errors import VaultError
 
 logger = logging.getLogger(__name__)
@@ -339,13 +340,17 @@ def _refuse_legacy(profile: OwnedProfile) -> None:
 
 
 def _require_capacity(base: Path, needed: int) -> None:
-    info = os.statvfs(base)
-    free = info.f_bavail * info.f_frsize
+    budget = _capacity(base, proof=_prove(base))
+    if budget.available_bytes is None:
+        raise BrowserProfileError(
+            f"The protected RAM budget is unknown ({budget.reason}). Check the readable kernel and "
+            "cgroup memory facts and retry. The encrypted browser profile was left unchanged.")
+    free = budget.available_bytes
     if free < needed + _RAM_MARGIN:
         raise BrowserProfileError(
-            f"The protected RAM workspace has {free // (1024 * 1024)} MiB free, too little to restore "
+            f"The protected RAM budget has {free // (1024 * 1024)} MiB free, too little to restore "
             f"this browser profile (about {needed // (1024 * 1024)} MiB). Free RAM workspace space or "
-            "point security.protected_work_dir at a larger ramfs, then retry. The encrypted profile "
+            "raise the applicable memory limit, then retry. The encrypted profile "
             "was left unchanged.")
 
 

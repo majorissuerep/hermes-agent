@@ -15,6 +15,7 @@ from contextlib import closing
 from pathlib import Path
 
 from hermes_platform.memory_protection import RamProof
+from hermes_platform.memory_capacity import CapacityBudget
 from hermes_security import vault
 
 PASSWORD = "synthetic owned browser profile password"
@@ -38,6 +39,8 @@ def owned_profile_env(tmp_path: Path, monkeypatch, *, proven: bool = True,
         vault.unlock(home, PASSWORD)
     proof = RamProof(proven, "ramfs" if proven else "ext4", "synthetic unit proof")
     monkeypatch.setattr("hermes_cli.browser_profile_store._prove", lambda _path: proof)
+    monkeypatch.setattr("hermes_cli.browser_profile_store._capacity", lambda _path, **_kwargs: CapacityBudget(
+        8 * 1024**3, "synthetic unit budget; native admission is qualified separately"))
     return home, ram
 
 
