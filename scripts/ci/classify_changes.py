@@ -171,6 +171,8 @@ _UPDATE_DEPENDENCIES = (
     "hermes_security/artifact_paths.py",  # private state classification during update migration
     "hermes_security/artifacts.py",  # authenticated private output recovery
     "hermes_security/delegation_repair.py",  # legacy delegation conversion during repair
+    "agent/pet/__init__.py",  # package initialization for private pet migration
+    "agent/pet/private_repair.py",  # profile-owned pet conversion during update migration
     "hermes_security/sqlite_custody.py",  # encrypted database lineage on every update
     "hermes_platform/memory_protection.py",  # native backing proof used by key custody
     "hermes_platform/managed_supervision.py",  # encrypted installer owner and stage lifetime

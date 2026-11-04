@@ -10,6 +10,8 @@ gives each UI a natural preview/loading point.
 from __future__ import annotations
 
 import contextlib
+import contextvars
+import io
 import logging
 import time
 from collections import Counter
@@ -20,6 +22,7 @@ from typing import Callable, Iterator
 
 from agent.pet.generate import atlas, imagegen, prompts
 from agent.pet.generate.imagegen import GenerationError, SpriteProvider
+from agent.provider_media import generation_scope
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +76,18 @@ def _harden_transparency(path: Path) -> Path:
         # name the same file on case-insensitive filesystems and the unlink below
         # would delete the hardened output.
         out = path if path.suffix.lower() == ".png" else path.with_suffix(".png")
-        keyed.save(out, format="PNG")
+        from tools.browser_media_custody import owned_media_path
+
+        if owned_media_path(str(path)) is not None:
+            from agent.provider_media import _output_custody
+            from hermes_security import artifacts
+
+            home, custody = _output_custody()
+            encoded = io.BytesIO()
+            keyed.save(encoded, format="PNG")
+            artifacts.write_bytes(out, encoded.getvalue(), home=home, custody=custody, overwrite=out == path)
+        else:
+            keyed.save(out, format="PNG")
         if out != path:
             _unlink_quietly(path)  # nothing prunes cache/generated/images, so drop it now
         return out
@@ -91,7 +105,7 @@ def _run_parallel(fn, items, *, cancelled, on_cancel_log: str) -> Iterator:
     """
     workers = max(1, min(len(items), _MAX_PARALLEL_GENERATIONS))
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        futures = [pool.submit(fn, item) for item in items]
+        futures = [pool.submit(contextvars.copy_context().run, fn, item) for item in items]
         for fut in as_completed(futures):
             if cancelled():
                 logger.info(on_cancel_log)
@@ -101,6 +115,7 @@ def _run_parallel(fn, items, *, cancelled, on_cancel_log: str) -> Iterator:
             yield fut.result()
 
 
+@generation_scope()
 def generate_base_drafts(
     concept: str,
     *,
@@ -206,6 +221,7 @@ def _generate_row(spec: tuple[str, int, int], *, base: Path, label: str, style: 
     return state, None
 
 
+@generation_scope()
 def hatch_pet(
     *,
     base_image: str | Path,

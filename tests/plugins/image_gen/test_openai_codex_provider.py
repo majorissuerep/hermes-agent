@@ -15,6 +15,8 @@ from pathlib import Path
 import httpx
 import pytest
 
+from hermes_security import vault
+
 # The plugin directory uses a hyphen, which is not a valid Python identifier
 # for the dotted-import form. Load it via importlib so tests don't need to
 # touch sys.path or rename the directory.
@@ -40,8 +42,12 @@ def _b64_png() -> str:
 @pytest.fixture(autouse=True)
 def _tmp_hermes_home(tmp_path, monkeypatch):
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    monkeypatch.setattr(vault, "_SCRYPT_N", 1024)
+    vault.init_vault(tmp_path, "synthetic image provider password")
+    vault.unlock(tmp_path, "synthetic image provider password")
     monkeypatch.delenv("OPENAI_IMAGE_MODEL", raising=False)
     yield tmp_path
+    vault.clear_vault_cache()
 
 
 @pytest.fixture
@@ -205,7 +211,7 @@ class TestGenerate:
         assert result["reported_size"] == "1254x1254"
         assert result["imagegen_request_id"] == "req_abc"
         saved = Path(result["image"])
-        assert saved.exists() and saved.parent == tmp_path / "cache" / "generated" / "images"
+        assert saved.exists() and saved.parent == tmp_path / "artifacts" / "generated" / "images"
         assert saved.name.startswith("openai_codex_")
 
         (request,) = codex_backend["requests"]

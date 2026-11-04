@@ -1,26 +1,28 @@
-"""On-disk pet store — install / list / resolve pets.
+"""Profile pet instances: encrypted metadata/media behind stable logical IDs.
 
-Pets live under ``get_hermes_home()/pets/<slug>/`` (profile-scoped; NOT petdex's
-``~/.codex/pets``, which its CLI owns): ``pet.json`` ({id, displayName,
-description, spritesheetPath}) plus ``spritesheet.webp`` (or .png). The active
-pet comes from the caller-supplied ``display.pet.slug`` (no config loader here).
+Instances live in opaque ``artifacts/generated/pet-store`` objects; ``pets/<slug>``
+is the historical layout imported by explicit repair. Downloaded public source
+catalog assets stay separate in ``cache/pet-catalog``. Active selection remains
+caller-supplied ``display.pet.slug``; this module does not load config.
 """
 
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import io
 import itertools
 import json
 import logging
 import re
-import shutil
 import zipfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlparse
 
 from hermes_constants import get_hermes_home
+from agent.pet import private_media
+from agent.provider_media import generation_scope
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +47,7 @@ class InstalledPet:
     directory: Path
     spritesheet: Path
     created_by: str = ""  # "generator" for pets hatched locally; "" for petdex installs
+    _private_custody: object | None = field(default=None, repr=False, compare=False)
 
     @property
     def exists(self) -> bool:
@@ -61,33 +64,23 @@ def _ensure_dir(path: Path) -> Path:
 
 
 def pets_dir() -> Path:
-    """Return the profile-scoped pets directory (created on demand)."""
+    """Historical instance directory; explicit repair imports it into the encrypted registry."""
     return _ensure_dir(get_hermes_home() / "pets")
 
 
-def _thumb_path(slug: str) -> Path:
-    """Cached thumbnail for *slug* (lives OUTSIDE the pet dir, under ``pets/.thumbs/``)."""
-    return _ensure_dir(pets_dir() / ".thumbs") / f"{slug}.png"
+def _thumb_path(source_url: str) -> Path:
+    """Public catalog previews are keyed by their public source, never a private label."""
+    root = _ensure_dir(get_hermes_home() / "cache/pet-catalog-thumbnails")
+    return root / (hashlib.sha256(source_url.encode()).hexdigest() + ".png")
 
 
-def _read_pet_json(directory: Path) -> dict:
-    pet_json = directory / "pet.json"
-    try:
-        return json.loads(pet_json.read_text(encoding="utf-8-sig")) if pet_json.is_file() else {}
-    except (OSError, ValueError) as exc:
-        logger.debug("unreadable pet.json in %s: %s", directory, exc)
-        return {}
 
 
 def _write_pet_json(directory: Path, meta: dict) -> None:
+    """Only immutable public source-catalog metadata is stored here."""
     (directory / "pet.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
 
 
-def _resolve_spritesheet(directory: Path, meta: dict) -> Path:
-    """Honor ``spritesheetPath``, else probe conventional names (incl. petdex R2's ``sprite.webp``)."""
-    declared = str(meta.get("spritesheetPath", "") or "").strip()
-    names = ([declared] if declared else []) + ["spritesheet.webp", "spritesheet.png", "sprite.webp", "sprite.png"]
-    return next((directory / n for n in names if (directory / n).is_file()), directory / "spritesheet.webp")  # stable default
 
 
 def _safe_slug(slug: str) -> str:
@@ -98,11 +91,13 @@ def _safe_slug(slug: str) -> str:
 
 def load_pet(slug: str) -> InstalledPet | None:
     """Return the :class:`InstalledPet` for *slug*, or ``None`` if absent."""
-    if not (slug := _safe_slug(slug)) or not (directory := pets_dir() / slug).is_dir():
+    if not (slug := _safe_slug(slug)):
         return None
-    meta = _read_pet_json(directory)
-    name, desc, by = (str(meta.get(k, "") or d) for k, d in (("displayName", slug), ("description", ""), ("createdBy", "")))
-    return InstalledPet(slug, name, desc, directory, _resolve_spritesheet(directory, meta), by)
+    if record := private_media.find(slug):
+        return private_media.installed(record)
+    if not (pets_dir() / slug).is_dir():
+        return None
+    raise PetStoreError("Historical pet instance needs explicit `hermes secure-vault repair`; offline export preserves recovery")
 
 
 def _usable_pet(slug: str, error: str = "") -> InstalledPet | None:
@@ -116,7 +111,11 @@ def _usable_pet(slug: str, error: str = "") -> InstalledPet | None:
 
 def installed_pets() -> list[InstalledPet]:
     """Return every installed pet (dirs containing a usable spritesheet)."""
-    return [pet for child in sorted(pets_dir().iterdir()) if child.is_dir() and (pet := _usable_pet(child.name))]
+    private = {record[0]: private_media.installed(record) for record in private_media.records()}
+    for child in sorted(pets_dir().iterdir()):
+        if child.is_dir() and child.name != ".thumbs":
+            raise PetStoreError("Historical pet instances need explicit `hermes secure-vault repair` before listing")
+    return sorted(private.values(), key=lambda pet: pet.slug)
 
 
 def resolve_active_pet(configured_slug: str | None = None) -> InstalledPet | None:
@@ -126,6 +125,7 @@ def resolve_active_pet(configured_slug: str | None = None) -> InstalledPet | Non
     return next(iter(installed_pets()), None)
 
 
+@generation_scope()
 def install_pet(slug: str, *, force: bool = False, timeout: float = _DOWNLOAD_TIMEOUT) -> InstalledPet:
     """Download *slug* from the manifest; idempotent unless *force*. Raises :class:`PetStoreError` / ``ManifestError``."""
     from agent.pet.manifest import find_entry
@@ -133,6 +133,8 @@ def install_pet(slug: str, *, force: bool = False, timeout: float = _DOWNLOAD_TI
     slug = _safe_slug(slug)
     if not slug:
         raise PetStoreError("invalid pet slug")
+    if (pets_dir() / slug).exists():
+        raise PetStoreError("Historical pet instance needs explicit `hermes secure-vault repair` before reinstalling")
     if not force and (existing := _usable_pet(slug)):
         return existing
     entry = find_entry(slug, timeout=timeout)
@@ -143,7 +145,7 @@ def install_pet(slug: str, *, force: bool = False, timeout: float = _DOWNLOAD_TI
     if not _is_petdex_host(entry.spritesheet_url):
         raise PetStoreError(f"refusing non-petdex spritesheet host for '{slug}'")
 
-    directory = _ensure_dir(pets_dir() / slug)
+    directory = _ensure_dir(get_hermes_home() / "cache/pet-catalog" / slug)
     sprite_ext = ".png" if entry.spritesheet_url.lower().split("?")[0].endswith(".png") else ".webp"
     sprite_path = directory / f"spritesheet{sprite_ext}"
     _download(entry.spritesheet_url, sprite_path, timeout=timeout)
@@ -160,6 +162,12 @@ def install_pet(slug: str, *, force: bool = False, timeout: float = _DOWNLOAD_TI
     meta.setdefault("id", slug)
     meta.setdefault("displayName", entry.display_name)
     _write_pet_json(directory, meta)
+    try:
+        private_media.register(sprite_path.read_bytes(), slug=slug, display_name=meta.get("displayName") or slug,
+                               description=meta.get("description") or "", legacy_metadata=meta,
+                               created_by=str(meta.get("createdBy") or ""))
+    except Exception as exc:
+        raise PetStoreError(f"could not retain installed pet metadata encrypted: {exc}") from exc
     return _usable_pet(slug, f"install of '{slug}' did not produce a spritesheet")
 
 
@@ -172,33 +180,27 @@ def unique_slug(name: str) -> str:
     """A :func:`slugify` result that doesn't collide with an existing pet dir."""
     base = slugify(name)
     candidates = (base if i == 1 else f"{base}-{i}" for i in itertools.count(1))
-    return next(slug for slug in candidates if not (pets_dir() / slug).exists())
+    return next(slug for slug in candidates if not (pets_dir() / slug).exists() and private_media.find(slug) is None)
 
 
+@generation_scope()
 def register_local_pet(spritesheet, *, slug: str, display_name: str = "", description: str = "") -> InstalledPet:
     """Write a locally-generated pet (PIL image, WebP/PNG bytes, or path) into the store as lossless WebP.
 
     Appears in :func:`installed_pets` immediately (no manifest entry needed).
     """
     slug = slugify(slug)
-    directory = _ensure_dir(pets_dir() / slug)
-    sprite_path = directory / "spritesheet.webp"
     try:
-        if isinstance(spritesheet, (bytes, bytearray)):
-            sprite_path.write_bytes(bytes(spritesheet))
-        else:
-            from agent.pet.generate.atlas import _load_rgba
-
-            _load_rgba(spritesheet).save(sprite_path, format="WEBP", lossless=True, quality=100, method=6, exact=True)
+        private_media.register(spritesheet, slug=slug, display_name=display_name, description=description)
     except Exception as exc:
-        raise PetStoreError(f"could not write spritesheet for '{slug}': {exc}") from exc
-    meta = {"id": slug, "displayName": display_name or slug, "description": description or "", "spritesheetPath": sprite_path.name}
-    _write_pet_json(directory, {**meta, "createdBy": "generator"})
+        raise PetStoreError(f"could not retain generated pet '{slug}' encrypted: {exc}") from exc
     return _usable_pet(slug, f"register of generated pet '{slug}' did not produce a spritesheet")
 
 
 def export_pet(slug: str) -> tuple[str, bytes]:
     """Zip an installed pet's folder → ``(filename, bytes)``; dotfiles (thumbs, backups) skipped."""
+    if record := private_media.find(slug):
+        return private_media.export(record)
     root = pets_dir()
     directory = root / slug.strip()
     # Traversal guard: the target must be a direct child of pets_dir.
@@ -230,14 +232,17 @@ def thumbnail_png(slug: str, *, source_url: str = "", timeout: float = 30.0) -> 
     """
     if not (slug := slug.strip()):
         return None
-    if (cache := _thumb_path(slug)).is_file():
+    if record := private_media.find(slug):
+        return private_media.thumbnail(record)
+    if (pets_dir() / slug).exists() or (pets_dir() / ".thumbs" / (slug + ".png")).exists():
+        raise PetStoreError("Historical pet instance needs explicit `hermes secure-vault repair` before preview")
+    if not source_url or not _is_petdex_host(source_url):
+        return None
+    if (cache := _thumb_path(source_url)).is_file():
         with contextlib.suppress(OSError):
             return cache.read_bytes()
     sheet_bytes = None
-    if pet := _usable_pet(slug):
-        with contextlib.suppress(OSError):
-            sheet_bytes = pet.spritesheet.read_bytes()
-    if sheet_bytes is None and source_url and _is_petdex_host(source_url):
+    if sheet_bytes is None:
         try:
             sheet_bytes = _http_get(source_url, timeout).content
         except Exception as exc:
@@ -245,35 +250,40 @@ def thumbnail_png(slug: str, *, source_url: str = "", timeout: float = 30.0) -> 
     if not sheet_bytes:
         return None
     try:
-        from PIL import Image
-
-        with Image.open(io.BytesIO(sheet_bytes)) as im:
-            frame = im.convert("RGBA").crop((0, 0, min(_THUMB_FRAME_W, im.width), min(_THUMB_FRAME_H, im.height)))
-        frame = frame.resize((_THUMB_W, round(_THUMB_W * _THUMB_FRAME_H / _THUMB_FRAME_W)), Image.NEAREST)
-        buf = io.BytesIO()
-        frame.save(buf, format="PNG")
-    except Exception as exc:
+        output = _thumbnail_data(sheet_bytes)
+    except (ImportError, OSError, ValueError, TypeError) as exc:
         logger.debug("thumb crop failed for %s: %s", slug, exc)
         return None
     with contextlib.suppress(OSError):
-        cache.write_bytes(buf.getvalue())
-    return buf.getvalue()
+        cache.write_bytes(output)
+    return output
 
 
+def _thumbnail_data(sheet_bytes):
+    from PIL import Image
+
+    with Image.open(io.BytesIO(sheet_bytes)) as im:
+        frame = im.convert("RGBA").crop((0, 0, min(_THUMB_FRAME_W, im.width), min(_THUMB_FRAME_H, im.height)))
+    frame = frame.resize((_THUMB_W, round(_THUMB_W * _THUMB_FRAME_H / _THUMB_FRAME_W)), Image.NEAREST)
+    output = io.BytesIO()
+    frame.save(output, format="PNG")
+    return output.getvalue()
+
+
+@generation_scope()
 def remove_pet(slug: str) -> bool:
     """Delete an installed pet directory. Returns True if anything was removed."""
     slug = _safe_slug(slug)
     if not slug:
         return False
-    # Drop the cached thumb too or a later pet reusing this slug shows the stale one.
-    with contextlib.suppress(OSError):
-        _thumb_path(slug).unlink(missing_ok=True)
-    if not (directory := pets_dir() / slug).is_dir():
-        return False
-    shutil.rmtree(directory, ignore_errors=True)
-    return not directory.exists()
+    if private_media.find(slug):
+        return private_media.remove(slug)
+    if (pets_dir() / slug).is_dir():
+        raise PetStoreError("Historical pet instance needs explicit `hermes secure-vault repair` before removal")
+    return False
 
 
+@generation_scope()
 def rename_pet(slug: str, display_name: str) -> str | None:
     """Rename a pet's ``displayName`` AND move its dir/thumb to ``slugify(name)`` when that's a free, different slug.
 
@@ -281,26 +291,12 @@ def rename_pet(slug: str, display_name: str) -> str | None:
     """
     slug = _safe_slug(slug)
     display_name = (display_name or "").strip()
-    directory = pets_dir() / slug
-    if not slug or not display_name or not (directory / "pet.json").is_file():
-        return None
-    meta = _read_pet_json(directory)
-    meta = meta if isinstance(meta, dict) else {}
-    meta["displayName"] = display_name
-    new_slug = slug
-    desired = slugify(display_name)
-    if desired and desired != slug and not (pets_dir() / desired).exists():
-        with contextlib.suppress(OSError):  # keep the provisional slug if the move fails
-            directory.rename(pets_dir() / desired)
-            with contextlib.suppress(OSError):
-                _thumb_path(slug).rename(_thumb_path(desired))
-            directory = pets_dir() / desired
-            new_slug = meta["id"] = desired
-    try:
-        _write_pet_json(directory, meta)
-    except OSError:
-        return None
-    return new_slug
+    if slug and display_name and private_media.find(slug):
+        desired = slugify(display_name)
+        return private_media.rename(slug, display_name, desired, public_conflict=(pets_dir() / desired).exists())
+    if (pets_dir() / slug).exists():
+        raise PetStoreError("Historical pet instance needs explicit `hermes secure-vault repair` before renaming")
+    return None
 
 
 def _http_get(url: str, timeout: float):

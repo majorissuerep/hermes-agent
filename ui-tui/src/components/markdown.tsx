@@ -111,7 +111,7 @@ function MediaReference({ path, theme }: { path: string; theme: Theme }) {
           Encrypted {privateKind}: {path}
         </Text>
         <Text color={theme.color.muted}>
-          {privateKind === 'audio'
+          {privateKind === 'audio' || privateKind === 'videos'
             ? 'Explicit offline recovery: hermes secure-vault export --output /outside-home/recovery.tar (whole-profile plaintext archive).'
             : 'Original retained; use read_file for authenticated document access.'}
         </Text>

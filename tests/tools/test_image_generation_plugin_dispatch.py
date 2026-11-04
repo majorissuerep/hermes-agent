@@ -8,9 +8,16 @@ from agent import image_gen_registry
 
 
 @pytest.fixture(autouse=True)
-def _reset_registry():
+def _reset_registry(tmp_path, monkeypatch):
+    from hermes_security import vault
+
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    monkeypatch.setattr(vault, "_SCRYPT_N", 1024)
+    vault.init_vault(tmp_path, "synthetic generation dispatcher password")
+    vault.unlock(tmp_path, "synthetic generation dispatcher password")
     image_gen_registry._reset_for_tests()
     yield
+    vault.clear_vault_cache()
     image_gen_registry._reset_for_tests()
 
 

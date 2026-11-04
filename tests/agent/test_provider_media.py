@@ -5,6 +5,20 @@ import pytest
 from agent import provider_media
 
 
+@pytest.fixture(autouse=True)
+def encrypted_output_home(tmp_path, monkeypatch):
+    from hermes_security import vault
+
+    home = tmp_path / ".hermes"
+    home.mkdir()
+    monkeypatch.setenv("HERMES_HOME", str(home))
+    monkeypatch.setattr(vault, "_SCRYPT_N", 1024)
+    vault.init_vault(home, "synthetic provider output password")
+    vault.unlock(home, "synthetic provider output password")
+    yield
+    vault.clear_vault_cache()
+
+
 def _save_video(url: str, **kwargs):
     return provider_media.save_url(
         "videos",
@@ -53,7 +67,7 @@ def test_save_url_forwards_headers_and_streams_to_cache(monkeypatch, tmp_path):
         require_known_content_type=True,
     )
 
-    assert path.read_bytes() == b"clip"
+    assert provider_media.artifacts.read_bytes(path) == b"clip"
     assert path.suffix == ".mp4"
     assert len(calls) == 1
     assert str(calls[0].url) == "https://api.example/videos/job/content"
@@ -103,7 +117,7 @@ def test_save_url_redirect_scopes_caller_headers_to_first_hop_and_fails_closed(m
         require_known_content_type=True,
     )
 
-    assert path.read_bytes() == b"clip"
+    assert provider_media.artifacts.read_bytes(path) == b"clip"
     assert len(calls) == 2
     assert calls[0].headers.get("Authorization") == "Bearer test"
     assert calls[1].headers.get("Authorization") is None
@@ -148,7 +162,7 @@ def test_save_url_trusted_origin_skips_private_check_on_first_hop_only(monkeypat
 
         path = _save_video(f"{base}/content", headers={"Authorization": "Bearer test"},
                            require_known_content_type=True, trusted_origin=True)
-        assert path.read_bytes() == b"clip"
+        assert provider_media.artifacts.read_bytes(path) == b"clip"
         assert hits == [("/content", "Bearer test")]
 
         with pytest.raises(ValueError, match="SSRF safety check"):

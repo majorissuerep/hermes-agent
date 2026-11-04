@@ -73,12 +73,12 @@ _GENERATED_VIDEO_KIND = f"{provider_media.GENERATED_SUBDIR}/videos"
 
 
 def save_b64_video(b64_data: str,*, prefix: str="video", extension: str="mp4") -> Path:
-    """Decode base64 video data into ``$HERMES_HOME/cache/generated/videos/``; return the path."""
+    """Retain base64 output in this profile's durable encrypted video artifacts."""
     return provider_media.save_b64(_GENERATED_VIDEO_KIND, b64_data, prefix=prefix, extension=extension)
 
 
 def save_bytes_video(raw: bytes,*, prefix: str="video", extension: str="mp4") -> Path:
-    """Write raw video bytes (e.g. an HTTP download body) to the cache."""
+    """Retain video bytes (e.g. an HTTP download body) as authenticated ciphertext."""
     return provider_media.save_bytes(_GENERATED_VIDEO_KIND, raw, prefix=prefix, extension=extension)
 
 
@@ -97,7 +97,7 @@ def save_url_video(
     require_video_content_type: bool = False,
     trusted_origin: bool = False,
 ) -> Path:
-    """Download an (often ephemeral) video URL into ``$HERMES_HOME/cache/generated/videos/``;
+    """Download an (often ephemeral) video URL into durable encrypted artifacts;
     raises on network / HTTP / oversize / empty errors so callers can fall back to the URL.
     ``trusted_origin`` is only for URLs built from the operator's configured provider
     ``base_url`` (see ``provider_media.save_url``)."""

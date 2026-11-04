@@ -72,10 +72,9 @@ def _clear_region(image, box: tuple[int, int, int, int]) -> None:
 
 def _load_rgba(image):
     """Open a path (or take an image) as RGBA."""
-    if isinstance(image, (str, Path)):
-        with Image.open(image) as opened:
-            return opened.convert("RGBA")
-    return image.convert("RGBA")
+    from agent.pet.private_media import rgba
+
+    return rgba(image)
 
 
 def _flood(w: int, h: int, visited: bytearray, seeds, accept) -> list[tuple[int, int]]:

@@ -101,6 +101,9 @@ def repair_clobbered_state(home: Path | str) -> dict:
 
     report: dict = {"sealed": [], "unwrapped": [], "reframed": [], "restored": [],
                     "unrecoverable": [], "skipped_dbs": [], "code_files": 0}
+    from agent.pet.private_repair import repair as repair_generated_pets
+
+    repair_generated_pets(home_path, report)
     # Snapshots retain their ORIGINAL path-bound ciphertext and inventory hashes.
     # Re-sealing them in their storage location makes the restore point unusable.
     for path, rel in _iter_files(home_path, exclude_roots={"backups", "state-snapshots", "profiles"}):
@@ -667,9 +670,11 @@ def migrate_home(home: Path | str, password: str | bytes, *, dry_run: bool = Fal
     if vault_mod.vault_exists(home):
         raise vault_errors.VaultError(f"A vault already exists at {home}")
     report = MigrationReport(home=home)
+    from agent.pet.private_repair import plaintext_paths as legacy_generated_pet_paths
 
     files = list(_iter_files(home))
-    if not files:
+    legacy_pets = legacy_generated_pet_paths(home)
+    if not files and not legacy_pets:
         # nothing to convert; still create the vault
         if not dry_run:
             vault_mod.init_vault(home, password, _allow_existing_state=True)
@@ -713,7 +718,24 @@ def migrate_home(home: Path | str, password: str | bytes, *, dry_run: bool = Fal
         except Exception as exc:
             report.failures.append(f"{rel.as_posix()}: {exc}")
 
+    _migrate_generated_pets(home, report, dry_run=dry_run)
     return report
+
+
+def _migrate_generated_pets(home, report, *, dry_run):
+    if dry_run:
+        from agent.pet.private_repair import inventory
+
+        known, unknown = inventory(home)
+        report.envelopes.extend(known)
+        report.failures.extend(path + ": pet provenance is unreadable; explicitly export before inspection" for path in unknown)
+        return
+    from agent.pet.private_repair import repair as repair_generated_pets
+
+    converted = {"sealed": [], "unrecoverable": []}
+    repair_generated_pets(home, converted)
+    report.envelopes.extend(converted["sealed"])
+    report.failures.extend(converted["unrecoverable"])
 
 
 def scan_for_plaintext(home: Path | str) -> list[str]:
@@ -728,6 +750,12 @@ def scan_for_plaintext(home: Path | str) -> list[str]:
 
     home = Path(home).expanduser().resolve()
     offenders = []
+    from agent.pet.private_repair import plaintext_paths as legacy_generated_pet_paths
+
+    try:
+        offenders.extend(legacy_generated_pet_paths(home))
+    except OSError:
+        offenders.append("pets")
     def unreadable(exc):
         offenders.append(Path(exc.filename or home).relative_to(home).as_posix())
 

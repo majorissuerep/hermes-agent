@@ -19,11 +19,18 @@ import pytest
 # ---------------------------------------------------------------------------
 
 @pytest.fixture
-def image_tool():
+def image_tool(tmp_path, monkeypatch):
     """Fresh import of tools.image_generation_tool per test."""
     import importlib
     import tools.image_generation_tool as mod
-    return importlib.reload(mod)
+    from hermes_security import vault
+
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    monkeypatch.setattr(vault, "_SCRYPT_N", 1024)
+    vault.init_vault(tmp_path, "synthetic FAL dispatcher password")
+    vault.unlock(tmp_path, "synthetic FAL dispatcher password")
+    yield importlib.reload(mod)
+    vault.clear_vault_cache()
 
 
 # ---------------------------------------------------------------------------

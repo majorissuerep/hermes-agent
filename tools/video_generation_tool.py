@@ -155,6 +155,19 @@ def _normalize_reference_images(value: Any) -> Optional[list[str]]:
 
 
 def _handle_video_generate(args: dict[str, Any], **_kw: Any) -> str:
+    if not (args.get("prompt") or "").strip():
+        return tool_error("prompt is required for video generation")
+    from agent.provider_media import generation_scope
+    from hermes_security.errors import VaultError
+
+    try:
+        with generation_scope():
+            return _generate_for_profile(args, **_kw)
+    except VaultError as exc:
+        return json.dumps(error_response(error=f"Encrypted generation unavailable: {exc}", error_type="vault_unavailable"))
+
+
+def _generate_for_profile(args: dict[str, Any], **_kw: Any) -> str:
     prompt = (args.get("prompt") or "").strip()
     image_url = (args.get("image_url") or "").strip() or None
     reference_image_urls = _normalize_reference_images(args.get("reference_image_urls"))
@@ -201,7 +214,10 @@ def _handle_video_generate(args: dict[str, Any], **_kw: Any) -> str:
             error=error, error_type=error_type,
             provider=getattr(provider, "name", ""), model=model or "", prompt=prompt))
     try:
-        result = provider.generate(prompt=prompt, **kwargs)
+        from agent.provider_media import generation_scope
+
+        with generation_scope():
+            result = provider.generate(prompt=prompt, **kwargs)
     except TypeError as exc:
         # An un-widened provider signature is a plugin bug, not a caller error.
         logger.warning("video_gen provider '%s' rejected kwargs (signature too narrow): %s", pname, exc)
@@ -210,7 +226,7 @@ def _handle_video_generate(args: dict[str, Any], **_kw: Any) -> str:
             f"Report this to the plugin author.",
             "provider_contract")
     except Exception as exc:
-        logger.warning("video_gen provider '%s' raised: %s", pname, exc)
+        logger.warning("video_gen provider '%s' raised: %s", pname, exc, exc_info=True)
         return _err(f"Provider '{pname}' error: {exc}", "provider_exception")
     if not isinstance(result, dict):
         return _err("Provider returned a non-dict result", "provider_contract")

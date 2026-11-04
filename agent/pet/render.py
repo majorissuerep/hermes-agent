@@ -16,7 +16,7 @@ import logging
 import os
 import sys
 import zlib
-from dataclasses import KW_ONLY, dataclass
+from dataclasses import KW_ONLY, dataclass, field
 from functools import lru_cache
 from itertools import groupby, takewhile
 from pathlib import Path
@@ -80,12 +80,12 @@ def _frame_is_blank(frame) -> bool:
 
 
 @lru_cache(maxsize=16)
-def _raw_frames(sheet_path: str, state_value: str, frame_w: int, frame_h: int, frames_per_state: int) -> tuple:
+def _raw_frames(sheet_path: str, state_value: str, frame_w: int, frame_h: int, frames_per_state: int, private_bytes=None) -> tuple:
     """Cropped RGBA frames for one state row, stopping at the first blank column; ``()`` on any decode failure."""
     try:
         from PIL import Image
 
-        sheet = Image.open(Path(sheet_path)).convert("RGBA")
+        sheet = Image.open(io.BytesIO(private_bytes) if private_bytes is not None else Path(sheet_path)).convert("RGBA")
         cols, rows = max(1, sheet.width // frame_w), max(1, sheet.height // frame_h)
         # Clamp to the sheet: some pets ship fewer rows than the taxonomy reserves.
         top = min(state_row_index(state_value, rows) * frame_h, max(0, sheet.height - frame_h))
@@ -97,9 +97,10 @@ def _raw_frames(sheet_path: str, state_value: str, frame_w: int, frame_h: int, f
 
 
 @lru_cache(maxsize=8)
-def _frames_for(sheet_path: str, state_value: str, frame_w: int, frame_h: int, frames_per_state: int, scale_w: int, scale_h: int):
+def _frames_for(sheet_path: str, state_value: str, frame_w: int, frame_h: int, frames_per_state: int,
+                scale_w: int, scale_h: int, private_bytes=None):
     """Scaled :func:`_raw_frames` (both cached, so animation-time requests are free)."""
-    raw = _raw_frames(sheet_path, state_value, frame_w, frame_h, frames_per_state)
+    raw = _raw_frames(sheet_path, state_value, frame_w, frame_h, frames_per_state, private_bytes)
     if not raw or (scale_w, scale_h) == (frame_w, frame_h):
         return list(raw)
     from PIL import Image
@@ -108,10 +109,20 @@ def _frames_for(sheet_path: str, state_value: str, frame_w: int, frame_h: int, f
 
 
 def state_frame_counts(
-    sheet_path: str | Path, *, frame_w: int = FRAME_W, frame_h: int = FRAME_H, frames_per_state: int = FRAMES_PER_STATE
+    sheet_path: str | Path, *, frame_w: int = FRAME_W, frame_h: int = FRAME_H,
+    frames_per_state: int = FRAMES_PER_STATE, custody=None,
 ) -> dict[str, int]:
     """Each driven :class:`PetState` → its real (padding-trimmed) frame count (shipped to the desktop canvas)."""
-    return {s.value: len(_raw_frames(str(sheet_path), s.value, frame_w, frame_h, frames_per_state)) for s in PetState}
+    from agent.pet.private_media import capture_image_custody, read_image
+
+    custody = capture_image_custody(sheet_path) if custody is None else custody
+    raw = read_image(sheet_path, custody=custody) if custody is not None else None
+    counts = {s.value: len(_raw_frames(str(sheet_path), s.value, frame_w, frame_h, frames_per_state, raw)) for s in PetState}
+    if custody is not None:
+        from agent.pet.private_media import _check_scope
+
+        _check_scope(custody)
+    return counts
 
 
 def _png_b64(frame) -> str:
@@ -286,10 +297,15 @@ class PetRenderer:
     frame_w: int = FRAME_W
     frame_h: int = FRAME_H
     frames_per_state: int = FRAMES_PER_STATE
+    private_custody: object | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
+        from agent.pet.private_media import capture_image_custody
+
         self.spritesheet = str(self.spritesheet)
         self.mode = self.mode if self.mode in RENDER_MODES else "unicode"
+        self._private_custody = (self.private_custody if self.private_custody is not None
+                                 else capture_image_custody(self.spritesheet))
 
     @property
     def available(self) -> bool:
@@ -298,15 +314,29 @@ class PetRenderer:
     def frame_count(self, state: PetState | str) -> int:
         return len(self._frames(state))
 
+    def assert_live(self) -> None:
+        """Authorize before an outer UI cache returns already decoded private pixels."""
+        if self._private_custody is not None:
+            from agent.pet.private_media import _check_scope
+
+            _check_scope(self._private_custody)
+
     def _frames(self, state: PetState | str):
+        from agent.pet.private_media import read_image
+
         name = state.value if isinstance(state, PetState) else str(state)
         scaled = max(1, int(self.frame_w * self.scale)), max(1, int(self.frame_h * self.scale))
-        return _frames_for(self.spritesheet, name, self.frame_w, self.frame_h, self.frames_per_state, *scaled)
+        raw = read_image(self.spritesheet, custody=self._private_custody) if self._private_custody is not None else None
+        frames = _frames_for(self.spritesheet, name, self.frame_w, self.frame_h, self.frames_per_state, *scaled, raw)
+        self.assert_live()
+        return frames
 
     def cells(self, state: PetState | str, index: int, *, cols: int | None = None) -> list[list[Cell]]:
         """One frame as a half-block cell grid for Ink's native color props; ``[]`` when unavailable."""
         frames = self._frames(state)
-        return _downscale_cells(frames[index % len(frames)], target_cols=cols or self.unicode_cols) if frames else []
+        cells = _downscale_cells(frames[index % len(frames)], target_cols=cols or self.unicode_cols) if frames else []
+        self.assert_live()
+        return cells
 
     def kitty_payload(self, state: PetState | str, *, image_id: int) -> dict | None:
         """kitty placeholder payload ``{cols, rows, placeholder, frames}`` (transmit escapes + static text grid); ``None`` if no frames."""
@@ -315,6 +345,7 @@ class PetRenderer:
         frames = _fit_frames_to_cell_grid(frames)
         cols, rows = _cell_box(frames[0])
         encoded = [_encode_kitty_virtual(f, image_id=image_id, cols=cols, rows=rows) for f in frames]
+        self.assert_live()
         return {"cols": cols, "rows": rows, "placeholder": kitty_placeholder_rows(cols, rows), "frames": encoded}
 
     def frame(self, state: PetState | str, index: int) -> str:
@@ -323,12 +354,13 @@ class PetRenderer:
             return ""
         frame = frames[index % len(frames)]
         try:
-            if self.mode in _ENCODERS:
-                return _ENCODERS[self.mode](frame)
-            return _encode_unicode(frame, target_cols=self.unicode_cols)
+            encoded = (_ENCODERS[self.mode](frame) if self.mode in _ENCODERS
+                       else _encode_unicode(frame, target_cols=self.unicode_cols))
         except Exception as exc:
             logger.debug("pet frame encode failed (mode=%s): %s", self.mode, exc)
             return ""
+        self.assert_live()
+        return encoded
 
 
 def build_renderer(

@@ -12,6 +12,7 @@ import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from agent.provider_media import generation_scope
 
 logger = logging.getLogger(__name__)
 
@@ -116,6 +117,7 @@ def _rejected_background(error: str) -> bool:
     return "background" in lowered and ("not supported" in lowered or "transparent" in lowered)
 
 
+@generation_scope()
 def generate(
     prompt: str,
     *,
@@ -140,7 +142,12 @@ def generate(
             "configure OpenAI gpt-image-2 or Krea for pet generation"
         )
 
-    refs = [str(p) for p in (reference_images or [])]
+    from model_tools import _run_async
+    from tools.browser_media_custody import owned_media_path
+    from tools.image_source import resolve_local_source_to_data_url
+
+    refs = [_run_async(resolve_local_source_to_data_url(str(p), None)) if owned_media_path(str(p)) is not None else str(p)
+            for p in (reference_images or [])]
 
     # Providers disagree on the ref kwarg name: our OpenRouter/Nous backends read
     # ``reference_images``, OpenAI's gpt-image-2 reads ``reference_image_urls``.

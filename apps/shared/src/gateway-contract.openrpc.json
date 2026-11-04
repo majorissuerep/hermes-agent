@@ -16750,7 +16750,7 @@
       },
       "PetInfoResult": {
         "additionalProperties": true,
-        "description": "``server._pet_sprite_payload`` behind ``enabled``; every sprite field is absent when the pet\ndisplay is off, ``spritesheetBase64`` is elided when ``spritesheetUnchanged``.",
+        "description": "``pet_media.sprite_payload`` behind ``enabled``; every sprite field is absent when the pet\ndisplay is off, ``spritesheetBase64`` is elided when ``spritesheetUnchanged``.",
         "properties": {
           "enabled": {
             "title": "Enabled",
