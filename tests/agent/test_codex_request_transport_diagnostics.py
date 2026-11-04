@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import secrets
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -13,6 +14,26 @@ import pytest
 from openai import APIConnectionError
 
 from agent.codex_runtime import _codex_request_failure_details, run_codex_stream
+
+
+@pytest.fixture
+def sealed_codex_agent(tmp_path, monkeypatch):
+    from hermes_security import vault
+    from tests.agent.test_run_agent_codex_responses import _build_agent
+
+    home = tmp_path / "owning-profile"
+    home.mkdir()
+    monkeypatch.setenv("HERMES_HOME", str(home))
+    monkeypatch.setattr(vault, "_SCRYPT_N", 1024)
+    vault.init_vault(home, "synthetic transport archive password")
+    vault.unlock(home, "synthetic transport archive password")
+    agent = _build_agent(monkeypatch)
+    try:
+        assert Path(agent.logs_dir) == home / "sessions"
+        yield home, agent
+    finally:
+        agent.close()
+        vault.clear_vault_cache()
 
 
 def test_transport_failure_without_attached_request_reports_unknown_size():
@@ -98,28 +119,34 @@ def _oversized_codex_kwargs(size: int) -> dict:
                       {"role": "user", "content": "continue"}]}
 
 
-def test_zero_event_retry_prunes_oversized_tool_output_and_logs_size_delta(monkeypatch, tmp_path, caplog):
+def test_zero_event_retry_prunes_oversized_tool_output_and_logs_size_delta(sealed_codex_agent, caplog):
     """#95429 criterion 3: a reconnect after a zero-event attempt must not resend the same oversized
     payload unchanged -- the inline tool output is spilled and the size delta is logged."""
-    from tests.agent.test_run_agent_codex_responses import _build_agent
-    from tools.tool_result_storage import PERSISTED_OUTPUT_TAG
+    from hermes_security import artifacts
+    from tools.tool_result_storage import PERSISTED_OUTPUT_TAG, extract_persisted_path
 
-    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
-    monkeypatch.setattr("hermes_constants.get_hermes_home", lambda: tmp_path, raising=False)
-    agent = _build_agent(monkeypatch)
+    home, agent = sealed_codex_agent
     seen: list = []
     agent.client = _zero_event_then_completed_client(seen)
+    canary = "synthetic private retry output " + secrets.token_hex(16)
+    original_output = canary + "x" * (760_396 - len(canary))
+    kwargs = _oversized_codex_kwargs(len(original_output))
+    kwargs["input"][2]["output"] = original_output
 
     with caplog.at_level(logging.INFO, logger="agent.codex_runtime"):
-        response = agent._run_codex_stream(_oversized_codex_kwargs(760_396))
+        response = agent._run_codex_stream(kwargs)
 
     assert response.status == "completed" and len(seen) == 2
     first, second = (len(json.dumps(i)) for i in seen)
     assert second < first // 10
     retried_output = seen[1][2]["output"]
     assert PERSISTED_OUTPUT_TAG in retried_output and len(retried_output) < 10_000
-    assert Path(tmp_path, "cache", "spillover", "call_browser.txt").read_text() == "x" * 760_396
-    assert seen[0][2]["output"] == "x" * 760_396  # the caller's kwargs are not mutated
+    persisted_path = Path(extract_persisted_path(retried_output))
+    assert persisted_path == home / "artifacts" / "tool-results" / "call_browser.txt"
+    ciphertext = persisted_path.read_bytes()
+    assert ciphertext.startswith(b"HRMVAULT\x00") and canary.encode() not in ciphertext
+    assert artifacts.read_text(persisted_path, home=home) == original_output
+    assert kwargs["input"][2]["output"] == seen[0][2]["output"] == original_output  # caller is not mutated
     prune_logs = [r.message for r in caplog.records if "zero-event" in r.message]
     assert len(prune_logs) == 1 and "attempt 1/2" in prune_logs[0]
     assert re.search(r"serialized_input_bytes=\d+ -> \d+", prune_logs[0])
