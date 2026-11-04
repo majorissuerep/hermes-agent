@@ -47,11 +47,11 @@ def test_real_stdio_result_keeps_original_session_and_fresh_sibling_connection_w
     from tools.mcp_tool_discovery import register_mcp_servers
     from tools.mcp_tool_lifecycle import shutdown_mcp_servers
     from tools.mcp_tool_schema import mcp_prefixed_tool_name
-    from tools.registry import registry, session_tool_scope
+    from tools.registry import registry
 
     first_id, sibling_id = "wire-A-" + change, "wire-B-" + change
     first, sibling = start_session_authority(home, first_id), start_session_authority(home, sibling_id)
-    callback_errors, signals = [], []
+    callback_errors, signals, connections, connection_scopes = [], [], [], []
 
     class Revoke(http.server.BaseHTTPRequestHandler):
         def do_GET(self):
@@ -82,14 +82,26 @@ def test_real_stdio_result_keeps_original_session_and_fresh_sibling_connection_w
 
     def invoke(session_id, revoke_url):
         from tools.mcp_tool_discovery import _owner_scope_home
+        from tools.mcp_tool_scope import _resolve_server_key
+        from tools import mcp_tool
+        from hermes_constants import get_hermes_home
 
-        # The tool overlay is a request ID, not a profile path. Native callers
-        # bind the owning profile separately before discovery and dispatch.
+        # Native sessions share the profile connection; Source/session identity
+        # belongs to each request, independently of the profile registry scope.
         token = set_secret_scope(build_profile_secret_scope(home), profile_home=str(home))
         try:
-            with scoped_current_session_id(session_id), session_tool_scope(session_id):
-                assert _owner_scope_home().resolve() == home.resolve()
+            with scoped_current_session_id(session_id):
+                owner = _owner_scope_home()
+                assert owner is None or owner.resolve() == home.resolve()
+                assert get_hermes_home().resolve() == home.resolve()
+                scope = mcp_tool._mcp_registry_scope()
+                assert scope in (None, str(home.resolve()))
                 register_mcp_servers(config)
+                connection_scopes.append(scope)
+                connection = mcp_tool._servers[_resolve_server_key("operation-media")]
+                if connections:
+                    assert connection is connections[0]
+                connections.append(connection)
                 name = mcp_prefixed_tool_name("operation-media", "capture")
                 assert registry.get_entry(name) is not None
                 result = registry.dispatch(name, {"canary": canary, "revoke_url": revoke_url})
@@ -112,8 +124,8 @@ def test_real_stdio_result_keeps_original_session_and_fresh_sibling_connection_w
         assert artifacts.read_bytes(retained[0], home=home) == _image(canary)
         assert all(canary.encode() not in path.read_bytes() for path in tmp_path.rglob("*") if path.is_file())
     finally:
-        shutdown_mcp_servers(scope=first_id)
-        shutdown_mcp_servers(scope=sibling_id)
+        for scope in set(connection_scopes):
+            shutdown_mcp_servers(scope=scope, names={"operation-media"})
         callback.shutdown()
         callback.server_close()
         thread.join(timeout=10)
