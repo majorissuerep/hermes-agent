@@ -617,8 +617,6 @@ def os_replace(src: Path, dst: Path) -> None:
 def _purpose_for(rel: Path) -> str:
     if is_delegation_manifest_path(rel):
         return "delegation-manifest:v1"
-    if rel.parent == Path("sessions") and rel.name.startswith("request_dump_") and rel.suffix == ".json":
-        return "state"
     name = rel.name
     suffix = rel.suffix
     if name == "config.yaml":

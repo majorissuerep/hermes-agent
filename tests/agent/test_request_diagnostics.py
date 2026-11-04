@@ -42,7 +42,7 @@ def test_provider_error_diagnostic_encrypts_private_prompt_and_preserves_forensi
     target = _dump(agent, marker)
     assert target is not None and target.parent == home / "sessions"
     assert marker.encode() not in target.read_bytes()
-    payload = io.read_json(target, purpose="state")
+    payload = io.read_json(target, purpose="transcript")
     assert payload["request"]["body"]["messages"][0]["content"] == marker
     assert "timeout" not in payload["request"]["body"]
     assert payload["error"]["message"] == "HTTP401 invalid api key"
@@ -94,7 +94,7 @@ def test_real_agent_diagnostic_reads_anthropic_client_and_messages_url(owned_age
         agent.client = None
         agent._anthropic_client = SimpleNamespace(api_key="sk-ant-api03-abcdefghijklmnopqrstuvwxyz")
         target = agent._dump_api_request_debug({"model": "claude", "messages": []}, reason="preflight")
-        payload = io.read_json(target, purpose="state")
+        payload = io.read_json(target, purpose="transcript")
         assert payload["request"]["url"] == "https://relay.example.com/anthropic/messages"
         assert "None" not in payload["request"]["headers"]["Authorization"]
         assert "abcdefghijklmnopqrstuvwxyz" not in payload["request"]["headers"]["Authorization"]
@@ -120,7 +120,7 @@ def test_missing_nested_profile_never_uses_an_unlocked_ancestor_vault(owned_agen
     bind_request_diagnostics(agent, home=selected)
     target = _dump(agent, "synthetic own-profile diagnostic context")
     assert target is not None
-    assert io.read_json(target, purpose="state")["request"]["body"]["messages"][0]["content"] == (
+    assert io.read_json(target, purpose="transcript")["request"]["body"]["messages"][0]["content"] == (
         "synthetic own-profile diagnostic context")
     before = {path.name: path.read_bytes() for path in (selected / "sessions").iterdir()}
     (selected / ".hermes-vault").unlink()
@@ -129,12 +129,12 @@ def test_missing_nested_profile_never_uses_an_unlocked_ancestor_vault(owned_agen
     assert vault.is_unlocked(parent)
 
 
-@pytest.mark.parametrize("consumer", ["scanner", "offline-export"])
-def test_diagnostic_and_conventional_transcript_retain_their_distinct_purposes(owned_agent, tmp_path, consumer):
+@pytest.mark.parametrize("consumer", ["scanner", "offline-export", "repair-and-scan"])
+def test_new_and_migrated_diagnostics_preserve_existing_transcript_purpose(owned_agent, tmp_path, consumer):
     import json
     import tarfile
 
-    from hermes_security.migrate import scan_for_plaintext
+    from hermes_security.migrate import repair_clobbered_state, scan_for_plaintext
     from hermes_security.recovery_export import export_home
 
     home, agent, _ = owned_agent
@@ -143,8 +143,15 @@ def test_diagnostic_and_conventional_transcript_retain_their_distinct_purposes(o
     assert target is not None
     conventional = home / "sessions" / "conversation.json"
     io.write_json(conventional, {"ordinary": "preserved conversation"}, purpose="transcript")
+    legacy = home / "sessions" / "request_dump_before_encryption.json"
+    original_payload = {"request": {"body": {"messages": [{"role": "user", "content": marker + " prior"}]}},
+                        "error": {"message": "HTTP401 original provider diagnostic"}}
+    # Published migration classified all sessions/*.json this way before diagnostics wrote envelopes directly.
+    io.write_json(legacy, original_payload, purpose="transcript")
     before = {path.name: path.read_bytes() for path in (home / "sessions").iterdir()}
-    if consumer == "scanner":
+    if consumer != "offline-export":
+        if consumer == "repair-and-scan":
+            assert not repair_clobbered_state(home)["unrecoverable"]
         assert scan_for_plaintext(home) == []
     else:
         archive = tmp_path / "explicit-forensic-export.tar"
@@ -152,6 +159,9 @@ def test_diagnostic_and_conventional_transcript_retain_their_distinct_purposes(o
         with tarfile.open(archive) as saved:
             diagnostic = json.load(saved.extractfile(target.relative_to(home).as_posix()))
             transcript = json.load(saved.extractfile("sessions/conversation.json"))
+            recovered_legacy = json.load(saved.extractfile(legacy.relative_to(home).as_posix()))
         assert diagnostic["request"]["body"]["messages"][0]["content"] == marker
         assert transcript == {"ordinary": "preserved conversation"}
+        assert recovered_legacy == original_payload
     assert {path.name: path.read_bytes() for path in (home / "sessions").iterdir()} == before
+    assert io.read_json(legacy, purpose="transcript") == original_payload

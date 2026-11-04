@@ -41,7 +41,7 @@ class _RequestStore:
             raise VaultLockedError("The request diagnostic's owning session ended")
         self.vault.assert_custody_live()
         serialized = (json.dumps(payload, ensure_ascii=False, indent=2, default=str) + "\n").encode("utf-8")
-        encoded = self.vault.encrypt(serialized, purpose="state",
+        encoded = self.vault.encrypt(serialized, purpose="transcript",
                                      relpath=path.relative_to(self.vault.home).as_posix(), authority=self.authority)
         vault._atomic_write(path, encoded)  # Only ciphertext reaches the existing atomic state writer.
 
