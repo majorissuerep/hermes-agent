@@ -108,6 +108,7 @@ def test_outgoing_fetch_failure_does_not_claim_an_unconfirmed_local_copy(owner, 
 
     assert not rec.stage.exists() and rec.capture in env.files
     assert "original selected outgoing backend" in caplog.text
+    assert rec.capture in caplog.text
     assert len(browser.stops()) == 1
     assert rec.lease.locator.exists()
     assert wrong_claim not in caplog.text, 'Retrieval failure claims a local copy exists, but only the selected backend holds it'

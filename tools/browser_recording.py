@@ -302,7 +302,7 @@ def _publish(rec: _Recording) -> Optional[Path]:
         sealed, cleanup_problem = _owned_call(rec, _seal, rec)
     except (VaultError, OSError, ValueError, RuntimeError) as exc:
         rec.state, rec.error = "sealing", str(exc)
-        location = ("on the original selected outgoing backend; no complete local copy was confirmed"
+        location = (f"on the original selected outgoing backend at {rec.capture}; no complete local copy was confirmed"
                     if rec.outgoing and not rec.complete else f"in protected RAM at {rec.stage}")
         _log(rec, logging.ERROR, "Browser recording for %s was NOT saved (%s). Its capture remains %s; "
                      "closing this browser session again retries with the original vault unlock.",
