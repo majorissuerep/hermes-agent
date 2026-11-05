@@ -260,7 +260,7 @@ class TestVaultSupervisorAttach:
         result = json.loads(bu_cli.browser_exec("print(1)", task_id="t-vault"))
 
         assert result["success"] is True
-        assert _fake_supervisor_registry == [("t-vault", "ws://127.0.0.1:47000/devtools/browser/t-vault")]
+        assert _fake_supervisor_registry == [("t-vault", "ws://127.0.0.1:47000/devtools/browser/bu-named-default")]
 
 
 @pytest.fixture
@@ -1390,7 +1390,7 @@ class TestExecHybridPrivateUrlRouting:
             assert self.local_keys == []
         else:
             assert result["success"] is True, result
-            assert [k for k, *_ in self.local_keys] == ["t::local"]
+            assert [k for k, *_ in self.local_keys] == ["bu-named-default::local"]
             assert result["output"] == "_local_default"
 
     def test_sidecar_route_has_its_own_daemon_and_sticks_for_url_less_calls(self):
@@ -1400,8 +1400,9 @@ class TestExecHybridPrivateUrlRouting:
                  (f'new_tab("{self.LAN}")', "_local_default"),
                  ('print(js("document.title"))', "_local_default")]
 
-        daemons = [json.loads(bu_cli.browser_exec(code, task_id="t"))["output"] for code, _ in steps]
+        daemons = [json.loads(bu_cli.browser_exec(code, task_id=task))["output"]
+                   for (code, _), task in zip(steps, ('t', 't', 'second-task'))]
 
         assert daemons == [want for _, want in steps]
-        assert self.cloud_keys == ["t"]
-        assert [k for k, *_ in self.local_keys] == ["t::local", "t::local"]
+        assert self.cloud_keys == ["bu-named-default"]
+        assert [k for k, *_ in self.local_keys] == ["bu-named-default::local", "bu-named-default::local"]

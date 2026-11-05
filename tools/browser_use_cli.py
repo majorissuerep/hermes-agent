@@ -700,11 +700,6 @@ def browser_exec(code: str, session: str = "", timeout_s: int = _DEFAULT_TIMEOUT
     verdict = _code_url_verdict(code)
     if verdict.blocked:
         return tool_error(verdict.blocked)
-    # One endpoint per call: any private URL sends the whole call to the local sidecar. A call with no URL
-    # literal stays on the route the previous call took (browser_navigate's _last_session_key twin).
-    route_key = _backend_cache_key(task_id, session)
-    local_sidecar = verdict.local_sidecar if _URL_RE.search(code) else _exec_route_is_sidecar.get(route_key, False)
-
     cmd = _find_cli()
     if not cmd:
         return tool_error("browser-harness is missing from Hermes's Python environment. "
@@ -716,19 +711,24 @@ def browser_exec(code: str, session: str = "", timeout_s: int = _DEFAULT_TIMEOUT
             return tool_error(f"Invalid session name {session!r}: use 1-64 letters, digits, "
                               "dashes, or underscores (e.g. 'r7k2').")
         env["BU_NAME"] = session
+    daemon_name = env.get('BU_NAME') or 'default'
+    # The daemon reads its endpoint once. Its selected name, rather than a task's workspace identity,
+    # must also select the browser and remembered private-URL sidecar route.
+    route_key = _backend_cache_key(task_id, daemon_name)
+    local_sidecar = verdict.local_sidecar if _URL_RE.search(code) else _exec_route_is_sidecar.get(route_key, False)
     from hermes_security.errors import VaultError
     from tools.browser_harness_runtime import HarnessRequest
 
     try:
         request = HarnessRequest(get_hermes_home(), task_id, env)
-        env = request.configure(_sidecar_daemon_name(session) if local_sidecar else (env.get('BU_NAME') or 'default'))
+        env = request.configure(_sidecar_daemon_name(daemon_name) if local_sidecar else daemon_name)
     except (VaultError, OSError, ValueError) as exc:
         return tool_error(f"Browser Use private state was retained: {exc}")
-    route_err = _route_backend(env, session, task_id, bool(local), force_local_sidecar=local_sidecar)
+    route_err = _route_backend(env, daemon_name, task_id, bool(local), force_local_sidecar=local_sidecar)
     if route_err:
         return tool_error(route_err)
     if local_sidecar:
-        env["BU_NAME"] = _sidecar_daemon_name(session)
+        env["BU_NAME"] = _sidecar_daemon_name(daemon_name)
     _exec_route_is_sidecar[route_key] = local_sidecar
 
     # SHARED browser (/browser connect CDP override): pin each named session to its own tab (see
