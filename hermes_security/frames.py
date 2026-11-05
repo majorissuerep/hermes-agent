@@ -96,10 +96,14 @@ def _frame_key(vault, purpose: str) -> bytes:
     return vault.derive_key("frames:" + purpose)
 
 
-def append(path: Path | str, payload: bytes, *, purpose: str) -> None:
-    """Append one encrypted frame to *path* under an inter-process lock."""
+def append(path: Path | str, payload: bytes, *, purpose: str, custody=None) -> None:
+    """Append a frame, optionally retaining one resource's original unlock/lineage."""
 
-    vault = get_vault(find_vault_home(path))
+    if custody is None:
+        vault = get_vault(find_vault_home(path))
+    else:
+        from hermes_security.artifacts import _bound_custody
+        vault = _bound_custody(find_vault_home(path), custody)
     target = Path(path).expanduser()
     target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     nonce = secrets.token_bytes(_NONCE_BYTES)
@@ -119,6 +123,8 @@ def append(path: Path | str, payload: bytes, *, purpose: str) -> None:
                 digest = hashlib.sha256(blob)
                 if _VALIDATED_STREAMS.pop(cache_key, None) != digest.digest():
                     _complete_stream(blob, vault=vault, purpose=purpose)
+                if custody is not None:
+                    custody.check()
                 # Invalidate before writing: an exception must never cache a partial append.
                 stream.write(frame)
                 stream.flush()

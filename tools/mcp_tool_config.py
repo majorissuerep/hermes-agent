@@ -29,11 +29,14 @@ class _VaultMCPLog:
 
     def __init__(self, path: Path):
         from hermes_security import frames
+        from hermes_security.artifacts import _bound_custody
         from hermes_security.errors import VaultIntegrityError
+        from hermes_security.vault import find_vault_home
         self.name = str(path)
         self.closed = False
+        self._custody = _bound_custody(find_vault_home(path))
         try:
-            frames.append(path, b"", purpose="log")
+            frames.append(path, b"", purpose="log", custody=self._custody)
         except VaultIntegrityError as exc:
             raise VaultIntegrityError(
                 "MCP log authentication failed; stop this profile and run "
@@ -44,7 +47,7 @@ class _VaultMCPLog:
         from hermes_security import frames
         if self.closed:
             raise ValueError("MCP log is closed")
-        frames.append(self.name, text.encode("utf-8", errors="replace"), purpose="log")
+        frames.append(self.name, text.encode("utf-8", errors="replace"), purpose="log", custody=self._custody)
         return len(text)
 
     def flush(self) -> None:
@@ -58,9 +61,15 @@ def _get_mcp_stderr_log() -> Any:
     """Profile-owned text sink. Child stderr reaches it through a kernel pipe."""
     from hermes_constants import get_hermes_home, hermes_home_key, mkdir_under_hermes_home
     from hermes_security.io import _home_for
+    from hermes_security.errors import VaultLockedError
     home_key = hermes_home_key()
     with _mcp_stderr_log_lock:
         fh = _mcp_stderr_log_fh.get(home_key)
+        if isinstance(fh, _VaultMCPLog) and not fh.closed:
+            try:
+                fh._custody.check()
+            except VaultLockedError:
+                fh.close()
         if fh is None or fh.closed:
             log_dir = get_hermes_home() / "logs"
             mkdir_under_hermes_home(log_dir)
