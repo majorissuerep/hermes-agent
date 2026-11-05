@@ -1,4 +1,8 @@
-"""Filesystem-only explicit LP import proves full recovery and per-entry retirement."""
+"""Real crypto/native inert FDs within a declared synthetic process-inventory/RAM fixture.
+
+Only the current fixture worker and its owned children are in the unit inventory. Global
+absence, including unrelated protected user processes, requires disposable native qualification.
+"""
 from pathlib import Path
 import json
 import os
@@ -7,6 +11,22 @@ import pytest
 
 pytest_plugins = ['tests.tools.test_browser_native_private_state']
 pytestmark = pytest.mark.platforms('linux', 'macos')
+
+
+@pytest.fixture(autouse=True)
+def isolated_fixture_process_inventory(monkeypatch):
+    """Do not inspect an installed user's processes merely to test synthetic legacy bytes."""
+    import psutil
+
+    def inventory(attributes):
+        owner = psutil.Process(os.getpid())
+        for process in [owner, *owner.children(recursive=True)]:
+            try:
+                process.info = process.as_dict(attrs=attributes, ad_value=None)
+            except psutil.NoSuchProcess:
+                continue
+            yield process
+    monkeypatch.setattr(psutil, 'process_iter', inventory)
 
 
 def _legacy(home, *, live=False):
@@ -104,3 +124,41 @@ def test_interrupted_source_retirement_keeps_original_full_cipher_for_safe_retry
         result = import_literal(home)
         assert result['recovery'] == marker['recovery'] and not source.exists()
     assert recovery.read_bytes() == original_cipher
+
+
+def test_open_original_log_writer_is_retained_until_close_then_full_snapshot_recovers(native_state):
+    import subprocess
+    import sys
+    from tools.browser_lightpanda_state import legacy_path
+    from tools.browser_lightpanda_legacy import import_literal
+    from hermes_security import browser_worker_archive as archive
+
+    home, _user, ram = native_state
+    source = legacy_path(home)
+    source.mkdir(mode=0o700, parents=True)
+    target = source/'manual-session.log'
+    payload = b'original live stderr complete before retirement'
+    target.write_bytes(payload)
+    unrelated = source.parent/'unrelated-readable-file'
+    unrelated.write_bytes(b'unrelated public file')
+    script = source.parent/'serve'
+    script.write_text('import threading\nprint("ready",flush=True)\nthreading.Event().wait()\n')
+    with target.open('ab') as output:
+        child = subprocess.Popen([sys.executable,'serve','--host','127.0.0.1','--port','49317'],
+                                 cwd=source.parent, stdout=subprocess.PIPE, stderr=output)
+    try:
+        assert child.stdout.readline() == b'ready\n'
+        with pytest.raises(RuntimeError, match='still open'):
+            import_literal(home)
+        assert target.read_bytes() == payload and child.poll() is None
+    finally:
+        child.terminate()
+        child.wait(timeout=5)
+    # A readable unrelated path cannot masquerade as ownership of the selected original tree.
+    with unrelated.open('rb'):
+        report = import_literal(home)
+    assert not source.exists() and unrelated.read_bytes() == b'unrelated public file'
+    destination = ram/'verified-original-log'
+    destination.mkdir(mode=0o700)
+    archive.replay_archive(home, Path(report['recovery']), custody=archive.capture_custody(home), target=destination)
+    assert (destination/'manual-session.log').read_bytes() == payload

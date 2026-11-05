@@ -14,6 +14,7 @@ import subprocess
 import threading
 import time
 from dataclasses import dataclass, field
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Optional
 
@@ -56,10 +57,22 @@ class LightpandaServer:
         from hermes_security.session_custody import SessionCustody
 
         source = get_session_env('HERMES_SESSION_ID', '')
-        if source:
-            self.users[source] = SessionCustody.capture(self.lease.home, resource=self.lease.resource.custody)
+        operation = SessionCustody.capture(self.lease.home, resource=self.lease.resource.custody)
+        with _resident_access(self, operation) as call:
+            if call is None:
+                return False
+            if source and self.is_alive():
+                self.users[source] = operation
+            return True
 
-    def shared_with_other(self, closing_source):
+    def shared_with_other(self, closing_source, operation=None):
+        from hermes_security.session_custody import SessionCustody
+
+        operation = operation or SessionCustody.capture(self.lease.home, resource=self.lease.resource.custody)
+        with _resident_access(self, operation) as call:
+            return False if call is None else self._shared_locked(closing_source)
+
+    def _shared_locked(self, closing_source):
         from hermes_security.errors import VaultLockedError
 
         self.lease.resource.custody.check()
@@ -286,10 +299,24 @@ def _lookup(session_name, home=None):
         return _servers.get(_key(session_name, home))
 
 
+@contextmanager
+def _resident_access(server, operation):
+    """Serialize membership/lifetime, checking tracking before access can create a RAM claim."""
+    from hermes_cli import browser_worker_store as store
+
+    with store._lock(server.lease.resource.lock_path, check_alive=operation.check):
+        operation.check()
+        if _lookup(server.session_name, server.lease.home) is not server:
+            yield None
+            return
+        with server.lease.access(operation) as call:
+            yield call
+
+
 def get_server(session_name: str, *, home=None):
     server = _lookup(session_name, home)
-    if server is not None:
-        server.admit()
+    if server is not None and not server.admit():
+        return None
     return server
 
 
@@ -310,11 +337,13 @@ def stop_lightpanda(session_name: str, *, home=None, expected=None, operation=No
         operation = SessionCustody.capture(lease.home, resource=lease.resource.custody)
     operation.check()
     source = lease.source if operation in (lease.operation, lease.source_operation) else _current_source()
-    if server.shared_with_other(source):
-        server.users.pop(source, None)
-        logger.info('Lightpanda session remains shared by another live source; cache checkpoint deferred')
-        return
-    with lease.access(operation) as call:
+    with _resident_access(server, operation) as call:
+        if call is None:
+            raise RuntimeError('Original Lightpanda tracking changed; no process was stopped')
+        if server.shared_with_other(source, operation):
+            server.users.pop(source, None)
+            logger.info('Lightpanda session remains shared by another live source; cache checkpoint deferred')
+            return
         if server.proc.poll() is None:
             if lease.record is None or not _record_matches(lease.record):
                 raise RuntimeError('Original Lightpanda process identity is unknown; RAM and archive retained')
@@ -322,14 +351,14 @@ def stop_lightpanda(session_name: str, *, home=None, expected=None, operation=No
             if server.proc.cancel() is None:
                 raise RuntimeError('Lightpanda owned tree cleanup is unconfirmed; all state retained')
         server.proc.wait(timeout=5)
-    lease.finish(operation)
-    with _servers_lock:
-        if _servers.get(key) is not server:
-            raise RuntimeError('Lightpanda tracking changed during cleanup; all state retained')
-        del _servers[key]
-        remaining = any(other.lease.resource is lease.resource for other in _servers.values())
-    if not remaining:
-        lease.resource.release(operation=operation)
+        lease.finish(operation)
+        with _servers_lock:
+            if _servers.get(key) is not server:
+                raise RuntimeError('Lightpanda tracking changed during cleanup; all state retained')
+            del _servers[key]
+            remaining = any(other.lease.resource is lease.resource for other in _servers.values())
+        if not remaining:
+            lease.resource.release(operation=operation)
 
 
 def stop_all_lightpanda():

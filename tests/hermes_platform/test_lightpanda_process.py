@@ -45,3 +45,24 @@ def test_native_child_identity_requires_original_executable_port_home_and_start(
 ])
 def test_membership_or_unknown_arguments_never_identify_a_hermes_serve_target(args):
     assert parse_serve(args) is None
+
+
+def test_unreadable_possible_legacy_owner_refuses_without_touching_original(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    import psutil
+    from hermes_platform.lightpanda_process import require_source_files_idle
+
+    source=tmp_path/'original-lightpanda'
+    source.mkdir(mode=0o700)
+    target=source/'original.log'
+    target.write_bytes(b'complete original log before repair')
+    class Unreadable:
+        pid=os.getpid()
+        info={'uids':SimpleNamespace(effective=os.geteuid()),'status':psutil.STATUS_RUNNING}
+    def unreadable(_pid):
+        raise psutil.AccessDenied(_pid)
+    monkeypatch.setattr(psutil,'process_iter',lambda _attrs:iter([Unreadable()]))
+    monkeypatch.setattr('hermes_platform.lightpanda_process._native_open_files',unreadable)
+    with pytest.raises(RuntimeError,match='possible legacy file owner is unreadable'):
+        require_source_files_idle(source,check_alive=lambda:None)
+    assert target.read_bytes()==b'complete original log before repair'

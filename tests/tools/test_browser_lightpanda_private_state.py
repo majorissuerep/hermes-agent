@@ -350,3 +350,40 @@ def test_duplicate_named_launch_refuses_before_another_producer_or_pending_marke
     assert {p.name:p.read_bytes() for p in (first.lease.resource.path/'processes').iterdir()}==before
     lp.stop_lightpanda(first.session_name,expected=first.lease.token)
     assert lp.get_server(first.session_name) is None
+
+
+def test_B_admitted_before_A_resource_effect_cannot_be_cancelled_by_A(fake_lightpanda,native_state,monkeypatch):
+    from contextlib import contextmanager
+    import threading
+    from agent.session_context import scoped_current_session_id
+    from hermes_security.session_authority import start_session_authority
+    lp,launched=fake_lightpanda;home,_user,_ram=native_state
+    a=start_session_authority(home,'LP-race-A');b=start_session_authority(home,'LP-race-B')
+    entering,release=threading.Event(),threading.Event();errors=[]
+    with scoped_current_session_id(a.session_id):server,error=lp.launch_lightpanda('race')
+    assert server is not None and error is None
+    from hermes_cli import browser_worker_store as store
+    real_lock=store._lock
+    @contextmanager
+    def gated(path, **kwargs):
+        if threading.current_thread().name=='LP-closing-A':
+            entering.set();assert release.wait(10)
+        with real_lock(path, **kwargs):yield
+    monkeypatch.setattr(store,'_lock',gated)
+    def close_A():
+        try:
+            with scoped_current_session_id(a.session_id):lp.stop_lightpanda('race',expected=server.lease.token)
+        except BaseException as error:errors.append(error)
+    thread=threading.Thread(target=close_A,name='LP-closing-A');thread.start()
+    try:
+        assert entering.wait(5)
+        with scoped_current_session_id(b.session_id):assert lp.get_server('race') is server
+        assert b.session_id in server.users
+        release.set();thread.join(timeout=10)
+        assert not thread.is_alive() and not errors
+        assert not launched[0].stopped,'Committed B admission must survive A closing decision/effect'
+        with scoped_current_session_id(b.session_id):
+            assert lp.get_server('race') is server
+            lp.stop_lightpanda('race',expected=server.lease.token)
+    finally:
+        release.set();thread.join(timeout=10);a.close();b.close()

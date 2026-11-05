@@ -146,6 +146,84 @@ def _legacy_record(path):
     return record
 
 
+class _OpenFile(NamedTuple):
+    path: str
+    fd: int
+
+
+def _native_open_files(pid):
+    """Kernel FD names only; psutil.open_files additionally stats unrelated user paths."""
+    from hermes_platform.host.facts import os_family
+
+    if os_family() == 'linux':
+        with os.scandir(Path('/proc')/str(pid)/'fd') as entries:
+            for entry in entries:
+                if entry.name.isdecimal():
+                    try:
+                        path = os.readlink(entry.path)
+                    except FileNotFoundError:
+                        continue  # This descriptor is already closed, not an unknown open owner.
+                    yield _OpenFile(path, int(entry.name))
+    elif os_family() == 'macos':
+        try:
+            from psutil._psutil_osx import proc_open_files
+        except ImportError as error:
+            raise RuntimeError('Native legacy open-file inspection is unavailable; source retained') from error
+        yield from (_OpenFile(path, fd) for path, fd in proc_open_files(pid))
+    else:
+        raise RuntimeError('Native legacy open-file inspection is unavailable; source retained')
+
+
+def _open_source_file(child, opened, source):
+    """Only a concrete legacy-root path is inspected; unrelated user files are untouched."""
+    from hermes_platform.host.facts import os_family
+
+    path = Path(opened.path)
+    if not path.is_relative_to(source):
+        return False
+    selected = path.stat(follow_symlinks=False)
+    if os_family() == 'linux':
+        actual = (Path('/proc')/str(child.pid)/'fd'/str(opened.fd)).stat()
+        if (actual.st_dev, actual.st_ino) != (selected.st_dev, selected.st_ino):
+            raise RuntimeError('Legacy Lightpanda open-file identity changed; source retained')
+    return True
+
+
+def require_source_files_idle(source, *, check_alive):
+    """Absence proof only: no live same-UID open handle may retain the literal old tree."""
+    source = Path(source).absolute()
+    for child in psutil.process_iter(['pid','uids','status']):
+        check_alive()
+        try:
+            if child.info['status'] == psutil.STATUS_ZOMBIE:
+                continue
+            uids = child.info['uids']
+            if uids is None:
+                raise RuntimeError('A possible legacy file owner is unreadable; source retained')
+            if uids.effective != os.geteuid():
+                continue
+            started = get_process_start_time(child.pid)
+            if started is None:
+                if not pid_exists(child.pid):
+                    continue
+                raise RuntimeError('A possible legacy file owner has unknown identity; source retained')
+            opened = list(_native_open_files(child.pid))
+            if get_process_start_time(child.pid) != started:
+                if not pid_exists(child.pid):
+                    continue
+                raise RuntimeError('A possible legacy file owner changed during inspection; source retained')
+            for handle in opened:
+                check_alive()
+                if _open_source_file(child, handle, source):
+                    raise RuntimeError('A legacy Lightpanda source file is still open by a live owner; source retained')
+        except psutil.NoSuchProcess:
+            continue
+        except (psutil.AccessDenied, OSError) as error:
+            if not pid_exists(child.pid):
+                continue
+            raise RuntimeError('A possible legacy file owner is unreadable; source retained') from error
+
+
 def require_legacy_idle(source, *, check_alive):
     """Old control files are conservative absence hints, never executable or signalling authority."""
     for path in sorted(Path(source).glob('*.json')):
@@ -154,3 +232,4 @@ def require_legacy_idle(source, *, check_alive):
         if pid_exists(record['owner_pid']) or pid_exists(record['pid']):
             raise RuntimeError('A legacy Lightpanda owner is live or unknown; close it before explicit repair')
     require_cache_idle(Path(source)/'http-cache', check_alive=check_alive)
+    require_source_files_idle(source, check_alive=check_alive)
