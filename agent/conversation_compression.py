@@ -3027,7 +3027,7 @@ def _run_summary_dispatch(
                 "Compression cancelled before summary dispatch (session=%s) — skipping summary work.",
                 agent.session_id or "none",
             )
-            compressed = messages
+            raise AuxiliaryExplicitCancellation()
         else:
             with (
                 aux_progress_hook(_progress_hook), aux_stream_deadline(_host_stream_deadline),
