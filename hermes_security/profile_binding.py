@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 import stat
 
-from hermes_security.errors import VaultLockedError
+from hermes_security.errors import VaultLockedError, VaultNotInitializedError
 
 _PROOF_BOUND = 8 * 1024 * 1024
 _MAGIC = b"HRMVAULT\x00"
@@ -79,6 +79,8 @@ def _proof_path(home):
 def owner_hint(home):
     """Read-only metadata/envelope-shape admission before explicit maintenance unlock."""
     home = Path(home).expanduser().resolve()
+    if _entry(home) is None:
+        raise VaultNotInitializedError("No initialized profile at the selected home")
     if _entry(home / ".hermes-vault") is not None:
         require_owned_metadata(home)
         return home
