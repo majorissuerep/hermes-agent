@@ -71,6 +71,22 @@ class _GuardedCustody:
         self.check()
         return self.original.derive_key(purpose)
 
+    def check_target(self, path):
+        self.check()
+        self.original.check_target(path)
+
+    def aad_path(self, relative):
+        self.check()
+        return self.original.aad_path(relative)
+
+    def encrypt(self, payload, *, purpose, relpath):
+        self.check()
+        return self.original.encrypt(payload, purpose=purpose, relpath=relpath)
+
+    def decrypt(self, payload, *, purpose, relpath):
+        self.check()
+        return self.original.decrypt(payload, purpose=purpose, relpath=relpath)
+
 
 def guarded(custody):
     budget = _CURRENT.get()

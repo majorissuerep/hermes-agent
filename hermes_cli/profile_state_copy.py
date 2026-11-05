@@ -52,7 +52,7 @@ def _public_asset(relative: Path) -> bool:
     return any(part in _SKIP_DIRS for part in relative.parts[:-1])
 
 
-def copy_profile_tree_file(source: str, destination: str, *, source_root: Path) -> str:
+def copy_profile_tree_file(source: str, destination: str, *, source_root: Path, target_custody=None) -> str:
     """copytree callback: code assets stay code; private state is authenticated and rebound."""
     from hermes_security import io, frames, vault
     from hermes_security.migrate import _frame_purpose
@@ -72,22 +72,23 @@ def copy_profile_tree_file(source: str, destination: str, *, source_root: Path) 
         _copy_database(src, dst)
     elif src.suffix in {".log", ".jsonl"}:
         raw = src.read_bytes()
+        from hermes_security.profile_binding import for_file
         records, consumed = frames.split_stream(
-            raw, vault=vault.get_vault(owner), purpose=_frame_purpose(src), strict=True)
+            raw, vault=for_file(src), purpose=_frame_purpose(src), strict=True)
         if consumed != len(raw):
             raise VaultIntegrityError(f"Incomplete profile stream: {relative}")
         target_owner = io._home_for(dst)
         if target_owner is None:
             raise VaultIntegrityError("Profile stream destination has no vault")
         vault._atomic_write(dst, frames.encode_frames(
-            records, vault=vault.get_vault(target_owner), purpose=_frame_purpose(src)))
+            records, vault=target_custody or for_file(dst), purpose=_frame_purpose(src)))
     else:
         # Never promote unknown plaintext state from a vaulted donor into a valid clone.
         copy_profile_file(src, dst, purpose=_purpose(relative))
     return str(dst)
 
 
-def publish_profile_state(staging: Path, destination: Path) -> None:
+def publish_profile_state(staging: Path, destination: Path, *, custody=None) -> None:
     """Bind a hidden profile's authenticated state to its final path before atomic rename.
 
     A failure leaves only unpublished staging bytes for the caller to discard. Donor files and
@@ -103,7 +104,7 @@ def publish_profile_state(staging: Path, destination: Path) -> None:
     final_owner = io._home_for(destination)
     if final_owner is None:
         raise ValueError("Published profile must remain inside a vault")
-    final_vault = vault.get_vault(final_owner)
+    final_vault = custody.vault if custody is not None else vault.get_vault(final_owner)
     for path in sorted(staging.rglob("*")):
         relative = path.relative_to(staging)
         if path.is_symlink() or not path.is_file() or _public_asset(relative):
@@ -111,11 +112,14 @@ def publish_profile_state(staging: Path, destination: Path) -> None:
         target = destination / relative
         with path.open("rb") as handle:
             envelope = handle.read(9) == b"HRMVAULT\x00"
+        if custody is not None:
+            custody.check()
         if envelope:
             purpose = _purpose(relative)
             content = io.read_bytes(path, purpose=purpose)
-            sealed = final_vault.encrypt(content, purpose=purpose,
-                                         relpath=target.resolve(strict=False).relative_to(final_owner).as_posix())
+            sealed = (custody.encrypt(content, purpose=purpose, relpath=relative.as_posix())
+                      if custody is not None else final_vault.encrypt(content, purpose=purpose,
+                          relpath=target.resolve(strict=False).relative_to(final_owner).as_posix()))
             vault._atomic_write(path, sealed)
         elif _database(path):
             fd, name = tempfile.mkstemp(prefix=".profile-publish-", dir=path.parent)
@@ -126,6 +130,15 @@ def publish_profile_state(staging: Path, destination: Path) -> None:
                 os.replace(temporary, path)
             finally:
                 temporary.unlink(missing_ok=True)
+
+
+def prepare_profile_publication(staging: Path, destination: Path):
+    """Only trusted creation/rename owns this hidden inode and explicit final name."""
+    from hermes_security import io
+    from hermes_security.profile_binding import for_publication
+
+    staging.mkdir(mode=0o700, parents=True, exist_ok=True)
+    return None if io._home_for(staging) is None else for_publication(staging, destination)
 
 
 def profile_clone_exclusions(directory: Path, names: list[str], *, source_root: Path) -> set[str]:
@@ -198,7 +211,6 @@ def _rename_opaque_profile(source: Path, destination: Path) -> None:
 def rename_profile_state(source: Path, destination: Path) -> None:
     """Move own-vault islands intact; rebind ancestor-owned legacy state separately."""
     import logging
-    import os
     import secrets
     from functools import partial
     from hermes_cli.profiles import (
@@ -214,17 +226,20 @@ def rename_profile_state(source: Path, destination: Path) -> None:
     rollback = source.parent / f".{source.name}.renaming-{secrets.token_hex(8)}"
     moved = False
     try:
+        publication = prepare_profile_publication(staging, destination)
         _copytree_keep_junctions(
             source, staging,
             lambda directory, names: profile_clone_exclusions(Path(directory), names, source_root=source),
-            copy_function=partial(copy_profile_tree_file, source_root=source),
+            dirs_exist_ok=True,
+            copy_function=partial(copy_profile_tree_file, source_root=source, target_custody=publication),
         )
         _materialize_symlinked_files(staging)
-        publish_profile_state(staging, destination)
+        publish_profile_state(staging, destination, custody=publication)
         source.rename(rollback)
         moved = True
         try:
-            os.rename(staging, destination)
+            from hermes_platform.fs_publish import rename_noreplace
+            rename_noreplace(staging, destination)
         except BaseException:
             rollback.rename(source)
             moved = False

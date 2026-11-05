@@ -55,7 +55,7 @@ def export_command(args) -> int:
     from hermes_cli.vault_cmd import _load_key_file, _password_from_env_or_prompt
     from hermes_platform.memory_protection import per_user_runtime_dir
     from hermes_security import vault
-    from hermes_security.artifacts import _Custody
+    from hermes_security.profile_binding import capture
     from hermes_security.errors import VaultError
     from hermes_security.migration_archive import read_backup_metadata
     from hermes_security.protected_workspace import protected_workspace
@@ -74,7 +74,7 @@ def export_command(args) -> int:
             unlocked = (vault.unlock_with_private_key(temporary, _load_key_file(key)) if key
                         else vault.unlock(temporary, _password_from_env_or_prompt()))
             try:
-                count = _publish(backup, output, _Custody(temporary))
+                count = _publish(backup, output, capture(temporary))
             finally:
                 unlocked.wipe()
                 vault.lock_now(temporary)

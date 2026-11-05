@@ -74,3 +74,14 @@ def run(args, home) -> int:
         return 1
     return 0
 
+
+
+def dispatch(args, home) -> int:
+    """Select the explicit repair scope before entering its original handler."""
+    from hermes_cli.profile_frame_repair import cmd_parent_profile_repair
+
+    if any(getattr(args, name, False) for name in (
+            "outgoing_browser_profile", "outgoing_browser_legacy", "native_browser_state")):
+        return run(args, home)
+    result = cmd_parent_profile_repair(args, home)
+    return run(args, home) if result is None else result

@@ -223,9 +223,9 @@ def cmd_vault(args: Any) -> int:
         return 0
 
     if command == "repair":
-        from hermes_cli.vault_repair import run
+        from hermes_cli.vault_repair import dispatch
 
-        return run(args, home)
+        return dispatch(args, home)
 
     if command == "lock":
         vault_mod.lock_now(home)

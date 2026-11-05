@@ -9,7 +9,7 @@ import tarfile
 import pytest
 
 from hermes_security import migrate, migration_state, vault
-from hermes_security.artifacts import _Custody
+from hermes_security.profile_binding import capture
 from hermes_security.errors import VaultError
 from hermes_security.migration_archive import read_backup_metadata, verified_tar
 
@@ -42,7 +42,7 @@ def _snapshot(home):
 
 
 def _originals(path, home):
-    with verified_tar(path, custody=_Custody(home)) as archive:
+    with verified_tar(path, custody=capture(home)) as archive:
         return {member.name: archive.extractfile(member).read() for member in archive if member.isfile()}
 
 

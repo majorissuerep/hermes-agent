@@ -44,7 +44,7 @@ def entries(home):
 
 
 def _backup(home, state, unlocked):
-    from hermes_security.artifacts import _Custody
+    from hermes_security.profile_binding import capture
     from hermes_security.migration_archive import verified_tar, write_backup
     from hermes_security.migration_resume import file_hash
 
@@ -61,7 +61,7 @@ def _backup(home, state, unlocked):
                  home.parent, home.parent / (home.name + "-migration-backups")}
     if target.parent not in permitted or target.is_symlink():
         raise VaultIntegrityError("Migration rollback path does not belong to the original home")
-    custody = _Custody(home)
+    custody = capture(home)
     if target.exists():
         # A crash after publication may precede checkpoint advancement. Do not overwrite it.
         metadata = _archive_metadata(target, home, unlocked, state)
@@ -117,7 +117,7 @@ def _convert_member(home, member, unlocked, state, report):
 def _continue(home, unlocked, state, report):
     from hermes_security import migrate
     from hermes_security import migration_pets
-    from hermes_security.artifacts import _Custody
+    from hermes_security.profile_binding import capture
     from hermes_security.migration_archive import verified_tar
     from hermes_security.migration_resume import file_hash
 
@@ -127,7 +127,7 @@ def _continue(home, unlocked, state, report):
         raise VaultIntegrityError("Verified migration rollback changed; no source files were converted")
     metadata = _archive_metadata(target, home, unlocked, state)
     pets = {}
-    with verified_tar(target, custody=_Custody(home), expected_sha256=state["sha256"],
+    with verified_tar(target, custody=capture(home), expected_sha256=state["sha256"],
                       expected_metadata=metadata) as archive:
         for member in archive:
             try:
@@ -211,10 +211,10 @@ def run(home, password, *, dry_run=False, public_key_raw=None):
 def original_member(backup: Path, home: Path, name: str) -> bytes | None:
     """Passive legacy reader plus complete-authentication-first encrypted repair input."""
     import tarfile
-    from hermes_security.artifacts import _Custody
+    from hermes_security.profile_binding import capture
     from hermes_security.migration_archive import verified_tar
 
-    context = (verified_tar(backup, custody=_Custody(home)) if backup.suffix == ".hmb"
+    context = (verified_tar(backup, custody=capture(home)) if backup.suffix == ".hmb"
                else tarfile.open(backup))
     with context as archive:
         for member in archive:

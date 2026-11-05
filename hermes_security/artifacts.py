@@ -16,7 +16,6 @@ from hermes_security.artifact_paths import (
     ARTIFACT_ROOTS, is_artifact_directory, is_artifact_relative_path, is_legacy_browser_snapshot_path,
     legacy_media_codec, media_kind, terminal_frame_purpose,
 )
-from hermes_security.errors import VaultLockedError
 
 _ROOTS = ARTIFACT_ROOTS
 _MAX_BYTES = 64 * 1024 * 1024
@@ -65,43 +64,11 @@ def _location(path, home=None):
         raise PermissionError("Private artifact belongs to a different profile") from exc
     if not is_artifact_relative_path(relative):
         raise PermissionError("Not an admitted private artifact path")
-    if not (selected / ".hermes-vault").is_file():
-        raise VaultLockedError("Private output requires an initialized, unlocked profile vault")
     if legacy_media_codec(relative):
         raise PermissionError(
             "Historical MCP document retains its published encrypted codec. Explicit offline recovery: "
             "hermes secure-vault export --output /outside-home/recovery.tar (whole-profile plaintext archive).")
     return selected, relative
-
-
-class _Custody:
-    """Keep the original unlock and adopted lineage, never a later ambient unlock."""
-    def __init__(self, home):
-        from hermes_security.session_authority import capture_inherited_authority
-        from hermes_security.vault import get_vault
-
-        self.vault = get_vault(home)
-        self.authority = capture_inherited_authority(home) if self.vault._borrowed else None
-        self.revoked = False
-        self.check()
-
-    def check(self):
-        from hermes_security.session_authority import SessionAuthorityError
-
-        _require_profile_metadata(self.vault.home)
-        if self.revoked:
-            raise VaultLockedError("Private artifact's original custody was revoked")
-        try:
-            self.vault.assert_custody_live()
-            if self.authority is not None:
-                self.authority.validate()
-        except (VaultLockedError, SessionAuthorityError) as exc:
-            self.revoked = True
-            raise VaultLockedError("Private artifact's original custody was revoked") from exc
-
-    def derive_key(self, purpose):
-        self.check()
-        return self.vault.derive_key_for_custody(purpose, authority=self.authority)
 
 
 @contextmanager
@@ -158,21 +125,10 @@ def _wire_bound(relative):
     return maximum + (max(128, batches * frames._FRAME_OVERHEAD) if _stream(relative) else 128)
 
 
-def _require_profile_metadata(home):
-    from hermes_security.vault import _load_meta
-
-    metadata = home / ".hermes-vault"
-    if not metadata.is_file() or metadata.is_symlink() or _load_meta(home) is None:
-        raise VaultLockedError("Private output requires this exact initialized profile")
-
-
 def _bound_custody(home, custody=None):
-    _require_profile_metadata(home)
-    custody = _Custody(home) if custody is None else custody
-    if custody.vault.home != home:
-        raise PermissionError("Private artifact custody belongs to a different profile")
-    custody.check()
-    return custody
+    from hermes_security.profile_binding import bound
+
+    return bound(home, custody)
 
 
 def write_bytes(path, data: bytes, *, home=None, overwrite=False, purpose="state", custody=None) -> Path:
@@ -182,13 +138,13 @@ def write_bytes(path, data: bytes, *, home=None, overwrite=False, purpose="state
         raise ValueError("Unsupported private artifact purpose or size")
     custody = _bound_custody(selected, custody)
     encoded = (frames.encode_frames([data], vault=custody, purpose=terminal_frame_purpose(relative)) if _stream(relative)
-               else custody.vault.encrypt(data, purpose="state", relpath=relative.as_posix(),
-                                          authority=custody.authority))
+               else custody.encrypt(data, purpose="state", relpath=relative.as_posix()))
     return _publish(selected, relative, encoded, custody, overwrite=overwrite)
 
 
 def _publish(selected, relative, encoded, custody, *, overwrite=False):
     """Publish already sealed bytes beneath a validated owning home and relative path."""
+    custody.check_target(selected / relative)
     with _parent(selected, relative, create=True) as parent:
         name = relative.name
         temporary = ".artifact-" + secrets.token_hex(16)
@@ -244,7 +200,7 @@ def read_bytes(path, *, home=None, purpose="state", custody=None) -> bytes:
     raw = _read_owned_bytes(selected, relative, wire_bound)
     custody.check()
     if not _stream(relative):
-        decoded = custody.vault.decrypt(raw, purpose="state", relpath=relative.as_posix(), authority=custody.authority)
+        decoded = custody.decrypt(raw, purpose="state", relpath=relative.as_posix())
     else:
         chunks, consumed = frames.split_stream(raw, vault=custody, purpose=terminal_frame_purpose(relative), strict=True)
         if consumed != len(raw):

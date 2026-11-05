@@ -17,7 +17,7 @@ import pytest
 pytestmark = pytest.mark.platforms("linux", "macos")
 
 from hermes_security import migrate, migration_profiles, vault
-from hermes_security.artifacts import _Custody
+from hermes_security.profile_binding import capture
 from hermes_security.errors import VaultError
 from hermes_security.migration_archive import read_backup_metadata, verified_tar
 
@@ -41,7 +41,7 @@ def _files(top: Path) -> dict[str, bytes]:
 
 
 def _members(backup: Path, home: Path) -> dict[str, tuple[bytes, str | None]]:
-    with verified_tar(backup, custody=_Custody(home)) as archive:
+    with verified_tar(backup, custody=capture(home)) as archive:
         return {m.name: (archive.extractfile(m).read(), m.pax_headers.get("HERMES.kind"))
                 for m in archive if m.isfile()}
 

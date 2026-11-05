@@ -130,6 +130,10 @@ class WorkerCall:
         self.root_identity = _identity(resource.path)
 
     @property
+    def home(self):
+        return self.resource.home
+
+    @property
     def vault(self):
         return self.operation.vault
 
@@ -146,6 +150,22 @@ class WorkerCall:
     def derive_key(self, purpose):
         self.check()
         return self.operation.derive_key(purpose)
+
+    def check_target(self, path):
+        self.check()
+        self.operation.check_target(path)
+
+    def aad_path(self, relative):
+        self.check()
+        return self.operation.aad_path(relative)
+
+    def encrypt(self, payload, *, purpose, relpath):
+        self.check()
+        return self.operation.encrypt(payload, purpose=purpose, relpath=relpath)
+
+    def decrypt(self, payload, *, purpose, relpath):
+        self.check()
+        return self.operation.decrypt(payload, purpose=purpose, relpath=relpath)
 
     def checkpoint(self):
         self.check()

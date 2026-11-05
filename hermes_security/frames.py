@@ -22,7 +22,6 @@ from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from hermes_security.errors import VaultError, VaultIntegrityError
-from hermes_security.vault import find_vault_home, get_vault
 
 _LENGTH = struct.Struct(">I")
 _NONCE_BYTES = 12
@@ -99,12 +98,10 @@ def _frame_key(vault, purpose: str) -> bytes:
 def append(path: Path | str, payload: bytes, *, purpose: str, custody=None) -> None:
     """Append a frame, optionally retaining one resource's original unlock/lineage."""
 
-    if custody is None:
-        vault = get_vault(find_vault_home(path))
-    else:
-        from hermes_security.artifacts import _bound_custody
-        vault = _bound_custody(find_vault_home(path), custody)
-    target = Path(path).expanduser()
+    from hermes_security.profile_binding import for_file
+
+    target = Path(path).expanduser().resolve(strict=False)
+    vault = for_file(target, custody)
     target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     nonce = secrets.token_bytes(_NONCE_BYTES)
     aad = f"hermes-frames|1|{purpose}".encode()
@@ -115,6 +112,7 @@ def append(path: Path | str, payload: bytes, *, purpose: str, custody=None) -> N
     with open(lock_path, "ab") as lock_file:
         _flock(lock_file.fileno())
         try:
+            vault.check_target(target)
             existed = target.exists()
             with open(target, "a+b") as stream:
                 cache_key = (str(target.resolve()), purpose, _frame_key(vault, purpose))
@@ -123,8 +121,7 @@ def append(path: Path | str, payload: bytes, *, purpose: str, custody=None) -> N
                 digest = hashlib.sha256(blob)
                 if _VALIDATED_STREAMS.pop(cache_key, None) != digest.digest():
                     _complete_stream(blob, vault=vault, purpose=purpose)
-                if custody is not None:
-                    custody.check()
+                vault.check_target(target)
                 # Invalidate before writing: an exception must never cache a partial append.
                 stream.write(frame)
                 stream.flush()
@@ -139,15 +136,17 @@ def append(path: Path | str, payload: bytes, *, purpose: str, custody=None) -> N
             _funlock(lock_file.fileno())
 
 
-def read_frames(path: Path | str, *, purpose: str) -> Iterator[bytes]:
+def read_frames(path: Path | str, *, purpose: str, custody=None) -> Iterator[bytes]:
     """Prefix-recovery/log-display reader, not a complete-store snapshot.
 
     Tolerate only an incomplete tail (including an append in flight), never a
     failed tag. Complete storage readers hold stream_lock and use _complete_stream.
     """
 
-    vault = get_vault(find_vault_home(path))
-    target = Path(path).expanduser()
+    from hermes_security.profile_binding import for_file
+
+    target = Path(path).expanduser().resolve(strict=False)
+    vault = for_file(target, custody)
     try:
         blob = target.read_bytes()
     except FileNotFoundError:
@@ -241,8 +240,10 @@ def rewrite(path: Path | str, transform: Callable[[list[bytes]], list[bytes]], *
 
     from hermes_security.vault import _atomic_write
 
-    vault = get_vault(find_vault_home(path))
-    target = Path(path).expanduser()
+    from hermes_security.profile_binding import for_file
+
+    target = Path(path).expanduser().resolve(strict=False)
+    vault = for_file(target)
     target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     lock_path = target.with_suffix(target.suffix + ".lock")
     with open(lock_path, "ab") as lock_file:
@@ -253,7 +254,9 @@ def rewrite(path: Path | str, transform: Callable[[list[bytes]], list[bytes]], *
             except FileNotFoundError:
                 blob = b""
             payloads = _complete_stream(blob, vault=vault, purpose=purpose)
-            _atomic_write(target, encode_frames(transform(payloads), vault=vault, purpose=purpose))
+            encoded = encode_frames(transform(payloads), vault=vault, purpose=purpose)
+            vault.check_target(target)
+            _atomic_write(target, encoded)
         finally:
             _funlock(lock_file.fileno())
 

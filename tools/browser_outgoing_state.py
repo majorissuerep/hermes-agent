@@ -91,7 +91,7 @@ def read(home: Path, digest: str, custody) -> dict | None:
         raw = artifacts._read_owned_bytes(home, path, _BOUND)
     except FileNotFoundError:
         return None
-    decoded = custody.vault.decrypt(raw, purpose="state", relpath=path.as_posix(), authority=custody.authority)
+    decoded = custody.decrypt(raw, purpose="state", relpath=path.as_posix())
     custody.check()
     document = json.loads(decoded)
     if (not isinstance(document, dict) or document.get("version") != 1
@@ -160,7 +160,7 @@ def write(home: Path, digest: str, custody, document: dict) -> None:
     if len(data) > _BOUND // 2:
         raise OutgoingProfileError("Outgoing browser recovery reference exceeds its bound")
     custody.check()
-    encoded = custody.vault.encrypt(data, purpose="state", relpath=path.as_posix(), authority=custody.authority)
+    encoded = custody.encrypt(data, purpose="state", relpath=path.as_posix())
     artifacts._publish(home, path, encoded, custody, overwrite=True)
 
 
@@ -184,7 +184,7 @@ def remove(home: Path, digest: str, custody, token: str, *, expected=None) -> No
                     before.st_ctime_ns, hashlib.sha256(raw).hexdigest())
         if expected is not None and identity != expected:
             raise OutgoingProfileError("Outgoing recovery reference changed since verification; retained")
-        document = json.loads(custody.vault.decrypt(raw, purpose="state", relpath=path.as_posix(), authority=custody.authority))
+        document = json.loads(custody.decrypt(raw, purpose="state", relpath=path.as_posix()))
         if not secrets.compare_digest(str(document.get("lease")), token):
             raise OutgoingProfileError("A newer outgoing browser lease replaced this recovery reference; retained")
         custody.check()

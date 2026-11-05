@@ -147,7 +147,7 @@ def replay_archive(home: Path, relative, *, custody, digest: str | None = None,
 def replay_opened(handle, relative, *, custody, digest=None, target=None) -> tree_archive.ArchiveSummary:
     """Restore a caller-pinned WORKER FD with the original path, slot and completion checks."""
     digest = _digest(relative) if digest is None else digest
-    _home, relative = _admitted(custody.vault.home, relative, custody=custody, digest=digest)
+    _home, relative = _admitted(custody.home, relative, custody=custody, digest=digest)
     return tree_archive.replay_opened(handle, custody=custody, purpose=_purpose(relative),
                                     policy=_policy(), slot=SLOT, digest=digest, target=target)
 
@@ -159,7 +159,7 @@ def authenticate_ciphertext(handle, relative, *, custody) -> tree_archive.Archiv
 
         return authenticate_handle(handle, relative, custody=custody)
     digest = _digest(relative)
-    _home, relative = _admitted(custody.vault.home, relative, custody=custody, digest=digest)
+    _home, relative = _admitted(custody.home, relative, custody=custody, digest=digest)
     return tree_archive.authenticate_ciphertext(handle, custody=custody, purpose=_purpose(relative),
                                                  policy=_policy(), slot=SLOT, digest=digest)
 

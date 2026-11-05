@@ -17,7 +17,7 @@ retired: capture, then locator, then manifest and directory. Every failure befor
 capture and the locator in place and says so.
 
 Every authenticated read/publication uses the ORIGINAL custody captured by the caller
-(``hermes_security.artifacts._Custody``) and rechecks it; a later unlock is never adopted.
+(``hermes_security.profile_binding.ProfileCustody``) and rechecks it; a later unlock is never adopted.
 """
 from __future__ import annotations
 

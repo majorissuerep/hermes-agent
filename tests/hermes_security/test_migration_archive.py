@@ -19,7 +19,7 @@ import pytest
 
 from hermes_security import migration_archive as archive
 from hermes_security import vault
-from hermes_security.artifacts import _Custody
+from hermes_security.profile_binding import capture
 
 PASSWORD = "synthetic-migration-passphrase"
 MIB = 1024 * 1024
@@ -97,7 +97,7 @@ def test_backup_streams_tree_exactly_and_never_replaces_or_follows_links(home, t
     canary = b"migration-canary-" + secrets.token_hex(16).encode()
     entries = _tree(home, canary)
     metadata = (home / ".hermes-vault").read_bytes()
-    custody = _Custody(home)
+    custody = capture(home)
     backups = tmp_path / "backups"
     backups.mkdir(mode=0o700)
     destination = backups / "rollback.hmb"
@@ -181,7 +181,7 @@ DAMAGE = {
 def test_damaged_backup_refuses_before_any_member_is_exposed(home, tmp_path, damage):
     entries = _tree(home, b"migration-canary-" + secrets.token_hex(16).encode())
     metadata = (home / ".hermes-vault").read_bytes()
-    custody = _Custody(home)
+    custody = capture(home)
     backups = tmp_path / "backups"
     backups.mkdir(mode=0o700)
     for name in ("first.hmb", "other.hmb"):
