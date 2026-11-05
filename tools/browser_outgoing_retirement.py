@@ -53,16 +53,21 @@ class _PinnedCipher:
         self.handle.seek(0)
         return digest.hexdigest()
 
-    def check(self):
-        self.custody.check()
+    def _check_native(self):
         with artifacts._parent(self.home, self.relative) as parent:
             current_parent = os.fstat(parent)
             current = os.stat(self.relative.name, dir_fd=parent, follow_symlinks=False)
             if ((current_parent.st_dev, current_parent.st_ino) != self.parent_identity
                     or _stamp(current) != self.native or _stamp(os.fstat(self.handle.fileno())) != self.native):
                 raise state.OutgoingProfileError("Original checkpoint ciphertext was replaced; every copy retained")
+
+    def check(self):
+        self.custody.check()
+        self._check_native()
         if self._hash() != self.digest or _stamp(os.fstat(self.handle.fileno())) != self.native:
             raise state.OutgoingProfileError("Original checkpoint ciphertext changed; every copy retained")
+        # Hashing can take time: revalidate the named copy after the complete read too.
+        self._check_native()
 
     def replay(self, lease, *, target=None):
         self.handle.seek(0)

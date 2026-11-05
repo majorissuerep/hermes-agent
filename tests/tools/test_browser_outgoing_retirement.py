@@ -162,7 +162,7 @@ def test_uncertain_remaining_state_is_retained_with_original_recovery(interrupte
             assert lease.runtime.profile in report["retained"][0]
 
 
-@pytest.mark.parametrize("case", ["cipher-after-proof", "reference-before-removal", "source-ended", "capacity"])
+@pytest.mark.parametrize("case", ["cipher-after-proof", "cipher-during-hash", "parent-during-hash", "reference-before-removal", "source-ended", "capacity"])
 def test_repair_rechecks_original_cipher_reference_and_authority(interrupted, monkeypatch, case):
     from agent.session_context import scoped_current_session_id
     from hermes_security import browser_profile_archive as archive
@@ -174,21 +174,39 @@ def test_repair_rechecks_original_cipher_reference_and_authority(interrupted, mo
     profile, lease, _expected, reference, _cipher = create()
     before = _contents(profile)
     original_subset, original_remove = retirement._subset, state.remove
-    changed = []
+    changed, armed = [], []
+    original_hash = retirement._PinnedCipher._hash
+
+    def replace_cipher():
+        custody = SessionCustody.capture(outgoing.home)
+        source = outgoing.ram / "late-same-checkpoint"
+        source.mkdir(mode=0o700)
+        archive.replay_archive(outgoing.home, lease.relative, custody=custody,
+                               slot=lease.slot, digest=lease.digest, target=source)
+        if case == "parent-during-hash":
+            parent = (outgoing.home / lease.relative).parent
+            parent.rename(parent.with_name("retained-original-browser-profile"))
+            parent.mkdir(mode=0o700)
+        archive.write_archive(outgoing.home, lease.relative, source, custody=custody,
+                              slot=lease.slot, identity=lease.identity, digest=lease.digest)
+
+    def digest(pinned):
+        result = original_hash(pinned)
+        if armed and not changed:
+            changed.append(True)
+            replace_cipher()
+        return result
 
     def subset(*args):
         original_subset(*args)
+        if case in {"cipher-during-hash", "parent-during-hash"}:
+            armed.append(True)
+            return
         changed.append(True)
         if case == "source-ended":
             sibling.close()
         elif case == "cipher-after-proof":
-            custody = SessionCustody.capture(outgoing.home)
-            source = outgoing.ram / "late-same-checkpoint"
-            source.mkdir(mode=0o700)
-            archive.replay_archive(outgoing.home, lease.relative, custody=custody,
-                                   slot=lease.slot, digest=lease.digest, target=source)
-            archive.write_archive(outgoing.home, lease.relative, source, custody=custody,
-                                  slot=lease.slot, identity=lease.identity, digest=lease.digest)
+            replace_cipher()
 
     def remove(*args, **kwargs):
         changed.append(True)
@@ -196,8 +214,10 @@ def test_repair_rechecks_original_cipher_reference_and_authority(interrupted, mo
         state.write(outgoing.home, lease.digest, custody, reference)
         return original_remove(*args, **kwargs)
 
-    if case in {"cipher-after-proof", "source-ended"}:
+    if case in {"cipher-after-proof", "cipher-during-hash", "parent-during-hash", "source-ended"}:
         monkeypatch.setattr(retirement, "_subset", subset)
+        if case in {"cipher-during-hash", "parent-during-hash"}:
+            monkeypatch.setattr(retirement._PinnedCipher, "_hash", digest)
     elif case == "reference-before-removal":
         monkeypatch.setattr(state, "remove", remove)
     else:
@@ -214,5 +234,5 @@ def test_repair_rechecks_original_cipher_reference_and_authority(interrupted, mo
         assert list(profile.iterdir()) == []  # Saved archive remains; only final metadata cleanup refused.
     else:
         assert _contents(profile) == before
-    if case != "cipher-after-proof":
+    if case not in {"cipher-after-proof", "cipher-during-hash", "parent-during-hash"}:
         assert (outgoing.home / lease.relative).read_bytes() == _cipher
