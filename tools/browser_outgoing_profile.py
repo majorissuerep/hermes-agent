@@ -19,6 +19,7 @@ from hermes_constants import get_hermes_home
 from hermes_security import artifacts, browser_profile_archive as archive
 from hermes_security import protected_workspace as ram_workspaces
 from tools import browser_outgoing_state as state, browser_outgoing_transfer as transfer
+from tools import browser_outgoing_retirement as retirement
 
 _LOCK = threading.RLock()
 _LEASES = {}
@@ -296,28 +297,20 @@ def _checkpoint(lease, *, stale=False, path=None):
         source, expected, raw_hash, maximum = transfer.download(lease, ram, path=path, stale=stale)
         written = archive.write_archive(lease.home, lease.relative, source, custody=lease.custody,
                                          slot=lease.slot, identity=lease.identity, digest=lease.digest)
-        checked = archive.replay_archive(lease.home, lease.relative, custody=lease.custody,
-                                          slot=lease.slot, digest=lease.digest)
-        if checked != written or checked != expected:
-            raise state.OutgoingProfileError("Browser checkpoint verification failed; every copy retained")
-        state.write(lease.home, lease.digest, lease.custody,
-                    document(lease, "checkpointed", recovery=asdict(checked), raw_hash=raw_hash, maximum=maximum))
-        transfer.retire(lease, raw_hash, maximum, path=path, stale=stale)
-        state.remove(lease.home, lease.digest, lease.custody, lease.token)
+        with retirement.pinned_archive(lease) as saved:
+            checked = saved.replay(lease)
+            if checked != written or checked != expected:
+                raise state.OutgoingProfileError("Browser checkpoint verification failed; every copy retained")
+            state.write(lease.home, lease.digest, lease.custody,
+                        document(lease, "checkpointed", recovery=asdict(checked), raw_hash=raw_hash,
+                                 maximum=maximum, archive_cipher_sha256=saved.digest))
+            reference = state.read(lease.home, lease.digest, lease.custody)
+            retirement.finish(lease, reference, stale=stale, path=path, saved=saved,
+                              original=(raw_hash, maximum))
 
 
 def _finish_checkpoint(lease, document, *, stale=False, path=None):
-    checked = archive.replay_archive(lease.home, lease.relative, custody=lease.custody,
-                                      slot=lease.slot, digest=lease.digest)
-    if asdict(checked) != document.get("recovery"):
-        raise state.OutgoingProfileError("The saved browser checkpoint changed; RAM and reference retained")
-    # Retirement may have completed before revocation/process exit prevented removal
-    # of the host reference. An exactly empty original generation needs no deletion.
-    # A newer allocation's binding counts as nonempty in this unbound inspection.
-    target = path or lease.runtime.profile
-    if not transfer.inspect(lease, path=target, stale=stale):
-        transfer.retire(lease, document["raw_hash"], document["maximum"], path=path, stale=stale)
-    state.remove(lease.home, lease.digest, lease.custody, lease.token)
+    retirement.finish(lease, document, stale=stale, path=path)
 
 
 def close(task_id: str, info: dict) -> bool | None:

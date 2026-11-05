@@ -501,6 +501,15 @@ def authenticate_ciphertext(handle, *, custody, purpose: str, policy: TreePolicy
     return summary
 
 
+def replay_opened(handle, *, custody, purpose: str, policy: TreePolicy,
+                  slot: str | None, digest: str | None, target: Path | None = None) -> ArchiveSummary:
+    """Replay one caller-pinned FD through the same complete authenticated reader."""
+    summary = _replay_handle(handle, _PurposeKey(custody, purpose), purpose,
+                             _Replay(policy, slot, digest, target))
+    custody.check()
+    return summary
+
+
 def replay_archive(home: Path, relative: PurePosixPath, *, custody, purpose: str, policy: TreePolicy,
                    slot: str | None, digest: str | None, target: Path | None) -> ArchiveSummary:
     """Authenticate one already admitted archive end to end; with ``target`` restore into it.

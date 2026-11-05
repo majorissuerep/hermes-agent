@@ -176,6 +176,14 @@ def authenticate_ciphertext(handle, relative, *, custody) -> tree_archive.Archiv
                                                  policy=_policy())
 
 
+def replay_opened(handle, relative, *, custody, slot: str, digest: str,
+                  target: Path | None = None) -> tree_archive.ArchiveSummary:
+    """Use an original opened archive; never resolve a replacement between passes."""
+    relative = _admitted(relative)
+    return tree_archive.replay_opened(handle, custody=custody, purpose=archive_purpose(relative),
+                                      policy=_policy(), slot=slot, digest=digest, target=target)
+
+
 def replay_archive(home: Path, relative, *, custody, slot: str | None = None, digest: str | None = None,
                    target: Path | None = None) -> tree_archive.ArchiveSummary:
     """Authenticate one owned archive end to end; with ``target`` restore into that fresh directory.

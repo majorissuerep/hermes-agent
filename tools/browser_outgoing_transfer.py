@@ -96,8 +96,8 @@ def claim(lease):
     lease.bound = True
 
 
-def download(lease, ram: Path, *, path=None, stale=False):
-    """Keep the exact raw tar identity for unchanged-source retirement; admit all members first."""
+def download_raw(lease, ram: Path, *, path=None, stale=False):
+    """Bound one exact target snapshot in protected RAM, without filtering its inventory."""
     maximum = transport.receive_bound(ram)
     target = ram / "transfer.tar"
     binding = lease.binding if lease.bound and path is None else None
@@ -107,9 +107,15 @@ def download(lease, ram: Path, *, path=None, stale=False):
         spool.flush()
         spool.seek(0)
         digest = hashlib.file_digest(spool, "sha256").hexdigest()
-        spool.seek(0)
-        restored = ram / "profile"
-        restored.mkdir(mode=0o700)
+    return target, digest, maximum
+
+
+def download(lease, ram: Path, *, path=None, stale=False):
+    """Keep the exact raw tar identity for unchanged-source retirement; admit all members first."""
+    target, digest, maximum = download_raw(lease, ram, path=path, stale=stale)
+    restored = ram / "profile"
+    restored.mkdir(mode=0o700)
+    with target.open("rb") as spool:
         summary = transport.unpack(spool, restored, check_alive=lease.custody.check)
     return restored, summary, digest, maximum
 

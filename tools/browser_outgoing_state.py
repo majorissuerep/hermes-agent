@@ -135,6 +135,10 @@ def _validate(document):
                 or len(raw_hash) != 64 or any(c not in "0123456789abcdef" for c in raw_hash)
                 or type(maximum) is not int or not 0 < maximum <= 4 * 1024**3):
             raise OutgoingProfileError("Outgoing browser checkpoint metadata is damaged; retained")
+        cipher = document.get("archive_cipher_sha256")
+        if cipher is not None and (not isinstance(cipher, str) or len(cipher) != 64
+                                   or any(c not in "0123456789abcdef" for c in cipher)):
+            raise OutgoingProfileError("Outgoing browser checkpoint ciphertext identity is damaged; retained")
 
 
 def _validate_identity(identity):
@@ -160,7 +164,7 @@ def write(home: Path, digest: str, custody, document: dict) -> None:
     artifacts._publish(home, path, encoded, custody, overwrite=True)
 
 
-def remove(home: Path, digest: str, custody, token: str) -> None:
+def remove(home: Path, digest: str, custody, token: str, *, expected=None) -> None:
     artifacts._bound_custody(home, custody)
     path = relative(digest)
     with artifacts._parent(home, path) as parent:
@@ -176,6 +180,10 @@ def remove(home: Path, digest: str, custody, token: str) -> None:
             raw = source.read(_BOUND + 1)
             if len(raw) > _BOUND:
                 raise OutgoingProfileError("Outgoing recovery reference exceeds its bound; retained")
+        identity = (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns,
+                    before.st_ctime_ns, hashlib.sha256(raw).hexdigest())
+        if expected is not None and identity != expected:
+            raise OutgoingProfileError("Outgoing recovery reference changed since verification; retained")
         document = json.loads(custody.vault.decrypt(raw, purpose="state", relpath=path.as_posix(), authority=custody.authority))
         if not secrets.compare_digest(str(document.get("lease")), token):
             raise OutgoingProfileError("A newer outgoing browser lease replaced this recovery reference; retained")
