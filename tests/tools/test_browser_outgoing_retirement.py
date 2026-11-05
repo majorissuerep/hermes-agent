@@ -141,6 +141,7 @@ def test_uncertain_remaining_state_is_retained_with_original_recovery(interrupte
         custody = SessionCustody.capture(outgoing.home)
         if case == "older-reference":
             reference.pop("archive_cipher_sha256", None)
+            reference.pop("inventory", None)  # An actual older reference predates native proof metadata.
             state.write(outgoing.home, lease.digest, custody, reference)
         elif case == "cipher-replaced":
             source = outgoing.ram / "same-summary-replacement"
@@ -174,7 +175,9 @@ def test_repair_rechecks_original_cipher_reference_and_authority(interrupted, mo
     outgoing, sibling, create = interrupted
     profile, lease, _expected, reference, _cipher = create()
     before = _contents(profile)
-    original_subset, original_remove = retirement._subset, state.remove
+    from tools import browser_outgoing_inventory as inventory
+
+    original_subset, original_remove = inventory.require_subset, state.remove
     changed, armed = [], []
     original_hash = retirement._PinnedCipher._hash
 
@@ -216,7 +219,7 @@ def test_repair_rechecks_original_cipher_reference_and_authority(interrupted, mo
         return original_remove(*args, **kwargs)
 
     if case in {"cipher-after-proof", "cipher-during-hash", "parent-during-hash", "source-ended"}:
-        monkeypatch.setattr(retirement, "_subset", subset)
+        monkeypatch.setattr(inventory, "require_subset", subset)
         if case in {"cipher-during-hash", "parent-during-hash"}:
             monkeypatch.setattr(retirement._PinnedCipher, "_hash", digest)
     elif case == "reference-before-removal":

@@ -268,7 +268,8 @@ def _stream_tree(sink: _RecordSink, root: int, header: dict, policy: TreePolicy)
 
 
 def write_archive(home: Path, relative: PurePosixPath, source: Path, *, custody, purpose: str,
-                  policy: TreePolicy, slot: str, identity: dict, digest: str) -> ArchiveSummary:
+                  policy: TreePolicy, slot: str, identity: dict, digest: str,
+                  overwrite: bool = True) -> ArchiveSummary:
     """Stream ``source`` into an owner-only ciphertext stage, authenticate it, then publish atomically.
 
     The caller has already admitted ``relative`` and chosen its concrete ``purpose``.
@@ -298,7 +299,11 @@ def write_archive(home: Path, relative: PurePosixPath, source: Path, *, custody,
             if _replay_from(parent, stage, keyed, purpose, _Replay(policy, slot, digest, None)) != summary:
                 raise ArchiveError(f"The sealed {policy.label} did not authenticate before publication")
             custody.check()
-            os.replace(stage, relative.name, src_dir_fd=parent, dst_dir_fd=parent)
+            if overwrite:
+                os.replace(stage, relative.name, src_dir_fd=parent, dst_dir_fd=parent)
+            else:
+                os.link(stage, relative.name, src_dir_fd=parent, dst_dir_fd=parent, follow_symlinks=False)
+                os.unlink(stage, dir_fd=parent)
             try:
                 os.fsync(parent)
             except OSError as exc:

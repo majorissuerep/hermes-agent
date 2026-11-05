@@ -20,6 +20,7 @@ from hermes_security import artifacts, browser_profile_archive as archive
 from hermes_security import protected_workspace as ram_workspaces
 from tools import browser_outgoing_state as state, browser_outgoing_transfer as transfer
 from tools import browser_outgoing_retirement as retirement
+from tools import browser_outgoing_inventory as native_inventory
 
 _LOCK = threading.RLock()
 _LEASES = {}
@@ -294,19 +295,29 @@ def _checkpoint(lease, *, stale=False, path=None):
         _finish_checkpoint(lease, previous, stale=stale, path=path)
         return
     with workspace(lease, "outgoing-browser-save") as ram:
+        original, _first_hash, _first_size = native_inventory.receive(
+            lease, ram, "native-before.json", path=path, stale=stale)
         source, expected, raw_hash, maximum = transfer.download(lease, ram, path=path, stale=stale)
+        current, native_hash, native_size = native_inventory.receive(
+            lease, ram, "native-after.json", path=path, stale=stale)
+        if current != original:
+            raise state.OutgoingProfileError("Original native profile changed during checkpoint; every copy retained")
+        native_bound = native_inventory.effect_limit(lease, native_size)
         written = archive.write_archive(lease.home, lease.relative, source, custody=lease.custody,
                                          slot=lease.slot, identity=lease.identity, digest=lease.digest)
         with retirement.pinned_archive(lease) as saved:
             checked = saved.replay(lease)
             if checked != written or checked != expected:
                 raise state.OutgoingProfileError("Browser checkpoint verification failed; every copy retained")
-            state.write(lease.home, lease.digest, lease.custody,
-                        document(lease, "checkpointed", recovery=asdict(checked), raw_hash=raw_hash,
-                                 maximum=maximum, archive_cipher_sha256=saved.digest))
-            reference = state.read(lease.home, lease.digest, lease.custody)
-            retirement.finish(lease, reference, stale=stale, path=path, saved=saved,
-                              original=(raw_hash, maximum))
+            with native_inventory.published(lease, ram, original) as (metadata, proof):
+                if state.read(lease.home, lease.digest, lease.custody) != previous:
+                    raise state.OutgoingProfileError("Original checkpoint reference changed; every copy retained")
+                state.write(lease.home, lease.digest, lease.custody,
+                            document(lease, "checkpointed", recovery=asdict(checked), raw_hash=raw_hash,
+                                     maximum=maximum, archive_cipher_sha256=saved.digest, inventory=metadata))
+                reference = state.read(lease.home, lease.digest, lease.custody)
+                retirement.finish(lease, reference, stale=stale, path=path, saved=saved, inventory=proof,
+                                  original=(raw_hash, maximum, native_hash, native_bound))
 
 
 def _finish_checkpoint(lease, document, *, stale=False, path=None):

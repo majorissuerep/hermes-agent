@@ -14,12 +14,12 @@ _PROGRAM = r'''
 import ctypes, hashlib, json, os, select, shutil, signal, stat, subprocess, sys, time
 if sys.version_info < (3, 11):
     raise RuntimeError("protected browser continuity requires Python 3.11 or later")
-operation, path, maximum, expected, stale, binding_raw = sys.argv[1:]
+operation, path, maximum, expected, stale, binding_raw, native_expected, native_limit = sys.argv[1:]
 maximum, stale = int(maximum), stale == "yes"
 binding = json.loads(binding_raw) if binding_raw else None
 BINDING = ".hermes-browser-binding.json"
 DEADLINE = time.monotonic() + 120
-WATCH_OWNER = operation in {"export", "retire", "retire-legacy"}
+WATCH_OWNER = operation in {"inventory", "export", "retire", "retire-legacy"}
 def terminal(error_type, reason):
     # Cancellation is single-shot: another tick must not interrupt kill()/wait().
     signal.setitimer(signal.ITIMER_REAL, 0)
@@ -93,7 +93,7 @@ def bound(fd):
         raise ValueError("browser runtime binding was replaced; retained")
 
 def claim(fd):
-    if not binding or os.listdir(fd):
+    if not binding or native_names(fd):
         raise ValueError("only a fresh empty profile can be claimed")
     descriptor = os.open(BINDING, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
                          0o600, dir_fd=fd)
@@ -127,23 +127,31 @@ def exported_hash(fd):
 def retire(fd, identity):
     quiet(fd)
     bound(fd)
+    records, children = native_inventory(fd)
+    encoded = native_encoded(fd, identity, records)
+    if native_expected and hashlib.sha256(encoded).hexdigest() != native_expected:
+        raise ValueError("native profile changed after its original subset proof; retained")
     if exported_hash(fd) != expected:
         raise ValueError("profile changed after its verified checkpoint; every copy retained")
     unchanged(fd, identity)
     quiet(fd)
     bound(fd)
-    if not shutil.rmtree.avoids_symlink_attacks:
-        raise ValueError("descriptor-safe profile retirement is unavailable")
-    for name in (entry for entry in os.listdir(fd) if entry != BINDING):
-        info = os.stat(name, dir_fd=fd, follow_symlinks=False)
-        if stat.S_ISDIR(info.st_mode):
-            shutil.rmtree(name, dir_fd=fd)
-        else:
-            os.unlink(name, dir_fd=fd)
+    # A second complete native pass fences entries tar may silently omit and
+    # changes while the raw tar hash was read. Neither pass changes the source.
+    if native_inventory(fd)[0] != records:
+        raise ValueError("native profile changed before cleanup; every copy retained")
+    def check():
+        unchanged(fd, identity)
+        quiet(fd)
+        bound(fd)
+    native_remove(fd, records, children, check)
     if os.path.lexists("/proc/self/fd/" + str(fd) + "/" + BINDING):
+        check()
+        if native_record(fd, BINDING) != records[BINDING]:
+            raise ValueError("native profile binding changed before cleanup; retained")
         os.unlink(BINDING, dir_fd=fd)
     unchanged(fd, identity)
-    if os.listdir(fd):
+    if native_names(fd):
         raise ValueError("profile retirement incomplete")
 
 def run():
@@ -155,13 +163,18 @@ def run():
             claim(fd)
         elif operation == "inspect":
             bound(fd)
-            entries = set(os.listdir(fd)) - ({BINDING} if binding else set())
+            entries = set(native_names(fd)) - ({BINDING} if binding else set())
             print(json.dumps({"empty": not entries}))
         elif operation == "binding":
             bound(fd)
             print("true")
+        elif operation == "inventory":
+            bound(fd)
+            records, _children = native_inventory(fd)
+            sys.stdout.buffer.write(native_encoded(fd, identity, records))
         elif operation == "export":
             bound(fd)
+            native_inventory(fd)
             result = subprocess.run(tar_argv(fd), stdin=subprocess.DEVNULL, stdout=sys.stdout.buffer,
                                     stderr=subprocess.DEVNULL, pass_fds=(fd,), preexec_fn=child_lifetime,
                                     timeout=120, check=False)
@@ -169,7 +182,7 @@ def run():
                 raise ValueError("profile export failed; original retained")
         elif operation == "restore":
             bound(fd)
-            if set(os.listdir(fd)) - ({BINDING} if binding else set()):
+            if set(native_names(fd)) - ({BINDING} if binding else set()):
                 raise ValueError("profile restore requires an empty directory")
             result = subprocess.run(["tar", "--extract", "--file=-", "--no-same-owner", "--no-same-permissions",
                                      "--directory=/proc/self/fd/" + str(fd)],
@@ -193,6 +206,9 @@ def run():
     finally:
         os.close(fd)
 
+'''
+_RUN = r'''
+INVENTORY_BYTES = min(INVENTORY_BYTES, int(native_limit))
 try:
     if WATCH_OWNER:
         expired(None, None)  # a preclosed owner channel admits no transfer effects
@@ -206,21 +222,28 @@ finally:
 
 
 def command(operation: str, path: str, *, maximum: int, expected: str = "", stale: bool = False,
-            binding: dict | None = None) -> list[str]:
+            binding: dict | None = None, native_expected: str = "",
+            native_limit: int = 64 * 1024**2) -> list[str]:
     """A fixed operation; the caller supplies a generated/proven profile path, never shell text."""
-    if operation not in {"inspect", "binding", "export", "restore", "retire", "retire-legacy", "claim"} or maximum <= 0:
+    if operation not in {"inspect", "binding", "inventory", "export", "restore", "retire", "retire-legacy", "claim"} or maximum <= 0:
         raise ValueError("Invalid outgoing profile operation")
     if not posixpath.isabs(path) or "\x00" in path or any(part == ".." for part in path.split("/")):
         raise ValueError("Outgoing profile operations require a proven absolute directory")
     if operation in {"retire", "retire-legacy"} and (len(expected) != 64 or any(c not in "0123456789abcdef" for c in expected)):
         raise ValueError("Retirement requires the verified export identity")
-    program = "TAR = " + repr(list(_TAR)) + "\n" + _PROGRAM
+    if (type(native_limit) is not int or not 0 < native_limit <= 64 * 1024**2
+            or (native_expected and (len(native_expected) != 64
+                                    or any(c not in "0123456789abcdef" for c in native_expected)))):
+        raise ValueError("Invalid native profile inventory proof")
+    from hermes_platform.remote_profile_inventory import program as inventory_program
+
+    program = "TAR = " + repr(list(_TAR)) + "\n" + _PROGRAM + inventory_program() + _RUN
     import json
     encoded = "" if binding is None else json.dumps(binding, sort_keys=True)
     if len(encoded) > 16384:
         raise ValueError("Browser runtime binding exceeds its bound")
     return ["python3", "-I", "-c", program, operation, path, str(maximum), expected,
-            "yes" if stale else "no", encoded]
+            "yes" if stale else "no", encoded, native_expected, str(native_limit)]
 
 
 def existence_command(path: str) -> list[str]:

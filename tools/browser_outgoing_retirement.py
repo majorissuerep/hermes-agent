@@ -1,7 +1,7 @@
 """Finish an authenticated outgoing checkpoint without discarding unconfirmed survivors."""
 from __future__ import annotations
 
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import asdict
 import hashlib
 import json
@@ -13,10 +13,10 @@ import tarfile
 from hermes_security import artifacts, browser_profile_archive as archive
 from hermes_security import browser_profile_transport as transport, tree_archive
 from tools import browser_outgoing_state as state, browser_outgoing_transfer as transfer
+from tools import browser_outgoing_inventory as native_inventory
+from tools import browser_outgoing_tar_witness as tar_witness
 
 _CHUNK = 1024 * 1024
-_META_BUDGET = 64 * 1024
-_BINDING = archive.RUNTIME_BINDING_NAME
 
 
 def _stamp(info):
@@ -93,132 +93,28 @@ def pinned_archive(lease):
         yield pinned
 
 
-class _TarReader:
-    """Bound stdlib tar metadata before parsing; regular bodies are streamed separately."""
-    def __init__(self, source):
-        self.source, self.metadata_left, self.data = source, _META_BUDGET, False
-
-    def read(self, size=-1):
-        if size < 0 or size > _CHUNK or (not self.data and size > self.metadata_left):
-            raise state.OutgoingProfileError("Remaining profile tar metadata exceeds its bound")
-        if not self.data:
-            self.metadata_left -= size
-        return self.source.read(size)
-
-    def seek(self, offset, whence=0):
-        return self.source.seek(offset, whence)
-
-    def tell(self):
-        return self.source.tell()
-
-
-def _file_hash(handle, custody):
-    digest = hashlib.sha256()
-    while block := handle.read(_CHUNK):
-        custody.check()
-        digest.update(block)
-    return digest.digest()
-
-
-def _same_entry(incoming, member, relative, original, reader, custody):
-    if member.isdir():
-        with tree_archive._source_directory(original, "checkpoint survivor", relative) as descriptor:
-            if not stat.S_ISDIR(os.fstat(descriptor).st_mode):
-                raise state.OutgoingProfileError("Remaining profile entry changed type")
-        return
-    if not member.isreg() or member.sparse is not None or member.size < 0:
-        raise state.OutgoingProfileError("Remaining profile has an unsupported entry type")
-    with tree_archive._source_file(original, "checkpoint survivor", relative) as (expected, info):
-        if info.st_size != member.size:
-            raise state.OutgoingProfileError("Remaining profile file changed size")
-        reader.data = True
+def _remaining(lease, document, ram, *, inventory=None, path=None):
+    raw, digest, maximum = transfer.download_raw(lease, ram, path=path, stale=True)
+    if inventory is not None:
+        expected = native_inventory.original(lease, document["inventory"], inventory, ram)
+        current, native_hash, native_size = native_inventory.receive(
+            lease, ram, "native-current.json", path=path, stale=True)
         try:
-            with incoming.extractfile(member) as current:
-                if _file_hash(current, custody) != _file_hash(expected, custody):
-                    raise state.OutgoingProfileError("Remaining profile file changed content")
-        finally:
-            reader.data = False
-
-
-def _binding(incoming, member, lease, reader):
-    if not member.isreg() or member.sparse is not None or not 0 < member.size <= 16384:
-        raise state.OutgoingProfileError("Original remaining profile binding is invalid")
-    reader.data = True
-    try:
-        with incoming.extractfile(member) as source:
-            raw = source.read(16385)
-    finally:
-        reader.data = False
-    if len(raw) != member.size or json.loads(raw) != lease.binding:
-        raise state.OutgoingProfileError("Original remaining profile binding was replaced")
-
-
-def _tar_end(source, offset):
-    size = os.fstat(source.fileno()).st_size
-    if size - offset < 1024 or (size - offset) % 512:
-        raise state.OutgoingProfileError("Remaining profile tar has no complete terminator")
-    source.seek(offset)
-    while block := source.read(_CHUNK):
-        if any(block):
-            raise state.OutgoingProfileError("Remaining profile tar has unconfirmed trailing data")
-
-
-def _subset(raw, original, lease):
-    policy, previous, binding, root, count = archive._policy(), None, False, False, 0
-    with raw.open("rb") as source:
-        reader = _TarReader(source)
-        with tarfile.open(fileobj=reader, mode="r:") as incoming:
-            while True:
-                reader.metadata_left = _META_BUDGET
-                member = incoming.next()
-                if member is None:
-                    break
-                lease.custody.check()
-                count += 1
-                if count > policy.max_entries + 2:
-                    raise state.OutgoingProfileError("Remaining profile exceeds its entry bound")
-                relative = transport._relative(member)
-                if relative is None:
-                    if root:
-                        raise state.OutgoingProfileError("Remaining profile repeats its root entry")
-                    root = True
-                else:
-                    key = tuple(relative.split("/"))
-                    if previous is not None and key <= previous:
-                        raise state.OutgoingProfileError("Remaining profile repeats or reorders an entry")
-                    previous = key
-                    if relative == _BINDING:
-                        _binding(incoming, member, lease, reader)
-                        binding = True
-                    else:
-                        _same_entry(incoming, member, relative, original, reader, lease.custody)
-                incoming.members.clear()  # No links are admitted; only this member is needed.
-            _tar_end(source, incoming.offset)
-    if not binding:
-        raise state.OutgoingProfileError("Original remaining profile binding is missing")
-
-
-def _remaining(lease, document, saved, summary, ram):
-    raw, digest, maximum = transfer.download_raw(lease, ram, stale=True)
+            native_inventory.require_subset(current, expected)
+            tar_witness.check(raw, current["entries"], custody=lease.custody,
+                              binding=lease.binding if lease.bound and path is None else None)
+        except (state.OutgoingProfileError, tarfile.TarError) as error:
+            raise state.OutgoingProfileError(
+                "Remaining browser state is not a proven unchanged native checkpoint subset "
+                "(unknown/excluded/new/changed entries are retained). "
+                f"Authenticated recovery: {lease.relative}; original target remainder: {path or lease.runtime.profile}. "
+                "No bytes were deleted.") from error
+        return digest, maximum, native_hash, native_inventory.effect_limit(lease, native_size)
     if digest == document["raw_hash"]:
-        return digest, maximum  # Exact original raw source also covers its declared exclusions.
-    if document.get("archive_cipher_sha256") is None:
-        raise state.OutgoingProfileError(
-            "Older partial checkpoint has no original ciphertext identity; no partial cleanup was attempted. "
-            f"Authenticated recovery: {lease.relative}; original target remainder: {lease.runtime.profile}")
-    transport.require_capacity(ram, summary.bytes + summary.entries * 8192 + _META_BUDGET)
-    restored = ram / "authenticated-checkpoint"
-    restored.mkdir(mode=0o700)
-    if saved.replay(lease, target=restored) != summary:
-        raise state.OutgoingProfileError("Original authenticated checkpoint changed")
-    try:
-        _subset(raw, restored, lease)
-    except (OSError, ValueError, tarfile.TarError, state.OutgoingProfileError) as error:
-        raise state.OutgoingProfileError(
-            "Remaining browser state is not a proven unchanged checkpoint subset "
-            f"(unknown/excluded/new/changed entries are retained). Authenticated recovery: {lease.relative}; "
-            f"original target remainder: {lease.runtime.profile}. No bytes were deleted.") from error
-    return digest, maximum
+        return digest, maximum
+    raise state.OutgoingProfileError(
+        "Older partial checkpoint has no complete original native inventory; no partial cleanup was attempted. "
+        f"Authenticated recovery: {lease.relative}; original target remainder: {path or lease.runtime.profile}")
 
 
 def _reference(lease, pinned):
@@ -228,7 +124,7 @@ def _reference(lease, pinned):
         raw, purpose="state", relpath=state.relative(lease.digest).as_posix()))
 
 
-def _finish(lease, document, saved, *, stale, path, original):
+def _finish(lease, document, saved, *, stale, path, original, inventory):
     if document.get("archive_cipher_sha256", saved.digest) != saved.digest:
         raise state.OutgoingProfileError("Original checkpoint ciphertext identity changed; every copy retained")
     summary = saved.replay(lease)
@@ -240,32 +136,46 @@ def _finish(lease, document, saved, *, stale, path, original):
         if original is not None:
             saved.check()
             reference.check()
+            if inventory is not None:
+                inventory.check()
             transfer.retire(lease, *original, path=path, stale=stale)
         elif not transfer.inspect(lease, path=path or lease.runtime.profile, stale=stale):
-            _resume(lease, document, saved, reference, summary, stale=stale, path=path)
+            _resume(lease, document, saved, reference, inventory=inventory, stale=stale, path=path)
         saved.check()
         reference.check()
+        if inventory is not None:
+            inventory.check()
         state.remove(lease.home, lease.digest, lease.custody, lease.token, expected=reference.identity)
+        if inventory is not None:
+            native_inventory.discard_completed(lease, inventory)
 
 
-def _resume(lease, document, saved, reference, summary, *, stale, path):
+def _resume(lease, document, saved, reference, *, inventory, stale, path):
     from tools.browser_outgoing_profile import workspace
 
-    if path is not None:
+    if path is not None and inventory is None:
         saved.check()
         reference.check()
         transfer.retire(lease, document["raw_hash"], document["maximum"], path=path, stale=stale)
         return
     with workspace(lease, "outgoing-browser-retirement") as ram:
-        digest, maximum = _remaining(lease, document, saved, summary, ram)
+        remaining = _remaining(lease, document, ram, inventory=inventory, path=path)
         saved.check()
         reference.check()
-        transfer.retire(lease, digest, maximum, stale=stale)
+        if inventory is not None:
+            inventory.check()
+        transfer.retire(lease, *remaining, path=path, stale=stale)
 
 
-def finish(lease, document, *, stale=False, path=None, saved=None, original=None):
-    """Keep original archive/ref pins through the only deletion and final reference cleanup."""
-    if saved is not None:
-        return _finish(lease, document, saved, stale=stale, path=path, original=original)
-    with pinned_archive(lease) as opened:
-        return _finish(lease, document, opened, stale=stale, path=path, original=original)
+def finish(lease, document, *, stale=False, path=None, saved=None, original=None, inventory=None):
+    """Keep original archive/ref/proof pins through the only deletion and reference cleanup."""
+    metadata = document.get("inventory")
+    proof_context = (nullcontext(inventory) if inventory is not None or metadata is None
+                     else native_inventory.opened(lease, metadata))
+    with proof_context as proof:
+        if proof is not None:
+            native_inventory.validate_opened(lease, metadata, proof)
+        if saved is not None:
+            return _finish(lease, document, saved, stale=stale, path=path, original=original, inventory=proof)
+        with pinned_archive(lease) as opened:
+            return _finish(lease, document, opened, stale=stale, path=path, original=original, inventory=proof)

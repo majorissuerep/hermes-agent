@@ -37,7 +37,10 @@ def client(lease, argv, *, payload=None, input_source=None, output_sink=None, ma
                 raise OutgoingProfileError(
                     f"Selected {lease.backend} target requires Python 3.11 or later for protected browser continuity; "
                     "install that prerequisite explicitly on the target. No source files were retired")
-            detail = "busy or unknown browser owner" if b"owner" in error or b"busy" in error else "transfer/admission unavailable"
+            if b"unsupported or foreign native profile entry" in error:
+                detail = "unsupported native entry"
+            else:
+                detail = "busy or unknown browser owner" if b"owner" in error or b"busy" in error else "transfer/admission unavailable"
             raise OutgoingProfileError(f"Original outgoing browser profile {detail}; recovery state retained (exit {code})")
         return output
 
@@ -156,9 +159,10 @@ def restore_prepared(lease, ram: Path, summary, spool: Path, restored: Path):
     return checked, summary
 
 
-def retire(lease, digest: str, maximum: int, *, path=None, stale=False):
+def retire(lease, digest: str, maximum: int, native_expected="", native_limit=64 * 1024**2, *, path=None, stale=False):
     """Retire only an unchanged quiescent copy already covered by verified durable ciphertext."""
     command = remote_profile.command("retire-legacy" if path else "retire", path or lease.runtime.profile,
                                      maximum=maximum, expected=digest, stale=stale,
-                                     binding=lease.binding if lease.bound and path is None else None)
+                                     binding=lease.binding if lease.bound and path is None else None,
+                                     native_expected=native_expected, native_limit=native_limit)
     client(lease, command, keep_input_open=True)

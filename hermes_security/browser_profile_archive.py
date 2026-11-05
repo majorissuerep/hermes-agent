@@ -157,7 +157,7 @@ def tree_digest(root: Path) -> tree_archive.ArchiveSummary:
 
 
 def write_archive(home: Path, relative, source: Path, *, custody, slot: str, identity: dict,
-                  digest: str) -> tree_archive.ArchiveSummary:
+                  digest: str, overwrite: bool = True) -> tree_archive.ArchiveSummary:
     """Seal ``source`` at its admitted profile location; see ``tree_archive.write_archive``.
 
     Pre-publication failures leave the previous archive and source untouched.
@@ -166,7 +166,7 @@ def write_archive(home: Path, relative, source: Path, *, custody, slot: str, ide
     """
     relative = _admitted(relative)
     return tree_archive.write_archive(home, relative, source, custody=custody, purpose=archive_purpose(relative),
-                                      policy=_policy(), slot=slot, identity=identity, digest=digest)
+                                      policy=_policy(), slot=slot, identity=identity, digest=digest, overwrite=overwrite)
 
 
 def authenticate_ciphertext(handle, relative, *, custody) -> tree_archive.ArchiveSummary:

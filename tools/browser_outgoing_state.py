@@ -94,7 +94,7 @@ def read(home: Path, digest: str, custody) -> dict | None:
     decoded = custody.decrypt(raw, purpose="state", relpath=path.as_posix())
     custody.check()
     document = json.loads(decoded)
-    if (not isinstance(document, dict) or document.get("version") != 1
+    if (not isinstance(document, dict) or type(document.get("version")) is not int or document.get("version") not in (1, 2)
             or document.get("home") != str(home) or document.get("digest") != digest
             or document.get("phase") not in {"active", "restoring", "checkpointed"}):
         raise OutgoingProfileError("Outgoing browser recovery reference is invalid; retained")
@@ -106,6 +106,10 @@ def _validate(document):
     from tools.browser_recording_pending import _valid_owner
     from hermes_platform.remote_identity import RuntimeIdentity, guarded_argv
 
+    version, proof = document.get("version"), document.get("inventory")
+    if ((version == 2 and (document.get("phase") != "checkpointed" or proof is None))
+            or (version == 1 and "inventory" in document)):
+        raise OutgoingProfileError("Outgoing retirement reference version/proof is invalid; retained")
     backend, identity, runtime = (document.get(k) for k in ("backend", "identity", "runtime"))
     token = document.get("lease")
     if (backend not in {"ssh", "docker", "singularity"} or not isinstance(identity, dict)
@@ -139,6 +143,12 @@ def _validate(document):
         if cipher is not None and (not isinstance(cipher, str) or len(cipher) != 64
                                    or any(c not in "0123456789abcdef" for c in cipher)):
             raise OutgoingProfileError("Outgoing browser checkpoint ciphertext identity is damaged; retained")
+        if version == 2:
+            from tools.browser_outgoing_inventory import validate_reference
+
+            if cipher is None:
+                raise OutgoingProfileError("Original checkpoint ciphertext identity is required; retained")
+            validate_reference(document["digest"], document["inventory"])
 
 
 def _validate_identity(identity):
@@ -156,7 +166,10 @@ def _validate_identity(identity):
 def write(home: Path, digest: str, custody, document: dict) -> None:
     artifacts._bound_custody(home, custody)
     path = relative(digest)
-    data = tree_archive.canonical_json({**document, "version": 1, "home": str(home), "digest": digest})
+    prepared = {**document, "version": 2 if "inventory" in document else 1,
+                "home": str(home), "digest": digest}
+    _validate(prepared)
+    data = tree_archive.canonical_json(prepared)
     if len(data) > _BOUND // 2:
         raise OutgoingProfileError("Outgoing browser recovery reference exceeds its bound")
     custody.check()

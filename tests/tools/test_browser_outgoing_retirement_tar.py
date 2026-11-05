@@ -1,6 +1,8 @@
 """Bounded logical survivor proof; mode/mtime are deliberately outside archive semantics."""
+import hashlib
 import io
 import json
+import stat
 import tarfile
 from types import SimpleNamespace
 
@@ -34,21 +36,31 @@ def survivor(tmp_path):
     return tmp_path / "remaining.tar", original, lease, entries
 
 
-def test_survivor_proof_checks_bytes_not_regenerated_file_mode_or_mtime(survivor):
-    from tools.browser_outgoing_retirement import _subset
+def _witness(path, original, lease):
+    from hermes_security import browser_profile_archive as archive
+    from tools.browser_outgoing_tar_witness import check
 
+    binding = json.dumps(lease.binding).encode()
+    records = {
+        archive.RUNTIME_BINDING_NAME: {"kind": stat.S_IFREG, "size": len(binding),
+                                       "sha256": hashlib.sha256(binding).hexdigest()},
+        "data-a": {"kind": stat.S_IFREG, "size": 6,
+                   "sha256": hashlib.sha256((original / "data-a").read_bytes()).hexdigest()},
+    }
+    check(path, records, custody=lease.custody, binding=lease.binding)
+
+
+def test_survivor_proof_checks_bytes_not_regenerated_file_mode_or_mtime(survivor):
     path, original, lease, entries = survivor
     (original / "data-a").chmod(0o600)
     _tar(path, entries)
-    _subset(path, original, lease)
+    _witness(path, original, lease)
 
 
 @pytest.mark.parametrize("case", ["duplicate", "reordered", "absolute", "link", "special", "huge-metadata", "truncated", "malformed", "trailing", "entry-bound"])
 def test_survivor_proof_refuses_unbounded_or_ambiguous_tar_without_writing(survivor, monkeypatch, case):
     from hermes_security import browser_profile_archive as archive
     from hermes_security import tree_archive
-    from tools.browser_outgoing_retirement import _subset
-
     path, original, lease, entries = survivor
     before = {p.name: p.read_bytes() for p in original.iterdir()}
     additions = {
@@ -71,5 +83,5 @@ def test_survivor_proof_refuses_unbounded_or_ambiguous_tar_without_writing(survi
     elif case == "trailing":
         path.write_bytes(data + b"unconfirmed" + bytes(501))
     with pytest.raises((RuntimeError, ValueError, OSError, tarfile.TarError, tree_archive.ArchiveError)):
-        _subset(path, original, lease)
+        _witness(path, original, lease)
     assert {p.name: p.read_bytes() for p in original.iterdir()} == before
