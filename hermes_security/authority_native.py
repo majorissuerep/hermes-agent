@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import base64
+import logging
 import os
 from pathlib import Path
 import secrets
@@ -85,6 +86,17 @@ def profile_arguments(home: Path, arguments):
     return arguments
 
 
+def _cleanup_complete(child):
+    from hermes_platform.authority_children import NativeChild
+    return child.finished.is_set() and (not isinstance(child, NativeChild) or child.cleanup_complete())
+
+
+def _forget_completed(identity, authority, child):
+    with _lock:
+        if _jobs.get(identity) == (authority, child) and _cleanup_complete(child):
+            del _jobs[identity]
+
+
 def _start(authority, request):
     from hermes_security.handoff import prepare_child_key
     from hermes_cli._launchers import runtime_command
@@ -105,7 +117,7 @@ def _start(authority, request):
         if not authority.is_live():
             raise ValueError("the owning session ended before the native command could start")
         for identity, (owner, child) in list(_jobs.items()):
-            if owner is authority and child.finished.is_set() and time.monotonic() - child.last_poll >= 20:
+            if owner is authority and _cleanup_complete(child) and time.monotonic() - child.last_poll >= 20:
                 del _jobs[identity]
         if sum(owner is authority for owner, _ in _jobs.values()) >= 4:
             raise ValueError("the owning session already has four native commands")
@@ -148,13 +160,14 @@ def dispatch_native(authority, request):
             raise ValueError("the native command does not belong to this session")
         if request["op"] == "native.cancel":
             child.close()
-            with _lock:
-                _jobs.pop(identity, None)
+            if not _cleanup_complete(child):
+                raise RuntimeError("native child cleanup remains pending")
+            _forget_completed(identity, authority, child)
             return {"ok": True}
         chunks, done, rc, reason = child.poll()
+        done = done and _cleanup_complete(child)
         if done:
-            with _lock:
-                _jobs.pop(identity, None)
+            _forget_completed(identity, authority, child)
         return {"ok": True, "chunks": [{"stream": stream, "data": base64.b64encode(data).decode("ascii")}
                                          for stream, data in chunks], "done": done, "returncode": rc, "reason": reason}
     except (OSError, ValueError, TypeError, RuntimeError) as exc:
@@ -165,9 +178,10 @@ def dispatch_native(authority, request):
 
 def close_native(authority):
     with _lock:
-        children = [child for owner, child in _jobs.values() if owner is authority]
-        for identity, (owner, _) in list(_jobs.items()):
-            if owner is authority:
-                del _jobs[identity]
-    for child in children:
-        child.close()
+        children = [(identity, child) for identity, (owner, child) in _jobs.items() if owner is authority]
+    for identity, child in children:
+        try:
+            child.close()
+        except RuntimeError:
+            logging.getLogger(__name__).warning("Native command cleanup remains pending; ownership retained.")
+        _forget_completed(identity, authority, child)
