@@ -9,6 +9,10 @@ import sys
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[2]
+FORMAL_FILES = [
+    "tests/e2e/core/formal_logic/test_native_checkpoints.py",
+    "tests/e2e/core/formal_logic/test_terminal_mode.py",
+]
 LINUX_FILES = [
     "tests/hermes_platform/test_remote_workspace_file_read.py",
     "tests/tools/test_browser_client_private_stdio.py",
@@ -67,6 +71,15 @@ def bootstrap_protocol(env: dict[str, str], directory: Path) -> None:
     assert observed == sha
 
 
+def formal_checks(env: dict[str, str]) -> None:
+    """Forward the owning PM store explicitly across the hermetic test boundary."""
+    from pm.paths import store_root
+
+    run(sys.executable, "scripts/ci/install_lean.py", env=env)
+    run("scripts/run_tests.sh", "--fail-on-skip", "--file-retries", "0", *FORMAL_FILES,
+        "--", "--formal-checker-store", str(store_root().resolve()), env=env)
+
+
 def main() -> None:
     if sys.platform.startswith("linux"):
         from scripts.ci.native_namespace_policy import reexec_if_required
@@ -85,6 +98,9 @@ def main() -> None:
         files = LINUX_FILES
     else:
         raise SystemExit("Native qualification requires a supported Linux or macOS host")
+    # macOS discovers every platform-marked file, including formal E2E cases.
+    # Their required compiler is installed by the dedicated fail-on-skip phase.
+    files = [path for path in files if path not in FORMAL_FILES]
     if not files:
         raise SystemExit("Native qualification must select tests")
     run("scripts/run_tests.sh", "--files", os.pathsep.join(files), "--file-retries", "0",
@@ -97,6 +113,8 @@ def main() -> None:
             "tests/scripts/e2e/test_container_docker_live.py", "tests/scripts/test_fresh_source_install.py", env=env)
         with tempfile.TemporaryDirectory(prefix="hermes-bootstrap-protocol-") as temporary:
             bootstrap_protocol(env, Path(temporary))
+    # The opt-in verifier needs real kernel evidence on both supported native hosts.
+    formal_checks(env)
     run("git", "diff", "--exit-code", env=env)
     if subprocess.check_output(["git", "ls-files", "--others", "--exclude-standard"],
                                cwd=ROOT, text=True, timeout=30).strip():

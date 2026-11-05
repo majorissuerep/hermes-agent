@@ -20,6 +20,7 @@ from typing import Optional
 
 from agent.session_context import declare_stateless_channel
 from hermes_cli.fallback_config import get_fallback_chain
+from hermes_cli.agent_limits import configured_turn_limit
 
 _ALL_TOOLSETS = {"all", "*"}
 
@@ -638,7 +639,7 @@ def _run_agent(
             # HERMES_INTERACTIVE (never set), hook approval via HERMES_ACCEPT_HOOKS=1, dangerous
             # commands via HERMES_YOLO_MODE=1, skill secret capture degrades gracefully.
             clarify_callback=_oneshot_clarify_callback,
-            **({"max_iterations": overrides["max_turns"]} if overrides.get("max_turns") is not None else {}),
+            max_iterations=configured_turn_limit(cfg, overrides.get("max_turns")),
             **({"run_budget_seconds": overrides["run_budget"]} if overrides.get("run_budget") is not None else {}),
             skip_context_files=bool(overrides.get("ignore_rules")),
             skip_memory=bool(overrides.get("ignore_rules")),

@@ -86,3 +86,66 @@ def test_entry_staged_without_exec_bit_is_usable_again(pm_env):
     binary.chmod(0o644)
     healed = pm.installed_package("faketool")
     assert healed is not None and healed.binary == binary and os.access(binary, os.X_OK)
+
+
+@pytest.mark.platforms("linux", "macos")
+@pytest.mark.parametrize("replacement", ["foreign-link", "changed-regular"])
+def test_verified_lookup_refuses_without_chmod_of_unverified_bytes(pm_env, tmp_path, replacement):
+    ensure("faketool", explicit=True)
+    original = pm.installed_package("faketool")
+    if replacement == "foreign-link":
+        selected = tmp_path / "foreign-user-data"
+        selected.write_bytes(b"public synthetic retained user bytes")
+        original.binary.unlink()
+        original.binary.symlink_to(selected)
+    else:
+        selected = original.binary
+        selected.write_bytes(b"changed public synthetic payload")
+    selected.chmod(0o600)
+    before, facts = selected.read_bytes(), paths.facts_path().read_bytes()
+
+    assert pm.installed_package("faketool", verify=True) is None
+
+    assert selected.read_bytes() == before and selected.stat().st_mode & 0o777 == 0o600
+    assert paths.facts_path().read_bytes() == facts
+
+
+@pytest.mark.platforms("linux", "macos")
+def test_verified_lookup_keeps_recorded_in_store_executable_symlinks(pm_env):
+    """Python's bin/python3-style archive links are valid package data, not blanket refusal."""
+    from pm.lock import Facts
+    from pm.store import tree_digest
+
+    ensure("faketool", explicit=True)
+    original = pm.installed_package("faketool")
+    destination = original.binary.with_name("recorded-real-tool")
+    original.binary.rename(destination)
+    original.binary.symlink_to(destination.name)
+    facts = Facts(paths.facts_path())
+    fact = facts.get("faketool")
+    facts.record("faketool", original.version, fact["entry"], {}, pm_env["runtime"],
+                 target=fact["target"], artifacts=fact["artifacts"], digest=tree_digest(original.path))
+    before = destination.stat().st_mode
+    recorded = paths.facts_path().read_bytes()
+
+    verified = pm.installed_package("faketool", verify=True)
+
+    assert verified is not None and verified.binary == original.binary
+    assert verified.binary.resolve() == destination and destination.stat().st_mode == before
+    assert paths.facts_path().read_bytes() == recorded
+
+
+@pytest.mark.platforms("linux", "macos")
+def test_verified_read_is_nonmutating_but_explicit_pm_heals_valid_regular_exec_bits(pm_env):
+    ensure("faketool", explicit=True)
+    binary = pm.installed_package("faketool").binary
+    before = binary.stat().st_ino
+    payload = binary.read_bytes()
+    binary.chmod(0o600)
+    assert pm.installed_package("faketool", verify=True) is None
+    assert binary.stat().st_mode & 0o777 == 0o600
+
+    ensure("faketool", explicit=True)
+
+    assert binary.stat().st_ino == before and binary.read_bytes() == payload
+    assert os.access(binary, os.X_OK) and pm.installed_package("faketool", verify=True) is not None

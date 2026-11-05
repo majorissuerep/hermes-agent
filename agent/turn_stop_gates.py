@@ -112,6 +112,15 @@ def apply_stop_gates(
     holds. Hook lookups are imported lazily from their origin modules (tests patch them
     there)."""
 
+    from agent.formal_logic import gate_final, set_checked_message
+    formal = gate_final(agent, final_msg, final_response, messages)
+    if formal is not None:
+        again, checked_response = formal
+        if again:
+            return StopGateVerdict(True, None, None, False)
+        final_response = checked_response
+        set_checked_message(final_msg, checked_response)
+
     def _continue(nudge: str, flag: str) -> StopGateVerdict:
         """Append the synthetic nudge row and hand the turn back to the loop."""
         append_message(messages, {"role": "user", "content": nudge, flag: True})
