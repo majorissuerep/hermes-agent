@@ -50,6 +50,7 @@ def _build_browser_env() -> dict:
     Browserbase/Firecrawl keys, and a served profile's browser must run on its own (or none)."""
     from agent.secret_scope import current_secret_scope, get_secret, serves_routed_profile
     from tools.environments.local import served_profile_child_env
+    from tools.environments.local_env_policy import strip_local_vault_authority
 
     from agent.proxy_bypass import add_loopback_no_proxy
 
@@ -69,7 +70,9 @@ def _build_browser_env() -> dict:
     # Chrome puts its SingletonSocket under $TMPDIR; a deep scratch dir overflows the AF_UNIX
     # path cap and Chrome dies at startup ("Socket path too long"), so browsers get the short root.
     env["TMPDIR"] = _socket_safe_tmpdir()
-    return env
+    # The trusted child builder re-applies local session authority after its credential scrub.
+    # Browser vendors receive selected browser credentials, never Hermes unlock authority.
+    return strip_local_vault_authority(env)
 
 
 try:
