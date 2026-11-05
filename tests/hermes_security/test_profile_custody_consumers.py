@@ -4,7 +4,6 @@ The worker uses a declared RAM-proof seam and real directory inodes; this is
 crypto/operation integration, not native browser or protected-memory evidence.
 """
 from contextlib import contextmanager
-from types import SimpleNamespace
 
 import pytest
 
@@ -25,7 +24,7 @@ def _selected(home, session):
 
 
 def test_worker_checkpoint_and_locator_keep_logical_aad_and_original_operation(machine, tmp_path, monkeypatch):
-    from hermes_cli.browser_worker_store import WorkerCall
+    from hermes_cli.browser_worker_store import WorkerResource
     from hermes_platform.memory_protection import RamProof
     from hermes_security import artifacts, browser_worker_archive as archive, browser_worker_pending as pending, io, vault
     from hermes_security.errors import VaultError
@@ -37,10 +36,7 @@ def test_worker_checkpoint_and_locator_keep_logical_aad_and_original_operation(m
     first, second = _profile("worker-first"), _profile("worker-second")
     root = tmp_path / "declared-unit-ram"
     root.mkdir(mode=0o700)
-    for name in ("tree", "r", "tmp", "claims", "processes"):
-        (root / name).mkdir(mode=0o700)
     marker = b"private parent-owned worker payload"
-    (root / "tree" / "config.json").write_bytes(marker)
     monkeypatch.setattr("hermes_cli.browser_worker_store._prove",
                         lambda _path: RamProof(True, "ramfs", "declared unit seam, not native RAM evidence"))
     source_a = start_session_authority(first, "worker-source-A")
@@ -49,12 +45,11 @@ def test_worker_checkpoint_and_locator_keep_logical_aad_and_original_operation(m
         with _selected(first, "worker-source-A"):
             operation = SessionCustody.capture(first)
             identity = {"kind": "logical-profile-consumer-contract"}
-            digest = archive.identity_digest(operation, identity)
-            relative = archive.archive_relative(digest)
-            resource = SimpleNamespace(home=first, path=root, tree=root / "tree", identity=identity,
-                                       digest=digest, relative=relative)
-            call = WorkerCall(resource, operation)
-            call.checkpoint()
+            resource = WorkerResource(first, identity, operation.resource, base=root)
+            digest, relative = resource.digest, resource.relative
+            with resource.access(operation=operation) as call:
+                (resource.tree / "config.json").write_bytes(marker)
+                call.checkpoint()
             pending.sync(resource, call)
             locator = pending.relative(digest)
             assert pending.read(first, locator, custody=call)["home"] == str(first)
