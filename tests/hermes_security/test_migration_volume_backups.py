@@ -36,10 +36,10 @@ def test_volume_migration_keeps_private_rollback_and_recovers_damaged_env(volume
     assert report.ok, report.failures
     assert report.backup_path.parent == backup
     assert stat.S_IMODE(report.backup_path.stat().st_mode) == 0o600
-    from hermes_security.artifacts import _Custody
+    from hermes_security.profile_binding import capture
     from hermes_security.migration_archive import verified_tar
 
-    with verified_tar(report.backup_path, custody=_Custody(home)) as archive:
+    with verified_tar(report.backup_path, custody=capture(home)) as archive:
         member = next(iter(archive))
         assert member.name == ".env"
         assert archive.extractfile(member).read() == original

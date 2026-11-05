@@ -69,10 +69,10 @@ def test_rollback_is_private_during_first_write_and_remains_restorable(tmp_path,
     assert first != second, "two backups must never overwrite the rollback copy"
     for path in (first, second):
         assert stat.S_IMODE(path.stat().st_mode) == 0o600
-        from hermes_security.artifacts import _Custody
+        from hermes_security.profile_binding import capture
         from hermes_security.migration_archive import verified_tar
 
-        with verified_tar(path, custody=_Custody(home)) as archive:
+        with verified_tar(path, custody=capture(home)) as archive:
             member = next(iter(archive))
             assert member.name == "config.yaml"
             assert archive.extractfile(member).read() == b"model: synthetic-rollback\n"

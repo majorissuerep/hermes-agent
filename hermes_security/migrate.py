@@ -449,12 +449,12 @@ def _migration_backups(home: Path) -> list[Path]:
 
 def _backup_home(home: Path, dest_dir: Path) -> Path:
     """Create an encrypted rollback with an already-established original vault credential."""
-    from hermes_security.artifacts import _Custody
+    from hermes_security.profile_binding import capture
     from hermes_security.migration_archive import write_backup
     from hermes_security.migration_workflow import entries
 
     backup = dest_dir / f"hermes-premigration-{home.name}-{time.strftime('%Y%m%d-%H%M%S')}-{os.urandom(16).hex()}.hmb"
-    write_backup(home, backup, custody=_Custody(home), entries=entries(home),
+    write_backup(home, backup, custody=capture(home), entries=entries(home),
                  metadata=(home / ".hermes-vault").read_bytes())
     return backup
 

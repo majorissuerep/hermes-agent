@@ -76,9 +76,9 @@ def archive_relative(slot: str, digest: str) -> PurePosixPath:
 
 def capture_custody(home: Path):
     """The current request's original unlock lineage for this exact home (never a later unlock)."""
-    from hermes_security.artifacts import _Custody
+    from hermes_security.profile_binding import capture
 
-    return _Custody(Path(home))
+    return capture(Path(home))
 
 
 def browser_state_kind(relative) -> str | None:

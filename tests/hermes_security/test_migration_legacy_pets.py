@@ -9,7 +9,7 @@ import pytest
 
 from agent.pet import private_media, store
 from hermes_security import migrate, migration_state, migration_workflow, vault
-from hermes_security.artifacts import _Custody
+from hermes_security.profile_binding import capture
 from hermes_security.migration_archive import verified_tar
 from tests.agent.test_generated_pet_custody import _legacy_pet
 
@@ -27,7 +27,7 @@ def legacy(tmp_path, monkeypatch):
 
 
 def _members(backup, home):
-    with verified_tar(backup, custody=_Custody(home)) as archive:
+    with verified_tar(backup, custody=capture(home)) as archive:
         return {member.name: (archive.extractfile(member).read(), member.pax_headers.get("HERMES.kind"))
                 for member in archive if member.isfile()}
 
