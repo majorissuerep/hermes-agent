@@ -7,7 +7,6 @@ and unrelated captures remain retained; no automatic reconnect or force close.
 """
 from __future__ import annotations
 
-import copy
 from contextlib import contextmanager
 from dataclasses import asdict
 from pathlib import Path
@@ -40,13 +39,10 @@ def _captured_env(reference, env):
     backend = reference["backend"]
     if backend == "ssh":
         return env
-    captured = copy.copy(env)
+    from tools.environments.captured_execution import capture_execution
     origin = reference["origin"]
-    field, value = ("_container_id", origin.get("container")) if backend == "docker" else ("instance_id", origin.get("instance"))
-    if not isinstance(value, str) or not value or len(value) > 256 or "\x00" in value:
-        raise state.OutgoingProfileError("Original outgoing backend identity is missing; every copy retained")
-    setattr(captured, field, value)
-    return captured
+    value = origin.get("container") if backend == "docker" else origin.get("instance")
+    return capture_execution(env, backend, value, lock=profiles.environment_lock(env))
 
 
 def _runtime(reference, env):

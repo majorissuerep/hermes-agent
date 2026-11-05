@@ -25,7 +25,10 @@ def exec_prefix(env: BaseEnvironment, *, user: Optional[str] = None, interactive
     from tools.environments.docker import DockerEnvironment
     from tools.environments.singularity import SingularityEnvironment
     from tools.environments.ssh import SSHEnvironment
+    from tools.environments.captured_execution import CapturedExecution
 
+    if isinstance(env, CapturedExecution):
+        return env.prefix(user=user, interactive=interactive)
     if isinstance(env, DockerEnvironment):
         container = getattr(env, "_container_id", None)
         if not container:
@@ -80,8 +83,10 @@ def remote_command(env: BaseEnvironment, argv: Sequence[str], *, child_env: Opti
         # Compare the SAME structured prefix used to build the command below. A second
         # lookup could bless a newer target after validation of the original one.
         from tools.environments.docker import DockerEnvironment
+        from tools.environments.captured_execution import CapturedExecution
         identity = prefix
-        if isinstance(env, DockerEnvironment) and interactive and prefix is not None:
+        docker = isinstance(env, DockerEnvironment) or (isinstance(env, CapturedExecution) and env.backend == "docker")
+        if docker and interactive and prefix is not None:
             identity = [*prefix[:2], *prefix[3:]]  # Docker's explicit -i stdin flag only
         if identity is None or tuple(identity) != tuple(expected_prefix):
             raise RuntimeError("The original outgoing execution target changed; no command was sent")
