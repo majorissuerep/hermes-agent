@@ -32,3 +32,10 @@ The stage adapter accepts a source ref and prepared TUI. Its output is a termina
 agent payload, not a signed GUI installer. Docker, Nix and Termux retain their own
 native layouts. Parser/helper tests do not prove a native build or successful runtime;
 qualify the exact source and artifacts on the target platform with isolated state.
+
+Release packaging emits a JSON receipt with the complete archive SHA-256 and an
+ordered parts list. Archives over 1.9 GB are streamed into numbered parts, keeping
+each file below [GitHub's release asset limit](https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases#storage-and-bandwidth-quotas).
+Concatenate those parts in receipt order into the listed archive filename, verify
+the complete SHA-256, then extract it. Smaller products retain one tar.gz file.
+The receipt also records each part's size and SHA-256.

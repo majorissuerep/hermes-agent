@@ -66,6 +66,76 @@ def inspect_payload(payload: Path, commit: str, target: str) -> str:
     return version
 
 
+
+MAX_ASSET_BYTES = 1_900_000_000  # Keep each release file below GitHub's 2 GiB limit.
+
+
+class _ArchiveWriter:
+    """Stream one gzip archive into bounded files without duplicating compressed storage."""
+    def __init__(self, path: Path, maximum: int):
+        if maximum < 1:
+            raise ValueError("release asset bound must be positive")
+        self.name, self.maximum = str(path), maximum
+        self.original, self.paths = path, [path]
+        self.handle = path.open("xb")
+        self.part_size, self.size = 0, 0
+        self.digest = hashlib.sha256()
+
+    def _rotate(self):
+        self.handle.close()
+        if len(self.paths) == 1:
+            first = self.original.with_name(self.original.name + ".part-001")
+            self.paths[0].rename(first)
+            self.paths[0] = first
+        index = len(self.paths) + 1
+        if index > 999:
+            raise ValueError("release archive exceeds the bounded part catalogue")
+        path = self.original.with_name(self.original.name + f".part-{index:03d}")
+        self.handle = path.open("xb")
+        self.paths.append(path)
+        self.part_size = 0
+
+    def write(self, data):
+        view = memoryview(data)
+        offset = 0
+        while offset < len(view):
+            if self.part_size == self.maximum:
+                self._rotate()
+            piece = view[offset:offset + self.maximum - self.part_size]
+            written = self.handle.write(piece)
+            if written != len(piece):
+                raise OSError("incomplete release archive write")
+            self.digest.update(piece)
+            self.part_size += written
+            self.size += written
+            offset += written
+        return len(view)
+
+    def tell(self):
+        return self.size
+
+    def flush(self):
+        self.handle.flush()
+
+    def close(self):
+        self.handle.close()
+
+
+def _write_archive(payload, staged):
+    writer = _ArchiveWriter(staged, MAX_ASSET_BYTES)
+    try:
+        with tarfile.open(fileobj=writer, mode="w:gz", compresslevel=6, dereference=False) as tar:
+            tar.add(payload, arcname="hermes")
+    finally:
+        writer.close()
+    parts = []
+    for path in writer.paths:
+        with path.open("rb") as stream:
+            digest = hashlib.file_digest(stream, "sha256").hexdigest()
+        parts.append({"file": path.name, "size": path.stat().st_size, "sha256": digest})
+    return writer, parts
+
+
 def package_payload(payload: Path, out: Path, commit: str, target: str) -> Path:
     payload = payload.resolve(strict=True)
     out = out.resolve()
@@ -75,22 +145,20 @@ def package_payload(payload: Path, out: Path, commit: str, target: str) -> Path:
     out.mkdir(parents=True, exist_ok=True)
     stem = f"hermes-{version}-{target}-{commit[:12]}"
     archive, receipt = out / f"{stem}.tar.gz", out / f"{stem}.json"
-    if archive.exists() or receipt.exists():
+    if archive.exists() or receipt.exists() or any(out.glob(archive.name + ".part-*")):
         raise FileExistsError("release output already exists")
     with tempfile.TemporaryDirectory(prefix=".package-", dir=out) as scratch:
         staged = Path(scratch) / archive.name
-        # LLVM/GPU toolchains gain little from level 9 at substantial CPU cost.
-        with tarfile.open(staged, "w:gz", compresslevel=6, dereference=False) as tar:
-            tar.add(payload, arcname="hermes")
-        with staged.open("rb") as stream:
-            digest = hashlib.file_digest(stream, "sha256").hexdigest()
+        writer, parts = _write_archive(payload, staged)
         data = {"schema": 1, "source": commit, "version": version, "target": target,
                 "product": "terminal-agent", "archive": archive.name,
-                "sha256": digest, "size": staged.stat().st_size,
+                "sha256": writer.digest.hexdigest(), "size": writer.size,
+                "layout": "single" if len(parts) == 1 else "split", "parts": parts,
                 "qualification": "build-only; native artifact lifecycle acceptance required"}
         staged_receipt = Path(scratch) / receipt.name
         staged_receipt.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-        os.link(staged, archive)
+        for part in writer.paths:
+            os.link(part, out / part.name)
         os.link(staged_receipt, receipt)
     return receipt
 
