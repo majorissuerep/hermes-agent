@@ -75,8 +75,10 @@ def _messages(output: str) -> list[dict]:
     if len(output) > 64_000:
         raise ValueError("Lean output exceeded its bound")
     rows = [json.loads(line) for line in output.splitlines() if line.strip()]
-    if not all(isinstance(row, dict) for row in rows):
-        raise ValueError("Invalid Lean diagnostic stream")
+    for row in rows:
+        if not isinstance(row, dict) or any(
+                not isinstance(row.get(field, ""), str) for field in ("severity", "data")):
+            raise ValueError("Invalid Lean diagnostic stream")
     return rows
 
 
