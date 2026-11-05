@@ -30,6 +30,7 @@ class DeclaredSDK:
         self.helpers._send = self.send
         self.helpers.capture_screenshot = self.capture
         package, entry = ModuleType('browser_harness'), ModuleType('browser_harness.run')
+        entry.__file__ = '/declared-sdk-site/browser_harness/run.py'
         entry.main = self.main
         package.helpers, package.run = self.helpers, entry
         for name, value in [('browser_harness', package), ('browser_harness.helpers', self.helpers),
@@ -260,7 +261,11 @@ from . import helpers
 from .helpers import capture_screenshot
 def main():
     value = capture_screenshot()
-    print(json.dumps({'value':value,'events':helpers.events,'python':sys.executable}))
+    import __main__
+    print(json.dumps({'value':value,'events':helpers.events,'python':sys.executable,
+                      'main_name':__name__=='__main__',
+                      'main_identity':__main__.__dict__ is globals(),
+                      'argv0_matches_sdk_file':sys.argv[0]==__file__}))
 ''')
     unrelated = tmp_path / 'unrelated-cwd'
     unrelated.mkdir()
@@ -272,5 +277,6 @@ def main():
     observed = json.loads(result.stdout)
     assert Path(observed['python']).resolve() == Path(sys.executable).resolve()
     assert observed['value'] == 'declared-no-image-writer'
+    assert observed['main_name'] and observed['main_identity'] and observed['argv0_matches_sdk_file']
     assert observed['events'] == ['connection_status', 'Page.bringToFront', 'connection_status',
                                   'Page.captureScreenshot', 'connection_status']

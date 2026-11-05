@@ -16,6 +16,11 @@ def main():
 
     install_private_capture(helpers)
     run.capture_screenshot = helpers.capture_screenshot
+    # SDK user code executes in run's globals, as it did under python -m. Keep
+    # __name__, import __main__, __file__ and argv[0] attached to that same module.
+    run.__name__ = '__main__'
+    sys.modules['__main__'] = run
+    sys.argv[0] = run.__file__
     return run.main()
 
 
