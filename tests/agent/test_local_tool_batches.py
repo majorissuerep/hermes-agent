@@ -21,9 +21,16 @@ def _response(calls=None):
 
 
 @pytest.fixture
-def mcp_server(tmp_path):
+def mcp_server(tmp_path, monkeypatch):
+    from hermes_security import vault
     from tools.mcp_tool_discovery import register_mcp_servers
     from tools.mcp_tool_lifecycle import shutdown_mcp_servers
+
+    home = tmp_path / "batch-owner"
+    monkeypatch.setenv("HERMES_HOME", str(home))
+    monkeypatch.setattr(vault, "_SCRYPT_N", 1024)
+    vault.init_vault(home, "synthetic batch fixture password")
+    vault.unlock(home, "synthetic batch fixture password")
 
     server = tmp_path / "server.py"
     server.write_text('''import json, pathlib, sys
@@ -47,13 +54,14 @@ for line in sys.stdin:
         result = {"content": [{"type": "text", "text": name + "-result"}]}
     print(json.dumps({"jsonrpc": "2.0", "id": req["id"], "result": result}), flush=True)
 ''', encoding="utf-8")
-    names = sorted(register_mcp_servers({"batchfixture": {
-        "command": sys.executable, "args": [str(server)], "timeout": 10}}))
-    assert len(names) == 2
     try:
+        names = sorted(register_mcp_servers({"batchfixture": {
+            "command": sys.executable, "args": [str(server)], "timeout": 10}}))
+        assert len(names) == 2
         yield names, tmp_path / "calls.jsonl"
     finally:
         shutdown_mcp_servers()
+        vault.clear_vault_cache()
 
 
 @pytest.mark.parametrize("mode", ["allow", "block", "scope", "schema", "interrupt"])
