@@ -8,8 +8,7 @@ wrong-extension repair behaviour on the inbound cache path, and unknown
 passthrough.
 """
 
-import os
-from unittest.mock import patch
+from pathlib import Path
 
 import pytest
 
@@ -93,15 +92,25 @@ class TestInboundCacheUsesSniffer:
             (FLAC, ".mp3", ".flac"),
         ],
     )
-    def test_wrong_ext_repaired(self, tmp_path, data, claimed, expected_suffix):
+    def test_wrong_ext_repaired(self, tmp_path, monkeypatch, data, claimed, expected_suffix):
+        from hermes_security import artifacts, vault
         from tools.media_cache import cache_audio_from_bytes
 
-        with patch("tools.media_cache.get_hermes_dir", return_value=tmp_path):
+        home = tmp_path / "owner"
+        home.mkdir(mode=0o700)
+        monkeypatch.setenv("HERMES_HOME", str(home))
+        monkeypatch.setattr(vault, "_SCRYPT_N", 1024)
+        password = "synthetic inbound audio credential"
+        vault.init_vault(home, password)
+        vault.unlock(home, password)
+        try:
             result = cache_audio_from_bytes(data, ext=claimed)
-
-        saved = tmp_path / os.path.basename(result)
-        assert saved.suffix == expected_suffix
-        assert saved.read_bytes() == data
+            saved = Path(result)
+            assert saved.suffix == expected_suffix
+            assert artifacts.read_bytes(saved, home=home) == data
+            assert saved.read_bytes() != data
+        finally:
+            vault.clear_vault_cache()
 
 
 
