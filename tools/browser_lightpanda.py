@@ -136,15 +136,27 @@ def _binary_supports_http_cache(binary: str, env: dict) -> bool:
     identity = str(Path(binary).resolve()), info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns
     if identity not in _CAPABILITIES:
         _CAPABILITIES.clear()  # Public executable capability cache remains bounded to one selection.
+        _CAPABILITIES[identity] = _probe_http_cache(binary, env)
+    return _CAPABILITIES[identity]
+
+
+def _probe_http_cache(binary: str, env: dict) -> bool:
+    """Try command help, then legacy help, within one capability deadline."""
+    deadline = time.monotonic() + 3.0
+    for command in (('help', 'serve'), ('help',)):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return False
         try:
-            proc = subprocess.run([binary, 'help'], env=env, capture_output=True, text=True,
-                                  encoding='utf-8', errors='replace', timeout=3.0,
+            proc = subprocess.run([binary, *command], env=env, capture_output=True, text=True,
+                                  encoding='utf-8', errors='replace', timeout=remaining,
                                   stdin=subprocess.DEVNULL, check=False)
-            _CAPABILITIES[identity] = _HTTP_CACHE_FLAG in ((proc.stdout or '')+(proc.stderr or ''))
         except (OSError, subprocess.SubprocessError) as error:
             logger.debug('Lightpanda capability probe failed: %s', error)
-            _CAPABILITIES[identity] = False
-    return _CAPABILITIES[identity]
+            return False
+        if _HTTP_CACHE_FLAG in ((proc.stdout or '') + (proc.stderr or '')):
+            return True
+    return False
 
 
 def _browser_env() -> dict:
