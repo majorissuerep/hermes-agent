@@ -40,6 +40,7 @@ def start(authority, operation, jobs, lock):
     from agent.secret_scope import build_profile_secret_scope, set_secret_scope, reset_secret_scope
     from agent.session_context import scoped_current_session_id
     from tools.terminal_scope import install_profile_terminal_scope, reset_terminal_scope
+    from hermes_security.authority_native import _cleanup_complete
     import time
 
     admitted_at = time.monotonic()
@@ -56,7 +57,7 @@ def start(authority, operation, jobs, lock):
             if not authority.is_live() or time.monotonic() - admitted_at >= 3:
                 raise ValueError('owning operation admission expired before effects could start')
             for identity, (owner, previous) in list(jobs.items()):
-                if owner is authority and previous.finished.is_set() and time.monotonic() - previous.last_poll >= 20:
+                if owner is authority and _cleanup_complete(previous) and time.monotonic() - previous.last_poll >= 20:
                     del jobs[identity]
             if sum(owner is authority for owner, _ in jobs.values()) >= 4:
                 raise ValueError('the owning session already has four native commands')

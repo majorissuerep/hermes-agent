@@ -48,9 +48,11 @@ class NativeChild:
     def _input(self, data):
         try:
             self.process.stdin.write(data)
-            self.process.stdin.close()
         except (BrokenPipeError, OSError):
             return
+        finally:
+            with contextlib.suppress(OSError):
+                self.process.stdin.close()
 
     def _read(self, name, stream):
         try:
@@ -85,23 +87,44 @@ class NativeChild:
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 continue
 
+    def cleanup_complete(self):
+        """Confirm reaping and pipe cleanup; an ended monitor alone proves neither."""
+        if self.process.poll() is None or self.returncode is None:
+            return False
+        if any(thread.is_alive() for thread in self.threads):
+            return False
+        for child in list(self.descendants.values()):
+            try:
+                if child.is_running():
+                    return False
+            except psutil.NoSuchProcess:
+                continue
+            except psutil.AccessDenied:
+                return False
+        return True
+
     def _watch(self):
-        try:
-            while self.process.poll() is None:
-                self._remember_children()
-                now = time.monotonic()
-                if now >= self.deadline or now - self.last_poll >= 20 or self.cancelled.is_set():
-                    self.reason = self.reason or ("deadline" if now >= self.deadline else "client_closed")
-                    self.cancelled.set()
-                    self._terminate()
-                    break
-                self.finished.wait(0.1)
-            self.returncode = self.process.wait(timeout=5)
-            self._terminate()  # a native child may not leave its own children behind
-            for thread in self.threads:
-                thread.join(timeout=2)
-        finally:
-            self.finished.set()
+        while True:
+            self._remember_children()
+            now = time.monotonic()
+            if now >= self.deadline or now - self.last_poll >= 20 or self.cancelled.is_set():
+                self.reason = self.reason or ("deadline" if now >= self.deadline else "client_closed")
+                self.cancelled.set()
+                self._terminate()
+            if self.cancelled.is_set() or self.process.poll() is not None:
+                try:
+                    self.returncode = self.process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    # Keep ownership and retry: a bounded wait is not proof of reaping.
+                    self.finished.wait(0.1)
+                    continue
+                self._terminate()  # a native child may not leave its own children behind
+                for thread in self.threads:
+                    thread.join(timeout=0.1)
+                if self.cleanup_complete():
+                    self.finished.set()
+                    return
+            self.finished.wait(0.1)
 
     def poll(self):
         self.last_poll = time.monotonic()
@@ -111,7 +134,7 @@ class NativeChild:
                 chunks.append(self.output.get_nowait())
             except queue.Empty:
                 break
-        done = self.finished.is_set() and self.output.empty() and not any(thread.is_alive() for thread in self.threads)
+        done = self.finished.is_set() and self.cleanup_complete() and self.output.empty()
         return chunks, done, self.returncode, self.reason
 
     def close(self):
@@ -119,5 +142,5 @@ class NativeChild:
         self.cancelled.set()
         self._terminate()
         self.monitor.join(timeout=10)
-        with contextlib.suppress(OSError):
-            self.process.stdin.close()
+        if not self.finished.is_set() or not self.cleanup_complete() or self.monitor.is_alive():
+            raise RuntimeError("native child cleanup remains pending")
