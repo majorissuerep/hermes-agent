@@ -156,8 +156,8 @@ def test_formal_gate_preserves_native_reasoning_answer_sidecar(monkeypatch):
     message = {"role": "assistant", "content": "", "api_content": raw}
     verdict = apply_stop_gates(agent, message, final_response=raw, messages=[], conversation_history=[],
                                pending_verification_response=None, pending_verification_response_previewed=False)
-    assert not verdict.continue_turn and message["content"] == ""
-    assert message["api_content"] == verdict.final_response
+    assert not verdict.continue_turn and message["content"] == verdict.final_response
+    assert message["api_content"] == raw
 
 
 def test_review_error_credentials_are_removed_before_repair_feedback(monkeypatch):

@@ -692,7 +692,8 @@ def _invoke_agent(
     # shown and then retracted (the client keeps streamed text when message.complete is "").
 
     def _stream(delta):
-        if getattr(agent, "_mute_notification_reply", False):
+        from agent.formal_logic_delivery import withheld
+        if getattr(agent, "_mute_notification_reply", False) or (delta is not None and withheld(agent, text=delta, step="tui-text")):
             return
         with session["history_lock"]:
             _append_inflight_delta(session, delta)
@@ -706,7 +707,8 @@ def _invoke_agent(
     # Interim assistant text (commentary beside tool calls, pre-nudge final answer) is sealed
     # by the desktop as its own segment instead of being lost to message.complete.
     def _interim_assistant_cb(text: str, *, already_streamed: bool = False) -> None:
-        if getattr(agent, "_mute_notification_reply", False):
+        from agent.formal_logic_delivery import withheld
+        if getattr(agent, "_mute_notification_reply", False) or withheld(agent):
             return
         _emit("message.interim", sid, {"text": text, "already_streamed": already_streamed})
     agent.interim_assistant_callback = (

@@ -291,6 +291,30 @@ _HISTORY_ASSISTANT_DETAIL_KEYS = (
 _HISTORY_ROLES = frozenset({"user", "assistant", "tool", "system"})
 
 
+def _remember_history_tool_calls(message: dict, calls: dict) -> None:
+    if message.get("role") != "assistant":
+        return
+    metadata = message.get("display_metadata")
+    formal_candidate = isinstance(metadata, dict) and metadata.get("formal_logic") == "candidate"
+    if message.get("display_kind") == "hidden" and not formal_candidate:
+        return
+    for call in message.get("tool_calls") or ():
+        function, identity = call.get("function", {}), call.get("id", "")
+        if identity and function.get("name"):
+            try:
+                arguments = json.loads(function.get("arguments", "{}"))
+            except (json.JSONDecodeError, TypeError):
+                arguments = {}
+            calls[identity] = (function["name"], arguments)
+
+
+def _assistant_display_details(message: dict) -> dict:
+    metadata = message.get("display_metadata")
+    if isinstance(metadata, dict) and metadata.get("formal_logic") in {"reviewed", "unverified"}:
+        return {}
+    return {key: message[key] for key in _HISTORY_ASSISTANT_DETAIL_KEYS if message.get(key) is not None}
+
+
 def _history_to_messages(history: list[dict], *, profile_home=None, image_urls: bool = True) -> list[dict]:
     """``image_urls=False`` is the ``inline_images=false`` projection (#116511): image parts render ``[image]``
     so a remote client's history read stays kilobytes instead of re-transmitting every stored attachment."""
@@ -305,6 +329,8 @@ def _history_to_messages(history: list[dict], *, profile_home=None, image_urls: 
         if m is None:
             continue
         role = m.get("role")
+        _remember_history_tool_calls(m, tool_call_args)
+        # Preserve actual tool cards even when their unchecked assistant prose is hidden.
         # display_kind="hidden": model-facing scaffolding the "[System:" sniff does not catch.
         if role not in _HISTORY_ROLES or m.get("display_kind") == "hidden":
             continue
@@ -315,15 +341,6 @@ def _history_to_messages(history: list[dict], *, profile_home=None, image_urls: 
             continue
         if role == "user":
             content_text = _DISCORD_TRIGGERING_NOTE_RE.sub(r"\1", content_text)
-        if role == "assistant" and m.get("tool_calls"):
-            for tc in m["tool_calls"]:
-                fn, tc_id = tc.get("function", {}), tc.get("id", "")
-                if tc_id and fn.get("name"):
-                    try:
-                        args = json.loads(fn.get("arguments", "{}"))
-                    except (json.JSONDecodeError, TypeError):
-                        args = {}
-                    tool_call_args[tc_id] = (fn["name"], args)
         if role == "user" and m.get("display_kind") == STEER_DISPLAY_KIND:
             # Mid-turn /steer: show the user's own words, not the model-facing marker wrapper.
             from agent.conversation_compression import _extract_steer_text_from_message
@@ -360,7 +377,7 @@ def _history_to_messages(history: list[dict], *, profile_home=None, image_urls: 
         if invocation:
             msg.update(text=invocation, display_kind="skill_invocation")
         if role == "assistant":
-            msg.update((key, m[key]) for key in _HISTORY_ASSISTANT_DETAIL_KEYS if m.get(key) is not None)
+            msg.update(_assistant_display_details(m))
         # Display-only timeline metadata (model switches, delegation events).
         display_kind = m.get("display_kind") or _legacy_display_kind(role, content_text)
         if display_kind:

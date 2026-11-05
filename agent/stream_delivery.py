@@ -32,11 +32,23 @@ class StreamDeliveryMixin:
 
     def _deliver_to_stream_callbacks(self, text: str) -> bool:
         """Send ``text`` to the display + TTS delta callbacks; True if at least one accepted it."""
-        results = [self._call_quietly(cb, text) for cb in (self.stream_delta_callback, self._stream_callback)]
+        from agent.formal_logic_delivery import withheld
+
+        results = [self._call_quietly(cb, text) if not withheld(self, text=text, step=step) else False
+                   for step, cb in (("display", self.stream_delta_callback), ("speech", self._stream_callback))]
         return any(results)
 
     def _enqueue_stream_hook(self, event: str, *, label: str | None = None, **fields: Any) -> None:
         """Best-effort plugin stream hook enqueue; never raises into the stream path."""
+        from agent.formal_logic_delivery import withheld
+
+        if withheld(self):
+            if event in {'on_stream_delta', 'on_interim_message'}:
+                if (event != 'on_stream_delta' or fields.get('kind') != 'text'
+                        or withheld(self, text=fields.get('delta'), step='hook-text')):
+                    return
+            if event == 'on_stream_end':
+                fields['final_text'] = ''
         try:
             from agent.plugin_stream_hooks import enqueue_plugin_stream_hook
 
@@ -93,7 +105,9 @@ class StreamDeliveryMixin:
 
     def _record_streamed_assistant_text(self, text: str) -> None:
         """Accumulate visible assistant text emitted through stream callbacks (superseded writers excluded)."""
-        if isinstance(text, str) and text and not self._stream_writer_superseded():
+        from agent.formal_logic_delivery import withheld
+        if (isinstance(text, str) and text and not withheld(self, text=text, step="record")
+                and not self._stream_writer_superseded()):
             parts = getattr(self, "_streamed_assistant_text_parts", None)
             if parts is None:
                 parts = self._streamed_assistant_text_parts = []
@@ -175,6 +189,10 @@ class StreamDeliveryMixin:
 
     def _deliver_interim(self, visible: str, *, already_streamed: bool, record: list[str]) -> None:
         """Hand ``visible`` to ``interim_assistant_callback`` and mark ``record`` delivered; swallows callback errors."""
+        from agent.formal_logic_delivery import withheld
+
+        if withheld(self):
+            return
         cb = getattr(self, "interim_assistant_callback", None)
         if cb is None:
             return
@@ -297,6 +315,10 @@ class StreamDeliveryMixin:
 
     def _fire_stream_delta(self, text: str) -> None:
         """Fire all registered stream delta callbacks (display + TTS)."""
+        from agent.formal_logic_delivery import withheld
+
+        if withheld(self, text=text, step="stream"):
+            return
         # A superseded stream must not interleave its tokens alongside the retry that replaced it.
         if self._stream_writer_superseded():
             # See #65991.
@@ -338,6 +360,10 @@ class StreamDeliveryMixin:
 
         ``inline`` marks text recovered from ``<think>`` blocks in content; any other call is a native
         provider reasoning delta and stops inline forwarding for the rest of this model response."""
+        from agent.formal_logic_delivery import withheld
+
+        if withheld(self):
+            return
         if not inline:
             self._native_reasoning_streamed = True
         if self._stream_writer_superseded():

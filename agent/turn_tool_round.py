@@ -246,7 +246,8 @@ def stage_tool_call_message(
     already showed."""
     from agent.conversation_loop import _STALE_MARKER_RE
 
-    assistant_msg = agent._build_assistant_message(assistant_message, finish_reason)
+    from agent.formal_logic_delivery import mark_candidate, withheld
+    assistant_msg = mark_candidate(agent, agent._build_assistant_message(assistant_message, finish_reason))
 
     turn_content = assistant_message.content or ""
 
@@ -281,7 +282,7 @@ def stage_tool_call_message(
         agent._last_content_tools_all_housekeeping = _line_is_reply
         if _all_housekeeping and agent._has_stream_consumers():
             agent._mute_post_response = True
-        elif agent._should_emit_quiet_tool_messages():
+        elif not withheld(agent) and agent._should_emit_quiet_tool_messages():
             clean = agent._strip_think_blocks(turn_content).strip()
             if clean:
                 agent._vprint(f"  ┊ 💬 {clean}")

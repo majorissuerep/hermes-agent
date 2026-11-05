@@ -696,6 +696,9 @@ def finalize_turn(
     # the conversation loop, so every delivery surface receives valid Unicode.
     if isinstance(final_response, str):
         final_response = _sanitize_surrogates(final_response)
+    from agent.formal_logic_delivery import release_accepted
+    release_accepted(agent)
+    final_response = seal_response(agent, final_response)
 
     result = {
         "final_response": final_response,

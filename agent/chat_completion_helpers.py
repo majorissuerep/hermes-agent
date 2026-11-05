@@ -2853,11 +2853,9 @@ class _StreamingCall(StreamingWaitMonitor, StreamFallbackMixin):
         self.agent._fire_tool_gen_started(name)
 
     def _route_suppressed_text(self, text: str) -> None:
-        """Tool-call turns suppress content streaming (no chatty preamble), but
-        reasoning tags inside it must still reach the display: route through
-        the delta callback for tag extraction (the CLI drops non-reasoning text
-        once the stream box is closed)."""
-        if self.agent.stream_delta_callback:
+        """Route suppressed text for extraction, except unchecked formal candidates."""
+        from agent.formal_logic_delivery import withheld
+        if self.agent.stream_delta_callback and not withheld(self.agent):
             self._quiet(lambda: (self.agent.stream_delta_callback(text), self.agent._record_streamed_assistant_text(text)))
 
     def _new_diag(self) -> dict:

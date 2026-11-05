@@ -152,13 +152,15 @@ def normalize_model_response(
     if intermediate_gate(agent, assistant_message, messages, conversation_history):
         return _verdict("break" if repair_exhausted(agent) else "continue")
 
+    from agent.formal_logic_delivery import withheld
+
     content = assistant_message.content
-    if content and not agent.quiet_mode:
+    if content and not withheld(agent) and not agent.quiet_mode:
         if agent.verbose_logging:
             agent._vprint(f"{agent.log_prefix}🤖 Assistant: {content}")
         else:
             agent._vprint(f"{agent.log_prefix}🤖 Assistant: {content[:100]}{'...' if len(content) > 100 else ''}")
-    if content and agent.tool_progress_callback:
+    if content and not withheld(agent) and agent.tool_progress_callback:
         _relay_thinking(agent, content)
 
     # Incomplete <REASONING_SCRATCHPAD> (opened, never closed): the model ran out of

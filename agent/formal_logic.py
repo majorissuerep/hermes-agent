@@ -50,6 +50,7 @@ class FormalState:
     attempts: int = 0
     approved: bool = False
     finalized: bool = False
+    delivered: bool = False
     accepted_response: str = ""
     status: str = "checkpoint_required"
     pending: dict = field(default_factory=dict)
@@ -98,7 +99,7 @@ def begin_turn(agent, user_message: Any) -> str:
     current.task = user_message if isinstance(user_message, str) else json.dumps(user_message, ensure_ascii=False)
     current.authority = getattr(agent, "_vault_session_authority", None)
     current.attempts, current.approved, current.status = 0, False, "checkpoint_required"
-    current.finalized, current.accepted_response = False, ""
+    current.finalized, current.accepted_response, current.delivered = False, "", False
     current.pending, current.decisions, current.cache, current.last_receipt = {}, {}, {}, {}
     return "\n\n" + _INSTRUCTIONS
 
@@ -116,7 +117,12 @@ def check_candidate(agent, content: str) -> tuple[bool, str]:
         if len(blocks) != 1 or len(content) > 80_000:
             raise LogicFormatError("Return exactly one bounded fenced hermes_logic checkpoint")
         checkpoint = parse_checkpoint(blocks[0].group(1))
-        answer = (content[:blocks[0].start()] + content[blocks[0].end():]).strip()
+        from agent.agent_runtime_helpers import strip_think_blocks
+        from agent.memory_manager import sanitize_context
+        from agent.message_sanitization import _sanitize_surrogates
+
+        answer = _sanitize_surrogates(strip_think_blocks(agent, sanitize_context(
+            content[:blocks[0].start()] + content[blocks[0].end():])).strip())
         if not answer:
             raise LogicFormatError("Supply a concise answer outside the checkpoint")
         receipt = current.cache.get(checkpoint.digest)
@@ -139,7 +145,7 @@ def check_candidate(agent, content: str) -> tuple[bool, str]:
     if current.status == "reviewed":
         current.approved = True
         current.attempts = 0
-        return True, content + "\n\nFormal check: Lean 4.35.0 verified the deductions; assumptions were reviewed separately."
+        return True, answer + "\n\nFormal check: Lean 4.35.0 verified the deductions; assumptions were reviewed separately."
     if current.status != "needs_stakeholder":
         current.attempts += 1
     feedback = {"formal_logic": receipt, "pending_stakeholder_questions": list(current.pending),
@@ -153,19 +159,29 @@ def gate_final(agent, final_msg: dict, final_response: str, messages: list) -> t
     current = state(agent)
     if current is None:
         return None
+    from agent.formal_logic_delivery import mark_reviewed
+
     accepted, text = check_candidate(agent, final_response)
     if _interruption_feedback(agent, current) is not None:
-        return False, _FAILURE + f" Status: {current.status}."
+        text = _FAILURE + f" Status: {current.status}."
+        set_checked_message(final_msg, text)
+        mark_reviewed(final_msg, status="unverified")
+        return False, text
     if accepted:
         current.finalized, current.accepted_response = True, text
         set_checked_message(final_msg, text)
+        mark_reviewed(final_msg)
         return False, text
     if current.attempts > current.max_repairs:
-        return False, _FAILURE + f" Status: {current.status}."
+        text = _FAILURE + f" Status: {current.status}."
+        set_checked_message(final_msg, text)
+        mark_reviewed(final_msg, status="unverified")
+        return False, text
     from agent.message_metadata import append_message
+    from agent.formal_logic_delivery import mark_candidate
     final_msg["finish_reason"] = "formal_verification_required"
-    append_message(messages, final_msg)
-    append_message(messages, {"role": "user", "content": text, "_formal_logic_feedback": True})
+    append_message(messages, mark_candidate(agent, final_msg))
+    append_message(messages, mark_candidate(agent, {"role": "user", "content": text, "_formal_logic_feedback": True}))
     agent._session_messages = messages
     return True, ""
 
@@ -182,11 +198,12 @@ def intermediate_gate(agent, assistant_message, messages: list, conversation_his
         feedback = json.dumps({"status": "reviewed", "checkpoint": current.last_receipt["checkpoint"],
                                "instruction": "Checkpoint accepted. Reissue any still-needed tool calls."})
     from agent.message_metadata import append_message
+    from agent.formal_logic_delivery import mark_candidate
     message = agent._build_assistant_message(assistant_message, assistant_message.finish_reason)
-    append_message(messages, message)
+    append_message(messages, mark_candidate(agent, message))
     for call in assistant_message.tool_calls:
-        append_message(messages, {"role": "tool", "tool_call_id": call.id, "name": call.function.name,
-                                  "content": feedback + "\nThis tool call was not executed during checkpoint review."})
+        append_message(messages, mark_candidate(agent, {"role": "tool", "tool_call_id": call.id, "name": call.function.name,
+                                  "content": feedback + "\nThis tool call was not executed during checkpoint review."}))
     agent._session_messages = messages
     agent._flush_messages_to_session_db(messages, conversation_history)
     return True
@@ -274,22 +291,22 @@ def enforce_outcome(agent, response, failed):
 def reset_delivery(agent) -> None:
     current = state(agent)
     if current is not None:
-        current.finalized, current.accepted_response = False, ""
+        current.finalized, current.accepted_response, current.delivered = False, "", False
 
 
 def seal_result(agent, result):
     if state(agent) is not None and isinstance(result, dict):
         result["final_response"] = seal_response(agent, result.get("final_response"))
+        result["last_reasoning"] = None
         attach_result(agent, result)
     return result
 
 
 def set_checked_message(message: dict, text: str) -> None:
-    # Preserve the native sidecar for routes whose visible answer was mislabeled as reasoning.
-    if "api_content" in message and not message.get("content"):
-        message["api_content"] = text
-    else:
-        message["content"] = text
+    # Presentation changes only the new visible row; native replay keeps the raw candidate.
+    if "api_content" not in message and message.get("content"):
+        message["api_content"] = message["content"]
+    message["content"] = text
 
 
 def checked_transform(agent, response):

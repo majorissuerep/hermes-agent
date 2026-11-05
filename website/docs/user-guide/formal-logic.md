@@ -56,6 +56,23 @@ schemas and earlier messages are preserved.
 
 ## Checkpoints and feedback
 
+Formal mode withholds the current model response from live text, speech, reasoning
+and interim displays while checks are pending. The provider's existing response
+buffer stays in memory; no plaintext spool is created. Only the cleaned accepted
+final answer is delivered, once. Rejected candidates and repair feedback remain in
+the encrypted model transcript and are hidden in the user-facing history. The
+checkpoint and original provider sidecars remain available for native model replay.
+
+Checkpoints are deliberate boundaries, not a proof requirement for every tool call.
+An explicitly supplied checkpoint is reviewed before its associated tool batch can
+reach tool approval or execution. Ordinary discovery and housekeeping, including
+brief narration, can proceed without a checkpoint; those intermediate responses are
+**unchecked**, withheld from presentation, and never certified by a prior proof.
+Final answers always require a checkpoint. The runtime does not classify arbitrary
+prose as a major inference or introduce an extra model call to find one. Independent
+tool-risk approval remains separate from accepting a premise; stakeholder questions
+still require the exact reviewed pending `clarify` request described below.
+
 A checkpoint accompanies a concise answer explaining its conditional conclusion:
 
 ```hermes_logic
