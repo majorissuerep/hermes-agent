@@ -131,6 +131,10 @@ def _resolve_budget_fallback(
         api_call_count >= agent.max_iterations or agent.iteration_budget.remaining <= 0
     )
     preserved_verification_fallback = False
+    from agent.formal_logic import budget_fallback
+    formal_fallback = budget_fallback(agent)
+    if formal_fallback is not None and budget_exhausted:
+        return formal_fallback, "formal_verification_incomplete", False, interrupted
     if (
         final_response is None and budget_exhausted and not interrupted and not failed
         and str(_turn_exit_reason) in {"unknown", "budget_exhausted"}
@@ -495,6 +499,10 @@ def apply_llm_output_transform(
     same turn get the recorded outcome instead of a second hook firing. Only the current
     turn's not-yet-written text is touched — earlier turns and the system prompt are never
     rewritten (prompt-cache invariant)."""
+    from agent.formal_logic import checked_transform
+    checked = checked_transform(agent, final_response)
+    if checked is not None:
+        return checked, False, None
     if logger is None:
         from agent.conversation_loop import logger
     recorded = getattr(agent, "_llm_output_transform", None)
@@ -579,6 +587,8 @@ def finalize_turn(
     # ``turn_exit_reason`` collapsed to code="unknown", retryable=True on every surface.
     # Advisory verdicts (``fails_turn=False``) only add the code: ``failed``/``completed`` keep
     # the loop's values so cron, kanban and transcript persistence behave as before.
+    from agent.formal_logic import enforce_outcome, seal_response
+    final_response, failed = enforce_outcome(agent, final_response, failed)
     _exit_failure = None if interrupted else exit_reason_failure(_turn_exit_reason)
     if _exit_failure is not None and _exit_failure.fails_turn:
         failed = True
@@ -629,6 +639,7 @@ def finalize_turn(
         # user will see, never the raw model text (#44239).
         if final_response and not interrupted:
             final_response, _, _ = apply_llm_output_transform(agent, final_response, turn_id=turn_id, logger=logger)
+        final_response = seal_response(agent, final_response)
         _close_transcript_tail(agent, messages, final_response, interrupted, _recovered_from_stream)
         if not interrupted and not failed:
             _micro_compact_after_turn(agent, messages, final_response, logger, effective_task_id)
@@ -659,6 +670,8 @@ def finalize_turn(
             agent, final_response, logger, platform=_platform, effective_task_id=effective_task_id,
             turn_id=turn_id, original_user_message=original_user_message, messages=messages,
         )
+
+    final_response = seal_response(agent, final_response)
 
     # Context engine observation hook: the turn finished with the finalized transcript.
     # Fail-open. ``_last_turn_usage`` is the last response's canonical usage dict, or

@@ -199,14 +199,8 @@ class CLIInitMixin:
     def _init_turn_limits(self, max_turns, run_budget):
         """max_turns: CLI arg > config > env var > default; run budget: CLI flag > config."""
         from cli import CLI_CONFIG
-        # resolve_turn_limit() accepts "none"/"unlimited" (-> sys.maxsize) alongside ints.
-        # KEEP the root-level CLI_CONFIG["max_turns"] fallback: it is never migrated on disk
-        # and other config paths may bypass the load-time fold.
-        from hermes_cli.config import resolve_turn_limit as _resolve_turn_limit
-        self.max_turns = _resolve_turn_limit(next(
-            (v for v in (max_turns, CLI_CONFIG["agent"].get("max_turns"), CLI_CONFIG.get("max_turns")) if v is not None),
-            os.getenv("HERMES_MAX_ITERATIONS"),
-        ))
+        from hermes_cli.agent_limits import configured_turn_limit
+        self.max_turns = configured_turn_limit(CLI_CONFIG, max_turns)
         self.run_budget_seconds = run_budget if run_budget is not None else CLI_CONFIG["agent"].get("run_budget_seconds")
         self._explicit_run_budget = run_budget  # `--run-budget`: session.create policy (the gateway runs the turn)
         # The gateway builds the agent now: the explicit flag (not the resolved value) rides session.create.

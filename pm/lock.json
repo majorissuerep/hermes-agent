@@ -300,6 +300,27 @@
       },
       "version": "0.39.0"
     },
+    "lean": {
+      "artifacts": {
+        "darwin-arm64": {
+          "sha256": "c0c6f34f35ba1dcc5c4a5fd106fefab9eb5e8469712624dd2c868d51b63177c2",
+          "url": "https://github.com/leanprover/lean4/releases/download/v4.35.0/lean-4.35.0-darwin_aarch64.tar.zst"
+        },
+        "darwin-x64": {
+          "sha256": "0b43be5c7ecfb36016566a41005ab62bdb04743e6bfd5837e45f796ef4750b4e",
+          "url": "https://github.com/leanprover/lean4/releases/download/v4.35.0/lean-4.35.0-darwin.tar.zst"
+        },
+        "linux-arm64": {
+          "sha256": "c8f0f8a3920e839718b1343e6781fd80a3e9b1024fbcd7078eb30f54e806b028",
+          "url": "https://github.com/leanprover/lean4/releases/download/v4.35.0/lean-4.35.0-linux_aarch64.tar.zst"
+        },
+        "linux-x64": {
+          "sha256": "7289597a44543246c9227b8cae501767e095ce17f6d448b95fc4a8dc97268f6d",
+          "url": "https://github.com/leanprover/lean4/releases/download/v4.35.0/lean-4.35.0-linux.tar.zst"
+        }
+      },
+      "version": "4.35.0"
+    },
     "llamacpp-cpu": {
       "artifacts": {
         "darwin-arm64": {
