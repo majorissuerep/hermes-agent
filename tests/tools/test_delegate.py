@@ -783,7 +783,7 @@ class TestSubagentCostRollup(unittest.TestCase):
     def test_batch_children_costs_sum_into_parent(self):
         parent = self._make_parent_with_cost_counters(starting_cost=0.00)
 
-        with patch("tools.delegate_tool._run_single_child") as mock_run:
+        with patch("tools.delegate_tool._get_max_concurrent_children", return_value=3), patch("tools.delegate_tool._run_single_child") as mock_run:
             mock_run.side_effect = [
                 {
                     "task_index": 0,
@@ -1777,7 +1777,7 @@ class TestOrchestratorEndToEnd(unittest.TestCase):
 
     @patch("tools.delegate_tool._resolve_delegation_credentials")
     @patch("tools.delegate_tool._load_config",
-           return_value={"max_spawn_depth": 2})
+           return_value={"max_spawn_depth": 2, "max_concurrent_children": 2})
     def test_end_to_end_nested_orchestration(self, mock_cfg, mock_creds):
         mock_creds.return_value = {
             "provider": None, "base_url": None,

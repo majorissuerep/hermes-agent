@@ -207,7 +207,7 @@ Subagents inherit the parent's enabled toolsets. `delegate_task` does not accept
 
 | Config | Default | Range | Effect |
 |--------|---------|-------|--------|
-| `max_concurrent_children` | 10 | >=1 | Parallel batch size per `delegate_task` call |
+| `max_concurrent_children` | 1 | >=1 | Parallel batch size per `delegate_task` call |
 | `max_spawn_depth` | 1 | >=1 | How many delegation levels can spawn further |
 
 Example: running 30 parallel workers with nested subagents:
