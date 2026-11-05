@@ -116,7 +116,9 @@ def export_home(home: Path | str, output: Path | str) -> dict:
     output = output.resolve(strict=False)
     if output == home or home in output.parents or _home_for(output) is not None:
         raise ValueError("Plaintext export must be outside every encrypted Hermes home")
-    vault = vault_mod.get_vault(home, allow_env_unlock=False)
+    from hermes_security.profile_binding import capture
+    custody = capture(home)
+    vault = custody._resource
     output.parent.mkdir(parents=True, exist_ok=True)
     hashes = {}
     databases = 0
@@ -134,7 +136,7 @@ def export_home(home: Path | str, output: Path | str) -> dict:
                         database.unlink()
                         databases += 1
                     else:
-                        data = _plaintext(path, relative, vault)
+                        data = _plaintext(path, relative, custody)
                     hashes[relative.as_posix()] = _add_bytes(
                         archive, relative.as_posix(), data, executable=bool(path.stat().st_mode & 0o100))
                 manifest = json.dumps({"format": 1, "sha256": hashes}, sort_keys=True).encode() + b"\n"

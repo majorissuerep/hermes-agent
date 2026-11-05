@@ -96,6 +96,21 @@ saved snapshots and other profiles alone. A plaintext database or unrecoverable
 file causes a nonzero result; it is not silently reset. Retain the damaged file
 and restore a known-good snapshot through `/snapshot` in the CLI.
 
+Managed named profiles beneath a machine vault keep the existing one-unlock
+model. Their complete encrypted local settings authenticate the selected
+profile; an independently initialized profile always requires its own usable
+vault. New profile log/transcript streams also bind their encryption key to the
+logical profile, so copying a sibling's encrypted stream does not grant access.
+
+For an older machine-owned profile whose streams predate that binding, select
+that profile and run `hermes secure-vault repair` offline. The exclusive repair
+authenticates each complete old stream, preserves its exact original ciphertext
+in an encrypted envelope under `backups/profile-frames`, then binds the new
+stream to the selected profile. This explicit adoption cannot establish the
+historical profile of an old stream that shared the machine-wide key. Runtime
+readers never try that legacy key as a fallback. Damaged or incomplete streams
+remain unchanged and return a retained/nonzero result.
+
 If source or the interpreter is missing, rerun this fork's source installer
 against the **same** installation/home. The installer retains local work in Git
 recovery refs/stashes. Do not delete the state home to make installation succeed.

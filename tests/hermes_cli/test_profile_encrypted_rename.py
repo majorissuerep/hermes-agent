@@ -51,7 +51,7 @@ def test_rename_rebinds_settings_and_database_without_changing_other_profile(tmp
 
 
 def test_failed_destination_publish_restores_original_authenticated_directory(tmp_path, monkeypatch):
-    import os
+    from hermes_platform import fs_publish
     from hermes_cli.profile_state_copy import rename_profile_state
     from hermes_security import io, vault
     from tests.e2e.vault_home import seal_fixture_home
@@ -63,14 +63,14 @@ def test_failed_destination_publish_restores_original_authenticated_directory(tm
     source.mkdir(parents=True)
     io.write_text(source / "config.yaml", "agent: {max_turns: 23}", purpose="config")
     original = (source / "config.yaml").read_bytes()
-    rename = os.rename
+    rename = fs_publish.rename_noreplace
 
     def fail_destination(old, new, *args, **kwargs):
         if Path(new) == destination:
             raise OSError("injected destination publish refusal")
         return rename(old, new, *args, **kwargs)
 
-    monkeypatch.setattr(os, "rename", fail_destination)
+    monkeypatch.setattr(fs_publish, "rename_noreplace", fail_destination)
     try:
         with pytest.raises(OSError, match="destination publish refusal"):
             rename_profile_state(source, destination)

@@ -278,37 +278,8 @@ def cmd_vault(args: Any) -> int:
         return 0
 
     if command == "repair":
-        if not vault_mod.vault_exists(home):
-            print(f"✗ No vault at {home}; run 'hermes secure-vault migrate' first")
-            return 1
-        gate_locked_vault(args, home)
-        from hermes_security.migrate import repair_clobbered_state
-
-        report = repair_clobbered_state(home)
-        sections = (
-            ("sealed", "✓ Re-sealed {n} plaintext file(s) into envelopes:"),
-            ("unwrapped", "✓ Unwrapped {n} database/stream file(s) a previous repair wrapped in envelopes:"),
-            ("reframed", "✓ Re-framed {n} log/transcript stream(s) holding plaintext:"),
-            ("restored", "✓ Restored {n} mangled file(s) from the pre-migration backup:"),
-            ("skipped_dbs", "⚠ {n} PLAINTEXT database(s) left untouched (vault bypass suspected — investigate):"),
-            ("unrecoverable", "✗ {n} file(s) could not be repaired:"),
-        )
-        for key, title in sections:
-            items = report[key]
-            if not items:
-                continue
-            print(title.format(n=len(items)))
-            for rel in items[:20]:
-                print(f"    {rel}")
-            if len(items) > 20:
-                print(f"    … and {len(items) - 20} more")
-        if report["code_files"]:
-            print(f"✓ Restored {report['code_files']} file(s) in hermes-agent.* code trees to plaintext (public code)")
-        if not any(report[key] for key, _ in sections) and not report["code_files"]:
-            print("○ Nothing to repair (every state file is in its canonical sealed form)")
-        if report["unrecoverable"] or report["skipped_dbs"]:
-            return 1
-        return 0
+        from hermes_cli.profile_frame_repair import cmd_repair
+        return cmd_repair(args, home)
 
     if command == "lock":
         vault_mod.lock_now(home)

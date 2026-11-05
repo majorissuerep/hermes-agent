@@ -1155,13 +1155,13 @@ def _copytree_keep_junctions(src: Path, dst: Path, ignore, dirs_exist_ok: bool =
             logger.warning("clone: skipped junction %s -> %s (%s)", link, target, exc)
 
 
-def _clone_all_into(source_dir: Path, profile_dir: Path, canon: str) -> None:
+def _clone_all_into(source_dir: Path, profile_dir: Path, canon: str, *, custody=None) -> None:
     """--clone-all: full copytree minus infrastructure/history, then strip runtime files
     and cloned single-use OAuth grants."""
     from functools import partial
     from hermes_cli.profile_state_copy import copy_profile_tree_file
-    _copytree_keep_junctions(source_dir, profile_dir, _clone_all_copytree_ignore(source_dir),
-                             copy_function=partial(copy_profile_tree_file, source_root=source_dir))
+    _copytree_keep_junctions(source_dir, profile_dir, _clone_all_copytree_ignore(source_dir), dirs_exist_ok=True,
+                             copy_function=partial(copy_profile_tree_file, source_root=source_dir, target_custody=custody))
     materialized = _materialize_symlinked_files(profile_dir)
     if materialized:
         logger.info("profile %s: materialized symlinked %s so the clone never writes through to %s",
@@ -1324,9 +1324,11 @@ def create_profile(
     clear_named_profile_deleted(profile_dir)
     # Hidden staging keeps partially created profiles out of native profile listings.
     staging = _clone_staging_dir(profile_dir)
+    from hermes_cli.profile_state_copy import prepare_profile_publication
     try:
+        publication = prepare_profile_publication(staging, profile_dir)
         if clone_all and source_dir:
-            _clone_all_into(source_dir, staging, canon)
+            _clone_all_into(source_dir, staging, canon, custody=publication)
         else:
             _bootstrap_profile_dir(staging, source_dir, sync_imports=sync_imports)
         if source_dir is not None:
@@ -1337,8 +1339,9 @@ def create_profile(
         from hermes_cli.profiles_initialization import finish_profile_layout
         finish_profile_layout(staging, no_skills=no_skills, clone_all=clone_all, description=description, soul=soul)
         from hermes_cli.profile_state_copy import publish_profile_state
-        publish_profile_state(staging, profile_dir)
-        os.rename(staging, profile_dir)
+        publish_profile_state(staging, profile_dir, custody=publication)
+        from hermes_platform.fs_publish import rename_noreplace
+        rename_noreplace(staging, profile_dir)
     except BaseException:
         shutil.rmtree(staging, ignore_errors=True)
         raise

@@ -8,16 +8,10 @@ import threading
 
 from hermes_security import artifacts
 from hermes_security.artifact_paths import is_delegation_log_path, is_delegation_manifest_path
-from hermes_security.errors import VaultNotInitializedError
 
 MANIFEST_PURPOSE = "delegation-manifest:v1"
 
 
-def _require_profile_metadata(home):
-    metadata = home / ".hermes-vault"
-    if not metadata.is_file() or metadata.is_symlink():
-        raise VaultNotInitializedError("Delegation state requires this exact initialized profile")
-    artifacts._require_profile_metadata(home)
 
 
 class DelegationStore:
@@ -30,7 +24,6 @@ class DelegationStore:
             home = get_hermes_home()
         self.configured_home = Path(os.path.abspath(Path(home).expanduser()))
         self.home = self.configured_home.resolve()
-        _require_profile_metadata(self.home)
         self.custody = artifacts._bound_custody(self.home)
         self.manifest_lock = threading.RLock()
 
@@ -42,7 +35,6 @@ class DelegationStore:
             raise PermissionError("Delegation manifest belongs to another profile") from exc
         if not is_delegation_manifest_path(relative):
             raise PermissionError("Not a delegation control manifest")
-        _require_profile_metadata(selected)
         artifacts._bound_custody(selected, self.custody)
         return selected, relative
 
@@ -51,16 +43,14 @@ class DelegationStore:
         raw = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
         if len(raw) > artifacts._MAX_BYTES:
             raise ValueError("Delegation manifest exceeds the supported bound")
-        encoded = self.custody.vault.encrypt(raw, purpose=MANIFEST_PURPOSE,
-                                             relpath=relative.as_posix(), authority=self.custody.authority)
+        encoded = self.custody.encrypt(raw, purpose=MANIFEST_PURPOSE, relpath=relative.as_posix())
         return artifacts._publish(selected, relative, encoded, self.custody, overwrite=True)
 
     def read_manifest(self, path):
         selected, relative = self._manifest_location(path)
         raw = artifacts._read_owned_bytes(selected, relative, artifacts._MAX_BYTES + 128)
         self.custody.check()
-        decoded = self.custody.vault.decrypt(raw, purpose=MANIFEST_PURPOSE,
-                                             relpath=relative.as_posix(), authority=self.custody.authority)
+        decoded = self.custody.decrypt(raw, purpose=MANIFEST_PURPOSE, relpath=relative.as_posix())
         payload = json.loads(decoded)
         if not isinstance(payload, dict):
             raise ValueError("Delegation manifest must be an object")
@@ -71,8 +61,7 @@ class DelegationStore:
         return artifacts.write_bytes(path, text.encode("utf-8"), home=self.configured_home, custody=self.custody)
 
     def _log_location(self, path):
-        selected, relative = artifacts._location(path, self.configured_home)
-        _require_profile_metadata(selected)
+        _selected, relative = artifacts._location(path, self.configured_home)
         if not is_delegation_log_path(relative):
             raise PermissionError("Not a delegation transcript")
 

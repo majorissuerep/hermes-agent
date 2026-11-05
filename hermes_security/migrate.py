@@ -142,7 +142,8 @@ def _harden_private_artifact(home: Path, relative: Path) -> None:
 
 def _frame_purpose(path: Path) -> str:
     path = path.resolve() if path.is_absolute() else path
-    relative = path.relative_to(vault_mod.find_vault_home(path)) if path.is_absolute() else path
+    from hermes_security.profile_binding import logical_home
+    relative = path.relative_to(logical_home(path)) if path.is_absolute() else path
     return terminal_frame_purpose(relative) or ("log" if path.suffix == ".log" else "transcript")
 
 
@@ -596,9 +597,11 @@ def _migrate_frames(home: Path, path: Path, rel: Path, report: MigrationReport) 
     tmp = path.with_name(path.name + ".frames-new")
     if tmp.exists():
         tmp.unlink()
+    from hermes_security.profile_binding import for_conversion
+    custody = for_conversion(path, home)
     for payload in payloads:
-        sec_frames.append(tmp, payload, purpose=purpose)
-    back = [p for p in sec_frames.read_frames(tmp, purpose=purpose)]
+        sec_frames.append(tmp, payload, purpose=purpose, custody=custody)
+    back = [p for p in sec_frames.read_frames(tmp, purpose=purpose, custody=custody)]
     if back != payloads:
         tmp.unlink(missing_ok=True)
         raise RuntimeError(f"{rel}: frame roundtrip mismatch")
@@ -738,8 +741,8 @@ def scan_for_plaintext(home: Path | str) -> list[str]:
                     conn.close()
             elif kind == "frames":
                 raw = path.read_bytes()
-                vault = vault_mod.get_vault(vault_mod.find_vault_home(path))
-                _, consumed = sec_frames.split_stream(raw, vault=vault, purpose=_frame_purpose(path))
+                from hermes_security.profile_binding import for_file
+                _, consumed = sec_frames.split_stream(raw, vault=for_file(path), purpose=_frame_purpose(path))
                 valid = consumed == len(raw)
             else:
                 owner = state_io._home_for(path)

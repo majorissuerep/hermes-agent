@@ -754,6 +754,16 @@ def _read_key_file(path: str) -> bytes:
     raise VaultIntegrityError(f"not a 32-byte key in base64 or hex ({path})")
 
 
+def cached_custody_object(home: Path | str) -> Vault | None:
+    """Keyless original-object lookup; callers must validate their captured provenance.
+
+    Unlike get_vault this does not consult unrelated adopted logical profiles.
+    Returning a reference grants no key access without the Vault's custody checks.
+    """
+    with _VAULT_LOCK:
+        return _VAULTS.get(Path(home).expanduser().resolve())
+
+
 def get_vault(home: Path | str | None = None, *, allow_env_unlock: bool = True) -> Vault:
     """Return the unlocked vault for *home* (default: the active Hermes home).
 

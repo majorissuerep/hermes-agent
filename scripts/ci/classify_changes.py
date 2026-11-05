@@ -170,6 +170,7 @@ _UPDATE_DEPENDENCIES = (
     "hermes_security/protected_memory.py",  # vault key custody on every encrypted update
     "hermes_security/artifact_paths.py",  # private state classification during update migration
     "hermes_security/artifacts.py",  # authenticated private output recovery
+    "hermes_security/profile_binding.py",  # frames/migrate retain exact logical profile custody
     "hermes_security/delegation_repair.py",  # legacy delegation conversion during repair
     "hermes_security/sqlite_custody.py",  # encrypted database lineage on every update
     "hermes_platform/memory_protection.py",  # native backing proof used by key custody

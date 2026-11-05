@@ -294,9 +294,9 @@ def _follow_log(path: Path, **filters) -> None:
     home = _home_for(path)
     if home is not None:
         from hermes_security import frames
-        from hermes_security.vault import get_vault
+        from hermes_security.profile_binding import for_file
 
-        vault = get_vault(home)
+        vault = for_file(path)
         with open(path, "rb") as stream:
             existing = stream.read()
             _, consumed = frames.split_stream(existing, vault=vault, purpose="log", strict=True)
