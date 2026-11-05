@@ -32,7 +32,12 @@ def repair_owned(home):
     owner = ProfileOwnership()
     try:
         owner.reserve([operation.home])
+        from tools.browser_lightpanda_repair import repair_owned as repair_lightpanda
+
+        lightpanda = repair_lightpanda(operation.home)
         result = store.retire_quiescent(operation.home)
+        result['archived'] = list(dict.fromkeys([*result['archived'], *lightpanda['saved']]))
+        result['retained'].extend(lightpanda['retained'])
         if not result['retained'] and not result['missing']:
             from hermes_cli.browser_use_import import repair_known_default
 

@@ -237,6 +237,7 @@ def _create_lightpanda_session(task_id: str) -> dict[str, Any]:
     if err:
         raise RuntimeError(err)
     info["cdp_url"] = server.cdp_url
+    info["lightpanda_epoch"] = server.lease.token
     _bt.logger.info("Created Lightpanda session %s (port %s) for task %s", info["session_name"], server.port, task_id)
     return info
 

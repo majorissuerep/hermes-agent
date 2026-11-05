@@ -532,6 +532,8 @@ class _FakeServer:
         self.port = port
         self.cdp_url = f"http://127.0.0.1:{port}"
         self._alive = alive
+        from types import SimpleNamespace
+        self.lease = SimpleNamespace(token='synthetic-lightpanda-generation')
 
     def is_alive(self):
         return self._alive
@@ -666,7 +668,7 @@ class TestLightpandaSessionLifecycle:
         bt = self.bt
         self._seed()
         stopped = []
-        monkeypatch.setattr("tools.browser_lightpanda.stop_lightpanda", stopped.append)
+        monkeypatch.setattr("tools.browser_lightpanda.stop_lightpanda", lambda name, **_kwargs: stopped.append(name))
         with patch("tools.browser_recording.stop"), \
              patch("tools.browser_tool_session._run_browser_command") as run, \
              patch("tools.browser_tool.os.path.exists", return_value=False):
@@ -697,10 +699,13 @@ class TestLightpandaSessionLifecycle:
         never an AttributeError that wedges the reaper."""
         from tools import browser_lightpanda
         monkeypatch.setenv("HERMES_HOME", str(tmp_path))
-        state_dir = browser_lightpanda._state_dir()
+        from tools.browser_lightpanda_state import legacy_path
+        state_dir = legacy_path(tmp_path)
+        state_dir.mkdir(parents=True)
         bad = state_dir / "broken.json"
         bad.write_text('"not a record"', encoding="utf-8")
         dead_owner = state_dir / "dead.json"
         dead_owner.write_text(json.dumps({"owner_pid": 2**22 + 7}), encoding="utf-8")
         assert browser_lightpanda.reap_orphaned_lightpanda() == 0
-        assert not bad.exists() and not dead_owner.exists()
+        assert bad.read_text() == '"not a record"'
+        assert dead_owner.exists()  # old control is retained data, never deletion authority

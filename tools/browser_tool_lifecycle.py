@@ -138,7 +138,10 @@ def _session_owner_scope(task_id: str):
     from tools.browser_native_runtime import cleanup_scope
 
     info = _bt._active_sessions.get(task_id, {})
-    with cleanup_scope(info.get('session_name', ''), owner_home, original=True):
+    from tools.browser_lightpanda import cleanup_scope as lightpanda_scope
+
+    with cleanup_scope(info.get('session_name', ''), owner_home, original=True), lightpanda_scope(
+            info, home=owner_home, original=True):
         home_token = set_hermes_home_override(owner_home)
         try:
             hydrate_profile_secret_sources(Path(owner_home))
@@ -692,6 +695,11 @@ def _force_reap_browser_session(task_id: str) -> None:
 
     Janitor last resort after repeated cleanup failures (#100738).
     """
+    with _bt._cleanup_lock:
+        retained = _bt._active_sessions.get(task_id, {})
+    if (retained.get('features') or {}).get('lightpanda'):
+        _cleanup_single_browser_session(task_id)  # Never discard an unsaved cache after repeated failures.
+        return
     _cdp._stop_cdp_supervisor(task_id)
     with _bt._cleanup_lock:
         session_info = _bt._active_sessions.get(task_id)
@@ -707,7 +715,10 @@ def _cleanup_single_browser_session(task_id: str) -> None:
     from tools.browser_native_runtime import cleanup_scope
 
     info = _bt._active_sessions.get(task_id, {})
-    with cleanup_scope(info.get('session_name', ''), _bt._session_owner_homes.get(task_id)):
+    from tools.browser_lightpanda import cleanup_scope as lightpanda_scope
+
+    home = _bt._session_owner_homes.get(task_id)
+    with cleanup_scope(info.get('session_name', ''), home), lightpanda_scope(info, home=home):
         _cleanup_admitted_browser_session(task_id)
 
 
@@ -749,11 +760,9 @@ def _cleanup_admitted_browser_session(task_id: str) -> None:
     # Lightpanda sessions have no daemon to ``close``; an expired cloud CDP URL cannot
     # accept one and would make _get_session_info() renew the session mid-cleanup.
     if (session_info.get("features") or {}).get("lightpanda"):
-        try:
-            from tools.browser_lightpanda import stop_lightpanda
-            stop_lightpanda(session_info.get("session_name", ""))
-        except Exception as e:
-            logger.exception("lightpanda stop failed for task %s: %s", task_id, e)
+        from tools.browser_lightpanda import stop_lightpanda
+        stop_lightpanda(session_info.get("session_name", ""), home=_bt._session_owner_homes.get(task_id),
+                        expected=session_info.get('lightpanda_epoch'))
     elif _session_has_expired(session_info):
         _bt.logger.debug("Skipping agent-browser close for expired session %s", task_id)
     else:

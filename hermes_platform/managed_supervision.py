@@ -1,8 +1,9 @@
 """Foreground native children whose whole process tree ends with their owner.
 
 The owner starts a small private supervisor (``python -I``) which starts the real
-child with the owner's stdio and process group, so terminal job control and
-Ctrl-C reach it unchanged. A control pipe, held only by the owner, carries one
+child with the owner's stdio and, by default, process group, so terminal job control and
+Ctrl-C reach it unchanged. Explicit resident consumers may isolate the supervisor and child
+in a new session; their control EOF/cancel still owns the same supervised tree. A control pipe, held only by the owner, carries one
 JSON spec line and then an optional ``cancel`` line; its EOF means the owner died.
 
 Linux: the supervisor is a child subreaper, so every orphaned descendant,
@@ -52,7 +53,7 @@ class SupervisedChild:
     """
 
     def __init__(self, argv, *, env, cwd=None, inherit_fds=(), stdin=None, stdout=None, stderr=None,
-                 cleanup_dirs=()):
+                 cleanup_dirs=(), start_new_session=False):
         from hermes_platform.owned_cleanup import capture_directories, close_directories
 
         fds = tuple(int(fd) for fd in inherit_fds)
@@ -65,7 +66,7 @@ class SupervisedChild:
                 self.process = subprocess.Popen(  # health: allow HX006 -- the supervisor owns the native child's lifetime
                     [sys.executable, "-I", "-c", _BOOTSTRAP, _ROOT, str(reader)], env=env, cwd=cwd,
                     pass_fds=(reader, *fds, *(entry["parent"] for entry in cleanup)),
-                    stdin=stdin, stdout=stdout, stderr=stderr)
+                    stdin=stdin, stdout=stdout, stderr=stderr, start_new_session=start_new_session)
             except BaseException:
                 self._close_control()
                 raise

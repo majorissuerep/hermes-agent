@@ -619,7 +619,27 @@ AGENT_BROWSER_ENGINE=lightpanda
 
 The engine works with both browser drivers:
 
-- **Browser Use mode (the default).** Hermes launches `lightpanda serve --host 127.0.0.1 --port <free>` itself — one process per `browser_exec` session name (or per task) — and points the Browser Use CLI at it. No Chromium, Playwright or Node.js is needed. The process is reaped after `browser.inactivity_timeout`, on exit, and by the orphan sweep if Hermes crashes. All of these processes share one on-disk HTTP cache at `$HERMES_HOME/cache/browser-use/lightpanda/http-cache`, so repeat visits skip re-downloading assets. Hermes passes the cache flag only when the installed Lightpanda supports it (0.3.x+); older binaries simply run without a cache. To clear it, stop your Lightpanda sessions first, then delete that directory. Lightpanda has no graphical renderer, so `capture_screenshot()` is unavailable and the tool description tells the model to work text-first; it also holds one page per session, so the model is told to call `new_tab()` once and `goto_url()` afterwards (tracked upstream in [lightpanda-io/browser#1962](https://github.com/lightpanda-io/browser/issues/1962)).
+- **Browser Use mode (the default).** Hermes launches `lightpanda serve --host 127.0.0.1 --port <free>` itself — one process per `browser_exec` session name (or per task) — and points the Browser Use CLI at it. No Chromium, Playwright or Node.js is needed. The process is reaped after `browser.inactivity_timeout`, on exit, and by the orphan sweep if Hermes crashes. Sessions in the same owning profile share an HTTP cache in a proven owner-only RAM workspace. After every cache producer has verifiably exited, Hermes saves the complete private tree with the existing encrypted WORKER archive; it never copies a live SQLite/WAL cache as a cold checkpoint. Per-session stderr and private HOME files remain in that protected tree; temporary files and process records stay in protected RAM. Hermes passes the cache flag only when the installed Lightpanda supports it (0.3.x+); older binaries still run without that optional cache. To deliberately clear cached HTTP content, stop every Lightpanda session, remove only the `http-cache` directory at the private RAM path reported in Hermes's diagnostic log, then run the existing `browser.worker.repair` operation to save and retire that quiescent state. Restore an already-retired cache through a normal session first. Do not delete the entire WORKER archive: it also preserves diagnostics and private HOME state. Lightpanda has no graphical renderer, so `capture_screenshot()` is unavailable and the tool description tells the model to work text-first; it also holds one page per session, so the model is told to call `new_tab()` once and `goto_url()` afterwards (tracked upstream in [lightpanda-io/browser#1962](https://github.com/lightpanda-io/browser/issues/1962)).
+The former `$HERMES_HOME/cache/browser-use/lightpanda` tree is retained unchanged.
+Protected startup refuses that unimported state. After closing its original owners,
+explicitly request its typed import with:
+
+```sh
+printf '%s\n' '{"op":"browser.worker.repair"}' | hermes manage apply
+```
+
+This fixed operation accepts only the known owned legacy tree, preserves and fully
+authenticates an encrypted original-source recovery copy, and verifies every remaining
+entry before retirement. Interrupted import uses that original complete copy; aliases,
+unknown/live owners, conflicting new cache state, or new/changed survivors are retained.
+Old PID/owner records become inert history, never permission to signal a process.
+Hermes disables Lightpanda usage telemetry by default, including capability probes.
+An explicitly configured `LIGHTPANDA_DISABLE_TELEMETRY=false` remains a deliberate
+operator override; it is not required for browser functionality.
+Failed close or checkpoint retains the current RAM copy, tracking and last verified
+archive, with the actual recovery location. Closing a request does not revoke another
+live request sharing the same profile resource. A later unlock cannot revive old callbacks.
+
 - **Built-in browser tools** (`/browser use off`). Hermes drives Lightpanda through `agent-browser --engine lightpanda` over CDP, the same way it drives local Chrome, with **automatic Chrome fallback**: Lightpanda handles the actions it supports (navigate, snapshot, click, type, scroll, back, press, eval) and Hermes transparently retries on Chrome for anything it doesn't. Screenshots and `browser_vision` are routed straight to Chrome.
 
 **When the engine is ignored.** `browser.engine` is the lowest-precedence browser setting: a cloud provider (including the Nous subscription browser — and on never-configured setups, any `BROWSERBASE_API_KEY` / `BROWSER_USE_API_KEY` in `~/.hermes/.env` auto-selects one), Camofox, a `browser.cdp_url` / `/browser connect` override, or `browser.use_real_profile` all take precedence. Picking Lightpanda in `hermes tools` writes `cloud_provider: local` for you; `/browser status` and `hermes doctor` report when the engine is configured but shadowed, and by what.

@@ -6,8 +6,6 @@ built-in ``browser_*`` tools keep going through ``agent-browser --engine lightpa
 ``tools.browser_tool`` owns the session cache, inactivity reaper and atexit sweep.
 """
 
-import functools
-import json
 import logging
 import os
 import shutil
@@ -15,9 +13,9 @@ import socket
 import subprocess
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -28,24 +26,52 @@ _READY_TIMEOUT_S = 10.0
 _POLL_INTERVAL_S = 0.1
 _STDERR_TAIL_LIMIT = 2000
 
-_servers: "dict[str, LightpandaServer]" = {}
+_servers: "dict[tuple[Path, str], LightpandaServer]" = {}
 _servers_lock = threading.Lock()
 
 
 @dataclass
 class LightpandaServer:
+    """proc/start_time name the supervisor; lease.record names the actual native vendor."""
     session_name: str
     port: int
     proc: subprocess.Popen
     log_path: str
     start_time: Optional[int] = None
+    lease: object = None
+    users: dict = field(default_factory=dict)
 
     @property
     def cdp_url(self) -> str:
         return f"http://127.0.0.1:{self.port}"  # HTTP discovery URL; the harness resolves /json/version itself
 
     def is_alive(self) -> bool:
-        return self.proc.poll() is None
+        if self.lease is not None:
+            self.lease.resource.custody.check()
+        return (self.proc.poll() is None and self.lease is not None and self.lease.record is not None
+                and _record_matches(self.lease.record))
+
+    def admit(self):
+        from agent.session_context import get_session_env
+        from hermes_security.session_custody import SessionCustody
+
+        source = get_session_env('HERMES_SESSION_ID', '')
+        if source:
+            self.users[source] = SessionCustody.capture(self.lease.home, resource=self.lease.resource.custody)
+
+    def shared_with_other(self, closing_source):
+        from hermes_security.errors import VaultLockedError
+
+        self.lease.resource.custody.check()
+        for source, operation in self.users.items():
+            if source == closing_source:
+                continue
+            try:
+                operation.check()
+            except VaultLockedError:
+                continue
+            return True
+        return False
 
 
 def _home_candidates() -> list:
@@ -82,62 +108,36 @@ def _pick_free_loopback_port() -> int:
         return int(sock.getsockname()[1])
 
 
-def _state_dir() -> Path:
-    from hermes_constants import get_hermes_home
-    path = Path(get_hermes_home()) / "cache" / "browser-use" / "lightpanda"
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+_CAPABILITIES = {}
 
 
-def _http_cache_dir() -> Path:
-    """Filesystem HTTP cache shared by every Lightpanda this Hermes spawns.
-
-    Shared rather than per-session so a cached asset survives session churn.
-    Lightpanda holds it in sqlite (WAL) with a best-effort write path, and
-    ``--http-cache-entry-limit`` (upstream default 1000, not passed here)
-    bounds it without Hermes managing eviction.
-    """
-    path = _state_dir() / "http-cache"
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+_HTTP_CACHE_FLAG = '--http-cache-dir'
 
 
-_HTTP_CACHE_FLAG = "--http-cache-dir"
+def _binary_supports_http_cache(binary: str, env: dict) -> bool:
+    """Probe public executable capabilities with the exact scrubbed private vendor environment."""
+    from tools.browser_lightpanda_state import vendor_environment
 
-
-@functools.lru_cache(maxsize=1)
-def _binary_supports_http_cache(binary: str) -> bool:
-    """True if ``lightpanda serve`` accepts ``--http-cache-dir``.
-
-    The flag landed upstream in 0.3.x; older binaries fatally reject it
-    ("unknown argument"), which would break every launch. Probing ``help``
-    output keeps working across future flag additions without parsing
-    versions, and the lru_cache keeps it once per binary per process.
-    """
-    try:
-        proc = subprocess.run(
-            [binary, "help"],
-            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=3.0,
-            stdin=subprocess.DEVNULL,
-            check=False,
-        )
-        return _HTTP_CACHE_FLAG in ((proc.stdout or "") + (proc.stderr or ""))
-    except Exception as e:
-        logger.debug("lightpanda http-cache probe failed (%s); assuming no", e)
-        return False
-
-
-def _record_path(session_name: str) -> Path:
-    return _state_dir() / f"{session_name}.json"
+    env = vendor_environment(env)
+    info = Path(binary).stat()
+    identity = str(Path(binary).resolve()), info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns
+    if identity not in _CAPABILITIES:
+        _CAPABILITIES.clear()  # Public executable capability cache remains bounded to one selection.
+        try:
+            proc = subprocess.run([binary, 'help'], env=env, capture_output=True, text=True,
+                                  encoding='utf-8', errors='replace', timeout=3.0,
+                                  stdin=subprocess.DEVNULL, check=False)
+            _CAPABILITIES[identity] = _HTTP_CACHE_FLAG in ((proc.stdout or '')+(proc.stderr or ''))
+        except (OSError, subprocess.SubprocessError) as error:
+            logger.debug('Lightpanda capability probe failed: %s', error)
+            _CAPABILITIES[identity] = False
+    return _CAPABILITIES[identity]
 
 
 def _browser_env() -> dict:
-    try:
-        from tools.browser_tool import _build_browser_env
-        return _build_browser_env()
-    except Exception as e:
-        logger.debug("credential-scrubbed browser env unavailable: %s", e)
-        return os.environ.copy()
+    from tools.browser_tool import _build_browser_env
+
+    return _build_browser_env()  # Refused original scope never falls back to ambient authority.
 
 
 def _cdp_ready(url: str, timeout: float = 0.2) -> bool:
@@ -171,174 +171,243 @@ def _terminate(proc: subprocess.Popen, what: str = "lightpanda") -> None:
         logger.debug("%s terminate failed: %s", what, e)
 
 
-def _safe_start_time(pid: int) -> Optional[int]:
-    try:
-        from tools.process_registry import ProcessRegistry
-        return ProcessRegistry._safe_host_start_time(pid)
-    except Exception:
-        return None
+def _process_record(child, binary, argv, env):
+    from hermes_platform.lightpanda_process import owned_child_record
+
+    return owned_child_record(child, executable=binary, argv=argv, home=env['HOME'])
 
 
-def _tree_kill(pid: int, expected_start) -> None:
-    """Tree-kill ``pid`` via ProcessRegistry, verifying its start time first."""
-    from tools.process_registry import ProcessRegistry
-    ProcessRegistry._terminate_host_pid(pid, expected_start=expected_start)
+def _record_matches(record):
+    from hermes_platform.lightpanda_process import matches
+
+    return matches({key:value for key,value in record.items() if key != 'kind'})
 
 
-def _write_record(server: LightpandaServer) -> None:
-    record = {"pid": server.proc.pid, "port": server.port, "owner_pid": os.getpid(),
-              "start_time": server.start_time, "started_at": time.time()}
-    try:
-        (_state_dir() / f"{server.session_name}.json").write_text(json.dumps(record), encoding="utf-8")
-    except OSError as e:
-        logger.debug("could not write lightpanda record for %s: %s", server.session_name, e)
+def _key(session_name, home=None):
+    from hermes_constants import get_hermes_home
+
+    return Path(home or get_hermes_home()).resolve(), session_name
 
 
-def launch_lightpanda(session_name: str, *, block_private_networks: bool = False) -> tuple[Optional[LightpandaServer], Optional[str]]:
-    """Start ``lightpanda serve`` on a free loopback port; ``(server, None)`` once ``/json/version`` answers,
-    else ``(None, error)``. stderr goes to ``<state_dir>/<session>.log`` so a chatty child never blocks on a pipe."""
-    from tools.browser_terminal import browser_in_terminal
-    if browser_in_terminal():
-        return None, "Native Lightpanda cannot run outside the selected terminal sandbox; use an explicit outgoing CDP endpoint."
-    binary = find_lightpanda_binary()
-    if not binary:
-        if os.name == "nt":
-            return None, ("browser.engine is 'lightpanda' but Lightpanda has no Windows "
-                          "build. Set browser.engine to auto (or run Hermes under WSL2).")
-        return None, ("browser.engine is 'lightpanda' but no lightpanda binary was found on PATH, ~/.lightpanda "
-                      f"or ~/.local/bin. {LIGHTPANDA_INSTALL_HINT}, or set browser.engine to auto.")
+def check_resource_epoch(resource):
+    with _servers_lock:
+        residents = [server for server in _servers.values() if server.lease.home == resource.home]
+    for server in residents:
+        original = server.lease.resource.custody
+        if original.vault is not resource.custody.vault:
+            raise RuntimeError('An earlier Lightpanda unlock still has retained resident state; close its original owner first')
+        original.check()
+        if original.authority is not None and not original.authority.is_current():
+            raise RuntimeError('An earlier Lightpanda native lineage still has retained resident state; close its original owner first')
 
-    port = _pick_free_loopback_port()
-    argv = [binary, "serve", "--host", "127.0.0.1", "--port", str(port)]
-    if _binary_supports_http_cache(binary):
-        argv += [_HTTP_CACHE_FLAG, str(_http_cache_dir())]
-    if block_private_networks:
-        argv.append("--block-private-networks")
-    log_path = str(_state_dir() / f"{session_name}.log")
-    try:
-        with open(log_path, "wb") as log_file:
-            proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                                    stderr=log_file, env=_browser_env(), start_new_session=True)
-    except (OSError, subprocess.SubprocessError) as e:
-        return None, f"Failed to launch lightpanda serve ({binary}): {e}"
 
-    url = f"http://127.0.0.1:{port}"
-    deadline = time.monotonic() + _READY_TIMEOUT_S
+def _register(server):
+    with _servers_lock:
+        key = server.lease.home, server.session_name
+        if key in _servers:
+            raise RuntimeError('The original Lightpanda session is still tracked; state retained')
+        _servers[key] = server
+        server.users[server.lease.source] = server.lease.source_operation
+
+
+def _ready(server, argv, env, call):
+    deadline = time.monotonic()+_READY_TIMEOUT_S
     while True:
-        rc = proc.poll()
+        server.lease.check(call)
+        rc = server.proc.poll()
         if rc is not None:
-            tail = _read_log_tail(log_path)
-            return None, f"lightpanda serve exited with code {rc} before {url}/json/version answered{f': {tail}' if tail else ''}"
-        if _cdp_ready(url):
-            break
+            raise RuntimeError(f'Lightpanda exited with code {rc} before CDP readiness: {_read_log_tail(server.log_path)}')
+        record = _process_record(server.proc, argv[0], argv, env)
+        if (record is not None and _cdp_ready(server.cdp_url)
+                and _process_record(server.proc, argv[0], argv, env) == record):
+            server.lease.identify(server.proc, record, call)
+            server.start_time = server.lease.supervisor_record['start_time']
+            return
         if time.monotonic() >= deadline:
-            _terminate(proc)
-            tail = _read_log_tail(log_path)
-            detail = f" (last stderr line: {tail})" if tail else ""
-            return None, f"lightpanda serve did not expose {url}/json/version within {int(_READY_TIMEOUT_S)}s{detail}"
+            raise RuntimeError(f'Lightpanda did not establish its exact process and CDP endpoint within {int(_READY_TIMEOUT_S)}s')
         time.sleep(_POLL_INTERVAL_S)
 
-    server = LightpandaServer(session_name, port, proc, log_path, _safe_start_time(proc.pid))
-    _write_record(server)
-    with _servers_lock:
-        _servers[session_name] = server
-    logger.info("Started lightpanda serve (pid %s, port %s) for session %s", proc.pid, port, session_name)
-    return server, None
+
+def _launch(lease, binary, *, block_private_networks):
+    from hermes_platform.managed_supervision import SupervisedChild
+
+    with lease.access() as call:
+        lease.prepare(call)
+        env = lease.environment(_browser_env())
+        port = _pick_free_loopback_port()
+        argv = [binary, 'serve', '--host', '127.0.0.1', '--port', str(port)]
+        if _binary_supports_http_cache(binary, env):
+            argv.extend([_HTTP_CACHE_FLAG, str(lease.cache)])
+        if block_private_networks:
+            argv.append('--block-private-networks')
+        lease.check(call)
+        lease.starting(binary, call)
+        descriptor = os.open(lease.log, os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW|os.O_CLOEXEC, 0o600)
+        with os.fdopen(descriptor, 'wb') as log:
+            child = SupervisedChild(argv, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                    stderr=log, start_new_session=True)
+        lease.child = child
+        server = LightpandaServer(lease.session, port, child, str(lease.log), lease=lease)
+        _register(server)
+        _ready(server, argv, env, call)
+    logger.info('Lightpanda private cache %s; encrypted checkpoint %s', lease.cache, lease.home/lease.resource.relative)
+    return server
 
 
-def get_server(session_name: str) -> Optional[LightpandaServer]:
-    with _servers_lock:
-        return _servers.get(session_name)
+def launch_lightpanda(session_name: str, *, block_private_networks: bool = False):
+    """Launch only inside original profile authority and proven RAM, retaining every failed copy."""
+    from tools.browser_terminal import browser_in_terminal
+    from hermes_constants import get_hermes_home
+    from hermes_security.errors import VaultError
+    from tools.browser_lightpanda_state import LightpandaLease
 
-
-def stop_lightpanda(session_name: str) -> None:
-    """Stop the server for ``session_name`` (tree-kill, plain terminate on failure) and drop its record."""
-    with _servers_lock:
-        server = _servers.pop(session_name, None)
-    if server is not None and server.is_alive():
-        try:
-            _tree_kill(server.proc.pid, server.start_time)
-        except Exception as e:
-            logger.debug("lightpanda tree-kill failed for %s: %s", server.session_name, e)
-            _terminate(server.proc)
-        try:
-            server.proc.wait(timeout=5)
-        except Exception:
-            _terminate(server.proc)
+    if browser_in_terminal():
+        return None, 'Native Lightpanda cannot run outside the selected terminal sandbox; use an explicit outgoing CDP endpoint.'
+    binary = find_lightpanda_binary()
+    if not binary:
+        return None, f"browser.engine is 'lightpanda' but no executable is selected. {LIGHTPANDA_INSTALL_HINT}"
+    lease = None
     try:
-        (_state_dir() / f"{session_name}.json").unlink(missing_ok=True)
-    except OSError as e:
-        logger.debug("could not remove lightpanda record for %s: %s", session_name, e)
+        lease = LightpandaLease(get_hermes_home(), session_name)
+        return _launch(lease, binary, block_private_networks=block_private_networks), None
+    except (OSError, RuntimeError, ValueError, VaultError) as error:
+        if lease is not None and lease.child is not None:
+            # This is cleanup of our exact supervisor, never a signal based on old PID metadata.
+            status = lease.child.cancel()
+            logger.warning('Lightpanda launch refused; owned cleanup status %s, private RAM retained at %s', status, lease.resource.path)
+        location = f'; private RAM retained at {lease.resource.path}' if lease is not None else ''
+        return None, f'Lightpanda launch refused: {error}{location}'
+
+
+def _lookup(session_name, home=None):
+    with _servers_lock:
+        return _servers.get(_key(session_name, home))
+
+
+def get_server(session_name: str, *, home=None):
+    server = _lookup(session_name, home)
     if server is not None:
-        logger.debug("Stopped lightpanda serve for session %s", session_name)
+        server.admit()
+    return server
 
 
-def stop_all_lightpanda() -> None:
-    """Stop every server this process started. Idempotent; safe from atexit."""
+def stop_lightpanda(session_name: str, *, home=None, expected=None, operation=None):
+    """Stop only the exact original named server; a failed close/save retains all tracking."""
+    from hermes_security.session_custody import SessionCustody
+
+    key = _key(session_name, home)
     with _servers_lock:
-        names = list(_servers)
-    for name in names:
+        server = _servers.get(key)
+    if server is None:
+        return
+    lease = server.lease
+    operation = _cleanup_operation(server, operation)
+    if expected is not None and lease.token != expected:
+        raise RuntimeError('Original Lightpanda session was replaced; no process was stopped')
+    if operation is None:
+        operation = SessionCustody.capture(lease.home, resource=lease.resource.custody)
+    operation.check()
+    source = lease.source if operation in (lease.operation, lease.source_operation) else _current_source()
+    if server.shared_with_other(source):
+        server.users.pop(source, None)
+        logger.info('Lightpanda session remains shared by another live source; cache checkpoint deferred')
+        return
+    with lease.access(operation) as call:
+        if server.proc.poll() is None:
+            if lease.record is None or not _record_matches(lease.record):
+                raise RuntimeError('Original Lightpanda process identity is unknown; RAM and archive retained')
+            call.check()
+            if server.proc.cancel() is None:
+                raise RuntimeError('Lightpanda owned tree cleanup is unconfirmed; all state retained')
+        server.proc.wait(timeout=5)
+    lease.finish(operation)
+    with _servers_lock:
+        if _servers.get(key) is not server:
+            raise RuntimeError('Lightpanda tracking changed during cleanup; all state retained')
+        del _servers[key]
+        remaining = any(other.lease.resource is lease.resource for other in _servers.values())
+    if not remaining:
+        lease.resource.release(operation=operation)
+
+
+def stop_all_lightpanda():
+    with _servers_lock:
+        servers = list(_servers.values())
+    for server in servers:
         try:
-            stop_lightpanda(name)
-        except Exception as e:
-            logger.debug("lightpanda stop failed for %s: %s", name, e)
+            stop_lightpanda(server.session_name, home=server.lease.home,
+                            expected=server.lease.token, operation=server.lease.source_operation)
+        except (OSError, RuntimeError) as error:
+            logger.warning('Lightpanda cache remains pending at %s: %s', server.lease.resource.path, error)
 
 
-def _is_lightpanda_process(pid: int, port, start_time) -> bool:
-    """True only when ``pid`` is verifiably the ``lightpanda serve`` we recorded."""
-    try:
-        import psutil
-        proc = psutil.Process(pid)
-        if "lightpanda" not in proc.name().lower():
-            return False
-        cmdline = proc.cmdline()
-        if "serve" not in cmdline or str(port) not in cmdline:
-            return False
-        if start_time:
-            from hermes_platform.processes import get_process_start_time
-            return get_process_start_time(pid) == start_time
-    except Exception:
-        return False
-    return True
+def reap_orphaned_lightpanda():
+    """Owned supervisors handle parent death. Old raw records never authorize signals or deletion."""
+    from hermes_constants import get_hermes_home
+    from tools.browser_lightpanda_state import legacy_path
 
-
-def reap_orphaned_lightpanda() -> int:
-    """Kill ``lightpanda serve`` processes whose owning Hermes is gone; return the count. A live owner is
-    never touched; a PID is only signalled after psutil confirms it is still ``lightpanda serve`` on the recorded port."""
-    try:
-        state_dir = _state_dir()
-    except Exception as e:
-        logger.debug("lightpanda state dir unavailable: %s", e)
-        return 0
-    try:
-        from hermes_platform.processes import pid_exists
-    except Exception:  # pragma: no cover - defensive
-        return 0
-
+    if os.path.lexists(legacy_path(get_hermes_home())):
+        logger.warning('Legacy Lightpanda data retained; use explicit browser.worker.repair')
+    with _servers_lock:
+        dead = [server for server in _servers.values() if not server.is_alive()]
     reaped = 0
-    for record_path in sorted(state_dir.glob("*.json")):
-        session_name = record_path.stem
+    for server in dead:
         try:
-            record = json.loads(record_path.read_text(encoding="utf-8-sig"))
-            if not isinstance(record, dict):
-                raise ValueError(f"expected a JSON object, got {type(record).__name__}")
-        except (OSError, ValueError):
-            record_path.unlink(missing_ok=True)
-            continue
-        owner_pid = record.get("owner_pid")
-        if owner_pid == os.getpid():
-            with _servers_lock:
-                if session_name in _servers:
-                    continue
-        elif owner_pid and pid_exists(int(owner_pid)):
-            continue
-        pid = record.get("pid")
-        if pid and _is_lightpanda_process(int(pid), record.get("port"), record.get("start_time")):
-            try:
-                _tree_kill(int(pid), record.get("start_time"))
-                reaped += 1
-                logger.info("Reaped orphaned lightpanda serve pid %s (session %s)", pid, session_name)
-            except Exception as e:
-                logger.debug("orphan lightpanda kill failed for pid %s: %s", pid, e)
-        record_path.unlink(missing_ok=True)
+            stop_lightpanda(server.session_name, home=server.lease.home,
+                            expected=server.lease.token, operation=server.lease.source_operation)
+            reaped += 1
+        except (OSError, RuntimeError) as error:
+            logger.warning('Lightpanda pending recovery retained at %s: %s', server.lease.resource.path, error)
     return reaped
+
+
+from contextlib import contextmanager
+from contextvars import ContextVar
+
+_CLEANUP = ContextVar('lightpanda_cleanup', default=None)
+
+
+def _current_source():
+    from agent.session_context import get_session_env
+
+    return get_session_env('HERMES_SESSION_ID', '')
+
+
+def _cleanup_operation(server, provided):
+    selected = _CLEANUP.get()
+    if selected is not None:
+        original, operation = selected
+        if original is not server:
+            raise RuntimeError('The queued Lightpanda cleanup belongs to another server generation')
+        return operation
+    return provided
+
+
+@contextmanager
+def cleanup_scope(info, *, home=None, original=False):
+    """Queued cleanup retains original Source; a fresh explicit request captures its own operation."""
+    from hermes_security.session_custody import SessionCustody
+
+    if not (info.get('features') or {}).get('lightpanda'):
+        yield
+        return
+    server = _lookup(info.get('session_name', ''), home)
+    if server is None:
+        yield
+        return
+    if info.get('lightpanda_epoch') != server.lease.token:
+        raise RuntimeError('Original Lightpanda session generation changed; state retained')
+    existing = _CLEANUP.get()
+    if existing is not None:
+        if existing[0] is not server:
+            raise RuntimeError('A different Lightpanda cleanup operation is already selected')
+        operation = existing[1]
+    else:
+        operation = (server.lease.source_operation if original else
+                     SessionCustody.capture(server.lease.home, resource=server.lease.resource.custody))
+    operation.check()
+    token = _CLEANUP.set((server, operation))
+    try:
+        yield
+    finally:
+        _CLEANUP.reset(token)
