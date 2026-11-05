@@ -52,13 +52,22 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 
 @pytest.fixture
 def listener(tmp_path, monkeypatch):
-    monkeypatch.setenv("HERMES_HOME", str(tmp_path / ".hermes"))
-    (tmp_path / ".hermes").mkdir()
+    from hermes_security import vault
+
+    home = tmp_path / ".hermes"
+    monkeypatch.setenv("HERMES_HOME", str(home))
+    monkeypatch.setattr(vault, "_SCRYPT_N", 1024)
+    vault.init_vault(home, "synthetic SSRF fixture password")
+    vault.unlock(home, "synthetic SSRF fixture password")
     _Handler.hits = []
     httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
-    yield f"http://127.0.0.1:{httpd.server_address[1]}", _Handler.hits
-    httpd.shutdown()
+    try:
+        yield f"http://127.0.0.1:{httpd.server_address[1]}", _Handler.hits
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+        vault.clear_vault_cache()
 
 
 def _sitemap_catalog(url: str, monkeypatch):
