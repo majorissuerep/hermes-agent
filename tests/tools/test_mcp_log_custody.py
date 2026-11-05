@@ -3,6 +3,7 @@
 from pathlib import Path
 import pytest
 
+
 @pytest.fixture
 def home(tmp_path, monkeypatch):
     from hermes_security import vault
@@ -17,17 +18,16 @@ def home(tmp_path, monkeypatch):
     vault.clear_vault_cache()
 
 
-
 @pytest.mark.parametrize("reunlock", [False, True])
 def test_retained_mcp_sink_keeps_original_unlock_but_not_first_source(home, reunlock):
-    from hermes_security import frames, vault
+    from hermes_security import artifacts, frames, vault
     from hermes_security.errors import VaultError
     from hermes_security.session_authority import start_session_authority
     from tools.mcp_tool_config import _VaultMCPLog
 
     source = start_session_authority(home, "original-log-first")
     path = Path(home) / "logs/mcp-stderr.log"
-    sink = _VaultMCPLog(path)
+    sink = _VaultMCPLog(path, custody=artifacts._bound_custody(home))
     sink.write("first synthetic line\n")
     before = path.read_bytes()
     source.close()
@@ -37,7 +37,7 @@ def test_retained_mcp_sink_keeps_original_unlock_but_not_first_source(home, reun
         with pytest.raises(VaultError):
             sink.write("late old-unlock synthetic line\n")
         assert path.read_bytes() == before
-        fresh = _VaultMCPLog(path)
+        fresh = _VaultMCPLog(path, custody=artifacts._bound_custody(home))
         fresh.write("fresh synthetic line\n")
         assert b"fresh synthetic line" in b"".join(
             frames.read_frames(path, purpose="log")

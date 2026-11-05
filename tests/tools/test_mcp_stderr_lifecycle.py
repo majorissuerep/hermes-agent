@@ -3,6 +3,9 @@
 import io
 from pathlib import Path
 
+import pytest
+
+from hermes_security import frames, vault
 from hermes_constants import (
     hermes_home_key,
     reset_hermes_home_override,
@@ -13,9 +16,23 @@ from tools.mcp_tool_config import _StderrTee, _get_mcp_stderr_log, _write_stderr
 from tools.mcp_tool_lifecycle import shutdown_mcp_servers
 
 
+@pytest.fixture(autouse=True)
+def encrypted_log_profiles(monkeypatch):
+    monkeypatch.setattr(vault, "_SCRYPT_N", 1024)
+    yield
+    shutdown_mcp_servers()
+    vault.clear_vault_cache()
+
+
+def _unlock_log_profile(home):
+    vault.init_vault(home, "synthetic MCP lifecycle password")
+    vault.unlock(home, "synthetic MCP lifecycle password")
+
+
 def test_scoped_shutdown_releases_log_and_preserves_other_profile(tmp_path):
     handles = []
     for name in ("first", "second"):
+        _unlock_log_profile(tmp_path / name)
         token = set_hermes_home_override(tmp_path / name)
         try:
             handles.append(_get_mcp_stderr_log())
@@ -50,6 +67,9 @@ def test_rename_profile_releases_cached_log_handle(tmp_path, monkeypatch):
     home.mkdir()
     monkeypatch.setenv("HERMES_HOME", str(home))
     old_dir = profiles.create_profile("mcp-log-old", no_alias=True)
+    from hermes_security.migrate import migrate_home
+    assert migrate_home(old_dir, "synthetic MCP lifecycle password").ok
+    vault.unlock(old_dir, "synthetic MCP lifecycle password")
     token = set_hermes_home_override(old_dir)
     try:
         handle = _get_mcp_stderr_log()
@@ -67,6 +87,7 @@ def test_rename_profile_releases_cached_log_handle(tmp_path, monkeypatch):
 
 
 def test_every_mcp_log_line_carries_a_stamp_hermes_logs_since_reads(tmp_path):
+    _unlock_log_profile(tmp_path)
     token = set_hermes_home_override(tmp_path)
     try:
         _write_stderr_log_header("probe")
@@ -76,7 +97,9 @@ def test_every_mcp_log_line_carries_a_stamp_hermes_logs_since_reads(tmp_path):
         for chunk in (b"first half ", b"second half\n", b"crlf line\r\n", b"no newline at exit"):
             tee.sink.write(chunk)
         assert tee.close() == "first half second half\ncrlf line\r\nno newline at exit"
-        banner = (tmp_path / "logs" / "mcp-stderr.log").read_text().strip()
+        path = tmp_path / "logs" / "mcp-stderr.log"
+        banner = b"".join(frames.read_frames(path, purpose="log")).decode().strip()
+        assert b"starting MCP server" not in path.read_bytes()
     finally:
         reset_hermes_home_override(token)
         shutdown_mcp_servers(scope=hermes_home_key(tmp_path))
