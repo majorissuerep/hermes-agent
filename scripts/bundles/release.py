@@ -79,7 +79,8 @@ def package_payload(payload: Path, out: Path, commit: str, target: str) -> Path:
         raise FileExistsError("release output already exists")
     with tempfile.TemporaryDirectory(prefix=".package-", dir=out) as scratch:
         staged = Path(scratch) / archive.name
-        with tarfile.open(staged, "w:gz", dereference=False) as tar:
+        # LLVM/GPU toolchains gain little from level 9 at substantial CPU cost.
+        with tarfile.open(staged, "w:gz", compresslevel=6, dereference=False) as tar:
             tar.add(payload, arcname="hermes")
         with staged.open("rb") as stream:
             digest = hashlib.file_digest(stream, "sha256").hexdigest()

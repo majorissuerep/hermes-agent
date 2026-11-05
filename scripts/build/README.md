@@ -22,6 +22,12 @@ Python environment with raw pip or uv. Dependency preparation may access registr
 product builders consume prepared inputs and refuse missing inputs. Nix and Termux
 supply their native dependency environments rather than borrowing another target's environment.
 
+Linux build hosts need Clang for the current PM Python's native-extension compiler,
+plus CMake, pkg-config and the platform development headers. Install the browser
+runtime libraries listed in the [Dockerfile runtime base](../../Dockerfile), including
+Cua's X11, Xi and xkbcommon dependencies, before staging the complete tool set.
+PM verifies native tools by executing their probes during assembly.
+
 The stage adapter accepts a source ref and prepared TUI. Its output is a terminal
 agent payload, not a signed GUI installer. Docker, Nix and Termux retain their own
 native layouts. Parser/helper tests do not prove a native build or successful runtime;
