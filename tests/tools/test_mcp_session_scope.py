@@ -3,10 +3,17 @@ import concurrent.futures
 import sys
 
 
-def test_session_mcp_registry_isolation_and_scoped_release(tmp_path):
+def test_session_mcp_registry_isolation_and_scoped_release(tmp_path, monkeypatch):
+    from hermes_security import vault
     from tools.registry import registry, session_tool_scope
     from tools.mcp_tool_discovery import register_mcp_servers
     from tools.mcp_tool_lifecycle import shutdown_mcp_servers
+
+    home = tmp_path / "session-owner"
+    monkeypatch.setenv("HERMES_HOME", str(home))
+    monkeypatch.setattr(vault, "_SCRYPT_N", 1024)
+    vault.init_vault(home, "synthetic MCP session fixture password")
+    vault.unlock(home, "synthetic MCP session fixture password")
 
     script = tmp_path / 'peer.py'
     script.write_text('''import json, os, sys
@@ -42,3 +49,4 @@ for line in sys.stdin:
     finally:
         shutdown_mcp_servers(scope='editor-session:a')
         shutdown_mcp_servers(scope='editor-session:b')
+        vault.clear_vault_cache()

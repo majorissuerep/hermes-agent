@@ -40,15 +40,25 @@ def test_register_summary_names_failed_server_with_reason(monkeypatch, tmp_path,
 
     monkeypatch.setattr(mcp_tool, "_MAX_INITIAL_CONNECT_RETRIES", 1)
     monkeypatch.setattr(mcp_tool, "_MAX_BACKOFF_SECONDS", 0.1)
+    from hermes_security import vault
+    from tools.mcp_tool_lifecycle import shutdown_mcp_servers
+
+    monkeypatch.setattr(vault, "_SCRYPT_N", 1024)
+    vault.init_vault(tmp_path, "synthetic missing-command fixture password")
+    vault.unlock(tmp_path, "synthetic missing-command fixture password")
     missing = str(tmp_path / "no-such-mcp-binary")
 
-    with caplog.at_level(logging.INFO, logger="tools.mcp_tool"):
-        register_mcp_servers({"ghost": {"command": missing, "connect_timeout": 15}})
+    try:
+        with caplog.at_level(logging.INFO, logger="tools.mcp_tool"):
+            register_mcp_servers({"ghost": {"command": missing, "connect_timeout": 15}})
 
-    summaries = _summaries(caplog)
-    assert len(summaries) == 1, summaries
-    assert "ghost" in summaries[0]
-    assert "no-such-mcp-binary" in summaries[0]
+        summaries = _summaries(caplog)
+        assert len(summaries) == 1, summaries
+        assert "ghost" in summaries[0]
+        assert "no-such-mcp-binary" in summaries[0]
+    finally:
+        shutdown_mcp_servers()
+        vault.clear_vault_cache()
 
 
 def test_summary_marks_candidate_skipped_for_cooldown(caplog, _clean_registry):
