@@ -232,6 +232,8 @@ def _launch(lease, binary, *, block_private_networks):
     from hermes_platform.managed_supervision import SupervisedChild
 
     with lease.access() as call:
+        if _lookup(lease.session, lease.home) is not None:
+            raise RuntimeError('The original Lightpanda session is still tracked; no second vendor launched')
         lease.prepare(call)
         env = lease.environment(_browser_env())
         port = _pick_free_loopback_port()

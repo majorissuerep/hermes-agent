@@ -337,3 +337,16 @@ def test_existing_owner_worker_repair_recovers_ended_A_under_fresh_B_without_rev
         assert (target/'http-cache'/'latest').read_bytes() == payload
     finally:
         a.close(); b.close()
+
+
+def test_duplicate_named_launch_refuses_before_another_producer_or_pending_marker(fake_lightpanda,native_state):
+    lp,launched=fake_lightpanda
+    first,error=lp.launch_lightpanda('same-name')
+    assert first is not None and error is None
+    before={p.name:p.read_bytes() for p in (first.lease.resource.path/'processes').iterdir()}
+    second,error=lp.launch_lightpanda('same-name')
+    assert second is None and error
+    assert len(launched)==1,'Duplicate name must refuse before starting a second private producer'
+    assert {p.name:p.read_bytes() for p in (first.lease.resource.path/'processes').iterdir()}==before
+    lp.stop_lightpanda(first.session_name,expected=first.lease.token)
+    assert lp.get_server(first.session_name) is None
