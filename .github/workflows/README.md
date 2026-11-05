@@ -33,3 +33,11 @@ default-deny policy. This adds no public endpoint.
 
 Live-provider and cold lifecycle acceptance remain separate, explicit runs.
 See [the tooling contract](../../website/docs/developer-guide/secure-tooling.md).
+
+A manual dispatch of the same workflow may select complete terminal payload
+builds. Supply its exact source SHA and dispatch that same ref. Both native
+qualification jobs still run, and the aggregate requires their success plus
+every selected payload build. Ordinary qualification does not build assets.
+The uploaded archives contain the compiled Ink product and a source/hash
+receipt; they are build outputs awaiting independent native artifact lifecycle
+acceptance. This workflow creates no release or tag.
