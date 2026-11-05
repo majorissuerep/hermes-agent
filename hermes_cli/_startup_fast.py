@@ -61,12 +61,15 @@ def try_session_proxy(argv: list[str]) -> None:
     """An inherited operation grant forwards native work before any vault read."""
     if not os.environ.get("HERMES_SESSION_VAULT") or os.environ.get("HERMES_VAULT_KEY_FD"):
         return
-    from hermes_constants import get_hermes_home
-    from hermes_security.session_authority import _vault_home
-    from hermes_security.vault import is_unlocked
-    owner = _vault_home(get_hermes_home().resolve())
-    if owner is not None and is_unlocked(owner):
-        return  # a trusted native owner may import this CLI backend after consuming its FD
+    # Pre-PM vault admission also calls this helper. An absent module cannot
+    # hold an unlocked cache; do not load crypto merely to forward operations.
+    vault = sys.modules.get("hermes_security.vault")
+    if vault is not None:
+        from hermes_constants import get_hermes_home
+        from hermes_security.session_authority import _vault_home
+        owner = _vault_home(get_hermes_home().resolve())
+        if owner is not None and vault.is_unlocked(owner):
+            return  # a trusted native owner may import this CLI backend after consuming its FD
     if (argv[:1] == ["manage"]
             or len(argv) >= 3 and argv[0] in {"-p", "--profile"} and argv[2] == "manage"
             or len(argv) >= 2 and argv[0].startswith("--profile=") and argv[1] == "manage"):
