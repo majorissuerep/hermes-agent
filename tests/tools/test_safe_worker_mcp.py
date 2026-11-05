@@ -30,9 +30,11 @@ for line in sys.stdin:
 def test_safe_worker_never_spawns_mcp_servers(tmp_path, mode):
     home = tmp_path / mode
     home.mkdir()
-    (home / "peer.py").write_text(PEER, encoding="utf-8")
+    # Executable fixture code is an external input, not private profile state.
+    peer = tmp_path / "peer.py"
+    peer.write_text(PEER, encoding="utf-8")
     spawned = home / "spawned"
-    server = {"command": sys.executable, "args": [str(home / "peer.py")],
+    server = {"command": sys.executable, "args": [str(peer)],
               "env": {"SPAWNED": str(spawned)}}
     config = {"mcp_servers": {"owned": server}, "plugins": {"enabled": []}}
     (home / "config.yaml").write_text(json.dumps(config), encoding="utf-8")
@@ -44,7 +46,7 @@ def test_safe_worker_never_spawns_mcp_servers(tmp_path, mode):
     env = dict(os.environ, HERMES_HOME=str(home), HOME=str(home), PROBE_MODE=mode)
     for key in ("HERMES_SAFE_MODE", "HERMES_IGNORE_USER_CONFIG"):
         env.pop(key, None)
-    script = home / "probe.py"
+    script = tmp_path / "probe.py"
     script.write_text(f"import sys; sys.path.insert(0, {str(root)!r})\n" + textwrap.dedent(f'''
         import json, os
         from hermes_security.handoff import adopt_inherited_key
