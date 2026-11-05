@@ -54,7 +54,7 @@ def _decode(raw, relative, custody):
     document = json.loads(plain)
     matched = (_LOCATOR if kind == 'locator' else _RECOVERY).fullmatch(Path(relative).name)
     if (not isinstance(document, dict) or type(document.get('version')) is not int
-            or document['version'] not in (1, 2) or document.get('digest') != matched[1]
+            or document['version'] not in (1, 2, 3) or document.get('digest') != matched[1]
             or not isinstance(document.get('identity'), dict)
             or archive.identity_digest(custody, document['identity']) != document['digest']):
         raise VaultIntegrityError('Browser WORKER metadata has invalid original identity')
@@ -88,13 +88,15 @@ def _validate(document, kind):
     if kind == 'recovery' and not isinstance(document.get('outcome'), str):
         raise VaultIntegrityError('Browser WORKER recovery history is incomplete')
     retirement = document.get('retirement')
-    if (document['version'] == 2) != (retirement is not None):
+    if kind == 'locator' and document['version'] == 2:
+        raise VaultIntegrityError('Unreleased worker retirement lacks survivor proof; every copy retained')
+    if (document['version'] in (2, 3)) != (retirement is not None):
         raise VaultIntegrityError('Worker retirement requires its closed metadata version; every copy retained')
     if retirement is not None:
-        _validate_retirement(document)
+        _validate_retirement(document, legacy=kind == 'recovery' and document['version'] == 2)
 
 
-def _validate_retirement(document):
+def _validate_retirement(document, *, legacy=False):
     intent = document['retirement']
     expected = {document['path']}
     external = document['identity'].get('external_tree')
@@ -110,13 +112,24 @@ def _validate_retirement(document):
     seen = set()
     for target in intent['targets']:
         if (not isinstance(target, dict) or not isinstance(target.get('path'), str) or target['path'] not in expected
-                or not Path(target['path']).is_absolute() or not _inode(target.get('inode'))):
+                or not Path(target['path']).is_absolute() or not _inode(target.get('inode'))
+                or (not legacy and not _inode(target.get('parent_inode')))):
             raise VaultIntegrityError('Worker retirement target is outside its authenticated resource')
         if target['path'] == document['path'] and target['inode'] != document['root_inode']:
             raise VaultIntegrityError('Worker retirement root changed its original identity')
         seen.add(target['path'])
     if seen != expected:
         raise VaultIntegrityError('Worker retirement targets are incomplete')
+    if not legacy:
+        control = intent.get('control')
+        if (document['version'] != 3 or not isinstance(control, dict)
+                or not all(isinstance(control.get(key), str) and re.fullmatch(r'[0-9a-f]{64}', control[key])
+                           for key in ('digest','sha256'))
+                or control['digest'] == document['digest']
+                or type(control.get('bytes')) is not int or not 0 < control['bytes'] <= 64*1024**2
+                or type(control.get('entries')) is not int or not 0 <= control['entries'] <= archive.MAX_ENTRIES):
+            raise VaultIntegrityError('Worker retirement has no bounded original survivor proof; every copy retained')
+
 
 
 def read(home, relative, *, custody):

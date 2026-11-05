@@ -144,6 +144,14 @@ def replay_archive(home: Path, relative, *, custody, digest: str | None = None,
                                        policy=_policy(), slot=SLOT, digest=digest, target=target)
 
 
+def replay_opened(handle, relative, *, custody, digest=None, target=None) -> tree_archive.ArchiveSummary:
+    """Restore a caller-pinned WORKER FD with the original path, slot and completion checks."""
+    digest = _digest(relative) if digest is None else digest
+    _home, relative = _admitted(custody.vault.home, relative, custody=custody, digest=digest)
+    return tree_archive.replay_opened(handle, custody=custody, purpose=_purpose(relative),
+                                    policy=_policy(), slot=SLOT, digest=digest, target=target)
+
+
 def authenticate_ciphertext(handle, relative, *, custody) -> tree_archive.ArchiveSummary:
     """Authenticate an opened opaque backup/import with this exact worker name and header."""
     if worker_state_kind(relative) == 'recovery':

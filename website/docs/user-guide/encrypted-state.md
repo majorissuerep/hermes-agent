@@ -148,8 +148,12 @@ Ordinary repair does not import arbitrary external paths. After closing all owne
 `hermes secure-vault repair` saves and retires
 quiescent worker RAM state. A live or unknown process identity prevents retirement.
 If retirement is interrupted, repair finishes from the already verified checkpoint;
-it never replaces that checkpoint with partially removed RAM files. Older running
-sessions refuse the pending cleanup; finish it with the current version. A replaced
+it never replaces that checkpoint with partially removed RAM files. Repair checks
+the whole remainder against the full checkpoint and an encrypted hash-only inventory
+of original control entries before deleting anything. New or changed data, unavailable
+proof, or insufficient proven RAM retain the remaining copies. Older running sessions
+refuse the closed cleanup record; finish it with the current version. Proofless
+development retirement records can be read as passive history, never cleanup authority. A replaced
 directory, changed checkpoint or revoked caller is retained for inspection instead
 of being deleted. Keep the reported locations and encrypted archive on refusal.
 Encrypted pending references identify the original RAM location even if the configured
