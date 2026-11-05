@@ -2,6 +2,7 @@ import asyncio
 import os
 import subprocess
 import sys
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -192,30 +193,51 @@ def test_run_stdio_malware_check_does_not_block_event_loop(initialized_mcp_log_p
     asyncio.run(_test())
 
 
-def test_run_stdio_malware_check_times_out_fail_open(initialized_mcp_log_profile):
-    """A check that hangs past the timeout must NOT freeze startup: it times
-    out, logs, and proceeds (fail-open) so the server still starts."""
+def test_run_stdio_malware_check_times_out_fail_open(initialized_mcp_log_profile, caplog):
+    """Bound the OSV wait while its worker is unresolved; logger/transport setup is separate."""
     import time
+    from tools import mcp_tool
+
     mock_stdio_cm, mock_session_cm = _stdio_mocks()
+    release, finished = threading.Event(), threading.Event()
+    preflight_elapsed = []
+    original_preflight = mcp_tool._preflight_stdio_command
 
     def hung_check(_command, _args):
-        time.sleep(0.5)  # outlasts the 0.2s timeout 2.5x; short enough not to stall teardown
-        return "MALWARE"  # would block startup if awaited to completion
+        try:
+            release.wait(timeout=10)  # Backstop only; the test releases after startup.
+            return "MALWARE"  # A late verdict must not undo the timed-out startup.
+        finally:
+            finished.set()
+
+    async def observed_preflight(*args):
+        started = time.monotonic()
+        try:
+            return await original_preflight(*args)
+        finally:
+            preflight_elapsed.append(time.monotonic() - started)
 
     async def _test():
         with patch("tools.osv_check.check_package_for_malware", side_effect=hung_check), \
              patch("tools.mcp_tool._OSV_MALWARE_CHECK_TIMEOUT_S", 0.2), \
+             patch("tools.mcp_tool._preflight_stdio_command", side_effect=observed_preflight), \
              patch("tools.mcp_tool_config._managed_launcher", return_value=None), \
              patch("tools.mcp_tool.StdioServerParameters"), \
              patch("tools.mcp_tool.stdio_client", return_value=mock_stdio_cm), \
              patch("tools.mcp_tool.ClientSession", return_value=mock_session_cm):
             server = MCPServerTask("srv")
-            start = time.monotonic()
-            await server.start({"command": "npx", "args": ["-y", "pkg"]})
-            elapsed = time.monotonic() - start
-            await server.shutdown()
-        # Returned shortly after the 0.2s timeout (fail-open), not the 0.5s hang.
-        assert elapsed < 1.0, f"startup did not fail-open promptly ({elapsed:.1f}s)"
+            try:
+                await server.start({"command": "npx", "args": ["-y", "pkg"]})
+                assert server.session is not None
+                assert not finished.is_set(), "startup waited for the unresolved malware verdict"
+            finally:
+                release.set()
+                await server.shutdown()
+        # Preserve the bound on the operation under test; encrypted diagnostics
+        # and SDK setup must not be charged to the OSV wait on a loaded runner.
+        assert len(preflight_elapsed) == 1
+        assert preflight_elapsed[0] < 1.0, f"OSV preflight did not fail open promptly ({preflight_elapsed[0]:.1f}s)"
+        assert any("OSV malware preflight timed out" in record.message for record in caplog.records)
 
     asyncio.run(_test())
 
