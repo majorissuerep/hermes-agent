@@ -177,7 +177,7 @@ _COMPRESSOR_ATTEMPT_STATE_FIELDS = (
     "_ineffective_compression_count", "_anti_thrash_recovery_deadline", "_fallback_compression_streak",
     "_verify_compaction_cleared_threshold", "_last_compression_made_progress", "_summary_failure_cooldown_until",
     "_cooldown_persist_failed", "_last_summary_error", "_consecutive_timeout_failures", "_consecutive_truncation_failures",
-    "_last_summary_dropped_count",
+    "_last_summary_dropped_count", "_last_summary_selection_failure",
     "_last_summary_fallback_used", "_last_compress_aborted", "_last_summary_auth_failure",
     "_last_summary_network_failure", "_last_summary_empty_content_failure", "_last_summary_truncated_failure",
     "_last_summary_overload_failure", "_consecutive_overload_aborts", "_last_summary_overload_degraded",
@@ -2095,7 +2095,8 @@ def check_compression_model_feasibility(agent: Any) -> None:
                 aux_model, base_url=aux_base_url, api_key=aux_api_key, config_context_length=_aux_cfg_ctx,
                 provider=_aux_provider, custom_providers=agent._custom_providers,
             )
-        # Aux model must meet MINIMUM_CONTEXT_LENGTH like the main model, else it cannot summarise a full window.
+        # Keep the actual summarizer window even when it does not lower the main trigger.
+        agent.context_compressor._summary_context_length = aux_context
         if aux_context and aux_context < MINIMUM_CONTEXT_LENGTH:
             raise ValueError(
                 f"Auxiliary compression model {aux_model} has a context "
@@ -2113,8 +2114,7 @@ def check_compression_model_feasibility(agent: Any) -> None:
                 aux_base_url=aux_base_url,
             )
         elif getattr(agent, "_last_feasibility_notice", None) is not None:
-            # Symmetric un-clamp: the summariser fits again, so the stale "auto-lowered" notice must not be
-            # replayed (``replay_compression_warning``) for a session that is no longer clamped (#114707).
+            # Clear a notice after the summarizer fits again (#114707).
             agent._last_feasibility_notice = None
             agent._compression_warning = None
     except ValueError:

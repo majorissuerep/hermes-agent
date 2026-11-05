@@ -43,7 +43,7 @@ from agent.model_metadata import (
     strip_opaque_replay_items,
 )
 from agent.redact import redact_sensitive_text
-from agent.turn_context import drop_stale_api_content
+from agent.turn_context import drop_stale_api_content, substitute_api_content
 from tools.todo_tool import TODO_INJECTION_HEADER
 
 logger = logging.getLogger(__name__)
@@ -783,6 +783,10 @@ _TERMINAL_SUMMARY_FAILURES = (
         "Summary generation failed because the provider is overloaded — aborting compression. %d message(s) "
         "preserved unchanged; the session was NOT rotated. Retry with /compress once capacity recovers, "
         "or continue the conversation as-is.",
+    ),
+    (
+        "_last_summary_selection_failure", "summary_invalid_selection",
+        "Context selection was incomplete — %d message(s) preserved unchanged.",
     ),
 )
 
@@ -2689,10 +2693,9 @@ class ContextCompressor(
         if max_tokens is not None:
             self.max_tokens = self._coerce_max_tokens(max_tokens)
         if runtime_changed:
-            # The aux ceiling was probed against the previous main runtime (an "auto" aux route follows the
-            # main model); the caller re-runs the feasibility probe. A same-runtime recompute (overflow-reported
-            # window, grown local window, tier cap) keeps it: the summariser did not change (#114707).
+            # Re-probe the summarizer only when its owning runtime changes.
             self._aux_context_ceiling = None
+            self._summary_context_length = None
         self._base_threshold_percent, self.threshold_percent, self.threshold_tokens = self._derive_trigger(
             model, context_length, provider)
         self._apply_threshold_tokens_cap()
@@ -2813,11 +2816,13 @@ class ContextCompressor(
         model_thresholds: dict[str, float] | None = None, threshold_tokens_cap: Any = None,
         proactive_prune_tokens: int = 0, proactive_prune_min_result_chars: int = 8000,
         proactive_prune_min_reclaim_tokens: int = 4096, min_tail_user_messages: int = 1, tail_mode: str = "lean",
-        custom_providers: list | None = None,
+        custom_providers: list | None = None, retained_ratio: float = 0.10,
     ):
         self.model, self.base_url, self.api_key, self.provider, self.api_mode = model, base_url, api_key, provider, api_mode
         # "lean" = small clamped tail + verbatim-user summary section; "legacy" = 0.20*window tail.
         self.tail_mode = tail_mode if tail_mode in ("legacy", "lean") else "lean"
+        from agent.context_chunking import normalize_retained_ratio
+        self.retained_ratio = normalize_retained_ratio(retained_ratio)
         # Per-model context_length overrides live in custom_providers; without them deferred
         # resolution falls back to the hardcoded family catalog (#83324).
         self.custom_providers = custom_providers or None
@@ -3470,12 +3475,6 @@ class ContextCompressor(
         self._last_reclaim_block_warn = None
         return pruned_msgs, pruned_count
 
-    def _compute_summary_budget(self, turns_to_summarize: list[dict[str, Any]]) -> int:
-        """Scale the summary token budget with content size and context window."""
-        content_tokens = estimate_messages_tokens_rough(turns_to_summarize)
-        budget = int(content_tokens * _SUMMARY_RATIO)
-        return max(_MIN_SUMMARY_TOKENS, min(budget, self.max_summary_tokens))
-
     # Summarizer-input limits: the budget is the summary model's window, not the main model's.
     _CONTENT_MAX = 6000       # total chars per message body
     _CONTENT_HEAD = 4000      # chars kept from the start
@@ -3485,7 +3484,7 @@ class ContextCompressor(
     # Aggregate cap applied after per-message limits; class alias so subclasses/tests can override.
     _SUMMARY_INPUT_MAX_CHARS = _SUMMARY_INPUT_MAX_CHARS
 
-    def _render_tool_call_for_summary(self, tc: Any) -> str:
+    def _render_tool_call_for_summary(self, tc: Any, *, bounded: bool = True) -> str:
         """``  name(args)`` line for the summarizer; object-shaped calls render as ``name(...)``."""
         if not isinstance(tc, dict):
             fn = getattr(tc, "function", None)
@@ -3494,11 +3493,11 @@ class ContextCompressor(
         # Redact the FULL args before cutting: delimited secrets (PEM BEGIN…END) only match whole, so a
         # pre-redaction cut would leave a key body straddling the cut unredacted in the persisted summary.
         args = _redact_compaction_text(fn.get("arguments", ""))
-        if len(args) > self._TOOL_ARGS_MAX:
+        if bounded and len(args) > self._TOOL_ARGS_MAX:
             args = args[:self._TOOL_ARGS_HEAD] + "..."
         return f"  {fn.get('name', '?')}({args})"
 
-    def _serialize_records_for_summary(self, turns: list[dict[str, Any]]) -> list[str]:
+    def _serialize_records_for_summary(self, turns: list[dict[str, Any]], *, bounded: bool = True) -> list[str]:
         """Serialize turns into a list of labeled, redacted records for the summarizer."""
         # Lazy import: agent_runtime_helpers pulls heavy transitive imports.
         from agent.agent_runtime_helpers import strip_think_blocks
@@ -3506,6 +3505,10 @@ class ContextCompressor(
         for msg in turns:
             role = msg.get("role", "unknown")
             content = msg.get("content")
+            if not bounded:
+                projection = msg.copy()
+                substitute_api_content(projection)
+                content = projection.get("content")
             if isinstance(content, list):
                 content = "\n".join(_summary_part_text(part) for part in content if isinstance(part, (dict, str)))
             content = _redact_compaction_text(content or "")
@@ -3513,13 +3516,14 @@ class ContextCompressor(
             # Strip inline <think>-style blocks: scratch work wastes summarizer context and risks being kept as fact.
             if role == "assistant" and content:
                 content = strip_think_blocks(None, content)
-            if len(content) > self._CONTENT_MAX:
+            if bounded and len(content) > self._CONTENT_MAX:
                 content = elide_middle(content, self._CONTENT_HEAD, self._CONTENT_TAIL)
             if role == "tool":
                 parts.append(f"[TOOL RESULT {msg.get('tool_call_id', '')}]: {content}")
                 continue
             if role == "assistant" and msg.get("tool_calls", []):
-                content += "\n[Tool calls:\n" + "\n".join(map(self._render_tool_call_for_summary, msg["tool_calls"])) + "\n]"
+                calls = (self._render_tool_call_for_summary(call, bounded=bounded) for call in msg["tool_calls"])
+                content += "\n[Tool calls:\n" + "\n".join(calls) + "\n]"
             parts.append(f"[{role.upper()}]: {content}")
         return parts
 
@@ -3896,6 +3900,7 @@ Summary generation was unavailable, so this is a best-effort deterministic fallb
         """Issue the single aux summary call; return validated content text.
         Raises RuntimeError for empty content or a length-truncated (PARTIAL) summary so the failure
         routes through main-model fallback + cooldown instead of wiping the compacted turns."""
+        from agent.context_chunking import selection_call_kwargs
         # call_llm writes the route it actually selected; never pre-resolve a second, stale pair.
         _aux_route: dict[str, str] = {}
         call_kwargs: dict[str, Any] = {
@@ -3905,8 +3910,8 @@ Summary generation was unavailable, so this is a best-effort deterministic fallb
                 "api_mode": self.api_mode,
             },
             "messages": [{"role": "user", "content": prompt}], "route_info": _aux_route,
-            # NO max_tokens: Anthropic/NIM wires forward it and a hard cap truncates summaries
-            # (thinking models burn it on reasoning). Timeout comes from call_llm config.
+            # Only range selection reserves output; legacy generated summaries stay uncapped.
+            **selection_call_kwargs(),
         }
         # Pinned route (stall fallback) replaces task routing so the retry leaves the stalled backend.
         self._apply_summary_route(call_kwargs, _pinned_summary_call_kwargs())
@@ -3979,7 +3984,7 @@ Summary generation was unavailable, so this is a best-effort deterministic fallb
             )
         return content
 
-    def _generate_summary(
+    def _generate_checkpoint_summary(
         self, turns_to_summarize: list[dict[str, Any]], focus_topic: Optional[str] = None,
         memory_context: str = "", bypass_cooldown: bool = False,
     ) -> Optional[str]:
@@ -4029,24 +4034,9 @@ Summary generation was unavailable, so this is a best-effort deterministic fallb
             summary = _reinject_pruned_skill_markers(summary, _pruned_skill_names)
             summary = self._ground_historical_task_snapshot(summary, turns_to_summarize)
             summary = self._augment_summary_lean(summary, turns_to_summarize)
-            self._validate_summary_user_provenance(summary, has_user_turn)
-            # A detached stale attempt must not publish its late summary onto shared compressor state:
-            # the fallback already advanced _previous_summary and owns the cooldown/error fields. The
-            # candidate itself is discarded downstream by the working-attempt check; bail here so the
-            # attribute writes never land. Entry-generation claims (lock sit-outs) do not count; the
-            # working marker is the ownership boundary for summary state.
-            from agent.conversation_compression import _raise_if_stale_attempt
-
-            _raise_if_stale_attempt(self)
-            self._previous_summary = summary
-            self._clear_compression_failure_cooldown()
-            self._summary_model_fallen_back = False
-            self._last_summary_error = None
-            self._clear_terminal_summary_failures()
-            # The provider answered a summary again: the sustained-overload budget restarts (#123167).
-            self._reset_consecutive_overload_aborts()
-            return self._with_summary_prefix(summary)
+            return self._publish_summary(summary, has_user_turn)
         except Exception as e:
+            logger.debug("Checkpoint generation failed", exc_info=True)
             return self._on_summary_failure(e, turns_to_summarize, focus_topic, memory_context)
 
     def _build_summary_prompt(
@@ -5568,6 +5558,11 @@ Write only the summary body. Do not include any preamble or prefix."""
         _raise_if_stale_attempt(self)
         telemetry = self._begin_compress_attempt(current_tokens, force)
         telemetry["has_focus_topic"] = bool(focus_topic)
+        telemetry["fixed_context_tokens"] = max(0, (current_tokens or 0) - estimate_messages_tokens_rough(messages))
+        from agent.context_overflow_history import compress_overflow_context
+        pending = compress_overflow_context(self, messages, current_tokens, focus_topic, memory_context, bypass_cooldown)
+        if pending is not None:
+            return pending
         n_messages = len(messages)
         # Only need head + 3 tail messages minimum (token budget decides the real tail size)
         _min_for_compress = self._protect_head_size(messages) + 3 + 1

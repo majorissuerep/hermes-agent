@@ -6552,16 +6552,12 @@ def _is_gemini_native_route(provider_norm: str, effective_base: str) -> bool:
 
 
 def _forwards_max_tokens(provider: str, provider_norm: str, model: str, effective_base: str, task: Optional[str]) -> bool:
-    """Whether an explicit max_tokens is forwarded on this route.
+    """Forward explicit caps on required routes and budgeted source-range selection."""
+    from agent.context_chunking import selected_output_tokens
 
-    No default cap elsewhere (omitted = provider default; avoids max_completion_tokens / ZAI-vision
-    quirks). Forward only where mandatory or honored: Anthropic Messages wire (400 without it);
-    NVIDIA NIM (empty choices[] when omitted); MoA reference slots; Gemini native (fixed 65,535
-    ceiling otherwise); OpenRouter (budgets the FULL window when omitted → 402 on low credit);
-    managed local llama-server (uncapped decode with no EOS burns the GPU to the context window).
-    """
     return (
-        _is_anthropic_compat_endpoint(provider, effective_base)
+        (task == "compression" and selected_output_tokens() is not None)
+        or _is_anthropic_compat_endpoint(provider, effective_base)
         or _nous_on_messages_wire(provider_norm, model)
         or provider_norm in _NVIDIA_PROVIDER_NAMES
         or base_url_host_matches(effective_base, "integrate.api.nvidia.com")

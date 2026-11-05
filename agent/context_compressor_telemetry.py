@@ -83,7 +83,7 @@ class CompressionTelemetryMixin:
             telemetry["aux_provider"] = aux_provider
         if aux_model:
             telemetry["aux_model"] = aux_model
-        if effective_aux_context is not None:
+        if effective_aux_context is not None and not telemetry.get("chunking"):
             telemetry["effective_aux_context"] = _safe_int(effective_aux_context)
         if telemetry["effective_aux_context"] is not None and telemetry["aux_prompt_tokens"] is not None:
             telemetry["fit_margin"] = (telemetry["effective_aux_context"] - telemetry["aux_prompt_tokens"]
@@ -99,6 +99,8 @@ class CompressionTelemetryMixin:
 
     def _compression_method(self) -> str:
         """How the summary that replaced the middle window was produced."""
+        if (getattr(self, "_active_compression_telemetry", None) or {}).get("chunking"):
+            return "verbatim_range_selection"
         if getattr(self, "_last_summary_fallback_used", False):
             return "deterministic_fallback"
         if getattr(self, "_last_aux_model_failure_error", None):

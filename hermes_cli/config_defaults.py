@@ -358,10 +358,11 @@ DEFAULT_CONFIG = {
         "threshold_tokens": None,
         # "progress_notices": False,    # opt-in (#52995): when True, routine compression
         "target_ratio": 0.20,         # fraction of threshold to preserve as recent tail
-        # tail_mode: "lean" = clamped 2.5%-of-window tail (10K floor / 25K cap) plus chunked
-        # digests, anchor index, verbatim user messages and session_search pointers in the summary
-        # (~3x fewer retained tokens; a few extra summarizer calls at the boundary). "legacy" =
-        # 0.20×threshold verbatim tail (100-240K tokens on big windows).
+        # Oversized input is selected in balanced chunks, with linear recency weights.
+        # Target includes protected head/tail; immutable task/protocol content can exceed it.
+        "retained_ratio": 0.10,       # fraction of the MODEL window, not the current history
+        # "lean": clamped 2.5%-of-window tail plus checkpoint and recovery pointers.
+        # "legacy": target_ratio × threshold verbatim tail.
         "tail_mode": "lean",
         # protect_last_n: minimum recent messages kept uncompressed, honoured up to a small count
         # floor; the verbatim tail is otherwise token-bounded and never above 20% of the window.

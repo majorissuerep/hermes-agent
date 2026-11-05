@@ -3247,7 +3247,7 @@ class TestSummaryPromptBounding:
         whose body contains blank lines, which are not record delimiters."""
         compressor = ContextCompressor(
             model="test/model", threshold_percent=0.85, protect_first_n=2, protect_last_n=2,
-            quiet_mode=True, tail_mode="lean",
+            quiet_mode=True, tail_mode="lean", config_context_length=1_000_000,
         )
         body = "para1\n\npara2 " + ("x" * 1200)
         messages = [{"role": "user", "content": f"record-{i:04d} {body}"} for i in range(1200)]

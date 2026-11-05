@@ -1528,8 +1528,9 @@ def _parse_compression_config(agent, _agent_cfg) -> CompressionSettings:
     """Parse the ``compression`` section. Defaults here MUST match DEFAULT_CONFIG."""
     cfg = _cfg_dict(_agent_cfg, "compression")
     threshold, autoraise_notice_enabled = _compression_threshold(agent, cfg)
-    # Plain int()/float() coercions raise on garbage; evaluated up front, in config order.
     target_ratio = float(cfg.get("target_ratio", 0.20))
+    from agent.context_chunking import normalize_retained_ratio
+    retained_ratio = normalize_retained_ratio(cfg.get("retained_ratio", 0.10))
     protect_last = int(cfg.get("protect_last_n", 20))
     # max_attempts: retry rounds before "max compression attempts reached"; some sessions
     # need >3 (incompressible tool schemas). Default 3, floor 1, cap 10.
@@ -1557,9 +1558,8 @@ def _parse_compression_config(agent, _agent_cfg) -> CompressionSettings:
         autoraise_notice_enabled=autoraise_notice_enabled,
         enabled=_cfg_flag(cfg, "enabled", True),
         target_ratio=target_ratio,
+        retained_ratio=retained_ratio,
         protect_last=protect_last,
-        # "lean" keeps a clamped 2.5%/10K-25K verbatim tail (continuity rides the summary);
-        # "legacy" restores the 0.20*threshold tail. Unknown → lean inside the compressor.
         tail_mode=str(cfg.get("tail_mode", "lean")).strip().lower(),
         # Actionable user messages guaranteed to survive in the tail (default 1, floor 1).
         min_tail_users=max(1, _parse_config_int(cfg.get("min_tail_user_messages", 1), 1)),
@@ -2014,7 +2014,7 @@ def _build_context_engine(agent, _agent_cfg, cs, _custom_providers, _effective_c
             proactive_prune_min_result_chars=cs.proactive_prune_min_chars,
             proactive_prune_min_reclaim_tokens=cs.proactive_prune_min_reclaim,
             min_tail_user_messages=cs.min_tail_users, tail_mode=cs.tail_mode,
-            custom_providers=_custom_providers,
+            custom_providers=_custom_providers, retained_ratio=cs.retained_ratio,
         )
     _bind_session_state = getattr(agent.context_compressor, "bind_session_state", None)
     if callable(_bind_session_state):

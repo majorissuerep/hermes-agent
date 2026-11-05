@@ -38,6 +38,40 @@ small-window 75% threshold floor yields a 375,000-token trigger at this window.
 
 ## Pluggable Context Engine
 
+### Oversized context recovery
+
+When the transcript cannot fit one summarizer request, the built-in compressor
+partitions the complete redacted source into approximately equal chronological
+chunks. It charges prompt instructions, source numbering, an output reservation
+and a safety margin against the resolved summarizer window. Boundaries prefer
+complete lines and sentences; an individually oversized sentence is split at
+word boundaries. No source is sampled away before this selection step.
+
+The helper returns source ranges, not a regenerated transcript. Hermes validates
+the ranges and copies the selected text locally. Retention budgets increase
+linearly toward recent chunks: weights `1, 2, ..., N`. The setting
+`compression.retained_ratio` defaults to `0.10` of the **model context window**,
+not the oversized history. For a 250K window and two chunks, a 25K budget divides
+approximately 8.3K/16.7K before charging protected context and checkpoint metadata.
+Existing `target_ratio` retains its separate legacy recent-tail meaning.
+
+The active request, system instructions, tool-call IDs and active protocol data
+remain protected. A just-loaded text tool result can use the same selector even
+in a conversation too short for ordinary middle-history compression. Hard window
+overflow also relaxes the old-history message floor and optional early-row
+protection, while retaining the complete current request and active tool group. Its full
+original remains in encrypted session history through the existing compaction
+transaction. Immutable instructions or protocol data alone can exceed the soft
+retention target; the target never authorizes discarding them.
+
+All chunks must finish successfully before a checkpoint is published. Invalid
+ranges, cancellation, refusal or truncated output preserve the usable original
+history. A real summarizer context rejection permits one smaller plan; unrelated
+errors do not cause unbounded rechunking. Normal fitting histories keep the
+existing structured checkpoint path. A relay error that reports both input and
+reserved output is also decoded correctly: a smaller output allowance is handled
+as an output-budget correction, without inventing a smaller model window.
+
 Context management is built on the `ContextEngine` ABC (`agent/context_engine.py`). The built-in `ContextCompressor` is the default implementation, but plugins can replace it with alternative engines (e.g., Lossless Context Management).
 
 ```yaml

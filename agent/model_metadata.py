@@ -18,6 +18,7 @@ from urllib.parse import urlparse
 import hermes_yaml as yaml
 
 from agent import model_metadata_http
+from agent.context_budget_errors import completion_output_budget
 
 from utils import atomic_json_write, atomic_yaml_write, base_url_host_matches, base_url_hostname
 
@@ -1215,6 +1216,7 @@ def parse_context_limit_from_error(error_msg: str) -> Optional[int]:
     if ("output limit" in error_lower or "output tokens" in error_lower or "output token" in error_lower) and "context" not in error_lower:
         return None
     patterns = (
+        r'exceeds (?:the )?context\s*\((\d{4,})\)',
         r'max_model_len\s*(?:is\s*)?[:=(]?\s*(\d{4,})',  # vLLM: "max_model_len 32768", "=32768", ": 32768", "(32768)", "is 32768"
         r'maximum model length\s*(?:is\s*)?[:=(]?\s*(\d{4,})',  # vLLM alt: "maximum model length 131072", "... is 131072"
         r'(?:max(?:imum)?|limit)\s*(?:context\s*)?(?:length|size|window)?\s*(?:is|of|:)?\s*(\d{4,})',
@@ -1239,26 +1241,6 @@ def get_context_length_from_provider_error(error_msg: str, current_context_lengt
     configured length and compress rather than stepping down guessed probe tiers."""
     parsed_limit = parse_context_limit_from_error(error_msg)
     return parsed_limit if parsed_limit is not None and parsed_limit < current_context_length else None
-
-
-# OpenAI's original overflow wording, copied by vLLM / llama-cpp-python: "(36865 in the messages,
-# 65536 in the completion)"; legacy completions: "(771 in your prompt; 4000 for the completion)".
-# The first figure is the prompt the server MEASURED, the second the requested max_tokens.
-_COMPLETION_SPLIT_RE = re.compile(
-    r'\((\d+)\s+(?:tokens\s+)?in (?:the messages|your prompt|the prompt)\s*[;,]\s*'
-    r'(\d+)\s+(?:tokens\s+)?(?:in|for) the completion\)'
-)
-
-
-def _completion_split_budget(error_lower: str) -> Optional[int]:
-    """window - measured prompt from the OpenAI-style parenthetical split, or None when the wording
-    is absent or the prompt alone fills the window (a genuine input overflow -> compress)."""
-    split = _COMPLETION_SPLIT_RE.search(error_lower)
-    ctx = re.search(r'maximum context length is (\d+)', error_lower)
-    if not split or not ctx:
-        return None
-    available = int(ctx.group(1)) - int(split.group(1))
-    return available if available >= 1 else None
 
 
 def parse_available_output_tokens_from_error(error_msg: str) -> Optional[int]:
@@ -1296,7 +1278,7 @@ def parse_available_output_tokens_from_error(error_msg: str) -> Optional[int]:
         _available = int(_m_ctx.group(1)) - int(_m_parts.group(1)) - int(_m_parts.group(2))
         if _available >= 1:
             return _available
-    _split_available = _completion_split_budget(error_lower)
+    _split_available = completion_output_budget(error_lower)
     if _split_available is not None:
         return _split_available
     # LM Studio / llama.cpp: window in tokens, prompt in CHARACTERS; ~3 chars/token over-reserves the input.
@@ -1350,6 +1332,7 @@ _INPUT_OVERFLOW_SIGNALS = (
 # reduce max_tokens, don't compress. DashScope's bounded range upper bound IS the
 # real max-output cap ("Range of max_tokens should be [1, 65536]").
 _PARSEABLE_OUTPUT_CAP_SIGNALS = (
+    ("prompt (", "max tokens (", "exceeds the context"),
     ("max_tokens", "available_tokens"), ("max_tokens", "available tokens"),
     ("in the output", "maximum context length"),
     ("maximum context length", "requested", "output tokens"),
@@ -1379,7 +1362,7 @@ def is_output_cap_error(error_msg: str) -> bool:
     error_lower = error_msg.lower()
     # The OpenAI-style split names neither max_tokens nor "output tokens" and ends with "reduce the
     # length", so it fails both gates below; the measured prompt decides instead (#90607).
-    if _completion_split_budget(error_lower) is not None:
+    if completion_output_budget(error_lower) is not None:
         return True
     # An error that ALSO describes an oversized INPUT is a genuine overflow — compression can fix it.
     # SGLang states both figures: input >= window is that same genuine overflow.

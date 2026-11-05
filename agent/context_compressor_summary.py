@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import inspect
+import logging
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from agent.auxiliary_client import AuxiliaryExplicitCancellation
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from agent.context_compressor import _HandoffScan
@@ -27,6 +30,55 @@ def _accepts_keyword_argument(callable_obj: Any, name: str) -> bool:
 
 
 class SummaryDispatchMixin:
+    def _compute_summary_budget(self, turns_to_summarize: list[dict[str, Any]]) -> int:
+        from agent.context_compressor import _MIN_SUMMARY_TOKENS, _SUMMARY_RATIO
+        from agent.model_metadata import estimate_messages_tokens_rough
+
+        budget = int(estimate_messages_tokens_rough(turns_to_summarize) * _SUMMARY_RATIO)
+        return max(_MIN_SUMMARY_TOKENS, min(budget, self.max_summary_tokens))
+
+    def _generate_summary(
+        self, turns_to_summarize: list[dict[str, Any]], focus_topic: Optional[str] = None,
+        memory_context: str = "", bypass_cooldown: bool = False,
+    ) -> Optional[str]:
+        from time import monotonic
+        from agent.context_chunked_summary import generate_chunked_summary, requires_chunked_summary
+
+        if self._compression_cancelled():
+            raise AuxiliaryExplicitCancellation()
+        if monotonic() < self._summary_failure_cooldown_until and not bypass_cooldown:
+            return None
+        if not requires_chunked_summary(self, turns_to_summarize, memory_context):
+            return self._generate_checkpoint_summary(
+                turns_to_summarize, focus_topic, memory_context, bypass_cooldown,
+            )
+        try:
+            return generate_chunked_summary(self, turns_to_summarize, focus_topic, memory_context)
+        except AuxiliaryExplicitCancellation:
+            raise
+        except Exception as error:
+            logger.debug("Chunked checkpoint generation failed", exc_info=True)
+            result = self._on_summary_failure(error, turns_to_summarize, focus_topic, memory_context)
+            if result is None:
+                from agent.context_chunked_summary import _check_owner
+                _check_owner(self)
+                self._last_summary_selection_failure = True
+            return result
+
+    def _publish_summary(self, summary: str, has_user_turn: bool) -> str:
+        """Publish only a complete checkpoint owned by the current compression attempt."""
+        from agent.context_chunked_summary import _check_owner
+
+        self._validate_summary_user_provenance(summary, has_user_turn)
+        _check_owner(self)
+        self._previous_summary = summary
+        self._clear_compression_failure_cooldown()
+        self._summary_model_fallen_back = False
+        self._last_summary_error = None
+        self._clear_terminal_summary_failures()
+        self._reset_consecutive_overload_aborts()
+        return self._with_summary_prefix(summary)
+
     def _empty_handoff_result(self, messages, canonical, telemetry, n_messages, spare_pending_images, pruned_count):
         """An empty summary window must not discard useful, already-approved tool pruning."""
         from agent.context_compressor import _COMPACTION_TAIL_MARKER, _fresh_compaction_message_copy
