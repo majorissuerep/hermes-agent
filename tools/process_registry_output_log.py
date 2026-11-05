@@ -139,8 +139,8 @@ class ProcessOutputLogMixin:
             return self._detached_host_fate(session.pid, session.host_start_time) == "running"
         try:
             from hermes_security import frames
-            from hermes_security.vault import get_vault
-            vault = get_vault()
+            from hermes_security.profile_binding import for_file
+            vault = for_file(session.output_log)
             with open(session.output_log, "rb") as stream:
                 drained = 0
                 pending = b""

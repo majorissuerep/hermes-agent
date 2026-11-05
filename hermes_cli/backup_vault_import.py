@@ -62,6 +62,8 @@ def _seal_frames(raw: bytes, target: Path, vault) -> bytes:
     from hermes_security import frames
     from hermes_security.migrate import _frame_purpose
 
+    from hermes_security.profile_binding import archive_frame_key
+    vault = archive_frame_key(vault, target.resolve().relative_to(vault.home))
     purpose = _frame_purpose(target)
     if frames.decode_frame_at(raw, 0, vault=vault, purpose=purpose) is not None:
         frames._complete_stream(raw, vault=vault, purpose=purpose)

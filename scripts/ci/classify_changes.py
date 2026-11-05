@@ -188,6 +188,7 @@ _UPDATE_DEPENDENCIES = (
     "hermes_security/browser_worker_pending.py",  # authenticated retained-RAM recovery references
     "hermes_security/tree_archive.py",  # shared verified tree grammar used by browser archive repair
     "hermes_cli/browser_profile_repair.py",  # explicit legacy browser conversion during update repair
+    "hermes_security/profile_binding.py",  # frames/migrate retain exact logical profile custody
     "hermes_security/delegation_repair.py",  # legacy delegation conversion during repair
     "agent/pet/__init__.py",  # package initialization for private pet migration
     "agent/pet/private_repair.py",  # profile-owned pet conversion during update migration

@@ -414,8 +414,8 @@ def validate_inherited_authority(home: Path | str) -> None:
 class InheritedAuthoritySnapshot:
     """Original borrowed lineage for retained resources, never an ambient replacement."""
 
-    def __init__(self, home: Path, grants: tuple) -> None:
-        self.home, self._grants = home, grants
+    def __init__(self, home: Path, grants: tuple, profile_home: Path | None = None) -> None:
+        self.home, self._grants, self._profile_home = home, grants, profile_home
 
     def validate(self) -> None:
         for selected, raw, proof in self._grants:
@@ -432,7 +432,10 @@ class InheritedAuthoritySnapshot:
                    for profile, raw, _proof in self._grants)
 
     def is_current(self) -> bool:
-        return self._grants == _inherited_authority_records(self.home)
+        try:
+            return self._grants == _inherited_authority_records(self.home, self._profile_home)
+        except SessionAuthorityError:
+            return False
 
     def __repr__(self) -> str:
         return "<InheritedAuthoritySnapshot>"
@@ -441,17 +444,26 @@ class InheritedAuthoritySnapshot:
         raise TypeError("Borrowed authority snapshots cannot be pickled")
 
 
-def _inherited_authority_records(home: Path) -> tuple:
+def _inherited_authority_records(home: Path, profile_home: Path | None = None) -> tuple:
     owner = _vault_home(home)
+    if profile_home is not None and _vault_home(profile_home) != owner:
+        raise SessionAuthorityError("Inherited authority belongs to another physical vault.")
     with _lock:
-        return tuple((Path(selected), raw, _legacy_proofs.get(selected))
-                     for selected, raw in sorted(_adopted.items()) if _vault_home(Path(selected)) == owner)
+        records = tuple((Path(selected), raw, _legacy_proofs.get(selected))
+                        for selected, raw in sorted(_adopted.items())
+                        if _vault_home(Path(selected)) == owner
+                        and (profile_home is None or Path(selected) == profile_home))
+        if (profile_home is not None and not records
+                and any(_vault_home(Path(selected)) == owner for selected in _adopted)):
+            raise SessionAuthorityError("No inherited authority for this exact logical profile.")
+        return records
 
 
-def capture_inherited_authority(home: Path | str) -> InheritedAuthoritySnapshot:
-    """Snapshot only already-adopted provenance of this explicit vault owner; no key copies."""
+def capture_inherited_authority(home: Path | str, *, profile_home: Path | str | None = None) -> InheritedAuthoritySnapshot:
+    """Pin exact logical provenance when selected; default retains joint-owner guards."""
     selected = Path(home).resolve()
-    return InheritedAuthoritySnapshot(selected, _inherited_authority_records(selected))
+    profile = Path(profile_home).resolve() if profile_home is not None else None
+    return InheritedAuthoritySnapshot(selected, _inherited_authority_records(selected, profile), profile)
 
 
 def inherited_grant(home: Path | str) -> str | None:

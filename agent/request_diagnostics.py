@@ -15,34 +15,28 @@ logger = logging.getLogger(__name__)
 
 class _RequestStore:
     def __init__(self, agent, home):
-        from hermes_security import io, vault
-        from hermes_security.errors import VaultNotInitializedError
-        from hermes_security.session_authority import capture_inherited_authority
+        from hermes_security.profile_binding import capture
 
         self.home = Path(home).resolve()
         if (self.home / "sessions").is_symlink():
             raise PermissionError("Request diagnostics cannot use a symlinked sessions directory")
-        owner = io._home_for(self.home / "sessions" / "request_dump.json")
-        if owner != self.home or vault._load_meta(self.home) is None:
-            raise VaultNotInitializedError("Request diagnostics require the owning profile's vault")
-        self.vault = vault.get_vault(self.home, allow_env_unlock=False)
-        self.authority = capture_inherited_authority(self.home) if self.vault._borrowed else None
+        self.custody = capture(self.home)
+        self.vault, self.authority = self.custody.vault, self.custody.authority
         self.session = getattr(agent, "_vault_session_authority", None)
 
     def write(self, path, payload):
         from hermes_security import vault
-        from hermes_security.errors import VaultLockedError, VaultNotInitializedError
+        from hermes_security.errors import VaultLockedError
 
         if path.parent != self.home / "sessions" or path.parent.is_symlink():
             raise PermissionError("Request diagnostics must remain in the original profile's sessions directory")
-        if vault._load_meta(self.home) is None:
-            raise VaultNotInitializedError("The original profile's vault metadata is unavailable")
+        self.custody.check_target(path)
         if self.session is not None and not self.session.is_live():
             raise VaultLockedError("The request diagnostic's owning session ended")
-        self.vault.assert_custody_live()
+        self.custody.check()
         serialized = (json.dumps(payload, ensure_ascii=False, indent=2, default=str) + "\n").encode("utf-8")
-        encoded = self.vault.encrypt(serialized, purpose="transcript",
-                                     relpath=path.relative_to(self.vault.home).as_posix(), authority=self.authority)
+        encoded = self.custody.encrypt(serialized, purpose="transcript",
+                                       relpath=path.relative_to(self.home).as_posix())
         vault._atomic_write(path, encoded)  # Only ciphertext reaches the existing atomic state writer.
 
 
@@ -53,8 +47,8 @@ def bind_request_diagnostics(agent, *, home=None):
 
     selected = Path(home or get_hermes_home()).expanduser().resolve()
     agent.logs_dir = selected / "sessions"
-    agent.logs_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
     try:
+        agent.logs_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
         agent._request_diagnostic_store = _RequestStore(agent, selected)
     except (OSError, VaultError):
         agent._request_diagnostic_store = None

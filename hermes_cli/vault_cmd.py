@@ -223,9 +223,14 @@ def cmd_vault(args: Any) -> int:
         return 0
 
     if command == "repair":
+        from hermes_cli.profile_frame_repair import cmd_parent_profile_repair
         from hermes_cli.vault_repair import run
 
-        return run(args, home)
+        if any(getattr(args, name, False) for name in (
+                "outgoing_browser_profile", "outgoing_browser_legacy", "native_browser_state")):
+            return run(args, home)
+        result = cmd_parent_profile_repair(args, home)
+        return run(args, home) if result is None else result
 
     if command == "lock":
         vault_mod.lock_now(home)
