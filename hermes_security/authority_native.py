@@ -12,6 +12,8 @@ _lock = threading.RLock()
 _jobs = {}
 _COMMANDS = {"chat", "manage", "doctor", "config", "sessions", "memory", "skills", "tools", "mcp", "cron", "artifacts",
              "kanban", "profile", "auth", "help", "status", "backup", "import"}
+# These existing public families expose only their exact help request to operation grants.
+_HELP_ONLY_COMMANDS = {"plugins", "secure-vault", "update", "pm"}
 _EXECUTION_FLAGS = {"--run-module", "--code", "--python", "--script", "--monitor-script", "--workdir", "--cwd",
                     "--in", "--worktree", "-w", "--accept-hooks", "--yolo"}
 
@@ -30,6 +32,11 @@ def _scope_arguments(command_args, arguments):
     return arguments[:len(arguments) - len(child)] if child else arguments
 
 
+def _lifecycle_help(arguments):
+    return (len(arguments) == 2 and arguments[0] in _HELP_ONLY_COMMANDS
+            and arguments[1] in {"--help", "-h"})
+
+
 def checked_arguments(arguments):
     if (not isinstance(arguments, list) or len(arguments) > 256
             or any(not isinstance(arg, str) or "\0" in arg or len(arg) > 65536 for arg in arguments)):
@@ -41,7 +48,7 @@ def checked_arguments(arguments):
     readonly = any(arg in {"--help", "-h", "--version", "-V"} for arg in arguments)
     command_args = command_argv(arguments)
     command = command_args[0] if command_args else ("chat" if query else "help" if readonly else "")
-    if command not in _COMMANDS:
+    if command not in _COMMANDS and not _lifecycle_help(arguments):
         raise ValueError("the session grant does not authorize this native command")
     if command == "artifacts":
         from hermes_cli.artifacts import validate_native_arguments
