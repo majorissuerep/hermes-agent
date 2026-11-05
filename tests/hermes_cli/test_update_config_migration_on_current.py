@@ -117,6 +117,10 @@ def test_active_config_write_failure_still_migrates_siblings_and_restores_snapsh
     monkeypatch.setattr(Path, 'home', lambda: tmp_path)
     monkeypatch.setenv('HERMES_HOME', str(root))
     seal_fixture_home(root)
+    # Selected-home migration retains child islands; explicitly authorize this
+    # synthetic sibling before exercising all-profile update/snapshot recovery.
+    seal_fixture_home(sibling)
+    request.addfinalizer(lambda: vault.lock_now(sibling))
     request.addfinalizer(lambda: vault.lock_now(root))
     active_snapshot = backup.create_quick_snapshot(label='pre-update', hermes_home=root)
     monkeypatch.setattr(update_cmd_config, '_LAST_SIBLING_SNAPSHOTS',
