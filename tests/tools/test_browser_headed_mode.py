@@ -5,10 +5,12 @@ Salvaged from PR #24064 (fixes #11020 lead bug).
 """
 
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from tools import browser_tool_session as bt_session
+
+pytest_plugins = ['tests.tools.test_browser_native_private_state']
 
 
 def _reset_headed_cache():
@@ -19,15 +21,22 @@ def _reset_headed_cache():
 
 
 @pytest.fixture(autouse=True)
-def _clean_headed_cache(monkeypatch, tmp_path):
+def _clean_headed_cache(monkeypatch, tmp_path, native_state):
     from pathlib import Path
+    from agent.session_context import scoped_current_session_id
+    from hermes_security.session_authority import start_session_authority
 
-    monkeypatch.setattr(Path, "home", lambda: tmp_path)
-    monkeypatch.setenv("HERMES_HOME", str(tmp_path / ".hermes"))
+    home, user, _ram = native_state  # Real crypto; RAM backing and vendor execution are unit seams.
+    monkeypatch.setattr(Path, "home", lambda: user)
     monkeypatch.setenv("HERMES_RUNTIME_DIR", str(tmp_path / "tools"))
     _reset_headed_cache()
-    yield
-    _reset_headed_cache()
+    source = start_session_authority(home, 'headed-fixture')
+    try:
+        with scoped_current_session_id(source.session_id):
+            yield
+    finally:
+        source.close()
+        _reset_headed_cache()
 
 
 # ---------------------------------------------------------------------------
@@ -91,30 +100,18 @@ class TestCleanupTaskResourcesHeadedSkip:
 
 class TestHeadedFlagInjection:
     def _run_and_capture(self, bt):
-        """Run a snapshot command with Popen mocked; return captured argv."""
+        """Run the real dispatcher with a fake capture client; no browser or process starts."""
         captured_cmds = []
-        mock_proc = MagicMock()
-        mock_proc.wait.return_value = None
-        mock_proc.returncode = 0
-
-        def capture_popen(cmd, **kwargs):
-            captured_cmds.append(cmd)
-            return mock_proc
 
         mock_stdout = (
             '{"success": true, "data": {"snapshot": '
             '"- heading \\"Hi\\" [ref=e1]", "refs": {"e1": {}}}}'
         )
-        with patch("subprocess.Popen", side_effect=capture_popen), \
-             patch("os.open", return_value=99), \
-             patch("os.close"), \
-             patch("os.unlink"), \
-             patch("os.makedirs"), \
-             patch("builtins.open", MagicMock(return_value=MagicMock(
-                 __enter__=MagicMock(return_value=MagicMock(
-                     read=MagicMock(return_value=mock_stdout))),
-                 __exit__=MagicMock(return_value=False),
-             ))), \
+        def capture_client(cmd, **kwargs):
+            captured_cmds.append(cmd)
+            return 0, mock_stdout.encode(), b''
+
+        with patch("hermes_platform.client_capture.run_client", side_effect=capture_client), \
              patch("tools.interrupt.is_interrupted", return_value=False), \
              patch("tools.browser_tool_lifecycle._write_owner_pid"):
             bt_session._run_browser_command("task1", "snapshot", [], _engine_override="auto")
