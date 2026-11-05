@@ -236,9 +236,11 @@ def test_same_turn_fallback_retry_is_not_gated_by_the_primary_stall_backoff(tmp_
     and facade timeout wrap; only the summary route (``compress``) is stubbed: the primary route stalls
     silently until the host cancels its fence, the pinned fallback route returns a real compressed list."""
     import os
+    import threading
     import time
     from pathlib import Path
 
+    from tests.waiting import wait_until
     import agent.conversation_compression as cc
     from agent.auxiliary_client import AuxiliaryExplicitCancellation
     from hermes_state import SessionDB
@@ -261,15 +263,15 @@ def test_same_turn_fallback_retry_is_not_gated_by_the_primary_stall_backoff(tmp_
     original = [{"role": "user", "content": f"m{i} " + "x" * 400} for i in range(20)]
     live = list(original)
     routes = []
+    primary_entered = threading.Event()
 
     def fake_compress(messages, **kwargs):
         route = take_pinned_summary_route()
         routes.append((route["label"] if route else None, kwargs.get("bypass_cooldown", False)))
         if route is None:
             cancelled = getattr(compressor, "_compression_cancelled_check", None)
-            deadline = time.monotonic() + 5
-            while time.monotonic() < deadline and not (callable(cancelled) and cancelled()):
-                time.sleep(0.0005)
+            primary_entered.set()
+            assert wait_until(lambda: callable(cancelled) and cancelled(), timeout=5)
             raise AuxiliaryExplicitCancellation()
         return [{"role": "user", "content": "summary of earlier turns"}, original[-1]]
 
@@ -278,12 +280,15 @@ def test_same_turn_fallback_retry_is_not_gated_by_the_primary_stall_backoff(tmp_
 
     def route_after_primary_unwound():
         # Pin the race outcome from the report: the primary persisted its backoff before the retry ran.
-        deadline = time.monotonic() + 3
-        while time.monotonic() < deadline and compressor._summary_failure_cooldown_until <= time.monotonic():
-            time.sleep(0.001)
+        assert primary_entered.wait(timeout=5), "the fixture must reach the primary summary route"
+        assert wait_until(
+            lambda: compressor._summary_failure_cooldown_until > time.monotonic(), timeout=5,
+        ), "the primary cancellation must arm its cooldown before retry admission"
         return real_route()
 
-    monkeypatch.setattr(cc, "resolve_context_compression_timeouts", lambda compression_cfg=None: (0.4, 4.0))
+    # This real-pipeline test must allow setup work before the deliberately stalled summary.
+    # Keep its wall bounds above the test guide's two-second minimum; the file budget is unchanged.
+    monkeypatch.setattr(cc, "resolve_context_compression_timeouts", lambda compression_cfg=None: (2.0, 4.0))
     monkeypatch.setattr(cc, "resolve_compression_fallback_route", route_after_primary_unwound)
     with _patch_chain([CHAIN_ENTRY]):
         out_msgs, _prompt = agent._compress_context(live, "sys", approx_tokens=50_000)

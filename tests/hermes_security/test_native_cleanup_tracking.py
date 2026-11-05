@@ -13,7 +13,7 @@ def test_cancel_and_owner_close_retain_handle_until_cleanup_confirmation(monkeyp
     child = inert_child(reaped=complete)
     child.finished.set()
     owner, sibling = object(), object()
-    sibling_child = object()
+    sibling_child = inert_child(reaped=False)
     jobs = {'owned': (owner, child), 'sibling': (sibling, sibling_child)}
     monkeypatch.setattr(authority_native, '_jobs', jobs)
     present_during_join = []

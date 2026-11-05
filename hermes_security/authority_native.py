@@ -103,6 +103,15 @@ def _retire_closed(identity, authority, child):
         _forget_completed(identity, authority, child)
 
 
+def _retire_revoked_completed():
+    """Local ancestor revocation can make already-finished results unreachable."""
+    with _lock:
+        recorded = list(_jobs.items())
+    for identity, (owner, child) in recorded:
+        if _cleanup_complete(child):
+            _retire_closed(identity, owner, child)
+
+
 def _start(authority, request):
     from hermes_security.handoff import prepare_child_key
     from hermes_cli._launchers import runtime_command
@@ -190,8 +199,6 @@ def dispatch_native(authority, request):
 def close_native(authority):
     with _lock:
         children = [(identity, child) for identity, (owner, child) in _jobs.items() if owner is authority]
-    if not children:
-        return
     from hermes_cli.management_owned_jobs import OwnedManagementJob
     for identity, child in children:
         try:
@@ -202,3 +209,4 @@ def close_native(authority):
             else:
                 logging.getLogger(__name__).warning("Native command cleanup remains pending; ownership retained.")
         _forget_completed(identity, authority, child)
+    _retire_revoked_completed()

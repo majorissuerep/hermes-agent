@@ -56,8 +56,9 @@ def test_owner_close_retains_pending_native_and_fixed_jobs_while_settling_comple
         child.budget = SimpleNamespace(cancelled=threading.Event())
         child.worker = SimpleNamespace(join=lambda timeout, name=label: joined.append(name))
     completed.finished.set()
+    unrelated = SimpleNamespace(finished=threading.Event())
     jobs = {'native': (owner, native), 'fixed': (owner, fixed), 'complete': (owner, completed),
-            'foreign': (sibling, object())}
+            'foreign': (sibling, unrelated)}
     monkeypatch.setattr(authority_native, '_jobs', jobs)
 
     authority_native.close_native(owner)
