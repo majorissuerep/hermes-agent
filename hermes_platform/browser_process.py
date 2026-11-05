@@ -88,6 +88,17 @@ def harness_process_record(pid_path, *, runtime, name, expected_env=None) -> dic
         return None
 
 
+def _possible_harness_owner_command(argv):
+    if len(argv) == 3 and argv[1] == '-m' and argv[2] in {'browser_harness.run', 'browser_harness.daemon'}:
+        return True
+    if len(argv) != 2:
+        return False
+    script = Path(argv[1])
+    # Read-side refusal must also cover relocated/older installations. These exact
+    # components identify a possible worker, never authority to signal it or use its data.
+    return script.is_absolute() and script.parts[-2:] == ('tools', 'browser_harness_worker.py')
+
+
 def require_harness_source_idle(source, *, check_alive):
     """Refuse an actual installed harness CLI/daemon referencing this legacy source."""
     source = Path(source)
@@ -98,7 +109,7 @@ def require_harness_source_idle(source, *, check_alive):
             if identities is None or identities.effective != os.geteuid():
                 continue
             argv = process.info['cmdline'] or []
-            if len(argv) != 3 or argv[1] != '-m' or argv[2] not in {'browser_harness.run', 'browser_harness.daemon'}:
+            if not _possible_harness_owner_command(argv):
                 continue
             env = process.environ()
             home = Path(env.get('HOME') or Path.home())

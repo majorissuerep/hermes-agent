@@ -185,4 +185,3 @@ def reference_images_from_data_url(ref_raw: str, stage) -> list:
     home, custody = _output_custody()
     ref_path = artifacts.write_bytes(stage / f"reference.{ext}", raw, home=home, custody=custody)
     return [ref_path]
-

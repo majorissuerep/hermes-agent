@@ -37,6 +37,9 @@ def _private_harness_storage(native_state, monkeypatch):
     monkeypatch.setattr('tools.browser_harness_runtime._DAEMONS', {})
     monkeypatch.setattr('hermes_platform.browser_process.harness_process_record', lambda *_a, **_kw: None)
     monkeypatch.setattr('hermes_platform.browser_process.harness_runtime_absent', lambda *_a, **_kw: True)
+    # These tests supply inert CLI producers; the real private screenshot worker is covered
+    # by test_browser_harness_screenshot rather than replacing these vendor seams.
+    monkeypatch.setattr('tools.browser_harness_worker.command_for_browser', lambda command, **_kw: command)
 
 
 @pytest.fixture(autouse=True)
