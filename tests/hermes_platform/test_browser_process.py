@@ -3,6 +3,7 @@ import os
 import json
 from pathlib import Path
 import subprocess
+from selectors import DefaultSelector, EVENT_READ
 import sys
 
 import pytest
@@ -44,9 +45,16 @@ def test_native_process_requires_exact_executable_and_socket_identity(tmp_path):
     socket = tmp_path/'socket'
     socket.mkdir()
     env = {**os.environ, 'AGENT_BROWSER_SOCKET_DIR':str(socket)}
-    with subprocess.Popen([sys.executable, '-c', 'import sys; sys.stdin.read(1)'], env=env,
-                          stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) as child:
+    with subprocess.Popen([sys.executable, '-c',
+                           'import sys; print("READY", flush=True); sys.stdin.read(1)'], env=env,
+                          stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL) as child:
         try:
+            # Popen is not the child's application-readiness signal. Inspect the
+            # positive identity only after this inert child has entered Python.
+            with DefaultSelector() as ready:
+                ready.register(child.stdout, EVENT_READ)
+                assert ready.select(timeout=10), "bounded native helper readiness"
+            assert child.stdout.readline() == b"READY\n"
             record = browser_process_record(child.pid, executable=sys.executable, socket_dir=socket)
             if record is None:
                 _record_absence_diagnostics(child.pid, socket)
