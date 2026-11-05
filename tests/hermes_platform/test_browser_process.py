@@ -1,5 +1,6 @@
 """Native daemon identity is exact; an action argument cannot masquerade as a close command."""
 import os
+import json
 from pathlib import Path
 import subprocess
 import sys
@@ -7,6 +8,26 @@ import sys
 import pytest
 
 from hermes_platform.browser_process import parse_agent_browser_command, browser_process_record
+
+
+def _record_absence_diagnostics(pid, socket):
+    """Only controlled-child facts, never environment values, leave a failed native assertion."""
+    import psutil
+    from hermes_platform.processes import get_process_start_time
+
+    result = {}
+    try:
+        process = psutil.Process(pid)
+        result['expected_executable_matches'] = Path(process.exe()).resolve() == Path(sys.executable).resolve()
+        result['effective_uid_matches'] = process.uids().effective == os.geteuid()
+        result['socket_environment_matches'] = process.environ().get('AGENT_BROWSER_SOCKET_DIR') == str(socket)
+        before, after = get_process_start_time(pid), get_process_start_time(pid)
+        result['native_start_identity_present'] = before is not None
+        result['native_start_identity_stable'] = before == after
+        result['zombie'] = process.status() == psutil.STATUS_ZOMBIE
+    except (psutil.NoSuchProcess, psutil.AccessDenied, OSError, ValueError) as exc:
+        result['error_type'] = type(exc).__name__
+    print('HERMES_NATIVE_PID_DIAGNOSTIC ' + json.dumps(result, sort_keys=True))
 
 
 def test_browser_action_uses_the_actual_command_position():
@@ -27,6 +48,8 @@ def test_native_process_requires_exact_executable_and_socket_identity(tmp_path):
                           stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) as child:
         try:
             record = browser_process_record(child.pid, executable=sys.executable, socket_dir=socket)
+            if record is None:
+                _record_absence_diagnostics(child.pid, socket)
             assert record and record['pid'] == child.pid
             assert browser_process_record(child.pid, executable=tmp_path/'same-name-other-binary', socket_dir=socket) is None
             assert browser_process_record(child.pid, executable=sys.executable, socket_dir=tmp_path/'other-socket') is None
