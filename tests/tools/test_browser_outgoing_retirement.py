@@ -7,6 +7,7 @@ import sys
 import pytest
 
 pytest_plugins = ["tests.tools.test_browser_outgoing_continuity"]
+pytestmark = pytest.mark.platforms("linux")
 
 
 def _contents(root):
