@@ -22,6 +22,7 @@ manually against the reporter's live repro).
 from __future__ import annotations
 
 import asyncio
+import io
 import time
 from unittest.mock import patch
 
@@ -75,7 +76,7 @@ class TestStdioInitializeTimeout:
                  patch.object(mcp_tool, "ClientSession", _fake_client_session), \
                  patch.object(_mcp_config, "_resolve_stdio_command", lambda c, e: (c, e)), \
                  patch.object(_mcp_config, "_write_stderr_log_header", lambda *_a, **_k: None), \
-                 patch.object(mcp_tool, "_get_mcp_stderr_log", lambda: None), \
+                 patch.object(_mcp_config, "_get_mcp_stderr_log", lambda: io.StringIO()), \
                  patch("tools.osv_check.check_package_for_malware",
                        lambda *_a, **_k: None):
                 start = time.monotonic()

@@ -94,9 +94,16 @@ def two_profile_homes(tmp_path, monkeypatch):
     worker_home.mkdir(parents=True)
     monkeypatch.setenv("HERMES_HOME", str(default_home))
     monkeypatch.setenv("NO_PROXY", "*")
+    from hermes_security import vault
+
+    monkeypatch.setattr(vault, "_SCRYPT_N", 1024)
+    for home in (default_home, worker_home):
+        vault.init_vault(home, "synthetic independent MCP identity password")
+        vault.unlock(home, "synthetic independent MCP identity password")
     yield {"default": default_home, "worker": worker_home}
     from tools.mcp_tool_lifecycle import shutdown_mcp_servers
     shutdown_mcp_servers()
+    vault.clear_vault_cache()
 
 
 def _discover_and_call(homes: dict, tool: str, args: dict) -> dict:
@@ -116,11 +123,14 @@ def test_profile_with_other_secret_source_value_gets_its_own_stdio_connection(tw
     server = tmp_path / "gh_server.py"
     server.write_text(textwrap.dedent(_STDIO_SERVER), encoding="utf-8")
     for name, home in two_profile_homes.items():
-        (home / "secrets.env").write_text(f"GH_TOKEN=fake-token-{name}\n", encoding="utf-8")
-        (home / "config.yaml").write_text(yaml.safe_dump({
+        from hermes_security import io
+
+        source = tmp_path / f"{name}-secret-source.env"
+        source.write_text(f"GH_TOKEN=fake-token-{name}\n", encoding="utf-8")
+        io.write_text(home / "config.yaml", yaml.safe_dump({
             "model": _MODEL,
-            "secrets": {"command": {"enabled": True, "command": f"cat {home / 'secrets.env'}"}},
-            "mcp_servers": {"gh": {"command": sys.executable, "args": [str(server)]}}}), encoding="utf-8")
+            "secrets": {"command": {"enabled": True, "command": f"cat {source}"}},
+            "mcp_servers": {"gh": {"command": sys.executable, "args": [str(server)]}}}), purpose="config")
 
     results = _discover_and_call(two_profile_homes, "mcp__gh__whoami", {})
 
@@ -140,7 +150,9 @@ def test_profile_with_other_profile_identity_header_gets_its_own_http_connection
         team = {"url": f"http://127.0.0.1:{port}/mcp",
                 "identity_header": {"name": "X-Hermes-Profile", "value_from": "profile"}}
         for home in two_profile_homes.values():
-            (home / "config.yaml").write_text(yaml.safe_dump({"model": _MODEL, "mcp_servers": {"team": team}}), encoding="utf-8")
+            from hermes_security import io
+
+            io.write_text(home / "config.yaml", yaml.safe_dump({"model": _MODEL, "mcp_servers": {"team": team}}), purpose="config")
 
         _discover_and_call(two_profile_homes, "mcp__team__save_note", {"text": "hi"})
 

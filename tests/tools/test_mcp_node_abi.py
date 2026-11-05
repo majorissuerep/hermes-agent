@@ -41,7 +41,12 @@ def test_stdio_server_dying_on_a_node_abi_mismatch_names_the_rebuild_under_herme
                                                                                          managed_node):
     from hermes_cli.mcp_config import _probe_failure_reason, _probe_single_server
 
-    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "home"))
+    from hermes_security import frames
+    from tests.e2e.vault_home import seal_fixture_home
+
+    home = tmp_path / "home"
+    monkeypatch.setenv("HERMES_HOME", str(home))
+    seal_fixture_home(home)
     node, npm = managed_node
     entry = tmp_path / ".npm" / "_npx" / "0e2eab1c"
     addon = entry / "node_modules" / "better-sqlite3" / "build" / "Release" / "better_sqlite3.node"
@@ -59,7 +64,9 @@ def test_stdio_server_dying_on_a_node_abi_mismatch_names_the_rebuild_under_herme
     # Every retry loads the same binary: parked at once, not walked through the retry ladder.
     assert spawns.read_text().count("spawn") == 1
     # The shared stderr log still receives the child's output.
-    assert "ERR_DLOPEN_FAILED" in (tmp_path / "home" / "logs" / "mcp-stderr.log").read_text()
+    log = home / "logs" / "mcp-stderr.log"
+    assert "ERR_DLOPEN_FAILED" in b"".join(frames.read_frames(log, purpose="log")).decode()
+    assert b"ERR_DLOPEN_FAILED" not in log.read_bytes()
 
 
 def test_the_remedy_never_points_the_server_at_another_node(managed_node):

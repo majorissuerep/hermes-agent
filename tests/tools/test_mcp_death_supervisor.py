@@ -446,10 +446,16 @@ def test_supervisor_is_released_once_nothing_is_left_to_reap(monkeypatch, all_gr
     assert len(spawned) == 2 and spawned[1].lines() == ["register 333"]
 
 
-def test_supervisor_survives_the_real_eof_release():
+def test_supervisor_survives_the_real_eof_release(tmp_path, monkeypatch):
     """End to end: closing the control pipe with nothing registered exits cleanly."""
     if os.name != "posix":
         pytest.skip("POSIX-only supervisor")
+    from tests.e2e.vault_home import seal_fixture_home
+    from hermes_security import vault
+
+    home = tmp_path / "supervisor-owner"
+    monkeypatch.setenv("HERMES_HOME", str(home))
+    seal_fixture_home(home)
     child = subprocess.Popen(_VICTIM, start_new_session=True)
     try:
         mcp_tool._update_death_supervisor("register", [os.getpgid(child.pid)])
@@ -462,6 +468,9 @@ def test_supervisor_survives_the_real_eof_release():
     finally:
         _kill(child.pid)
         child.wait(timeout=10)
+        from tools.mcp_tool_config import _close_mcp_stderr_logs
+        _close_mcp_stderr_logs()
+        vault.lock_now(home)
 
 
 def test_unregister_alone_does_not_start_a_supervisor(monkeypatch):
@@ -612,7 +621,7 @@ def _stdio_connection(child_pid, fake_supervisor):
             side_effect=[set(), {child_pid}],
         ),
         patch("tools.mcp_tool_config._write_stderr_log_header"),
-        patch("tools.mcp_tool._get_mcp_stderr_log", return_value=None),
+        patch("tools.mcp_tool_config._get_mcp_stderr_log", return_value=io.StringIO()),
         patch(
             "tools.mcp_tool._spawn_death_supervisor",
             return_value=fake_supervisor,
