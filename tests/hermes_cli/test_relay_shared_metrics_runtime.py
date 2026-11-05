@@ -2791,7 +2791,7 @@ def test_install_snapshot_is_daily_and_carries_only_bucketed_counts(
 
 def _stored_values(tmp_path, metric: str) -> list[tuple[dict[str, Any], int]]:
     from hermes_cli.observability.shared_metrics import SharedMetricsStore
-
+    _join_export_workers()
     root = tmp_path / "hermes-home" / "telemetry" / "shared_metrics"
     return [
         (counter["dimensions"], counter["value"])

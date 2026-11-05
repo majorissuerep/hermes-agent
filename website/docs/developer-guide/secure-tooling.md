@@ -23,8 +23,17 @@ The [delivery order](#delivery-order-and-gates) and
 [follow-up backlog](#explicit-follow-up-backlog) define the stopping point.
 The wider hidden reasoning controller remains deferred; the separate opt-in
 formal-checkpoint consumer and held Goal prototype do not establish its delivery.
-Unknown swap protection and unresolved image-library advisories also prevent a
-whole-system privacy or advisory-closure claim.
+Unknown host swap/crash protection, unqualified private-state producers and
+final-head advisory acceptance remain open. They prevent a whole-system privacy
+or completed-security-audit claim.
+
+The November 5 source candidate combines confirmed native cleanup,
+closed-owner and ancestor-revocation retirement, and typed cancellation before
+compression dispatch. The combined feature preserves fixed maintenance-job
+results for live owners and retires unreachable completed results. These changes
+have pure behavioral and static evidence; their final-head native, CI and
+fresh-main acceptance remains pending. Earlier passes, failures and incomplete
+inventories retain their original revision and environment scope.
 
 ## Baseline and boundaries
 
@@ -40,6 +49,15 @@ A read-only upstream refresh on November 4 observed and fetched
 reviewed input. This is a new review input, not an accepted port. **UPSTREAM-02**
 tracks the relevant local CLI/agent/MCP fixes; removed product surfaces stay out.
 
+The November 5 bounded audit reaches
+`ed1afb082eb3e46cf2edae9d8f68fb67b09ee4df`. Its 73 commits after the
+previously reviewed `28203b081f47` are individually accounted for. Candidate
+`c0bd2acc4939` selects five input commits: the excessive-JSON-depth guard,
+three stale auxiliary-slot removals, and the plugin example correction. The
+27-commit new terminal-image feature remains deferred for protected-media and
+Ink adaptation; removed services remain excluded. This is a bounded port,
+not an assertion that every feature at upstream HEAD is shipped.
+
 The local command layer owns management; the native agent owns conversations;
 `hermes_security` owns encryption and temporary unlock authority; terminal and
 process helpers own child lifetimes. External coding agents retain their own
@@ -54,6 +72,11 @@ hosting remain outside this fork. No change authorizes a public deployment.
   commands remain locked. Unreadable state is an error, not an empty substitute.
 - A child can invoke the owning Hermes installation. Closing that child leaves
   the parent usable; ending the owner revokes grants derived from it.
+- Cancellation and terminal polling require confirmed process reaping, ended
+  pipes and cleanup of observed descendants. A bounded wait can leave cleanup
+  pending; its exact job record stays owned. Confirmed completion retires a
+  revoked owner's record, including completed work made unreachable by local
+  ancestor revocation. Live-owner output remains available for ordinary polling.
 - A trusted worker's one-shot key descriptor belongs to the exact live session.
   A stale session cannot select a sibling's authority. Installer shell children
   request fixed owner-executed stages and receive completion receipts only.
@@ -194,8 +217,10 @@ API failure diagnostics retain their masked request/error JSON under `sessions`
 using the existing encrypted state format. The error notice names the encrypted
 file and deliberate offline forensic export. Missing profile metadata, revoked
 custody or a failed write withholds the dump and preserves the original API
-failure. An explicitly selected profile without its own vault cannot borrow an
-initialized ancestor's diagnostic storage.
+failure. An independently vaulted profile uses its own store. A supported named
+profile sealed by the machine vault authenticates its local envelope and exact
+logical directory generation before using that original physical custody. An
+unmanaged or damaged nested home cannot borrow an ancestor's diagnostic storage.
 
 Older private outputs in `cache/terminal-output`, `cache/spillover`,
 `cache/screenshots` and `browser_screenshots` remain visible to the read-only
@@ -256,6 +281,18 @@ Log migration, legacy-backup import and explicit recovery export retain line
 terminators and partial final lines; JSONL record framing is unchanged.
 The native parent-death supervisor keeps its kernel-pipe diagnostics and filtered
 environment without receiving unlock material.
+
+The captured MCP log sink belongs to its original vault unlock and native
+lineage. Closing its first requesting session leaves that shared profile
+resource usable; locking and unlocking the vault never revives the old sink.
+Factory admission requires either the selected profile's valid own store or an
+authenticated managed machine-vault profile, before any log-directory or cache
+effect. The sink is keyed by the canonical logical profile and retains its
+original physical Vault and inherited lineage. Parent metadata is never copied
+into the child. Missing, damaged, unmanaged or foreign nested stores refuse.
+Renaming an independently migrated profile preserves its vault metadata,
+ciphertext and child islands intact, refuses a live descendant or an existing
+destination, and requires the original credential at the new location.
 
 The consequential assumptions are that the public command inherits the correct
 installation and grant, and that external executors preserve the grant through
@@ -324,8 +361,12 @@ The public MCP stdio scenarios completed four checks; seven pre-existing expecte
 failures for unsupported image results and empty metadata remain unqualified.
 Separate real-SDK regressions verify owning/explicit child homes, filtered unlock
 material, encrypted/redacted diagnostics, write failure and legacy-log recovery.
-The six cold lifecycle/live-gateway scenarios require their existing dedicated
-credentials and disposable environments; they remain pending here.
+The six live lifecycle legs in `scripts/e2e/README.md` remain required: fresh
+install, update, broken-file repair, dirty install, reinstall and upstream
+install. They use an outbound model relay, which is a retained provider route.
+The separate actual Ink active-session update is also required. These scenarios
+need dedicated disposable environments and an approved spend-capped connection;
+recording-provider fixtures alone do not qualify them.
 
 A later isolated Linux replay exercised actual managed native chat and a native
 delegated conversation, including child and parent terminal self-calls: two
@@ -345,8 +386,15 @@ A later, separately qualified dependency refresh reduces this to 39 advisories
 in Pillow 12.3.0. It updates certifi, MCP, PyJWT, urllib3, setuptools, Mistral and
 OpenTelemetry using releases older than the existing 14-day quarantine, without
 metadata overrides or quarantine exceptions. A fresh PM environment passes its
-dependency-consistency check; this remains a failing security audit. Pillow 13's
-fixes are blocked by the declared browser-harness and fastembed constraints.
+dependency-consistency check; that result remains a failing security audit.
+Maintained compatibility candidate `7b23979d21` now accepts aged Pillow 13 through
+real installed metadata. Independent review fetched the hash-verified aged source
+archives, reproduced both local distributions and confirmed unchanged runtime code
+and licenses. Its ten archive-boundary and builder contracts passed. Fresh PM
+full-graph and saved-workspace offline repair receipts are separate author evidence;
+real browser/image/embedding compatibility and final-head audit remain required.
+This is a declared dependency maintenance commitment, with honest local versions
+and exact path-and-hash archive exceptions; it changes no quarantine or PM checks.
 A November 4 audit of the unchanged baseline Node lock found 17 affected package
 nodes (three high and 14 moderate). An aged, compatible refresh of Undici,
 Vitest/Vite and Zod reduces that result to 12 moderate nodes and zero high or
@@ -400,7 +448,7 @@ schema bytes stay fixed. Pin restores in the same process preserve that boundary
 including the synthesized bridge during an outage. Explicit reload retains its
 existing boundary. The ports keep the fork's session and sandbox filters.
 
-The latest source-only inventory pins upstream
+An earlier source-only inventory pinned upstream
 `8112254f8a934626032579cae967b25b7795836d`: 7,462 commits ahead and 7,091
 changed files relative to the fork's recorded shared base. The narrow issuer
 compatibility port from `1dadda835d9e67a11758481cf123c821dc2538db` accepts the
@@ -684,9 +732,11 @@ add a reasoning toolset or rewrite past prompts, memories or tool schemas.
 
 The initial ten-hour delivery window ended on November 4. The operator then
 extended the work until a stable fork release; qualification, rather than that
-elapsed deadline, determines completion. Work uses GPT-6.1 Sol at high effort
-and Claude Opus 5.5 at high effort, with approximately equal delegated work packages. The
-coordinator owns integration, evidence reconciliation, merge and publication.
+elapsed deadline, determines completion. The requested execution mix is
+GPT-6.1 Sol and Claude Opus 5.5, both at high effort, with approximately equal delegated work packages. Receipts must name the
+actual executor; this requested mix is not evidence that both engines ran.
+Desktop exclusively owns remote integration, merge, mirror and publication;
+component coordinators own isolated repairs and evidence reconciliation.
 Model agreement is not independent evidence. A non-author owns each milestone's
 independent acceptance, using fresh environments and the actual merged SHA.
 
@@ -714,6 +764,19 @@ the input, source, checker and environment identities. A green old revision,
 stale log stream or compiler exit code cannot certify the current outcome.
 
 ### Delivery order and gates
+
+Release integration has two main boundaries: the source-only repair first, then
+one combined browser/media/recovery and default-off formal/version candidate.
+Each boundary retains all exact-head private, public Linux/macOS and aggregate
+checks. After the first merge, automatic mirroring and a non-author's freshly
+fetched actual-main acceptance must finish before the combined feature merge.
+The combined merge likewise needs independent actual-main acceptance and final
+artifact install/update/restore before publication. M0 and M1 below identify
+capability work; they do not require two additional main merges. Combining the
+feature candidate changes merge granularity, not coverage or evidence scope.
+Its formal slice is the already-authorized opt-in consumer. The wider hidden
+controller and separate Goal prototype remain explicit follow-up work, not
+implemented or outcome-validated features of this release.
 
 | Milestone | Backlog and owner | Completion evidence | Independent test after merge |
 | --- | --- | --- | --- |
@@ -805,23 +868,79 @@ login, macOS or exact merged-revision acceptance.
 
 ### Current candidate and remaining release gates
 
-The November 4 continuation belongs to the integration owner after the operator
-confirmed that the desktop session stopped. No milestone has merged into main.
-Composition happens in a separate checkout; independently tested component SHAs
-remain frozen. The exact composed SHA must pass its own checks.
+Desktop holds exclusive remote integration, merge, mirror and release ownership
+after the explicit writer handoff. Component lanes continue in isolated checkouts
+without remote writes. No milestone has merged into main at this evidence cut.
+The current source successor is `96d1102414a0`; its source review passes,
+while fresh native and private/public gates remain pending. Private run 62
+completed successfully on the older `8711160b8e87` with 42,209 Python passes
+and 548 skips; that source still fails its separate help-denial contract.
+Main remains `1815472adf69`.
+All 11,651 successor source paths are pinned. The new startup fix sends a
+borrowed secure-vault command to its existing owner before early help parsing
+can return success. Standalone help and unsafe key-only creation refusal before
+startup writes retain their contracts; forwarding adds no new authority transport
+or pre-PM crypto dependency.
+
+Source `8711160b8e87` passed its physical Linux 53- and 219-execution cohorts
+and stock-VM 31 contracts, with independent source, export and cleanup readbacks.
+Its separate help cohort completed two cases and failed one denial assertion:
+a request returned secure-vault help with exit zero. This was an assertion failure,
+not a file timeout. The exact native request remains unknown because its argument
+representation was truncated. Independent library tests identify two mixed-argument
+vectors that exit before owner validation. Those causes are fixed in the successor;
+the original V5 positive, denial, lineage and whole-tree oracles still require
+fresh execution without changing their file limit. Older passes cannot qualify it.
+
+Historical passes retain their scope. Source `7ef1a717d9aa` completed private run
+57 with 42,184 passes, zero failures and 548 skips; it also passed its separate
+219-execution and stock-VM 31 replays. Source `308f6c90a68f` passed 53 native
+cleanup cases, but its later original 219-execution replay ended with 218 passes
+and one compression assertion failure. The current source includes the resulting
+narrow cancellation repair; actual-agent acceptance must run again. None of
+these older results qualifies the current source or actual main.
+
+Reviewed combined baseline `18816cc2accb` includes the verified formal-delivery
+buffer, BrowserUse `0e148d9a606c`, outgoing `9299ecbb1894`, Lightpanda
+`77e41b7f1834` and atomic PID readiness. The next composition adds Source
+`96d1102414a0`, dispatch repair `9e014618fca5` and the metrics fixture settlement
+barrier `744baafa4267`. These changes preserve live-owner output and fixed-job
+routing. Independent pure contracts cover atomic dispatch preparation, exact
+reservation cleanup and original exception identity; actual SQLCipher conditional
+deletion and combined encrypted recovery remain disposable runtime obligations.
+The metrics fixture waits for existing export workers before reading; this does
+not establish the exact call that failed in the older incomplete CI report.
+
+Private feature run 60 tested the older `5b9a93d29520`. It reached its unchanged
+7,200-second limit at 74.4% completion, with 32,976 passes and four observed
+failures; it produced no complete final failure report. All seven previously
+timing-out managed cases passed in that run. The observed failures concern two
+PID-marker reads, a locked metrics database and concurrent delegation admission.
+The reviewed atomic marker fixture is composed; the other follow-ups still need
+current-head verification. The exact cause of every observed failure is not
+established by a separate causal helper test.
+
+Earlier broad `51555aeb89e0` diagnostics and TCG timeout attempts remain negative
+or incomplete evidence. Actual component passes, including unprofiled PID
+readiness, BrowserUse screenshots and Lightpanda cache continuity, are bounded
+Linux observations. Outgoing cancellation setup and subsequent recovery remain
+unresolved. Frozen component evidence does not qualify a new composed SHA,
+macOS, an installed artifact or merged main.
 
 | Capability | Observed component evidence | Remaining obligation |
 | --- | --- | --- |
-| Source CI and native integration | Private run 52 on `386b91a4c4` found a real deferred one-turn model switch that incorrectly lasted two turns. Repair `f32130272d` passes all three original Ink PTY cases unchanged in 247.9 seconds, 32 focused helpers and all 12 checks. Private run 53 now qualifies that exact head. The earlier public Linux multicall `env` failure and private run 52 remain negative evidence. | Both current-head native jobs, required aggregate, guarded source merge and automatic mirror; then fresh independent actual-main acceptance. A previous green revision cannot qualify this head. |
+| Source CI and native integration | Authenticated logical custody preserves managed machine-vault profiles without child metadata copying. Source `8711160b8e87` passed its separate native53, original219 and stock31 cohorts but failed one help-denial assertion. Successor `96d1102414a0` adds owner forwarding before early help parsing; its 11,651 paths and pure boundary contracts are independently reviewed. Earlier passes and failures retain their exact revisions and environments. | Fresh successor native53, original219, stock31 and complete public-help acceptance; full trusted exact-head private, public Linux/macOS and aggregate gates; guarded source-only merge, automatic mirror, then independent fresh actual-main acceptance. Overlapping scoped replays do not replace full CI or merged-main acceptance. |
 | Browser profile continuity | `207238f488` passed a real stock Debian/Chromium disconnect and cold restore of cookies, local storage and CacheStorage. Its separate 90-case native component cohort passed without retries or skips. | Combined-head and macOS qualification. RAM/cgroup capacity is an admission observation, not a reservation or an OOM guarantee. |
 | Migration rollback and profile scope | `cbf8edd94d` passed 127 native cases, including public CLI original-credential recovery, unchanged independent child state and refusal before WAL-drift mutation. Composed `444388b02e` repeated the public CLI and profile contracts. The subsequent legacy-pet-only regression is repaired at `5a7f046cfb`: 34 isolated native cases include public migration and original-key-only recovery, complete original pet groups and unchanged opaque child bytes. | Run combined-head required gates and fresh-main original-credential recovery before retiring any additional source bytes. Existing ancestor-sealed legacy children need explicit recovery, not implicit rekeying. |
 | Browser backup and shared archive engine | `8a028f7724` retains the old encrypted format and opened-file authentication API. Composed `444388b02e` passed the actual backup/import CLI, its 19 recovery observations and the archive/capacity cohort, including worker owner-executable files. | Required exact-head gates and non-author fresh-main cold disaster recovery. Codec compatibility alone does not qualify a new producer or remote backend. |
 | Recording recovery | Composed `444388b02e` passed recording core, neighboring contracts and public CLI recovery after the locator, guidance, cleanup and fixture repairs. The same run had 454 passing tests and one required RAM-probe skip, so its aggregate remains failed. Fixture repair `65d33cfb3a` is covered by the later real-RAM positive at `f278f04f01`. | Run the actual browser recording and recovery on the combined candidate, then required gates and fresh main. Keep incomplete copies recoverable and report their actual location. |
 | Operation authority | `444388b02e` passed real inherited-FD revocation. Provider `427db2078f` and computer-use `f278f04f01` add original-session guards; their causal cases fail on their bases and pass with the repairs. An isolated `f278f04f01` cohort passed 71 cases, including real RAM and inherited-FD revocation. A sibling session remains usable; actual GUI/provider use is a separate obligation. | Isolated exact-head replay and independent fresh-main tests. A shared profile resource retains its original vault; each operation retains its own session and cannot borrow a sibling or new unlock. |
-| Browser worker state | Anonymous-pipe collection passed 181 native cases at `72a859890d`; the shared tree format has two-way compatibility evidence. The original SSD leak is retained as a negative. Native producer `cb401bb506` subsequently kept the synthetic payload out of the scanned persistent homes and temporary roots, retained complete encrypted worker state, and recovered localStorage with explicit vendor state loading. Automatic named restoration failed in both Hermes and a direct pinned-vendor control. | Repair and requalify automatic cold restoration using the verified public vendor capability; finish Browser Use RAM workspace/config persistence and owner-session repair. Preserve explicit paths, all state bytes and normal native sandbox flags. Diagnostic supplements do not qualify the failed cold-restore case. |
-| MCP media and attachments | `d7745c4f00` retains original home, unlock and operation across RPC completion, nested calls, vision workers and final attachment. Four held-out attachment failures are red on its base; 96 helper cases pass. A fresh real-SDK stdio run passed all three selected cases, then stopped because the fixture left an untracked source-tree entry; all 11,714 tracked hashes remained unchanged. | Correct the fixture's missing owning-profile binding, preserve exact residue evidence, and repeat complete isolated qualification. Required gates and non-author fresh-main replay still apply. No external MCP account or final model transmission is established by these fixtures. |
-| Outgoing browser continuity | `c744c3fccb` passed a fresh stock-VM SSH roundtrip through the public browser tool: cookie, localStorage and CacheStorage survived normal close, encryption and fresh-target RAM restoration. Its 117 helpers and native abrupt-parent case passed; all 11 continuity observations and source guards passed, and VM disks were removed. | Qualify the descendant owner-session repair jobs and actual terminal self-call/cancellation. Docker, Singularity, macOS and real external account continuity remain separate unqualified adapters. |
-| Formal checker identity | The existing opt-in consumer is retained. `2ec3cdf766` selects PM-verified Lean 4.35 with isolated bounded pipes, rejects planted/unavailable evidence without PATH fallback, and supports the official zstd artifact. Separate fresh Linux subjects passed eight real encrypted CLI/compiler cases and the remaining Ink case, with zero retries or selected skips. Earlier failed and incomplete aggregate runs remain recorded. | Combined-current-head and macOS qualification, required gates and independent fresh-main acceptance. This does not introduce a second controller or demonstrate general model-independent task gains. |
+| Browser worker state | Descendant `4d9a970896` authenticates original payload/control survivors; scoped cold, crash-shaped remainder and no-effect refusal checks pass. BrowserUse `0e148d9a606c` passes four actual original scenarios and 22 separate process contracts, with seven full 11,852-path guards and verified cleanup. Its private screenshot child activates and rechecks the exact session/target around one capture; shared user routes retain their existing behavior. Earlier screenshot and observer-admission failures remain recorded. The separate unprofiled stock-VM PID-readiness fixture passes its three original cases. | Complete actual producer, shared RAM, parent-profile import, revocation, daemon absence, pathless repair, cold recovery, screenshot and SSD cases on the final composition and supported native hosts. Linux component passes do not qualify a new combined head. Missing RAM history remains distinct from restored data. |
+| Lightpanda protected cache | Exact `77e41b7f1834` completes five actual official Lightpanda 1.0.1 scenarios: private CDP navigation and cold HTTP-cache reuse, fresh-session public repair, revoked-epoch refusal, real browser-tool routing and global legacy open-file refusal followed by authenticated retirement. Ten native process contracts and all 12 checks pass. All 24 scenario assertions, nine full 11,803-path source guards, zero retries and complete VM/disk cleanup are independently read back. The prior two-pass/three-failure attempt remains linked negative evidence; the bounded command-specific capability probe repairs its cache detection. | Final combined-head and native macOS gates, then independent actual-main and artifact lifecycle acceptance. This Linux component result does not qualify direct agent-browser Lightpanda routing, other vendor versions or the whole release. |
+| MCP media and attachments | Request/session/log custody repairs retain scoped native evidence. The shared logical-profile bridge `deb4cd7054ba` closes stale migration callers with 83 helpers and all 12 checks. Consumer descendant `39e65e16225a` uses a real WorkerResource for two causal worker/archive/pet contracts: both fail without the forwarding bridge and pass with it. These are unit contracts with a declared RAM seam, distinct from the exact-source public MCP/model replay above. | Native exact-composition replay must preserve original Source, child/home generation, shared connection positives, encrypted path/key domains and first-session-close behavior. Later unlocks or possibly completed writes never justify automatic replay. External MCP login and actual final media transmission need their own evidence. |
+| Outgoing browser continuity | Exact `9dd8c07d08` passes 40 native SSH/CLI lifetime cases. Current `9299ecbb1894` authenticates bounded full native inventory, binds every descendant path edge before deletion and returns typed retention for malformed transfer archives. Its 108 helpers and three unchanged independent held-outs pass. A separate composed parent-key state/proof contract passes with logical custody; the raw-physical-vault control fails. Native V13 passes its 14 safety and one crypto contracts. The actual Docker case passes 16 original cold-state/revocation/first-SSD checks and publishes full original ciphertext after a completed partial unlink, but fails cancellation-helper readiness. Later recovery and final SSD checks are unreached. Its cleanup and prior failed attempts remain recorded. | Establish the cancellation setup failure from bounded actual client outcomes, then complete real transfer cancellation and interrupted-cache recovery with the original assertions and budgets. Require saved/empty-root/ref-and-proof retirement for genuine recovery; safe retention is not completion. Repeat on the current combined parent-key logical profile, preserve the original full ciphertext and separately owned runtime, then independently repeat from fresh main. |
+| Formal checker identity and delivery | The existing opt-in consumer remains default-off. Earlier `d86ebb729f` passed eight real encrypted CLI/kernel cases, PM Lean 4.35 provenance and one actual Ink keyboard case. Delivery repair `02df36ad2b91` buffers display, TTS and interim prose until accepted, binds delivery to its exact source/turn/text, and preserves encrypted replay after repair-budget exhaustion. Five independent material visibility/history contracts pass; ordinary discovery without a checkpoint remains allowed under the occasional cadence. | Run the original eight Lean/CLI cases and Ink keyboard case on the final combined head, required Linux/macOS gates, then independent fresh-main acceptance. Neither old native evidence nor pure delivery tests qualify the current composition. This does not introduce a hidden default controller, validate empirical premises, or demonstrate model-independent task gains. |
+| Complete product payload | Cold preview `7e55d33e3060` completes the full TUI/product build, relocation, bounded two-part gzip archive and independent whole/part hash, gzip, tar and manifest verification. Source integrity and disposable namespace/volume cleanup pass. | Rebuild the actual final accepted source and repeat artifact checks. This older build preview does not establish final-source install/update/restore, logged-in integration or protected lifecycle acceptance. |
 
 The remaining producer, remote continuity and advisory items below are required
 release work. They do not become optional because another component passes.
@@ -838,15 +957,53 @@ a corrective PR and prevents completion of that milestone.
 | **P0 SEC-05: qualify retained database and private output custody** | SQLCipher handles keep their original session across cached reads, cursor fetches, transactions and reopened connections. Terminal/result archives and browser captures remain encrypted, recoverable and revocable; old private caches participate in explicit repair. | Security and integration owners; final exact-head gates, then non-author fresh-main tests for stale handles, sibling isolation, authenticated text/image recovery, real RAM staging, unavailable custody and unchanged data on refusal. Pre-fix native failures remain evidence; unit/browser fixtures do not establish live browser qualification. |
 | **P0 SEC-06: qualify failure diagnostics and delegation persistence** | Seal request dumps, task goals/control manifests, live views and summary spills while preserving public readers, original home/session custody, legacy recovery and bounded results when storage fails. Generic file tools cannot read the control manifest. | Integration and security owners; retain the actual native negative receipts, then independently test ciphertext and authenticated roundtrips, nested missing profiles, wrong-home reads, lock/re-unlock, delayed callbacks, failed initial storage, concurrent writers, CLI/TUI consumers and explicit legacy repair. Replay the successful five-request native delegation and the separate rejected-request privacy case on the final candidate, then fresh main after merge. |
 | **P0 MEDIA-02: finish private media ports and recovery lifecycle** | Port computer-use screenshot/element caches, ordinary private image staging and selected remote capture scratch; inventory browser profiles and generated media. Keep deliberate offline migration/export archives explicit and preserve consumers. This blocks a whole-toolchain encrypted-storage claim. | Tool/lifecycle owners; isolate and reproduce each private-byte writer, use encrypted persistence or proven RAM, then run real-backend routing, residue and recovery checks. Independently repeat after the corresponding main milestone. Explain deliberate plaintext recovery archives and define their lifecycle without claiming SSD erasure; keep unknown host swap protection separate. |
+| **P0 MCP-01: admit exact-profile log custody** | Captured stderr sinks retain original vault/native lineage, survive first-session close and reject old-unlock reuse. Admission authenticates the selected own-vault store or supported managed machine-vault profile before directory/cache effects. Own-vault rename preserves opaque descendants and original credentials. | Source and MCP owners; complete exact successor private/native gates, real pipe/public CLI proof, independent final-head review, then newly fetched actual-main acceptance. Public creation-to-MCP positives must work without copying machine metadata into children. Missing/locked/corrupt unmanaged stores and canonical alias routing remain fail-closed cases. |
+| **P0 MEDIA-03: finish interrupted retirement safely** | Worker and outgoing cleanup never replace a full original archive with partial RAM or delete new, changed or unverified survivors. Keep versioned authenticated intent, source/epoch and native path identities; genuine RAM loss yields truthful recoverability history. | Security/native owners; independent original-failure reproduction, exact-head real cleanup/recovery and no-effect refusal, parent/sibling survival, physical-storage scan, compatibility and native host gates. An excluded-cache refusal is incomplete operational recovery, not a completed cleanup. Repeat independently after merge. |
+| **P0 MEDIA-04: protect Browser Use producers** | Workspace code/state, config/auth, downloads and captures persist encrypted or execute only in proven RAM. Explicit shared workspace identity and user bytes remain intact; offline import verifies full encrypted recovery before retiring raw state. | Browser/lifecycle owners; actual pinned Browser Harness producer and public CLI consumer, shared-path continuity, no helper autoexecution, source revocation, cold recovery, imported bytes/config equality, SSD scan and independent fresh-main replay. This is required release work, not covered by Pillow inference or normal default-browser success. |
+| **P0 OPS-02: qualify cancelled owner jobs** | The public command, owner job, SSH client, target helper and archive worker share a bounded lifetime. `9dd8c07d08` freshly passes actual CLI/SSH cancellation and source-close reaping, including parent/sibling operation and recoverable ciphertext; the older `25fc078adc` failure remains historical negative evidence. | Integration and native-process owners; compose the exact repair, run current-head host/required gates and independently repeat from fresh main. Keep native process identity, original deadlines and zero retries. No listener, arbitrary owner-job target or passing-older-head substitution. |
 | **P0 HOST-01: transient-memory admission** | Establish swap, hibernation and crash-storage protection for each supported protected host; report unknown evidence honestly. Retained-key locking and RAM-only files do not protect every Python, crypto or SQLCipher buffer. | Operator supplies host guarantees or a native deployment proves the required posture. A non-author tests refusal and recovery. Full protected-workflow acceptance remains pending while admission is unevaluated. No implicit host setting changes. |
-| **P0 DEP-01: Pillow advisory closure (external blocker)** | Upstream browser-harness and fastembed metadata currently prevent installing the aged fixed Pillow through normal consistency checks. | Dependency owner tracks compatible upstream releases and rechecks at the next eligible release/quarantine boundary; then fresh PM lock/environment, applicable advisory closure and real browser/image consumers. Preserve the 14-day quarantine and all existing tooling; do not force incompatible metadata. |
-| **P0 DEP-00: qualify the aged refresh** | Land the separately prepared security dependency and SDK refresh after its exact-head checks. Local audit reduces 65 advisories in seven packages to the 39 Pillow advisories recorded above. | Integration owner; fresh PM environment, actual SDK protocol checks, full required gates and independent fresh-main consumers. Local test counts alone do not establish publication. |
+| **P0 DEP-01: qualify maintained Pillow compatibility** | Candidate `7b23979d21` carries two honest metadata-only backports of hash-verified aged sources, unchanged runtime code/licenses and exact path/hash archive exceptions. Fresh PM full-graph, installed metadata and saved-workspace offline repair pass. Exact draft `90dee561f5` additionally passes 42 fresh native consumer/guard cases, including real default CLIP image embedding inference with fixed public weights and bounded image processing; all source hashes and cleanup checks pass. | Dependency and integration owners; actual Browser Harness screenshot/state/workspace lifecycle, current composed private/Linux/macOS gates, final audit, fresh-main and artifact lifecycle acceptance. Inference compatibility is bounded consumer evidence, not model quality or private-storage acceptance. Preserve quarantine and PM integrity; retire the maintained backports after compatible aged upstream qualification. |
+| **P0 DEP-00: qualify the aged refresh** | Land the prepared security dependency and SDK refresh with its maintained compatibility backports. Earlier advisory counts remain historical inventories; the final graph requires a current readback. | Integration owner; fresh PM environment, current advisory and installed-metadata checks, actual SDK protocol checks, full required gates and independent fresh-main consumers. Local test counts alone do not establish publication. |
 | **P0 DEP-02: qualify Node fixes and close the remaining chain** | Qualify the aged high-severity fixes and their compatible lock, then resolve the 12 remaining Minimatch/ESLint development-chain findings when the fixed version clears quarantine and its major-version parents are compatible. | Dependency owner; fresh install, dependency-tree validation, complete workspace and real terminal checks, then non-author fresh-main replay. Retain the baseline audit and rejected young resolution as evidence; no incompatible metadata or age-policy exception. |
 | **P0 INT-02: reconcile the native follow-ups** | Include read-only Codex management, profile API routing and cached-login preservation, sticky-profile authority binding, and every concrete remote-client spawn boundary. Exercise real native managed chat and delegated AIAgent conversations with terminal CLI self-calls as well as configuration-only commands. | Integration owner; exact-head private/native checks followed by independent fresh-main CLI, observed model/tool requests, encrypted parent/child history and ciphertext checks. Diagnose failed or incomplete probes before accepting this milestone. A partial author test run cannot qualify it. |
 | **P1 NATIVE-02: remaining host and lifecycle evidence** | Qualify protected workspaces, native cancellation/reaping, install/update/restore and logged-in vendor routes on each supported native host. | Non-author host owner. Keep Linux protocol, macOS, synthetic API login and real account evidence distinct; unavailable dedicated credentials remain pending. |
-| **P1 UPSTREAM-02: refresh the reviewed input** | Review newer upstream changes against the pinned input and port only concrete consumers within this fork's encrypted local scope. | Integration owner records the fetched revision, port/defer decision and encrypted behavior proof. A newer upstream HEAD alone neither qualifies a port nor authorizes removed services. |
+| **P1 UPSTREAM-02: maintain the bounded reviewed input** | The complete 73-commit `28203b081f47..ed1afb082eb3` audit is recorded; candidate `c0bd2acc4939` selects five source inputs within the retained scope. Independent review passes 32 utility/guardrail/auxiliary cases and verifies the audit against the exact Git commit set. | Integration owner; compose and run required current-head gates. Preserve explicit port/defer decisions and revisit deferred terminal-image work only with protected-media/Ink/native proof. A newer moving HEAD does not reopen every qualified increment or authorize removed services. |
 | **P1 HARNESS-02: one coherent formal contract** | Preserve the authorized opt-in consumer and hold the separate Goal controller. Reuse verified PM tool identity, source/review identities, protected scratch, conditional status and aggregate attempt/cost receipts through one checker boundary. | Harness owner; compare existing consumers and failure contracts, then merge only a fully qualified bounded increment. A future default hidden controller requires a concrete consumer; opt-in checkpoint visibility is not evidence that this preference has been fulfilled. |
 | **P2 ORCH-02 / KB-02** | Broaden decomposition and source invalidation through existing kanban/goal interfaces only after a concrete consumer needs them. | Independent outcome review after each major merge; report actual task resolution, cost and human effort rather than verifier counts alone. |
+
+Current P0 additions retain the same milestone gates:
+
+- **MCP-03 — qualify encrypted test fixtures:** the seven transport/death/ABI/
+  worker repairs, OSV timing repair and external public-peer fixture are frozen
+  in the `7ef1a717d9aa` source successor. Real peers use initialized synthetic profiles; only fully
+  mocked SDKs use in-memory diagnostics. Original assertions remain intact and
+  its 219-execution critical cohort and independent stock-VM 31 contracts pass.
+  Complete actual full exact-head CI, Linux/macOS/aggregate and fresh-main
+  acceptance; an older failure or older green is not relabelled.
+- **MEDIA-05 — complete outgoing retirement proof:** the lifecycle owner covers
+  all native entry types with bounded authenticated original inventory, immutable
+  proof publication and per-entry checks. Unknown evidence preserves every copy.
+  A non-author tests repeated interrupted cleanup and newly introduced entries,
+  then repeats from fresh actual main after merge and mirror.
+- **MEDIA-06 — protect retained Lightpanda cache:** the browser owner ports the
+  persistent HTTP cache to a shared logical-profile WORKER resource, with private
+  HOME, logs and temporary files in proven RAM. Checkpoint only after every exact
+  cache owner has stopped; a stale requesting session cannot stop its live
+  sibling. `01e4a1e08812` additionally checks literal legacy open-file owners
+  and fences membership admission with stop/save. `77e41b7f1834` fixes real
+  command-specific vendor capability discovery within the original three-second
+  total probe budget. Five actual Linux vendor scenarios, ten process contracts
+  and 24 native assertions pass, with full source and cleanup evidence.
+  Unreadable possible owners still retain the source. Complete current combined
+  and native macOS gates and independently replay after merge; this component
+  pass alone does not establish whole-toolchain privacy or a stable release.
+- **MEDIA-07 — retain encrypted fixture intent:** reviewed successors initialize
+  real synthetic vaults for pet, media and mocked browser consumers. Updater
+  fixtures explicitly unlock independent sibling keys before their snapshots;
+  this preserves opaque-child policy and leaves the old schema versions for the
+  actual updater to migrate. All original assertions remain, with added checks
+  against vacuous early custody denial. These combined-feature fixtures do not
+  change Source admission or establish native managed-parent update coverage.
 
 ### M1 behavioral contracts
 

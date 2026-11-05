@@ -8,14 +8,17 @@ import sys
 
 def admit_vault_command(argv: list[str]) -> None:
     """Reuse canonical argv, profile and vault parsers; perform only read-only admission."""
+    from hermes_cli._startup_fast import normalize_hermes_home_env, try_session_proxy
+
+    normalize_hermes_home_env()
+    try_session_proxy(argv)  # The owning authority must admit even help before argparse can exit.
+
     from hermes_cli._parser import command_argv
     from hermes_cli._profile_selection import profile_home, select_profile, sudo_user_profile_env
-    from hermes_cli._startup_fast import normalize_hermes_home_env
     from hermes_cli.subcommands.secure_vault import build_secure_vault_parser
     from hermes_cli.vault_key_policy import key_destination
     from hermes_constants import get_process_hermes_home
 
-    normalize_hermes_home_env()
     try:
         name, consume, index, _sticky = select_profile(argv)
         selected = get_process_hermes_home()

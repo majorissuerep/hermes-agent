@@ -150,7 +150,7 @@ def _capture_routing_origin() -> dict[str, Any]:
         return {}
 
 
-def _persist_dispatch(record: dict[str, Any]) -> None:
+def _persist_dispatch(record: dict[str, Any]) -> tuple[Any, ...]:
     now = time.time()
     try:
         from hermes_platform.processes import get_process_start_time
@@ -165,6 +165,10 @@ def _persist_dispatch(record: dict[str, Any]) -> None:
         task_payload["owner_cwd"] = os.getcwd()
     except OSError:
         pass
+    insert_values = (
+        record["delegation_id"], record.get("session_key", ""), record.get("origin_ui_session_id", ""),
+        record.get("parent_session_id"), record["dispatched_at"], now, os.getpid(), owner_started_at,
+        json.dumps(task_payload), record.get("origin_session_id", ""))
     with _DB_LOCK, _transaction() as conn:
         conn.execute("""INSERT OR REPLACE INTO async_delegations
                (delegation_id, origin_session, origin_ui_session_id,
@@ -172,35 +176,61 @@ def _persist_dispatch(record: dict[str, Any]) -> None:
                 delivery_state, delivery_attempts, owner_pid,
                 owner_started_at, task_json, origin_session_id)
                VALUES (?, ?, ?, ?, 'running', ?, ?, 'pending', 0, ?, ?, ?, ?)""",
-            (record["delegation_id"], record.get("session_key", ""), record.get("origin_ui_session_id", ""),
-             record.get("parent_session_id"), record["dispatched_at"], now, os.getpid(), owner_started_at,
-             json.dumps(task_payload), record.get("origin_session_id", "")))
-    _prune_durable_records()
+            insert_values)
+        _prune_durable_records(conn)
+    return insert_values
 
 
-def _prune_durable_records() -> None:
+def _discard_unscheduled_dispatch(record: dict[str, Any], insert_values: tuple[Any, ...] | None) -> bool:
+    """Discard only this unchanged preparation; uncertain ownership stays recoverable."""
+    if insert_values is None:
+        return False
+    delegation_id = record["delegation_id"]
+    with _records_lock:
+        if _records.get(delegation_id) is not record:
+            return False
+    with _DB_LOCK, _transaction() as conn:
+        deleted = conn.execute(
+            """DELETE FROM async_delegations
+               WHERE delegation_id=? AND origin_session IS ? AND origin_ui_session_id IS ?
+                 AND parent_session_id IS ? AND dispatched_at IS ? AND updated_at IS ?
+                 AND owner_pid IS ? AND owner_started_at IS ? AND task_json IS ? AND origin_session_id IS ?
+                 AND state='running' AND delivery_state='pending' AND delivery_attempts=0
+                 AND completed_at IS NULL AND event_json IS NULL AND result_json IS NULL
+                 AND delivered_at IS NULL AND owner_execution_id IS NULL
+                 AND delivery_claim IS NULL AND delivery_claimed_at IS NULL""",
+            insert_values,
+        ).rowcount
+        if deleted != 1:
+            return False
+    with _records_lock:
+        if _records.get(delegation_id) is record:
+            _records.pop(delegation_id)
+    return True
+
+
+def _prune_durable_records(conn: sqlite3.Connection) -> None:
     """Bound terminal history, preferring delivered records for deletion."""
     cutoff = time.time() - _DURABLE_RETENTION_SECONDS
-    with _DB_LOCK, _transaction() as conn:
-        conn.execute(
-            "DELETE FROM async_delegations WHERE delivery_state='delivered' AND updated_at < ?", (cutoff,))
-        terminal_count = conn.execute(
-            "SELECT COUNT(*) FROM async_delegations WHERE state NOT IN ('running','finalizing')").fetchone()[0]
-        if terminal_count > _MAX_RETAINED_COMPLETED:
-            conn.execute("""DELETE FROM async_delegations WHERE delegation_id IN (
-                     SELECT delegation_id FROM async_delegations
-                     WHERE state NOT IN ('running','finalizing')
-                     ORDER BY CASE delivery_state WHEN 'delivered' THEN 0 ELSE 1 END,
-                              updated_at ASC LIMIT ?
-                   )""", (terminal_count - _MAX_RETAINED_COMPLETED,))
-        pending_count = conn.execute("""SELECT COUNT(*) FROM async_delegations
-               WHERE state NOT IN ('running','finalizing') AND delivery_state='pending'""").fetchone()[0]
-        if pending_count > _MAX_DURABLE_PENDING:
-            conn.execute("""DELETE FROM async_delegations WHERE delegation_id IN (
-                     SELECT delegation_id FROM async_delegations
-                     WHERE state NOT IN ('running','finalizing') AND delivery_state='pending'
-                     ORDER BY updated_at ASC LIMIT ?
-                   )""", (pending_count - _MAX_DURABLE_PENDING,))
+    conn.execute(
+        "DELETE FROM async_delegations WHERE delivery_state='delivered' AND updated_at < ?", (cutoff,))
+    terminal_count = conn.execute(
+        "SELECT COUNT(*) FROM async_delegations WHERE state NOT IN ('running','finalizing')").fetchone()[0]
+    if terminal_count > _MAX_RETAINED_COMPLETED:
+        conn.execute("""DELETE FROM async_delegations WHERE delegation_id IN (
+                 SELECT delegation_id FROM async_delegations
+                 WHERE state NOT IN ('running','finalizing')
+                 ORDER BY CASE delivery_state WHEN 'delivered' THEN 0 ELSE 1 END,
+                          updated_at ASC LIMIT ?
+               )""", (terminal_count - _MAX_RETAINED_COMPLETED,))
+    pending_count = conn.execute("""SELECT COUNT(*) FROM async_delegations
+           WHERE state NOT IN ('running','finalizing') AND delivery_state='pending'""").fetchone()[0]
+    if pending_count > _MAX_DURABLE_PENDING:
+        conn.execute("""DELETE FROM async_delegations WHERE delegation_id IN (
+                 SELECT delegation_id FROM async_delegations
+                 WHERE state NOT IN ('running','finalizing') AND delivery_state='pending'
+                 ORDER BY updated_at ASC LIMIT ?
+               )""", (pending_count - _MAX_DURABLE_PENDING,))
 
 
 def _persist_completion(event: dict[str, Any], result: dict[str, Any]) -> None:
@@ -790,10 +820,13 @@ def _dispatch(
             return {"status": "rejected", "error": capacity_error}
         _records[delegation_id] = record
         live_units = sum(1 for r in _records.values() if r.get("status") in _LIVE_STATES)
-    _persist_dispatch(record)
-    # Units of one call share a slot, so live units can exceed slots: size the pool by units or a
-    # unit queues behind a full pool and the stale monitor kills it before its child ever starts.
-    executor = _get_executor(max(max_async_children, live_units))
+    try:
+        insert_values = _persist_dispatch(record)
+    except BaseException:
+        with _records_lock:
+            if _records.get(delegation_id) is record:
+                _records.pop(delegation_id)
+        raise
 
     def _worker() -> None:
         result: dict[str, Any] = {}
@@ -813,13 +846,18 @@ def _dispatch(
             _finalize(delegation_id, result, status)
 
     try:
+        # Units of one call share a slot, so live units can exceed slots: size the pool by units or a
+        # unit queues behind a full pool and the stale monitor kills it before its child ever starts.
+        executor = _get_executor(max(max_async_children, live_units))
         executor.submit(propagate_context_to_thread(_worker))
-    except Exception as exc:  # pragma: no cover — pool submit failure is rare
+    except Exception as exc:  # pragma: no cover — executor startup/submit failure is rare
         logger.exception("Failed to schedule async delegation %s", delegation_id)
-        with _records_lock:
-            _records.pop(delegation_id, None)
-        with _DB_LOCK, _transaction() as conn:
-            conn.execute("DELETE FROM async_delegations WHERE delegation_id=?", (delegation_id,))
+        try:
+            discarded = _discard_unscheduled_dispatch(record, insert_values)
+        except Exception as cleanup_error:
+            raise exc from cleanup_error
+        if not discarded:
+            raise
         return {"status": "rejected", "error": f"Failed to schedule async delegation{label}: {exc}"}
     if progress_fn is not None:
         _ensure_stale_monitor()
