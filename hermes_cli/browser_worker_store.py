@@ -128,6 +128,7 @@ class WorkerCall:
         self.resource, self.operation = resource, operation
         self.directories = {name: _identity(resource.path/name) for name in ('tree', 'r', 'tmp', 'claims', 'processes')}
         self.root_identity = _identity(resource.path)
+        self.tree_identity = _identity(resource.tree)
 
     @property
     def home(self):
@@ -143,9 +144,12 @@ class WorkerCall:
 
     def check(self):
         self.operation.check()
-        if (not _prove(self.resource.path).proven or _identity(self.resource.path) != self.root_identity
+        if (not _prove(self.resource.path).proven or not _prove(self.resource.tree).proven
+                or _identity(self.resource.tree) != self.tree_identity
+                or _identity(self.resource.path) != self.root_identity
                 or any(_identity(self.resource.path/name) != expected for name, expected in self.directories.items())):
             raise WorkerStateError('Private browser RAM state was replaced; every copy was retained')
+        self.resource.check_tree()
 
     def derive_key(self, purpose):
         self.check()
@@ -221,18 +225,25 @@ class WorkerResource:
         try:
             for name in ('tree', 'r', 'tmp', 'claims', 'processes'):
                 (stage/name).mkdir(mode=0o700)
-            size = archive.archive_ciphertext_size(self.home, self.relative, digest=self.digest)
-            if size is not None:
-                budget = _capacity(self.base, proof=_prove(self.base))
-                if budget.available_bytes is None or budget.available_bytes < size + 64*1024**2:
-                    raise WorkerStateError('Insufficient proven RAM budget; encrypted browser state was left unchanged')
-                archive.replay_archive(self.home, self.relative, custody=operation, digest=self.digest, target=stage/'tree')
+            self.restore_initial(stage, operation)
             self.bind(stage)
             operation.check()
             os.rename(stage, self.path)
         except BaseException:
             remove_stable_workspace(stage)
             raise
+        self._validate()
+
+    def restore_initial(self, stage, operation):
+        size = archive.archive_ciphertext_size(self.home, self.relative, digest=self.digest)
+        if size is None:
+            return
+        summary = archive.replay_archive(self.home, self.relative, custody=operation, digest=self.digest)
+        _require_restore_capacity(self.base, summary)
+        archive.replay_archive(self.home, self.relative, custody=operation, digest=self.digest, target=stage/'tree')
+
+    def check_tree(self):
+        """The concrete tree's own home/inode binding is retained through each operation."""
         self._validate()
 
     @contextlib.contextmanager
@@ -315,11 +326,30 @@ class WorkerResource:
         return _read(path)
 
 
-def resource(home, *, kind, task=None):
+def _require_restore_capacity(base, summary):
+    budget = _capacity(base, proof=_prove(base))
+    needed = summary.bytes + summary.entries*8192 + 64*1024**2
+    if budget.available_bytes is None or budget.available_bytes < needed:
+        raise WorkerStateError('Insufficient proven RAM for authenticated files and metadata; original archive retained')
+
+
+def _construct(home, identity, custody, *, base=None):
+    if 'external_tree' in identity:
+        from hermes_cli.browser_worker_external import ExternalWorkerResource
+
+        return ExternalWorkerResource(home, identity, custody, base=base)
+    return WorkerResource(home, identity, custody, base=base)
+
+
+def resource(home, *, kind, task=None, external_tree=None):
     """Shared per-home config or explicit per-home+task workspace, under the original Vault epoch."""
     home = Path(home).expanduser().resolve()
     custody = archive.capture_custody(home)
     identity = {'kind':kind, **({'task':str(task)} if task is not None else {})}
+    if external_tree is not None:
+        from hermes_cli.browser_worker_external import external_identity
+
+        identity.update(external_identity(home, external_tree))
     key = home, json.dumps(identity, sort_keys=True)
     with _POOL_LOCK:
         current = _POOL.get(key)
@@ -327,7 +357,7 @@ def resource(home, *, kind, task=None):
             and (current.custody.authority is None or current.custody.authority.is_current())):
         current.custody.check()
         return current
-    selected = WorkerResource(home, identity, custody)
+    selected = _construct(home, identity, custody)
     with _POOL_LOCK:
         _POOL[key] = selected
     return selected
@@ -350,7 +380,7 @@ def resources_in_ram(home):
                 f'Private browser RAM copy is missing at {retained}; reference {reference} and last '
                 f'checkpoint {home/archive.archive_relative(document["digest"])} were retained. '
                 'Run hermes secure-vault repair to inspect the original owners and checkpoint.')
-        selected = WorkerResource(home, document['identity'], custody, base=retained.parent)
+        selected = _construct(home, document['identity'], custody, base=retained.parent)
         if selected.path != retained or list(_identity(retained)) != document['root_inode']:
             raise WorkerStateError(f'Private browser RAM copy at {retained} was replaced; all copies were retained')
         selected._validate()
@@ -378,7 +408,7 @@ def resources_in_ram(home):
         identity = document.get('identity_doc')
         if not isinstance(identity, dict):
             raise WorkerStateError('Private browser RAM state lacks its original identity')
-        selected = WorkerResource(home, identity, archive.capture_custody(home))
+        selected = _construct(home, identity, archive.capture_custody(home))
         if selected.path != path:
             raise WorkerStateError('Private browser RAM state has an invalid resource name')
         selected._validate()
@@ -415,6 +445,13 @@ def retire_quiescent(home):
         if not archive.archive_paths(home) and not pending.paths(home):
             return {'archived':[], 'retained':[], 'missing':missing}  # no admitted private worker state
         raise
+    from hermes_cli.browser_harness_repair import reconcile_candidates
+
+    # Several task/config trees may share one harness runtime. Resolve original absence while
+    # every runtime directory still exists, before retiring any of those authenticated trees.
+    retained = reconcile_candidates(candidates)
+    if retained:
+        return {'archived':saved, 'retained':retained, 'missing':missing}
     for selected in candidates:
         operation = _guard(SessionCustody.capture(selected.home, resource=selected.custody))
         try:

@@ -81,6 +81,37 @@ The mode is a **driver** that composes with your configured browser backend: it 
 
 **Concurrent sessions:** `browser_exec` accepts a `session=<name>` argument that isolates browser work per name on every backend. Each name gets its own harness daemon (its own IPC socket, log, and state) and its own browser (a separate packaged Chromium locally, a separate cloud browser on cloud backends) — so parallel subagents or simultaneous chats no longer clobber a single shared connection. Omitting `session` uses the shared default daemon, which is fine for one-at-a-time browsing.
 
+Browser Use keeps its owned workspace and settings in private proven RAM while active,
+then checkpoints complete file trees into this profile's encrypted `browser-worker/` archives.
+The default workspace is scoped to the profile and task; settings and named daemons are
+shared within that profile. Each operation retains its original session authority. Revoked
+operations leave recovery data in place rather than borrowing a sibling's authority.
+IPC, logs and temporary files stay in RAM and are not durable workspace files.
+
+An explicit `BH_AGENT_WORKSPACE`, `BH_HOME` or `BH_CONFIG_DIR` in proven private RAM keeps
+its actual path. The same explicitly selected tree can serve multiple tasks within its owning
+profile. An SSD source requires deliberate offline conversion after closing its original owners:
+
+```sh
+hermes secure-vault repair --browser-use-workspace /absolute/original/workspace
+hermes secure-vault repair --browser-use-config /absolute/original/settings
+```
+
+Conversion authenticates an encrypted copy of every regular file and directory, including
+helper code and owner-execute bits, before removing the original source. It does not execute
+helper code. The command reports the encrypted original-source recovery archive and the RAM
+mapping; keep the same original selector for subsequent calls. A reappearing or changed source
+is refused rather than ignored or merged. Existing legacy task directories under this profile's
+`cache/browser-use/workspace/` also require `--browser-use-task ORIGINAL_TASK_ID`; unknown or
+ambiguous task names remain untouched. Ordinary offline conversion requires the selected
+profile's sessions to be closed. Logged-in `browser.worker.repair` admits only pending owned
+resources and the literal known legacy default workspace, with no caller-selected paths.
+
+Explicit `BH_RUNTIME_DIR` and `BH_TMP_DIR` must already be private proven RAM; their paths
+and shared-directory selection are preserved. These volatile directories do not gain a durable
+backup. Missing RAM, uninspectable daemon ownership, or an unverifiable checkpoint is an
+explicit refusal with the retained location. No secure-erasure or host swap guarantee is made.
+
 To opt out and force the built-in browser tools, use `/browser use off`, or:
 
 ```yaml

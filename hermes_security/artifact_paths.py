@@ -13,7 +13,7 @@ _OUTPUT_CACHE_ROOTS = (("cache", "terminal-output"), ("cache", "spillover"), ("c
 _DELEGATION_ROOT = ("cache", "delegation")
 _DELEGATION_ROOTS = (_DELEGATION_ROOT, ("delegation_cache",))
 _SNAPSHOT_CACHE_ROOTS = (("cache", "web"), ("web_cache",))
-PRIVATE_CACHE_ROOTS = (*_OUTPUT_CACHE_ROOTS, *_DELEGATION_ROOTS)
+PRIVATE_CACHE_ROOTS = (*_OUTPUT_CACHE_ROOTS, *_DELEGATION_ROOTS, ('cache', 'browser-use'))
 LEGACY_ROOTS = (*PRIVATE_CACHE_ROOTS, ("browser_screenshots",))
 ARTIFACT_ROOTS = (("artifacts", "terminal-output"), ("artifacts", "tool-results"),
                   ("artifacts", "browser"), ("artifacts", "browser-snapshots"),
@@ -203,7 +203,7 @@ def is_legacy_browser_snapshot_path(relative) -> bool:
 def is_private_cache_branch(relative) -> bool:
     """Admit only old private cache roots and their ancestors while walking."""
     parts = Path(relative).parts
-    return (parts == ("cache",) or _under(relative, PRIVATE_CACHE_ROOTS) or parts in PRIVATE_CACHE_ROOTS
+    return (parts in {("cache",), ("cache", "browser-use")} or _under(relative, PRIVATE_CACHE_ROOTS) or parts in PRIVATE_CACHE_ROOTS
             or parts in _SNAPSHOT_CACHE_ROOTS or is_legacy_browser_snapshot_path(relative)
             or parts in _LEGACY_MEDIA or parts in _LEGACY_COMPUTER_USE
             or parts in {("cache", "generated"), ("cache", "generated", "images"),

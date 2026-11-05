@@ -107,6 +107,8 @@ def _emergency_cleanup_all_sessions():
                     logger.exception("Browser cleanup retained task %s: %s", task_id, exc)
         except Exception as e:
             _bt.logger.error("Emergency cleanup error: %s", e)
+    _best_effort("Browser Use original daemon cleanup",
+                 lambda: __import__("tools.browser_use_cli", fromlist=["stop_harness_daemons"]).stop_harness_daemons(original=True))
     _best_effort("Unsaved browser recording report", _recording.report_unsaved)
     # Lightpanda servers we spawned that fell out of ``_active_sessions``.
     _best_effort("Lightpanda cleanup on exit", _stop_all_lightpanda)

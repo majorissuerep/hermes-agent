@@ -33,6 +33,12 @@ def repair_owned(home):
     try:
         owner.reserve([operation.home])
         result = store.retire_quiescent(operation.home)
+        if not result['retained'] and not result['missing']:
+            from hermes_cli.browser_use_import import repair_known_default
+
+            legacy = repair_known_default(operation.home)
+            result['archived'].extend(legacy['saved'])
+            result['retained'].extend(legacy['retained'])
         operation.check()
         return {'saved':result['archived'], 'retained':[*result['retained'], *result['missing']]}
     finally:

@@ -183,6 +183,12 @@ _UPDATE_DEPENDENCIES = (
     "hermes_cli/browser_worker_retirement_proof.py",  # hash-only original control inventory before cleanup
     "hermes_cli/browser_worker_retirement_survivors.py",  # full-checkpoint survivor proof before deletion
     "hermes_cli/browser_worker_repair.py",  # explicit legacy native browser-state import
+    "hermes_cli/browser_use_import.py",  # whole-tree Browser Use conversion and retained legacy debt
+    "hermes_cli/browser_harness_repair.py",  # native absence proof for retained harness control records
+    "hermes_cli/browser_worker_import_source.py",  # original-source proof before import retirement
+    "hermes_cli/browser_worker_external.py",  # reconstruct typed explicit-RAM worker recovery
+    "hermes_security/browser_worker_paths.py",  # exact legacy workspace classification
+    "hermes_platform/browser_process.py",  # structured source-owner admission during conversion
     "hermes_cli/browser_native_restore.py",  # retained bootstrap inputs during explicit worker recovery
     "hermes_cli/browser_native_state.py",  # authenticated native saved-state ordering during repair
     "hermes_security/browser_worker_pending.py",  # authenticated retained-RAM recovery references

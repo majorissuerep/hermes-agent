@@ -18,6 +18,10 @@ def browser_relative(relative) -> Path | None:
     parts = Path(relative).parts
     if len(parts) > 2 and parts[0] == "profiles":
         parts = parts[2:]
+    from hermes_security.browser_worker_paths import legacy_workspace_root
+
+    if legacy_workspace_root(Path(*parts)) is not None:
+        return Path(*parts)
     if parts and parts[0] in {archive.ARCHIVE_ROOT, archive.LEGACY_DEBUG_ROOT, workers.ARCHIVE_ROOT}:
         return Path(*parts)
     return None

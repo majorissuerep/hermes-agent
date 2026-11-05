@@ -47,11 +47,22 @@ def build_secure_vault_parser(subparsers) -> None:
                           help="repair: explicitly connect to the selected original backend to settle a quiescent orphan; retains unknown/live state")
     recovery.add_argument("--outgoing-browser-legacy", action="store_true",
                           help="repair: explicitly seal the old selected target browser profile; refuses raw/cipher conflicts")
-    parser.add_argument(
+    recovery.add_argument(
         "--native-browser-state", metavar="DIRECTORY",
         help="repair: explicitly move an owned .agent-browser directory into verified encrypted browser state; "
              "retire the original only after full verification, retaining an encrypted recovery snapshot",
     )
+    recovery.add_argument(
+        "--browser-use-workspace", metavar="DIRECTORY",
+        help="repair: deliberately import one Browser Use workspace into authenticated protected storage; "
+             "all original files and helper code are preserved without execution",
+    )
+    recovery.add_argument(
+        "--browser-use-config", metavar="DIRECTORY",
+        help="repair: deliberately import one selected Browser Use config/auth root, retaining full encrypted recovery",
+    )
+    parser.add_argument("--browser-use-task", metavar="TASK_ID",
+                        help="repair workspace: exact original task ID for a legacy sanitized in-home workspace")
     parser.add_argument(
         "--key-only", action="store_true",
         help="migrate: non-interactive creation for daemons/scripts — generate an X25519 pair, "
@@ -77,8 +88,11 @@ def build_secure_vault_parser(subparsers) -> None:
     )
 
     def _run(args):
-        if args.native_browser_state and args.vault_command != "repair":
-            parser.error("--native-browser-state requires secure-vault repair")
+        selected = (args.native_browser_state or args.browser_use_workspace or args.browser_use_config)
+        if selected and args.vault_command != "repair":
+            parser.error("browser state import selectors require secure-vault repair")
+        if args.browser_use_task is not None and not args.browser_use_workspace:
+            parser.error("--browser-use-task requires --browser-use-workspace")
         from hermes_cli.vault_cmd import cmd_vault
         from hermes_cli.vault_export import export_command
 

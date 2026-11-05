@@ -57,6 +57,10 @@ def archive_relative(digest: str) -> PurePosixPath:
 
 
 def worker_state_kind(relative) -> str | None:
+    from hermes_security.browser_worker_paths import legacy_workspace_root
+
+    if legacy_workspace_root(relative) is not None:
+        return 'legacy'
     parts = PurePosixPath(Path(relative).as_posix()).parts
     if not parts or parts[0] != ARCHIVE_ROOT:
         return None

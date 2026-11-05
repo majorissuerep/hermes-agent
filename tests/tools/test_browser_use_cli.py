@@ -28,6 +28,17 @@ from tools import browser_tool_cloud as bt_cloud
 from tools import browser_tool_session as bt_session
 
 
+pytest_plugins = ['tests.tools.test_browser_native_private_state']
+
+
+@pytest.fixture(autouse=True)
+def _private_harness_storage(native_state, monkeypatch):
+    """Real crypto/home boundaries; filesystem RAM and vendor daemon are explicit unit seams."""
+    monkeypatch.setattr('tools.browser_harness_runtime._DAEMONS', {})
+    monkeypatch.setattr('hermes_platform.browser_process.harness_process_record', lambda *_a, **_kw: None)
+    monkeypatch.setattr('hermes_platform.browser_process.harness_runtime_absent', lambda *_a, **_kw: True)
+
+
 @pytest.fixture(autouse=True)
 def _clean_env(monkeypatch):
     monkeypatch.delenv("BU_NAME", raising=False)
@@ -252,8 +263,47 @@ class TestVaultSupervisorAttach:
         assert _fake_supervisor_registry == [("t-vault", "ws://127.0.0.1:47000/devtools/browser/t-vault")]
 
 
+@pytest.fixture
+def _latched_fake_daemons(_private_harness_storage, native_state, monkeypatch):
+    """Known live inert process per fake CLI name, stopped by its own private EOF control."""
+    from hermes_platform.processes import get_process_start_time
+
+    children = {}
+    original = bu_cli._run_cli_killing_process_group
+    def record(_path, *, name, **_kwargs):
+        child = children.get(name)
+        if child is None or child.poll() is not None:
+            return None
+        return {'pid':child.pid, 'start_time':get_process_start_time(child.pid)}
+    def absent(_path, *, name, **_kwargs):
+        child = children.get(name)
+        return child is None or child.poll() is not None
+    def execute(cmd, code, env, timeout):
+        name = env.get('BU_NAME','default')
+        if '--reload' not in cmd and absent(None, name=name):
+            children[name] = subprocess.Popen([sys.executable, '-c', 'import sys;sys.stdin.buffer.read()'],
+                                             env={'HOME':str(native_state[1]), 'PATH':'/usr/bin:/bin'},
+                                             stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                             close_fds=True, start_new_session=True)
+        result = original(cmd, code, env, timeout)
+        if '--reload' in cmd and name in children:
+            children[name].stdin.close()
+            children[name].wait(timeout=5)
+        return result
+    monkeypatch.setattr('hermes_platform.browser_process.harness_process_record', record)
+    monkeypatch.setattr('hermes_platform.browser_process.harness_runtime_absent', absent)
+    monkeypatch.setattr(bu_cli, '_run_cli_killing_process_group', execute)
+    try:
+        yield
+    finally:
+        for child in children.values():
+            if not child.stdin.closed:
+                child.stdin.close()
+            child.wait(timeout=5)
+
+
 class TestBackendSwapRetargetsDaemons:
-    def test_browser_swap_restarts_every_daemon_on_the_new_endpoint(self, tmp_path, monkeypatch):
+    def test_browser_swap_restarts_every_daemon_on_the_new_endpoint(self, tmp_path, monkeypatch, _latched_fake_daemons):
         """/browser connect|disconnect swap the endpoint inside cleanup_all_browsers(). The harness daemon
         latches BU_CDP_* when it starts and outlives every call, so without a stop there every later
         browser_exec, named or not, kept driving the browser from before the swap."""
@@ -1298,7 +1348,6 @@ class TestExecHybridPrivateUrlRouting:
         monkeypatch.setattr(bt_cloud, "_get_cloud_provider", lambda: object())
         monkeypatch.setattr(bt_cloud, "_auto_local_for_private_urls", lambda: True)
         monkeypatch.setattr(bu_cli, "_exec_route_is_sidecar", {}, raising=False)
-        monkeypatch.setattr(bu_cli, "_driven_daemons", set())
         self.cloud_keys = []
         monkeypatch.setattr(bt_session, "_get_session_info",
                             lambda key: self.cloud_keys.append(key) or {"cdp_url": "wss://cloud.example/x"})

@@ -5,6 +5,10 @@ from hermes_security import vault as vault_mod
 
 
 def run(args, home) -> int:
+    if getattr(args, "browser_use_workspace", None) or getattr(args, "browser_use_config", None):
+        from hermes_cli.browser_use_import import cmd_import
+
+        return cmd_import(args, home)
     if not vault_mod.vault_exists(home):
         print(f"✗ No vault at {home}; run 'hermes secure-vault migrate' first")
         return 1
@@ -81,7 +85,8 @@ def dispatch(args, home) -> int:
     from hermes_cli.profile_frame_repair import cmd_parent_profile_repair
 
     if any(getattr(args, name, False) for name in (
-            "outgoing_browser_profile", "outgoing_browser_legacy", "native_browser_state")):
+            "outgoing_browser_profile", "outgoing_browser_legacy", "native_browser_state",
+            "browser_use_workspace", "browser_use_config")):
         return run(args, home)
     result = cmd_parent_profile_repair(args, home)
     return run(args, home) if result is None else result

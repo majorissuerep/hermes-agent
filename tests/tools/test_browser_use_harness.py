@@ -8,6 +8,15 @@ import pytest
 
 from tools import browser_use_cli as bu
 
+pytest_plugins = ['tests.tools.test_browser_native_private_state']
+
+
+@pytest.fixture(autouse=True)
+def owned_harness_environment(native_state, monkeypatch):
+    # The child-env probe is an inert Python producer; actual Browser Use is qualified separately.
+    monkeypatch.setattr('hermes_platform.browser_process.harness_runtime_absent', lambda *_a, **_kw: True)
+    monkeypatch.setattr('hermes_platform.browser_process.harness_process_record', lambda *_a, **_kw: None)
+
 
 @pytest.mark.platforms("posix", "windows")
 def test_harness_runs_on_an_interpreter_without_its_own_site_packages(monkeypatch):

@@ -133,6 +133,9 @@ def repair_clobbered_state(home: Path | str) -> dict:
     recovered = recover_quiescent_profiles(home_path)
     for key in ("archived", "retained"):
         browser[key].extend(recovered[key])
+    from hermes_cli.browser_use_import import legacy_debt
+
+    browser["retained"].extend(legacy_debt(home_path))
     report["browser_archived"], report["browser_retained"] = browser["archived"], browser["retained"]
     return report
 
@@ -722,6 +725,15 @@ def _convert_browser_profiles(home: Path, report: MigrationReport) -> None:
     from hermes_cli.browser_profile_repair import convert_legacy_browser_profiles
 
     retained = convert_legacy_browser_profiles(home)["retained"]
+    from hermes_security.browser_worker_paths import legacy_workspace_root
+
+    for relative in report.browser_profiles:
+        parts = Path(relative).parts
+        inner = Path(*parts[2:]) if len(parts) > 2 and parts[0] == 'profiles' else Path(relative)
+        if legacy_workspace_root(inner) is not None:
+            report.failures.append(f'{relative}: Browser Use workspace retained; explicitly run '
+                                   'hermes secure-vault repair --browser-use-workspace DIRECTORY '
+                                   '--browser-use-task ORIGINAL_TASK_ID')
     report.failures += [f"{item} — run 'hermes secure-vault repair' once resolved" for item in retained]
 
 
@@ -730,6 +742,11 @@ def _browser_root(relative: Path) -> str:
     parts = Path(relative).parts
     prefix = parts[:2] if len(parts) > 2 and parts[0] == "profiles" else ()
     inner = parts[len(prefix):]
+    from hermes_security.browser_worker_paths import legacy_workspace_root
+
+    workspace = legacy_workspace_root(Path(*inner))
+    if workspace is not None:
+        return Path(*prefix, workspace).as_posix()
     return Path(*prefix, *inner[:2 if inner[0] != "chrome-debug" else 1]).as_posix()
 
 
