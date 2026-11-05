@@ -61,6 +61,22 @@ class NativeEnvironment(dict):
         self.check()
         return self.operation.derive_key(purpose)
 
+    def check_target(self, path):
+        self.check()
+        self.operation.check_target(path)
+
+    def aad_path(self, relative):
+        self.check()
+        return self.operation.aad_path(relative)
+
+    def encrypt(self, payload, *, purpose, relpath):
+        self.check()
+        return self.operation.encrypt(payload, purpose=purpose, relpath=relpath)
+
+    def decrypt(self, payload, *, purpose, relpath):
+        self.check()
+        return self.operation.decrypt(payload, purpose=purpose, relpath=relpath)
+
 
 class NativeLease:
     def __init__(self, home, session, resource):
