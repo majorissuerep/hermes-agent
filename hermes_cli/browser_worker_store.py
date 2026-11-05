@@ -225,6 +225,8 @@ class WorkerResource:
         with _lock(self.lock_path, check_alive=operation.check):
             document = pending.read_optional(self.home, self.digest, custody=operation)
             if document is not None:
+                if document.get('retirement') is not None:
+                    raise WorkerStateError('Verified worker retirement is pending; run browser.worker.repair')
                 retained = Path(document['path'])
                 if retained != self.path or pending.root_missing(document) or list(_identity(retained)) != document['root_inode']:
                     raise WorkerStateError(
@@ -376,12 +378,15 @@ def _require_idle(selected):
 
 def retire_quiescent(home):
     """Explicit offline repair: checkpoint before retiring any sole RAM copy; never signal an owner."""
-    from hermes_security.protected_workspace import remove_stable_workspace
     from hermes_security import browser_worker_pending as pending
+    from hermes_cli import browser_worker_retirement as retirement
 
     operation = _guard(SessionCustody.capture(home))
+    completed, interrupted = retirement.resume(home, operation)
+    if interrupted:
+        return {'archived':completed, 'retained':interrupted, 'missing':[]}
     missing, retained = pending.recover_missing(home, custody=operation)
-    saved = []
+    saved = completed
     if retained:
         return {'archived':saved, 'retained':retained, 'missing':missing}
     try:
@@ -407,9 +412,8 @@ def retire_quiescent(home):
                 call.checkpoint()
                 _require_idle(selected)
                 call.check()
-                remove_stable_workspace(selected.path)
-                if pending.read_optional(home, selected.digest, custody=operation) is not None:
-                    pending.remove(home, selected.digest, custody=operation)
+                retirement.begin(selected, call)
+                retirement.finish(home, selected.digest, operation)
                 saved.append(selected.relative.as_posix())
         except (VaultError, OSError, ValueError) as exc:
             retained.append(f'{selected.relative.as_posix()} ({exc})')

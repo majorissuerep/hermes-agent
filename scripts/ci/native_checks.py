@@ -17,6 +17,8 @@ LINUX_FILES = [
     "tests/tools/test_browser_native_private_state.py",
     "tests/tools/test_browser_native_restore.py",
     "tests/hermes_cli/test_browser_worker_store.py",
+    "tests/hermes_cli/test_browser_worker_retirement.py",
+    "tests/hermes_cli/test_browser_worker_retirement_survivors.py",
     "tests/hermes_cli/test_browser_worker_management.py",
     "tests/hermes_platform/test_client_capture.py",
     "tests/hermes_platform/test_remote_workspace.py",

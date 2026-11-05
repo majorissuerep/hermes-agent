@@ -179,6 +179,9 @@ _UPDATE_DEPENDENCIES = (
     "hermes_security/browser_profile_archive.py",  # verified browser archive repair during migration
     "hermes_security/browser_worker_archive.py",  # typed private browser configuration/workspace recovery
     "hermes_cli/browser_worker_store.py",  # quiescent private browser state during explicit repair
+    "hermes_cli/browser_worker_retirement.py",  # authenticated resumable worker cleanup before repair deletes RAM
+    "hermes_cli/browser_worker_retirement_proof.py",  # hash-only original control inventory before cleanup
+    "hermes_cli/browser_worker_retirement_survivors.py",  # full-checkpoint survivor proof before deletion
     "hermes_cli/browser_worker_repair.py",  # explicit legacy native browser-state import
     "hermes_cli/browser_native_restore.py",  # retained bootstrap inputs during explicit worker recovery
     "hermes_cli/browser_native_state.py",  # authenticated native saved-state ordering during repair
