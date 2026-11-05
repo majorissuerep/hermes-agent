@@ -1228,3 +1228,18 @@ def test_prune_never_evicts_live_records():
 
     assert {"live-stalling", "live-finalizing", "live-running"} <= survivors
     assert "done-0" not in survivors and len(survivors - {"live-stalling", "live-finalizing", "live-running"}) == ad._MAX_RETAINED_COMPLETED
+
+
+def test_dispatch_rejected_at_capacity_uses_low_cost_default_and_respects_opt_in(monkeypatch):
+    from hermes_cli.config_defaults import DEFAULT_CONFIG
+    from tools import delegate_tool_config as config
+
+    monkeypatch.delenv("DELEGATION_MAX_CONCURRENT_CHILDREN", raising=False)
+    monkeypatch.setattr(config, "_cfg", dict)
+    assert config._get_max_concurrent_children() == 1
+    assert DEFAULT_CONFIG["delegation"]["max_concurrent_children"] == config._get_max_concurrent_children()
+    assert config._get_oneshot_max_children() == 2
+    monkeypatch.setenv("DELEGATION_MAX_CONCURRENT_CHILDREN", "3")
+    assert config._get_max_concurrent_children() == 3
+    monkeypatch.setattr(config, "_cfg", lambda: {"max_concurrent_children": 2})
+    assert config._get_max_concurrent_children() == 2

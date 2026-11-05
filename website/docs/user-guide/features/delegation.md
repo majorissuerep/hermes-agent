@@ -208,7 +208,7 @@ This is off by default because every unit is a new turn for the orchestrator: a 
 
 The dispatch handle lists each unit (`units[].delegation_id`, `group`, `task_indexes`); unit ids are the call's id suffixed `-1`, `-2`, …, and every unit of one call shares a single slot of `delegation.max_concurrent_children`, so grouping never changes capacity accounting (the worker pool grows to the number of live units so no unit waits behind a full pool). An orchestrator subagent waits for its whole batch in the current turn so it can synthesize the results.
 
-- **Maximum concurrency:** 10 tasks by default (configurable via `delegation.max_concurrent_children` or the `DELEGATION_MAX_CONCURRENT_CHILDREN` env var; floor of 1, no hard ceiling). Batches larger than the limit return a tool error rather than being silently truncated.
+- **Maximum concurrency:** 1 child by default (configurable via `delegation.max_concurrent_children` or the `DELEGATION_MAX_CONCURRENT_CHILDREN` env var; floor of 1, no hard ceiling). Batches larger than the limit return a tool error rather than being silently truncated. Increase the setting deliberately when parallel work justifies the extra model requests; existing explicit settings are preserved.
 - **Thread pool:** Uses `ThreadPoolExecutor` with the configured concurrency limit as max workers
 - **Progress display:** In CLI mode, a tree-view shows tool calls from each subagent in real-time with per-task completion lines. In gateway mode, progress is batched and relayed to the parent's progress callback. CLI and TUI completion notices use task-first titles such as `Subagent Task Completed: Review changes`; multi-task groups use the group name and task count. Unsuccessful or incomplete work gets a corresponding status label. These compact notices do not replace the full results delivered to the parent agent.
 - **Result ordering:** Within a unit, results are sorted by task index to match input order regardless of completion order; `TASK i/N` labels index the whole call
@@ -660,7 +660,7 @@ error.
 # In ~/.hermes/config.yaml
 delegation:
   max_iterations: 250                       # Max turns per child (default: 250)
-  # max_concurrent_children: 10             # Parallel children per batch (default: 10)
+  # max_concurrent_children: 1              # Parallel children per batch (default: 1)
   # independent_completions: false          # true = each task/group returns as it finishes (default: one message per call)
   # worktree_isolation: false               # Give each child its own git worktree (see Worktree Isolation above)
   # max_spawn_depth: 1                      # Tree depth (floor 1, no ceiling, default 1 = flat). Raise to 2 to allow orchestrator children to spawn leaves; 3+ for deeper trees.

@@ -14,7 +14,7 @@ logger = logging.getLogger("tools.delegate_tool")  # log-record parity with the 
 # match hermes_cli.runtime_provider.RUNTIME_PROVIDER_TYPE_CUSTOM.
 _RUNTIME_PROVIDER_CUSTOM = "custom"
 
-_DEFAULT_MAX_CONCURRENT_CHILDREN = 10
+_DEFAULT_MAX_CONCURRENT_CHILDREN = 1
 # One-shot guard: _get_max_concurrent_children() runs on every get_definitions()
 # schema rebuild, so the >10 cost advisory would otherwise log on every turn.
 _HIGH_CONCURRENCY_WARNED = False
@@ -91,7 +91,7 @@ def _get_oneshot_max_children() -> int:
 
 
 def _get_max_concurrent_children() -> int:
-    """delegation.max_concurrent_children > DELEGATION_MAX_CONCURRENT_CHILDREN env > 10.
+    """delegation.max_concurrent_children > DELEGATION_MAX_CONCURRENT_CHILDREN env > 1.
 
     Floor of 1 is the only bound enforced; there is no ceiling.
     """

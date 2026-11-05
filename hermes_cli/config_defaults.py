@@ -944,7 +944,7 @@ DEFAULT_CONFIG = {
         "reasoning_effort": "",
         # Max parallel children per batch AND max concurrent background delegation units; async
         # dispatches beyond it run synchronously. Floor 1, no ceiling.
-        "max_concurrent_children": 10,
+        "max_concurrent_children": 1,
         # Background fan-outs return as ONE message when the whole call finishes. true = each task
         # (or `group`) returns on its own as it finishes — more new turns for the orchestrator.
         "independent_completions": False,
