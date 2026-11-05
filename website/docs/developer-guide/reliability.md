@@ -63,6 +63,32 @@ retry-masked failures, cancellations, and partial matrices are not qualification
 Record the exact SHA, OS/image, protocol, model, checks, and cleanup result.
 Never upload credentials, decrypted state, or test homes.
 
+## Default verification budget
+
+Routine fork verification uses the focused profile: seven selected Python files
+cover encrypted owner/child authority, bounded delegation, formal-checker repair
+feedback, context preservation, encrypted conversation/resume, and the selection
+command itself. One test worker runs serially with zero automatic file retries.
+The provider conversation uses the LiteLLM route against a strict local HTTP
+oracle; it is not a live-model quality or availability measurement.
+
+GitHub uses one focused Python job, plus one serial native terminal workflow per
+supported OS. JavaScript checks use one workspace/check worker. Private checks
+use one Python worker and a two-CPU limit. Full regression tests remain in the
+repository and require an explicit full profile; broad E2E/upgrade matrices also
+require that profile. A focused success must always be reported as focused.
+
+Use python scripts/ci/focused_tests.py --plan to inspect the exact selection.
+Use python scripts/ci/verify.py --test-profile full for the complete serial local
+regression suite, or select test_profile=full on a GitHub workflow dispatch.
+
+Release evidence additionally records a few real agent workflows: reasoning
+verification/recovery, managed child completion, self-management without another
+unlock, and context continuity. Record wall time, model requests and tokens,
+tool calls, child counts, verification attempts, and actual failures. Count
+coverage and resource use separately from successful outcomes. Do not rerun the
+whole regression suite to diagnose one failed workflow.
+
 ## Installation and encrypted state
 
 Acceptance covers clean install, older-fork update, damaged source, a previously

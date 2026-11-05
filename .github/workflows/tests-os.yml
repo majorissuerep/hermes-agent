@@ -22,6 +22,10 @@ name: OS-specific tests
 on:
   workflow_call:
     inputs:
+      test_profile:
+        description: focused fork contracts or explicit full regressions
+        type: string
+        default: focused
       commit:
         description: Commit to test and build. Empty keeps the triggering commit.
         type: string
@@ -47,30 +51,9 @@ jobs:
     timeout-minutes: ${{ github.repository == 'NousResearch/hermes-agent' && 30 || 60 }}
     strategy:
       fail-fast: false
+      max-parallel: 1
       matrix:
-        include:
-          - name: Linux terminal usability
-            runner: ubuntu-latest
-            marker: linux
-            workers: 1
-            files: >-
-              tests/tui_runtime/test_terminal_model_pty.py
-              tests/tui_runtime/test_terminal_global_model_pty.py
-              tests/tui_runtime/test_terminal_session_naming_pty.py
-              tests/tui_runtime/test_terminal_pty_custody.py
-              tests/hermes_cli/test_update_finish.py
-              tests/tools/test_terminal_management_launcher.py
-              tests/e2e/test_fixture_download_cache.py
-          # Two slices on the free standard runner (3 cores, 3 workers): one lane ran
-          # ~7.5 min and became the slowest required job once the Linux suite split.
-          - name: macOS-only tests (1/2)
-            runner: macos-latest
-            marker: macos
-            slice: 1/2
-          - name: macOS-only tests (2/2)
-            runner: macos-latest
-            marker: macos
-            slice: 2/2
+        include: ${{ fromJSON(inputs.test_profile == 'full' && '[{"name":"Linux terminal usability","runner":"ubuntu-latest","marker":"linux","workers":1,"files":"tests/tui_runtime/test_terminal_model_pty.py tests/tui_runtime/test_terminal_global_model_pty.py tests/tui_runtime/test_terminal_session_naming_pty.py tests/tui_runtime/test_terminal_pty_custody.py tests/hermes_cli/test_update_finish.py tests/tools/test_terminal_management_launcher.py tests/e2e/test_fixture_download_cache.py"},{"name":"macOS full (1/2)","runner":"macos-latest","marker":"macos","slice":"1/2"},{"name":"macOS full (2/2)","runner":"macos-latest","marker":"macos","slice":"2/2"}]' || '[{"name":"Linux terminal workflow","runner":"ubuntu-latest","marker":"linux","workers":1,"files":"tests/tui_runtime/test_terminal_model_pty.py tests/hermes_security/test_session_authority.py"},{"name":"macOS terminal workflow","runner":"macos-latest","marker":"macos","workers":1,"files":"tests/tui_runtime/test_terminal_model_pty.py tests/hermes_security/test_session_authority.py"}]') }}
     steps:
       - name: Checkout code
         uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a # v7.0.1
@@ -155,7 +138,7 @@ jobs:
         env:
           UV_CACHE_DIR: ${{ steps.pm.outputs.uv-cache-path }}
           # Linux serializes real PTYs; preserve the existing macOS worker count.
-          HERMES_TEST_WORKERS: ${{ matrix.workers || (github.repository == 'NousResearch/hermes-agent' && '16' || '3') }}
+          HERMES_TEST_WORKERS: ${{ matrix.workers || '1' }}
           HERMES_E2E_REQUIRE_TUI: '1'
           HERMES_TEST_SLICE: ${{ matrix.slice || '' }}
           # Belt-and-suspenders with tests/conftest.py's env blanking: no

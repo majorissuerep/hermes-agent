@@ -17,6 +17,11 @@ name: CI
 on:
   workflow_dispatch:
     inputs:
+      test_profile:
+        description: Focused contracts by default; full regression matrices are opt-in.
+        type: choice
+        options: [focused, full]
+        default: focused
       release:
         description: 'Stable-release candidate run: force every applicability lane and make the aggregate gate strict (skipped required lanes fail).'
         required: false
@@ -29,6 +34,10 @@ on:
         default: ''
   workflow_call:
     inputs:
+      test_profile:
+        description: focused or full regression scope
+        type: string
+        default: focused
       commit:
         description: Commit to test and build. Empty keeps the triggering commit.
         type: string
@@ -108,6 +117,7 @@ jobs:
         id: gate-lanes
         env:
           RELEASE: ${{ inputs.release }}
+          TEST_PROFILE: ${{ inputs.test_profile || 'focused' }}
           EVENT_NAME: ${{ github.event_name }}
           QUALIFICATION_PUSH: ${{ github.event_name == 'push' && github.ref == 'refs/heads/qualification/terminal-release' }}
           CLASSIFIED: ${{ toJSON(steps.classify.outputs) }}
@@ -116,7 +126,7 @@ jobs:
           import json, os
           values = json.loads(os.environ['CLASSIFIED'])
           release = os.environ['RELEASE'] == 'true'
-          e2e_allowed = (
+          e2e_allowed = os.environ['TEST_PROFILE'] == 'full' and (
               release
               or os.environ['EVENT_NAME'] == 'workflow_dispatch'
               or os.environ['QUALIFICATION_PUSH'] == 'true'
@@ -147,6 +157,7 @@ jobs:
     if: needs.detect.outputs.python == 'true' || needs.detect.outputs.e2e == 'true' || needs.detect.outputs.e2e_upgrade == 'true'
     uses: ./.github/workflows/tests.yml
     with:
+      test_profile: ${{ inputs.test_profile || 'focused' }}
       commit: ${{ inputs.commit }}
       e2e: ${{ needs.detect.outputs.e2e == 'true' }}
       e2e_upgrade: ${{ needs.detect.outputs.e2e_upgrade == 'true' }}
@@ -162,6 +173,7 @@ jobs:
     if: needs.detect.outputs.python == 'true'
     uses: ./.github/workflows/tests-os.yml
     with:
+      test_profile: ${{ inputs.test_profile || 'focused' }}
       commit: ${{ inputs.commit }}
       strict_acceptance: ${{ inputs.strict_acceptance || '' }}
 

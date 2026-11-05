@@ -96,7 +96,7 @@ def _on(workflow: dict) -> dict:
 
 
 def _detect_outputs(lanes: dict[str, bool], event_name: str = "workflow_dispatch", *,
-                    ref: str = "refs/heads/main") -> dict[str, Any]:
+                    ref: str = "refs/heads/main", test_profile: str = "full") -> dict[str, Any]:
     """The classifier's lines -> the composite action's outputs -> ci.yaml ``detect`` outputs.
 
     Replays a diagnostic dispatch by default. Releases and the explicit qualification push also
@@ -111,7 +111,7 @@ def _detect_outputs(lanes: dict[str, bool], event_name: str = "workflow_dispatch
     classify = next(s for s in detect["steps"] if s.get("id") == "classify")
     assert classify["uses"] == "./.github/actions/detect-changes"
     steps = {"classify": {"outputs": action_out}}
-    ctx = {"steps": steps, "github": {"event_name": event_name, "ref": ref}, "inputs": {}}
+    ctx = {"steps": steps, "github": {"event_name": event_name, "ref": ref}, "inputs": {"test_profile": test_profile}}
     steps["gate-lanes"] = {"outputs": workflow_steps.outputs(gate, ctx)}
     return {k: gha.render(v, ctx) for k, v in detect["outputs"].items()}
 
@@ -178,7 +178,7 @@ def _run_workflow(rel: str, *, inputs: dict[str, Any], detect: dict[str, Any] | 
 
 
 def _ci_run(lanes: dict[str, bool]) -> dict:
-    return _run_workflow(".github/workflows/ci.yaml", inputs={}, detect=_detect_outputs(lanes))
+    return _run_workflow(".github/workflows/ci.yaml", inputs={"test_profile": "full"}, detect=_detect_outputs(lanes))
 
 
 def _reached(run: dict, *path: str) -> dict | None:
@@ -198,7 +198,7 @@ def _selected_test_files(node: dict, name: str) -> set[str]:
     if "shard" in matrix:
         cells = [{"shard": s} for s in gha.render(matrix["shard"], ctx)]
     else:
-        cells = matrix.get("include", [{}])
+        cells = gha.render(matrix.get("include", [{}]), ctx)
     assert cells, f"{name}: empty matrix"
     selected = set()
     for cell in cells:
@@ -738,7 +738,7 @@ def _strict_env(run: dict, path: tuple[str, ...], rel: str, job: str, step_name:
 def test_strict_acceptance_dispatch_reaches_every_e2e_suite(value):
     """`gh workflow run ci.yaml -f strict_acceptance=upd-txn` (the batch's acceptance run)."""
     lanes = cc.classify([])  # a dispatch has no diff: every lane on
-    run = _run_workflow(".github/workflows/ci.yaml", inputs={"release": False, "strict_acceptance": value},
+    run = _run_workflow(".github/workflows/ci.yaml", inputs={"release": False, "strict_acceptance": value, "test_profile": "full"},
                         detect=_detect_outputs(lanes))
     for path, rel, job, step in _STRICT_STEPS:
         assert _strict_env(run, path, rel, job, step) == value, "/".join(path)
@@ -787,3 +787,11 @@ def test_pending_outgoing_profile_restore_fence_reaches_upgrade_lane():
 ])
 def test_owned_native_maintenance_dependencies_reach_upgrade_lane(dependency):
     assert cc.classify([dependency])['e2e_upgrade']
+
+
+@pytest.mark.parametrize("profile,enabled", [("focused", False), ("full", True)])
+def test_broad_e2e_dispatch_requires_an_explicit_full_profile(profile, enabled):
+    lanes = cc.classify([], run_e2e=True)
+    outputs = _detect_outputs(lanes, "workflow_dispatch", test_profile=profile)
+    assert outputs["python"] == "true"
+    assert outputs["e2e"] == outputs["e2e_upgrade"] == gha.to_string(enabled)

@@ -72,6 +72,8 @@ def setup(env: dict[str, str], directory: Path) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--plan", action="store_true", help="show selected consumers without provisioning or running checks")
+    parser.add_argument("--test-profile", choices=("focused", "full"), default="focused",
+                        help="focused fork contracts by default; full suite only when requested")
     parser.add_argument("--base", help="reviewed Git base; default is the PR merge base or HEAD's first parent")
     parser.add_argument("--event", choices=("pull_request", "push", "manual"))
     args = parser.parse_args()
@@ -93,8 +95,8 @@ def main() -> None:
         directory = Path(temporary)
         env.update({
             "HERMES_HOME": str(directory / "home"), "HERMES_RUNTIME_DIR": str(directory / "tools"),
-            "TMPDIR": str(directory / "tmp"), "HERMES_TEST_WORKERS": "4",
-            "HERMES_TEST_FILE_RETRIES": "0", "HERMES_TEST_FILE_TIMEOUT": "600", "VITEST_MAX_WORKERS": "2",
+            "TMPDIR": str(directory / "tmp"), "HERMES_TEST_WORKERS": "1",
+            "HERMES_TEST_FILE_RETRIES": "0", "HERMES_TEST_FILE_TIMEOUT": "600", "VITEST_MAX_WORKERS": "1",
         })
         for name in ("HERMES_TEST_PATHS", "HERMES_TEST_SLICE"):
             env.pop(name, None)
@@ -114,7 +116,7 @@ def main() -> None:
             run(["npm", "ci"], env)
             run(["npm", "run", "build", "--prefix", "ui-tui"], env)
         if lanes["python"]:
-            run(["scripts/run_tests.sh", "-j", "4", "--file-retries", "0"], env)
+            run([python, "scripts/ci/focused_tests.py", "--profile", args.test_profile], env)
         if lanes["frontend"]:
             run(["node", ".github/scripts/run-workspace-checks.mjs", "--concurrency", "1"], env)
         if lanes["site"]:

@@ -3,6 +3,10 @@ name: Tests
 on:
   workflow_call:
     inputs:
+      test_profile:
+        description: focused fork contracts or explicit full regressions
+        type: string
+        default: focused
       commit:
         description: Commit to test and build. Empty keeps the triggering commit.
         type: string
@@ -42,15 +46,15 @@ jobs:
     # 3x the price because files contend for the shared machine. Separate machines
     # scale linearly. run_tests_parallel.py partitions from the checkout alone, so
     # both slices agree on the split without a planning job.
-    # Fork: eight slices on standard runners keep the complete suite practical
-    # without access to the organization's larger runners.
+    # Focused checks use one job/worker. Full regression slicing is explicit.
     name: Run tests (${{ matrix.slice }}/${{ matrix.total }})
     runs-on: ${{ github.repository == 'NousResearch/hermes-agent' && 'ubuntu-latest-32-core' || 'ubuntu-latest' }}
     timeout-minutes: ${{ github.repository == 'NousResearch/hermes-agent' && 30 || 120 }}
     strategy:
       fail-fast: false
+      max-parallel: 1
       matrix:
-        include: ${{ fromJSON(github.repository == 'NousResearch/hermes-agent' && '[{"slice":1,"total":2},{"slice":2,"total":2}]' || '[{"slice":1,"total":8},{"slice":2,"total":8},{"slice":3,"total":8},{"slice":4,"total":8},{"slice":5,"total":8},{"slice":6,"total":8},{"slice":7,"total":8},{"slice":8,"total":8}]') }}
+        include: ${{ fromJSON(inputs.test_profile != 'full' && '[{"slice":1,"total":1}]' || github.repository == 'NousResearch/hermes-agent' && '[{"slice":1,"total":2},{"slice":2,"total":2}]' || '[{"slice":1,"total":8},{"slice":2,"total":8},{"slice":3,"total":8},{"slice":4,"total":8},{"slice":5,"total":8},{"slice":6,"total":8},{"slice":7,"total":8},{"slice":8,"total":8}]') }}
     steps:
       - name: Checkout code
         uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a # v7.0.1
@@ -113,12 +117,18 @@ jobs:
         # No --files: the runner discovers the suite itself. The discovered
         # set is identical to the list the removed matrix job used to pass in.
         run: |
-          scripts/run_tests.sh
+          case "$TEST_PROFILE" in focused|full) ;; *) echo "unknown test profile" >&2; exit 2 ;; esac
+          if [ "$TEST_PROFILE" = full ]; then
+            scripts/run_tests.sh --file-retries 0
+          else
+            "$HERMES_PYTHON" scripts/ci/focused_tests.py
+          fi
         env:
+          TEST_PROFILE: ${{ inputs.test_profile }}
           # Fork: standard runners have 4 cores; scale workers per host instead of
           # upstream's fixed 32 (its 32-core runner count).
           HERMES_TEST_SLICE: ${{ matrix.slice }}/${{ matrix.total }}
-          HERMES_TEST_WORKERS: ${{ github.repository == 'NousResearch/hermes-agent' && '32' || '4' }}
+          HERMES_TEST_WORKERS: ${{ inputs.test_profile != 'full' && '1' || (github.repository == 'NousResearch/hermes-agent' && '32' || '4') }}
           HERMES_TEST_FILE_TIMEOUT: 600
           # Ensure tests don't accidentally call real APIs
           OPENROUTER_API_KEY: ""
