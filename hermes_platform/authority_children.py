@@ -14,8 +14,9 @@ import psutil
 class NativeChild:
     """Stream bounded output without a plaintext spool or an inherited caller FD."""
 
-    def __init__(self, command, *, env, cwd, key_fd, input_bytes=b"", deadline=3600):
+    def __init__(self, command, *, env, cwd, key_fd, input_bytes=b"", deadline=3600, _on_cleanup_complete=None):
         from agent.memory_provider import spawn_context_thread
+        self._on_cleanup_complete = _on_cleanup_complete
         self.output = queue.Queue(maxsize=128)
         self.cancelled = threading.Event()
         self.finished = threading.Event()
@@ -123,6 +124,8 @@ class NativeChild:
                     thread.join(timeout=0.1)
                 if self.cleanup_complete():
                     self.finished.set()
+                    if self._on_cleanup_complete is not None:
+                        self._on_cleanup_complete(self)
                     return
             self.finished.wait(0.1)
 

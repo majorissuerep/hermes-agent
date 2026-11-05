@@ -97,6 +97,12 @@ def _forget_completed(identity, authority, child):
             del _jobs[identity]
 
 
+def _retire_closed(identity, authority, child):
+    """A revoked owner cannot drain results; release only confirmed exact work."""
+    if not authority.is_live():
+        _forget_completed(identity, authority, child)
+
+
 def _start(authority, request):
     from hermes_security.handoff import prepare_child_key
     from hermes_cli._launchers import runtime_command
@@ -141,9 +147,11 @@ def _start(authority, request):
                     raise ValueError("the owning vault is locked")
                 env.update(handoff[1])
                 command = runtime_command(Path(__file__).resolve().parents[1], arguments)
-                child = NativeChild(command, env=env, cwd=authority.cwd, key_fd=handoff[0], input_bytes=data)
                 identity = secrets.token_hex(24)
+                child = NativeChild(command, env=env, cwd=authority.cwd, key_fd=handoff[0], input_bytes=data,
+                                    _on_cleanup_complete=lambda completed: _retire_closed(identity, authority, completed))
                 _jobs[identity] = (authority, child)
+                _retire_closed(identity, authority, child)  # completion may precede registration
         finally:
             if handoff is not None:
                 os.close(handoff[0])

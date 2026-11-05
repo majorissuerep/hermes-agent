@@ -13,6 +13,7 @@ from hermes_platform.authority_children import NativeChild
 
 def inert_child(*, reaped=True, pipe_live=False, descendant_live=False):
     child = NativeChild.__new__(NativeChild)
+    child._on_cleanup_complete = None
     child.output = queue.Queue()
     child.cancelled = threading.Event()
     child.finished = threading.Event()

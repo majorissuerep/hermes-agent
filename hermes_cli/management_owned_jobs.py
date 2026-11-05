@@ -22,6 +22,7 @@ class OwnedManagementJob:
         self.last_poll = time.monotonic()
         self.returncode, self.reason, self.result = None, None, None
         self._offset, self._encoded = 0, None
+        self._on_cleanup_complete = None
         from agent.memory_provider import spawn_context_thread
         self.worker = spawn_context_thread(self._run, name='hermes-owned-maintenance', daemon=True)
 
@@ -50,6 +51,8 @@ class OwnedManagementJob:
                            'message': 'Private maintenance did not finish; original backend RAM, recovery references and verified archives were retained'}}
         finally:
             self.finished.set()
+            if self._on_cleanup_complete is not None:
+                self._on_cleanup_complete(self)
 
     def poll(self):
         self.last_poll = time.monotonic()

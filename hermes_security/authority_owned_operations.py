@@ -40,7 +40,7 @@ def start(authority, operation, jobs, lock):
     from agent.secret_scope import build_profile_secret_scope, set_secret_scope, reset_secret_scope
     from agent.session_context import scoped_current_session_id
     from tools.terminal_scope import install_profile_terminal_scope, reset_terminal_scope
-    from hermes_security.authority_native import _cleanup_complete
+    from hermes_security.authority_native import _cleanup_complete, _retire_closed
     import time
 
     admitted_at = time.monotonic()
@@ -62,6 +62,7 @@ def start(authority, operation, jobs, lock):
             if sum(owner is authority for owner, _ in jobs.values()) >= 4:
                 raise ValueError('the owning session already has four native commands')
             identity = secrets.token_hex(24)
+            child._on_cleanup_complete = lambda completed: _retire_closed(identity, authority, completed)
             jobs[identity] = authority, child
             try:
                 child.start()
