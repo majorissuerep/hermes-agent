@@ -157,6 +157,13 @@ def test_profile_scoped_process_caches_follow_routed_home(two_homes, monkeypatch
     assert _under(a, browser_tool_cloud._is_headed_mode) is False
     assert _under(b, browser_tool_cloud._is_headed_mode) is True
 
+    from hermes_security import vault
+    from hermes_security.migrate import migrate_home
+
+    monkeypatch.setattr(vault, "_SCRYPT_N", 1024)
+    for home, password in ((b, "synthetic routed log B"), (a, "synthetic routed log A")):
+        assert migrate_home(home, password).ok
+        vault.unlock(home, password)
     mcp_tool_config._mcp_stderr_log_fh.clear()
     try:
         assert Path(_under(a, mcp_tool_config._get_mcp_stderr_log).name).parent == a / "logs"
@@ -165,3 +172,4 @@ def test_profile_scoped_process_caches_follow_routed_home(two_homes, monkeypatch
         for fh in mcp_tool_config._mcp_stderr_log_fh.values():
             fh.close()
         mcp_tool_config._mcp_stderr_log_fh.clear()
+        vault.clear_vault_cache()

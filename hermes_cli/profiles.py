@@ -1905,8 +1905,8 @@ def _record_profile_rename(new_dir: Path, old_canon: str) -> None:
 
 def rename_profile(old_name: str, new_name: str) -> Path:
     """Mutate an inactive profile while holding exclusive local ownership."""
-    from hermes_state.runtime_ownership import exclusive_maintenance
-    with exclusive_maintenance([get_profile_dir(normalize_profile_name(old_name))]):
+    from hermes_cli.profile_state_copy import profile_rename_maintenance
+    with profile_rename_maintenance(get_profile_dir(normalize_profile_name(old_name))):
         return _rename_profile_owned(old_name, new_name)
 
 

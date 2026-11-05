@@ -1,5 +1,7 @@
 """Authenticated profile-file copies; encrypted bytes never retain another path's AAD."""
 from pathlib import Path
+from contextlib import contextmanager
+import os
 import shutil
 
 
@@ -147,8 +149,54 @@ def profile_clone_exclusions(directory: Path, names: list[str], *, source_root: 
     return excluded
 
 
+def _rename_homes(source: Path) -> set[Path]:
+    """Include independently owned descendants without following external links."""
+    from hermes_constants import named_profile_has_identity
+
+    homes = {source.resolve()}
+
+    def unreadable(error):
+        raise error
+
+    for directory, _directories, files in os.walk(source, followlinks=False, onerror=unreadable):
+        path = Path(directory)
+        if ".hermes-vault" in files or (path.parent.name == "profiles" and named_profile_has_identity(path)):
+            homes.add(path.resolve())
+    return homes
+
+
+@contextmanager
+def profile_rename_maintenance(source: Path):
+    """Refuse a move while any enclosed profile has a live local runtime."""
+    from hermes_cli.profiles import _get_default_hermes_home
+    from hermes_state.runtime_ownership import exclusive_maintenance
+
+    # The default profile only changes its display name; its children do not move.
+    homes = {source} if source.resolve() == _get_default_hermes_home().resolve() else _rename_homes(source)
+    with exclusive_maintenance(homes):
+        yield
+
+
+def _rename_opaque_profile(source: Path, destination: Path) -> None:
+    """Move a vault island intact; old-path custody never follows its keys."""
+    from hermes_platform.fs_publish import rename_noreplace
+    from hermes_security import vault
+
+    original = source.resolve()
+    custodies = [vault.get_vault(home, allow_env_unlock=False) for home in vault.unlocked_homes()
+                 if home == original or original in home.parents]
+    rename_noreplace(source, destination)
+    if destination.resolve() == original:
+        return  # Renaming an alias did not relocate its independent physical home.
+    for custody in custodies:
+        vault._discard_cached_vault(custody)
+    if (destination / ".hermes-vault").is_file():
+        print("⚠ Vault bytes preserved unchanged. Unlock the renamed profile with its original credential; "
+              "encrypted rename-history/identity bookkeeping may require a retry.")
+
+
 def rename_profile_state(source: Path, destination: Path) -> None:
-    """Publish a rekeyed sibling atomically; retain the donor until publication succeeds."""
+    """Move own-vault islands intact; rebind ancestor-owned legacy state separately."""
     import logging
     import os
     import secrets
@@ -156,11 +204,11 @@ def rename_profile_state(source: Path, destination: Path) -> None:
     from hermes_cli.profiles import (
         _clone_staging_dir, _copytree_keep_junctions, _materialize_symlinked_files,
     )
-    from hermes_security import io, vault
+    from hermes_security import io
 
     source_owner = io._home_for(source)
-    if source_owner is None:
-        source.rename(destination)
+    if source_owner is None or source_owner == source.resolve():
+        _rename_opaque_profile(source, destination)
         return
     staging = _clone_staging_dir(destination)
     rollback = source.parent / f".{source.name}.renaming-{secrets.token_hex(8)}"
@@ -190,5 +238,3 @@ def rename_profile_state(source: Path, destination: Path) -> None:
         except OSError as exc:
             logging.getLogger(__name__).warning(
                 "Profile renamed; original encrypted snapshot retained at %s: %s", rollback, exc)
-        if source_owner == source.resolve():
-            vault.lock_now(source_owner)

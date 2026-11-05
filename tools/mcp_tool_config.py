@@ -27,13 +27,14 @@ _mcp_stderr_log_lock = threading.Lock()
 class _VaultMCPLog:
     """Text sink for the existing encrypted log frame format; no plaintext file FD."""
 
-    def __init__(self, path: Path):
+    def __init__(self, path: Path, *, custody):
         from hermes_security import frames
         from hermes_security.errors import VaultIntegrityError
         self.name = str(path)
         self.closed = False
+        self._custody = custody
         try:
-            frames.append(path, b"", purpose="log")
+            frames.append(path, b"", purpose="log", custody=self._custody)
         except VaultIntegrityError as exc:
             raise VaultIntegrityError(
                 "MCP log authentication failed; stop this profile and run "
@@ -44,7 +45,7 @@ class _VaultMCPLog:
         from hermes_security import frames
         if self.closed:
             raise ValueError("MCP log is closed")
-        frames.append(self.name, text.encode("utf-8", errors="replace"), purpose="log")
+        frames.append(self.name, text.encode("utf-8", errors="replace"), purpose="log", custody=self._custody)
         return len(text)
 
     def flush(self) -> None:
@@ -57,16 +58,23 @@ class _VaultMCPLog:
 def _get_mcp_stderr_log() -> Any:
     """Profile-owned text sink. Child stderr reaches it through a kernel pipe."""
     from hermes_constants import get_hermes_home, hermes_home_key, mkdir_under_hermes_home
-    from hermes_security.io import _home_for
-    home_key = hermes_home_key()
+    from hermes_security.artifacts import _bound_custody
+    from hermes_security.errors import VaultLockedError
+    home = get_hermes_home().resolve()
+    custody = _bound_custody(home)
+    home_key = hermes_home_key(home)
     with _mcp_stderr_log_lock:
         fh = _mcp_stderr_log_fh.get(home_key)
+        if isinstance(fh, _VaultMCPLog) and not fh.closed:
+            try:
+                fh._custody.check()
+            except VaultLockedError:
+                fh.close()
         if fh is None or fh.closed:
-            log_dir = get_hermes_home() / "logs"
+            log_dir = home / "logs"
             mkdir_under_hermes_home(log_dir)
             path = log_dir / "mcp-stderr.log"
-            fh = (_VaultMCPLog(path) if _home_for(path) is not None else
-                  open(path, "a", encoding="utf-8", errors="replace", buffering=1))
+            fh = _VaultMCPLog(path, custody=custody)
             _mcp_stderr_log_fh[home_key] = fh
         return fh
 

@@ -146,3 +146,91 @@ def test_legacy_log_requires_repair_and_retains_diagnostics(tmp_path):
         _close_mcp_stderr_logs()
         reset_hermes_home_override(token)
         vault.clear_vault_cache()
+
+
+@pytest.mark.parametrize("reunlock", [False, True])
+def test_real_stderr_pipe_retains_unlock_without_owning_first_source(
+    tmp_path, monkeypatch, reunlock
+):
+    from agent.session_context import scoped_current_session_id
+    from hermes_platform.managed_supervision import SupervisedChild
+    from hermes_security.errors import VaultError
+    from hermes_security.session_authority import start_session_authority
+    from tests.waiting import wait_until
+    from tools.mcp_tool_config import (
+        _StderrTee,
+        _close_mcp_stderr_logs,
+        _get_mcp_stderr_log,
+    )
+
+    home = tmp_path / "retained-log-owner"
+    password = "synthetic retained log pipe password"
+    monkeypatch.setenv("HERMES_HOME", str(home))
+    monkeypatch.setattr(vault, "_SCRYPT_N", 1024)
+    vault.init_vault(home, password)
+    vault.unlock(home, password)
+    source = start_session_authority(home, "retained-log-source")
+    with scoped_current_session_id(source.session_id):
+        log = _get_mcp_stderr_log()
+        tee = _StderrTee(log)
+    path = Path(log.name)
+    program = (
+        "import os,sys\n"
+        'os.write(2,b"MCP_PIPE_FIRST\\n")\n'
+        "sys.stdin.readline()\n"
+        'os.write(2,b"MCP_PIPE_AFTER\\n")\n'
+    )
+    child = SupervisedChild(
+        [sys.executable, "-c", program],
+        env={
+            "PATH": str(Path(sys.executable).parent),
+            "HOME": str(home),
+            "LANG": "C.UTF-8",
+        },
+        cwd=tmp_path,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.DEVNULL,
+        stderr=tee.sink,
+    )
+    try:
+        wait_until(
+            lambda: (
+                b"MCP_PIPE_FIRST" in b"".join(frames.read_frames(path, purpose="log"))
+            ),
+            timeout=10,
+            what="first real child stderr frame",
+        )
+        before = path.read_bytes()
+        source.close()
+        if reunlock:
+            vault.lock_now(home)
+            vault.unlock(home, password)
+        child.process.stdin.write(b"go\n")
+        child.process.stdin.flush()
+        assert child.wait(timeout=10) == 0
+        if reunlock:
+            with pytest.raises(VaultError):
+                tee.close()
+            assert path.read_bytes() == before
+            fresh = _get_mcp_stderr_log()
+            assert fresh is not log and log.closed
+            fresh.write("MCP_PIPE_FRESH\n")
+            assert b"MCP_PIPE_FRESH" in b"".join(
+                frames.read_frames(path, purpose="log")
+            )
+        else:
+            tee.close()
+            assert b"MCP_PIPE_AFTER" in b"".join(
+                frames.read_frames(path, purpose="log")
+            )
+            assert _get_mcp_stderr_log() is log
+    finally:
+        source.close()
+        if child.poll() is None:
+            assert child.cancel() is not None
+        if child.process.stdin is not None:
+            child.process.stdin.close()
+        tee.sink.close()
+        tee._reader.join(timeout=5)
+        _close_mcp_stderr_logs()
+        vault.clear_vault_cache()

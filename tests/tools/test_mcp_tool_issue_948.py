@@ -137,7 +137,26 @@ def _stdio_mocks():
     return mock_stdio_cm, mock_session_cm
 
 
-def test_run_stdio_malware_check_does_not_block_event_loop():
+@pytest.fixture
+def initialized_mcp_log_profile(tmp_path, monkeypatch):
+    from hermes_constants import reset_hermes_home_override, set_hermes_home_override
+    from hermes_security import vault
+    from tools.mcp_tool_config import _close_mcp_stderr_logs
+
+    selected = tmp_path / "mcp-profile"
+    monkeypatch.setattr(vault, "_SCRYPT_N", 1024)
+    vault.init_vault(selected, "synthetic MCP preflight password")
+    vault.unlock(selected, "synthetic MCP preflight password")
+    token = set_hermes_home_override(selected)
+    try:
+        yield
+    finally:
+        _close_mcp_stderr_logs()
+        reset_hermes_home_override(token)
+        vault.clear_vault_cache()
+
+
+def test_run_stdio_malware_check_does_not_block_event_loop(initialized_mcp_log_profile):
     """The blocking OSV check runs off the loop (asyncio.to_thread), so a
     concurrent coroutine keeps making progress while it runs."""
     import time
@@ -173,7 +192,7 @@ def test_run_stdio_malware_check_does_not_block_event_loop():
     asyncio.run(_test())
 
 
-def test_run_stdio_malware_check_times_out_fail_open():
+def test_run_stdio_malware_check_times_out_fail_open(initialized_mcp_log_profile):
     """A check that hangs past the timeout must NOT freeze startup: it times
     out, logs, and proceeds (fail-open) so the server still starts."""
     import time
@@ -461,8 +480,12 @@ def test_tail_server_stderr_scopes_to_the_named_server(tmp_path, monkeypatch):
     """The connect-failure log line quotes the child's last stderr lines; a server that
     never started has no segment and gets nothing (not another server's output)."""
     from hermes_constants import reset_hermes_home_override, set_hermes_home_override
+    from hermes_security import vault
     from tools import mcp_tool_config as cfg
 
+    monkeypatch.setattr(vault, "_SCRYPT_N", 1024)
+    vault.init_vault(tmp_path, "synthetic MCP tail password")
+    vault.unlock(tmp_path, "synthetic MCP tail password")
     token = set_hermes_home_override(tmp_path)
     try:
         cfg._close_mcp_stderr_logs()
@@ -480,3 +503,4 @@ def test_tail_server_stderr_scopes_to_the_named_server(tmp_path, monkeypatch):
     finally:
         cfg._close_mcp_stderr_logs()
         reset_hermes_home_override(token)
+        vault.clear_vault_cache()
