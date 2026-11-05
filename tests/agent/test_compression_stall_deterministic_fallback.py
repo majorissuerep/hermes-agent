@@ -12,10 +12,12 @@ logged as a recovery (#112387 review caveat).
 
 from __future__ import annotations
 
+from concurrent.futures import Future
 import os
 import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -182,7 +184,7 @@ def test_fence_level_retry_ladder_is_unchanged_without_a_prior_timeout():
         release.set()
 
 
-def test_deadline_observed_by_worker_still_runs_first_stall_fallback():
+def test_deadline_observed_by_worker_still_runs_first_stall_fallback(monkeypatch):
     """A cooperative worker can return its no-op result at the same deadline the host is waiting on.
     That settled result must not win the race and bypass the deterministic over-window fallback."""
     original = [{"role": "user", "content": "keep-me"}]
@@ -190,11 +192,29 @@ def test_deadline_observed_by_worker_still_runs_first_stall_fallback():
     attempts = []
     timeout_causes = []
     timeout_callbacks = []
+    clock = [0.0]
+
+    class SettledExecutor:
+        def submit(self, function, *args):
+            future = Future()
+            try:
+                future.set_result(function(*args))
+            except BaseException as exc:
+                future.set_exception(exc)
+            return future
+
+    # This case targets the settled-at-deadline branch. A real 50ms retry budget
+    # also charged thread scheduling, so loaded runners could expire before its
+    # fallback began. Keep the real fences and retry ladder; settle each worker
+    # inline and advance only the primary's logical clock to its exact deadline.
+    # Adjacent tests exercise real worker/commit concurrency separately.
+    monkeypatch.setattr(cc, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    monkeypatch.setattr(cc, "_get_compress_timeout_executor", lambda: SettledExecutor())
 
     def primary_worker(fence: CompressionCommitFence):
         attempts.append("primary")
-        while not fence.deadline_exceeded:
-            time.sleep(0.001)
+        clock[0] = fence.deadline_monotonic
+        assert fence.deadline_exceeded
         return original, "unchanged"
 
     def fallback_worker(_fence: CompressionCommitFence):

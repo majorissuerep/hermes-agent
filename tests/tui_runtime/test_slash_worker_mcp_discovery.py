@@ -65,6 +65,10 @@ def test_profile_local_mcp_tool_is_visible_in_slash_worker(tmp_path):
         encoding="utf-8",
     )
 
+    from tests.e2e.vault_home import seal_fixture_home, spawn_unlocked
+
+    seal_fixture_home(profile_home)
+    config_ciphertext = (profile_home / "config.yaml").read_bytes()
     env = os.environ.copy()
     for key in list(env):
         if key.endswith("_API_KEY") or key.endswith("_TOKEN"):
@@ -73,7 +77,7 @@ def test_profile_local_mcp_tool_is_visible_in_slash_worker(tmp_path):
     env["PYTHONPATH"] = str(Path(__file__).resolve().parents[2])
     env["HERMES_SLASH_WATCHDOG_GRACE_S"] = "0"
     env["HERMES_SLASH_WATCHDOG_POLL_S"] = "0.05"
-    proc = subprocess.Popen(
+    proc = spawn_unlocked(
         [
             sys.executable,
             "-u",
@@ -119,6 +123,7 @@ def test_profile_local_mcp_tool_is_visible_in_slash_worker(tmp_path):
         request(1, "/version", 60)
         response = request(2, "/tools", 10)
         assert "mcp__profileprobe__hermes_61922_profile_probe" in response["output"]
+        assert (profile_home / "config.yaml").read_bytes() == config_ciphertext
     finally:
         proc.terminate()
         try:
