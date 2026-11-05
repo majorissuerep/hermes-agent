@@ -2,6 +2,7 @@
 
 Native child-lifetime contract; run under the disposable qualification's Tini.
 No browser, provider, external host or real user state is involved.
+PID markers are published atomically so existence proves the complete PID is readable.
 """
 import os
 import hashlib
@@ -28,7 +29,8 @@ def test_tar_worker_dies_when_original_transfer_helper_is_killed(tmp_path):
     # A fixed inert tar stand-in stops after proving the real fork/exec boundary.
     worker = binary / "tar"
     worker.write_text("#!/usr/bin/env python3\nimport os,signal\nfrom pathlib import Path\n"
-                      f"Path({str(ready)!r}).write_text(str(os.getpid()))\n"
+                      f"ready=Path({str(ready)!r}); staging=ready.with_name(ready.name+'.tmp')\n"
+                      "staging.write_text(str(os.getpid())); staging.replace(ready)\n"
                       "while True: signal.pause()\n")
     worker.chmod(0o700)
     command = remote_profile.command("export", str(profile), maximum=1024**2)
@@ -62,7 +64,8 @@ def test_transfer_owner_pipe_eof_reaps_helper_and_tar_without_retiring_source(tm
     ready = tmp_path / "worker-identity"
     worker = binary / "tar"
     worker.write_text("#!/usr/bin/env python3\nimport os,signal\nfrom pathlib import Path\n"
-                      f"Path({str(ready)!r}).write_text(str(os.getpid()))\n"
+                      f"ready=Path({str(ready)!r}); staging=ready.with_name(ready.name+'.tmp')\n"
+                      "staging.write_text(str(os.getpid())); staging.replace(ready)\n"
                       "while True: signal.pause()\n")
     worker.chmod(0o700)
     command = remote_profile.command(operation, str(profile), maximum=1024**2,
@@ -129,7 +132,8 @@ def test_terminal_owner_event_does_not_interrupt_a_slow_owned_child_reap(tmp_pat
     ready, reaping, release = (tmp_path / name for name in ("worker", "reaping", "release"))
     worker = binary / "tar"
     worker.write_text("#!/usr/bin/env python3\nimport os,signal\nfrom pathlib import Path\n"
-                      f"Path({str(ready)!r}).write_text(str(os.getpid()))\n"
+                      f"ready=Path({str(ready)!r}); staging=ready.with_name(ready.name+'.tmp')\n"
+                      "staging.write_text(str(os.getpid())); staging.replace(ready)\n"
                       "while True: signal.pause()\n")
     worker.chmod(0o700)
     command = remote_profile.command(operation, str(profile), maximum=1024**2,
