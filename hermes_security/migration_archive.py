@@ -284,7 +284,7 @@ def _add_entry(tar: tarfile.TarFile, home_fd: int, relative: Path, attributes: d
 
 def _open_home(home: Path, custody) -> int:
     selected = home.expanduser().resolve()
-    if custody.vault.home != selected:
+    if custody.home != selected:
         raise PermissionError("Migration backup custody belongs to a different profile")
     custody.check()
     return os.open(selected, os.O_RDONLY | os.O_DIRECTORY | _NOFOLLOW | _CLOEXEC)

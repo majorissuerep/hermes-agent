@@ -50,7 +50,7 @@ def _decode(raw, relative, custody):
     if len(raw) > _BOUND+128:
         raise VaultIntegrityError('Browser WORKER metadata exceeds its bound')
     custody.check()
-    plain = custody.vault.decrypt(raw, purpose='state', relpath=Path(relative).as_posix(), authority=custody.authority)
+    plain = custody.decrypt(raw, purpose='state', relpath=Path(relative).as_posix())
     document = json.loads(plain)
     matched = (_LOCATOR if kind == 'locator' else _RECOVERY).fullmatch(Path(relative).name)
     if (not isinstance(document, dict) or type(document.get('version')) is not int
@@ -58,7 +58,7 @@ def _decode(raw, relative, custody):
             or not isinstance(document.get('identity'), dict)
             or archive.identity_digest(custody, document['identity']) != document['digest']):
         raise VaultIntegrityError('Browser WORKER metadata has invalid original identity')
-    if kind == 'locator' and document.get('home') != str(custody.vault.home):
+    if kind == 'locator' and document.get('home') != str(custody.home):
         raise VaultIntegrityError('Browser WORKER locator belongs to another profile')
     _validate(document, kind)
     custody.check()
@@ -159,7 +159,7 @@ def write(home, relative, document, *, custody, overwrite=True):
     if len(plain) > _BOUND:
         raise VaultIntegrityError('Browser WORKER metadata exceeds its bound')
     custody.check()
-    encoded = custody.vault.encrypt(plain, purpose='state', relpath=Path(relative).as_posix(), authority=custody.authority)
+    encoded = custody.encrypt(plain, purpose='state', relpath=Path(relative).as_posix())
     artifacts._publish(Path(home), Path(relative), encoded, custody, overwrite=overwrite)
 
 

@@ -61,6 +61,22 @@ class SessionCustody:
         self.check()
         return self.resource.derive_key(purpose)
 
+    def check_target(self, path) -> None:
+        self.check()
+        self.resource.check_target(path)
+
+    def aad_path(self, relative) -> str:
+        self.check()
+        return self.resource.aad_path(relative)
+
+    def encrypt(self, payload, *, purpose, relpath):
+        self.check()
+        return self.resource.encrypt(payload, purpose=purpose, relpath=relpath)
+
+    def decrypt(self, payload, *, purpose, relpath):
+        self.check()
+        return self.resource.decrypt(payload, purpose=purpose, relpath=relpath)
+
     def __repr__(self) -> str:
         return "<SessionCustody>"
 

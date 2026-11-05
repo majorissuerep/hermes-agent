@@ -224,9 +224,8 @@ def _remaining(lease, document, saved, summary, ram):
 def _reference(lease, pinned):
     pinned.handle.seek(0)
     raw = pinned.handle.read(state._BOUND + 1)
-    return json.loads(lease.custody.vault.decrypt(
-        raw, purpose="state", relpath=state.relative(lease.digest).as_posix(),
-        authority=lease.custody.authority))
+    return json.loads(lease.custody.decrypt(
+        raw, purpose="state", relpath=state.relative(lease.digest).as_posix()))
 
 
 def _finish(lease, document, saved, *, stale, path, original):

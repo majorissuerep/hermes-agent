@@ -32,7 +32,7 @@ def _owner():
 def _check_scope(custody):
     from hermes_constants import get_hermes_home
 
-    if custody.vault.home != get_hermes_home().resolve():
+    if custody.home != get_hermes_home().resolve():
         raise PermissionError("Generated pet belongs to a different profile")
     custody.check()
 
@@ -121,7 +121,7 @@ def read_image(path, *, custody=None):
     path = Path(path)
     raise_if_model_read_blocked(str(path))
     if owned_media_path(str(path)) is not None:
-        home, selected = _owner() if custody is None else (custody.vault.home, custody)
+        home, selected = _owner() if custody is None else (custody.home, custody)
         _check_scope(selected)
         relative = artifacts._location(path, home=home)[1]
         if not is_image_relative_path(relative):
@@ -206,7 +206,7 @@ def thumbnail(record):
     from agent.pet.store import _thumbnail_data
 
     custody = record[3]
-    home = custody.vault.home
+    home = custody.home
     pet = installed(record)
     target = pet.directory / "thumbnail.png"
     if target.exists():
