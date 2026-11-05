@@ -20,6 +20,8 @@ def owned_harness_environment(native_state, monkeypatch):
     monkeypatch.setattr(browser_tool, '_build_browser_env', _production_browser_environment)
     monkeypatch.setattr('hermes_platform.browser_process.harness_runtime_absent', lambda *_a, **_kw: True)
     monkeypatch.setattr('hermes_platform.browser_process.harness_process_record', lambda *_a, **_kw: None)
+    # Keep the declared inert child probe; private screenshot execution has its own worker contracts.
+    monkeypatch.setattr('tools.browser_harness_worker.command_for_browser', lambda command, **_kw: command)
 
 
 @pytest.mark.platforms("posix", "windows")

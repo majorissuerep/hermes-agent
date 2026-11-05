@@ -734,6 +734,8 @@ def browser_exec(code: str, session: str = "", timeout_s: int = _DEFAULT_TIMEOUT
     # SHARED browser (/browser connect CDP override): pin each named session to its own tab (see
     # _OWN_TAB_PREAMBLE). Private per-name browsers skip this — nothing to collide with.
     private_browser = env.pop(_PRIVATE_BROWSER_SENTINEL, None)  # always pop: never exported to the CLI
+    from tools.browser_harness_worker import command_for_browser
+    cmd = command_for_browser(cmd, private=bool(private_browser))
     if session and not private_browser:
         code = _OWN_TAB_PREAMBLE + code
 
