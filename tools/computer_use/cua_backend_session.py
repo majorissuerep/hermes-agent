@@ -132,18 +132,39 @@ def _cli_result(parsed: Any, shot_file: Optional[str]) -> dict[str, Any]:
     # In-band logical failures with exit 0 must still fail closed.
     is_error = parsed.get("isError") is True or parsed.get("is_error") is True
     shot = parsed.get("screenshot_png_b64")
-    # Otherwise the screenshot was routed to a file (ours or the daemon's choice).
-    fpath = parsed.get("screenshot_file_path") or shot_file
-    if not shot and fpath and os.path.exists(fpath):
-        try:
-            with open(fpath, "rb") as fh:
-                shot = base64.b64encode(fh.read()).decode("ascii")
-        except Exception as e:
-            logger.debug("cua-driver CLI fallback: failed reading %s: %s", fpath, e)
+    if not shot:
+        shot = _read_cli_screenshot(shot_file, parsed.get("screenshot_file_path"))
     data: Any = parsed.get("tree_markdown")
     if data is not None and parsed.get("element_count") is not None:
         data = f"{parsed['element_count']} elements\n{data}"
     return _tool_envelope(data, [shot] if shot else [], parsed, is_error)
+
+
+def _read_cli_screenshot(expected: Optional[str], reported) -> Optional[str]:
+    """Read only the bounded, owned regular file requested inside the protected workspace."""
+    import stat
+    from pathlib import Path
+
+    if reported and (not expected or os.path.abspath(str(reported)) != expected):
+        raise RuntimeError("cua-driver returned a screenshot outside the protected capture workspace")
+    if not expected:
+        return None
+    target = Path(expected)
+    parent = os.open(target.parent, os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0))
+    try:
+        fd = os.open(target.name, os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0), dir_fd=parent)
+        with os.fdopen(fd, "rb") as stream:
+            info = os.fstat(stream.fileno())
+            maximum = 128 * 1024 * 1024  # same bound as retained private image artifacts
+            if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
+                    or info.st_nlink != 1 or info.st_size > maximum):
+                raise RuntimeError("cua-driver screenshot must be an owned, bounded regular file")
+            data = stream.read(maximum + 1)
+            if len(data) > maximum:
+                raise RuntimeError("cua-driver screenshot exceeds the private image bound")
+            return base64.b64encode(data).decode("ascii")
+    finally:
+        os.close(parent)
 
 
 def _logical_error_text(result: dict[str, Any]) -> str:
@@ -438,17 +459,31 @@ class _CuaDriverSession:
         """Fallback transport: ``cua-driver call <tool> <json>`` subprocess. The MCP stdio bridge can persistently
         fail heavy calls (``get_window_state``) with EAGAIN while the plain CLI, on its own daemon socket, keeps
         working. Output is remapped to the ``_extract_tool_result`` shape. ``get_window_state`` routes its
-        screenshot to a temp file (``screenshot_out_file``) so the daemon returns a tiny JSON body, not the
-        multi-megabyte base64 blob that congests the socket; ``_cli_result`` reads it back."""
-        import tempfile as _tempfile
+        screenshot to a file (``screenshot_out_file``) so the daemon returns a tiny JSON body, not the
+        multi-megabyte base64 blob that congests the socket; ``_cli_result`` reads it back. That file lives only in
+        a fresh proven RAM-only protected workspace, removed on success and failure alike. Without such a
+        workspace the fallback refuses: no system-temp or cache staging, and no heavy inline retry."""
+        if name != "get_window_state":
+            return self._run_cli(name, dict(args), timeout, None)
+        from tools.browser_media_custody import MediaCustodyError, protected_media_workspace
+
+        try:
+            with protected_media_workspace("cua-capture") as workspace:
+                shot_file = str(workspace / "window_state.png")
+                # Preserve the original transport's owner-only preallocated target,
+                # including when a privileged driver writes into it.
+                fd = os.open(shot_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                os.close(fd)
+                return self._run_cli(name, {**args, "screenshot_out_file": shot_file}, timeout, shot_file)
+        except MediaCustodyError as exc:
+            raise RuntimeError(f"cua-driver CLI fallback for {name} refused: {exc}") from exc
+
+    def _run_cli(self, name: str, call_args: dict[str, Any], timeout: float,
+                 shot_file: Optional[str]) -> dict[str, Any]:
+        """One ``cua-driver call`` through the selected native backend (embedded daemon socket when present)."""
         from tools.computer_use import cua_backend as _cb
         from tools.environments.local import _sanitize_subprocess_env
 
-        call_args, shot_file = dict(args), None
-        if name == "get_window_state" and "screenshot_out_file" not in call_args:
-            fd, shot_file = _tempfile.mkstemp(prefix="cua_shot_", suffix=".png")
-            os.close(fd)
-            call_args["screenshot_out_file"] = shot_file
         driver_command = _driver.resolve_cua_driver_cmd()
         if not driver_command:
             raise RuntimeError(_driver.cua_driver_install_hint())
@@ -458,12 +493,7 @@ class _CuaDriverSession:
             driver_command, child_env = daemon.proxy_invocation()[0], daemon.child_env()
             socket_args = ["--socket", daemon.socket_path]
         cmd = [driver_command, "call", name, json.dumps(call_args), *socket_args]
-        try:
-            return _cli_result(_cli_run_json(cmd, _sanitize_subprocess_env(child_env), name, timeout), shot_file)
-        finally:
-            if shot_file and os.path.exists(shot_file):
-                with contextlib.suppress(OSError):
-                    os.remove(shot_file)
+        return _cli_result(_cli_run_json(cmd, _sanitize_subprocess_env(child_env), name, timeout), shot_file)
 
     def call_tool(self, name: str, args: dict[str, Any], timeout: float = 30.0) -> dict[str, Any]:
         if name not in self._LIFECYCLE_CALLS:

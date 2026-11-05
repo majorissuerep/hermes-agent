@@ -20,12 +20,10 @@ import json
 import logging
 import math
 import os
-import tempfile
 import time
 import uuid
 import threading
 from datetime import datetime
-from pathlib import Path
 from typing import Any, Callable, Dict, List, Literal, Optional, Tuple
 
 from agent.auxiliary_client import AuxiliaryExplicitCancellation
@@ -4347,12 +4345,6 @@ def compress_context(
 # 4 MB leaves headroom under Anthropic's 5 MB; shrinking loses quality but only
 # runs after a confirmed provider rejection, so the alternative is failure.
 _IMAGE_SHRINK_TARGET_BYTES = 4 * 1024 * 1024
-_IMAGE_SUFFIX_BY_MIME = {
-    "image/png": ".png", "image/gif": ".gif", "image/webp": ".webp", "image/jpeg": ".jpg", "image/jpg": ".jpg",
-    "image/bmp": ".bmp",
-}
-
-
 def _data_url_mime(header: str, default: str = "image/jpeg") -> str:
     """``image/*`` mime from a ``data:`` URL header, else ``default``."""
     if header.startswith("data:"):
@@ -4397,18 +4389,9 @@ def _shrink_data_url(url: str, *, max_dimension: int, resize_fn: Any) -> tuple:
         mime = _data_url_mime(header)
         import base64 as _b64
         raw = _b64.b64decode(data)
-        tmp = tempfile.NamedTemporaryFile(
-            prefix="hermes_shrink_", suffix=_IMAGE_SUFFIX_BY_MIME.get(mime, ".jpg"), delete=False
+        resized = resize_fn(
+            raw, mime_type=mime, max_base64_bytes=target_bytes, max_dimension=max_dimension
         )
-        try:
-            tmp.write(raw)
-            tmp.close()
-            resized = resize_fn(
-                Path(tmp.name), mime_type=mime, max_base64_bytes=target_bytes, max_dimension=max_dimension
-            )
-        finally:
-            with contextlib.suppress(Exception):
-                Path(tmp.name).unlink(missing_ok=True)
         if not resized:
             return None, True  # Pillow couldn't help
         new_dims = _decode_pixels(resized)

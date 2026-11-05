@@ -99,6 +99,9 @@ def _start(authority, request):
     data = base64.b64decode(request.get("stdin", ""), validate=True)
     if len(data) > 524288:
         raise ValueError("native stdin exceeds the bounded input limit")
+    from hermes_security import authority_owned_operations
+    if operation := authority_owned_operations.selected(arguments, data):
+        return authority_owned_operations.start(authority, operation, _jobs, _lock)
     with _lock:
         # close_native takes this same lock after revocation. A previously dispatched request
         # cannot enter after that fence; an admitted child is registered before close can reap it.
@@ -166,8 +169,23 @@ def dispatch_native(authority, request):
 def close_native(authority):
     with _lock:
         children = [child for owner, child in _jobs.values() if owner is authority]
-        for identity, (owner, _) in list(_jobs.items()):
-            if owner is authority:
+    if not children:
+        return
+    from hermes_cli.management_owned_jobs import OwnedManagementJob
+    with _lock:
+        for identity, (owner, child) in list(_jobs.items()):
+            if owner is authority and not isinstance(child, OwnedManagementJob):
                 del _jobs[identity]
     for child in children:
-        child.close()
+        try:
+            child.close()
+        except RuntimeError:
+            if not isinstance(child, OwnedManagementJob):
+                raise
+            import logging
+            logging.getLogger(__name__).warning("Owner maintenance cancellation is pending; domain recovery references retained", exc_info=True)
+        if isinstance(child, OwnedManagementJob) and child.finished.is_set():
+            with _lock:
+                for identity, (owner, current) in list(_jobs.items()):
+                    if owner is authority and current is child:
+                        del _jobs[identity]

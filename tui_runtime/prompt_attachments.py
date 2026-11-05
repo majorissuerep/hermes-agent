@@ -90,11 +90,18 @@ def _session_home_dir(session: dict, name: str) -> Path:
     ``attachments`` instead follows the session workspace when the profile's config opts
     in via ``attachments.storage: workspace`` (#110662): staging then lands inside the
     allowed ref root, so the ``@file:`` ref stays workspace-relative."""
-    profile_home = session.get("profile_home")
-    if name == "attachments" and _profile_attachments_storage(profile_home) == "workspace":
+    if name == "attachments" and _profile_attachments_storage(session.get("profile_home")) == "workspace":
         if workspace := _session_attachments_workspace(session):
             return workspace / ".hermes" / "attachments"
-    return (Path(profile_home) if profile_home else _hermes_home) / name
+    return _session_owner_home(session) / name
+
+
+def _session_owner_home(session: dict) -> Path:
+    """The session's owning profile home, from its stored ``profile_home`` (unset: this runtime's
+    launch home). Attach RPCs run before ``prompt.submit`` installs the profile scope, so owned
+    writes and reads name this home explicitly instead of the thread's current HERMES_HOME."""
+    profile_home = session.get("profile_home")
+    return Path(profile_home) if profile_home else _hermes_home
 
 
 def _profile_attachments_storage(profile_home) -> str:
@@ -132,43 +139,59 @@ def _session_attachments_workspace(session: dict) -> Path | None:
     return None
 
 
-def _session_images_dir(session: dict) -> Path:
-    return _session_home_dir(session, "images")
+_PRIVATE_IMAGE_ROOT = ("artifacts", "media", "images")
 
 
-def stage_image_bytes(directory, img_bytes: bytes, ext: str, *, prefix: str):
-    """Private, collision-free staging shared by local and canonical byte uploads."""
-    import os
+def stage_image_bytes(home, img_bytes: bytes, ext: str, *, prefix: str) -> Path:
+    """Seal an owned image upload as an encrypted artifact of exactly ``home``; no plaintext file.
+
+    Collision-free by name; a missing, locked or foreign profile vault fails closed. Owned readers
+    (vision, native attach, resume projection, ``/artifacts view``) decrypt it into memory only."""
     from pathlib import Path
-    import tempfile
-    directory = Path(directory)
-    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
-    fd, name = tempfile.mkstemp(dir=directory, prefix=prefix + "_", suffix=ext)
-    path = Path(name)
-    try:
-        with os.fdopen(fd, "wb") as output:
-            output.write(img_bytes)
-            output.flush()
-            os.fsync(output.fileno())
-    except BaseException:
-        path.unlink(missing_ok=True)
-        raise
-    return path
+    import uuid
+    from hermes_security import artifacts
+    home = Path(home)
+    target = home.joinpath(*_PRIVATE_IMAGE_ROOT, f"{prefix}_{uuid.uuid4().hex}{ext}")
+    return artifacts.write_bytes(target, img_bytes, home=home)
 
 
 def _queue_attached_image(session: dict, img_bytes: bytes, ext: str, *, prefix: str) -> Path:
-    """Write image bytes into the session images dir and queue them for the next submit."""
+    """Seal image bytes for the session's owning profile and queue them for the next submit."""
     session["image_counter"] = session.get("image_counter", 0) + 1
-    img_dir = _session_images_dir(session)
     try:
-        # mkstemp allocation is atomic across sessions sharing the profile images dir (main #b4faf6587e9's
-        # cross-session collision fix holds without the counter-named xb probe loop).
-        img_path = stage_image_bytes(img_dir, img_bytes, ext, prefix=prefix)
+        img_path = stage_image_bytes(_session_owner_home(session), img_bytes, ext, prefix=prefix)
     except Exception:
         session["image_counter"] = max(0, session["image_counter"] - 1)
         raise
     session.setdefault("attached_images", []).append(str(img_path))
     return img_path
+
+
+def _capture_clipboard_pixels(save) -> bytes | None:
+    """Clipboard image bytes via ``save(path)`` inside a proven RAM-only workspace, else None.
+
+    Platform helpers need a real path (and may convert it in place); it never touches the profile
+    disk. Without a provable RAM workspace this raises instead of falling back to a disk temp."""
+    from tools.browser_media_custody import protected_media_workspace
+    with protected_media_workspace("tui-clipboard") as scratch:
+        target = scratch / "clipboard.png"
+        return target.read_bytes() if save(target) else None
+
+
+def _image_meta(path: Path, pixels: bytes | None = None) -> dict:
+    """Display name plus dimensions/token hint; ``pixels`` (already in memory) wins over the path,
+    which an owned encrypted artifact would not decode from."""
+    import contextlib
+    import io
+    meta = {"name": path.name}
+    with contextlib.suppress(Exception):
+        from PIL import Image
+        with Image.open(io.BytesIO(pixels) if pixels is not None else path) as img:
+            width, height = (int(v) for v in img.size)
+        # Rough attachment-display token estimate: 512px tiles at ~85 tokens/tile (cross-provider hint).
+        tiles = max(1, (width + 511) // 512) * max(1, (height + 511) // 512) if width > 0 and height > 0 else 0
+        meta.update(width=width, height=height, token_estimate=tiles * 85)
+    return meta
 
 
 def _format_ref_value(value: str) -> str:

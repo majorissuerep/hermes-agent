@@ -6,7 +6,7 @@ import pytest
 
 
 
-def test_pets_cli_quoted_false_disables_and_toggle_enables(tmp_path, monkeypatch):
+def test_pets_cli_quoted_false_disables_and_toggle_enables(empty_home):
     """Quoted `display.pet.enabled: "false"` must read as disabled.
 
     bool('false') is True — before the is_truthy_value fix, _has_active_pet
@@ -16,14 +16,14 @@ def test_pets_cli_quoted_false_disables_and_toggle_enables(tmp_path, monkeypatch
 
     from hermes_cli.pets import _has_active_pet, toggle_pet_display
 
-    home = tmp_path / ".hermes"
-    home.mkdir()
-    monkeypatch.setenv("HERMES_HOME", str(home))
-    (home / "config.yaml").write_text(
+    from hermes_security import io
+
+    home = empty_home
+    io.write_text(home / "config.yaml",
         yaml.safe_dump(
             {"display": {"pet": {"enabled": "false", "slug": "", "scale": 0.33}}}
         ),
-        encoding="utf-8",
+        purpose="config",
     )
 
     assert _has_active_pet() is False
@@ -38,9 +38,18 @@ def test_pets_cli_quoted_false_disables_and_toggle_enables(tmp_path, monkeypatch
 @pytest.fixture
 def empty_home(tmp_path, monkeypatch):
     home = tmp_path / ".hermes"
-    home.mkdir()
+    home.mkdir(mode=0o700)
     monkeypatch.setenv("HERMES_HOME", str(home))
-    return home
+    from hermes_security import vault
+
+    monkeypatch.setattr(vault, "_SCRYPT_N", 1024)
+    password = "synthetic pet config credential"
+    vault.init_vault(home, password)
+    vault.unlock(home, password)
+    try:
+        yield home
+    finally:
+        vault.clear_vault_cache()
 
 
 def test_set_pet_scale_writes_clamped_value(empty_home):

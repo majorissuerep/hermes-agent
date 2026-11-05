@@ -112,3 +112,46 @@ def _remove(workspace: Path) -> None:
             workspace.unlink()  # swapped in by a racer: drop the link, never follow it
         else:
             shutil.rmtree(workspace)
+
+
+# --- Named long-lived workspaces --------------------------------------------------------------
+# A browser launched on a profile outlives the call that prepared it and may be re-attached by a
+# later cooperating local process, so its directory needs a stable name under the same proven base
+# instead of a context-scoped mkdtemp. Every use re-proves the base and the directory.
+
+_STABLE_NAME = re.compile(r"hermes-[a-z0-9][a-z0-9-]{0,40}-[0-9a-f]{16,64}")
+
+
+def stable_workspace_path(name: str, base: Path | str) -> Path:
+    """Where the named workspace lives under an already resolved base; creates and proves nothing."""
+    if not _STABLE_NAME.fullmatch(name):
+        raise ValueError("A stable protected workspace name is hermes-<purpose>-<hex digest>")
+    return Path(os.path.realpath(base)) / name
+
+
+def ensure_stable_workspace(path: Path, *, prove: Prover = ram_only_directory_proof) -> Path:
+    """Create (0700) or re-validate a named workspace on a proven RAM-only base."""
+    _require_proven(path.parent, prove, "The protected workspace base")
+    with contextlib.suppress(FileExistsError):
+        os.mkdir(path, 0o700)
+    _verify_created(path, prove)
+    return path
+
+
+def fresh_sibling_workspace(path: Path, label: str, *, prove: Prover = ram_only_directory_proof) -> Path:
+    """A new 0700 staging directory beside ``path`` (same proven base), for atomic publication."""
+    if not _PURPOSE.fullmatch(label):
+        raise ValueError("A staging label is a short lowercase [a-z0-9-] label")
+    _require_proven(path.parent, prove, "The protected workspace base")
+    staged = Path(tempfile.mkdtemp(dir=path.parent, prefix=f"{path.name}.{label}-"))
+    try:
+        _verify_created(staged, prove)
+    except BaseException:
+        _remove(staged)
+        raise
+    return staged
+
+
+def remove_stable_workspace(path: Path) -> None:
+    """Remove a named or staging workspace tree without following a swapped-in link."""
+    _remove(path)

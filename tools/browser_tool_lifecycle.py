@@ -21,6 +21,7 @@ from tools import browser_tool_cloud as _cloud
 from tools import browser_tool_session as _session
 from tools import browser_tool_install as _install
 from tools import browser_tool_real_profile as _real_profile
+from tools import browser_recording as _recording
 
 
 def _session_expiry_timestamp(session_info: dict[str, Any]) -> Optional[float]:
@@ -68,11 +69,19 @@ def _stop_all_lightpanda() -> None:
     stop_all_lightpanda()
 
 
+def _settle_owned_browser_profiles() -> None:
+    """Save (encrypted) and retire every owned profile copy this process prepared whose browser
+    has exited; copies a browser still holds stay active in RAM and are saved at a later boundary."""
+    from hermes_cli.browser_profile_store import settle
+    settle()
+
+
 def _emergency_cleanup_all_sessions():
     """atexit: close this process's sessions, then sweep orphans left by crashed
     hermes processes — every clean exit reaps accumulated orphans, not only
     processes that used the browser tool."""
     try:
+        logger = _bt.logger
         if _bt._cleanup_done:
             return
         _bt._cleanup_done = True
@@ -88,18 +97,23 @@ def _emergency_cleanup_all_sessions():
     if _bt._active_sessions:
         _bt.logger.info("Emergency cleanup: closing %s active session(s)...", len(_bt._active_sessions))
         try:
-            cleanup_all_browsers()
+            with _bt._cleanup_lock:
+                tasks = list(_bt._active_sessions)
+            for task_id in tasks:
+                try:
+                    with _session_owner_scope(task_id):
+                        cleanup_browser(task_id)
+                except Exception as exc:
+                    logger.exception("Browser cleanup retained task %s: %s", task_id, exc)
         except Exception as e:
             _bt.logger.error("Emergency cleanup error: %s", e)
-        finally:
-            with _bt._cleanup_lock:
-                _bt._active_sessions.clear()
-                _bt._session_last_activity.clear()
-                _bt._session_owner_homes.clear()
-                _bt._cleanup_failures.clear()
-                _bt._recording_sessions.clear()
+    _best_effort("Browser Use original daemon cleanup",
+                 lambda: __import__("tools.browser_use_cli", fromlist=["stop_harness_daemons"]).stop_harness_daemons(original=True))
+    _best_effort("Unsaved browser recording report", _recording.report_unsaved)
     # Lightpanda servers we spawned that fell out of ``_active_sessions``.
     _best_effort("Lightpanda cleanup on exit", _stop_all_lightpanda)
+    # The debug browser (/browser connect) is the user's to close; save it only if already closed.
+    _best_effort("Owned browser profile save on exit", _settle_owned_browser_profiles)
     # Safe even if we never used the browser — owner_pid liveness protects daemons
     # owned by other live hermes processes.
     _best_effort("Orphan reap on exit", _reap_orphaned_browser_sessions)
@@ -121,27 +135,38 @@ def _session_owner_scope(task_id: str):
     from agent.secret_scope import build_profile_secret_scope, reset_secret_scope, set_secret_scope
     from hermes_cli.env_loader import hydrate_profile_secret_sources
 
-    home_token = set_hermes_home_override(owner_home)
-    try:
-        hydrate_profile_secret_sources(Path(owner_home))
-        secret_token = set_secret_scope(build_profile_secret_scope(Path(owner_home)), profile_home=owner_home)
+    from tools.browser_native_runtime import cleanup_scope
+
+    info = _bt._active_sessions.get(task_id, {})
+    from tools.browser_lightpanda import cleanup_scope as lightpanda_scope
+
+    with cleanup_scope(info.get('session_name', ''), owner_home, original=True), lightpanda_scope(
+            info, home=owner_home, original=True):
+        home_token = set_hermes_home_override(owner_home)
         try:
-            yield
+            hydrate_profile_secret_sources(Path(owner_home))
+            secret_token = set_secret_scope(build_profile_secret_scope(Path(owner_home)), profile_home=owner_home)
+            try:
+                yield
+            finally:
+                reset_secret_scope(secret_token)
         finally:
-            reset_secret_scope(secret_token)
-    finally:
-        reset_hermes_home_override(home_token)
+            reset_hermes_home_override(home_token)
 
 
-def _forget_session_tracking(task_id: str, *, activity: bool = True, session: bool = False) -> None:
+def _forget_session_tracking(task_id: str, *, activity: bool = True, session: bool = False,
+                            expected_session: dict | None = None) -> bool:
     """Drop the janitor's bookkeeping (and optionally the session entry) for ``task_id``."""
     with _bt._cleanup_lock:
+        if expected_session is not None and _bt._active_sessions.get(task_id) is not expected_session:
+            return False
         if session:
             _bt._active_sessions.pop(task_id, None)
         if activity:
             _bt._session_last_activity.pop(task_id, None)
         _bt._session_owner_homes.pop(task_id, None)
         _bt._cleanup_failures.pop(task_id, None)
+    return True
 
 
 def _cleanup_inactive_browser_sessions():
@@ -180,7 +205,7 @@ def _cleanup_inactive_browser_sessions():
                     _force_reap_browser_session(task_id)
             except Exception as reap_exc:
                 _bt.logger.error("Force-reap of browser session %s failed: %s", task_id, reap_exc)
-            finally:
+            else:
                 _forget_session_tracking(task_id, activity=False)
 
 
@@ -418,6 +443,7 @@ def _browser_cleanup_thread_worker():
             _cleanup_inactive_browser_sessions()
         except Exception as e:
             _bt.logger.warning("Cleanup thread error: %s", e)
+        _best_effort("Owned browser profile save", _settle_owned_browser_profiles)
 
         for _ in range(30):  # 1s granularity so stop is quick
             if not _bt._cleanup_running:
@@ -575,17 +601,6 @@ def _cleanup_old_screenshots(screenshots_dir, max_age_hours=24):
     _unlink_older_than(screenshots_dir, "browser_screenshot_*.png", max_age_hours, "screenshot")
 
 
-def _cleanup_old_recordings(max_age_hours=72):
-    """Prune old browser recordings."""
-    try:
-        recordings_dir = get_hermes_home() / "browser_recordings"
-    except Exception as e:
-        _bt.logger.debug("Recording cleanup error (non-critical): %s", e)
-        return
-    if recordings_dir.exists():
-        _unlink_older_than(recordings_dir, "session_*.webm", max_age_hours, "recording")
-
-
 def _drop_last_active_binding(task_id: str) -> None:
     """Drop stale last-active ownership after cleaning ``task_id``: a bare task always, a
     sidecar only if it was still the recorded owner (a later click must not resurrect a
@@ -640,8 +655,16 @@ def _release_session_resources(task_id: str, session_info: dict[str, Any]) -> No
     force-reap path (#100738), which skips the polite agent-browser/Camofox ``close`` that kept failing but
     must still release the cloud session and the local Chromium.
     """
+    from tools.browser_native_runtime import captured_socket
+    from hermes_security.errors import VaultError
+
+    session_name = session_info.get("session_name", "")
+    try:
+        native_socket = captured_socket(session_name, _bt._session_owner_homes.get(task_id)) if session_name else None
+    except (VaultError, OSError) as exc:
+        _bt.logger.warning("Native browser cleanup retained its original RAM state: %s", exc)
+        raise
     bb_session_id = session_info.get("bb_session_id", "unknown")
-    _forget_session_tracking(task_id, session=True)
 
     if bb_session_id:  # cloud only — local sidecars have bb_session_id=None
         provider = _cloud._get_cloud_provider()
@@ -651,12 +674,20 @@ def _release_session_resources(task_id: str, session_info: dict[str, Any]) -> No
             except Exception as e:
                 _bt.logger.warning("Could not close cloud browser session: %s", e)
 
-    session_name = session_info.get("session_name", "")
     if session_name:
-        socket_dir = os.path.join(_bt._socket_safe_tmpdir(), f"agent-browser-{session_name}")
+        socket_dir = native_socket or os.path.join(_bt._socket_safe_tmpdir(), f"agent-browser-{session_name}")
         if os.path.exists(socket_dir):
-            _kill_verified_daemon(socket_dir, session_name)
-            shutil.rmtree(socket_dir, ignore_errors=True)
+            if native_socket:
+                from tools.browser_native_runtime import stop_and_release
+                try:
+                    stop_and_release(session_name, socket_dir)
+                except (VaultError, OSError) as exc:
+                    _bt.logger.warning("Native browser RAM cleanup remains pending: %s", exc)
+                    raise
+            else:
+                _kill_verified_daemon(socket_dir, session_name)
+                shutil.rmtree(socket_dir, ignore_errors=True)
+    _forget_session_tracking(task_id, session=True)
 
 
 def _force_reap_browser_session(task_id: str) -> None:
@@ -664,18 +695,36 @@ def _force_reap_browser_session(task_id: str) -> None:
 
     Janitor last resort after repeated cleanup failures (#100738).
     """
+    with _bt._cleanup_lock:
+        retained = _bt._active_sessions.get(task_id, {})
+    if (retained.get('features') or {}).get('lightpanda'):
+        _cleanup_single_browser_session(task_id)  # Never discard an unsaved cache after repeated failures.
+        return
     _cdp._stop_cdp_supervisor(task_id)
     with _bt._cleanup_lock:
         session_info = _bt._active_sessions.get(task_id)
         _bt._session_last_activity.pop(task_id, None)
-        _bt._recording_sessions.discard(task_id)
+    _recording.abandon(task_id)
     if session_info:
         _release_session_resources(task_id, session_info)
     _drop_last_active_binding(task_id)
 
 
 def _cleanup_single_browser_session(task_id: str) -> None:
-    """Reap a single browser session by its exact session key."""
+    """Admit the current operation before its first teardown effect."""
+    from tools.browser_native_runtime import cleanup_scope
+
+    info = _bt._active_sessions.get(task_id, {})
+    from tools.browser_lightpanda import cleanup_scope as lightpanda_scope
+
+    home = _bt._session_owner_homes.get(task_id)
+    with cleanup_scope(info.get('session_name', ''), home), lightpanda_scope(info, home=home):
+        _cleanup_admitted_browser_session(task_id)
+
+
+def _cleanup_admitted_browser_session(task_id: str) -> None:
+    """Reap an admitted browser session by its exact session key."""
+    logger = _bt.logger
     _cdp._stop_cdp_supervisor(task_id)  # close our WebSocket BEFORE the backend tears down the endpoint
 
     # Camofox: managed persistence keeps the profile (cookies) across tasks; skip the full
@@ -696,19 +745,24 @@ def _cleanup_single_browser_session(task_id: str) -> None:
 
     if not session_info:
         _bt.logger.debug("No active session found for task_id: %s", task_id)
+        _recording.retry_seal(task_id)  # a recording whose browser is gone may still await sealing
         return
 
     _bt.logger.debug("Found session for task %s: bb_session_id=%s", task_id, session_info.get("bb_session_id", "unknown"))
-    _bt._maybe_stop_recording(task_id)  # saves the file before close
+    _recording.stop(task_id)  # seals the completed video before close
+    from tools import browser_outgoing_profile as outgoing
+    if outgoing.lookup(task_id) is not None:
+        outgoing.require_saved_recordings(outgoing.lookup(task_id).env)
+        outgoing.close(task_id, session_info)  # failure retains tracking and the original backend
+        _release_session_resources(task_id, session_info)
+        return
 
     # Lightpanda sessions have no daemon to ``close``; an expired cloud CDP URL cannot
     # accept one and would make _get_session_info() renew the session mid-cleanup.
     if (session_info.get("features") or {}).get("lightpanda"):
-        try:
-            from tools.browser_lightpanda import stop_lightpanda
-            stop_lightpanda(session_info.get("session_name", ""))
-        except Exception as e:
-            _bt.logger.warning("lightpanda stop failed for task %s: %s", task_id, e)
+        from tools.browser_lightpanda import stop_lightpanda
+        stop_lightpanda(session_info.get("session_name", ""), home=_bt._session_owner_homes.get(task_id),
+                        expected=session_info.get('lightpanda_epoch'))
     elif _session_has_expired(session_info):
         _bt.logger.debug("Skipping agent-browser close for expired session %s", task_id)
     else:
@@ -716,7 +770,7 @@ def _cleanup_single_browser_session(task_id: str) -> None:
             _session._run_browser_command(task_id, "close", [], timeout=10)
             _bt.logger.debug("agent-browser close command completed for task %s", task_id)
         except Exception as e:
-            _bt.logger.warning("agent-browser close failed for task %s: %s", task_id, e)
+            logger.exception("agent-browser close failed for task %s: %s", task_id, e)
 
     _release_session_resources(task_id, session_info)
     _bt.logger.debug("Removed task %s from active sessions", task_id)
@@ -728,6 +782,7 @@ def cleanup_all_browsers() -> None:
         task_ids = list(_bt._active_sessions.keys())
     for task_id in task_ids:
         cleanup_browser(task_id)
+    _recording.retry_pending()
 
     try:  # tear down CDP supervisors so background threads exit
         from tools.browser_supervisor import SUPERVISOR_REGISTRY  # type: ignore[import-not-found]

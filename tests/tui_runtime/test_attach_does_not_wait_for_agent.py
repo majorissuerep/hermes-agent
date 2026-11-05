@@ -51,11 +51,18 @@ def no_build(monkeypatch):
 
 
 @pytest.fixture
-def session(tmp_path, no_build, request):
+def session(tmp_path, no_build, request, monkeypatch):
+    from hermes_security import vault
+
+    # Owned uploads are sealed artifacts: the session's owner has an unlocked vault.
+    monkeypatch.setattr(vault, "_SCRYPT_N", 1024)
+    vault.init_vault(tmp_path, "synthetic attach password")
+    vault.unlock(tmp_path, "synthetic attach password")
     sid = f"attach-{request.node.name}"
     record = building_session(tmp_path, sid)
     yield sid, record
     server._sessions.pop(sid, None)
+    vault.clear_vault_cache()
 
 
 def call(method: str, params: dict) -> dict:

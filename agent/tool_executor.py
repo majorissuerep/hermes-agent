@@ -660,20 +660,18 @@ def _blocked_tool_result(agent, ref: _ToolCallRef, *, block_body: dict[str, Any]
 
 
 def _pre_tool_block(agent, ref: _ToolCallRef):
-    """Run ``pre_tool_call`` plugin hooks; returns ``(block_message, final_args)`` with any
-    hook-modified args applied. Hook failures never block."""
+    """Resolve plugin argument rewrites, then enforce the native human-review gate."""
     try:
         from hermes_cli.plugins import _dispatch_pre_tool_call_hooks
-
         block_msg, modified_args = _dispatch_pre_tool_call_hooks(
-            ref.name,
-            ref.args,
-            **tool_hook_ids(agent, ref.task_id, ref.call_id),
+            ref.name, ref.args, **tool_hook_ids(agent, ref.task_id, ref.call_id),
             middleware_trace=list(ref.trace),
         )
-        return block_msg, (ref.args if modified_args is None else modified_args)
     except Exception:
-        return None, ref.args
+        block_msg, modified_args = None, None
+    final_args = ref.args if modified_args is None else modified_args
+    from agent.formal_logic import before_tool
+    return block_msg or before_tool(agent, ref.name, final_args), final_args
 
 
 def _dispatch_authorized_once(
@@ -1092,6 +1090,8 @@ def _commit_tool_result(
     from hermes_cli.observability.shared_metrics_harness import observe_tool_outcome
 
     observe_tool_outcome(agent, function_name, is_error)
+    from agent.formal_logic import observe_tool
+    observe_tool(agent, function_name, function_args, function_result, blocked=blocked or is_error)
     if observed:
         sidecars = getattr(agent, "_policy_sidecars", None)
         if sidecars and sidecars.router and not blocked:

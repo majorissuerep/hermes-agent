@@ -1,7 +1,7 @@
 """Tests for browser first-open timeout and timeout diagnostics."""
 
-import subprocess
 from unittest.mock import Mock
+from pathlib import Path
 
 import pytest
 
@@ -11,21 +11,34 @@ from tools import browser_tool_lifecycle as bt_lifecycle
 from tools import browser_tool_cloud as bt_cloud
 from tools import browser_tool_install as bt_install
 
+pytest_plugins = ['tests.tools.test_browser_native_private_state']
+
 
 @pytest.fixture(autouse=True)
-def _reset_browser_caches(monkeypatch, tmp_path):
+def _reset_browser_caches(monkeypatch, tmp_path, native_state):
+    from agent.session_context import scoped_current_session_id
+    from hermes_security.session_authority import start_session_authority
+
+    home, _user, _ram = native_state  # Declared RAM/vendor seams; real profile and operation custody.
     monkeypatch.setenv("HERMES_RUNTIME_DIR", str(tmp_path / "tools"))
     bt._cached_command_timeout = None
     bt._command_timeout_resolved = False
     bt._active_sessions.clear()
     bt._session_last_activity.clear()
     bt._last_active_session_key.clear()
-    yield
-    bt._cached_command_timeout = None
-    bt._command_timeout_resolved = False
-    bt._active_sessions.clear()
-    bt._session_last_activity.clear()
-    bt._last_active_session_key.clear()
+    bt._session_owner_homes.clear()
+    source = start_session_authority(home, 'timeout-fixture')
+    try:
+        with scoped_current_session_id(source.session_id):
+            yield
+    finally:
+        source.close()
+        bt._cached_command_timeout = None
+        bt._command_timeout_resolved = False
+        bt._active_sessions.clear()
+        bt._session_last_activity.clear()
+        bt._last_active_session_key.clear()
+        bt._session_owner_homes.clear()
 
 
 class TestOpenCommandTimeout:
@@ -100,9 +113,6 @@ class TestCommandTimeoutRecovery:
         bt._session_last_activity[task_id] = 1.0
         bt._last_active_session_key[task_id] = task_id
 
-        process = Mock()
-        process.returncode = 0
-        process.wait.side_effect = [subprocess.TimeoutExpired("agent-browser", 1), -9, 0]
         supervisor_events = []
 
         monkeypatch.setattr(bt_install, "_find_agent_browser", lambda: "agent-browser")
@@ -114,13 +124,22 @@ class TestCommandTimeoutRecovery:
         monkeypatch.setattr("tools.browser_tool_lifecycle._write_owner_pid", lambda *_args: None)
         monkeypatch.setattr(bt, "_build_browser_env", dict)
         monkeypatch.setattr("tools.browser_tool_install._merge_browser_path", lambda value: value)
-        monkeypatch.setattr(subprocess, "Popen", lambda *_args, **_kwargs: process)
+        client = Mock(side_effect=[(None, "", ""), (0, '{"success": true}', "")])
+        monkeypatch.setattr(bt_session, "_run_agent_browser_client", client)
         monkeypatch.setattr("tools.interrupt.is_interrupted", lambda: False)
+        prepared = []
+        prepare = bt_session._prepare_session_socket_dir
+        def capture_socket(name):
+            socket = prepare(name)
+            prepared.append(socket)
+            return socket
+        monkeypatch.setattr(bt_session, '_prepare_session_socket_dir', capture_socket)
 
         bt_session._run_browser_command(task_id, "click", ["@e1"], timeout=1)
 
         assert task_id not in bt._last_active_session_key
         assert not (tmp_path / "agent-browser-stuck-session").exists()
+        assert prepared and not Path(prepared[0]).exists()
         if not cloud:
             assert task_id not in bt._active_sessions and task_id not in bt._session_last_activity
             return
@@ -165,7 +184,7 @@ class TestBrowserNavigateOpenTimeout:
         monkeypatch.setattr(
             bt, "_navigation_session_key", lambda task_id, url, local_browser=False: task_id
         )
-        monkeypatch.setattr(bt, "_maybe_start_recording", lambda *a, **kw: None)
+        monkeypatch.setattr("tools.browser_recording.start", lambda *a, **kw: None)
         monkeypatch.setattr(bt, "check_website_access", lambda url: None)
 
         bt.browser_navigate("https://example.com", task_id="task-1")

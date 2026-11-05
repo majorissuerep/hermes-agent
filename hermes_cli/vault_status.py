@@ -27,6 +27,20 @@ def print_status(home) -> int:
             print(f"  Salt             : {salt_hex} ({len(salt_b64)} b64 chars)")
     envelopes, dbs, frames = status["encrypted_files"]
     print(f"  Encrypted files  : {envelopes} envelope(s), {dbs} database(s), {frames} frame stream(s)")
+    from hermes_cli.browser_connect import _BROWSERS
+    from hermes_cli.browser_profile_store import status_lines
+
+    for line in status_lines(home, [browser.key for browser in _BROWSERS]):
+        print(f"  {line}")
+    from tools.browser_recording_pending import locator_names
+
+    try:
+        pending = len(locator_names(home))
+    except OSError as exc:
+        print(f"  Recording recovery references could not be inspected: {exc}")
+        return 1
+    if pending:
+        print(f"  Pending recordings: {pending} reference(s); 'hermes secure-vault repair' checks quiescent recovery")
     if not status["unlocked"]:
         print("  (use 'hermes secure-vault unlock', or HERMES_VAULT_PRIVATE_KEY=<key-file path>, to unlock)")
     return 0

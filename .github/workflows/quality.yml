@@ -4,6 +4,15 @@ on:
   push:
     branches: [mirror/qualification]
   workflow_dispatch:
+    inputs:
+      build_payloads:
+        description: Build complete native terminal assets after qualification; does not publish a release.
+        type: boolean
+        default: false
+      source_commit:
+        description: Exact commit SHA of the dispatched ref; required when building payloads.
+        type: string
+        required: false
 
 permissions:
   contents: read
@@ -28,6 +37,17 @@ jobs:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a # v7.0.1
         with:
           fetch-depth: 0
+      - name: Bind requested payload build to this qualified source
+        if: github.event_name == 'workflow_dispatch' && inputs.build_payloads
+        env:
+          REQUESTED_SOURCE: ${{ inputs.source_commit }}
+        run: |
+          python3 - <<'PY'
+          import os, re
+          source = os.environ["REQUESTED_SOURCE"]
+          assert re.fullmatch(r"[0-9a-f]{40}", source), "supply the exact source SHA"
+          assert source == os.environ["GITHUB_SHA"], "dispatch the same source ref as source_commit"
+          PY
       - uses: ./.github/actions/setup-pm
         id: pm
         with:
@@ -72,9 +92,52 @@ jobs:
         with:
           scandir: ./docker
 
+  payload:
+    name: Build terminal payload (${{ matrix.os }})
+    needs: [native]
+    if: github.event_name == 'workflow_dispatch' && inputs.build_payloads && needs.native.result == 'success'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/setup-pm
+        id: pm
+        with:
+          toolchain: all
+      - name: Compile and stage the complete terminal product
+        env:
+          UV_CACHE_DIR: ${{ steps.pm.outputs.uv-cache-path }}
+        run: |
+          set -euo pipefail
+          node scripts/build/node-deps.mjs --source "$GITHUB_WORKSPACE" --workspace ui-tui --workspace apps/shared
+          node scripts/build/tui.mjs --source "$GITHUB_WORKSPACE" --out "$RUNNER_TEMP/release-tui"
+          python scripts/bundles/stage.py --ref "$GITHUB_SHA" --tui "$RUNNER_TEMP/release-tui" --out "$RUNNER_TEMP/release-payload" --cache "$UV_CACHE_DIR"
+      - name: Check the packaged launcher and record source provenance
+        env:
+          PAYLOAD_TARGET: ${{ steps.pm.outputs.target }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/payload-smoke-home"
+          HOME="$RUNNER_TEMP/payload-smoke-home" HERMES_HOME="$RUNNER_TEMP/payload-smoke-home/profile" HERMES_RUNTIME_DIR="$RUNNER_TEMP/release-payload/tools" "$RUNNER_TEMP/release-payload/bin/hermes" --version
+          python scripts/bundles/release.py --payload "$RUNNER_TEMP/release-payload" --out "$RUNNER_TEMP/release-assets" --commit "$GITHUB_SHA" --target "$PAYLOAD_TARGET"
+      - name: Upload build assets for independent lifecycle acceptance
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: terminal-payload-${{ steps.pm.outputs.target }}-${{ github.sha }}
+          path: ${{ runner.temp }}/release-assets/*
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+
   required:
     name: All required checks pass (v2)
-    needs: [native]
+    needs: [native, payload]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2
@@ -82,9 +145,13 @@ jobs:
       - name: Require every selected consumer to succeed
         env:
           RESULTS: ${{ toJSON(needs) }}
+          BUILD_PAYLOADS: ${{ github.event_name == 'workflow_dispatch' && inputs.build_payloads && 'true' || 'false' }}
         run: |
           python3 - <<'PY'
           import json, os
           results = json.loads(os.environ['RESULTS'])
-          assert results and all(row['result'] == 'success' for row in results.values()), results
+          selected = os.environ["BUILD_PAYLOADS"] == "true"
+          assert set(results) == {"native", "payload"}, results
+          assert results["native"]["result"] == "success", results
+          assert results["payload"]["result"] == ("success" if selected else "skipped"), results
           PY

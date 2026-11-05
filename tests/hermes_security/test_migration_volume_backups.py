@@ -3,7 +3,6 @@
 import os
 import secrets
 import stat
-import tarfile
 
 import pytest
 
@@ -37,8 +36,13 @@ def test_volume_migration_keeps_private_rollback_and_recovers_damaged_env(volume
     assert report.ok, report.failures
     assert report.backup_path.parent == backup
     assert stat.S_IMODE(report.backup_path.stat().st_mode) == 0o600
-    with tarfile.open(report.backup_path) as archive:
-        assert archive.extractfile(".env").read() == original
+    from hermes_security.profile_binding import capture
+    from hermes_security.migration_archive import verified_tar
+
+    with verified_tar(report.backup_path, custody=capture(home)) as archive:
+        member = next(iter(archive))
+        assert member.name == ".env"
+        assert archive.extractfile(member).read() == original
     assert (home / ".env").read_bytes().startswith(b"HRMVAULT\x00")
     assert io.read_bytes(home / ".env", purpose="env") == original
     damaged = bytearray((home / ".env").read_bytes())

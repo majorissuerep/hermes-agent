@@ -1432,7 +1432,7 @@ export interface PetInfoParams {
   profile?: string | null
   knownRevision?: string | null
 }
-/** ``server._pet_sprite_payload`` behind ``enabled``; every sprite field is absent when the pet display is off, ``spritesheetBase64`` is elided when ``spritesheetUnchanged``. */
+/** ``pet_media.sprite_payload`` behind ``enabled``; every sprite field is absent when the pet display is off, ``spritesheetBase64`` is elided when ``spritesheetUnchanged``. */
 export interface PetInfoResult {
   enabled: boolean
   slug?: string | null

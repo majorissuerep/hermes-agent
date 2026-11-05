@@ -2,13 +2,14 @@
 command timeout (#72205, salvaging #72206) and daemon tree-kill on the wedged
 path (#68139).
 
-All tests use a fake daemon layer (mocked Popen + monkeypatched probes) —
+All tests use a fake client/daemon layer (capture seam + native identity probes) —
 no real agent-browser or Chromium is spawned.
 """
 
 import json
 import os
 import subprocess
+from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
@@ -20,19 +21,30 @@ from tools import browser_tool_install as bt_install
 from tools import browser_tool_lifecycle as bt_lifecycle
 
 TASK = "suspect-task"
+pytest_plugins = ['tests.tools.test_browser_native_private_state']
 
 
 @pytest.fixture(autouse=True)
-def _reset_browser_state():
+def _reset_browser_state(native_state):
+    from agent.session_context import scoped_current_session_id
+    from hermes_security.session_authority import start_session_authority
+
+    home, _user, _ram = native_state
     def _clear():
         bt._active_sessions.clear()
         bt._session_last_activity.clear()
         bt._last_active_session_key.clear()
         bt._suspect_browser_sessions.clear()
+        bt._session_owner_homes.clear()
 
     _clear()
-    yield
-    _clear()
+    source = start_session_authority(home, 'suspect-fixture')
+    try:
+        with scoped_current_session_id(source.session_id):
+            yield
+    finally:
+        source.close()
+        _clear()
 
 
 def _local_session(name="stuck-session"):
@@ -52,7 +64,15 @@ def _install_command_stubs(monkeypatch, tmp_path, process):
     monkeypatch.setattr("tools.browser_tool_install._merge_browser_path", lambda value: value)
     monkeypatch.setattr("tools.browser_tool_cloud._get_browser_engine", lambda: "auto")
     monkeypatch.setattr("tools.browser_tool_cloud._is_headed_mode", lambda: False)
-    monkeypatch.setattr(subprocess, "Popen", lambda *_a, **_k: process)
+    def fake_client(_argv, *, timeout, **_kwargs):
+        if process is None:
+            pytest.fail('This test must install its explicit fake client response')
+        try:
+            process.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            return None, b'', b''
+        return process.returncode, b'', b''
+    monkeypatch.setattr('hermes_platform.client_capture.run_client', fake_client)
     monkeypatch.setattr("tools.interrupt.is_interrupted", lambda: False)
 
 
@@ -151,19 +171,9 @@ class TestSuccessfulCallNeverRecycles:
 
         payload = json.dumps({"success": True, "data": {"ok": 1}}).encode()
 
-        class FakePopen:
-            returncode = 0
-
-            def __init__(self, *_args, **kwargs):
-                os.write(kwargs["stdout"], payload)
-
-            def wait(self, timeout=None):
-                return 0
-
-        monkeypatch.setattr(subprocess, "Popen", FakePopen)
-        process = None  # FakePopen installed above; stub the rest.
+        process = None
         _install_command_stubs(monkeypatch, tmp_path, process)
-        monkeypatch.setattr(subprocess, "Popen", FakePopen)  # re-assert after stubs
+        monkeypatch.setattr('hermes_platform.client_capture.run_client', lambda *_a, **_kw: (0, payload, b''))
 
         recycle_calls = []
         monkeypatch.setattr(
@@ -198,8 +208,7 @@ class TestWedgedDaemonTreeKill:
         bt._last_active_session_key[TASK] = TASK
 
         daemon_pid = 5150
-        socket_dir = tmp_path / "agent-browser-wedged-session"
-        socket_dir.mkdir()
+        socket_dir = Path(bt_session._prepare_session_socket_dir('wedged-session'))
         (socket_dir / "wedged-session.pid").write_text(str(daemon_pid))
 
         process = Mock()
@@ -275,22 +284,17 @@ class TestBackendLevelFailureRecycles:
     a parsed page-level error must not."""
 
     @staticmethod
-    def _popen_sequence(monkeypatch, tmp_path, outputs):
-        """FakePopen replaying ``outputs`` (rc, stdout bytes) per spawn; records each argv."""
+    def _client_sequence(monkeypatch, tmp_path, outputs):
+        """Fake capture responses (rc, stdout bytes) per dispatch; records each real argv."""
         spawns = []
 
-        class FakePopen:
-            def __init__(self, argv, *_args, **kwargs):
-                rc, out = outputs[len(spawns)]
-                spawns.append(list(argv))
-                self.returncode = rc
-                os.write(kwargs["stdout"], out)
-
-            def wait(self, timeout=None):
-                return self.returncode
+        def fake_client(argv, **_kwargs):
+            rc, out = outputs[len(spawns)]
+            spawns.append(list(argv))
+            return rc, out, b''
 
         _install_command_stubs(monkeypatch, tmp_path, None)
-        monkeypatch.setattr(subprocess, "Popen", FakePopen)
+        monkeypatch.setattr('hermes_platform.client_capture.run_client', fake_client)
         monkeypatch.setattr("tools.browser_tool_cdp._get_cdp_override", lambda: "")
         monkeypatch.setattr(bt_cloud, "_get_cloud_provider", lambda: None)
         monkeypatch.setattr("tools.browser_tool_real_profile._real_profile_cdp", lambda: (None, None))
@@ -301,7 +305,7 @@ class TestBackendLevelFailureRecycles:
         stale = {"session_name": "stale-session", "bb_session_id": None, "cdp_url": None, "features": {"local": True}}
         bt._active_sessions[TASK] = stale
         ok = json.dumps({"success": True, "data": {"cdpUrl": "ws://127.0.0.1:1/x"}}).encode()
-        spawns = self._popen_sequence(monkeypatch, tmp_path, [(101, b""), (0, ok)])
+        spawns = self._client_sequence(monkeypatch, tmp_path, [(101, b""), (0, ok)])
 
         result = bt_session._run_browser_command(TASK, "get", ["cdp-url"], timeout=5)
 
@@ -317,7 +321,7 @@ class TestBackendLevelFailureRecycles:
                         "features": {"local": True}}
         bt._active_sessions[TASK] = session_info
         page_error = json.dumps({"success": False, "error": "Element @e9 not found"}).encode()
-        spawns = self._popen_sequence(monkeypatch, tmp_path, [(0, page_error)])
+        spawns = self._client_sequence(monkeypatch, tmp_path, [(0, page_error)])
 
         result = bt_session._run_browser_command(TASK, "click", ["@e9"], timeout=5)
 

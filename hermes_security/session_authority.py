@@ -421,6 +421,16 @@ class InheritedAuthoritySnapshot:
         for selected, raw, proof in self._grants:
             _check_grant(selected, raw, trusted_key_proof=proof)
 
+    def names_session(self, home: Path, session_id: str) -> bool:
+        """Whether this captured native handoff explicitly names the caller's session.
+
+        This selects no current grant and transfers no key. ``validate`` still checks the
+        original issuer's liveness before an operation may use the captured provenance.
+        """
+        selected = Path(home).resolve()
+        return any(profile == selected and json.loads(raw).get("session_id") == session_id
+                   for profile, raw, _proof in self._grants)
+
     def is_current(self) -> bool:
         try:
             return self._grants == _inherited_authority_records(self.home, self._profile_home)

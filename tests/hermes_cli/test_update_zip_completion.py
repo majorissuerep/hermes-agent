@@ -44,6 +44,9 @@ def zip_update(tmp_path, monkeypatch, isolated_source_completion):
 
     from tests.e2e.vault_home import seal_fixture_home
     seal_fixture_home(active)
+    # Both independent synthetic homes are explicitly unlocked for this
+    # all-profile maintenance fixture; parent migration never rekeys a child.
+    seal_fixture_home(sibling)
 
     root = tmp_path / "checkout"
     root.mkdir()

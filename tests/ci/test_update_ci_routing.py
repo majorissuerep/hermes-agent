@@ -652,6 +652,10 @@ def test_every_module_an_update_entry_point_imports_starts_its_suite(entries, la
     assert missing == {}, f"{lane}: imported by the update path but not routed to it: {missing}"
 
 
+def test_private_legacy_pet_migration_reaches_existing_upgrade_suite():
+    assert cc.classify(["hermes_security/migration_pets.py"])["e2e_upgrade"]
+
+
 def test_entry_points_themselves_start_their_suites():
     for module in _entry_modules(cc._UPDATE_ENTRY_POINTS):
         assert cc.classify([module.relative_to(_REPO).as_posix()])["e2e_upgrade"], module
@@ -771,3 +775,15 @@ def test_run_tests_forwards_the_strict_switch():
     text = (_REPO / "scripts/run_tests.sh").read_text(encoding="utf-8-sig")
     allow = re.search(r"for _test_var in (.*?); do", text, re.DOTALL)
     assert allow and "HERMES_E2E_STRICT_ACCEPTANCE" in allow.group(1).split()
+
+
+def test_pending_outgoing_profile_restore_fence_reaches_upgrade_lane():
+    assert cc.classify(["tools/browser_outgoing_state.py"])["e2e_upgrade"]
+
+
+@pytest.mark.parametrize('dependency',[
+    'hermes_security/authority_owned_operations.py','hermes_security/operation_custody.py',
+    'hermes_cli/management_owned_jobs.py','hermes_cli/management_browser.py',
+])
+def test_owned_native_maintenance_dependencies_reach_upgrade_lane(dependency):
+    assert cc.classify([dependency])['e2e_upgrade']

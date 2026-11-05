@@ -584,7 +584,7 @@ class TestIterCacheFiles:
         (doc_dir / "report.pdf").write_bytes(b"%PDF-1.4")
         old = time.time() - 25 * 3600
         os.utime(doc_dir / "report.pdf", (old, old))
-        # cache/generated is never swept: sync only its last-24h files (#126445).
+        # Historical generated outputs are private; neither fresh nor old files auto-upload.
         gen_dir = hermes_home / "cache" / "generated" / "images"
         gen_dir.mkdir(parents=True)
         (gen_dir / "fresh.png").write_bytes(b"\x89PNG")
@@ -594,7 +594,8 @@ class TestIterCacheFiles:
 
         entries = iter_cache_files()
         names = {Path(e["container_path"]).name for e in entries}
-        assert {"upload.zip", "report.pdf", "fresh.png"} <= names
+        assert {"upload.zip", "report.pdf"} <= names
+        assert "fresh.png" not in names
         assert "stale.png" not in names
 
     @pytest.mark.require_symlinks

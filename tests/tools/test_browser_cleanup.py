@@ -31,7 +31,6 @@ class TestBrowserCleanup:
         self.browser_tool = browser_tool
         self.orig_active_sessions = browser_tool._active_sessions.copy()
         self.orig_session_last_activity = browser_tool._session_last_activity.copy()
-        self.orig_recording_sessions = browser_tool._recording_sessions.copy()
         self.orig_cleanup_done = browser_tool._cleanup_done
 
     def teardown_method(self):
@@ -39,8 +38,6 @@ class TestBrowserCleanup:
         self.browser_tool._active_sessions.update(self.orig_active_sessions)
         self.browser_tool._session_last_activity.clear()
         self.browser_tool._session_last_activity.update(self.orig_session_last_activity)
-        self.browser_tool._recording_sessions.clear()
-        self.browser_tool._recording_sessions.update(self.orig_recording_sessions)
         self.browser_tool._cleanup_done = self.orig_cleanup_done
 
     def test_cleanup_browser_clears_tracking_state(self):
@@ -52,7 +49,7 @@ class TestBrowserCleanup:
         browser_tool._session_last_activity["task-1"] = 123.0
 
         with (
-            patch("tools.browser_tool._maybe_stop_recording") as mock_stop,
+            patch("tools.browser_recording.stop") as mock_stop,
             patch(
                 "tools.browser_tool_session._run_browser_command",
                 return_value={"success": True},
@@ -74,15 +71,17 @@ class TestBrowserCleanup:
         browser_tool._active_sessions["task-2"] = {"session_name": "sess-2"}
         browser_tool._session_last_activity["task-1"] = 1.0
         browser_tool._session_last_activity["task-2"] = 2.0
-        browser_tool._recording_sessions.update({"task-1", "task-2"})
 
-        with patch("tools.browser_tool_lifecycle.cleanup_all_browsers") as mock_cleanup_all:
+        with (
+            patch("tools.browser_recording.stop"),
+            patch("tools.browser_tool_session._run_browser_command", return_value={"success":True}) as close,
+            patch("tools.browser_tool.os.path.exists", return_value=False),
+        ):
             bt_lifecycle._emergency_cleanup_all_sessions()
 
-        mock_cleanup_all.assert_called_once_with()
+        assert {call.args[:2] for call in close.call_args_list} == {('task-1', 'close'), ('task-2', 'close')}
         assert browser_tool._active_sessions == {}
         assert browser_tool._session_last_activity == {}
-        assert browser_tool._recording_sessions == set()
         assert browser_tool._cleanup_done is True
 
 
@@ -98,7 +97,7 @@ class TestInactivityJanitorMultiplex:
             name: getattr(browser_tool, name).copy()
             for name in (
                 "_active_sessions", "_session_last_activity",
-                "_session_owner_homes", "_cleanup_failures", "_recording_sessions",
+                "_session_owner_homes", "_cleanup_failures",
             )
         }
         self.orig_timeout = browser_tool.BROWSER_SESSION_INACTIVITY_TIMEOUT

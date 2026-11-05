@@ -22,7 +22,20 @@ Python environment with raw pip or uv. Dependency preparation may access registr
 product builders consume prepared inputs and refuse missing inputs. Nix and Termux
 supply their native dependency environments rather than borrowing another target's environment.
 
+Linux build hosts need Clang for the current PM Python's native-extension compiler,
+plus CMake, pkg-config and the platform development headers. Install the browser
+runtime libraries listed in the [Dockerfile runtime base](../../Dockerfile), including
+Cua's X11, Xi and xkbcommon dependencies, before staging the complete tool set.
+PM verifies native tools by executing their probes during assembly.
+
 The stage adapter accepts a source ref and prepared TUI. Its output is a terminal
 agent payload, not a signed GUI installer. Docker, Nix and Termux retain their own
 native layouts. Parser/helper tests do not prove a native build or successful runtime;
 qualify the exact source and artifacts on the target platform with isolated state.
+
+Release packaging emits a JSON receipt with the complete archive SHA-256 and an
+ordered parts list. Archives over 1.9 GB are streamed into numbered parts, keeping
+each file below [GitHub's release asset limit](https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases#storage-and-bandwidth-quotas).
+Concatenate those parts in receipt order into the listed archive filename, verify
+the complete SHA-256, then extract it. Smaller products retain one tar.gz file.
+The receipt also records each part's size and SHA-256.

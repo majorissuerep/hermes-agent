@@ -115,8 +115,14 @@ def test_concurrent_image_results_preserve_shared_remote_sync_state(monkeypatch,
 
 def test_handle_image_generate_postprocesses_plugin_result(monkeypatch, tmp_path):
     from tools import image_generation_tool
+    from hermes_security import vault
+
+    monkeypatch.setattr(vault, "_SCRYPT_N", 1024)
 
     hermes_home = tmp_path / ".hermes"
+    hermes_home.mkdir()
+    vault.init_vault(hermes_home, "synthetic image handler password")
+    vault.unlock(hermes_home, "synthetic image handler password")
     image_dir = hermes_home / "cache" / "images"
     image_dir.mkdir(parents=True)
     image_path = image_dir / "plugin.png"

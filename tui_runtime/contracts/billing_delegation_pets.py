@@ -514,7 +514,7 @@ class PetHatchParams(ProfileParams):
     provider: str | None = None
 
 
-# TODO(common): ``tui_runtime/server.py::_pet_sprite_payload`` is one shape for ``pet.info`` and
+# TODO(common): ``tui_runtime/pet_media.py::sprite_payload`` is one shape for ``pet.info`` and
 # ``pet.hatch``; consolidate with the pets contract module. Every field optional: ``pet.hatch``
 # emits ``{}`` when the installed pet cannot be reloaded.
 class PetSpritePayload(Result):

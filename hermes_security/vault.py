@@ -397,6 +397,8 @@ def init_vault(
     password: str | bytes,
     *,
     _allow_existing_state: bool = False,
+    _migration_id: str | None = None,
+    public_key_raw: bytes | None = None,
 ) -> None:
     """Create vault metadata for *home*.
 
@@ -426,6 +428,17 @@ def init_vault(
         "salt": _b64e(salt),
         "verifier": _b64e(_make_verifier(root_key, salt)),
     }
+    if public_key_raw is not None:
+        meta["key_slots"] = [_seal_to_public_key(public_key_raw, root_key)]
+    if _migration_id is not None:
+        from hermes_security import migration_state
+
+        temporary = Vault(home_path, root_key)
+        try:
+            meta["migration_pending"] = migration_state.seal(
+                temporary, migration_state.initial(home_path, _migration_id))
+        finally:
+            temporary.wipe()
     _atomic_write(home_path / _META_FILENAME, json.dumps(meta).encode("utf-8"))
 
 

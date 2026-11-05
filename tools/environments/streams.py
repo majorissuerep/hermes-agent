@@ -25,7 +25,10 @@ def exec_prefix(env: BaseEnvironment, *, user: Optional[str] = None, interactive
     from tools.environments.docker import DockerEnvironment
     from tools.environments.singularity import SingularityEnvironment
     from tools.environments.ssh import SSHEnvironment
+    from tools.environments.captured_execution import CapturedExecution
 
+    if isinstance(env, CapturedExecution):
+        return env.prefix(user=user, interactive=interactive)
     if isinstance(env, DockerEnvironment):
         container = getattr(env, "_container_id", None)
         if not container:
@@ -71,10 +74,22 @@ def shell_joined(env: BaseEnvironment) -> bool:
 
 
 def remote_command(env: BaseEnvironment, argv: Sequence[str], *, child_env: Optional[dict] = None,
-                   user: Optional[str] = None, interactive: bool = True) -> Optional[list[str]]:
+                   user: Optional[str] = None, interactive: bool = True,
+                   expected_prefix: Optional[Sequence[str]] = None) -> Optional[list[str]]:
     """Full local argv running ``argv`` inside ``env`` with ``child_env`` exported, quoted for that backend's
     client; None for a backend without an exec prefix."""
     prefix = exec_prefix(env, user=user, interactive=interactive)
+    if expected_prefix is not None:
+        # Compare the SAME structured prefix used to build the command below. A second
+        # lookup could bless a newer target after validation of the original one.
+        from tools.environments.docker import DockerEnvironment
+        from tools.environments.captured_execution import CapturedExecution
+        identity = prefix
+        docker = isinstance(env, DockerEnvironment) or (isinstance(env, CapturedExecution) and env.backend == "docker")
+        if docker and interactive and prefix is not None:
+            identity = [*prefix[:2], *prefix[3:]]  # Docker's explicit -i stdin flag only
+        if identity is None or tuple(identity) != tuple(expected_prefix):
+            raise RuntimeError("The original outgoing execution target changed; no command was sent")
     if prefix is None:
         return None
     return remote_argv(prefix, argv, env=child_env, shell_joined=shell_joined(env))
@@ -92,9 +107,11 @@ def open_stream(env: BaseEnvironment, argv: Sequence[str], *, child_env: Optiona
 
 
 def run_in(env: BaseEnvironment, argv: Sequence[str], *, child_env: Optional[dict] = None, user: Optional[str] = None,
-           timeout: float = 30.0, stdin: Optional[bytes] = None) -> subprocess.CompletedProcess:
+           timeout: float = 30.0, stdin: Optional[bytes] = None,
+           expected_prefix: Optional[Sequence[str]] = None) -> subprocess.CompletedProcess:
     """One short command inside ``env`` with captured bytes output (probes: ``command -v``, ``cat env``)."""
-    command = remote_command(env, argv, child_env=child_env, user=user, interactive=stdin is not None)
+    command = remote_command(env, argv, child_env=child_env, user=user, interactive=stdin is not None,
+                             expected_prefix=expected_prefix)
     if command is None:
         raise RuntimeError(f"{type(env).__name__} cannot exec argv")
     return subprocess.run(  # windows-footgun: ok — Linux sandbox client

@@ -14,7 +14,6 @@ import re
 import signal
 import subprocess
 import sys
-import threading
 import time
 from pathlib import Path
 from typing import Any, Callable, Dict, List, NamedTuple, Optional
@@ -299,20 +298,6 @@ def _find_cli() -> Optional[list[str]]:
     if _harness_site_dir() is None:
         return None
     return [sys.executable, "-m", "browser_harness.run"]
-
-
-def _workspace_dir(task_id: Optional[str]) -> Optional[str]:
-    """Stable per-task scratch dir that persists across browser_exec calls"""
-    if os.environ.get("BH_AGENT_WORKSPACE"):
-        return os.environ["BH_AGENT_WORKSPACE"]
-    try:
-        safe = _TASK_ID_SAFE_RE.sub("_", str(task_id or "default"))[:80] or "default"
-        path = Path(get_hermes_home()) / "cache" / "browser-use" / "workspace" / safe
-        path.mkdir(parents=True, exist_ok=True)
-        return str(path)
-    except Exception as e:
-        logger.debug("browser_exec workspace unavailable: %s", e)
-        return None
 
 
 def _find_screenshot(stdout: str, since: float) -> Optional[str]:
@@ -630,6 +615,21 @@ def _kill_cli_process_group(proc) -> None:
         os.killpg(proc.pid, signal.SIGKILL)  # windows-footgun: ok — POSIX only, the nt branch returned above
 
 
+def _communicate_guarded(proc, code, env, timeout):
+    """Preserve one stdin dispatch and the original deadline while checking the captured source."""
+    deadline = time.monotonic()+timeout
+    data = code
+    while True:
+        env.check()
+        remaining = deadline-time.monotonic()
+        if remaining <= 0:
+            raise subprocess.TimeoutExpired(proc.args, timeout)
+        try:
+            return proc.communicate(input=data, timeout=min(0.1, remaining))
+        except subprocess.TimeoutExpired:
+            data = None
+
+
 def _run_cli_killing_process_group(cmd, code, env, timeout):
     """Run the CLI in its own process group and kill the whole group on timeout.
 
@@ -638,48 +638,59 @@ def _run_cli_killing_process_group(cmd, code, env, timeout):
     still holding them, and on Windows ``run()``'s unbounded post-kill ``communicate()`` then
     blocks on pipe EOF forever — so the tool call, plus its activity heartbeat, wedges (#106244).
     """
+    check = getattr(env, 'check', None)
+    if check is not None:
+        check()
+        env.starting()
+        check()
     proc = subprocess.Popen(
         cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         text=True, encoding="utf-8", errors="replace", env=env, **_group_popen_kwargs(),
     )
     try:
-        stdout, stderr = proc.communicate(input=code, timeout=timeout)
+        stdout, stderr = (_communicate_guarded(proc, code, env, timeout) if check is not None
+                          else proc.communicate(input=code, timeout=timeout))
     except subprocess.TimeoutExpired:
         _kill_cli_process_group(proc)
         with contextlib.suppress(subprocess.TimeoutExpired):
             proc.communicate(timeout=_POST_KILL_DRAIN_S)
         raise
+    except BaseException:
+        if proc.returncode is None:
+            _kill_cli_process_group(proc)
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            proc.communicate(timeout=_POST_KILL_DRAIN_S)
+        raise
+    if check is not None:
+        check()
     return subprocess.CompletedProcess(cmd, proc.returncode, stdout, stderr)
 
 
-# BU_NAMEs whose harness daemon this process has driven. The daemon reads BU_CDP_* once, at start, and
-# outlives every call, so a backend swap (/browser connect|disconnect) that only changes the resolved
-# endpoint leaves later browser_exec calls in the old browser until these are stopped.
-_driven_daemons: set = set()
-_driven_daemons_lock = threading.Lock()
 # Route cache key -> whether its last browser_exec ran on the hybrid local sidecar.
 _exec_route_is_sidecar: dict[str, bool] = {}
 
 
-def stop_harness_daemons() -> None:
+def stop_harness_daemons(*, original=False) -> None:
     """Stop every harness daemon this process drove, through the harness's own identity-checked
     ``--reload``; the next browser_exec respawns one on the endpoint it resolves then."""
-    with _driven_daemons_lock:
-        names = sorted(_driven_daemons)
-        _driven_daemons.clear()
-    cmd = _find_cli() if names else None
+    from hermes_security.errors import VaultError
+    from tools.browser_harness_runtime import captured_daemons
+
+    home = Path(get_hermes_home()).resolve()
+    daemons = [daemon for daemon in captured_daemons() if original or daemon.resource.home == home]
+    cmd = _find_cli() if daemons else None
     if not cmd:
         return
-    env = _base_subprocess_env()
-    for name in names:
-        with contextlib.suppress(OSError, subprocess.SubprocessError):
-            _run_cli_killing_process_group([*cmd, "--reload"], "", {**env, "BU_NAME": name}, 15)
+    for daemon in daemons:
+        try:
+            daemon.stop(cmd, _run_cli_killing_process_group, original=original)
+        except (VaultError, OSError, subprocess.SubprocessError) as exc:
+            logger.warning('Browser Use cleanup retained %s: %s', daemon.resource.path, exc, exc_info=True)
 
 
 def browser_exec(code: str, session: str = "", timeout_s: int = _DEFAULT_TIMEOUT_S,
                  task_id: Optional[str] = None, local: bool = False):
     """Run Python code through the browser-use CLI, and return its output"""
-    from agent.redact import redact_sensitive_text
     from tools.registry import tool_error, tool_result
     if not code or not code.strip():
         return tool_error("No code provided. Pass Python that uses the pre-imported helpers, e.g. new_tab(\"https://example.com\") then print(page_info()).")
@@ -689,11 +700,6 @@ def browser_exec(code: str, session: str = "", timeout_s: int = _DEFAULT_TIMEOUT
     verdict = _code_url_verdict(code)
     if verdict.blocked:
         return tool_error(verdict.blocked)
-    # One endpoint per call: any private URL sends the whole call to the local sidecar. A call with no URL
-    # literal stays on the route the previous call took (browser_navigate's _last_session_key twin).
-    route_key = _backend_cache_key(task_id, session)
-    local_sidecar = verdict.local_sidecar if _URL_RE.search(code) else _exec_route_is_sidecar.get(route_key, False)
-
     cmd = _find_cli()
     if not cmd:
         return tool_error("browser-harness is missing from Hermes's Python environment. "
@@ -705,11 +711,24 @@ def browser_exec(code: str, session: str = "", timeout_s: int = _DEFAULT_TIMEOUT
             return tool_error(f"Invalid session name {session!r}: use 1-64 letters, digits, "
                               "dashes, or underscores (e.g. 'r7k2').")
         env["BU_NAME"] = session
-    route_err = _route_backend(env, session, task_id, bool(local), force_local_sidecar=local_sidecar)
+    daemon_name = env.get('BU_NAME') or 'default'
+    # The daemon reads its endpoint once. Its selected name, rather than a task's workspace identity,
+    # must also select the browser and remembered private-URL sidecar route.
+    route_key = _backend_cache_key(task_id, daemon_name)
+    local_sidecar = verdict.local_sidecar if _URL_RE.search(code) else _exec_route_is_sidecar.get(route_key, False)
+    from hermes_security.errors import VaultError
+    from tools.browser_harness_runtime import HarnessRequest
+
+    try:
+        request = HarnessRequest(get_hermes_home(), task_id, env)
+        env = request.configure(_sidecar_daemon_name(daemon_name) if local_sidecar else daemon_name)
+    except (VaultError, OSError, ValueError) as exc:
+        return tool_error(f"Browser Use private state was retained: {exc}")
+    route_err = _route_backend(env, daemon_name, task_id, bool(local), force_local_sidecar=local_sidecar)
     if route_err:
         return tool_error(route_err)
     if local_sidecar:
-        env["BU_NAME"] = _sidecar_daemon_name(session)
+        env["BU_NAME"] = _sidecar_daemon_name(daemon_name)
     _exec_route_is_sidecar[route_key] = local_sidecar
 
     # SHARED browser (/browser connect CDP override): pin each named session to its own tab (see
@@ -718,9 +737,7 @@ def browser_exec(code: str, session: str = "", timeout_s: int = _DEFAULT_TIMEOUT
     if session and not private_browser:
         code = _OWN_TAB_PREAMBLE + code
 
-    workspace = _workspace_dir(task_id)
-    if workspace:
-        env["BH_AGENT_WORKSPACE"] = workspace
+    workspace = str(request.workspace_path)
 
     # BU_AUTOSPAWN makes the CLI start a Browser Use cloud browser when no local
     # Chrome/CDP endpoint is reachable (their API key authenticates it)
@@ -732,8 +749,6 @@ def browser_exec(code: str, session: str = "", timeout_s: int = _DEFAULT_TIMEOUT
 
     def dispatch() -> dict[str, Any]:
         _attach_vault_supervisor(env, task_id)
-        with _driven_daemons_lock:
-            _driven_daemons.add(env.get("BU_NAME", "default"))
         try:
             return {"proc": _run_cli_killing_process_group(cmd, code, env, timeout)}
         except subprocess.TimeoutExpired:
@@ -745,12 +760,34 @@ def browser_exec(code: str, session: str = "", timeout_s: int = _DEFAULT_TIMEOUT
         except OSError as e:
             return {"error_result": tool_error(f"Failed to launch browser-use CLI: {e}")}
 
-    dispatched = dispatch()
+    try:
+        with request.execution():
+            dispatched = dispatch()
+            request.check()
+    except (VaultError, OSError, ValueError) as exc:
+        return tool_error(f"Browser Use private state remains at {workspace}; use hermes secure-vault repair: {exc}")
     if "proc" not in dispatched:
         if "error_result" in dispatched:
             return dispatched["error_result"]
         return tool_result(dispatched)
-    proc = dispatched["proc"]
+    return _browser_exec_response(dispatched['proc'], request=request, workspace=workspace,
+                                  session=session, started=started)
+
+
+def _browser_exec_response(proc, *, request, workspace, session, started):
+    from hermes_security.errors import VaultError
+    from tools.registry import tool_error
+
+    try:
+        request.check()
+        return _format_browser_exec_response(proc, request=request, workspace=workspace, session=session, started=started)
+    except (VaultError, OSError, ValueError) as exc:
+        return tool_error(f'Browser Use original operation ended; private state retained at {workspace}: {exc}')
+
+
+def _format_browser_exec_response(proc, *, request, workspace, session, started):
+    from tools.registry import tool_result
+    from agent.redact import redact_sensitive_text
 
     # browser_vault fill registers injected values with this forced model-egress
     # boundary. Preserve raw stdout only for screenshot-path detection below.
@@ -773,7 +810,9 @@ def browser_exec(code: str, session: str = "", timeout_s: int = _DEFAULT_TIMEOUT
         result["screenshot_path"] = screenshot
         native = _native_screenshot_result(result, screenshot)
         if native is not None:
+            request.check()
             return native
+    request.check()
     return tool_result(result)
 
 

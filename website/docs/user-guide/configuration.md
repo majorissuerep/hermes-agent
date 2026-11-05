@@ -1581,14 +1581,6 @@ auxiliary:
     timeout: 30
     language: ""
 
-  # Skills hub — skill matching and search
-  skills_hub:
-    provider: "auto"
-    model: ""
-    base_url: ""
-    api_key: ""
-    timeout: 30
-
   # MCP tool dispatch
   mcp:
     provider: "auto"
@@ -1653,7 +1645,7 @@ Each entry supports the same three knobs as any auxiliary task config:
 | `model` | Model name for that provider |
 | `base_url` | (Optional) Custom OpenAI-compatible endpoint |
 
-`fallback_chain` is available on any auxiliary task — `compression`, `vision`, `approval`, `skills_hub`, `mcp`, etc.
+`fallback_chain` is available on any auxiliary task — `compression`, `vision`, `approval`, `mcp`, etc.
 
 ### Native vision embed budgets (top-level `vision:`)
 
@@ -2569,7 +2561,7 @@ Configure browser automation behavior:
 browser:
   inactivity_timeout: 120        # Seconds before auto-closing idle sessions
   command_timeout: 30             # Timeout in seconds for browser commands (screenshot, navigate, etc.)
-  record_sessions: false         # Auto-record browser sessions as WebM videos to ~/.hermes/browser_recordings/
+  record_sessions: false         # Auto-record browser sessions as encrypted WebM videos under artifacts/media/videos/
   # Optional CDP override — when set, Hermes attaches directly to your own
   # Chromium-family browser (via /browser connect) rather than starting a headless browser.
   cdp_url: ""

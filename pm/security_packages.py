@@ -12,9 +12,39 @@ from pm import paths
 from pm.filesystem import native
 from pm.lock import Lockfile
 from pm.package import InstallError
-from pm.packages import BinaryPackage, _RUST_TRIPLE
+from pm.packages import BinaryPackage, _RUST_TRIPLE, _github_release_digests
 from pm.registry import register
-from pm.store import MUSL_TARGETS, flatten_single_dir
+from pm.store import ALL_TARGETS, MUSL_TARGETS, flatten_single_dir
+
+
+@register
+class Lean(BinaryPackage):
+    """Optional pinned checker and standard library; never an ambient elan toolchain."""
+
+    name = "lean"
+    optional = True
+    on_path = False
+    probe_version = False  # The checker boundary owns credential-free isolated execution.
+    binary_rel = {"posix": "bin/lean"}
+    _platforms = {"linux-x64": "linux", "linux-arm64": "linux_aarch64",
+                  "darwin-x64": "darwin", "darwin-arm64": "darwin_aarch64"}
+    gaps = {target: "the Lean checker requires a supported glibc Linux or macOS release"
+            for target in ALL_TARGETS if target not in {
+                "linux-x64", "linux-arm64", "darwin-x64", "darwin-arm64"}}
+
+    def fetch_url(self, version: str, target: str) -> str:
+        platform = self._platforms.get(target)
+        if platform is None:
+            raise InstallError(self.name, self.missing_reason(target) or "unsupported target")
+        return f"https://github.com/leanprover/lean4/releases/download/v{version}/lean-{version}-{platform}.tar.zst"
+
+    def known_sha256(self, version: str, url: str) -> str | None:
+        return _github_release_digests("leanprover/lean4", f"v{version}").get(url.rsplit("/", 1)[-1])
+
+    def verify(self, entry: Path, target: str) -> str:
+        if not (entry / "lib" / "lean" / "Init.olean").is_file():
+            return "the pinned Lean standard library is missing"
+        return super().verify(entry, target)
 
 
 @register

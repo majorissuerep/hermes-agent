@@ -5,13 +5,9 @@ image stripping, and provider quirks (Anthropic dot preservation, Qwen portal me
 """
 import logging
 import asyncio
-import base64
 import copy
 import hashlib
 import json
-import os
-import tempfile
-from pathlib import Path
 from typing import Any, List, Optional
 
 from agent.lazy_forward import forward_static as _forward_static
@@ -23,9 +19,6 @@ logger = logging.getLogger("run_agent")
 
 _IMAGE_PART_TYPES = {"image_url", "input_image"}
 _TEXT_PART_TYPES = {"text", "input_text"}
-_DATA_URL_SUFFIXES = {
-    "image/png": ".png", "image/gif": ".gif", "image/webp": ".webp", "image/jpeg": ".jpg", "image/jpg": ".jpg"
-}
 
 
 def _is_image_part(part: Any) -> bool:
@@ -67,28 +60,6 @@ class VisionMessagePrepMixin:
     # 20 MB base64 ≈ 15 MB decoded — prevents OOM from an oversized data: URL in a shared gateway process.
     _MAX_DATA_URL_BASE64_BYTES = 20 * 1024 * 1024
 
-    @staticmethod
-    def _materialize_data_url_for_vision(image_url: str) -> tuple[str, Optional[Path]]:
-        header, _, data = str(image_url or "").partition(",")
-        if len(data) > VisionMessagePrepMixin._MAX_DATA_URL_BASE64_BYTES:
-            logger.warning("data-URL payload too large (%d bytes), skipping", len(data))
-            return "", None
-        mime = header[len("data:"):].split(";", 1)[0].strip() if header.startswith("data:") else ""
-        suffix = _DATA_URL_SUFFIXES.get(mime if mime.startswith("image/") else "image/jpeg", ".jpg")
-        tmp = tempfile.NamedTemporaryFile(prefix="anthropic_image_", suffix=suffix, delete=False)
-        try:
-            with tmp:
-                tmp.write(base64.b64decode(data))
-        except Exception:
-            # delete=False means a corrupt/unsupported data URL would otherwise
-            # leak a zero-byte temp file on every failed materialization.
-            try:
-                os.unlink(tmp.name)
-            except OSError:
-                pass
-            raise
-        return tmp.name, Path(tmp.name)
-
     def _describe_image_for_anthropic_fallback(self, image_url: str, role: str) -> str:
         cache_key = hashlib.sha256(str(image_url or "").encode("utf-8")).hexdigest()
         cached = self._anthropic_image_fallback_cache.get(cache_key)
@@ -104,24 +75,18 @@ class VisionMessagePrepMixin:
 
         vision_source = str(image_url or "")
         is_data_url = vision_source.startswith("data:")
-        cleanup_path: Optional[Path] = None
-        if is_data_url:
-            vision_source, cleanup_path = self._materialize_data_url_for_vision(vision_source)
+        if is_data_url and len(vision_source.partition(",")[2]) > self._MAX_DATA_URL_BASE64_BYTES:
+            description = "Image analysis failed: inline image exceeds the supported size limit."
+        else:
+            try:
+                from tools.vision_tools import vision_analyze_tool
 
-        try:
-            from tools.vision_tools import vision_analyze_tool
-
-            result_json = asyncio.run(vision_analyze_tool(image_url=vision_source, user_prompt=analysis_prompt))
-            result = json.loads(result_json) if isinstance(result_json, str) else {}
-            description = (result.get("analysis") or "").strip()
-        except Exception as e:
-            description = f"Image analysis failed: {e}"
-        finally:
-            if cleanup_path and cleanup_path.exists():
-                try:
-                    cleanup_path.unlink()
-                except OSError:
-                    pass
+                # The shared resolver validates inline bytes without materializing a file.
+                result_json = asyncio.run(vision_analyze_tool(image_url=vision_source, user_prompt=analysis_prompt))
+                result = json.loads(result_json) if isinstance(result_json, str) else {}
+                description = (result.get("analysis") or "").strip()
+            except Exception as e:
+                description = f"Image analysis failed: {e}"
 
         note = f"[The {role_label} attached an image. Here's what it contains:\n{description or 'Image analysis failed.'}]"
         if vision_source and not is_data_url:

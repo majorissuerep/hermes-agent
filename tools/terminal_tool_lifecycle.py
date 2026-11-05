@@ -91,6 +91,28 @@ def _cleanup_env(env: Any, *, force_remove: Optional[bool] = None) -> None:
     Shared by ``cleanup_vm``, the idle reaper and the prompt-time backend probe so
     the signature check lives in one place.
     """
+    from tools import browser_outgoing_profile as browser
+    with browser.environment_lock(env):
+        if not vars(env).get("_hermes_browser_profile_retired", False):
+            _preserve_browser_state(env, force_remove=force_remove)
+            browser.retire_environment(env)
+        _cleanup_backend(env, force_remove=force_remove)
+
+
+def _preserve_browser_state(env, *, force_remove=None):
+    from tools import browser_outgoing_profile as browser
+    try:
+        browser.before_destroy(env)
+    except Exception:
+        if (not force_remove or not hasattr(env, "cleanup")
+                or "force_remove" not in inspect.signature(env.cleanup).parameters):
+            raise
+        logger.error("EXPLICIT force removal proceeds although outgoing browser preservation failed. "
+                     "Unsaved private state at %s may be lost; it was NOT reported as saved.",
+                     browser.retained_origins(env))
+
+
+def _cleanup_backend(env, *, force_remove=None):
     if hasattr(env, 'cleanup'):
         if force_remove is not None and "force_remove" in inspect.signature(env.cleanup).parameters:
             env.cleanup(force_remove=force_remove)
@@ -125,7 +147,7 @@ def _clear_file_ops_cache(task_id: str) -> None:
         pass
 
 
-def _unregister_env(task_id: str):
+def _unregister_env(task_id: str, *, force_remove=None):
     """Pop *task_id* from the env cache, activity map and creation locks; return
     the env (or None). Callers run the (slow) teardown OUTSIDE the lock —
     Modal/Docker teardown can block 10-15s and would stall every concurrent
@@ -134,9 +156,19 @@ def _unregister_env(task_id: str):
         _active_environments, _creation_locks, _creation_locks_lock, _env_lock,
         _last_activity,
     )
+    from tools import browser_outgoing_profile as browser
     with _env_lock:
-        env = _active_environments.pop(task_id, None)
-        _last_activity.pop(task_id, None)
+        env = _active_environments.get(task_id)
+    if env is None:
+        return None
+    with browser.environment_lock(env):
+        _preserve_browser_state(env, force_remove=force_remove)
+        with _env_lock:
+            if _active_environments.get(task_id) is not env:
+                raise RuntimeError("Environment changed while private browser state was being preserved; retained")
+            _active_environments.pop(task_id)
+            _last_activity.pop(task_id, None)
+        browser.retire_environment(env)
     with _creation_locks_lock:
         _creation_locks.pop(task_id, None)
     return env
@@ -145,8 +177,7 @@ def _unregister_env(task_id: str):
 def _cleanup_inactive_envs(lifetime_seconds: int = 300):
     """Clean up environments that have been inactive for longer than lifetime_seconds."""
     from tools.terminal_tool import (
-        _active_environments, _creation_locks, _creation_locks_lock, _env_lock,
-        _last_activity,
+        _env_lock, _last_activity,
     )
     current_time = time.time()
 
@@ -159,20 +190,18 @@ def _cleanup_inactive_envs(lifetime_seconds: int = 300):
     except ImportError:
         pass
 
-    # Phase 1: unregister stale entries atomically under the lock; phase 2:
-    # stop them outside it (see _unregister_env for why).
+    # Preserve private browser state outside the global lock, then unregister only
+    # that exact environment. A failed close/checkpoint keeps its cache entry.
     with _env_lock:
         stale = [t for t, last in list(_last_activity.items()) if current_time - last > lifetime_seconds]
-        envs_to_stop = [(t, _active_environments.pop(t, None)) for t in stale]
-        for t in stale:
-            _last_activity.pop(t, None)
-        with _creation_locks_lock:
-            for t in stale:
-                _creation_locks.pop(t, None)
-    for task_id, env in envs_to_stop:
-        if env is not None:
-            _clear_file_ops_cache(task_id)
-            _teardown_env(env, task_id)
+    for task_id in stale:
+        try:
+            env = _unregister_env(task_id)
+            if env is not None:
+                _clear_file_ops_cache(task_id)
+                _teardown_env(env, task_id)
+        except Exception as exc:
+            logger.warning("Inactive environment %s retained: private browser preservation failed (%s)", task_id, exc, exc_info=True)
 
 
 def get_active_env(task_id: str):
@@ -302,7 +331,7 @@ def cleanup_vm(task_id: str, *, force_remove: bool = False):
     directly, so persist-mode idle envs are likewise no-op'd; only the orphan
     reaper at next startup reclaims them.
     """
-    env = _unregister_env(task_id)
+    env = _unregister_env(task_id, force_remove=force_remove)
     _clear_file_ops_cache(task_id)
     if env is None:
         return
@@ -316,18 +345,15 @@ def _evict_environment_for_task(task_id: Optional[str]) -> None:
     """Drop any cached env for *task_id* (and its collapsed key) after an
     infrastructure failure, so later calls don't reuse a dead connection."""
     from tools.terminal_tool import (
-        _active_environments, _env_lock, _last_activity, _resolve_container_task_id,
+        _resolve_container_task_id,
     )
     keys = {_resolve_container_task_id(task_id)}
     if task_id:
         keys.add(task_id)
-    evicted = []
-    with _env_lock:
-        for key in keys:
-            env = _active_environments.pop(key, None)
-            _last_activity.pop(key, None)
+    for key in keys:
+        try:
+            env = _unregister_env(key)
             if env is not None:
-                evicted.append(env)
-    for env in evicted:
-        with _quiet("cleanup of degraded environment failed"):
-            env.cleanup()
+                _cleanup_env(env)
+        except Exception as exc:
+            logger.warning("Degraded environment %s retained: cleanup/preservation failed (%s)", key, exc, exc_info=True)

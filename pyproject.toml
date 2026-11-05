@@ -4,7 +4,7 @@
 
 [project]
 name = "hermes-agent"
-version = "1.0.1"
+version = "1.1.0"
 description = "The self-improving AI agent — creates skills from experience, improves them during use, and runs anywhere"
 readme = "README.md"
 # 3.14 is the newest python we know we have wheels for.
@@ -140,7 +140,7 @@ dependencies = [
   # wrapper over it). Pure Python, and its pins match Pillow/websockets above,
   # so it rides in the main venv and every install, Desktop bundle included,
   # ships it without a separate tool environment.
-  "browser-harness==0.1.13; python_version >= '3.14'",
+  "browser-harness==0.1.13+hermes.2; python_version >= '3.14'",
   "ptyprocess>=0.7.0,<1; sys_platform != 'win32' and python_version >= '3.14'",
   # Python 3.14 requires pywinpty 3.x. Version 3.0.5 includes the native
   # binaries missing from 3.0.4 wheels on both Windows architectures.
@@ -157,9 +157,10 @@ dependencies = [
   # libs required for the codecs we use, so it's safe to ship in the base
   # install rather than gating it behind an extra + a mid-session lazy install
   # (which deadlocked the CLI under prompt_toolkit — see #40490).
-  # Pillow 13.0.0 fixes the open 12.3.0 advisories, but browser-harness 0.1.13
-  # (its newest release) pins pillow==12.3.0 and fastembed 0.8.1 caps <13.
-  "Pillow==12.3.0; python_version >= '3.14'",
+  # Pillow 13 fixes the open 12.3 advisories. The two maintained packaging
+  # backports below accept it with honest installed dependency metadata;
+  # pm/compatibility/provenance.json records the aged inputs and exact changes.
+  "Pillow==13.0.0; python_version >= '3.14'",
   # HEIF/HEIC/AVIF decode for the vision tools. iPhone photos and screenshots
   # are HEIC (frequently mislabeled .jpg by upload pipelines); Pillow has no
   # built-in HEIF codec, so without this the vision resolver rejects them as
@@ -202,7 +203,7 @@ dependencies = [
 # Native LanceDB/ONNX wheels do not cover Intel macOS, Windows ARM64 or Android.
 lancedb-memory = [
   "lancedb==0.39.0; ((sys_platform == 'darwin' and platform_machine == 'arm64') or (sys_platform == 'linux' and platform_machine == 'x86_64' and 'android' not in platform_release) or (sys_platform == 'linux' and platform_machine == 'aarch64' and 'android' not in platform_release))",
-  "fastembed==0.8.1; ((sys_platform == 'darwin' and platform_machine == 'arm64') or (sys_platform == 'linux' and platform_machine == 'x86_64' and 'android' not in platform_release) or (sys_platform == 'linux' and platform_machine == 'aarch64' and 'android' not in platform_release))",
+  "fastembed==0.8.1+hermes.2; ((sys_platform == 'darwin' and platform_machine == 'arm64') or (sys_platform == 'linux' and platform_machine == 'x86_64' and 'android' not in platform_release) or (sys_platform == 'linux' and platform_machine == 'aarch64' and 'android' not in platform_release))",
 ]
 # a libuv-backed implementation for ~2-4x throughput on uvicorn.  Gated as an
 # optional extra because libuv's ./configure does not run on Android/Termux
@@ -518,6 +519,10 @@ exclude-newer = "14 days"
 # Applied only when Hermes locks its own dependencies. Install workspaces
 # use the reviewed lock without requiring mirror upload timestamps.
 
+[tool.uv.sources]
+browser-harness = { path = "pm/compatibility/browser_harness-0.1.13+hermes.2.tar.gz" }
+fastembed = { path = "pm/compatibility/fastembed-0.8.1+hermes.2.tar.gz" }
+
 [tool.setuptools]
 # Root single-file modules are derived by setup.py at build time from the
 # source tree (see the ``_root_py_modules`` helper there). A static
@@ -566,7 +571,8 @@ plugins = ["**/plugin.yaml", "**/plugin.yml"]
 # pm/lock.json is the runtime pin table (uv/python/tool versions + sha256s).
 # Without it a sealed wheel installs the pm package but has no pins to
 # realize — the pm store would be empty.
-pm = ["lock.json", "artifact-mirror.json", "pyproject.toml", "uv.lock"]
+pm = ["lock.json", "artifact-mirror.json", "pyproject.toml", "uv.lock",
+      "compatibility/*.tar.gz", "compatibility/*.json", "compatibility/*.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -120,3 +120,7 @@ plans/
 /*.png.bak
 *.tar.gz
 *.tgz
+
+# Exact reviewed dependency sdists; CI also requires their full pinned hashes.
+!pm/compatibility/browser_harness-0.1.13+hermes.2.tar.gz
+!pm/compatibility/fastembed-0.8.1+hermes.2.tar.gz

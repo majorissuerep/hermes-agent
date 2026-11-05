@@ -27,7 +27,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from agent.proxy_bypass import is_loopback_host
-from hermes_constants import get_hermes_home
 
 logger = logging.getLogger(__name__)
 
@@ -348,9 +347,10 @@ def detect_default_chromium(system: str | None = None) -> str | None:
 # --- Real-profile SNAPSHOT launch -------------------------------------------------------
 # Never drive the live default user-data-dir: Chromium ≥136 (Google builds) refuses remote
 # debugging on it, and the user's running browser holds it (SingletonLock). Instead snapshot
-# the real profile into ``~/.hermes/browser-profile/`` and launch the user's real binary on
-# the copy — with NO mock-keychain/basic-store switches, so OS-keyring-encrypted cookies
-# decrypt exactly as in the user's own browser.
+# the real profile into a Hermes-owned copy and launch the user's real binary on the copy —
+# with NO mock-keychain/basic-store switches, so OS-keyring-encrypted cookies decrypt exactly
+# as in the user's own browser. The copy is active only in proven RAM and persisted as an
+# encrypted archive (``hermes_cli.browser_profile_store``); the source profile is only read.
 
 # Excluded from the snapshot: caches/telemetry AND replay-prone state that hangs a fresh
 # Chromium's renderer (extensions + service workers spin up on launch and wedge JS eval;
@@ -383,8 +383,46 @@ _AUTH_REFRESH_PROFILE_FILES = (
 
 
 def real_profile_copy_dir(browser: str) -> str:
-    """Return the hermes-owned snapshot dir for ``browser``'s real profile."""
-    return str(get_hermes_home() / "browser-profile" / browser)
+    """The active RAM copy dir for ``browser``'s real profile. Pure: creates and decrypts nothing.
+
+    Raises ``BrowserProfileError`` when no protected RAM base can be resolved."""
+    from hermes_cli.browser_profile_store import owned_profile
+    from hermes_security.browser_profile_archive import real_slot
+
+    return str(owned_profile(real_slot(browser)).path)
+
+
+def _account_identity(local_state: str, profile_key: str) -> dict:
+    """The signed-in account recorded for ``profile_key`` (empty when signed out/unreadable)."""
+    try:
+        with open(local_state, encoding="utf-8-sig", errors="replace") as fh:
+            entry = ((json.load(fh).get("profile") or {}).get("info_cache") or {}).get(profile_key) or {}
+    except (OSError, ValueError, AttributeError):
+        entry = {}
+    entry = entry if isinstance(entry, dict) else {}
+    return {"gaia_id": str(entry.get("gaia_id") or ""), "user_name": str(entry.get("user_name") or "")}
+
+
+def real_profile_identity(browser: str, src: str, source_profile: str) -> dict:
+    """Exact source identity a real-profile copy is bound to: browser, source dir, profile, account."""
+    return {"browser": browser, "source_dir": os.path.realpath(src), "source_profile": source_profile,
+            "account": _account_identity(os.path.join(src, "Local State"), source_profile)}
+
+
+def legacy_copy_identity(browser: str, copy_dir: str) -> dict | None:
+    """Best-known identity of a raw copy an older build left on disk (for explicit repair only)."""
+    if browser not in _BROWSER_BY_KEY:
+        return None
+    try:
+        with open(os.path.join(copy_dir, _SNAPSHOT_DONE_MARKER), encoding="utf-8") as fh:
+            source_profile = fh.read().strip()
+    except OSError:
+        source_profile = ""
+    src = real_profile_data_dir(browser)
+    return {"browser": browser, "source_dir": os.path.realpath(src) if src else "",
+            "source_profile": source_profile,
+            # _sync_local_state rewrote the copy's info_cache to the source entry under "Default".
+            "account": _account_identity(os.path.join(copy_dir, "Local State"), "Default")}
 
 
 def _last_used_profile(src: str) -> str:
@@ -399,26 +437,17 @@ def _last_used_profile(src: str) -> str:
     return last if isinstance(last, str) and os.path.isdir(os.path.join(src, last)) else "Default"
 
 
-def _secure_snapshot(path: str, *, contents: bool = False) -> None:
-    """Lock down a snapshot dir (or, with ``contents``, everything INSIDE it) as a secret store.
-    It holds the user's Cookies / Login Data, so it gets the same owner-only perms (managed-mode /
-    NixOS group-share carve-out, HERMES_UID/GID) as every Hermes secret dir — via ``_secure_dir``/
-    ``_secure_file``, not a bespoke chmod. Contents matter too (#96729): ``copy2`` keeps Chrome's
-    0644 and sqlite backups land umask-wide, so cookies were world-readable under the
-    ``HERMES_HOME_MODE`` hatch. Best-effort; never blocks a launch."""
-    try:
-        from hermes_cli.config import _secure_dir, _secure_file
-        if not contents:
-            _secure_dir(path)
-            return
-        for root, dirs, files in os.walk(path):
-            for d in dirs:
-                _secure_dir(os.path.join(root, d))
-            for f in files:
-                _secure_file(os.path.join(root, f))
-    except Exception as e:
-        logger.debug("could not secure real-profile snapshot %s %s: %s",
-                     "contents" if contents else "dir", path, e)
+def _owner_only_tree(path: str) -> None:
+    """Make every entry INSIDE the RAM copy owner-only (#96729: ``copy2`` keeps Chrome's 0644 and
+    sqlite backups land umask-wide). The copy is this user's private RAM workspace, never a shared
+    Hermes home, so no group-share carve-out applies. Symlinks are never followed."""
+    for root, dirs, files in os.walk(path):
+        for name, mode in ((d, 0o700) for d in dirs):
+            if not os.path.islink(os.path.join(root, name)):
+                os.chmod(os.path.join(root, name), mode)
+        for name in files:
+            if not os.path.islink(os.path.join(root, name)):
+                os.chmod(os.path.join(root, name), 0o600)
 
 
 # Auth files that are SQLite databases: on Windows a running Chrome holds these with an
@@ -697,11 +726,47 @@ def _copy_profile_tree(src: str, dst: str, source_profile: str) -> None:
             len(multi.args[0]) if multi.args else 0, src, source_profile)
 
 
+class _SnapshotRefused(Exception):
+    """The copy refresh failed closed; the message is the user-facing reason."""
+
+
+def _refresh_copy(browser: str, src: str, dst: str, source_profile: str) -> None:
+    """Fill/refresh the RAM copy from the source. The completion marker is written only after full
+    success, so a torn first copy (RAM full, Ctrl+C) never looks "already populated"."""
+    marker = os.path.join(dst, _SNAPSHOT_DONE_MARKER)
+    # Only a copy that previously COMPLETED counts as populated; a half-written tree is
+    # rebuilt — otherwise a torn first copy poisons freshness forever.
+    populated = os.path.isfile(marker)
+    _sync_local_state(src, dst, source_profile)
+    if not populated:
+        _copy_profile_tree(src, dst, source_profile)
+    # Both paths: lock-aware auth DB copy into Default — also the per-launch re-sync.
+    failed_dbs = _mirror_profile_auth(src, dst, source_profile)
+    if failed_dbs:  # even online-backup failed: never launch a silently signed-out session
+        raise _SnapshotRefused(_unavailable_auth_dbs_error(browser, failed_dbs))
+    # Never carry live-instance leftovers into the copy.
+    for leftover in ("SingletonLock", "SingletonSocket", "SingletonCookie"):
+        with contextlib.suppress(OSError):
+            os.unlink(os.path.join(dst, leftover))
+    # Mark complete only after everything above succeeded.
+    try:
+        with open(marker, "w", encoding="utf-8") as fh:
+            fh.write(source_profile)
+    except OSError as e:
+        logger.debug("real-profile snapshot: could not write done marker: %s", e)
+    # AFTER the marker write so the marker itself is covered; every pass, so old copies heal.
+    _owner_only_tree(dst)
+
+
 def snapshot_real_profile(browser: str, src: str | None = None) -> tuple[str | None, str | None]:
-    """Snapshot ``browser``'s real ACTIVE profile into the hermes copy dir; returns ``(dst, err)``.
-    Copies ``Local State`` plus the active profile's auth files into the copy's ``Default``. The
-    completion marker is written only after full success, so a torn first copy (disk full, Ctrl+C)
-    never looks "already populated" — it is redone from scratch."""
+    """Snapshot ``browser``'s real ACTIVE profile into the owned RAM copy; returns ``(dst, err)``.
+
+    The copy is restored from (or created for) the encrypted archive bound to this exact source
+    identity, then ``Local State`` plus the active profile's auth files are re-synced into its
+    ``Default``. Persisting it back is the owned-profile lifecycle's job at a quiescent boundary."""
+    from hermes_cli import browser_profile_store as store
+    from hermes_security.browser_profile_archive import real_slot
+
     src = src or real_profile_data_dir(browser)
     if not src or not os.path.isdir(src):
         return None, (
@@ -710,54 +775,35 @@ def snapshot_real_profile(browser: str, src: str | None = None) -> tuple[str | N
     source_profile, resolve_err = _resolve_source_profile(src)
     if resolve_err or not source_profile:
         return None, resolve_err
-    dst = real_profile_copy_dir(browser)
     # Fast lock probe BEFORE any copy: a blocking file op on a Windows-locked cookie DB can
     # hang the launch for minutes. Never trips on POSIX; there a running browser surfaces later as
     # auth DB backups that miss their deadline (``_unavailable_auth_dbs_error``).
     if _profile_is_locked(src, source_profile):
         return None, _locked_profile_error(browser)
-    marker = os.path.join(dst, _SNAPSHOT_DONE_MARKER)
-    # Only a copy that previously COMPLETED counts as populated; a half-written tree is
-    # rebuilt — otherwise a torn first copy poisons freshness forever.
-    populated = os.path.isfile(marker)
     try:
-        # Creation is private even when container/managed reconciliation leaves
-        # existing operator-owned modes untouched. Copies contain live cookies.
-        os.makedirs(dst, mode=0o700, exist_ok=True)
-        # Secure the snapshot dir AND its browser-profile parent on EVERY launch so a failed
-        # first attempt or an older-build dir still converges to owner-only perms.
-        for path in filter(None, (os.path.dirname(dst), dst)):
-            _secure_snapshot(path)
-        _sync_local_state(src, dst, source_profile)
-        if not populated:
-            _copy_profile_tree(src, dst, source_profile)
-        # Both paths: lock-aware auth DB copy into Default — also the per-launch re-sync.
-        failed_dbs = _mirror_profile_auth(src, dst, source_profile)
-        if failed_dbs:  # even online-backup failed: never launch a silently signed-out session
-            return None, _unavailable_auth_dbs_error(browser, failed_dbs)
-        # Never carry live-instance leftovers into the copy.
-        for leftover in ("SingletonLock", "SingletonSocket", "SingletonCookie"):
-            with contextlib.suppress(OSError):
-                os.unlink(os.path.join(dst, leftover))
-        # Mark complete only after everything above succeeded.
-        try:
-            with open(marker, "w", encoding="utf-8") as fh:
-                fh.write(source_profile)
-        except OSError as e:
-            logger.debug("real-profile snapshot: could not write done marker: %s", e)
-        # AFTER the marker write so the marker itself is covered; every pass, so old snapshots heal.
-        _secure_snapshot(dst, contents=True)
+        profile = store.owned_profile(real_slot(browser))
+        with store.prepare(profile, real_profile_identity(browser, src, source_profile)) as dst:
+            _refresh_copy(browser, src, str(dst), source_profile)
+    except (store.BrowserProfileError, _SnapshotRefused) as e:
+        return None, str(e)
     except OSError as e:
-        return None, f"could not snapshot the '{browser}' profile into {dst}: {e}"
-    return dst, None
+        return None, f"could not snapshot the '{browser}' profile into its protected RAM copy: {e}"
+    return str(dst), None
 
 
-def cleanup_real_profile_snapshots() -> None:
-    """Delete the whole real-profile snapshot store when consent is OFF (idempotent)."""
-    root = str(get_hermes_home() / "browser-profile")
-    if os.path.isdir(root):
-        shutil.rmtree(root, ignore_errors=True)
-        logger.info("real-profile: removed snapshot store %s (consent off)", root)
+def cleanup_real_profile_snapshots() -> dict:
+    """Consent is OFF: delete the real-profile archives and quiescent RAM copies (idempotent).
+
+    A copy a browser still holds is retained and reported, never deleted under it; the debug
+    profile archive and the operator's own browser profile are untouched."""
+    from hermes_cli.browser_profile_store import discard_real_profiles
+
+    report = discard_real_profiles([b.key for b in _BROWSERS])
+    if report["removed"]:
+        logger.info("real-profile: removed %s (consent off)", ", ".join(report["removed"]))
+    if report["retained"]:
+        logger.warning("real-profile: consent is off but kept %s", ", ".join(report["retained"]))
+    return report
 
 
 def _debug_candidate_paths(system: str):
@@ -794,140 +840,31 @@ def get_chrome_debug_candidates(system: str) -> list[str]:
 
 
 def chrome_debug_data_dir() -> str:
-    return str(get_hermes_home() / "chrome-debug")
+    """The active RAM copy of the ``/browser connect`` debug profile. Pure: creates nothing."""
+    from hermes_cli.browser_profile_store import owned_profile
+    from hermes_security.browser_profile_archive import DEBUG_SLOT
 
-
-def _managed_install() -> bool:
-    """True when a package manager (NixOS) owns this install's modes.
-
-    Read once per creation so the *creation* mode honours the same carve-out
-    ``hermes_cli.config._secure_dir`` applies to reconciliation. Import is
-    local and failure means "not managed": an unimportable config module is
-    the single-user source-install case, where 0700 is the right default.
-    """
-    try:
-        from hermes_cli.config import is_managed
-
-        return bool(is_managed())
-    except Exception:  # pragma: no cover - defensive
-        return False
-
-
-def _ensure_chrome_debug_data_dir(data_dir: str) -> None:
-    """Create the Chromium user-data-dir owner-only (0700), except managed.
-
-    ``chrome-debug`` is a real Chromium profile: Cookies, Login Data, and
-    Local Storage live here. Created with a bare ``os.makedirs`` it inherits
-    the umask and lands 0755, so every other local account could list and
-    read those stores. ``HERMES_HOME`` is 0700 by default, which contains the
-    damage — but the documented ``HERMES_HOME_MODE=0701`` hatch (so nginx can
-    traverse to a served subdirectory) makes a 0755 child genuinely
-    world-readable.
-
-    The mode is passed to ``os.makedirs`` so it is set *at creation* — no
-    window where the profile sits world-readable before a follow-up chmod.
-    Policy is then reconciled by ``hermes_cli.config._secure_dir``, the house
-    helper, rather than a hand-rolled chmod: it skips managed/NixOS installs,
-    honours ``HERMES_HOME_MODE``, and applies ``HERMES_UID``/``HERMES_GID``
-    ownership so a root-created dir does not lock out uid-mapped Docker
-    workers (#34107).
-
-    **Managed installs are skipped at creation too, not just at
-    reconciliation.** ``_secure_dir`` returns early under ``is_managed()``
-    because the NixOS module deliberately shares state group-wise, and
-    ``chrome-debug`` is *not* one of the directories its ``systemd.tmpfiles``
-    rules pre-create — it is made lazily at runtime, so a hardcoded 0700 here
-    would be the only thing setting its mode and would silently override that
-    design. On such a host the gateway and a hostUsers CLI share one
-    ``$HERMES_HOME`` through the hermes group, so a 0700 profile created by
-    whichever ran first locks the other out of the browser entirely.
-    Omitting the explicit mode there lets the inherited setgid + umask decide,
-    matching ``ensure_hermes_home``'s managed branch.
-
-    Reconciling unconditionally also heals a profile an older Hermes left at
-    0755, which is the whole point — the exposure is on disk already. It is
-    safe against a *running* browser: only group/other bits are dropped, the
-    owner keeps ``rwx``, and POSIX checks the mode at ``open()`` rather than
-    on already-open descriptors, so an attached Chromium keeps reading and
-    writing its profile. On Windows POSIX mode bits are advisory (``chmod``
-    only toggles the read-only flag), so this is best-effort there.
-    """
-    if _managed_install():
-        # Managed mode: the NixOS-configured umask/setgid owns the mode, and
-        # _secure_dir would no-op here anyway.
-        os.makedirs(data_dir, exist_ok=True)
-        return
-    os.makedirs(data_dir, mode=0o700, exist_ok=True)
-    try:
-        from hermes_cli.config import _secure_dir
-
-        _secure_dir(data_dir)
-    except Exception as exc:  # pragma: no cover - defensive
-        logger.debug("browser debug launch: profile dir chmod skipped: %s", exc)
+    return str(owned_profile(DEBUG_SLOT).path)
 
 
 def _open_launch_stderr_log(path: str):
-    """Open the launch stderr log owner-only (0600), truncating as before.
+    """Open the launch stderr log owner-only (0600), truncating per candidate.
 
-    Opened with a plain ``open(path, "wb")`` this lands 0644 under a default
-    umask — a fixed, guessable name inside the profile dir hardened just
-    above. Under ``HERMES_HOME_MODE=0701`` the directory is traversable but
-    unlistable, so a predictable filename is exactly the case that stays
-    reachable; the uuid-named files elsewhere in the profile do not.
-
-    Two halves, covering different installs:
-
-    * **At creation** the mode is passed to ``os.open``, so the file is never
-      briefly group/other-readable. ``O_TRUNC`` keeps the existing
-      per-candidate overwrite semantics.
-    * **On an already-existing log** ``O_CREAT`` applies ``mode`` only to a
-      file it actually creates, so the inode keeps whatever it had. An older
-      Hermes left this file at 0644 on disk, so creation-time hardening alone
-      would leave every *upgrading* install exposed at the one path in this
-      change with a guessable name. ``hermes_cli.config._secure_file``
-      reconciles it, for the same reason ``_ensure_chrome_debug_data_dir``
-      delegates to ``_secure_dir``: that helper is the single owner of the
-      owner-only file policy — it skips managed/NixOS installs and containers
-      and is where Windows ACL enforcement lands (#77527). Ordering: the
-      reconcile runs *after* the truncating open and *before* any bytes are
-      written, so the tighten lands while the file is empty.
-
-    The managed/NixOS carve-out applies at creation here too — the same defect
-    the profile directory had. This log is created lazily at runtime and is
-    not covered by the module's ``systemd.tmpfiles`` rules; the gateway and an
-    interactive ``hostUsers`` CLI share one ``$HERMES_HOME`` at two uids
-    through the hermes group, and a 0600 log created by whichever ran first
-    makes the other's truncating open fail with ``EACCES`` — and because every
-    candidate binary reuses this one path, that fails *the whole launch*.
-    There the inherited ``UMask = "0007"`` decides, like the merge base's
-    plain ``open()``.
-    """
-    managed = _managed_install()
-    # 0o666 rather than 0o600 on managed installs so the configured umask
-    # decides, matching the merge base's plain open() and the carve-out
-    # _ensure_chrome_debug_data_dir applies to the directory.
-    create_mode = 0o666 if managed else 0o600
-    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+    The log has a fixed, guessable name inside the profile copy. The copy is this user's 0700 RAM
+    workspace, but the mode is still set at creation and an existing inode is tightened after the
+    truncating open and before any bytes are written, so it is never group/other-readable. A
+    planted link is never followed."""
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0), 0o600)
     try:
-        fd = os.open(path, flags, create_mode)
-    except OSError:
-        # Same fallback the pre-fix code had: let a genuinely unopenable path
-        # surface to launch_chrome_debug's per-candidate handler.
-        handle = open(path, "wb")
-    else:
-        handle = os.fdopen(fd, "wb")
-    if not managed:
-        try:
-            from hermes_cli.config import _secure_file
-
-            _secure_file(path)
-        except Exception as exc:  # pragma: no cover - defensive
-            logger.debug("browser debug launch: stderr log chmod skipped: %s", exc)
-    return handle
+        os.fchmod(fd, 0o600)
+    except BaseException:
+        os.close(fd)
+        raise
+    return os.fdopen(fd, "wb")
 
 
-def _chrome_debug_args(port: int) -> list[str]:
-    return [f"--remote-debugging-port={port}", f"--user-data-dir={chrome_debug_data_dir()}",
+def _chrome_debug_args(port: int, data_dir: str) -> list[str]:
+    return [f"--remote-debugging-port={port}", f"--user-data-dir={data_dir}",
             "--no-first-run", "--no-default-browser-check"]
 
 
@@ -1000,15 +937,21 @@ def find_free_debug_port(preferred: int = DEFAULT_BROWSER_CDP_PORT, attempts: in
     return next((p for p in ports if all(bindable(f, h, p) for f, h in loopbacks)), preferred + 1)
 
 
-def manual_chrome_debug_command(port: int = DEFAULT_BROWSER_CDP_PORT, system: str | None = None) -> str | None:
+def manual_chrome_debug_command(port: int = DEFAULT_BROWSER_CDP_PORT, system: str | None = None,
+                                data_dir: str | None = None) -> str | None:
+    """A command the user can run by hand on the PREPARED debug profile copy (``data_dir`` from
+    :class:`ChromeDebugLaunch`). None when no copy was prepared — never a path to an unprepared
+    location, where a browser would create an unprotected profile."""
+    if not data_dir:
+        return None
     system = system or platform.system()
     candidates = get_chrome_debug_candidates(system)
     if candidates:
-        argv = [candidates[0], *_chrome_debug_args(port)]
+        argv = [candidates[0], *_chrome_debug_args(port, data_dir)]
         return subprocess.list2cmdline(argv) if system == "Windows" else shlex.join(argv)
     if system == "Darwin":
         return (f'open -a "Google Chrome" --args --remote-debugging-port={port} '
-                f'--user-data-dir="{chrome_debug_data_dir()}" --no-first-run '
+                f'--user-data-dir="{data_dir}" --no-first-run '
                 "--no-default-browser-check")
     return None
 
@@ -1052,13 +995,19 @@ class LaunchAttempt:
 @dataclass
 class ChromeDebugLaunch:
     """Result of ``launch_chrome_debug``: ``launched`` = a browser was spawned and is ready or
-    still starting (NOT a guarantee the CDP port ever opens); ``attempts`` explains *why* not."""
+    still starting (NOT a guarantee the CDP port ever opens); ``attempts`` explains *why* not.
+    ``profile_dir`` is the prepared debug profile copy; ``profile_error`` says why none could be
+    prepared (then nothing was launched and no manual command may be offered)."""
     launched: bool = False
     attempts: list[LaunchAttempt] = field(default_factory=list)
+    profile_dir: str | None = None
+    profile_error: str | None = None
 
     @property
     def hint(self) -> str | None:
         """Best user-facing explanation for a failed/soft launch, if any."""
+        if self.profile_error:
+            return self.profile_error
         for attempt in self.attempts:
             if attempt.state == "exited" and attempt.returncode == 0:
                 name = os.path.basename(attempt.binary)
@@ -1083,31 +1032,27 @@ def _read_stderr_tail(path: str) -> str:
         return ""
 
 
-def launch_chrome_debug(
-    port: int = DEFAULT_BROWSER_CDP_PORT, system: str | None = None) -> ChromeDebugLaunch:
-    """Launch a Chromium-family browser with remote debugging, trying each candidate in turn. One
-    that exits before the CDP port opens (crash, singleton forward, bad profile dir) is logged with
-    exit code + stderr tail and the next is tried."""
-    system = system or platform.system()
-    result = ChromeDebugLaunch()
-    candidates = get_chrome_debug_candidates(system)
-    if not candidates:
-        logger.info("browser debug launch: no Chromium-family binary found (system=%s)", system)
-        return result
+def _launch_candidates(result: ChromeDebugLaunch, candidates: list[str], port: int, system: str,
+                       profile) -> None:
+    """Try each candidate on the prepared copy; the launched browser is bound to the copy so the
+    owned-profile lifecycle saves it only after that browser has exited."""
+    from hermes_cli.browser_profile_store import BrowserProfileError, record_launch
 
-    data_dir = chrome_debug_data_dir()
-    _ensure_chrome_debug_data_dir(data_dir)
-    stderr_path = os.path.join(data_dir, _LAUNCH_STDERR_LOG)
+    stderr_path = os.path.join(result.profile_dir, _LAUNCH_STDERR_LOG)
     for candidate in candidates:
         try:
             with _open_launch_stderr_log(stderr_path) as stderr_file:
                 proc = subprocess.Popen(
-                    [candidate, *_chrome_debug_args(port)],
+                    [candidate, *_chrome_debug_args(port, result.profile_dir)],
                     stdout=subprocess.DEVNULL, stderr=stderr_file, **_detach_kwargs(system))
-        except Exception as exc:
+        except (OSError, ValueError, subprocess.SubprocessError) as exc:
             result.attempts.append(LaunchAttempt(binary=candidate, state="spawn-failed"))
             logger.info("browser debug launch: failed to spawn %s: %s", candidate, exc)
             continue
+        try:
+            record_launch(profile, proc)
+        except (BrowserProfileError, OSError) as exc:  # its SingletonLock still marks the copy busy
+            logger.warning("browser debug launch: browser not bound to its profile copy: %s", exc)
         logger.info(
             "browser debug launch: spawned %s (pid=%s) with --remote-debugging-port=%d",
             candidate, getattr(proc, "pid", None), port)
@@ -1116,11 +1061,37 @@ def launch_chrome_debug(
         result.attempts.append(attempt)
         if state != "exited":
             result.launched = True
-            return result
+            return
         attempt.returncode = getattr(proc, "returncode", None)
         attempt.stderr_tail = _read_stderr_tail(stderr_path)
         logger.warning(
             "browser debug launch: %s exited (code=%s) before port %d opened%s",
             candidate, attempt.returncode, port,
             f"; stderr tail: {attempt.stderr_tail}" if attempt.stderr_tail else "")
+
+
+def launch_chrome_debug(
+    port: int = DEFAULT_BROWSER_CDP_PORT, system: str | None = None) -> ChromeDebugLaunch:
+    """Launch a Chromium-family browser with remote debugging, trying each candidate in turn. One
+    that exits before the CDP port opens (crash, singleton forward, bad profile dir) is logged with
+    exit code + stderr tail and the next is tried.
+
+    The browser runs on the debug profile's protected RAM copy, restored from its encrypted
+    archive; a profile that cannot be prepared safely launches nothing (``profile_error``)."""
+    from hermes_cli import browser_profile_store as store
+    from hermes_security.browser_profile_archive import DEBUG_SLOT
+
+    system = system or platform.system()
+    result = ChromeDebugLaunch()
+    candidates = get_chrome_debug_candidates(system)
+    if not candidates:
+        logger.info("browser debug launch: no Chromium-family binary found (system=%s)", system)
+        return result
+    try:
+        profile = store.owned_profile(DEBUG_SLOT)
+        with store.prepare(profile, {}) as data_dir:
+            result.profile_dir = str(data_dir)
+            _launch_candidates(result, candidates, port, system, profile)
+    except store.BrowserProfileError as exc:
+        result.profile_error = str(exc)
     return result

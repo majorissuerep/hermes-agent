@@ -31,16 +31,17 @@ def _extract_screenshot_path_from_text(text: str) -> Optional[str]:
 
 
 def _store_full_snapshot(snapshot_text: str) -> Optional[str]:
-    """Write a full snapshot to cache/web and return its path (None on failure — best-effort).
+    """Seal a full browser tree for profile-owned file-tool recovery.
 
-    Mirrors ``web_tools._store_full_text``: cache/web is mounted read-only into
-    remote backends, so read_file can page through the complete tree on any
-    backend. The stored copy is force-redacted (page-rendered secrets must not
-    hit disk unmasked) and named by content hash so identical snapshots dedupe.
+    Page text is private state. Its authenticated host path is readable by the
+    existing file tools even when task execution uses an outgoing backend;
+    neither a plaintext web cache nor a remote copy is required. Content hashes
+    preserve duplicate detection. Secret redaction remains a model boundary.
     """
     try:
         import hashlib
-        from hermes_constants import get_hermes_dir
+        from hermes_constants import get_hermes_home
+        from hermes_security.artifacts import write_bytes
         from agent.redact import redact_sensitive_text
 
         content = redact_sensitive_text(snapshot_text, force=True)
@@ -50,17 +51,10 @@ def _store_full_snapshot(snapshot_text: str) -> Optional[str]:
                 + f"\n\n[... stored copy truncated at {_bt.MAX_STORED_SNAPSHOT_CHARS:,} chars "
                 f"of {len(content):,} ...]"
             )
-        from tools.spill_safety import ensure_spill_dir, write_text_exclusive
-
-        cache_dir = get_hermes_dir("cache/web", "web_cache")
-        ensure_spill_dir(cache_dir, private=False)
+        home = get_hermes_home()
         digest = hashlib.sha256(content.encode("utf-8")).hexdigest()[:10]
-        path = cache_dir / f"browser-snapshot-{digest}.txt"
-        # Deterministic filename in a well-known dir: refuse symlinks (lstat-unlink +
-        # exclusive create); same-content re-snapshots legitimately overwrite. Not
-        # private: cache/web is bind-mounted into remote backends' container UID.
-        write_text_exclusive(path, content, private=False, overwrite=True)
-        return str(path)
+        path = home / "artifacts" / "browser-snapshots" / f"browser-snapshot-{digest}.txt"
+        return str(write_bytes(path, content.encode("utf-8"), home=home, overwrite=True))
     except Exception as exc:
         _bt.logger.debug("Failed to store full browser snapshot: %s", exc)
         return None
@@ -70,7 +64,7 @@ def _truncate_snapshot(snapshot_text: str, max_chars: Optional[int] = None) -> s
     """Truncate a snapshot at line boundaries (never mid-element) to ``max_chars``.
 
     Defaults to ``browser.snapshot_threshold``. The full snapshot is stored to
-    cache/web and the appended note tells the agent how to page through it
+    encrypted profile artifacts and the appended note tells the agent how to page through it
     with read_file — element refs beyond the cut are in the file, not lost.
     """
     if max_chars is None:
@@ -79,11 +73,6 @@ def _truncate_snapshot(snapshot_text: str, max_chars: Optional[int] = None) -> s
         return snapshot_text
 
     stored_path = _store_full_snapshot(snapshot_text)
-    if stored_path:
-        # Agent-visible path: read_file runs inside the active backend (#72389).
-        from tools.credential_files import to_agent_visible_cache_path
-        stored_path = to_agent_visible_cache_path(stored_path)
-
     lines = snapshot_text.split('\n')
     result: list[str] = []
     chars = 0
@@ -104,7 +93,9 @@ def _truncate_snapshot(snapshot_text: str, max_chars: Optional[int] = None) -> s
                 f'read_file path="{stored_path}" offset={next_line} limit=200]'
             )
         else:
-            result.append(f'\n[... {remaining} more lines truncated, use browser_snapshot for full content]')
+            result.append(
+                f'\n[... {remaining} more lines truncated; encrypted full snapshot unavailable. '
+                'Unlock the owning profile and retry browser_snapshot.]')
     return '\n'.join(result)
 
 

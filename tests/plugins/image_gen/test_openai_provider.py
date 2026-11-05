@@ -8,6 +8,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from hermes_security import artifacts, vault
+from hermes_security import io as state_io
+
 import plugins.image_gen.openai as openai_plugin
 
 
@@ -32,7 +35,11 @@ def _fake_response(*, b64=None, url=None, revised_prompt=None):
 @pytest.fixture(autouse=True)
 def _tmp_hermes_home(tmp_path, monkeypatch):
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    monkeypatch.setattr(vault, "_SCRYPT_N", 1024)
+    vault.init_vault(tmp_path, "synthetic image provider password")
+    vault.unlock(tmp_path, "synthetic image provider password")
     yield tmp_path
+    vault.clear_vault_cache()
 
 
 @pytest.fixture
@@ -87,9 +94,7 @@ class TestModelResolution:
 
     def test_config_openai_model(self, tmp_path):
         import hermes_yaml as yaml
-        (tmp_path / "config.yaml").write_text(
-            yaml.safe_dump({"image_gen": {"openai": {"model": "gpt-image-2-low"}}})
-        )
+        state_io.write_text(tmp_path / "config.yaml", yaml.safe_dump({"image_gen": {"openai": {"model": "gpt-image-2-low"}}}), purpose="config")
         model_id, meta = openai_plugin._resolve_model()
         assert model_id == "gpt-image-2-low"
         assert meta["quality"] == "low"
@@ -107,8 +112,8 @@ class TestEndpointConfig:
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
         monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
         monkeypatch.setenv("IMAGE_GATEWAY_TOKEN", "gateway-token")
-        (tmp_path / "config.yaml").write_text(yaml.safe_dump({"image_gen": {"openai": {
-            "base_url": "http://localhost:18081/v1/", "key_env": "IMAGE_GATEWAY_TOKEN"}}}))
+        state_io.write_text(tmp_path / "config.yaml", yaml.safe_dump({"image_gen": {"openai": {
+            "base_url": "http://localhost:18081/v1/", "key_env": "IMAGE_GATEWAY_TOKEN"}}}), purpose="config")
         provider = openai_plugin.OpenAIImageGenProvider()
         assert provider.is_available() is True  # same resolver as generate(); no OPENAI_API_KEY needed
         fake_client = MagicMock()
@@ -128,8 +133,8 @@ class TestEndpointConfig:
         import hermes_yaml as yaml
         monkeypatch.setenv("OPENAI_API_KEY", "k")
         monkeypatch.delenv("OPENAI_IMAGE_MODEL", raising=False)
-        (tmp_path / "config.yaml").write_text(yaml.safe_dump({"image_gen": {
-            "model": "fal-ai/flux-2/klein/9b", "openai": {"model": "custom-image-model"}}}))
+        state_io.write_text(tmp_path / "config.yaml", yaml.safe_dump({"image_gen": {
+            "model": "fal-ai/flux-2/klein/9b", "openai": {"model": "custom-image-model"}}}), purpose="config")
         fake_client = MagicMock()
         fake_client.images.generate.return_value = _fake_response(b64=_b64_png())
         with _patched_openai(fake_client):
@@ -137,7 +142,7 @@ class TestEndpointConfig:
         assert result["success"] is True and result["model"] == "custom-image-model"
         request = fake_client.images.generate.call_args.kwargs
         assert request["model"] == "custom-image-model" and "quality" not in request
-        (tmp_path / "config.yaml").write_text(yaml.safe_dump({"image_gen": {"model": "fal-ai/flux-2/klein/9b"}}))
+        state_io.write_text(tmp_path / "config.yaml", yaml.safe_dump({"image_gen": {"model": "fal-ai/flux-2/klein/9b"}}), purpose="config")
         assert openai_plugin._resolve_model()[0] == "gpt-image-2-medium"
 
     def test_named_custom_endpoint_supplies_base_url_and_key(self, monkeypatch, tmp_path):
@@ -148,16 +153,16 @@ class TestEndpointConfig:
             monkeypatch.delenv(key, raising=False)
         monkeypatch.setenv("MY_GW_KEY", "gw-token")
         monkeypatch.setenv("IMAGE_ONLY_KEY", "image-token")
-        (tmp_path / "config.yaml").write_text(yaml.safe_dump({
+        state_io.write_text(tmp_path / "config.yaml", yaml.safe_dump({
             "providers": {"my-gateway": {"name": "My Gateway", "api": "https://gw.example/v1", "key_env": "MY_GW_KEY"}},
-            "image_gen": {"openai": {"provider": "my-gateway"}}}))
+            "image_gen": {"openai": {"provider": "my-gateway"}}}), purpose="config")
         assert openai_plugin._resolve_endpoint() == ("https://gw.example/v1", "gw-token")
         assert openai_plugin.OpenAIImageGenProvider().is_available() is True
-        (tmp_path / "config.yaml").write_text(yaml.safe_dump({
+        state_io.write_text(tmp_path / "config.yaml", yaml.safe_dump({
             "providers": {"my-gateway": {"name": "My Gateway", "api": "https://gw.example/v1", "key_env": "MY_GW_KEY"}},
-            "image_gen": {"openai": {"provider": "my-gateway", "key_env": "IMAGE_ONLY_KEY"}}}))
+            "image_gen": {"openai": {"provider": "my-gateway", "key_env": "IMAGE_ONLY_KEY"}}}), purpose="config")
         assert openai_plugin._resolve_endpoint() == ("https://gw.example/v1", "image-token")
-        (tmp_path / "config.yaml").write_text(yaml.safe_dump({"image_gen": {"openai": {"provider": "no-such"}}}))
+        state_io.write_text(tmp_path / "config.yaml", yaml.safe_dump({"image_gen": {"openai": {"provider": "no-such"}}}), purpose="config")
         assert openai_plugin._resolve_endpoint() == ("", "")
 
     def test_custom_base_url_ignores_system_proxy(self, monkeypatch, tmp_path):
@@ -171,8 +176,8 @@ class TestEndpointConfig:
                     "NO_PROXY", "no_proxy"):
             monkeypatch.delenv(key, raising=False)
         monkeypatch.setenv("OPENAI_API_KEY", "k")
-        (tmp_path / "config.yaml").write_text(yaml.safe_dump(
-            {"image_gen": {"openai": {"base_url": "http://localhost:18081/v1"}}}))
+        state_io.write_text(tmp_path / "config.yaml", yaml.safe_dump(
+            {"image_gen": {"openai": {"base_url": "http://localhost:18081/v1"}}}), purpose="config")
         fake_client = MagicMock()
         fake_client.images.generate.return_value = _fake_response(b64=_b64_png())
         sys_proxy = {"http": "http://sysproxy:3128", "https": "http://sysproxy:3128"}
@@ -248,8 +253,8 @@ class TestGenerate:
 
         saved = Path(result["image"])
         assert saved.exists()
-        assert saved.parent == tmp_path / "cache" / "generated" / "images"
-        assert saved.read_bytes() == png_bytes
+        assert saved.parent == tmp_path / "artifacts" / "generated" / "images"
+        assert artifacts.read_bytes(saved) == png_bytes
 
         call_kwargs = fake_client.images.generate.call_args.kwargs
         # All tiers hit the single underlying API model.
@@ -308,9 +313,9 @@ class TestGenerate:
 
         tier = api_model if quality == "auto" else f"{api_model}-{quality}"
         monkeypatch.delenv("OPENAI_IMAGE_MODEL", raising=False)
-        (tmp_path / "config.yaml").write_text(yaml.safe_dump({
+        state_io.write_text(tmp_path / "config.yaml", yaml.safe_dump({
             "image_gen": {"openai": {"model": tier}}
-        }))
+        }), purpose="config")
         source = tmp_path / "source.png"
         source.write_bytes(bytes.fromhex(_PNG_HEX))
         fake_client = MagicMock()
@@ -326,7 +331,7 @@ class TestGenerate:
         assert call.call_args.kwargs["quality"] == quality
         assert call.call_args.kwargs["model"] == api_model
         assert "response_format" not in call.call_args.kwargs
-        assert Path(result["image"]).read_bytes() == bytes.fromhex(_PNG_HEX)
+        assert artifacts.read_bytes(result["image"]) == bytes.fromhex(_PNG_HEX)
 
     @pytest.mark.parametrize("aspect,expected_size", [
         ("landscape", "1536x1024"),

@@ -27,6 +27,23 @@ def _no_real_sandbox(monkeypatch):
     monkeypatch.setattr(tt, "ensure_task_env", lambda *a, **k: None)
 
 
+@pytest.fixture
+def generation_home(tmp_path, monkeypatch):
+    from hermes_security import vault
+
+    home = tmp_path / "h"
+    home.mkdir(mode=0o700)
+    monkeypatch.setenv("HERMES_HOME", str(home))
+    monkeypatch.setattr(vault, "_SCRYPT_N", 1024)
+    password = "synthetic generation confinement credential"
+    vault.init_vault(home, password)
+    vault.unlock(home, password)
+    try:
+        yield home
+    finally:
+        vault.clear_vault_cache()
+
+
 class TestConfineSourceImages:
     def test_local_backend_is_passthrough(self, monkeypatch):
         monkeypatch.setenv("TERMINAL_ENV", "local")
@@ -88,11 +105,10 @@ class TestConfineSourceImages:
         # The host secret's bytes never left the chokepoint.
         assert "HOST-PRIVATE-KEY" not in err
 
-    def test_handler_rejects_before_provider_dispatch(self, monkeypatch, tmp_path):
+    def test_handler_rejects_before_provider_dispatch(self, monkeypatch, tmp_path, generation_home):
         """_handle_image_generate returns the confinement error without ever
         reaching plugin/FAL dispatch."""
         monkeypatch.setenv("TERMINAL_ENV", "ssh")
-        monkeypatch.setenv("HERMES_HOME", str(tmp_path / "h"))
 
         import tools.image_source as isrc
 
@@ -109,15 +125,15 @@ class TestConfineSourceImages:
         )
         payload = json.loads(out)
         assert payload["success"] is False
+        assert "Could not read source image" in payload["error"]
         assert dispatched == []
 
-    def test_video_generate_uses_same_chokepoint(self, monkeypatch, tmp_path):
+    def test_video_generate_uses_same_chokepoint(self, monkeypatch, tmp_path, generation_home):
         """video_generate's handler routes its image sources through the
         shared confinement helper too."""
         import tools.video_generation_tool as vgt
 
         monkeypatch.setenv("TERMINAL_ENV", "docker")
-        monkeypatch.setenv("HERMES_HOME", str(tmp_path / "h"))
 
         import tools.image_source as isrc
 

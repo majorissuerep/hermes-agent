@@ -33,11 +33,19 @@ def _reset_registry():
 @pytest.fixture
 def cfg_home(tmp_path, monkeypatch):
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
-    return tmp_path
+    from hermes_security import vault
+
+    monkeypatch.setattr(vault, "_SCRYPT_N", 1024)
+    vault.init_vault(tmp_path, "synthetic image edit password")
+    vault.unlock(tmp_path, "synthetic image edit password")
+    yield tmp_path
+    vault.clear_vault_cache()
 
 
 def _write_cfg(home, cfg: dict):
-    (home / "config.yaml").write_text(yaml.safe_dump(cfg))
+    from hermes_security import io as state_io
+
+    state_io.write_text(home / "config.yaml", yaml.safe_dump(cfg), purpose="config")
 
 
 # ---------------------------------------------------------------------------

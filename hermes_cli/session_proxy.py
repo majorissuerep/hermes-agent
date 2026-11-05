@@ -31,7 +31,7 @@ def _cancel(_signal, _frame):
     raise KeyboardInterrupt
 
 
-def main(arguments):
+def main(arguments, *, input_data: bytes | None = None):
     from hermes_constants import get_hermes_home
     from hermes_security.session_authority import ENV_NAME, operation_request, SessionAuthorityError, LegacySessionAuthorityError
 
@@ -39,7 +39,9 @@ def main(arguments):
     job = None
     previous = signal.signal(signal.SIGTERM, _cancel)
     try:
-        data = _read_input()
+        data = _read_input() if input_data is None else input_data
+        if not isinstance(data, bytes) or len(data) > 524288:
+            raise ValueError("native stdin exceeds the bounded input limit")
         response = operation_request(home, raw, {"op": "native.start", "arguments": arguments,
                                                 "stdin": base64.b64encode(data).decode("ascii")})
         if response.get("ok") is not True:

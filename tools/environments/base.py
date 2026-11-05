@@ -261,6 +261,7 @@ class BaseEnvironment(ABC):
         return "/tmp"  # no-tmp: ok — sandbox-side (remote container) temp dir, not the host
 
     def __init__(self, cwd: str, timeout: int, env: dict | None = None, persist_env: bool = True):
+        self._hermes_browser_owner_home = Path(get_hermes_home()).resolve()
         self.cwd = cwd
         self.timeout = timeout
         self.env = env or {}

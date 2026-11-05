@@ -160,6 +160,12 @@ _UPDATE_ENTRY_POINTS = (
 )
 # What the entry points import, outside the update_* family and the pipeline above.
 _UPDATE_DEPENDENCIES = (
+    "hermes_security/migration_archive.py",  # encrypted rollback and interrupted migration
+    "hermes_security/migration_state.py",  # encrypted rollback and interrupted migration
+    "hermes_security/migration_resume.py",  # encrypted rollback and interrupted migration
+    "hermes_security/migration_workflow.py",  # encrypted rollback and interrupted migration
+    "hermes_security/migration_profiles.py",  # selected-home conversion and opaque profile rollback
+    "hermes_security/migration_pets.py",  # private legacy producer rollback and group admission
     "hermes_cli/terminal_update.py",
     "hermes_platform/process_argv.py",
     "hermes_platform/child_processes.py",  # native updater custody and completion receipt ownership
@@ -170,8 +176,28 @@ _UPDATE_DEPENDENCIES = (
     "hermes_security/protected_memory.py",  # vault key custody on every encrypted update
     "hermes_security/artifact_paths.py",  # private state classification during update migration
     "hermes_security/artifacts.py",  # authenticated private output recovery
+    "hermes_security/browser_profile_archive.py",  # verified browser archive repair during migration
+    "hermes_security/browser_worker_archive.py",  # typed private browser configuration/workspace recovery
+    "hermes_cli/browser_worker_store.py",  # quiescent private browser state during explicit repair
+    "hermes_cli/browser_worker_retirement.py",  # authenticated resumable worker cleanup before repair deletes RAM
+    "hermes_cli/browser_worker_retirement_proof.py",  # hash-only original control inventory before cleanup
+    "hermes_cli/browser_worker_retirement_survivors.py",  # full-checkpoint survivor proof before deletion
+    "hermes_cli/browser_worker_repair.py",  # explicit legacy native browser-state import
+    "hermes_cli/browser_use_import.py",  # whole-tree Browser Use conversion and retained legacy debt
+    "hermes_cli/browser_harness_repair.py",  # native absence proof for retained harness control records
+    "hermes_cli/browser_worker_import_source.py",  # original-source proof before import retirement
+    "hermes_cli/browser_worker_external.py",  # reconstruct typed explicit-RAM worker recovery
+    "hermes_security/browser_worker_paths.py",  # exact legacy workspace classification
+    "hermes_platform/browser_process.py",  # structured source-owner admission during conversion
+    "hermes_cli/browser_native_restore.py",  # retained bootstrap inputs during explicit worker recovery
+    "hermes_cli/browser_native_state.py",  # authenticated native saved-state ordering during repair
+    "hermes_security/browser_worker_pending.py",  # authenticated retained-RAM recovery references
+    "hermes_security/tree_archive.py",  # shared verified tree grammar used by browser archive repair
+    "hermes_cli/browser_profile_repair.py",  # explicit legacy browser conversion during update repair
     "hermes_security/profile_binding.py",  # frames/migrate retain exact logical profile custody
     "hermes_security/delegation_repair.py",  # legacy delegation conversion during repair
+    "agent/pet/__init__.py",  # package initialization for private pet migration
+    "agent/pet/private_repair.py",  # profile-owned pet conversion during update migration
     "hermes_security/sqlite_custody.py",  # encrypted database lineage on every update
     "hermes_platform/memory_protection.py",  # native backing proof used by key custody
     "hermes_platform/managed_supervision.py",  # encrypted installer owner and stage lifetime
@@ -195,6 +221,13 @@ _UPDATE_DEPENDENCIES = (
     "hermes_cli/backup.py",  # pre-update backup
     "hermes_cli/backup_cron_prompts.py",  # restore_cron_prompt_fields_if_degraded (update_cmd_config)
     "hermes_cli/backup_restore.py",
+    "hermes_cli/backup_browser_profiles.py",  # current browser ciphertext in full recovery backups
+    "tools/browser_outgoing_state.py",  # pre-import fence for unsaved outgoing browser RAM/references
+    "hermes_security/authority_owned_operations.py",  # fixed native owner dispatch during scoped management
+    "hermes_security/operation_custody.py",  # original-source/chunk cancellation in owned maintenance
+    "hermes_cli/management_owned_jobs.py",  # fixed maintenance in the existing native job lifecycle
+    "hermes_cli/management_browser.py",  # shared ownership admission for explicit browser recovery
+    "hermes_cli/browser_profile_recovery.py",  # explicit orphan RAM checkpoint before restore
     "hermes_cli/relay_plugin_migrate.py",
     "hermes_cli/macos_tcc_anchor.py",
     "hermes_cli/model_catalog.py",

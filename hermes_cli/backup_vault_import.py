@@ -89,6 +89,10 @@ def prepare_import_file(staged: Path, target: Path) -> None:
     if home is None:
         return
     relative = target.resolve().relative_to(home)
+    from hermes_cli.backup_browser_profiles import prepare_import
+
+    if prepare_import(staged, target, home):
+        return
     if (vault_mod._is_in_skip_dir(relative) or target.name.startswith(".hermes-vault")
             or relative == Path("vault.key")):
         return

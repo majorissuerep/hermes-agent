@@ -16,13 +16,12 @@ import subprocess
 import sys
 import tempfile
 import threading
-import time
 from typing import Dict, Any, Optional, Union
 from pathlib import Path
 from agent.redact import redact_cdp_url
 from hermes_constants import get_hermes_home, hermes_home_key
 from utils import env_int
-from hermes_cli.config import DEFAULT_CONFIG, cfg_get
+from hermes_cli.config import DEFAULT_CONFIG
 from hermes_cli.observability.shared_metrics_loop import record_browser_call
 
 
@@ -51,6 +50,7 @@ def _build_browser_env() -> dict:
     Browserbase/Firecrawl keys, and a served profile's browser must run on its own (or none)."""
     from agent.secret_scope import current_secret_scope, get_secret, serves_routed_profile
     from tools.environments.local import served_profile_child_env
+    from tools.environments.local_env_policy import strip_local_vault_authority
 
     from agent.proxy_bypass import add_loopback_no_proxy
 
@@ -70,7 +70,9 @@ def _build_browser_env() -> dict:
     # Chrome puts its SingletonSocket under $TMPDIR; a deep scratch dir overflows the AF_UNIX
     # path cap and Chrome dies at startup ("Socket path too long"), so browsers get the short root.
     env["TMPDIR"] = _socket_safe_tmpdir()
-    return env
+    # The trusted child builder re-applies local session authority after its credential scrub.
+    # Browser vendors receive selected browser credentials, never Hermes unlock authority.
+    return strip_local_vault_authority(env)
 
 
 try:
@@ -378,7 +380,6 @@ def _socket_safe_tmpdir() -> str:
 # for a hybrid-routing local sidecar (opaque to _run_browser_command / cleanup_browser).
 # Values: session_name (always), bb_session_id + cdp_url (cloud).
 _active_sessions: dict[str, dict[str, Any]] = {}
-_recording_sessions: set = set()  # session_keys with active recordings
 # Most recent session_key per task_id (set by browser_navigate, read by every non-nav
 # tool) so click/snapshot land in the session that served the last navigation.
 _last_active_session_key: dict[str, str] = {}
@@ -462,6 +463,7 @@ _cleanup_running = False
 _cleanup_lock = threading.Lock()  # protects _session_last_activity AND _active_sessions
 
 from tools import browser_tool_lifecycle as _lifecycle
+from tools import browser_recording as _recording
 
 # atexit only — NO SIGINT/SIGTERM handlers calling sys.exit(): a SystemExit raised
 # inside a prompt_toolkit key-binding callback corrupts the coroutine state and
@@ -784,9 +786,10 @@ def browser_navigate(url: str, task_id: Optional[str] = None) -> str:
 
     session_info = _session._get_session_info(nav_session_key)
     is_first_nav = session_info.get("_first_nav", True)
+    recording_warning = None
     if is_first_nav:
         session_info["_first_nav"] = False
-        _maybe_start_recording(nav_session_key)
+        recording_warning = _recording.start(nav_session_key)
 
     result = _session._run_browser_command(nav_session_key, "open", [url],
                                   timeout=_get_open_command_timeout(first_open=is_first_nav))
@@ -801,6 +804,8 @@ def browser_navigate(url: str, task_id: Optional[str] = None) -> str:
         return blocked
 
     response = {"success": True, "url": final_url, "title": title}
+    if recording_warning:
+        response["recording_warning"] = recording_warning
     features = session_info.get("features") or {}
     if features.get("real_profile"):  # auditability: this ran on the user's real-profile copy-browser
         response["used_real_profile"] = True
@@ -1154,47 +1159,6 @@ def _camofox_eval(expression: str, task_id: Optional[str] = None) -> str:
         return tool_error(str(e), success=False)
 
 
-def _maybe_start_recording(task_id: str):
-    """Start recording if browser.record_sessions is enabled in config."""
-    with _cleanup_lock:
-        if task_id in _recording_sessions:
-            return
-    try:
-        from hermes_cli.config import read_raw_config
-        hermes_home = get_hermes_home()
-        if not cfg_get(read_raw_config(), "browser", "record_sessions", default=False):
-            return
-        recordings_dir = hermes_home / "browser_recordings"
-        recordings_dir.mkdir(parents=True, exist_ok=True)
-        _lifecycle._cleanup_old_recordings(max_age_hours=72)
-        recording_path = recordings_dir / f"session_{time.strftime('%Y%m%d_%H%M%S')}_{task_id[:16]}.webm"
-        result = _session._run_browser_command(task_id, "record", ["start", str(recording_path)])
-        if result.get("success"):
-            with _cleanup_lock:
-                _recording_sessions.add(task_id)
-            logger.info("Auto-recording browser session %s to %s", task_id, recording_path)
-        else:
-            logger.debug("Could not start auto-recording: %s", result.get("error"))
-    except Exception as e:
-        logger.debug("Auto-recording setup failed: %s", e)
-
-
-def _maybe_stop_recording(task_id: str):
-    """Stop recording if one is active for this session."""
-    with _cleanup_lock:
-        if task_id not in _recording_sessions:
-            return
-    try:
-        result = _session._run_browser_command(task_id, "record", ["stop"])
-        if result.get("success"):
-            logger.info("Saved browser recording for session %s: %s", task_id, result.get("data", {}).get("path", ""))
-    except Exception as e:
-        logger.debug("Could not stop recording for %s: %s", task_id, e)
-    finally:
-        with _cleanup_lock:
-            _recording_sessions.discard(task_id)
-
-
 _GET_IMAGES_JS = "JSON.stringify([...document.images].map(img => ({src: img.src, alt: img.alt || '', width: img.naturalWidth, height: img.naturalHeight})).filter(img => img.src && !img.src.startsWith('data:')))"
 
 
@@ -1240,11 +1204,9 @@ def _capture_vision_screenshot(effective_task_id: str, annotate: bool, screensho
         # doesn't trigger a redundant LP fallback.
         result = _session._run_browser_command(effective_task_id, "screenshot", screenshot_args,
                                       _engine_override="auto" if lp_prerouted else None)
-        if remote_path and result.get("success"):
-            try:
-                _session.fetch_sandbox_file(str((result.get("data") or {}).get("path") or remote_path), screenshot_path)
-            except Exception as exc:
-                logger.warning("could not fetch the sandbox screenshot %s: %s", remote_path, exc)
+        if remote_path:  # fetched into the host RAM stage, then removed from the backend either way
+            _session.settle_sandbox_capture(remote_path, (result.get("data") or {}).get("path"),
+                                            screenshot_path, fetch=bool(result.get("success")))
         elif result.get("success"):
             _vision.adopt_capture(str((result.get("data") or {}).get("path") or ""), screenshot_path)
     if not result.get("success"):

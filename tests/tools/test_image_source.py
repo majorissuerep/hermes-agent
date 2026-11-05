@@ -285,7 +285,7 @@ class TestExecReadSafety:
 class TestSvgNormalization:
     """SVG resolves end-to-end: the resolver passes it through as
     image/svg+xml and the vision call sites rasterize it to PNG via
-    _normalize_to_supported_image (PR #52688, folded in)."""
+    _normalize_to_supported_image (PR #52688, folded in), in memory."""
 
     @pytest.mark.asyncio
     async def test_svg_rasterized_when_converter_available(self, tmp_path, monkeypatch):
@@ -295,27 +295,23 @@ class TestSvgNormalization:
         svg = tmp_path / "art.svg"
         svg.write_bytes(b'<svg xmlns="http://www.w3.org/2000/svg" width="4" height="4"/>')
 
-        def fake_rasterize(svg_path, out_path):
-            out_path.write_bytes(PNG)
-            return True
-
-        with patch.object(vt, "_rasterize_svg_to_png", side_effect=fake_rasterize):
+        with patch.object(vt, "_rasterize_svg_bytes", return_value=PNG) as rasterize:
             res = await isrc.resolve_image_source(str(svg), isrc.ResolveContext())
             assert res.mime == "image/svg+xml"
-            path, mime, err = vt._normalize_to_supported_image(svg, "image/svg+xml")
+            data, mime, err = vt._normalize_to_supported_image(res.data, "image/svg+xml")
         assert err is None
         assert mime == "image/png"
-        assert path.read_bytes() == PNG
-        path.unlink()
+        assert data == PNG
+        rasterize.assert_called_once_with(svg.read_bytes())
 
     def test_svg_actionable_error_when_no_converter(self, tmp_path, monkeypatch):
         from tools import vision_tools_image_prep as vt
         _reload(monkeypatch, tmp_path / "hermes")
         svg = tmp_path / "art.svg"
         svg.write_bytes(b'<svg xmlns="http://www.w3.org/2000/svg"/>')
-        with patch.object(vt, "_rasterize_svg_to_png", return_value=False):
-            path, _mime, err = vt._normalize_to_supported_image(svg, "image/svg+xml")
-        assert path is None
+        with patch.object(vt, "_rasterize_svg_bytes", return_value=None):
+            data, _mime, err = vt._normalize_to_supported_image(svg, "image/svg+xml")
+        assert data is None
         assert "rasterizer" in err
 
 
@@ -518,11 +514,10 @@ class TestHeicDetection:
         res = await isrc.resolve_image_source(str(heic), isrc.ResolveContext())
         assert res.mime == "image/heic"
 
-        path, mime, err = vt._normalize_to_supported_image(heic, "image/heic")
+        data, mime, err = vt._normalize_to_supported_image(res.data, "image/heic")
         assert err is None
         assert mime == "image/png"
-        assert path.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
-        path.unlink()
+        assert data.startswith(b"\x89PNG\r\n\x1a\n")
 
     def test_heic_actionable_error_when_decoder_missing(self, tmp_path, monkeypatch):
         """With pillow-heif unavailable, a HEIC image gets an actionable error
@@ -542,8 +537,8 @@ class TestHeicDetection:
             return real_import(name, *args, **kwargs)
 
         with patch.object(builtins, "__import__", side_effect=_no_heif):
-            path, _mime, err = vt._normalize_to_supported_image(heic, "image/heic")
-        assert path is None
+            data, _mime, err = vt._normalize_to_supported_image(heic, "image/heic")
+        assert data is None
         assert "pillow-heif" in err
 
     def test_avif_converts_without_pillow_heif(self, tmp_path, monkeypatch):
@@ -575,12 +570,11 @@ class TestHeicDetection:
             return real_import(name, *args, **kwargs)
 
         with patch.object(builtins, "__import__", side_effect=_no_heif):
-            path, mime, err = vt._normalize_to_supported_image(avif, "image/avif")
+            data, mime, err = vt._normalize_to_supported_image(avif, "image/avif")
 
         assert err is None, f"AVIF was rejected without pillow-heif: {err}"
         assert mime == "image/png"
-        assert path.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
-        path.unlink()
+        assert data.startswith(b"\x89PNG\r\n\x1a\n")
 
     def test_avif_error_names_av1_not_just_pillow_heif(self, tmp_path, monkeypatch):
         """When an AVIF genuinely cannot be decoded, the guidance must mention
@@ -592,6 +586,6 @@ class TestHeicDetection:
         broken = tmp_path / "broken.avif"
         broken.write_bytes(AVIF_HEADER)
 
-        path, _mime, err = vt._normalize_to_supported_image(broken, "image/avif")
-        assert path is None
+        data, _mime, err = vt._normalize_to_supported_image(broken, "image/avif")
+        assert data is None
         assert "AV1" in err or "Pillow" in err

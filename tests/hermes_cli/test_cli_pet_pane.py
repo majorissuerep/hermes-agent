@@ -40,7 +40,14 @@ def boba_like(tmp_path, monkeypatch):
     (pet_dir / "pet.json").write_text(
         '{"id":"boba","displayName":"Boba","description":"d","spritesheetPath":"spritesheet.webp"}'
     )
-    return "boba"
+    from hermes_security import vault
+    from hermes_security.migrate import migrate_home
+
+    monkeypatch.setattr(vault, "_SCRYPT_N", 1024)
+    result = migrate_home(home, "synthetic pet consumer fixture password")
+    assert result.ok
+    yield "boba"
+    vault.clear_vault_cache()
 
 
 def _make_cli():

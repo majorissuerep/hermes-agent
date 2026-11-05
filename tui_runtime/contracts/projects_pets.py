@@ -25,7 +25,7 @@ class PetInfoParams(ProfileParams):
 
 
 class PetInfoResult(OpenModel):
-    """``server._pet_sprite_payload`` behind ``enabled``; every sprite field is absent when the pet
+    """``pet_media.sprite_payload`` behind ``enabled``; every sprite field is absent when the pet
     display is off, ``spritesheetBase64`` is elided when ``spritesheetUnchanged``."""
 
     enabled: bool

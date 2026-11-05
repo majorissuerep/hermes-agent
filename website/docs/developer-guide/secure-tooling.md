@@ -155,12 +155,27 @@ their own qualification; non-persistence flags alone are insufficient evidence.
 
 Private terminal and tool outputs are stored beneath `artifacts/terminal-output`
 and `artifacts/tool-results`; owned browser images use `artifacts/browser`.
+Oversized browser accessibility trees use `artifacts/browser-snapshots`. Their
+truncation footer names the authenticated host path for the existing file tools,
+including when task execution uses an outgoing backend. Paging, search and
+element references survive without mounting or uploading private page text.
+A failed encrypted save is explicitly reported; no plaintext cache is created.
 An explicit image path can be inspected with `hermes artifacts view PATH` or
 `/artifacts view PATH`. This authenticates and decodes in memory, then renders a
 bounded grayscale text preview (at most 120 columns by 60 rows). It creates no
 plaintext viewing file. Vision tools still receive the image pixels. Private
 `MEDIA:` references provide that slash-command hint instead of an external link
 to ciphertext. General configuration and credentials are outside this reader.
+
+`vision_analyze` and `video_analyze` prepare ordinary media in process memory.
+HTTP downloads, data URLs, local or sandbox reads, format normalization,
+region crops and resizes create no plaintext file under the profile or the
+system temp directory. The user's source file is only read. SVG rendering uses
+cairosvg in memory when installed. Its file-based fallbacks (svglib,
+rsvg-convert, inkscape) run only in a proven RAM-only protected workspace.
+Without one, the tool returns setup guidance, and history replay sends the
+existing text placeholder for the SVG. Raster images keep working on every
+host. In-memory preparation is not encrypted process memory.
 
 Delegation keeps its existing `cache/delegation` layout, including populated
 legacy `delegation_cache` homes. Task live views and full summary spills can be
@@ -188,15 +203,34 @@ plaintext scan. Explicit vault repair seals them in place and hardens their
 permissions; it preserves their authenticated legacy paths. Raw old images are
 refused by runtime readers until repaired. Package-manager and other public
 caches remain excluded. This change does not erase old bytes from SSD media.
+The same explicit repair covers the old `browser-snapshot-<hash>.txt` files in
+`cache/web` and `web_cache`. Ordinary public web extracts in `cache/web` keep
+their existing cache policy. A planted symlink at a private destination is
+refused and retained for inspection; its target is never written through.
 
-The existing initial migration creates a documented plaintext recovery archive
-outside the home, and deliberate offline exports also produce plaintext. These
-operator recovery operations are distinct from normal encrypted runtime output.
-Inspected computer-use image/element caches and ordinary user-image staging
-still have plaintext writers, as does selected remote browser scratch. Browser
-profiles and remaining generated media require an inventory. Those ports and
-their native-backend qualification remain explicit follow-up work; these changes
-do not certify every SSD byte or the host's swap and crash storage.
+The candidate initial migration streams its full rollback directly into an
+authenticated encrypted archive before converting state. The original credential
+can recover it even if conversion stops; explicit offline export is the action
+that creates plaintext. A selected home preserves nested profiles as opaque
+independent islands, including their own credential metadata, and reports known
+profiles that still need their own migration. It never borrows an ancestor key
+or claims that converting one home encrypted every child.
+
+Candidate computer-use caches, ordinary image preparation and generated media
+use encrypted persistence or proven RAM storage. These ports remain subject to
+combined-candidate and independent main acceptance. A browser in a selected Docker, SSH or Singularity
+terminal keeps its generated profile, captures, sockets and temporary files in
+an owner-only directory that the backend itself proves is never-swapped RAM:
+a bounded mount/swap probe runs there and the host applies its own RAM rule.
+The backend's runtime directory or temp directory must be ramfs, noswap tmpfs,
+or tmpfs without active swap; otherwise browser use refuses and names the
+backend. Captures move through bounded anonymous pipes into the host RAM stage
+and are removed only through the owning runtime. Earlier backend-home profiles
+are retained. Durable remote profile continuity, verified legacy conversion and
+actual Docker/SSH/Singularity replay are still release blockers. Local real/debug
+browser profiles have component-level encrypted disconnect/cold-restore evidence;
+recording recovery and remaining native worker state are still under qualification.
+These changes do not certify every SSD byte or the host's swap and crash storage.
 
 A running old owner retains its old implementation after a source update. New
 operation-only clients report `owner_restart_required` with restart/resume
@@ -648,9 +682,10 @@ controller owns bookkeeping and verification. The main model keeps its ordinary
 working interface and receives concise consequential findings; this does not
 add a reasoning toolset or rewrite past prompts, memories or tool schemas.
 
-The bounded delivery window starts at **2026-11-03 21:08 UTC** and ends at
-**2026-11-04 07:08 UTC**. Work uses GPT-6.1 Sol at high effort and Claude Opus 5.5
-at high effort, with approximately equal delegated work packages. The
+The initial ten-hour delivery window ended on November 4. The operator then
+extended the work until a stable fork release; qualification, rather than that
+elapsed deadline, determines completion. Work uses GPT-6.1 Sol at high effort
+and Claude Opus 5.5 at high effort, with approximately equal delegated work packages. The
 coordinator owns integration, evidence reconciliation, merge and publication.
 Model agreement is not independent evidence. A non-author owns each milestone's
 independent acceptance, using fresh environments and the actual merged SHA.
@@ -684,7 +719,7 @@ stale log stream or compiler exit code cannot certify the current outcome.
 | --- | --- | --- | --- |
 | **M0: qualify encrypted integrations** | **INT-01** native/self-called Hermes, Codex and Claude; **MCP-01** device login, refresh, issuer selection and scoped persistence; **CI-01** minimal private verification, native GitHub gates and automatic public mirror. Integration owner: coordinator; independent acceptance: a non-author for each boundary. | Real encrypted homes, real native processes and CLI entry points, observed routing, ciphertext inspection, parent survival, revocation, cancellation and failure cleanup. All required checks green for the candidate; source/public main readbacks match. Current status: held; custody, exact-session and owned-I/O repairs require final qualification. | A non-author starts from fresh main, with separate homes/runtime roots and held-out lifecycle scenarios. Exercise logged-in external CLIs, MCP refresh/failure recovery, install/update/restore and stale-capability rejection. Foreign-host or unavailable-credential cases remain explicitly unqualified. |
 | **M1: protected workflow vertical slice** | **WF-01** immutable contract and receipt; **ASSUME-01** encrypted, source-linked assumptions; **VERIFY-01** hidden checker routing; **LEAN-01** one reviewed formal obligation; **OPS-01** logged-in operational status, diagnosis, cancellation and recovery. Wider integration is deferred until M0 acceptance; the existing opt-in consumer is not the hidden controller. | A concrete local workflow decomposes into dependency-bound work, checks required premise review/attestation state and currency, runs an available validator, returns actionable feedback, and resumes from an encrypted checkpoint without replaying committed side effects. No new core model tools or persistent plaintext work artifacts. Formal evidence is conditional on the reviewed specification and premises; it does not establish premise truth. | Swap implementation/test ownership. Use fresh main and adversarial held-out cases: false/missing/stale premise, changed statement, contradictory premises, forged receipt, `sorry`/unexpected axiom, checker unavailable, interrupted child and revoked parent. Failure blocks certification and produces a corrective backlog item. |
-| **M2: broaden only from evidence** | **EVID-01** primary-source evidence register; **ORCH-02** larger DAGs and bounded parallel execution; **KB-02** source-change invalidation and selective human review; **ADAPT-02** additional executor/backend qualification. | Extend a proven consumer, retain model-neutral contracts and per-adapter evidence. Quantified task gains require an applicable published result or an honest Hermes-specific measurement; do not relabel filtering as better task completion. | Independent regression and outcome review after each subsequent major merge; no blanket provider, operating-system or model-independence claim. Deferred work stays in this backlog if the delivery window cannot accommodate its full merge and acceptance cycle. |
+| **M2: broaden only from evidence** | **EVID-01** primary-source evidence register; **ORCH-02** larger DAGs and bounded parallel execution; **KB-02** source-change invalidation and selective human review; **ADAPT-02** additional executor/backend qualification. | Extend a proven consumer, retain model-neutral contracts and per-adapter evidence. Quantified task gains require an applicable published result or an honest Hermes-specific measurement; do not relabel filtering as better task completion. | Independent regression and outcome review after each subsequent major merge; no blanket provider, operating-system or model-independence claim. Deferred work stays in this backlog until its full merge and acceptance cycle is complete. |
 
 M0 also includes **SEC-01**, operation-scoped child authority with trusted native
 key handoff; **SEC-02**, measured memory and temporary-storage protection; and
@@ -724,15 +759,15 @@ Only this bounded completion slice is implemented locally. The wider M1
 decomposition, side-effect recovery and host-admission contracts remain pending;
 existing kanban functionality alone does not establish their combined acceptance.
 
-The integration cutoff is **00:08 UTC**: start exact-candidate qualification
-early enough to allow private CI, native GitHub gates, the source merge and an
-independent main acceptance cycle before the delivery deadline. Unqualified
-later features stay explicitly deferred; a deadline does not authorize bypassing
-checks. Roll back an unmerged increment by reverting only its task-owned commits;
+Start exact-candidate qualification early enough to allow private CI, native
+GitHub gates, the source merge and an independent main acceptance cycle.
+Unqualified features stay explicitly deferred; a deadline does not authorize
+bypassing checks. Roll back an unmerged increment by reverting only its task-owned commits;
 post-merge defects require a corrective PR and the same checks.
 
-The cutoff has passed. Only repairs to concrete M0 acceptance failures continue;
-new workflow features remain deferred. Each major merge is followed by a fresh
+The November 4 checkpoint ended the initial timebox. The operator subsequently
+resumed work until a stable fork release. Concrete encrypted-integration and
+lifecycle failures retain priority over new orchestration. Each major merge is followed by a fresh
 non-author acceptance run before that milestone is described as complete. A
 stacked feature may be prepared earlier, but does not skip that acceptance step.
 
@@ -767,6 +802,32 @@ and `openai_base_url` configuration. These arguments contain no credential. The
 no-profile-key case leaves native CLI-owned login and routing in control. These
 are native CLI/protocol observations, not current paid-provider, subscription
 login, macOS or exact merged-revision acceptance.
+
+### Current candidate and remaining release gates
+
+The November 4 continuation belongs to the integration owner after the operator
+confirmed that the desktop session stopped. No milestone has merged into main.
+Composition happens in a separate checkout; independently tested component SHAs
+remain frozen. The exact composed SHA must pass its own checks.
+
+| Capability | Observed component evidence | Remaining obligation |
+| --- | --- | --- |
+| Source CI and native integration | Private run 52 on `386b91a4c4` found a real deferred one-turn model switch that incorrectly lasted two turns. Repair `f32130272d` passes all three original Ink PTY cases unchanged in 247.9 seconds, 32 focused helpers and all 12 checks. Private run 53 now qualifies that exact head. The earlier public Linux multicall `env` failure and private run 52 remain negative evidence. | Both current-head native jobs, required aggregate, guarded source merge and automatic mirror; then fresh independent actual-main acceptance. A previous green revision cannot qualify this head. |
+| Browser profile continuity | `207238f488` passed a real stock Debian/Chromium disconnect and cold restore of cookies, local storage and CacheStorage. Its separate 90-case native component cohort passed without retries or skips. | Combined-head and macOS qualification. RAM/cgroup capacity is an admission observation, not a reservation or an OOM guarantee. |
+| Migration rollback and profile scope | `cbf8edd94d` passed 127 native cases, including public CLI original-credential recovery, unchanged independent child state and refusal before WAL-drift mutation. Composed `444388b02e` repeated the public CLI and profile contracts. The subsequent legacy-pet-only regression is repaired at `5a7f046cfb`: 34 isolated native cases include public migration and original-key-only recovery, complete original pet groups and unchanged opaque child bytes. | Run combined-head required gates and fresh-main original-credential recovery before retiring any additional source bytes. Existing ancestor-sealed legacy children need explicit recovery, not implicit rekeying. |
+| Browser backup and shared archive engine | `8a028f7724` retains the old encrypted format and opened-file authentication API. Composed `444388b02e` passed the actual backup/import CLI, its 19 recovery observations and the archive/capacity cohort, including worker owner-executable files. | Required exact-head gates and non-author fresh-main cold disaster recovery. Codec compatibility alone does not qualify a new producer or remote backend. |
+| Recording recovery | Composed `444388b02e` passed recording core, neighboring contracts and public CLI recovery after the locator, guidance, cleanup and fixture repairs. The same run had 454 passing tests and one required RAM-probe skip, so its aggregate remains failed. Fixture repair `65d33cfb3a` is covered by the later real-RAM positive at `f278f04f01`. | Run the actual browser recording and recovery on the combined candidate, then required gates and fresh main. Keep incomplete copies recoverable and report their actual location. |
+| Operation authority | `444388b02e` passed real inherited-FD revocation. Provider `427db2078f` and computer-use `f278f04f01` add original-session guards; their causal cases fail on their bases and pass with the repairs. An isolated `f278f04f01` cohort passed 71 cases, including real RAM and inherited-FD revocation. A sibling session remains usable; actual GUI/provider use is a separate obligation. | Isolated exact-head replay and independent fresh-main tests. A shared profile resource retains its original vault; each operation retains its own session and cannot borrow a sibling or new unlock. |
+| Browser worker state | Anonymous-pipe collection passed 181 native cases at `72a859890d`; the shared tree format has two-way compatibility evidence. The original SSD leak is retained as a negative. Native producer `cb401bb506` subsequently kept the synthetic payload out of the scanned persistent homes and temporary roots, retained complete encrypted worker state, and recovered localStorage with explicit vendor state loading. Automatic named restoration failed in both Hermes and a direct pinned-vendor control. | Repair and requalify automatic cold restoration using the verified public vendor capability; finish Browser Use RAM workspace/config persistence and owner-session repair. Preserve explicit paths, all state bytes and normal native sandbox flags. Diagnostic supplements do not qualify the failed cold-restore case. |
+| MCP media and attachments | `d7745c4f00` retains original home, unlock and operation across RPC completion, nested calls, vision workers and final attachment. Four held-out attachment failures are red on its base; 96 helper cases pass. A fresh real-SDK stdio run passed all three selected cases, then stopped because the fixture left an untracked source-tree entry; all 11,714 tracked hashes remained unchanged. | Correct the fixture's missing owning-profile binding, preserve exact residue evidence, and repeat complete isolated qualification. Required gates and non-author fresh-main replay still apply. No external MCP account or final model transmission is established by these fixtures. |
+| Outgoing browser continuity | `c744c3fccb` passed a fresh stock-VM SSH roundtrip through the public browser tool: cookie, localStorage and CacheStorage survived normal close, encryption and fresh-target RAM restoration. Its 117 helpers and native abrupt-parent case passed; all 11 continuity observations and source guards passed, and VM disks were removed. | Qualify the descendant owner-session repair jobs and actual terminal self-call/cancellation. Docker, Singularity, macOS and real external account continuity remain separate unqualified adapters. |
+| Formal checker identity | The existing opt-in consumer is retained. `2ec3cdf766` selects PM-verified Lean 4.35 with isolated bounded pipes, rejects planted/unavailable evidence without PATH fallback, and supports the official zstd artifact. Separate fresh Linux subjects passed eight real encrypted CLI/compiler cases and the remaining Ink case, with zero retries or selected skips. Earlier failed and incomplete aggregate runs remain recorded. | Combined-current-head and macOS qualification, required gates and independent fresh-main acceptance. This does not introduce a second controller or demonstrate general model-independent task gains. |
+
+The remaining producer, remote continuity and advisory items below are required
+release work. They do not become optional because another component passes.
+Each major merge is followed by a non-author replay from newly fetched main and
+its automatic public mirror before the next major merge. A failing replay opens
+a corrective PR and prevents completion of that milestone.
 
 ### Explicit follow-up backlog
 
@@ -848,3 +909,51 @@ The existing experiments are the primary basis for implementation choices.
 Small Hermes-specific comparisons are a fallback for consequential transfer
 assumptions and acceptance of the actual package; they are not a substitute for
 the published evidence or a pretext to postpone the integration work.
+
+### DeepSeek super-agent assessment
+
+The reviewed [DeepSeek research prototype](https://github.com/deepseek-ai/dsh-superagent-prototype/tree/8c32a9dc5d72c033816c6a8110b37f40cf94fba4)
+was published on October 31, 2026. Its own README distinguishes the reference
+code from the internal implementation and proposed future features. The design
+separates coordination from independent workers, durable work and environments,
+and surfaces decisions that need human attention. These principles fit the
+fork where existing local consumers already implement them:
+
+| Mechanism | Fork implementation and acceptance boundary |
+| --- | --- |
+| Concurrent isolated work and follow-up | Existing native delegation contexts, stable child identity and owner-scoped steer/stop; no new model tools. |
+| Recoverable work and bounded recall | Encrypted session/delegation records and authenticated artifact paging; an output pointer grants no new authority. |
+| Admission before semantic judgment | Existing session capabilities and deterministic goal/formal gates; a model judgment never grants permission. |
+| Useful waiting, failure and attention states | Existing goal/kanban outcomes and process supervision; running or self-reported success does not establish completion. |
+| Verification behind the main conversation | The separate opt-in formal consumer under review uses existing auxiliary routes and append-only feedback; its own qualification remains required. |
+
+Adopt these ideas by reuse. No uncovered consumer currently justifies another
+controller, model-facing coordination skill, listener or default provider switch.
+The prototype's GitHub/Feishu subscriptions, web panel and cloud daemon remain
+outside this fork. Its [per-request prompt refresh](https://github.com/deepseek-ai/dsh-superagent-prototype/blob/8c32a9dc5d72c033816c6a8110b37f40cf94fba4/docs/004-prompts.md)
+conflicts with this fork's active-session snapshots. Its
+[deployment defaults](https://github.com/deepseek-ai/dsh-superagent-prototype/blob/8c32a9dc5d72c033816c6a8110b37f40cf94fba4/docs/006-deployment.md)
+do not provide an OS isolation boundary. Neither is imported.
+
+The authors' [design article](https://x.com/i/article/2116829218935857152)
+reports a synthetic scheduling test with approximately 300 messages, 20 work
+requests and five runs per design. Median/p95 task time was 12.4/15.7 minutes
+versus 20.4/29.5 for its neutral single-session baseline; coding work was a mock
+tool. Cache-read tokens increased from 6.1M to 23.2M. These are scheduling results,
+not coding correctness or equal-cost task-resolution gains. The model identity
+was absent from the recovered article. Direct article access was unavailable;
+the numbers were recovered through a public cache of the official author's post
+and were not independently replicated.
+
+The cross-model [scaling study, version 3](https://arxiv.org/html/2512.08296v3)
+also reports mixed coding results: on 20 Terminal-Bench cases GPT-5 improved
+from 30% single-agent to 50% hybrid, while Sonnet 4.5 fell from 60% to 50%.
+The reported intervals are wide. Neither study establishes a model-independent
+gain or a result for Sol 6.1 and Opus 5.5 in this fork.
+
+Revisit the empty implementation delta when an actual existing consumer loses
+acknowledged work, admits a foreign or duplicate completion, confuses waiting
+with completion, reuses stale premises or accepts a failed required gate.
+Retain that failure as a behavioral regression and repair the existing consumer.
+Kernel acceptance still proves only the encoded deduction: source currency,
+premise truth and faithful translation retain their separate review obligations.

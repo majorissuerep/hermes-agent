@@ -7,6 +7,8 @@ named on the child's result as orphaned before teardown kills it.
 """
 
 import json
+import shlex
+import sys
 import time
 import weakref
 
@@ -51,7 +53,7 @@ def clean_queue():
         process_registry.completion_queue.get_nowait()
 
 
-def test_handed_off_process_completion_reaches_parent_and_leftover_is_reported(clean_queue):
+def test_handed_off_process_completion_reaches_parent_and_leftover_is_reported(clean_queue, tmp_path):
     """A real child-owned process handed off carries the parent's owner id (so the parent's drain accepts it, with the
     handoff purpose), while a sibling the child did not hand off is still owned by the child and is listed as orphaned
     on the child's result."""
@@ -60,7 +62,13 @@ def test_handed_off_process_completion_reaches_parent_and_leftover_is_reported(c
     child = _Child(parent)
     _register(sid, child)
     try:
-        handed = process_registry.spawn_local("sleep 0.4; echo ci-green", task_id=sid, owner_task_id=sid)
+        # Keep this real child live until ownership is actually handed off.
+        # Fixed-duration sleeps can expire while the parent starts its sibling.
+        release = tmp_path / "release-handed-process"
+        child_code = ("import pathlib,sys,time; gate=pathlib.Path(sys.argv[1]); "
+                      "exec('while not gate.exists(): time.sleep(0.01)'); print('ci-green')")
+        command = shlex.join([sys.executable, "-c", child_code, str(release)])
+        handed = process_registry.spawn_local(command, task_id=sid, owner_task_id=sid)
         handed.notify_on_complete = True
         leftover = process_registry.spawn_local("sleep 30", task_id=sid, owner_task_id=sid)
 
@@ -72,6 +80,8 @@ def test_handed_off_process_completion_reaches_parent_and_leftover_is_reported(c
 
         # Only the un-handed sibling is left in the child's name — this is what the result entry reports as orphaned.
         assert [s.id for s in process_registry.running_owned_by(sid)] == [leftover.id]
+
+        release.touch()
 
         # Let it exit on its own — a registry wait() would mark the completion consumed (that is the parent-observed path).
         deadline = time.time() + 10

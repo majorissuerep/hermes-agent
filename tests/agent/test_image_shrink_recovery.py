@@ -493,13 +493,9 @@ class TestShrinkImagePartsHelper:
 
         # _resize_image_for_vision returns small for the shrinkable input but
         # echoes the oversized payload back for the unshrinkable one.
-        def fake_resize(path, *a, **kw):
-            # The temp file written by the helper contains the decoded bytes;
-            # distinguish by size — the 6000 KB source stays "big".
-            try:
-                size = path.stat().st_size
-            except Exception:
-                size = 0
+        def fake_resize(data, *a, **kw):
+            # The helper passes decoded bytes directly; the 6000 KB source stays "big".
+            size = len(data)
             if size > 5500 * 1024:
                 return unshrinkable  # can't reduce — echo oversized back
             return small
