@@ -47,7 +47,8 @@ def command(name: str) -> list[str]:
     return path
 
 
-def inside_namespace(workspace: Path, parent_namespace_fd: int, profile: str = "focused") -> None:
+def inside_namespace(workspace: Path, parent_namespace_fd: int, profile: str = "focused",
+                     formal_checker_store: Path | None = None) -> None:
     """Refuse host mount changes: an inherited namespace FD must differ from ours."""
     parent = os.readlink(f"/proc/self/fd/{parent_namespace_fd}")
     if parent == os.readlink("/proc/self/ns/mnt"):
@@ -70,10 +71,15 @@ def inside_namespace(workspace: Path, parent_namespace_fd: int, profile: str = "
               flush=True)
         env = dict(os.environ, XDG_RUNTIME_DIR=str(workspace),
                    HERMES_TEST_FILE_TIMEOUT="600", HERMES_TEST_FILE_RETRIES="0")
-        files = FILES if profile == "full" else FOCUSED_FILES
-        subprocess.run(["scripts/run_tests.sh", "-j", "1", "--file-timeout", "600",
-                        "--file-retries", "0", "--fail-on-skip", *files],
-                       cwd=ROOT, env=env, check=True, timeout=1800)
+        if formal_checker_store is not None:
+            from scripts.ci.native_checks import formal_test_command
+
+            argv = formal_test_command(profile, formal_checker_store)
+        else:
+            files = FILES if profile == "full" else FOCUSED_FILES
+            argv = ["scripts/run_tests.sh", "--file-retries", "0", "--fail-on-skip", *files]
+        env["HERMES_TEST_WORKERS"] = "1"
+        subprocess.run(argv, cwd=ROOT, env=env, check=True, timeout=1800)
     finally:
         subprocess.run([*unmount, str(workspace)], check=True, timeout=30)
 
@@ -83,14 +89,18 @@ def main() -> None:
         raise SystemExit("Protected mount-namespace qualification requires native Linux")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--test-profile", choices=("focused", "full"), default="focused")
+    parser.add_argument("--formal-checker-store", type=Path)
     parser.add_argument("--workspace", type=Path)
     parser.add_argument("--parent-namespace-fd", type=int)
     args = parser.parse_args()
     if args.workspace is not None or args.parent_namespace_fd is not None:
         if args.workspace is None or args.parent_namespace_fd is None:
             parser.error("both private child arguments are required")
-        inside_namespace(args.workspace, args.parent_namespace_fd, args.test_profile)
+        inside_namespace(args.workspace, args.parent_namespace_fd, args.test_profile,
+                         args.formal_checker_store)
         return
+    formal = (["--formal-checker-store", str(args.formal_checker_store.resolve(strict=True))]
+              if args.formal_checker_store is not None else [])
     with tempfile.TemporaryDirectory(prefix="hermes-native-managed-") as directory:
         descriptor = os.open("/proc/self/ns/mnt", os.O_RDONLY)
         try:
@@ -99,7 +109,7 @@ def main() -> None:
                 sys.executable, "-m", "scripts.ci.protected_management_checks",
                 "--test-profile", args.test_profile,
                 "--workspace", str(Path(directory).resolve()),
-                "--parent-namespace-fd", str(descriptor),
+                "--parent-namespace-fd", str(descriptor), *formal,
             ], cwd=ROOT, pass_fds=(descriptor,), check=True, timeout=1900)
         finally:
             os.close(descriptor)

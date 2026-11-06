@@ -86,11 +86,21 @@ def formal_checks(env: dict[str, str], profile: str) -> None:
     from pm.paths import store_root
 
     run(sys.executable, "scripts/ci/install_lean.py", env=env)
+    store = store_root().resolve()
+    if sys.platform.startswith("linux"):
+        run(sys.executable, "-m", "scripts.ci.protected_management_checks",
+            "--test-profile", profile, "--formal-checker-store", str(store), env=env)
+    else:
+        run(*formal_test_command(profile, store), env=env)
+
+
+def formal_test_command(profile: str, store: Path) -> list[str]:
+    """Keep real compiler selection and the focused repair scenarios together."""
     selected = [] if profile == "full" else [
         "-k", "real_cli_repairs_before_review or real_cli_failure_budget or "
         "public_terminal_verifies"]
-    run("scripts/run_tests.sh", "--fail-on-skip", "--file-retries", "0", *FORMAL_FILES,
-        "--", "--formal-checker-store", str(store_root().resolve()), *selected, env=env)
+    return ["scripts/run_tests.sh", "--fail-on-skip", "--file-retries", "0", *FORMAL_FILES,
+            "--", "--formal-checker-store", str(store), *selected]
 
 
 def focused_checks(env: dict[str, str]) -> None:

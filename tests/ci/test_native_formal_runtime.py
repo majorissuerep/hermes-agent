@@ -25,9 +25,13 @@ def test_native_formal_phase_forwards_exact_selected_store(monkeypatch, tmp_path
     monkeypatch.setattr(native_checks.subprocess, "check_output", lambda *_args, **_kwargs: b"")
     native_checks.main()
     install = next(i for i, args in enumerate(calls) if "scripts/ci/install_lean.py" in args)
-    formal = next(i for i, args in enumerate(calls) if native_checks.FORMAL_FILES[0] in args)
+    formal = next(i for i, args in enumerate(calls) if "--formal-checker-store" in args)
     assert install < formal
-    args = calls[formal]
+    wrapper = calls[formal]
+    assert "scripts.ci.protected_management_checks" in wrapper
+    assert wrapper[wrapper.index("--formal-checker-store") + 1] == os.fspath(store.resolve())
+    assert wrapper[wrapper.index("--test-profile") + 1] == profile
+    args = native_checks.formal_test_command(profile, store.resolve())
     assert args[0] == "scripts/run_tests.sh"
     assert args[args.index("--file-retries") + 1] == "0" and "--fail-on-skip" in args
     assert all(path in args for path in native_checks.FORMAL_FILES)
