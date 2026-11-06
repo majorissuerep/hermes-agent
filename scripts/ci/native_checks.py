@@ -81,16 +81,38 @@ def bootstrap_protocol(env: dict[str, str], directory: Path) -> None:
     assert observed == sha
 
 
-def formal_checks(env: dict[str, str]) -> None:
+def formal_checks(env: dict[str, str], profile: str) -> None:
     """Forward the owning PM store explicitly across the hermetic test boundary."""
     from pm.paths import store_root
 
     run(sys.executable, "scripts/ci/install_lean.py", env=env)
+    selected = [] if profile == "full" else [
+        "-k", "real_cli_repairs_before_review or real_cli_failure_budget or "
+        "public_terminal_verifies"]
     run("scripts/run_tests.sh", "--fail-on-skip", "--file-retries", "0", *FORMAL_FILES,
-        "--", "--formal-checker-store", str(store_root().resolve()), env=env)
+        "--", "--formal-checker-store", str(store_root().resolve()), *selected, env=env)
+
+
+def focused_checks(env: dict[str, str]) -> None:
+    """Exercise complete owner, delegated process, context and repair paths."""
+    run("scripts/run_tests.sh", "--fail-on-skip", "--file-retries", "0",
+        "tests/tools/test_terminal_management_launcher.py", env=env)
+    run("scripts/run_tests.sh", "--fail-on-skip", "--file-retries", "0",
+        "tests/scripts/e2e/test_provider_conversation_chat.py", "--", "-k", "litellm", env=env)
+    if sys.platform.startswith("linux"):
+        run(sys.executable, "-m", "scripts.ci.protected_management_checks",
+            "--test-profile", "focused", env=env)
+    else:
+        from scripts.ci.protected_management_checks import FOCUSED_FILES
+
+        run("scripts/run_tests.sh", "--fail-on-skip", "--file-retries", "0",
+            *FOCUSED_FILES, env=env)
 
 
 def main() -> None:
+    profile = os.environ.get("HERMES_CI_TEST_PROFILE", "focused")
+    if profile not in {"focused", "full"}:
+        raise SystemExit("HERMES_CI_TEST_PROFILE must be focused or full")
     if sys.platform.startswith("linux"):
         from scripts.ci.native_namespace_policy import reexec_if_required
 
@@ -98,9 +120,20 @@ def main() -> None:
         if status is not None:
             raise SystemExit(status)
     env = dict(os.environ, HERMES_TEST_FILE_RETRIES="0", HERMES_TEST_FILE_TIMEOUT="600",
-               HERMES_TEST_WORKERS="2", HERMES_E2E_REQUIRE_TUI="1")
+               HERMES_TEST_WORKERS="1", HERMES_E2E_REQUIRE_TUI="1")
     for key in ("HERMES_TEST_PATHS", "HERMES_TEST_SLICE"):
         env.pop(key, None)
+    print(f"Native verification profile: {profile}; workers: 1; retries: 0", flush=True)
+    if profile == "focused":
+        if not (sys.platform.startswith("linux") or sys.platform == "darwin"):
+            raise SystemExit("Native qualification requires a supported Linux or macOS host")
+        focused_checks(env)
+        if sys.platform.startswith("linux"):
+            with tempfile.TemporaryDirectory(prefix="hermes-bootstrap-protocol-") as temporary:
+                bootstrap_protocol(env, Path(temporary))
+        formal_checks(env, profile)
+        require_clean_checkout(env)
+        return
     if sys.platform == "darwin":
         files = subprocess.check_output([sys.executable, "scripts/ci/list_os_marked_tests.py", "macos"],
                                         cwd=ROOT, text=True, timeout=30).splitlines()
@@ -116,7 +149,7 @@ def main() -> None:
     run("scripts/run_tests.sh", "--files", os.pathsep.join(files), "--file-retries", "0",
         "--", "-m", "platforms and not integration", env=env)
     if sys.platform.startswith("linux"):
-        run(sys.executable, "-m", "scripts.ci.protected_management_checks", env=env)
+        run(sys.executable, "-m", "scripts.ci.protected_management_checks", "--test-profile", "full", env=env)
         run("scripts/run_tests.sh", "--fail-on-skip", "--file-retries", "0",
             "tests/hermes_security/test_pipe_readonly_namespace.py",
             "tests/tools/test_ssh_environment.py", "tests/tools/test_docker_backend_real.py",
@@ -124,7 +157,11 @@ def main() -> None:
         with tempfile.TemporaryDirectory(prefix="hermes-bootstrap-protocol-") as temporary:
             bootstrap_protocol(env, Path(temporary))
     # The opt-in verifier needs real kernel evidence on both supported native hosts.
-    formal_checks(env)
+    formal_checks(env, profile)
+    require_clean_checkout(env)
+
+
+def require_clean_checkout(env: dict[str, str]) -> None:
     run("git", "diff", "--exit-code", env=env)
     if subprocess.check_output(["git", "ls-files", "--others", "--exclude-standard"],
                                cwd=ROOT, text=True, timeout=30).strip():

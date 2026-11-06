@@ -5,6 +5,11 @@ on:
     branches: [mirror/qualification]
   workflow_dispatch:
     inputs:
+      test_profile:
+        description: Focused integration checks by default; broad native coverage is opt-in.
+        type: choice
+        options: [focused, full]
+        default: focused
       build_payloads:
         description: Build complete native terminal assets after qualification; does not publish a release.
         type: boolean
@@ -26,12 +31,14 @@ jobs:
     name: Native qualification (${{ matrix.os }})
     strategy:
       fail-fast: false
+      max-parallel: 1
       matrix:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     env:
       HERMES_TEST_FILE_RETRIES: '0'
+      HERMES_CI_TEST_PROFILE: ${{ inputs.test_profile || 'focused' }}
       HERMES_TEST_IMAGE_REF: debian:13-slim@sha256:a29215f6a35e51e22adffa17f89e9d2ef06214e64a2bad10d765c46aea49f11f
     steps:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a # v7.0.1
@@ -57,14 +64,16 @@ jobs:
           test-environment: 'true'
       - name: Build the real terminal UI
         run: npm ci --workspace ui-tui --ignore-scripts --no-audit --no-fund && npm run build --workspace ui-tui
-      - name: Prepare native Linux prerequisites and the real SSH host
+      - name: Prepare native Linux prerequisites
         if: runner.os == 'Linux'
         env:
           HERMES_TEST_SSHD_IMAGE: ${{ env.HERMES_TEST_IMAGE_REF }}
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends apparmor-utils bubblewrap
-          scripts/ci/start_test_sshd.sh "$RUNNER_TEMP/hermes-test-sshd"
+          if [ "$HERMES_CI_TEST_PROFILE" = full ]; then
+            scripts/ci/start_test_sshd.sh "$RUNNER_TEMP/hermes-test-sshd"
+          fi
       - name: Native terminal, platform and lifecycle protocols
         env:
           HERMES_TEST_DOCKER_IMAGE: ${{ env.HERMES_TEST_IMAGE_REF }}

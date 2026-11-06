@@ -7,8 +7,11 @@ the old fan-out alongside the in-house verifier.
 Routine validation has one command, `python3 scripts/ci/verify.py`, in
 `.woodpecker/verify.yml`. It reuses the classifier, pinned PM toolchain, blocking
 guards and canonical test runner. GitHub supplies native Linux/macOS, real
-SSH/Docker and installer protocol evidence through two host jobs and one
-aggregate gate. Hosted runners do not need access to the private forge.
+installer protocol evidence through serial Linux/macOS jobs and one aggregate
+gate. The default native profile runs bounded encrypted management, native child,
+conversation compression/resume and Lean repair integration checks, with one
+test worker and no retries. A manual full-profile dispatch opts into the broader
+native SSH/Docker, platform and lifecycle suites. Hosted runners do not need access to the private forge.
 
 `.woodpecker/mirror.yml` runs only on source-main pushes after verification. It
 requires the exact revision's latest trusted Woodpecker result before pushing
