@@ -28,11 +28,11 @@ from agent.auxiliary_client import (
     _message_field,
     aux_interrupt_protection,
     call_llm,
-    extract_content_or_reasoning,
 )
 from agent.context_engine import ContextEngine, sanitize_memory_context
 from agent.context_compressor_prellm import PreLlmSkipMixin
 from agent.context_compressor_summary import SummaryDispatchMixin
+from agent.context_compressor_summary_call import SummaryCallMixin
 from agent.context_compressor_retry import retryable_user_text
 from agent.context_compressor_telemetry import CompressionTelemetryMixin
 from agent.error_classifier import FailoverReason, classify_api_error
@@ -2152,7 +2152,8 @@ Describe agent/tool work only as completed actions, state, or historical work.]"
 
 
 class ContextCompressor(
-    SummaryDispatchMixin, PreLlmSkipMixin, CompressionTelemetryMixin, MicroCompactionMixin, ContextEngine,
+    SummaryDispatchMixin, SummaryCallMixin, PreLlmSkipMixin, CompressionTelemetryMixin, MicroCompactionMixin,
+    ContextEngine,
 ):
     """Default context engine: prune tool results, protect head/tail, summarize the middle
     with an LLM, and iteratively update the previous summary on later compactions."""
@@ -3896,25 +3897,10 @@ Summary generation was unavailable, so this is a best-effort deterministic fallb
         self.summary_model = ""  # empty = use main model
         self._clear_compression_failure_cooldown()  # no cooldown — retry immediately
 
-    def _call_summary_llm(self, prompt: str, prompt_started_at: float) -> str:
-        """Issue the single aux summary call; return validated content text.
-        Raises RuntimeError for empty content or a length-truncated (PARTIAL) summary so the failure
-        routes through main-model fallback + cooldown instead of wiping the compacted turns."""
-        from agent.context_chunking import selection_call_kwargs
-        # call_llm writes the route it actually selected; never pre-resolve a second, stale pair.
-        _aux_route: dict[str, str] = {}
-        call_kwargs: dict[str, Any] = {
-            "task": "compression",
-            "main_runtime": {
-                "model": self.model, "provider": self.provider, "base_url": self.base_url, "api_key": self.api_key,
-                "api_mode": self.api_mode,
-            },
-            "messages": [{"role": "user", "content": prompt}], "route_info": _aux_route,
-            # Only range selection reserves output; legacy generated summaries stay uncapped.
-            **selection_call_kwargs(),
-        }
-        # Pinned route (stall fallback) replaces task routing so the retry leaves the stalled backend.
-        self._apply_summary_route(call_kwargs, _pinned_summary_call_kwargs())
+    def _dispatch_summary_llm(self, call_kwargs: dict[str, Any], prompt_started_at: float) -> Any:
+        """Send one summary request (built by ``_call_summary_llm``) and record its telemetry.
+        ``call_kwargs["route_info"]`` comes back holding the route ``call_llm`` actually selected."""
+        _aux_route: dict[str, str] = call_kwargs["route_info"]
         # Compression is atomic: protect the in-flight summary call from a mid-turn gateway interrupt.
         # Without this, an incoming user message aborts the summary and compression falls back to a degraded
         # static marker, losing the real handoff (#23975). Re-entrant: a main-model retry (_generate_summary
@@ -3926,7 +3912,8 @@ Summary generation was unavailable, so this is a best-effort deterministic fallb
         # one — silence before it is prompt build, silence after it is the summary provider.
         logger.info(
             "Compression summary call dispatched: model=%s prompt_chars=%s prompt_build_ms=%s",
-            self.summary_model or self.model, f"{len(prompt):,}", _latency_info["prompt_build_ms"],
+            self.summary_model or self.model, f"{len(call_kwargs['messages'][0]['content']):,}",
+            _latency_info["prompt_build_ms"],
         )
         try:
             # Compression is atomic: shield the summary call from gateway interrupts. Re-entrant.
@@ -3950,39 +3937,7 @@ Summary generation was unavailable, so this is a best-effort deterministic fallb
             )
         if self._compression_cancelled():
             raise AuxiliaryExplicitCancellation()
-        # Reasoning-field fallback (DeepSeek/Qwen/Kimi put the summary in reasoning_content); capped.
-        content = extract_content_or_reasoning(response, max_reasoning_chars=8000)
-        where = f"(provider={self.provider or 'auto'} model={self.summary_model or self.model})"
-        # Some OpenAI-compatible proxies (e.g. cmkey.cn, one-api channels) return a well-formed HTTP 200
-        # with an empty or whitespace-only ``content`` instead of an error or empty ``choices``. That
-        # payload passes ``_validate_llm_response`` (a ``message`` exists), so it reaches here and would
-        # otherwise be stored as a prefix-only summary with no body — silently wiping the compacted turns
-        # and making the model forget the in-progress task (#11978, #11914). Treat empty content as a
-        # failure so it routes through the same main-model fallback + cooldown machinery as a transport
-        # error, rather than replacing real context with an empty summary.
-        if not content.strip():
-            raise RuntimeError(f"Context compression LLM returned empty content {where}")
-        if _is_refusal_response(response, content):
-            # Treat a refusal as unusable content. This deliberately reuses the
-            # established fallback/cooldown/abort path for an empty body, so it
-            # can never be committed as `_previous_summary`.
-            raise RuntimeError(f"Context compression LLM returned refusal content {where}")
-        # A finish_reason of "length" means the summarizer hit its output token cap mid-generation: the text
-        # present is PARTIAL. Persisting a partial summary as the compaction checkpoint silently truncates
-        # the conversation's memory — the cut-off text replaces the real middle turns AND is fed back into
-        # every subsequent iterative update prompt, compounding the loss across compactions. Treat it as a
-        # failure so it routes through the same main-model fallback + abort machinery as other degraded
-        # responses instead of becoming a checkpoint. (Ported from earendil-works/pi#7048.)
-        # A length stop means the merged rolling summary is partial — persisting it would silently drop the
-        # tail of the merge and feed the cut-off text into every later micro-compact pass. Leave the
-        # exchange unabsorbed instead; a later pass retries it. (Same class as _generate_summary's guard;
-        # pi#7048.)
-        if _response_finish_reason(response) == "length":
-            raise RuntimeError(
-                f"Context compression summary was truncated ({_TRUNCATED_SUMMARY_MARKER}): generation hit the output "
-                f"token cap and the summary is incomplete {where}"
-            )
-        return content
+        return response
 
     def _generate_checkpoint_summary(
         self, turns_to_summarize: list[dict[str, Any]], focus_topic: Optional[str] = None,

@@ -214,9 +214,26 @@ counter; a summary that ends in `finish_reason=length` (output cap hit, the
 transcript is preserved) escalates on its own counter along the same
 60s → 300s → 900s rungs, so a later turn — such as an async delegation
 completion arriving after the cooldown lapsed — cannot re-issue the same
-capped request every 30 seconds (#69637). JSON-decode, closed-stream and
-empty-content failures stay on a flat 30 s cooldown. Three paths run a real
-attempt anyway:
+capped request every 30 seconds (#69637).
+
+A length stop whose response carried reasoning (`reasoning_content`,
+`reasoning`, `reasoning_details`, or inline `<think>`) is handled before it
+counts: a thinking summarizer behind a relay that applies its own output
+ceiling when the request omits `max_tokens` (LiteLLM in front of Qwen3.8
+caps at 12,288) spent that ceiling thinking and never wrote the summary.
+The summary call re-issues the request once with the route's thinking-off
+encoding (`reasoning_effort: "none"` on custom endpoints, stepped up to the
+`low` floor where reasoning is mandatory) and remembers the route for the
+rest of the session, so later compactions start with reasoning off. Only a
+retry that still stops on length advances the truncation counter; its
+warning points at `auxiliary.compression.extra_body` for endpoints whose
+thinking switch is vendor-specific (for example
+`chat_template_kwargs: {enable_thinking: false}` on Qwen chat templates).
+A route already configured with `auxiliary.compression.reasoning_effort: none`
+is never re-issued identically.
+
+JSON-decode, closed-stream and empty-content failures stay on a flat 30 s
+cooldown. Three paths run a real attempt anyway:
 
 - Manual `/compress` (`force=True`) — clears the cooldown and retries.
 - The same-turn `fallback_chain` retry after a stalled primary route — the
