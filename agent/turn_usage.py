@@ -38,6 +38,17 @@ class ResponseUsageOutcome:
     rearmed: bool = False
 
 
+def note_response_reasoning_tokens(agent: Any, response: Any) -> None:
+    """Record *response*'s own reported reasoning count; ``_build_assistant_message`` stamps it on
+    every row the response becomes (the replay price of its encrypted reasoning, replayed_reasoning.py).
+    Set once per response, before any row is built, so a row never carries an earlier response's count.
+    ``response.usage`` is the aggregator's own usage: MoA advisors' thinking never replays."""
+    usage = getattr(response, "usage", None)
+    agent._last_response_reasoning_tokens = (
+        normalize_usage(usage, provider=agent.provider, api_mode=agent.api_mode).reasoning_tokens if usage else 0
+    )
+
+
 def _loop_mod():
     """Lazy ``agent.conversation_loop`` import (avoids an import cycle)."""
     import agent.conversation_loop as _cl
@@ -170,9 +181,6 @@ def record_response_usage(
 
     # Stash canonical usage for on_turn_complete(); keep the latest call's.
     agent._last_turn_usage = dict(usage_dict)
-    # build_assistant_message stamps this onto the row the response becomes: the replay price of its
-    # encrypted reasoning (replayed_reasoning.py). Aggregator usage only: MoA advisors' thinking never replays.
-    agent._last_response_reasoning_tokens = aggregator_usage.reasoning_tokens
     # The parent's CURRENT prompt size for headroom math (delegate summary budgets): the
     # aggregator's own prompt, never the MoA-folded total (advisor prompts are not in this context).
     agent._last_prompt_size_tokens = int(context_prompt_tokens or aggregator_usage.prompt_tokens or 0)
