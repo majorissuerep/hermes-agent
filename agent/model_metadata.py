@@ -24,6 +24,7 @@ from utils import atomic_json_write, atomic_yaml_write, base_url_host_matches, b
 
 from hermes_constants import OPENROUTER_MODELS_URL, openrouter_variant_base
 from agent.message_metadata import PERSISTENCE_ONLY_MESSAGE_FIELDS, UNPRICED_REPLAY_FIELDS, without_persistence_fields
+from agent.replayed_reasoning import codex_reasoning_replay_tokens, strip_opaque_replay_items
 
 logger = logging.getLogger(__name__)
 
@@ -2370,13 +2371,11 @@ def estimate_messages_tokens_rough(messages: list[dict[str, Any]], *, charge_sta
 
 
 def estimate_native_anthropic_messages_tokens_rough(messages: list[dict[str, Any]]) -> int:
-    """Estimate native Anthropic messages with replayed readable thinking charged exactly once."""
+    """Estimate native Anthropic messages with replayed thinking charged exactly once (at its billed size)."""
     from agent.message_sanitization import native_anthropic_accounting_projection
 
     projected, replayed_thinking = native_anthropic_accounting_projection(messages)
-    return estimate_messages_tokens_rough(projected) + sum(
-        estimate_tokens_rough(text) for text in replayed_thinking
-    )
+    return estimate_messages_tokens_rough(projected) + sum(replayed_thinking)
 
 
 def estimate_native_anthropic_request_tokens_rough(
@@ -2387,9 +2386,7 @@ def estimate_native_anthropic_request_tokens_rough(
     from agent.message_sanitization import native_anthropic_accounting_projection
 
     projected, replayed_thinking = native_anthropic_accounting_projection(messages)
-    return estimate_request_tokens_rough(
-        projected, system_prompt=system_prompt, tools=tools
-    ) + sum(estimate_tokens_rough(text) for text in replayed_thinking)
+    return estimate_request_tokens_rough(projected, system_prompt=system_prompt, tools=tools) + sum(replayed_thinking)
 
 
 # Thinking-text keys replayed for at most the newest assistant turn on non-echo routes — must stay
@@ -2449,6 +2446,7 @@ def _estimate_message_tokens_cached(msg: Any, image_cost: int) -> int:
     per-image price re-prices cached rows without invalidating them."""
     def _compute() -> tuple[int, int]:
         return _estimate_message_tokens_without_images(msg), _count_image_tokens(msg, 1)
+    replay = codex_reasoning_replay_tokens(msg)  # stamp lives in display_metadata, outside the memo key
     try:
         pins: list = []
         # Persistence-only fields (identity, timestamps, display metadata) never reach the estimate: keep them
@@ -2458,10 +2456,10 @@ def _estimate_message_tokens_cached(msg: Any, image_cost: int) -> int:
         hash(key)
     except Exception:
         text, images = _compute()
-        return text + images * image_cost
+        return text + images * image_cost + replay
     cached = _MSG_TOKENS_CACHE.get(key)
     if cached is not None:
-        return cached[1] + cached[2] * image_cost
+        return cached[1] + cached[2] * image_cost + replay
     text, images = _compute()
     tokens = text + images * image_cost
     _MSG_TOKENS_CACHE[key] = (pins, text, images)
@@ -2470,7 +2468,7 @@ def _estimate_message_tokens_cached(msg: Any, image_cost: int) -> int:
             _MSG_TOKENS_CACHE.pop(next(iter(_MSG_TOKENS_CACHE)))
         except (StopIteration, KeyError, RuntimeError):
             break
-    return tokens
+    return tokens + replay
 
 
 def _count_parts(parts: Any, types: set) -> int:
@@ -2496,18 +2494,6 @@ def _count_image_tokens(msg: dict[str, Any], cost_per_image: int) -> int:
     return count * cost_per_image
 
 
-def strip_opaque_replay_items(items: Any) -> Any:
-    """``codex_reasoning_items`` with ``encrypted_content`` blanked for local token estimation.
-    The ciphertext is priced by the provider's own count, never by its bytes (a compaction
-    checkpoint alone can be 5M chars, #100611); only real usage prices it."""
-    if not isinstance(items, list):
-        return items
-    return [
-        {k: ("" if k == "encrypted_content" else v) for k, v in item.items()} if isinstance(item, dict) else item
-        for item in items
-    ]
-
-
 def _wire_message_shadow(msg: dict[str, Any]) -> dict[str, Any]:
     """Shadow of a message holding only what the provider actually receives.
     * ``api_content`` SUBSTITUTES ``content`` (mirrors ``turn_context.substitute_api_content`` exactly):
@@ -2517,9 +2503,9 @@ def _wire_message_shadow(msg: dict[str, Any]) -> dict[str, Any]:
     * ``reasoning`` never ships as-is (request builds pop it after optionally promoting it into
       ``reasoning_content``); counting both inflated estimates up to +53%.
     * Opaque provider blobs (``encrypted_content`` on codex reasoning / compaction items) are
-      ciphertext the provider prices by its OWN token count, never by bytes; a native compaction
-      checkpoint alone can be 5M chars (#100611). They contribute 0 here: only real usage ever
-      prices them, and the usage anchor carries that price forward."""
+      ciphertext, never priced by bytes (a native compaction checkpoint alone can be 5M chars,
+      #100611); replayed reasoning is priced at its provider-reported count by
+      ``replayed_reasoning.codex_reasoning_replay_tokens``."""
     sidecar = msg.get("api_content")
     sidecar_wins = isinstance(sidecar, str) and bool(sidecar) and msg.get("role") in ("user", "assistant")
     _rc = msg.get("reasoning_content")

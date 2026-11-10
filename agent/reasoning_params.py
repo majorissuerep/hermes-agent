@@ -152,7 +152,14 @@ class ReasoningParamsMixin:
             return None
         return {"effort": clamp_github_reasoning_effort(cfg.get("effort"), supported)}
 
-    _build_assistant_message = _forward("agent.chat_completion_helpers", "build_assistant_message")
+    def _build_assistant_message(self, assistant_message, finish_reason: str) -> dict:
+        """Build a row with the provider-reported replay price of its reasoning."""
+        from agent.chat_completion_helpers import build_assistant_message
+        from agent.message_metadata import stamp_reasoning_tokens
+
+        msg = build_assistant_message(self, assistant_message, finish_reason)
+        stamp_reasoning_tokens(msg, getattr(self, "_last_response_reasoning_tokens", 0))
+        return msg
 
     def _reasoning_replay_route(self):
         """Reasoning replay decision for the active route (``message_sanitization.reasoning_replay_route``).
