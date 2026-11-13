@@ -368,6 +368,19 @@ def _resolve_container_alias(task_id: str) -> str:
     return key
 
 
+def _shell_state_chain(task_id: Optional[str]) -> tuple[str, ...]:
+    """*task_id* plus its aliased ancestors, root excluded: a delegated child reads and
+    writes its own shell snapshot, seeded from the nearest ancestor's (the root's is the
+    environment's own). Empty for a task with no alias (#84536)."""
+    chain: list[str] = []
+    key = task_id
+    with _container_alias_lock:
+        while key and key in _container_aliases and key not in chain:
+            chain.append(key)
+            key = _container_aliases[key]
+    return tuple(chain)
+
+
 _ISOLATION_OVERRIDE_KEYS = frozenset({
     "docker_image", "modal_image", "singularity_image",
     "daytona_image", "env_type",
@@ -1395,76 +1408,78 @@ def terminal_tool(
             command, task_id=task_id, timeout=timeout, background=background, _host_local=_host_local,
         )
         env = _acquire_env(plan, task_id)
-        env_type, cwd, effective_task_id = plan.env_type, plan.cwd, plan.effective_task_id
+        from tools.environments.base import shell_state_scope
+        with shell_state_scope(_shell_state_chain(task_id)):
+            env_type, cwd, effective_task_id = plan.env_type, plan.cwd, plan.effective_task_id
 
-        # Session key for cwd records: the contextvar doesn't cross tool-worker
-        # threads, so fall back to the raw task_id (the top-level agent's
-        # session_key) as a stable anchor.
-        from tools.approval import get_current_session_key
+            # Session key for cwd records: the contextvar doesn't cross tool-worker
+            # threads, so fall back to the raw task_id (the top-level agent's
+            # session_key) as a stable anchor.
+            from tools.approval import get_current_session_key
 
-        session_key = get_current_session_key(default="") or (task_id or "")
+            session_key = get_current_session_key(default="") or (task_id or "")
 
-        # The supervised-gateway identity probe ends in a kernel process query
-        # (psutil create_time) that has wedged for the better part of an hour on
-        # macOS; ``env.execute`` is already behind ``run_bounded_sync`` but this
-        # chain ran ahead of it, so the tool call never returned and the cron
-        # slot stayed occupied (#111922). Share the command's own deadline. A
-        # guard that never rendered a verdict fails CLOSED: these checks apply
-        # unconditionally (``force`` cannot bypass them), so the command is
-        # refused with a retryable error instead of running unguarded.
-        from agent.deadline import run_bounded_sync
-        from tools.interrupt import acting_for_tid
+            # The supervised-gateway identity probe ends in a kernel process query
+            # (psutil create_time) that has wedged for the better part of an hour on
+            # macOS; ``env.execute`` is already behind ``run_bounded_sync`` but this
+            # chain ran ahead of it, so the tool call never returned and the cron
+            # slot stayed occupied (#111922). Share the command's own deadline. A
+            # guard that never rendered a verdict fails CLOSED: these checks apply
+            # unconditionally (``force`` cannot bypass them), so the command is
+            # refused with a retryable error instead of running unguarded.
+            from agent.deadline import run_bounded_sync
+            from tools.interrupt import acting_for_tid
 
-        # The guard chain runs on the deadline worker; keep it answerable to /stop
-        # aimed at this tool thread (a remote-backend script read polls is_interrupted()).
-        guard_timeout = max(plan.effective_timeout, _PRE_EXEC_GUARD_MIN_TIMEOUT_S)
-        _acting_token = acting_for_tid.set(threading.current_thread().ident)
-        try:
-            bounded_guard = run_bounded_sync(
-                lambda: _pre_exec_block(
-                    command, env=env, env_type=env_type, cwd=cwd, workdir=workdir, session_key=session_key,
-                ),
-                guard_timeout,
-                label="terminal.pre-exec-guard",
-            )
-        finally:
-            acting_for_tid.reset(_acting_token)
-        if bounded_guard.timed_out:
-            raise _Rejected(_error_json(
-                f"Terminal pre-execution guard did not finish within {guard_timeout}s "
-                "(process-identity probe wedged); the command was not run. Retry the call.",
-                status="error",
-            ))
-        # Pre-exec security checks (floors + dangerous command detection);
-        # force=True means the user already confirmed.
-        verdict = _run_approval_guards(command, env_type, plan.config, force=force)
+            # The guard chain runs on the deadline worker; keep it answerable to /stop
+            # aimed at this tool thread (a remote-backend script read polls is_interrupted()).
+            guard_timeout = max(plan.effective_timeout, _PRE_EXEC_GUARD_MIN_TIMEOUT_S)
+            _acting_token = acting_for_tid.set(threading.current_thread().ident)
+            try:
+                bounded_guard = run_bounded_sync(
+                    lambda: _pre_exec_block(
+                        command, env=env, env_type=env_type, cwd=cwd, workdir=workdir, session_key=session_key,
+                    ),
+                    guard_timeout,
+                    label="terminal.pre-exec-guard",
+                )
+            finally:
+                acting_for_tid.reset(_acting_token)
+            if bounded_guard.timed_out:
+                raise _Rejected(_error_json(
+                    f"Terminal pre-execution guard did not finish within {guard_timeout}s "
+                    "(process-identity probe wedged); the command was not run. Retry the call.",
+                    status="error",
+                ))
+            # Pre-exec security checks (floors + dangerous command detection);
+            # force=True means the user already confirmed.
+            verdict = _run_approval_guards(command, env_type, plan.config, force=force)
 
-        pty_disabled = pty and _command_requires_pipe_stdin(command)
-        if plan.promoted_from_foreground_timeout is not None:
-            # Promotion implies notify_on_complete; watch_patterns is a background-only flag the
-            # caller could not have meant for a foreground call, and the two are exclusive anyway.
-            background, notify_on_complete, watch_patterns = True, True, None
-        if background:
-            result = spawn_background_process(
-                command=command, env=env, env_type=env_type, effective_task_id=effective_task_id,
-                task_id=task_id, session_key=session_key, workdir=workdir, cwd=cwd,
-                mounted_host=getattr(env, "host_cwd", None) or plan.host_cwd,
-                effective_pty=pty and not pty_disabled, notify_on_complete=notify_on_complete,
-                watch_patterns=watch_patterns, approval_note=verdict.note,
-                pty_disabled_reason=_PTY_DISABLED_REASON if pty_disabled else None,
-                completion_output_chars=_completion_output_chars,
-                heartbeat_seconds=heartbeat,
-                persist_on_release=persist_on_release,
-            )
+            pty_disabled = pty and _command_requires_pipe_stdin(command)
             if plan.promoted_from_foreground_timeout is not None:
-                result = _with_promoted_note(result, plan.promoted_from_foreground_timeout)
-            return _metered(None if _host_local else plan, result)
-        return _metered(None if _host_local else plan, _run_foreground(
-            command, env, plan,
-            task_id=task_id, session_id=session_id, session_key=session_key,
-            workdir=workdir, approval_note=verdict.note, clear_interrupt=verdict.approved_run,
-            metered=not _host_local,
-        ))
+                # Promotion implies notify_on_complete; watch_patterns is a background-only flag the
+                # caller could not have meant for a foreground call, and the two are exclusive anyway.
+                background, notify_on_complete, watch_patterns = True, True, None
+            if background:
+                result = spawn_background_process(
+                    command=command, env=env, env_type=env_type, effective_task_id=effective_task_id,
+                    task_id=task_id, session_key=session_key, workdir=workdir, cwd=cwd,
+                    mounted_host=getattr(env, "host_cwd", None) or plan.host_cwd,
+                    effective_pty=pty and not pty_disabled, notify_on_complete=notify_on_complete,
+                    watch_patterns=watch_patterns, approval_note=verdict.note,
+                    pty_disabled_reason=_PTY_DISABLED_REASON if pty_disabled else None,
+                    completion_output_chars=_completion_output_chars,
+                    heartbeat_seconds=heartbeat,
+                    persist_on_release=persist_on_release,
+                )
+                if plan.promoted_from_foreground_timeout is not None:
+                    result = _with_promoted_note(result, plan.promoted_from_foreground_timeout)
+                return _metered(None if _host_local else plan, result)
+            return _metered(None if _host_local else plan, _run_foreground(
+                command, env, plan,
+                task_id=task_id, session_id=session_id, session_key=session_key,
+                workdir=workdir, approval_note=verdict.note, clear_interrupt=verdict.approved_run,
+                metered=not _host_local,
+            ))
     except _Rejected as r:
         return r.result_json
     except EnvironmentConnectionError as e:

@@ -176,6 +176,7 @@ def _wrap_command_script(
     user_shell: str | None = None,
     persist_env: bool = True,
     hermes_bin_dir: str | None = None,
+    seed_snaps: Iterable[str] = (),
 ) -> str:
     """Per-command bash script: source snapshot, cd, run, re-dump env, emit CWD marker.
     ``persist_env=False`` skips the re-dump, so every command starts from the login-time
@@ -198,7 +199,12 @@ def _wrap_command_script(
     escaped = command.replace("'", "'\\''")
     save, restore = _passthrough_save_restore(passthrough_names)
     parts = list(save)
-    if snapshot_ready:
+    seeds = list(seed_snaps)
+    if snapshot_ready and seeds:
+        parts.append(
+            f"for __hermes_s in {quoted_snap} {' '.join(seeds)}; do "
+            'if [ -f "$__hermes_s" ]; then source "$__hermes_s" >/dev/null 2>&1 || true; break; fi; done')
+    elif snapshot_ready:
         parts.append(f"source {quoted_snap} >/dev/null 2>&1 || true")
     parts += restore
     if hermes_bin_dir:
