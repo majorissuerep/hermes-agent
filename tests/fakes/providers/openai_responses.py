@@ -94,6 +94,7 @@ class Turn:
     output_tokens: int = 20
     cached_tokens: int = 0
     drop_after_events: int | None = None  # close the socket after N events (no terminal event)
+    reasoning_tokens: int = 0
 
 
 @dataclass
@@ -261,7 +262,7 @@ def turn_events(turn: Turn) -> list[dict[str, Any]]:
         input_tokens=turn.input_tokens, output_tokens=turn.output_tokens,
         total_tokens=turn.input_tokens + turn.output_tokens,
         input_tokens_details=InputTokensDetails(cached_tokens=turn.cached_tokens),
-        output_tokens_details=OutputTokensDetails(reasoning_tokens=0))
+        output_tokens_details=OutputTokensDetails(reasoning_tokens=turn.reasoning_tokens))
     events.append(ResponseCompletedEvent(response=_response(resp_id, "completed", built, usage),
                                          sequence_number=seq(), type="response.completed"))
     return [e.model_dump(mode="json", exclude_none=True) for e in events]

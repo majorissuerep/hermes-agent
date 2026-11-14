@@ -2,10 +2,8 @@
 
 Codex/xAI ``encrypted_content`` and Claude thinking ``signature`` are ciphertext, so their bytes are
 not their cost; local estimates used to price them at 0 (#100611: a 5M-char native compaction
-checkpoint read as 1.29M tokens). But the provider bills each replayed reasoning item as INPUT at the
-reasoning count it reported for the turn that minted it (live A/B, same request with and without the
-item: gpt-5.6-sol reported 2,765 -> +2,767 billed; claude-opus-5.5 reported 3,959 -> +3,959 billed,
-while its readable summary was ~1,016). Pricing it at 0 hid most of a long Codex/xAI session from the
+checkpoint read as 1.29M tokens). Use the reasoning count reported for the response as its replay
+budget. Pricing it at 0 hid most of a long Codex/xAI session from the
 compaction cut, so compression found "nothing to cut" while the bill sat over the window (#125920).
 
 A turn's reasoning is priced at the count stamped on it (``message_metadata.stamp_reasoning_tokens``).
