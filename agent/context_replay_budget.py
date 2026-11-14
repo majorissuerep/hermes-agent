@@ -34,5 +34,3 @@ def native_anthropic_tail_prices(compressor: Any):
         ]
 
     return prices
-
-
