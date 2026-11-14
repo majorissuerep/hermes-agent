@@ -29,6 +29,10 @@ push events through its documented plugin settings, with a pinned host key.
 It cannot use the mirror write key. This binding avoids an hourly OAuth
 snapshot expiring between Git fetches during a slow checkout; the shared CI
 bot's interactive login remains unchanged.
+The verifier and publisher run as the checkout owner and use `OnRootMismatch`
+after cloning, avoiding another recursive ownership walk over initialized NFS
+workspaces. Clone initialization retains its existing group policy. Qualify
+group-write requirements before adding a stage that runs as another user.
 The clone uses Gitea's private cluster service. Operators apply
 `scripts/ci/woodpecker-clone-egress.yaml` to allow only repository 17's `git`
 pods to reach the Gitea SSH pod port; verification pods keep their existing

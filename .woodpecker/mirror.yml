@@ -38,6 +38,9 @@ steps:
         from_secret: gitea_status_token
     backend_options:
       kubernetes:
+        # Publishing runs as the checkout owner; retain its initialized root.
+        securityContext:
+          fsGroupChangePolicy: OnRootMismatch
         nodeSelector:
           theincompetent.dev/hermes-verification: "true"
         resources:
