@@ -3,8 +3,8 @@
 At spawn, ChildRun.seed_workspace() seeds the child's cwd record and aliases the child to the
 parent's environment (one sandbox, #16177: the parent sees the child's files). That environment
 owns one bash snapshot every command sources and re-dumps, so a child's ``export``/``unset``
-became the parent's and its siblings' shell state. Contract: copy-on-spawn, as for the cwd; the
-child starts from the parent's exports, later changes stay in the child.
+became the parent's and its siblings' shell state. Each child seeds its own snapshot on first
+shell use from the nearest initialized ancestor; later changes stay in the child.
 
 Adapted from the regression test posted on the issue by ar-labs-agent.
 """

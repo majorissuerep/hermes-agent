@@ -57,3 +57,26 @@ def test_locked_website_policy_never_falls_back_to_allow(homes, monkeypatch):
     vault.lock_now(homes[1])
     with pytest.raises(VaultLockedError):
         website_policy.check_website_access('https://blocked.example', config_path=homes[1] / 'config.yaml')
+
+
+def test_extract_dispatch_preserves_locked_policy_refusal(homes):
+    import asyncio
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, patch
+
+    from hermes_constants import set_hermes_home_override, reset_hermes_home_override
+    from hermes_security.errors import VaultLockedError
+    from tools.web_tools_extract import _extract_safe_urls
+
+    vault.lock_now(homes[1])
+    token = set_hermes_home_override(homes[1])
+    try:
+        with (
+            patch('tools.web_tools_extract._dispatch_extract', new_callable=AsyncMock) as dispatch,
+            patch('tools.web_result_cache.extract_cache_get') as cache_get,
+        ):
+            with pytest.raises(VaultLockedError):
+                asyncio.run(_extract_safe_urls(SimpleNamespace(name='fixture'), ['https://blocked.example'], None))
+            assert dispatch.await_count == 0 and cache_get.call_count == 0
+    finally:
+        reset_hermes_home_override(token)

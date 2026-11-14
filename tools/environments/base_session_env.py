@@ -188,7 +188,8 @@ def _wrap_command_script(
     uses the same mktemp+mv atomic publish as the bootstrap and chains ``mv`` on the dump
     succeeding so a failed dump never replaces a good snapshot. ``umask 077`` is applied after
     the user's command so snapshot files (which may carry secrets) are private without
-    changing the command's umask.
+    changing the command's umask. Before a child's own snapshot exists, ``seed_snaps``
+    supplies its ancestors in order; the first existing snapshot seeds the command.
 
     Fork (user-native terminals): the snapshot machinery stays bash (it is
     Hermes' own dialect), but the user's COMMAND executes under their native
