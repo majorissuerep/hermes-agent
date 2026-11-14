@@ -2634,7 +2634,7 @@ security:
       - "/etc/hermes/blocked-sites.txt"
 ```
 
-When enabled, any URL matching a blocked domain pattern is rejected before the web or browser tool executes. This applies to `web_search`, `web_extract`, `browser_navigate`, and any tool that accesses URLs.
+The website blocklist refuses matching requested `web_extract` URLs before cache access or provider dispatch. The tool returns the matched rule for each blocked URL and can still extract allowed URLs in the same batch. `web_search` accepts a query; its result list is not filtered by this gate. Redirects followed by an extraction provider remain under that provider's policy.
 
 Domain rules support:
 - Exact domains: `admin.example.com`

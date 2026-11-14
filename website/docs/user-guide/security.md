@@ -745,7 +745,7 @@ security:
       - "/etc/hermes/blocked-sites.txt"
 ```
 
-When a blocked URL is requested, the tool returns an error explaining the domain is blocked by policy. The blocklist is enforced across `web_search`, `web_extract`, `browser_navigate`, and all URL-capable tools.
+The website blocklist refuses matching requested `web_extract` URLs before cache access or provider dispatch. The tool returns the matched rule for each blocked URL and can still extract allowed URLs in the same batch. `web_search` accepts a query; its result list is not filtered by this gate. Redirects followed by an extraction provider remain under that provider's policy.
 
 See [Website Blocklist](./configuration.md#website-blocklist) in the configuration guide for full details.
 
