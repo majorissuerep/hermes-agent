@@ -323,7 +323,7 @@ class TestContentStructuredArbitration:
     def test_plugin_call_mcp_keeps_sdk_structured_content(self, _patch_mcp_server):
         """Only the model view collapses the SDK wrapper: ``ctx.call_mcp`` (the handler without
         ``native_images``) still hands plugins the typed ``structuredContent``."""
-        from hermes_cli.plugins_context import PluginContext
+        from hermes_cli.plugins import PluginContext
         from mcp.server import MCPServer
 
         sdk = MCPServer("wrap")
@@ -400,8 +400,14 @@ class TestContentStructuredArbitration:
         a 30K table stays inline (the doubled payload crossed 50K and spilled), and a 60K table
         spills as the text alone, with no escaped second copy in ``<mcp-result-metadata>``."""
         import tools.tool_result_storage as trs
+        from hermes_security import artifacts, vault
         from tools.budget_config import DEFAULT_BUDGET, DEFAULT_MCP_RESULT_SIZE_CHARS
-        monkeypatch.setenv("HERMES_HOME", str(tmp_path / ".hermes"))
+        home = tmp_path / ".hermes"
+        home.mkdir()
+        monkeypatch.setenv("HERMES_HOME", str(home))
+        monkeypatch.setattr(vault, "_SCRYPT_N", 1024)
+        vault.init_vault(home, "synthetic MCP spill password")
+        vault.unlock(home, "synthetic MCP spill password")
         monkeypatch.setattr(trs, "_spillover_pruned_homes", set())
         handler = _mcp_handlers._make_tool_handler("test-server", "my-tool", 30.0, native_images=True)
         row = "| FY2027E | Revenue | 630.7 |\n"
@@ -418,7 +424,9 @@ class TestContentStructuredArbitration:
         table, out = _call(60_000)
         spilled = trs.maybe_persist_tool_result(out, "mcp_test_server_my_tool", "tc_spill", config=DEFAULT_BUDGET)
         assert trs.PERSISTED_OUTPUT_TAG in spilled
-        assert (trs.get_spillover_dir() / "tc_spill.txt").read_text(encoding="utf-8") == table
+        path = trs.get_spillover_dir() / "tc_spill.txt"
+        assert artifacts.read_text(path) == table
+        assert table.encode() not in path.read_bytes()
 
     def test_whitespace_only_content_falls_back(self, _patch_mcp_server):
         """Whitespace-only text is not usable content — fallback fires."""
