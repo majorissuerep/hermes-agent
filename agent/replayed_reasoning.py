@@ -18,12 +18,6 @@ from typing import Any
 
 from agent.message_metadata import stamped_reasoning_tokens
 
-# Turns persisted before the stamp existed: ciphertext characters per billed reasoning token, measured
-# live per issuer (OpenAI/Codex ~13.5, xAI grok-4.7 ~1.6). An estimate, used only when no stamp exists.
-_LEGACY_CHARS_PER_TOKEN = {"xai_responses": 1.6}
-_DEFAULT_LEGACY_CHARS_PER_TOKEN = 13.5
-
-
 def strip_opaque_replay_items(items: Any) -> Any:
     """``codex_reasoning_items`` with ``encrypted_content`` blanked; the ciphertext is priced separately
     (:func:`codex_reasoning_replay_tokens`), never by its bytes as text."""
@@ -38,24 +32,16 @@ def strip_opaque_replay_items(items: Any) -> Any:
 def codex_reasoning_replay_tokens(msg: Any) -> int:
     """Billed input cost of the encrypted reasoning an assistant row (or a converted Responses
     ``reasoning`` input item) replays. Compaction checkpoints are excluded."""
-    if isinstance(msg, dict) and msg.get("type") == "reasoning":
-        return _legacy_tokens([msg])
     items = msg.get("codex_reasoning_items") if isinstance(msg, dict) and msg.get("role") == "assistant" else None
     if not isinstance(items, list):
         return 0
-    reasoning = [item for item in items if isinstance(item, dict) and item.get("type") != "compaction"]
-    if not _legacy_tokens(reasoning):
-        return 0
-    return stamped_reasoning_tokens(msg) or _legacy_tokens(reasoning)
-
-
-def _legacy_tokens(items: list[Any]) -> int:
-    return sum(
-        int(len(item["encrypted_content"]) / _LEGACY_CHARS_PER_TOKEN.get(
-            str(item.get("_issuer_kind") or ""), _DEFAULT_LEGACY_CHARS_PER_TOKEN))
-        for item in items
-        if isinstance(item, dict) and isinstance(item.get("encrypted_content"), str) and item["encrypted_content"]
-    )
+    has_reasoning = any(
+        isinstance(item, dict) and item.get("type") == "reasoning"
+        and isinstance(item.get("encrypted_content"), str) and item["encrypted_content"]
+        for item in items)
+    # Ciphertext length is not a portable token measure. Historical unstamped rows retain
+    # the real-usage anchor; even a one-character carrier can have a known large replay cost.
+    return stamped_reasoning_tokens(msg) if has_reasoning else 0
 
 
 def signed_thinking_replay_tokens(msg: Any, readable_tokens: int) -> int:
