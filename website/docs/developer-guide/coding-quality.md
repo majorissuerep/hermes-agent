@@ -1,7 +1,7 @@
 # Coding quality and PR workflow
 
-This workflow applies the operator-provided “AI Coding Agents & PR Quality:
-Failure Modes, Prompt Fixes, and Verification” (2026-11-15). The coding posture
+This workflow applies the operator-provided "AI Coding Agents & PR Quality:
+Failure Modes, Prompt Fixes, and Verification" (2026-11-15). The coding posture
 in `agent/coding_context.py` and verification nudge in `agent/verify_hooks.py`
 carry the short runtime rules; this guide records the review and measurement
 procedure. These are behavioral instructions, not an enforcement sandbox.
@@ -52,7 +52,7 @@ Keep implementation/loading checks separate from outcome validation:
 
 - Record model and prompt revisions, hashes, task type and cost. Preserve a
   baseline (about four weeks or 100 PRs) and change one rule group at a time.
-- Replay 30–50 private historical tasks against old/new configurations, three
+- Replay 30-50 private historical tasks against old/new configurations, three
   runs each, using regression and held-out checks. Keep inputs and budgets fixed.
 - Randomize live tasks between configurations; compare within task type. Track
   first-push CI pass rate, failed checks, diff size, duplicate closures, review
