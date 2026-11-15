@@ -43,6 +43,21 @@ Read `CONTRIBUTING.md` and the relevant area's `AGENTS.md` before editing.
 - Rebase onto current `main` before merging. Test the exact candidate SHA and
   distinguish Linux, macOS, protocol, live-provider, and lifecycle evidence.
 
+## Coding and PR quality
+
+- Follow [the coding-quality workflow](website/docs/developer-guide/coding-quality.md):
+  check overlapping work, keep one concern, reproduce bugs, review the diff, and
+  attach current-revision evidence. A user request supplies task authorization.
+- Prefer readable, conventional code over clever shorthand. Two failures with
+  one approach require diagnosis and a different approach, not a blind rewrite.
+- Before a ready PR, required local checks must pass; before merge, current CI
+  gates must also pass for the candidate.
+  Use `scripts/run_tests.sh <affected paths> --file-retries 0` and
+  `python scripts/check`; honor additional area and CI gates. Missing checks are
+  unverified. Never weaken tests or bypass failed/pending/missing checks.
+- Keep review responses, failure behavior and rollback concrete. Prompt wording
+  and green CI alone do not establish better production outcomes.
+
 ## Local runtime and encrypted authority
 
 `hermes_cli.main` dispatches commands; bare interactive `hermes` launches

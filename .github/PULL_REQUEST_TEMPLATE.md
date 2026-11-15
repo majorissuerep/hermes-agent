@@ -1,76 +1,40 @@
-## What does this PR do?
+<!-- First line: the user-visible effect. Link a real issue if one exists. -->
 
-<!-- Describe the change clearly. What problem does it solve? Why is this approach the right one? -->
+## What and why
 
+<!-- Explain the problem, final behavior and scope in 2–3 sentences. Search open
+issues/PRs for overlap; link related work or state that none was found. A direct
+user request needs no invented issue or extra approval. -->
 
+## Evidence
 
-## Related Issue
+- Revision and environment:
+- Bug reproduction / failing before, passing after (or why not applicable):
+- Checks: <!-- Exact commands, exit status and final output. Use
+  scripts/run_tests.sh <affected paths> --file-retries 0, never bare pytest;
+  python scripts/check; and the applicable area's build/type/security checks.
+  List unavailable checks as unverified. -->
+- Performance only: <!-- Same command/environment, baseline and after. -->
+- Edge cases: <!-- Relevant empty/null, error, boundary, concurrency and auth
+  cases, with covering tests or a reason they do not apply. -->
 
-<!-- Link the issue this PR addresses. If no issue exists, consider creating one first. -->
+## Risk and rollback
 
-Fixes #
+<!-- What could break, failure behavior, existing logs/monitoring, rollout or
+existing feature flag where appropriate, and how to revert. -->
 
-## Type of Change
+## Review
 
-<!-- Check the one that applies. -->
+<!-- Self-review or fresh-context review: findings and how each was handled.
+Reply to actionable review comments with a fixing commit or reason. Leave
+resolution to the reviewer unless explicitly asked. -->
 
-- [ ] 🐛 Bug fix (non-breaking change that fixes an issue)
-- [ ] ✨ New feature (non-breaking change that adds functionality)
-- [ ] 🔒 Security fix (undisclosed vulnerabilities in [SECURITY.md](https://github.com/NousResearch/hermes-agent/blob/main/SECURITY.md) §3.1 scope go to [Security Advisories](https://github.com/NousResearch/hermes-agent/security/advisories/new) first, not a public PR)
-- [ ] 📝 Documentation update
-- [ ] ✅ Tests (adding or improving test coverage)
-- [ ] ♻️ Refactor (no behavior change)
-- [ ] 🎯 New skill (bundled or hub)
+- [ ] One concern; no unrelated dependencies, refactors or formatting. Above
+  5 files or 300 changed lines, explain why it stays together or split it.
+- [ ] Followed [contribution rules](../CONTRIBUTING.md) and area instructions.
+- [ ] Required checks passed on the current candidate; no weakened checks.
+- [ ] Relevant docs/config/schema examples updated, or not applicable.
+- [ ] Security reports follow [SECURITY.md](../SECURITY.md); no secrets in artifacts.
 
-## Changes Made
-
-<!-- List the specific changes. Include file paths for code changes. -->
-
-- 
-
-## How to Test
-
-<!-- Steps to verify this change works. For bugs: reproduction steps + proof that the fix works. -->
-
-1. 
-2. 
-3. 
-
-## Checklist
-
-<!-- Complete these before requesting review. -->
-
-### Code
-
-- [ ] I've read the [Contributing Guide](https://github.com/NousResearch/hermes-agent/blob/main/CONTRIBUTING.md)
-- [ ] My commit messages follow [Conventional Commits](https://www.conventionalcommits.org/) (`fix(scope):`, `feat(scope):`, etc.)
-- [ ] I searched for [existing PRs](https://github.com/NousResearch/hermes-agent/pulls) to make sure this isn't a duplicate
-- [ ] My PR contains **only** changes related to this fix/feature (no unrelated commits)
-- [ ] I've run `pytest tests/ -q` and all tests pass
-- [ ] `python scripts/check` passes (the blocking lint and code-health checks CI runs)
-- [ ] I've added tests for my changes (required for bug fixes, strongly encouraged for features)
-- [ ] I've tested on my platform: <!-- e.g. Ubuntu 24.04, macOS 15.2, Windows 11 -->
-
-### Documentation & Housekeeping
-
-<!-- Check all that apply. It's OK to check "N/A" if a category doesn't apply to your change. -->
-
-- [ ] I've updated relevant documentation (README, `docs/`, docstrings) — or N/A
-- [ ] I've documented config changes in the focused guide and kept the minimal `hermes_cli/data/config.yaml.example` current where relevant — or N/A
-- [ ] I've updated `CONTRIBUTING.md` or `AGENTS.md` if I changed architecture or workflows — or N/A
-- [ ] I've considered cross-platform impact (Linux, macOS) per the [compatibility guide](https://github.com/majorissuerep/hermes-agent/blob/main/website/docs/getting-started/platform-support.md) — or N/A
-- [ ] I've updated tool descriptions/schemas if I changed tool behavior — or N/A
-
-## For New Skills
-
-<!-- Only fill this out if you're adding a skill. Delete this section otherwise. -->
-
-- [ ] This skill is **broadly useful** to most users (if bundled) — see [Contributing Guide](https://github.com/NousResearch/hermes-agent/blob/main/CONTRIBUTING.md#should-the-skill-be-bundled)
-- [ ] SKILL.md follows the [standard format](https://github.com/NousResearch/hermes-agent/blob/main/CONTRIBUTING.md#skillmd-format) (frontmatter, trigger conditions, steps, pitfalls)
-- [ ] No external dependencies that aren't already available (prefer stdlib, curl, existing Hermes tools)
-- [ ] I've tested the skill end-to-end: `hermes --toolsets skills -q "Use the X skill to do Y"`
-
-## Screenshots / Logs
-
-<!-- If applicable, add screenshots or log output showing the fix/feature in action. -->
-
+<!-- Installed prompts, passing tests and merged PRs establish different claims.
+Do not claim outcome improvement without replay/live/post-merge evidence. -->
