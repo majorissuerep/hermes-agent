@@ -17,6 +17,11 @@ BATCHES = (
                               "tests/agent/test_context_overflow_reported_budget.py"), ()),
     ("encrypted conversation and resume", ("tests/scripts/e2e/test_provider_conversation_chat.py",),
      ("-k", "litellm")),
+    ("coding prompt and cache contracts", ("tests/agent/test_coding_context.py",
+                                         "tests/agent/test_verify_hooks.py",
+                                         "tests/agent/test_system_prompt.py",
+                                         "tests/agent/test_prompt_cache_prefix_contract.py",
+                                         "tests/ci/test_prompt_surface.py"), ()),
     ("verification selection", ("tests/ci/test_focused_tests.py",), ()),
 )
 
