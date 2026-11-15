@@ -106,6 +106,28 @@ def test_cwd_persists_and_workdir_does_not(docker_task):
     assert _run("pwd", docker_task)["output"].strip() == "/workspace/proj"
 
 
+def test_deleted_container_workdir_does_not_block_exec():
+    """#62169: ``docker exec`` inherits the container's creation-time ``-w``; once that directory is
+    gone the OCI runtime refused every exec (exit 127, chdir error) before the shell's fallback ran."""
+    from tools.environments import streams
+    from tools.environments.docker import DockerEnvironment
+
+    env = DockerEnvironment(image=_IMAGE, cwd="/tmp/project", task_id=f"rb-w-{uuid.uuid4().hex[:8]}",
+                            persist_across_processes=False)
+    try:
+        assert env.execute("pwd")["output"].strip() == "/tmp/project"
+        env.execute("rm -rf /tmp/project", cwd="/")
+        refused = env.execute("echo ran", cwd="/tmp/project")  # a named workdir never falls back
+        assert refused["returncode"] == 126 and "ran" not in refused["output"], refused
+        recovered = env.execute("pwd", cwd="/tmp")
+        assert recovered["returncode"] == 0 and recovered["output"].strip() == "/tmp", recovered
+        probe = streams.run_in(env, ["pwd"], timeout=30)  # the stream/long-lived launch path
+        assert probe.returncode == 0 and probe.stdout.strip() == b"/", probe
+    finally:
+        env.cleanup(force_remove=True)
+        assert DockerEnvironment.wait_for_all_teardowns(timeout=60)
+
+
 def test_exported_env_persists_between_commands(docker_task):
     _run("export HERMES_RB_EXPORTED='kept value'", docker_task)
     assert _run('echo "$HERMES_RB_EXPORTED"', docker_task)["output"].strip() == "kept value"
