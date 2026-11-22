@@ -15,6 +15,7 @@ from agent.compression_marker import elide
 from agent.interrupt_compat import request_hard_interrupt
 from dataclasses import dataclass, field
 from tools import file_state
+from tools.delegate_tool_config import DEFAULT_CHILD_IDLE_SECONDS
 from tools.delegate_tool_progress import _quiet, _safe_progress
 from tools.delegate_tool_registry import (
     _capture_local_steer_authority, _close_subagent_steering, _register_subagent, _unregister_subagent,
@@ -113,6 +114,16 @@ def _signal_child_stop(child: Any, *reason: str, tool_reason: str = "parent dele
                 and hasattr(child, "_interrupt_requested")):
             child._interrupt_requested = True
 
+
+def _request_stalled_child_stop(child: Any) -> None:
+    """An interrupted child can still be holding a commit fence or transport lock."""
+    scope = contextvars.copy_context()
+    worker = threading.Thread(target=scope.run, args=(_signal_child_stop, child),
+                              kwargs={"tool_reason": "subagent inactivity timeout"},
+                              name="subagent-timeout-interrupt", daemon=True)
+    worker.start()
+    worker.join(timeout=0.1)
+
 # ── 0-API-call timeout diagnostic ────────────────────────────────────────────
 
 def _format_thread_stack(frame: Any, indent: str) -> list[str]:
@@ -188,6 +199,7 @@ def _dump_subagent_timeout_diagnostic(
     child's config, prompt/schema sizes, activity snapshot and worker stack. Path, or None on failure."""
     try:
         from hermes_constants import get_hermes_home
+        from hermes_security.io import write_state_text
         import datetime as _dt
         logs_dir = get_hermes_home() / "logs"
         try:
@@ -226,7 +238,7 @@ def _dump_subagent_timeout_diagnostic(
             "  Common causes: oversized prompt rejected by provider, transport hang,",
             "  credential resolution stuck. See issue #14726 for context.",
         ]
-        dump_path.write_text("\n".join(lines), encoding="utf-8")
+        write_state_text(dump_path, "\n".join(lines), purpose="log")
         return str(dump_path)
     except Exception as exc:
         logger.warning("Subagent timeout diagnostic dump failed: %s", exc)
@@ -259,21 +271,19 @@ def _warn_child_budget(child: Any, idle_seconds: float, child_timeout: float) ->
         logger.debug("budget warning steer failed: %s", exc)
 
 def _child_activity_fingerprint(child: Any) -> tuple:
-    """``(completed calls, current tool, activity clock)`` — the progress signals the heartbeat's stale verdict
-    already watches. A child waiting on an in-flight LLM completion is ALIVE: its activity clock ticks while the
-    provider works (``direct_api_call``'s 15s heartbeat) and the call itself is bounded by the per-call stale
-    watchdog, so at the delegation layer it must not read as stuck (#116001)."""
+    """Completed calls, tool transitions, and observed work since the last sample."""
     try:
         summary = child.get_activity_summary() or {}
     except Exception:
         return (None, None, None)
-    return (summary.get("api_call_count"), summary.get("current_tool"), summary.get("last_activity_ts"))
+    return (summary.get("api_call_count"), summary.get("current_tool"),
+            summary.get("last_progress_ts", summary.get("last_activity_ts")))
 
 def _child_last_event_age(child: Any) -> Optional[float]:
     """Seconds since the child's activity clock last ticked, or None when the child exposes no clock. Reported on a
     timeout so an operator can tell a slow-but-live provider from a runaway without transcript forensics."""
     try:
-        ts = (child.get_activity_summary() or {}).get("last_activity_ts")
+        _, _, ts = _child_activity_fingerprint(child)
         return round(max(0.0, time.time() - float(ts)), 2) if ts is not None else None
     except Exception:
         return None
@@ -286,9 +296,8 @@ class _Heartbeat:
 
     def __init__(self, child: Any, parent_agent: Any, task_index: int):
         self.child, self.parent_agent, self.task_index = child, parent_agent, task_index
-        # Stale detection: a cycle counts as stale when (tool, iteration,
-        # activity_ts) all froze; thresholds differ idle vs in-tool.
-        self.last_seen = {"iter": 0, "tool": None, "ts": None, "stale": 0}
+        self.fingerprint = _child_activity_fingerprint(child)
+        self.stale_cycles = 0
         self.handle = None
         # Set on the stale verdict; ``await_child`` waits on it (its worker's done-callback
         # sets it too) so a wedged child ends the wait instead of only ending the heartbeat.
@@ -310,46 +319,33 @@ class _Heartbeat:
     def tick(self):
         """Returning False stops the periodic callback."""
         from tools.delegate_tool import _HEARTBEAT_INTERVAL, _HEARTBEAT_STALE_CYCLES_IDLE, _HEARTBEAT_STALE_CYCLES_IN_TOOL
-        child, parent_agent, task_index, last_seen = self.child, self.parent_agent, self.task_index, self.last_seen
-        touch = getattr(parent_agent, "_touch_activity", None) if parent_agent is not None else None
-        if not touch:
-            return None
-        desc = f"delegate_task: subagent {task_index} working"
-        try:
-            child_summary = child.get_activity_summary()
-            child_tool = child_summary.get("current_tool")
-            child_iter = child_summary.get("api_call_count", 0)
-            child_max = child_summary.get("max_iterations", 0)
-            child_activity_ts = child_summary.get("last_activity_ts")
-            # A slow model wait refreshes last_activity_ts (direct_api_call
-            # heartbeat), so it never looks stale at the idle threshold.
-            activity_advanced = child_activity_ts is not None and (
-                last_seen["ts"] is None or child_activity_ts > last_seen["ts"]
-            )
-            if child_iter > last_seen["iter"] or child_tool != last_seen["tool"] or activity_advanced:
-                last_seen.update(iter=child_iter, tool=child_tool, stale=0)
-                if child_activity_ts is not None:
-                    last_seen["ts"] = child_activity_ts
-            else:
-                last_seen["stale"] += 1
-            stale_cycles = _HEARTBEAT_STALE_CYCLES_IN_TOOL if child_tool else _HEARTBEAT_STALE_CYCLES_IDLE
-            if last_seen["stale"] >= stale_cycles:
-                logger.warning(
-                    "Subagent %d appears stale (no progress for %d heartbeat cycles, tool=%s) — abandoning its wait",
-                    task_index, last_seen["stale"], child_tool or "<none>",
-                )
-                # A finite/-Q turn has no gateway watchdog behind this; the wait itself must end (#109749).
-                self.stale_threshold_seconds = stale_cycles * _HEARTBEAT_INTERVAL
-                self.settled.set()
-                return False
-            if child_tool:
-                desc = f"delegate_task: subagent running {child_tool} (iteration {child_iter}/{child_max})"
-            elif child_summary.get("last_activity_desc", ""):
-                desc = f"delegate_task: subagent {child_summary.get('last_activity_desc', '')} (iteration {child_iter}/{child_max})"
-        except Exception:
-            pass
-        with _quiet(None):
-            touch(desc)
+        from agent.activity_tracking import touch_heartbeat
+
+        fingerprint = _child_activity_fingerprint(self.child)
+        progressed = fingerprint != self.fingerprint
+        self.fingerprint = fingerprint
+        self.stale_cycles = 0 if progressed else self.stale_cycles + 1
+        calls, tool, _ = fingerprint
+        limit = _HEARTBEAT_STALE_CYCLES_IN_TOOL if tool else _HEARTBEAT_STALE_CYCLES_IDLE
+        if self.stale_cycles >= limit:
+            self.stale_threshold_seconds = limit * _HEARTBEAT_INTERVAL
+            self.settled.set()
+            return False
+
+        details = f"{calls or 0} model calls completed"
+        if tool:
+            details += f" · {tool} running"
+        if self.stale_cycles:
+            details += f" · no update for {self.stale_cycles * _HEARTBEAT_INTERVAL:g}s"
+        callback = getattr(self.child, "tool_progress_callback", None)
+        _safe_progress(callback, "subagent.progress", preview=details)
+        if callable(touch := getattr(self.parent_agent, "_touch_activity", None)):
+            desc = f"delegate_task: subagent {self.task_index + 1} ({details})"
+            with _quiet("Parent delegation activity update failed", exc_info=True):
+                if progressed:
+                    touch(desc)
+                else:
+                    touch_heartbeat(self.parent_agent, desc)
         return None
 
 
@@ -416,7 +412,7 @@ def _create_isolated_worktree(parent_agent: Any, parent_task_id: Any, subagent_i
         )
     return None
 
-def _defer_close_after_timeout(child: Any, child_future: Any) -> None:
+def _defer_close_after_timeout(child: Any, child_future: Any, task_id: str) -> None:
     """Hand ``child.close()`` to a Future done-callback and drain its transports.
 
     The interrupt is cooperative: the worker still runs its finally path, so closing now could close SQLite under its
@@ -426,7 +422,20 @@ def _defer_close_after_timeout(child: Any, child_future: Any) -> None:
     sweep + one delayed re-sweep for a connection opened in between; a worker that still won't settle keeps its
     resources until process exit.
     """
-    child_future.add_done_callback(lambda _done: _close_child(child, "Failed to close timed-out child after worker exit"))
+    close_scope = contextvars.copy_context()
+    child_future.add_done_callback(lambda _done: close_scope.run(
+        _close_child, child, "Failed to close timed-out child after worker exit"))
+
+    if task_id:
+        from tools.process_registry import process_registry
+
+        def reap_owned_processes() -> None:
+            with _quiet("Timed-out child process cleanup failed", exc_info=True):
+                process_registry.kill_all(task_id, source="agent_close", consume_output=True)
+
+        reap_scope = contextvars.copy_context()
+        threading.Thread(target=reap_scope.run, args=(reap_owned_processes,),
+                         name="subagent-timeout-reaper", daemon=True).start()
     # Bounded drain (#94248 native half): the deferred close above only fires once the abandoned worker
     # unwinds, but that worker is typically parked inside an in-flight OpenSSL read (Codex / httpx). Never
     # hard-close that transport from this thread — releasing FDs under a live SSL read is the #29507/#70773
@@ -442,7 +451,8 @@ def _defer_close_after_timeout(child: Any, child_future: Any) -> None:
             _drain(reason=f"delegate_timeout_{phase}")
 
     _drain_once("immediate")
-    _resweep_timer = threading.Timer(5.0, lambda: None if child_future.done() else _drain_once("resweep"))
+    resweep_scope = contextvars.copy_context()
+    _resweep_timer = threading.Timer(5.0, lambda: None if child_future.done() else resweep_scope.run(_drain_once, "resweep"))
     _resweep_timer.daemon = True
     _resweep_timer.start()
 
@@ -801,21 +811,12 @@ class _ChildRun:
         return _close_subagent_steering(self.subagent_id, self.child) if self.subagent_id else None
 
     def wait_liveness_aware(self, settled: threading.Event, child_future: Any, child_timeout: Optional[float]) -> None:
-        """Wait for the worker or the stale verdict, where ``child_timeout`` bounds INACTIVITY, not total runtime.
-
-        A configured cap used to be a dispatch-to-death stopwatch, so it only ever killed children the runtime had
-        already judged healthy: all 75 reported deaths happened while waiting on an in-flight LLM completion, none
-        mid-tool (#116001). A provider serving multi-minute completions is progress — the child's activity clock
-        ticks during the wait and the request is bounded by the per-call stale watchdog — so the budget restarts on
-        every sign of progress, exactly the signals the heartbeat's stale verdict reads. Genuinely frozen children
-        keep two authorities: this budget (when configured) and the heartbeat's stale threshold.
-        """
-        if child_timeout is None:
-            settled.wait()
-            return
+        """Bound inactivity independently of the shared progress scheduler."""
+        warn_child = child_timeout is not None
+        child_timeout = child_timeout or DEFAULT_CHILD_IDLE_SECONDS
         deadline = time.monotonic() + child_timeout
         warn_at = deadline - child_timeout * (1.0 - _BUDGET_WARNING_FRACTION)
-        warned = False
+        warned = not warn_child
         fingerprint = _child_activity_fingerprint(self.child)
         while True:
             now = time.monotonic()
@@ -833,7 +834,7 @@ class _ChildRun:
                 fingerprint = current
                 deadline = time.monotonic() + child_timeout
                 warn_at = deadline - child_timeout * (1.0 - _BUDGET_WARNING_FRACTION)
-                warned = False  # a fresh window gets its own warning
+                warned = not warn_child
             elif not warned and time.monotonic() >= warn_at:
                 warned = True
                 _warn_child_budget(self.child, child_timeout - (deadline - time.monotonic()), child_timeout)
@@ -842,8 +843,7 @@ class _ChildRun:
         """Run the child's conversation on a daemon worker: ``(result, None, False)`` or ``(None, error_entry,
         close_deferred)`` on timeout/exception.
 
-        Hard timeout is off by default (``result(timeout=None)``; stuck children are the heartbeat's job). Daemon
-        worker: an abandoned timed-out child on a non-daemon thread would block interpreter exit at atexit join. The
+        An abandoned child on a non-daemon thread would block interpreter exit at atexit join. The
         worker installs a non-interactive approval callback (deny/approve per delegation.subagent_auto_approve) so
         dangerous-command prompts never fall back to ``input()`` and deadlock the parent TUI. On failure: steer
         acceptance closes BEFORE the stop signal (a concurrent steer is drained into the entry or rejected, never
@@ -901,7 +901,7 @@ class _ChildRun:
                 # here on purpose: the success path's `_merge_late_steer` (or the failure
                 # path below) is the linearization boundary, so a concurrent steer is never
                 # lost either way.
-                _signal_child_stop(child)
+                _request_stalled_child_stop(child)
                 grace = _STALE_RESULT_GRACE_SECONDS
                 grace_done = threading.Event()
                 future.add_done_callback(lambda _f: grace_done.set())
@@ -920,10 +920,13 @@ class _ChildRun:
             executor.shutdown(wait=False)
 
         _late_pending_steer = self.close_steering()
-        _signal_child_stop(child)
         is_timeout = isinstance(exc, (FuturesTimeoutError, TimeoutError))
+        if not is_timeout:
+            _signal_child_stop(child)
+        elif stale_after is None:
+            _request_stalled_child_stop(child)
         # What actually ended the wait: the stale threshold pre-empts a longer configured cap.
-        timeout_cause = stale_after if stale_after is not None else child_timeout
+        timeout_cause = stale_after if stale_after is not None else (child_timeout or DEFAULT_CHILD_IDLE_SECONDS)
         duration = self.elapsed()
         logger.warning("Subagent %d %s after %.1fs", task_index, "timed out" if is_timeout else f"raised {type(exc).__name__}", duration)
         child_api_calls = 0
@@ -950,12 +953,12 @@ class _ChildRun:
             )
         elif before_first_call:
             _err = (
-                f"Subagent timed out after {child_timeout}s without making any API call — the child never reached its "
+                f"Subagent timed out after {timeout_cause}s without making any API call — the child never reached its "
                 f"first LLM request (prompt construction, credential resolution, or transport may be stuck)."
             )
         else:
             _err = (
-                f"Subagent timed out after {child_timeout}s with {child_api_calls} API call(s) completed — no "
+                f"Subagent timed out after {timeout_cause}s with {child_api_calls} API call(s) completed — no "
                 f"progress in that window (no completed call, tool change, or activity-clock tick): a stalled "
                 f"provider request or an unresponsive network request."
             )
@@ -977,7 +980,7 @@ class _ChildRun:
         self.finish_failed(_error_entry, _late_pending_steer, preview=f"Timed out after {duration}s" if is_timeout else str(exc))
         close_deferred = is_timeout and not future.done()
         if close_deferred:
-            _defer_close_after_timeout(child, future)
+            _defer_close_after_timeout(child, future, self.child_task_id)
         return None, _error_entry, close_deferred
 
     def append_sibling_write_reminder(self, entry: dict[str, Any]) -> None:

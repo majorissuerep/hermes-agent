@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import os
 from typing import Any, Dict, List, Optional
 from utils import base_url_hostname, is_truthy_value
@@ -25,6 +26,7 @@ _LEGACY_MAX_ASYNC_WARNED = False
 # models) was being killed mid-task. Stuck-child detection is the heartbeat staleness monitor;
 # delegation.child_timeout_seconds opts back in.
 DEFAULT_CHILD_TIMEOUT: Optional[float] = None
+DEFAULT_CHILD_IDLE_SECONDS = 600.0
 
 def _cfg() -> dict:
     """The ``delegation`` section, read through the origin so tests can patch it."""
@@ -134,18 +136,15 @@ def _get_max_async_children() -> int:
 def _parse_timeout(raw: Any) -> Optional[float]:
     """Seconds → None (<= 0 disables) or max(30, value). Raises on non-numeric."""
     parsed = float(raw)
+    if not math.isfinite(parsed):
+        raise ValueError("delegation timeout must be finite")
     return None if parsed <= 0 else max(30.0, parsed)
 
 def _get_child_timeout() -> Optional[float]:
-    """Inactivity cap for one child (seconds of NO progress), or None (default: no cap). Failures should come from
-    what the child does (API/tool errors, iteration budget), not a stopwatch: the cap restarts on every sign of
-    progress — a completed call, a tool change, an activity-clock tick — so a slow provider serving multi-minute
-    completions never loses a live child, and a child frozen for the whole window is still caught. A configured
-    value pre-empts nothing the heartbeat staleness monitor would not also catch. delegation.child_timeout_seconds
-    > 0 opts in (floor 30 s); 0 or negative disables. Env fallback: DELEGATION_CHILD_TIMEOUT_SECONDS."""
+    """Optional inactivity cap. Zero leaves the built-in watchdog in charge."""
     return _knob(
         "child_timeout_seconds", "DELEGATION_CHILD_TIMEOUT_SECONDS", _parse_timeout, DEFAULT_CHILD_TIMEOUT,
-        "delegation.child_timeout_seconds=%r is not a valid number; using default (no timeout)",
+        "delegation.child_timeout_seconds=%r is not a valid number; using the built-in watchdog",
     )
 
 def _get_max_spawn_depth() -> int:

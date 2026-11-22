@@ -26,6 +26,7 @@ from typing import Any, Optional
 
 from hermes_cli.timeouts import get_provider_request_timeout, get_provider_stale_timeout
 from hermes_constants import PARTIAL_STREAM_STUB_ID, FINISH_REASON_LENGTH
+from agent.activity_tracking import touch_heartbeat
 from agent.error_classifier import (
     FailoverReason, PROVIDER_STREAM_EMPTY_FRAME_ERROR_CODE, PROVIDER_STREAM_NON_JSON_ERROR_CODE)
 from agent.sdk_transform_bypass import bypass_chat_sdk_request_transform
@@ -917,11 +918,10 @@ class _InlineRequest:
         self._watchdog = None
 
     def _activity_heartbeat(self) -> None:
-        # Never put the API call itself on another worker thread — that is the nested-pool
-        # deadlock this path exists to avoid (#60203). This ticker only refreshes the clock.
+        # The request stays on its caller's thread to avoid nested-pool deadlocks (#60203).
         while not self._hb_stop.wait(_DIRECT_API_ACTIVITY_HEARTBEAT_SECONDS):
             with contextlib.suppress(Exception):
-                self.agent._touch_activity("waiting for non-streaming API response")
+                touch_heartbeat(self.agent, "waiting for non-streaming API response")
 
     def _on_stale(self) -> None:
         # Timer thread: aborts sockets only, never issues a request (keeps the no-worker

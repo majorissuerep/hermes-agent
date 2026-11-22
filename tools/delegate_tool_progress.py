@@ -119,12 +119,15 @@ _LEGACY_EVENT_MAP: dict[str, DelegateEvent] = {
 # Event → _ChildProgressRelay method name. Lifecycle strings are emitted by the orchestrator itself (not
 # DelegateEvent). Any other DelegateEvent (TASK_TOOL_STARTED and the reserved TASK_* values) takes the tool-started
 # path; None means "recognised but ignored".
-_LIFECYCLE_EVENTS = frozenset({"subagent.spawn_requested", "subagent.start", "subagent.complete", "subagent.text"})
+_LIFECYCLE_EVENTS = frozenset({
+    "subagent.spawn_requested", "subagent.start", "subagent.complete", "subagent.text", "subagent.progress",
+})
 _EVENT_HANDLERS: dict[Any, Optional[str]] = {
     "subagent.spawn_requested": "_on_spawn_requested",
     "subagent.start": "_on_start",
     "subagent.complete": "_on_complete",
     "subagent.text": "_on_text",
+    "subagent.progress": "_on_heartbeat",
     DelegateEvent.TASK_THINKING: "_on_thinking",
     DelegateEvent.TASK_PROGRESS: "_on_progress",
     DelegateEvent.TASK_TOOL_COMPLETED: None,
@@ -377,6 +380,9 @@ class _ChildProgressRelay:
         # Streamed child reply text, relayed verbatim for gateway watch windows;
         # inert on CLI/TUI (their progress handlers ignore non-tool events).
         self._relay("subagent.text", preview=preview)
+
+    def _on_heartbeat(self, tool_name, preview, args, kwargs):
+        self._relay("subagent.progress", preview=preview)
 
     # ── DelegateEvent handlers ──
     def _on_thinking(self, tool_name, preview, args, kwargs):

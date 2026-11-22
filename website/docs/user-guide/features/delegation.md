@@ -353,32 +353,20 @@ A child that exhausts its budget returns with `exit_reason: max_iterations` and 
 
 ## Child Timeout
 
-By default there is **no wall-clock timeout** on subagents. Children fail only from what they're actually doing — API errors, tool errors, or hitting their iteration budget — never from a delegation-level stopwatch. Earlier releases shipped a hard cap (300s, later 600s), which kept killing legitimately busy children mid-task: deep code reviews, large research fan-outs, and slow reasoning models routinely need more than 10 minutes while making steady progress the whole time.
+Hermes reports when a subagent starts initializing. Once the child is running, the TUI shows periodic updates in `/agents`. Each update includes the number of completed model calls and, when applicable, the current tool and time since the last progress signal.
 
-Genuinely stuck children are still detected on every runtime, with or without a configured cap: the heartbeat staleness monitor watches each child's progress signals (API calls, tool starts, activity-timestamp ticks). A child whose progress is completely frozen past the stale threshold — 450s idle between turns, 1200s while inside a tool — is interrupted and its wait is **abandoned**: the parent gets a `status: "timeout"` entry whose error reads `Subagent stopped making progress after N API call(s) — no activity for 450s (heartbeat stale threshold); the pending worker was abandoned.` The wait ends even in one-shot runs (`hermes chat -Q`, Bot Chat one-shot, cron) that have no gateway inactivity watchdog behind them, so a wedged child can no longer hold the turn or its session lease forever. An in-flight model wait still counts as progress — subagents refresh the activity clock while waiting on the provider, so a slow local / long-prefill completion is not treated as stalled.
+The watchdog allows up to **10 minutes of inactivity** during child startup and execution. Streamed output, tool transitions, and completed model calls restart the running child's window. Routine wait heartbeats keep the status visible while the inactivity clock continues. A child that keeps making progress can run longer than 10 minutes.
 
-If you want a cap anyway (e.g. cost control on unattended cron-driven delegation), opt in per-install:
+Use `delegation.child_timeout_seconds` to shorten the inactivity window. The floor is 30 seconds. A value of `0` uses the built-in watchdog.
 
 ```yaml
 delegation:
-  child_timeout_seconds: 0     # default: 0 = no timeout
-  # child_timeout_seconds: 1800  # opt-in inactivity cap (floor 30s)
+  child_timeout_seconds: 0
 ```
 
-A positive value bounds **inactivity, not total runtime**: it is the longest a child may go with *no* progress (no completed API call, no tool change, no activity-clock tick) before it is abandoned. Every sign of progress restarts the window, so a child waiting on a multi-minute completion — the case that used to lose finished work — is never killed for taking long, while a child that has genuinely stopped moving is still caught (and an in-flight request is bounded independently by the per-call stale watchdog). `0` or a negative value disables the cap; the heartbeat staleness monitor below stays active either way.
+When startup times out, the parent gets a startup error. Hermes discards any child that finishes constructing later. A running child that times out gets a cancellation request and its owned, nonpersistent terminal jobs are stopped. Hermes returns the timeout to the parent and closes the child's session resources once its worker finishes unwinding.
 
-At ~80% of an idle window the child receives a one-line `[delegation budget warning]` through its steer channel (delivered at its next iteration boundary) telling it how long it has been idle and to return its summary now, so a slow-but-recoverable child can wrap up instead of losing its context. The warning fires once per idle window and re-arms when progress resumes.
-
-When a configured cap or the stale threshold fires, the child's result carries
-structured timeout metadata alongside the error message so parents and hooks
-can distinguish a stopwatch kill from other failures without parsing text:
-`timeout_seconds` (whichever limit actually ended the wait — the stale
-threshold when it pre-empts a longer configured cap, otherwise the cap),
-`timed_out_after_seconds` (actual wall clock), `last_event_age` (how long
-the child had been silent when the wait ended — the fast way to tell a slow
-provider from a runaway), and `timeout_phase`
-(`before_first_llm_call` when the child never reached its first request,
-`after_llm_calls` otherwise). All four are `null` on non-timeout errors.
+Runtime timeout results include `timeout_seconds`, `timed_out_after_seconds`, `last_event_age`, and `timeout_phase`. A zero-call timeout can also write a diagnostic under the profile's `logs/` directory. In an encrypted profile, Hermes seals that diagnostic with the profile vault.
 
 ## Failure Visibility
 
@@ -390,45 +378,11 @@ A subagent that fails — non-retryable provider error (404/400), timeout, crash
 
 Error text is reduced to the single most informative line (the exception message, not a traceback wall) and capped in length.
 
-:::tip Diagnostic dump on zero-call timeout
-With a hard cap configured, if a subagent times out having made **zero** API calls (usually: provider unreachable, auth failure, or tool-schema rejection), `delegate_task` writes a structured diagnostic to `~/.hermes/logs/subagent-timeout-<session>-<timestamp>.log` containing the subagent's config snapshot, credential-resolution trace, any early error messages, and stack traces for **all** live threads (not just the child's own) — a child parked waiting on a nested helper thread is indistinguishable from a slow provider without the full picture.
-:::
-
 ## Stall Detection for Background Subagents
 
-Background delegations (`delegate_task(background=true)`) are watched by a
-**progress-based stall monitor** — on by default, zero config. Unlike a
-wall-clock timeout, it never touches a child that is making progress, no
-matter how long it runs.
+Every running child has its own inactivity watchdog, including when siblings are still making progress. Hermes also monitors the background batch as a whole. If a batch stops reporting progress for 10 minutes, the monitor requests cancellation and gives the batch up to two minutes to finish and deliver its result. If it still fails to settle, the owning session receives a `stalled` completion.
 
-The monitor samples each detached child's progress signals — API-call count,
-current tool, and last-activity timestamp (which ticks on **every streamed
-token**, tool transition, and API-call boundary, so a child mid-stream on a
-long response always counts as alive):
-
-1. **Progressing children are never touched.** Any advancing signal resets
-   the clock.
-2. A child whose progress is completely frozen past the stale threshold
-   (450s idle, 1200s while inside a tool — legitimately slow terminal
-   commands and web fetches get the higher ceiling) is **interrupted** and
-   given a 120s grace window. A child that unwinds in time delivers its
-   partial results through the normal completion path.
-3. A child that never returns is force-finalized with a terminal `stalled`
-   completion event, so the owning session hears an outcome instead of
-   going silent, and the async slot frees for new work.
-
-The `stalled` event carries structured metadata mirroring the sync-path
-timeout fields: `stalled_after_quiet_seconds`, `stall_threshold_seconds`,
-`stall_phase` (`idle` / `in_tool`), and `stall_grace_seconds`.
-
-This closed a long-standing failure mode where a wedged background child
-left its session looking dead until a process restart. The underlying wedge
-(children hanging at their first API call after multi-day gateway uptime)
-was also fixed at the root: delegated children now run their OpenAI-wire
-API requests inline on their own conversation thread instead of a nested
-worker thread — the layer where the wedge lived. The stall monitor remains
-as the safety net for anything else.
-
+The background completion records `stalled_after_quiet_seconds`, `stall_threshold_seconds`, `stall_phase`, and `stall_grace_seconds`.
 
 ## Monitoring Running Subagents (`/agents`)
 
@@ -471,7 +425,7 @@ Background delegations: 1 running
 ```
 
 A delegation the stall monitor has flagged shows as
-`stalling · no progress 450s — interrupting`, and long-quiet-but-healthy
+`stalling · no progress 600s — interrupting`, and long-quiet-but-healthy
 children show their quiet time so you can tell "slow" from "stuck" at a
 glance.
 

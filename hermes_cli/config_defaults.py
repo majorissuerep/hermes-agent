@@ -935,9 +935,7 @@ DEFAULT_CONFIG = {
         # ~/.hermes/cache/delegation/ with a head+tail window + read_file offset footer, nothing
         # lost). 0 disables the ceiling; the dynamic budget still applies.
         "max_summary_chars": 24000,
-        # Inactivity cap per child (seconds, floor 30) — time with NO progress, not total runtime. 0 = no cap:
-        # children fail only from real errors (API, tools, iteration budget). A progressing child (including one
-        # waiting on a multi-minute completion) restarts the window; a frozen one is caught.
+        # Optional shorter inactivity cap per child (seconds, floor 30). Zero uses the built-in 600s watchdog.
         "child_timeout_seconds": 0,
         # Subagent effort: "ultra" | "max" | "xhigh" | "high" | "medium" | "low" | "minimal" |
         # "none" (empty = inherit)

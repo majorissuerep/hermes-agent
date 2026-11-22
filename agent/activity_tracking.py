@@ -25,6 +25,14 @@ def _activity_lock(obj) -> threading.Lock:
     return _lock
 
 
+def touch_heartbeat(agent, description: str) -> None:
+    """Refresh the display and session heartbeat without crediting work progress."""
+    if isinstance(agent, ActivityTrackingMixin):
+        agent._touch_activity(description, provenance=ActivityProvenance.HEARTBEAT)
+    else:
+        agent._touch_activity(description)
+
+
 class ActivityTrackingMixin:
     """Liveness timestamps/labels and rate-limited session activity persistence."""
 
@@ -66,6 +74,8 @@ class ActivityTrackingMixin:
                 getattr(self, "_turn_liveness_activity_generation", 0) + 1
             )
             self._last_activity_ts = time.time()
+            if resolved_provenance is not ActivityProvenance.HEARTBEAT:
+                self._last_progress_ts = self._last_activity_ts
             self._last_activity_desc = bound_activity_description(desc)
             self._last_activity_provenance = resolved_provenance
             # Real progress invalidates a reserved abort claim; an in-flight watchdog interrupt must abandon

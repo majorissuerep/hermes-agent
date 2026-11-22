@@ -20,8 +20,10 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Dict, List, Optional
 
+from agent.memory_provider import spawn_context_thread
 from hermes_constants import get_hermes_home, hermes_home_key
 from tools.daemon_pool import DaemonThreadPoolExecutor
+from tools.delegate_tool_config import DEFAULT_CHILD_IDLE_SECONDS
 from tools.thread_context import propagate_context_to_thread
 
 logger = logging.getLogger(__name__)
@@ -73,8 +75,8 @@ _last_orphan_sweep: dict[str, float] = {}
 # the normal finalize path, and only force-finalized (terminal ``stalled`` event) if
 # it never returns. Thresholds mirror delegate_tool's sync heartbeat monitor.
 _STALE_CHECK_INTERVAL = 30.0
-_STALE_IDLE_SECONDS = 450.0
-_STALE_IN_TOOL_SECONDS = 1200.0
+_STALE_IDLE_SECONDS = DEFAULT_CHILD_IDLE_SECONDS
+_STALE_IN_TOOL_SECONDS = _STALE_IDLE_SECONDS
 _STALL_GRACE_SECONDS = 120.0
 
 _monitor_lock = threading.Lock()
@@ -1102,6 +1104,18 @@ def _call_interrupt(fn, msg: str, *args) -> bool:
         return False
 
 
+def _retire_idle_monitor() -> bool:
+    """Recheck admissions under the same lock used to start the monitor."""
+    global _monitor_thread
+    with _monitor_lock, _records_lock:
+        if any(r["status"] == "stalling" or (r["status"] == "running" and r.get("progress_fn"))
+               for r in _records.values()):
+            return False
+        if _monitor_thread is threading.current_thread():
+            _monitor_thread = None
+        return True
+
+
 def _stale_monitor_loop() -> None:
     """Sweep running delegations for stalled progress. A changed progress token refreshes the
     record's timestamp; a frozen token past the idle/in-tool threshold marks the record
@@ -1116,13 +1130,19 @@ def _stale_monitor_loop() -> None:
                            "(in_tool=%s) — interrupting; grace window %.0fs",
                            delegation_id, quiet_for, in_tool, _STALL_GRACE_SECONDS)
             with _records_lock:
-                fn = (_records.get(delegation_id) or {}).get("interrupt_fn")
-            _call_interrupt(fn, "Async delegation %s stall interrupt failed: %s", delegation_id)
+                record = _records.get(delegation_id) or {}
+                fn = record.get("interrupt_fn")
+                scope = record.get("_context")
+            if callable(fn) and scope is not None:
+                scope.run(
+                    spawn_context_thread, _call_interrupt, name="async-delegate-stale-interrupt",
+                    args=(fn, "Async delegation %s stall interrupt failed: %s", delegation_id),
+                ).start()
         for delegation_id in expired:
             with _records_lock:
                 ctx = (_records.get(delegation_id) or {}).get("_context") or contextvars.copy_context()
             ctx.run(_finalize, delegation_id, lambda rec, d=delegation_id: _stalled_result(d, rec), "stalled")
-        if not any_monitorable:
+        if not any_monitorable and _retire_idle_monitor():
             return
 
 

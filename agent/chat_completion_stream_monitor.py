@@ -4,6 +4,7 @@ import time
 from types import SimpleNamespace
 
 from agent import chat_completion_wait_notice as wn
+from agent.activity_tracking import touch_heartbeat
 from agent.stream_fallback import uses_local_stream_grace
 
 
@@ -47,14 +48,14 @@ class StreamingWaitMonitor:
             diag = getattr(getattr(self, "clients", None), "diag", None)
             phase = "post_chunk" if isinstance(diag, dict) and diag.get("first_chunk_at") else "first_chunk"
             if not self._mon.wait_notice.should_emit(phase, watchdog):
-                self.agent._touch_activity(f"waiting for stream response ({waiting_secs}s, {phase})")
+                touch_heartbeat(self.agent, f"waiting for stream response ({waiting_secs}s, {phase})")
                 return
             self._mon.wait_notice_started_ts = self._mon.last_heartbeat
             self.agent._emit_wait_notice(wn.wait_notice_text(
                 self.api_kwargs.get('model', 'the provider'), waiting_secs, phase, watchdog))
         else:
             # Chunks are flowing — keep the tracker fresh, leave the display alone.
-            self.agent._touch_activity(f"waiting for stream response ({waiting_secs}s, no chunks yet)")
+            touch_heartbeat(self.agent, f"waiting for stream response ({waiting_secs}s, no chunks yet)")
 
     def _monitor_loop(self) -> None:
         _HEARTBEAT_INTERVAL = 30.0  # seconds between gateway activity touches

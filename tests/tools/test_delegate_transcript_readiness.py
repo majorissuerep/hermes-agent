@@ -1,5 +1,6 @@
 """Native queued children publish an encrypted transcript before their first turn."""
 import json
+import threading
 
 import pytest
 
@@ -103,3 +104,39 @@ def test_failed_child_reservation_is_not_published_and_can_be_retried(parent, mo
         assert "subagent.spawn_requested" in published
     finally:
         child.close()
+
+
+def test_startup_timeout_closes_late_child_without_launching_it(parent, monkeypatch):
+    from tools import delegate_tool
+
+    agent, _ = parent
+    release = threading.Event()
+    closed = threading.Event()
+    published = []
+    real_build = delegate_tool._build_child_preserving_parent_tools
+
+    def delayed_build(**kwargs):
+        child = real_build(**kwargs)
+        close = child.close
+
+        def record_close():
+            close()
+            closed.set()
+
+        child.close = record_close
+        release.wait(2)
+        return child
+
+    agent.tool_progress_callback = lambda event, *args, **payload: published.append(event)
+    monkeypatch.setattr(delegate_tool, "_build_child_preserving_parent_tools", delayed_build)
+    monkeypatch.setattr(delegate_tool, "_get_child_timeout", lambda: 0.2)
+    monkeypatch.setattr(delegate_tool, "_run_single_child", lambda *a, **kw: pytest.fail("late child ran"))
+    try:
+        result = json.loads(delegate_tool.delegate_task(goal="Startup timeout witness", parent_agent=agent))
+        assert "startup" in result["error"].lower()
+        assert "subagent.spawn_requested" not in published
+        assert agent._active_children == []
+    finally:
+        release.set()
+    assert closed.wait(5)
+    assert agent._session_db.get_session(agent.session_id) is not None

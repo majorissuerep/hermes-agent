@@ -20,6 +20,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
+from agent.activity_tracking import touch_heartbeat
 from agent.display import (
     KawaiiSpinner,
     build_tool_preview as _build_tool_preview,
@@ -609,7 +610,7 @@ def _run_tool_activity_heartbeat(
         while not stop_event.wait(interval):
             if is_thread_interrupted(worker_tid):
                 return
-            agent._touch_activity(label)
+            touch_heartbeat(agent, label)
     except Exception:
         pass  # a heartbeat must never break the agent loop
 

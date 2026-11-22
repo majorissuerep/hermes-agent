@@ -15,7 +15,9 @@ from typing import Any, Dict, List, Optional
 
 from hermes_cli.observability.shared_metrics_loop import begin_delegation_run, finish_delegation_unit
 from tools.async_delegation import _new_delegation_id, record_unit_child
-from tools.delegate_tool_child_run import _attach_child, _detach_child, _fabricated_entry, _signal_child_stop
+from tools.delegate_tool_child_run import (
+    _attach_child, _child_activity_fingerprint, _detach_child, _fabricated_entry, _signal_child_stop,
+)
 from tools.delegate_tool_progress import (
     SUBAGENT_FAILURE_STATUSES, _print_completion_line, _quiet, describe_subagent_failure, format_batch_tag,
 )
@@ -299,27 +301,9 @@ def _resolve_async_session_key(parent_agent: Any, origin_ui_session_id: str) -> 
     return session_key or agent_session_id, origin_ui_session_id
 
 def _batch_progress_token(child_agents: list[Any]) -> tuple:
-    """Progress token for the async registry's stale monitor: every child's (api_call_count, current_tool,
-    last_activity_ts). last_activity_ts ticks on streamed chunks, tool transitions and API-call start/completion,
-    so a child streaming a long response counts as alive; a fully frozen token past the threshold means the batch
-    is wedged. ``in_tool`` is True while ANY child is inside a tool so slow tools get the higher ceiling (mirrors
-    the sync heartbeat)."""
-    # Progress token for the async registry's stale monitor: the combined (api_call_count, current_tool,
-    # last_activity_ts) of every child. last_activity_ts is ticked by _touch_activity on every streamed
-    # chunk ("receiving stream response"), every tool transition, and every API-call start/completion — so a
-    # child streaming a long response is alive even though api_call_count only advances when the call
-    # completes (same liveness signal as the compaction inactivity budget, PR #71508).
-    parts = []
-    in_tool = False
-    for c in child_agents:
-        try:
-            summary = c.get_activity_summary()
-            tool = summary.get("current_tool")
-            parts.append((summary.get("api_call_count", 0), tool, summary.get("last_activity_ts")))
-            in_tool = in_tool or bool(tool)
-        except Exception:
-            parts.append(None)
-    return tuple(parts), in_tool
+    """Use the same progress signals as the individual child watchdog."""
+    parts = tuple(_child_activity_fingerprint(child) for child in child_agents)
+    return parts, any(tool for _, tool, _ in parts)
 
 _BACKGROUND_NOTES = {
     "one": (

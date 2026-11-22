@@ -15,6 +15,7 @@ import logging
 import time
 import weakref
 from pathlib import Path
+from threading import Event
 from typing import Any, Dict, List, Optional
 
 from tools.terminal_tool import set_approval_callback as _set_subagent_approval_cb
@@ -25,10 +26,12 @@ logger = logging.getLogger(__name__)
 # The delegate_tool_* siblings hold the pieces split out of this module; every name callers or patching tests reach as
 # ``tools.delegate_tool.<name>`` is re-imported here. Mutable flag globals live only in their owning module.
 from tools.delegate_tool_child_run import (
-    _ChildRun, _attach_child, _build_child_goal_message, _build_result_entry, _dump_subagent_timeout_diagnostic, _fabricated_entry,
+    _ChildRun, _attach_child, _build_child_goal_message, _build_result_entry, _close_child, _dump_subagent_timeout_diagnostic,
+    _fabricated_entry,
     _lease_child_credential, _merge_late_steer, _register_child, _start_heartbeat, _validate_child_output_schema,
 )
 from tools.delegate_tool_config import (
+    DEFAULT_CHILD_IDLE_SECONDS,
     _DEFAULT_MAX_CONCURRENT_CHILDREN, _get_child_timeout, _get_max_async_children, _get_max_concurrent_children,
     _get_max_spawn_depth, _get_oneshot_max_children, _get_orchestrator_enabled, _get_subagent_approval_callback, _get_worktree_isolation,
     _inherit_parent_capabilities, _load_config, _merge_request_overrides, _resolve_child_credential_pool,
@@ -56,6 +59,7 @@ from tools.delegate_tool_toolsets import (
 from tools.delegate_tool_results import (
     _apply_summary_budget, _build_child_preserving_parent_tools, _run_child_lifecycle, _summarize_tool_arguments,
 )
+from tools.delegate_tool_startup import build_child_with_watchdog
 
 _ROLES = frozenset({"leaf", "orchestrator"})
 
@@ -104,12 +108,8 @@ def _normalize_role(r: Optional[str]) -> str:
 
 DEFAULT_MAX_ITERATIONS = 250
 _HEARTBEAT_INTERVAL = 30  # seconds between parent activity heartbeats during delegation
-# Stale-heartbeat thresholds (cycles of _HEARTBEAT_INTERVAL with no progress). Progress = iteration, current_tool OR
-# last_activity_ts advancing; an in-flight model wait refreshes last_activity_ts, so slow models are not "idle". Idle
-# stays tight so a truly wedged child doesn't mask the gateway timeout; in-tool is much higher so legitimately long
-# tools can finish.
-_HEARTBEAT_STALE_CYCLES_IDLE = 15  # 450s idle between turns → stale
-_HEARTBEAT_STALE_CYCLES_IN_TOOL = 40  # 1200s stuck on same tool → stale
+_HEARTBEAT_STALE_CYCLES_IDLE = int(DEFAULT_CHILD_IDLE_SECONDS / _HEARTBEAT_INTERVAL)
+_HEARTBEAT_STALE_CYCLES_IN_TOOL = _HEARTBEAT_STALE_CYCLES_IDLE
 # After the stale verdict ends the wait, keep polling the worker this long for its real
 # result (#113222): a child that already wrote its final answer often finishes unwinding a
 # moment later, and that recorded result must be collected instead of a synthesized timeout.
@@ -214,9 +214,10 @@ def _build_child_agent(
     routing_cfg: Optional[dict[str, Any]] = None,
     # Legacy; accepted for wire compat but ignored (capability is depth-derived).
     role: str = "leaf",
+    *,
+    startup_cancelled: Optional[Event] = None,
 ):
-    """Build (don't run) a child AIAgent on the main thread. override_* (from delegation config) replace parent
-    inheritance so children can run on a different provider:model pair."""
+    """Construct the child; supervised callers publish only after accepting its result."""
     import uuid as _uuid
     from run_agent import AIAgent
     from agent.delegation_context import delegated_child_context
@@ -291,9 +292,11 @@ def _build_child_agent(
                     release_or_close(child_session_db)
             raise
     child._print_fn = getattr(parent_agent, "_print_fn", None)
-    _apply_child_cache_ttl(child)
     if child_session_db is not None:
         child._owns_session_db = True  # released by the child's close(), never by the parent
+    if startup_cancelled is not None and startup_cancelled.is_set():
+        return child  # watchdog owns cleanup of this unpublished result
+    _apply_child_cache_ttl(child)
     # Ownership transfer for the dedicated handle: the child's close() must release it (nothing else holds a
     # reference), and no parent teardown can close it out from under a background child (#81267).
     from tools.delegate_tool_child_run import _reserve_child_transcript
@@ -320,19 +323,24 @@ def _build_child_agent(
     if child_pool is not None:
         child._credential_pool = child_pool
 
-    _attach_child(parent_agent, child)  # interrupt propagation
-    # spawn_requested now — the child may queue for seconds when the pool is
-    # saturated — then the subagent_start lifecycle hook.
-    _safe_progress(child_progress_cb, "subagent.spawn_requested", preview=goal)
+    if startup_cancelled is None:
+        _publish_child(child, parent_agent, goal)
+    return child
+
+
+def _publish_child(child, parent_agent, goal: str) -> None:
+    """Expose an admitted child only after its durable transcript is reserved."""
+    _attach_child(parent_agent, child)
+    _safe_progress(getattr(child, "tool_progress_callback", None), "subagent.spawn_requested", preview=goal)
     with _quiet("subagent_start hook invocation failed", exc_info=True):
         from hermes_cli.lifecycle import invoke_hook as _invoke_hook
         _invoke_hook(
-            "subagent_start", parent_session_id=parent_sid,
-            parent_turn_id=getattr(parent_agent, "_current_turn_id", "") or "", parent_subagent_id=parent_subagent_id,
-            child_session_id=getattr(child, "session_id", None), child_subagent_id=subagent_id,
-            child_role=effective_role, child_goal=goal,
+            "subagent_start", parent_session_id=getattr(parent_agent, "session_id", None),
+            parent_turn_id=getattr(parent_agent, "_current_turn_id", "") or "",
+            parent_subagent_id=getattr(child, "_parent_subagent_id", None),
+            child_session_id=getattr(child, "session_id", None), child_subagent_id=getattr(child, "_subagent_id", None),
+            child_role=getattr(child, "_delegate_role", None), child_goal=goal,
         )
-    return child
 
 def _run_single_child(
     task_index: int, goal: str, child=None, parent_agent=None, *, owner_session_id: Optional[str] = None,
@@ -417,8 +425,7 @@ def _build_children(
     top_role: str, max_iterations: int, parent_agent, routing_cfg: dict[str, Any],
     live_deleg_id: Optional[str], live_writers: list, task_images: Optional[list[Optional[list[str]]]] = None,
 ) -> tuple[list[tuple], Optional[str]]:
-    """Build every child on the main thread (construction is not thread-safe);
-    ``(children, None)`` or ``([], error)`` on an explicit-pin preflight failure."""
+    """Build the batch before publishing; refuse setup failures without stranded siblings."""
     from tools.delegation_live_log import wrap_progress_callback
     from tools.delegation_output_schema import append_output_contract
     overrides = _credential_overrides(creds, routing_cfg)
@@ -429,14 +436,18 @@ def _build_children(
         if _task_schema is not None:
             _child_context = append_output_contract(_child_context, _task_schema)
         try:
-            child = _build_child_preserving_parent_tools(
+            child = build_child_with_watchdog(
                 task_index=i, goal=t["goal"], context=_child_context,
                 toolsets=None,  # always inherit the parent's toolsets
                 model=creds["model"], max_iterations=max_iterations, task_count=len(task_list),
                 parent_agent=parent_agent, role=_normalize_role(t.get("role") or top_role), **overrides,
             )
-        except ValueError as exc:
-            return [], str(exc)
+        except BaseException as exc:
+            for _, _, earlier in children:
+                _close_child(earlier, "Failed to close unstarted child after batch setup failed")
+            if isinstance(exc, ValueError):
+                return [], str(exc)
+            raise
         if _task_schema is not None:
             with _quiet("Could not attach output schema to child %d", i):
                 child._delegate_output_schema = _task_schema
@@ -458,6 +469,8 @@ def _build_children(
             if isinstance(_ident_ref, dict):
                 _ident_ref["delegation_id"] = live_deleg_id
         children.append((i, t, child))
+    for _, task, child in children:
+        _publish_child(child, parent_agent, task["goal"])
     return children, None
 
 

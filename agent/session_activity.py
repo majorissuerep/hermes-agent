@@ -25,6 +25,7 @@ class ActivityProvenance(str, Enum):
     """Where a durable/in-memory activity stamp came from."""
 
     UNKNOWN = "unknown"
+    HEARTBEAT = "heartbeat"
     # Compression writers: heartbeat, host timeout, cooldown, turn hold.
     # See #72424.
     AGENT_COMPRESSION = "agent.compression"

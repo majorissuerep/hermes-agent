@@ -16,6 +16,8 @@ import threading
 import time
 from types import SimpleNamespace
 
+import pytest
+
 from tools import delegate_tool
 
 _CAP_SECONDS = 0.4
@@ -108,3 +110,37 @@ def test_frozen_child_is_still_abandoned_when_the_cap_elapses(monkeypatch):
     assert entry["timeout_seconds"] == _CAP_SECONDS
     assert entry["last_event_age"] is not None and entry["last_event_age"] > 0.3, entry
     assert child.interrupted.is_set()
+
+
+@pytest.mark.platforms("linux", "macos")
+def test_default_watchdog_ignores_heartbeats_and_reaps_only_child_owned_jobs(tmp_path, monkeypatch):
+    from tests.e2e.vault_home import seal_fixture_home
+    from tools import delegate_tool_child_run
+    from tools.process_registry import process_registry
+
+    home = tmp_path / "profile"
+    home.mkdir()
+    monkeypatch.setenv("HERMES_HOME", str(home))
+    seal_fixture_home(home)
+    child = _SlowButLiveChild(total_seconds=2, advance=False, initial_calls=1)
+    child._subagent_id = "sa-watchdog-test"
+    started = time.time()
+    child.get_activity_summary = lambda: {
+        "api_call_count": 1, "current_tool": "terminal",
+        "last_activity_ts": time.time(), "last_progress_ts": started,
+    }
+    monkeypatch.setattr(delegate_tool_child_run, "DEFAULT_CHILD_IDLE_SECONDS", 0.2)
+    monkeypatch.setattr(delegate_tool_child_run._Heartbeat, "start", lambda self: None)
+    owned = process_registry.spawn_local("sleep 30", task_id=child._subagent_id, owner_task_id=child._subagent_id)
+    sibling = process_registry.spawn_local("sleep 30", task_id="sibling-watchdog-test", owner_task_id="sibling-watchdog-test")
+    try:
+        entry = _run(child, monkeypatch, cap=None)
+        assert entry["status"] == "timeout", entry
+        assert entry["timeout_seconds"] == 0.2
+        assert child.interrupted.is_set()
+        process_registry.wait(owned.id, timeout=5)
+        assert owned.exited
+        assert not sibling.exited
+    finally:
+        process_registry.kill_process(owned.id, source="test")
+        process_registry.kill_process(sibling.id, source="test")

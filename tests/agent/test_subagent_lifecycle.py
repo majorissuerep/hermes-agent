@@ -148,7 +148,8 @@ def test_public_lifecycle_runs_host_aggregation(monkeypatch):
     memory.on_delegation.assert_called_once_with(
         task="aggregate me", result="aggregated", child_session_id="child-session"
     )
-    hook.assert_called_once_with(
+    assert [call.args[0] for call in hook.call_args_list] == ["subagent_start", "subagent_stop"]
+    hook.assert_called_with(
         "subagent_stop",
         parent_session_id="parent-aggregate",
         parent_turn_id="turn-1",

@@ -966,7 +966,7 @@ def test_ungrouped_task_completes_alone_and_group_completes_together(monkeypatch
     """With delegation.independent_completions on, a finished ungrouped task must not wait for its siblings;
     tasks sharing a `group` must."""
     import tools.delegate_tool as dt
-    monkeypatch.setattr(dt, "_load_config", lambda: {"independent_completions": True})
+    monkeypatch.setattr(dt, "_load_config", lambda: {"independent_completions": True, "max_concurrent_children": 4})
     gates = [threading.Event() for _ in range(4)]
     tasks = [
         {"goal": "review PR 1 thoroughly and report"},
@@ -1017,7 +1017,7 @@ def test_multi_task_call_is_one_completion_unless_independent_completions(monkey
     """Default: a background fan-out returns as ONE message when every task is done, so an orchestrator
     is not woken N times per call; `group` is inert until delegation.independent_completions is on."""
     import tools.delegate_tool as dt
-    monkeypatch.setattr(dt, "_load_config", dict)
+    monkeypatch.setattr(dt, "_load_config", lambda: {"max_concurrent_children": 3})
     gates = [threading.Event() for _ in range(3)]
     tasks = [{"goal": "review PR 1 thoroughly and report"}, {"goal": "review PR 2 thoroughly and report", "group": "g"},
              {"goal": "review PR 3 thoroughly and report", "group": "g"}]
@@ -1064,15 +1064,16 @@ def test_units_beyond_slot_count_still_start_and_are_not_stalled_while_queued(mo
     release.set()
 
 
-def test_child_finished_before_crash_is_recovered_with_its_result(tmp_path):
+def test_child_finished_before_crash_is_recovered_with_its_result(encrypted_restart_probe):
     """Real-import E2E: a 2-task group unit whose owner dies mid-run replays the finished child's real result
     and marks only the unfinished sibling unknown — a crash costs the stragglers, never the finished work."""
-    repo = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-    env = {**os.environ, "HERMES_HOME": str(tmp_path), "PYTHONPATH": repo}
+    run, _ = encrypted_restart_probe
     producer = r'''
-import os, sys, time
+import json, os, threading, time
 from unittest.mock import MagicMock
 import tools.delegate_tool as dt
+import tools.delegate_tool_dispatch as dispatch
+from tools import async_delegation as ad
 parent = MagicMock(); parent._delegate_depth = 0; parent.session_id = "sess"; parent._interrupt_requested = False
 parent._active_children = []; parent._active_children_lock = None
 def child(task_index, goal, child=None, parent_agent=None, **kw):
@@ -1084,20 +1085,27 @@ def build(**kw):
     c = MagicMock(); c._delegate_role = "leaf"; c._subagent_id = f"s{kw['task_index']}"; return c
 creds = {"model": "m", "provider": None, "base_url": None, "api_key": None, "api_mode": None, "command": None, "args": None}
 dt._build_child_agent = build; dt._run_single_child = child; dt._resolve_delegation_credentials = lambda *a, **k: creds
-dt.delegate_task(tasks=[{"goal": "fast member of the group task", "group": "g"},
-                        {"goal": "slow member of the group task", "group": "g"}], background=True, parent_agent=parent)
-time.sleep(2.0)
-sys.stdout.flush(); os._exit(1)
+dt._load_config = lambda: {"max_concurrent_children": 2, "independent_completions": True}
+recorded = threading.Event()
+def observe_record(delegation_id, entry):
+    ad.record_unit_child(delegation_id, entry)
+    recorded.set()
+dispatch.record_unit_child = observe_record
+result = json.loads(dt.delegate_task(tasks=[{"goal": "fast member of the group task", "group": "g"},
+                                           {"goal": "slow member of the group task", "group": "g"}],
+                                     background=True, parent_agent=parent))
+assert result["status"] == "dispatched", result
+assert recorded.wait(15), "finished child did not reach durable accounting"
+os._exit(0)
 '''
-    subprocess.run([sys.executable, "-c", producer], cwd=repo, env=env, text=True, capture_output=True, timeout=30, check=False)
+    run(producer)
     consumer = r'''
 import json, queue
 from tools import async_delegation as ad
 q = queue.Queue(); ad.restore_undelivered_completions(q)
 print(json.dumps(q.get_nowait(), sort_keys=True))
 '''
-    second = subprocess.run([sys.executable, "-c", consumer], cwd=repo, env=env, text=True, capture_output=True,
-                            timeout=15, check=True)
+    second = run(consumer)
     evt = json.loads(second.stdout.strip().splitlines()[-1])
     by_index = {r["task_index"]: r for r in evt["results"]}
     assert by_index[0]["status"] == "completed" and by_index[0]["summary"] == "done: fast member of the group task"
