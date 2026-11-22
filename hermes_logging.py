@@ -795,11 +795,7 @@ _log_queue: Optional[queue.SimpleQueue] = None
 _queue_listener: Optional[QueueListener] = None
 _queued_file_handlers: list = []
 _queue_atexit_registered = False
-# Guards every read-modify-write of the four globals above. setup_logging()
-# holds no lock and its _logging_initialized guard runs AFTER handler
-# registration, so _register_queued_handler() can race a flush/reset from
-# another thread (gateway init vs a plugin/CLI path); without this, two
-# threads can interleave stop()/reassign/start() and leave two live listeners.
+# Serializes handler publication and listener lifecycle operations across setup callers.
 _queue_state_lock = threading.Lock()
 
 
@@ -826,39 +822,29 @@ def _stop_queue_listener() -> None:
 
 
 def _start_queue_listener_locked() -> None:
-    """(Re)build + start a listener over the current handler set (``_queue_state_lock`` held).
-
-    A running listener is stopped first; this only happens while handlers are being
-    added (queue empty), so ``stop()`` returns immediately.
-    """
+    """Start a listener over the current handler set while holding the state lock."""
     global _queue_listener
-    if _queue_listener is not None:
-        _queue_listener.stop()
     _queue_listener = QueueListener(_log_queue, *_queued_file_handlers, respect_handler_level=True)
     _queue_listener.start()
 
 
-def _register_queued_handler(handler: logging.Handler) -> None:
-    """Route *handler* through the shared async queue instead of attaching it to root.
-
-    Emitting threads never block on file I/O or the rotation lock; the ``QueueListener``
-    applies each handler's own level and filters on its worker thread.
-    """
+def _register_queued_handler_locked(handler: logging.Handler) -> None:
+    """Publish *handler* without joining a listener that may be waiting on file I/O."""
     global _log_queue, _queue_atexit_registered
-    with _queue_state_lock:
-        if _log_queue is None:
-            _log_queue = queue.SimpleQueue()
-            qh = _NonFormattingQueueHandler(_log_queue)
-            qh._hermes_queue = True  # type: ignore[attr-defined]
-            # Always on the root logger so records from any logger reach the queue.
-            logging.getLogger().addHandler(qh)
-        _queued_file_handlers.append(handler)
+    if _log_queue is None:
+        _log_queue = queue.SimpleQueue()
+        qh = _NonFormattingQueueHandler(_log_queue)
+        qh._hermes_queue = True  # type: ignore[attr-defined]
+        logging.getLogger().addHandler(qh)
+    _queued_file_handlers.append(handler)
+    if _queue_listener is None:
         _start_queue_listener_locked()
-        if not _queue_atexit_registered:
-            # Runs before logging.shutdown (registered earlier at import time),
-            # so the listener stops before its file handlers are closed.
-            atexit.register(_stop_queue_listener)
-            _queue_atexit_registered = True
+    else:
+        # QueueListener handles each record against one immutable handler tuple.
+        _queue_listener.handlers = tuple(_queued_file_handlers)
+    if not _queue_atexit_registered:
+        atexit.register(_stop_queue_listener)
+        _queue_atexit_registered = True
 
 
 def flush_log_queue() -> None:
@@ -991,12 +977,17 @@ def _add_rotating_handler(
 ) -> None:
     """Register a queued ``RotatingFileHandler`` for *path*; idempotent per resolved path."""
     resolved = path.resolve()
+    with _queue_state_lock:
+        _add_file_handler_locked(resolved, level, max_bytes, backup_count, formatter, log_filter)
+
+
+def _add_file_handler_locked(resolved, level, max_bytes, backup_count, formatter, log_filter) -> None:
     for existing in _queued_file_handlers:
         # Already attached directly, or already covered by the profile router — for its default
         # home or any profile home it routes (a bare handler beside it would take every record).
         if getattr(existing, "_hermes_routed_log_path", None) == resolved or (
-            isinstance(existing, RotatingFileHandler)
-            and Path(getattr(existing, "baseFilename", "")).resolve() == resolved
+            isinstance(existing, (RotatingFileHandler, _VaultFrameHandler))
+            and Path(existing.baseFilename).resolve() == resolved
         ):
             return
         if isinstance(existing, _ProfileRoutingFileHandler) and existing._filename == resolved.name and (
@@ -1004,7 +995,7 @@ def _add_rotating_handler(
         ):
             return
     handler = _new_file_handler(
-        path, level=level, max_bytes=max_bytes, backup_count=backup_count, formatter=formatter,
+        resolved, level=level, max_bytes=max_bytes, backup_count=backup_count, formatter=formatter,
     )
     if log_filter is not None:
         handler.addFilter(log_filter)
@@ -1020,7 +1011,7 @@ def _add_rotating_handler(
         _quietly(handler.close)
         handler = routed
     # Queue, not ``addHandler``: the rotation-lock wait never runs on the caller's thread.
-    _register_queued_handler(handler)
+    _register_queued_handler_locked(handler)
 
 
 def _read_logging_config():

@@ -79,6 +79,45 @@ def liveness_clock(monkeypatch):
     return advance
 
 
+@pytest.mark.platforms("linux", "macos")
+def test_repeated_vault_logging_setup_does_not_wait_for_the_writer(hermes_home, monkeypatch):
+    from hermes_security import frames, vault
+
+    vault.init_vault(hermes_home, "synthetic log password")
+    vault.unlock(hermes_home, "synthetic log password")
+    entered_append = threading.Event()
+    setup_finished = threading.Event()
+    original_append = frames.append
+
+    def observe_append(*args, **kwargs):
+        entered_append.set()
+        return original_append(*args, **kwargs)
+
+    def setup_again():
+        hermes_logging.setup_logging(hermes_home=hermes_home)
+        setup_finished.set()
+
+    monkeypatch.setattr(frames, "append", observe_append)
+    log_path = hermes_home / "logs" / "agent.log"
+    hermes_logging.setup_logging(hermes_home=hermes_home)
+    logger = logging.getLogger("agent.vault_logging_regression")
+    worker = threading.Thread(target=setup_again, daemon=True)
+    try:
+        with frames.stream_lock(log_path):
+            logger.info("vault writer lock witness")
+            assert entered_append.wait(5)
+            worker.start()
+            returned_while_locked = setup_finished.wait(1)
+        worker.join(5)
+        assert returned_while_locked, "agent startup waited for the encrypted log writer"
+        logger.info("one encrypted copy witness")
+        hermes_logging.flush_log_queue()
+        records = list(frames.read_frames(log_path, purpose="log"))
+        assert sum(b"one encrypted copy witness" in line for line in records) == 1
+    finally:
+        vault.clear_vault_cache()
+
+
 @pytest.mark.parametrize("configured,explicit,minimum", [(None, None, logging.INFO), ("DEBUG", "WARNING", logging.WARNING), ("DEBUG", None, logging.DEBUG)])
 def test_repeated_setup_routes_records_once(hermes_home, configured, explicit, minimum):
     if configured:
