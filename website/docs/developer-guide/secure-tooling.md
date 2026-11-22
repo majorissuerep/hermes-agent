@@ -423,6 +423,21 @@ python3 scripts/ci/verify.py --plan --event pull_request
 python3 scripts/ci/verify.py --base origin/main
 ```
 
+The 2026-11-22 review pins upstream `0f602c5f6f18615632535251d62a2db74ce93b69`
+and fork `536e07eb3ae1df59fe9f453cefaa4ffc9c4b1ee2`. The shared base remains
+`eb75627faf532fa6ffbdae59a0d14b0b385fc780`. The ancestry comparison finds 21,614
+upstream-only commits and 719 fork-only commits. The upstream diff changes
+15,514 paths, and the dry merge with rename detection disabled reports 4,229
+conflict notices. Full integration remains pending.
+
+This increment ports `cd664e5abf35e03c6aedd464a5d18b11e9320519` and
+`92d60d77f61c3d5bf1fdc15d75adbdfc4b0b76de` so a deleted container workdir
+cannot block later Docker or Podman execs. An explicit missing workdir still
+fails. It also ports `62c35b8e6ba2314ee62b16c799750785abb61a20` so a tool
+call rejected before execution is removed from the new turn's native replay
+blocks. Signed blocks and earlier conversation prefixes retain their original
+order and contents.
+
 The inventory records source/base SHAs, graph distance, affected local/excluded
 areas and a bounded candidate list. It creates a new output exclusively and
 does not count file parity as qualification. This increment ports upstream
