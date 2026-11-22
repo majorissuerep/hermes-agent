@@ -2,6 +2,7 @@
 
 from agent import chat_completion_helpers as h
 from agent import chat_completion_wait_notice as wn
+from agent.activity_tracking import touch_heartbeat
 
 
 class _NonStreamRequest:
@@ -154,7 +155,8 @@ class _NonStreamRequest:
             silence = self.call_start + elapsed - (
                 activity_ts if activity_ts is not None else self.call_start)
             if silence < 60.0:
-                self.agent._touch_activity(
+                touch_heartbeat(
+                    self.agent,
                     "waiting for first stream event after reconnect"
                     if retry_started_ts is not None else "waiting for provider response")
                 return
@@ -175,7 +177,7 @@ class _NonStreamRequest:
             # One neutral notice per silence; repeating it every heartbeat made
             # healthy long calls read as provider trouble (#92550).
             if not self.wait_notice.should_emit(phase, watchdog):
-                self.agent._touch_activity(f"waiting for provider response ({int(silence)}s, {phase})")
+                touch_heartbeat(self.agent, f"waiting for provider response ({int(silence)}s, {phase})")
                 return
             self.agent._emit_wait_notice(wn.wait_notice_text(
                 self.api_kwargs.get('model', 'the provider'), silence, phase, watchdog))

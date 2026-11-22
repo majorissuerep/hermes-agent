@@ -7,6 +7,7 @@ Extracted from ``run_agent.py``; every method resolves through ``AIAgent``'s MRO
 import logging
 import sys
 
+from agent.activity_tracking import touch_heartbeat
 from agent.i18n import t
 from agent.session_activity import ActivityProvenance
 
@@ -179,7 +180,7 @@ class StatusOutputMixin:
     def _emit_wait_notice(self, text: str) -> None:
         """Rewrite the live status line (CLI spinner, TUI ``thinking.delta``, gateway activity)
         so long provider waits are not an anonymous spinner."""
-        self._touch_activity(text)
+        touch_heartbeat(self, text)
         self._call_callback("thinking_callback", text, origin="_emit_wait_notice")
 
     def _emit_diagnostic_wait(self, text: str) -> None:

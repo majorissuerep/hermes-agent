@@ -36,12 +36,16 @@ def _make_agent(tmp_path, monkeypatch, **kwargs):
     )
 
 def test_emit_wait_notice_updates_spinner_and_activity(tmp_path, monkeypatch):
-    """The notice reaches the live display callback AND the activity tracker."""
+    """A stalled stream updates the display without renewing its progress deadline."""
     seen: list = []
     agent = _make_agent(tmp_path, monkeypatch, thinking_callback=seen.append)
+    agent._touch_activity("receiving stream response")
+    progress = agent.get_activity_summary()["last_progress_ts"]
 
-    agent._emit_wait_notice("⏳ waiting on test-model — 30s with no response yet")
+    notice = "⏳ waiting on test-model — stream open; 60s without stream output"
+    agent._emit_wait_notice(notice)
 
-    assert seen == ["⏳ waiting on test-model — 30s with no response yet"]
+    assert seen == [notice]
     summary = agent.get_activity_summary()
     assert "waiting on test-model" in summary["last_activity_desc"]
+    assert summary["last_progress_ts"] == progress
